@@ -16,6 +16,7 @@ import { writePrivate } from "../../kernel/files.ts";
 import { directories } from "../../config/index.ts";
 import { kanthord as command, environment } from "./cli-support.ts";
 import { WorkerMethod } from "../../worker/contract.ts";
+import { errorSchema } from "../../kernel/errors.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const clientConfigPath = (env: NodeJS.ProcessEnv) =>
@@ -138,6 +139,61 @@ test("resume CLI validates input and token and denies machine access", async (t)
   );
   assert.equal(refused.code, ExitCode.Failure);
   assert.match(refused.stderr, /^gateway.authentication.unauthorized:/);
+});
+
+test("instance inspection CLI validates filters and identity and denies machine reads", async (t) => {
+  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  assert.equal(
+    (await command(["worker", "instance", "list", "--help"], env)).code,
+    ExitCode.Success,
+  );
+  for (const [args, code] of [
+    [
+      ["list", "--project", "invalid"],
+      "cli.worker.instance.list.invalid_project_id",
+    ],
+    [
+      ["list", "--binding", "Invalid"],
+      "cli.worker.instance.list.invalid_binding_name",
+    ],
+    [
+      ["list", "--binding", "general"],
+      "cli.worker.instance.list.binding_without_project",
+    ],
+    [["get", "invalid"], "cli.worker.instance.get.invalid_runtime_identity"],
+  ] as const) {
+    const result = await command(["worker", "instance", ...args], env);
+    assert.equal(result.code, ExitCode.Failure);
+    assert.ok(result.stderr.startsWith(`${code}:`));
+  }
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  const denied = await command(
+    ["worker", "instance", "list", "--token", token],
+    env,
+  );
+  assert.equal(denied.code, ExitCode.Failure);
+  assert.match(denied.stderr, /^gateway.authentication.unauthorized:/);
+  const page = await command(["worker", "instance", "list"], env);
+  assert.equal(page.code, ExitCode.Success, page.stderr);
+  assert.deepEqual(JSON.parse(page.stdout), { items: [], nextCursor: null });
+  const invalidQuery = await fixture.request(
+    "/api/worker/instance?resourceIdentity=worker:kanthord:general",
+  );
+  const badRequest = 400;
+  const validationFailed = "gateway.request.validation_failed";
+  assert.equal(invalidQuery.status, badRequest);
+  assert.equal(
+    errorSchema.parse(await invalidQuery.json()).error.code,
+    validationFailed,
+  );
 });
 
 test("worker catalog CLI lists ascending pages", async (t) => {

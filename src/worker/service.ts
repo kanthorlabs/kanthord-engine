@@ -73,6 +73,7 @@ import {
   validateProvider,
 } from "./configuration.ts";
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
+import { instanceRecord, listInstanceRecords } from "./instance-record.ts";
 import type { WorkerConfig } from "./config.ts";
 import {
   HeartbeatClock,
@@ -888,7 +889,33 @@ export class WorkerService implements Service {
     );
   }
 
+  private declareInstanceReads(registry: OperationRegistry): void {
+    assert.equal(workerOperations["instance.list"].mutation, false);
+    assert.equal(workerOperations["instance.get"].access, AccessPolicy.Human);
+    registry.register(workerOperations["instance.list"], ({ query }, caller) =>
+      caller.commit((tx) =>
+        listInstanceRecords(tx, this.dependencies, query, Date.now()),
+      ),
+    );
+    registry.register(workerOperations["instance.get"], ({ params }, caller) =>
+      caller.commit((tx) => {
+        const row = this.registrations.liveRegistrationOf(
+          tx,
+          params.runtimeIdentity,
+        );
+        if (!row)
+          throw new OperationError(
+            HttpStatus.NotFound,
+            WorkerErrorCode.InstanceNotFound,
+            "Instance not found.",
+          );
+        return instanceRecord(tx, this.dependencies, row, Date.now());
+      }),
+    );
+  }
+
   declare(registry: OperationRegistry): void {
+    this.declareInstanceReads(registry);
     this.declareDeregister(registry);
     registry.register(
       workerOperations["instance.resume"],

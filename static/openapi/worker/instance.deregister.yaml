@@ -47,6 +47,51 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
       "504":
         $ref: ../shared/components.yaml#/components/responses/Error
+  get:
+    operationId: worker.instance.get
+    tags:
+      - worker
+    description: Read a live instance record. Unknown and ended instances answer not found.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: runtimeIdentity
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.instance.get.Input/properties/params/propert\
+            ies/runtimeIdentity"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.instance.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
     worker.instance.deregister.Input:
@@ -90,5 +135,99 @@ components:
           const: false
       required:
         - runtimeIdentity
+        - registered
+      additionalProperties: false
+    worker.instance.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            runtimeIdentity:
+              type: string
+              minLength: 42
+              maxLength: 42
+              pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: worker_instance_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - runtimeIdentity
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.instance.get.Output:
+      type: object
+      properties:
+        runtimeIdentity:
+          type: string
+          minLength: 42
+          maxLength: 42
+          pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: worker_instance_ followed by a canonical 26-character uppercase ULID.
+        projectId:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: project_ followed by a canonical 26-character uppercase ULID.
+        resourceIdentity:
+          type: string
+          pattern: ^worker:kanthord:[a-z][a-z0-9-]{0,62}$
+        workerName:
+          type: string
+          minLength: 1
+        host:
+          type: string
+          enum:
+            - kanthord
+            - external-harness
+        placement:
+          type: string
+          enum:
+            - server
+            - worker
+        clientId:
+          type: string
+          minLength: 42
+          maxLength: 42
+          pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: client_identity_ followed by a canonical 26-character uppercase ULID.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        activity:
+          type: string
+          enum:
+            - idle
+            - pulling
+            - executing
+        draining:
+          type: boolean
+        executionId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: execution_ followed by a canonical 26-character uppercase ULID.
+        registered:
+          type: boolean
+      required:
+        - runtimeIdentity
+        - projectId
+        - resourceIdentity
+        - workerName
+        - host
+        - activity
+        - draining
         - registered
       additionalProperties: false

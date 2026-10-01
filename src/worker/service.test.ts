@@ -972,6 +972,43 @@ test("catalog pages supplied declarations once per commit and registrations add 
   ]);
 });
 
+test("instance reads commit once, retain heartbeat age and refuse ended identities", (t) => {
+  const f = enablementFixture(t, { monotonicNow: () => 100 });
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(
+      tx,
+      {
+        ...client,
+        clientId: createIdentity("client_identity"),
+        projectId: createIdentity("project"),
+      },
+      Date.now(),
+    ),
+  );
+  f.worker.heartbeatClock.set(row.runtimeIdentity);
+  const before = f.store.transaction(readAllLive);
+  const age = f.worker.heartbeatClock.ageMs(row.runtimeIdentity);
+  const commits = f.commits();
+  const record = f.invoke("instance.get", null, {
+    runtimeIdentity: row.runtimeIdentity,
+  });
+  const page = f.invoke("instance.list", null, {});
+  assert.deepEqual(page.items, [record]);
+  const twoReads = 2;
+  assert.equal(f.commits() - commits, twoReads);
+  assert.deepEqual(f.store.transaction(readAllLive), before);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), age);
+  f.store.transaction((tx) =>
+    f.worker.registrations.deregister(tx, row.runtimeIdentity, Date.now()),
+  );
+  refuses(
+    () =>
+      f.invoke("instance.get", null, { runtimeIdentity: row.runtimeIdentity }),
+    WorkerErrorCode.InstanceNotFound,
+    HttpStatus.NotFound,
+  );
+});
+
 test("catalog reads expose host-specific budgets and refuse unknown names and malformed cursors", (t) => {
   const f = enablementFixture(t);
   const native = f.invoke("catalog.get", null, { workerName: WORKER });

@@ -18,6 +18,10 @@ import {
 } from "../../worker/contract.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import {
+  bindingNameSchema,
+  workerResourceIdentity,
+} from "../../project/contract.ts";
+import {
   handleMutationResult,
   handleReadResult,
   parsePositiveInt,
@@ -270,6 +274,86 @@ async function resume(
   process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
+function instanceListQuery(options: Record<string, string | undefined>) {
+  assert.equal(workerOperations["instance.list"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["instance.list"].mutation, false);
+  if (
+    options.project !== undefined &&
+    !identitySchema("project").safeParse(options.project).success
+  )
+    throw new Diagnostic(
+      "cli.worker.instance.list.invalid_project_id",
+      "Expected a canonical project identity.",
+    );
+  if (
+    options.binding !== undefined &&
+    !bindingNameSchema.safeParse(options.binding).success
+  )
+    throw new Diagnostic(
+      "cli.worker.instance.list.invalid_binding_name",
+      "Expected a worker binding name.",
+    );
+  if (options.binding !== undefined && options.project === undefined)
+    throw new Diagnostic(
+      "cli.worker.instance.list.binding_without_project",
+      "--binding requires --project.",
+    );
+  const limit =
+    options.limit === undefined
+      ? LIST_LIMIT_DEFAULT
+      : parsePositiveInt(options.limit, LIMIT_INVALID);
+  if (limit > LIST_LIMIT_MAX)
+    throw new Diagnostic(
+      LIMIT_OUT_OF_RANGE,
+      `limit must be at most ${LIST_LIMIT_MAX}`,
+    );
+  return {
+    projectId: options.project,
+    resourceIdentity:
+      options.binding === undefined
+        ? undefined
+        : workerResourceIdentity(options.binding),
+    limit,
+    cursor: options.cursor,
+  };
+}
+
+async function instanceList(command: Command): Promise<void> {
+  assert.equal(workerOperations["instance.list"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["instance.list"].mutation, false);
+  const options = command.optsWithGlobals();
+  const query = instanceListQuery(options);
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.worker.instance.list.token_required");
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "instance.list"
+  ]({ params: {}, query, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.worker.instance.list.indeterminate"))}\n`,
+  );
+}
+
+async function instanceGet(
+  runtimeIdentity: string,
+  command: Command,
+): Promise<void> {
+  assert.equal(workerOperations["instance.get"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["instance.get"].mutation, false);
+  if (!identitySchema("worker_instance").safeParse(runtimeIdentity).success)
+    throw new Diagnostic(
+      "cli.worker.instance.get.invalid_runtime_identity",
+      "Expected a canonical worker_instance identity.",
+    );
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, "cli.worker.instance.get.token_required");
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "instance.get"
+  ]({ params: { runtimeIdentity }, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.worker.instance.get.indeterminate"))}\n`,
+  );
+}
+
 async function get(agentName: string, command: Command): Promise<void> {
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(token, GET_TOKEN_REQUIRED);
@@ -412,6 +496,33 @@ export function addWorkerCommand(program: Command): void {
     .command("instance")
     .description("Worker instance commands");
   instance.action(() => instance.help());
+  instance
+    .command(LIST)
+    .description("List live worker instances")
+    .option(
+      "--project <project-id>",
+      "Project identity",
+      singleUse("--project"),
+    )
+    .option(
+      "--binding <binding-name>",
+      "Worker binding name",
+      singleUse("--binding"),
+    )
+    .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
+    .option(
+      "--cursor <opaque>",
+      "Continue from a cursor",
+      singleUse("--cursor"),
+    )
+    .action((_options, command: Command) => instanceList(command));
+  instance
+    .command(GET)
+    .description("Read a live worker instance")
+    .argument("<runtime-identity>", "Runtime identity")
+    .action((runtimeIdentity: string, _options, command: Command) =>
+      instanceGet(runtimeIdentity, command),
+    );
   instance
     .command("resume")
     .description("Resume an ended registration with a running execution")

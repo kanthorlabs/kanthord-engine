@@ -51,6 +51,27 @@ export const InstanceActivity = {
 } as const;
 export type InstanceActivity =
   (typeof InstanceActivity)[keyof typeof InstanceActivity];
+export const InstancePlacement = {
+  Server: "server",
+  Worker: "worker",
+} as const;
+export const workerResourceIdentitySchema = z
+  .string()
+  .regex(/^worker:kanthord:[a-z][a-z0-9-]{0,62}$/);
+export const instanceRecordSchema = z.strictObject({
+  runtimeIdentity: identitySchema("worker_instance"),
+  projectId: identitySchema("project"),
+  resourceIdentity: workerResourceIdentitySchema,
+  workerName: z.string().min(1),
+  host: z.enum(WorkerHost),
+  placement: z.enum(InstancePlacement).optional(),
+  clientId: identitySchema("client_identity").optional(),
+  name: z.string().min(1).max(64).optional(),
+  activity: z.enum(InstanceActivity),
+  draining: z.boolean(),
+  executionId: identitySchema("execution").optional(),
+  registered: z.boolean(),
+});
 
 export interface SchedulerClaims {
   runningExecutionOfRuntime(
@@ -216,6 +237,7 @@ export const WorkerErrorCode = {
   InstanceNotFound: "worker.instance.not_found",
   NoLiveExecution: "worker.instance.no_live_execution",
   ClientLive: "worker.instance.client_live",
+  BindingUnknown: "worker.instance.binding_unknown",
   SlotUnavailable: "worker.instance.slot_unavailable",
   CatalogNotFound: "worker.catalog.not_found",
   AgentNotFound: "worker.agent.not_found",
@@ -298,6 +320,56 @@ const enablementMutation = {
 } as const;
 
 export const workerOperations = {
+  "instance.list": {
+    ...enablementOperation,
+    id: "worker.instance.list",
+    method: HttpMethod.Get,
+    path: "/api/worker/instance",
+    mutation: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z
+        .strictObject({
+          projectId: identitySchema("project").optional(),
+          resourceIdentity: workerResourceIdentitySchema.optional(),
+          limit: z.coerce
+            .number()
+            .int()
+            .min(1)
+            .max(LIST_LIMIT_MAX)
+            .default(LIST_LIMIT_DEFAULT),
+          cursor: z.string().min(1).optional(),
+        })
+        .refine(
+          (query) =>
+            query.resourceIdentity === undefined ||
+            query.projectId !== undefined,
+          { message: "resourceIdentity requires projectId" },
+        ),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(instanceRecordSchema),
+      nextCursor: z.string().nullable(),
+    }),
+    description:
+      "Page live registrations in descending runtime identity order without changing runtime state.",
+  },
+  "instance.get": {
+    ...enablementOperation,
+    id: "worker.instance.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/instance/:runtimeIdentity",
+    mutation: false,
+    input: z.strictObject({
+      params: runtimeIdentityParams,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: instanceRecordSchema,
+    description:
+      "Read a live instance record. Unknown and ended instances answer not found.",
+  },
   "catalog.list": {
     ...enablementOperation,
     id: "worker.catalog.list",
