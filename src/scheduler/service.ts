@@ -23,6 +23,7 @@ import * as settlement from "./settlement.ts";
 import { readExecution } from "./execution-store.ts";
 import { WaitingPulls } from "./wakeup.ts";
 import { workPull } from "./work-pull.ts";
+import { release } from "./release.ts";
 import {
   JOB_IDENTITY_PREFIX,
   QUEUE_LIST_LIMIT_DEFAULT,
@@ -176,13 +177,24 @@ export class SchedulerService implements Service, WorkQueue {
       schedulerOperations.queuePeek.service !== SCHEDULER_SERVICE_NAME ||
       schedulerOperations.queuePeek.access !== AccessPolicy.Human ||
       schedulerOperations.workPull.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.workPull.access !== AccessPolicy.Client
+      schedulerOperations.workPull.access !== AccessPolicy.Client ||
+      schedulerOperations.executionRelease.service !== SCHEDULER_SERVICE_NAME ||
+      schedulerOperations.executionRelease.access !== AccessPolicy.Client
     )
       throw new Error(
         "Scheduler operations require scheduler ownership and their declared access.",
       );
     registry.register(schedulerOperations.queueList, (input, caller) =>
       this.queueList(input, caller),
+    );
+    registry.register(schedulerOperations.executionRelease, (input, caller) =>
+      release(
+        this.dependencies,
+        input.params.executionId,
+        input.body.furtherWork,
+        caller,
+        (projectId) => this.wake(projectId),
+      ),
     );
     registry.register(schedulerOperations.queuePeek, (input, caller) =>
       this.queuePeek(input, caller),

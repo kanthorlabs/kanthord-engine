@@ -252,6 +252,29 @@ export const QUEUE_LIST_LIMIT_MIN = 1;
 export const QUEUE_LIST_LIMIT_MAX = 1000;
 
 export const schedulerOperations = {
+  executionRelease: {
+    id: "scheduler.execution.release",
+    service: SCHEDULER_SERVICE_NAME,
+    method: HttpMethod.Post,
+    path: "/api/scheduler/execution/:executionId/release",
+    access: AccessPolicy.Client,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: SCHEDULER_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    requiresExecution: true,
+    status: HttpStatus.OK,
+    description: "Release a running execution after Mission admission.",
+    input: z.strictObject({
+      params: z.strictObject({
+        executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: executionReleaseSchema,
+    }),
+    output: releaseResultSchema,
+  },
   workPull: {
     id: "scheduler.work.pull",
     service: SCHEDULER_SERVICE_NAME,
