@@ -1,25 +1,32 @@
 # Scheduler CLI specification
 
-This is the proposed `kanthord scheduler` command surface for engine
+This is the implemented `kanthord scheduler` command surface for engine
 contributors. See the [CLI index](./README.md) and
 [shared conventions](./other.md). The contracts below are self-contained;
 provenance links at the end provide design context.
 
 ## Status and ownership
 
-**Implemented, inspected 2026-09-23:** the Scheduler group prints help and
-accepts `--endpoint`. It has no service subcommands. The
-[CLI dispatcher](../../src/apps/cli/index.ts) creates that placeholder; the
-[server composition](../../src/apps/server/index.ts) constructs Project,
-Worker and Gateway only. There is no Scheduler source directory, operation
-declaration, migration or generated Scheduler OpenAPI document.
+**Implemented, inspected 2026-10-01:** all seven commands below are callable.
+The [Scheduler CLI](../../src/apps/cli/scheduler.ts) and
+[execution CLI](../../src/apps/cli/scheduler-execution.ts) use the
+[operation contracts](../../src/scheduler/contract.ts), with generated
+[OpenAPI](../../static/openapi/scheduler/). The
+[server composition](../../src/apps/server/index.ts) wires the Scheduler to
+the real Mission transitions, Worker registrations and declarations, Project
+bindings, and Gateway execution proof. The Scheduler owns durable jobs and
+execution rows, bounded waiting pulls, postcommit wakeups, fixed deadlines,
+and the supervised 30-second loss sweep.
 
-**Proposed:** every command, operation identifier, route, request field and
-response shape below, except the existing group help. These are candidates for
-the future Scheduler implementation contract and OpenAPI, not callable APIs.
-The ownership and admission requirements stated here come from the service
-design. Open recovery decisions remain open, even where a candidate command
-shape is otherwise complete.
+**Current boundary:** `TraceIdentity` is a minting stand-in injected by the
+composition root; stored telemetry and the tracer await ERD 4. Mission
+execution submissions, custody handover, the action performer, native methods
+and the worker application loop belong to later ERD 2 plans. Intake and
+delivery admission await ERD 3. The Scheduler's credential-pin collaborations
+exist, but custody handover does not yet call them. Server-hosted execution
+and its in-process abort, on-demand requests, numeric processor/fairness bounds
+and B9 recovery are outside Plan03. The design obligations described below
+retain those boundaries; they do not imply that these integrations exist.
 
 The Scheduler owns jobs, claims, execution records, fixed deadlines and
 live-execution accounting. Mission owns nodes, attempts, pinned revisions,
@@ -28,7 +35,7 @@ Worker owns registrations, runtime identities, healthchecks, compatibility
 declarations and execution hosting. Project owns bindings, configured counts,
 resource authorization and delivery verification.
 
-The proposed public surface has **7 remote commands**: five read operations
+The public surface has **7 remote commands**: five read operations
 and two mutations. Group/resource help is local and calls no operation.
 
 ## Shared input, output and access rules
@@ -57,7 +64,7 @@ declared here are rejected before sending the request. Optional JSON fields
 are omitted when absent unless their table supplies a default; `null` is
 invalid unless explicitly allowed. Arrays are ordered JSON arrays, not
 comma-separated strings. All request objects are closed, including nested
-objects. JSON schemas and their eventual size bounds belong in `contract.ts`.
+objects. JSON schemas and their declared field bounds live in `contract.ts`.
 The [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#operation-contracts) declare the shapes below.
 
 ### Identifiers, timestamps and revisions
@@ -71,16 +78,14 @@ The [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob
   Node IDs, evidence IDs and binding IDs use the prefixes of their owners;
   copy them from the owner's response.
   Binding IDs use `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).
-- `runtimeIdentity` is the opaque string returned by Worker registration.
-  Current [Worker code](../../src/worker/registrations.ts) generates
-  `runtime_identity_<ulid>`, but its
-  [published input/output declaration](../../src/worker/contract.ts) only
-  validates a nonblank string of at most 128 characters.
-  The target prefix is `worker_instance_` under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service).
+- `runtimeIdentity` is the `worker_instance_<ulid>` identity returned by
+  Worker registration. Both the [Worker contract](../../src/worker/contract.ts)
+  and the [Scheduler contract](../../src/scheduler/contract.ts) validate the
+  canonical prefixed identity under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service).
 - `attempt` is a positive safe integer counter belonging to the node, not a
   new opaque identity. `pinnedRevision` is a positive safe JSON integer
-  revision counter, aligned with the [Mission proposal](./mission.md) and
-  pending adoption in its owning contract. Clients never choose either on a pull.
+  revision counter, implemented in the Scheduler contract and aligned with
+  [Mission](./mission.md). Clients never choose either on a pull.
 - Every server-defined timestamp below is a nonnegative safe JSON integer
   of **Unix epoch milliseconds in UTC**. A nullable timestamp uses `null`
   when its event has not occurred. A duration is measured with a monotonic clock. JWT timestamps retain their separate seconds unit.
@@ -91,7 +96,7 @@ The [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob
 ### Access policies
 
 `human` means a Gateway-verified human JWT under the existing equal-human
-authority rule. This proposal uses it for project-wide inspection. A human
+authority rule. Scheduler uses it for project-wide inspection. A human
 token does not become a worker by supplying a runtime or execution ID.
 
 `client` means a Gateway-verified machine JWT and a live Worker registration.
@@ -99,7 +104,9 @@ Gateway resolves its project and worker binding, and Worker vouches for the
 runtime association. A caller-supplied identifier must match that association.
 Claim inspection and release additionally require that the execution
 belongs to that client identity and runtime. Release declares the live-execution
-requirement, so the invocation chain proves it before the handler. Its write
+requirement, so the invocation chain proves it before mutation replay and the
+handler. A registered machine whose proof fails receives 403
+`gateway.invocation.execution_proof_failed`. Its write
 transaction repeats the full proof; failure answers 409
 `scheduler.execution.not_running`. `claim get` declares no live-execution
 requirement and its handler checks ownership, or answers 403
@@ -154,27 +161,27 @@ If acquisition committed before disconnection, the next pull of the same
 runtime identity returns the live execution. Shutdown stops new claims,
 cancels waiting pulls, and preserves accepted execution obligations.
 
-[scheduler-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery
+<a id="command-inventory-and-proposed-operation-mapping"></a>
 
-## Command inventory and proposed operation mapping
+## Command inventory and operation mapping
 
 The literal service prefix is `/api/scheduler`. Path variables become required
 path parameters with the scalar rules above; query fields are only those
 listed by a command. Read requests have no body. Every route in this table is
-**proposed, pending the owning operation declaration and generated OpenAPI**.
+implemented in the operation declaration and generated OpenAPI.
 
-| Command suffix / synopsis                                                                              | Operation identifier                                         | HTTP route                                           | Access / effect                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                                        | `scheduler.queue.list` **[blocked][scheduler-contract]**     | `GET /api/scheduler/project/:projectId/queue`        | `human`; read                                                                                                                                          |
-| `queue peek <project-id>`                                                                              | `scheduler.queue.peek` **[blocked][scheduler-contract]**     | `GET /api/scheduler/project/:projectId/queue/peek`   | `human`; read                                                                                                                                          |
-| `work pull --file <path> [--idempotency-key <key>]`                                                    | `scheduler.work.pull` **[blocked][scheduler-contract]**      | `POST /api/scheduler/work/pull`                      | `client`; mutation, bounded wait                                                                                                                       |
-| `claim get <execution-id>`                                                                             | `scheduler.claim.get`                                        | `GET /api/scheduler/claim/:executionId`              | `client`; owned claim read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)** |
-| `execution list <project-id> [--node <node-id> [--attempt <n>]] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list` **[blocked][scheduler-contract]** | `GET /api/scheduler/project/:projectId/execution`    | `human`; read                                                                                                                                          |
-| `execution get <execution-id>`                                                                         | `scheduler.execution.get`                                    | `GET /api/scheduler/execution/:executionId`          | `human`; read; **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery)**              |
-| `execution release <execution-id> --file <path> [--idempotency-key <key>]`                             | `scheduler.execution.release`                                | `POST /api/scheduler/execution/:executionId/release` | `client`; owned live execution mutation                                                                                                                |
+| Command suffix / synopsis                                                                              | Operation identifier          | HTTP route                                           | Access / effect                         |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------- | ---------------------------------------------------- | --------------------------------------- |
+| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                                        | `scheduler.queue.list`        | `GET /api/scheduler/project/:projectId/queue`        | `human`; read                           |
+| `queue peek <project-id>`                                                                              | `scheduler.queue.peek`        | `GET /api/scheduler/project/:projectId/queue/peek`   | `human`; read                           |
+| `work pull --file <path> [--idempotency-key <key>]`                                                    | `scheduler.work.pull`         | `POST /api/scheduler/work/pull`                      | `client`; mutation, bounded wait        |
+| `claim get <execution-id>`                                                                             | `scheduler.claim.get`         | `GET /api/scheduler/claim/:executionId`              | `client`; owned claim read              |
+| `execution list <project-id> [--node <node-id> [--attempt <n>]] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list`    | `GET /api/scheduler/project/:projectId/execution`    | `human`; read                           |
+| `execution get <execution-id>`                                                                         | `scheduler.execution.get`     | `GET /api/scheduler/execution/:executionId`          | `human`; read                           |
+| `execution release <execution-id> --file <path> [--idempotency-key <key>]`                             | `scheduler.execution.release` | `POST /api/scheduler/execution/:executionId/release` | `client`; owned live execution mutation |
 
-These read operations are proposed operational visibility, not an existing
-authorization to inspect service tables directly. `claim get` provides a
+These read operations provide operational visibility through the invocation
+chain, with no authorization to inspect service tables directly. `claim get` provides a
 machine-scoped view of the claim held in an execution record; it introduces
 neither a separate claim identity nor a second acquisition path.
 
@@ -207,7 +214,7 @@ the first job in priority descending, then job identity ascending order,
 and removes nothing. It neither predicts a particular instance's compatible
 selection nor reserves a node for a subsequent pull.
 
-### Proposed `Job` result
+### `Job` result
 
 Every field below is required in a result; none has a client default.
 
@@ -231,14 +238,19 @@ kanthord scheduler work pull --file <path> [--idempotency-key <key>]
 ```
 
 There are no positional arguments or query fields. The required file supplies
-the following proposed fields. The file forms the HTTP JSON body.
+the following fields. The file forms the HTTP JSON body.
 
-| JSON file field    | Requiredness / type     | Default and validation                                                                    |
-| ------------------ | ----------------------- | ----------------------------------------------------------------------------------------- |
-| `resourceIdentity` | Required opaque string. | No default. Must equal the resource identity authenticated from the machine JWT.          |
-| `runtimeIdentity`  | Required opaque string. | No default. Must equal that client's live Worker registration and belong to that binding. |
+| JSON file field    | Requiredness / type                | Default and validation                                                                    |
+| ------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| `resourceIdentity` | Required nonempty opaque string.   | No default. Must equal the resource identity authenticated from the machine JWT.          |
+| `runtimeIdentity`  | Required `worker_instance_<ulid>`. | No default. Must equal that client's live Worker registration and belong to that binding. |
 
 The Scheduler parks a pull that finds no work for at most 90 s and then answers with no work. The client chooses no wait. The route timeout is 120 s.
+
+Only one waiter is retained per runtime identity. A concurrent duplicate still
+probes for a live or new claim; if none is available, it returns `no-work`
+instead of parking another waiter. A failed healthcheck or a committed loss
+settlement can also produce an earlier empty answer.
 
 The authenticated binding determines the project. The file accepts no project
 override, node/mission selector, priority, claim kind, worker-name override,
@@ -270,15 +282,16 @@ it cannot acquire a chosen node or authorize its own claim.
 
 A claim serializes with block, pause, graph/import and binding changes. The
 worker's declared capability for both kinds gives it no preference to review
-its own steps. Hosted reviewers pull independently. All admission conditions
+its own steps. The Worker design requires hosted reviewers to pull independently.
+All admission conditions
 are rechecked after waiting, including a binding disabled during the wait.
 
-**Proposed result:** exactly one of these closed objects:
+**Result:** exactly one of these closed objects:
 
 - `{ "kind": "claimed", "execution": ExecutionRecord }`.
 - `{ "kind": "no-work" }`.
 
-Both are successful results, proposed HTTP `200`; the CLI adds its key.
+Both are successful results, HTTP `200`; the CLI adds its key.
 No-work opens no attempt, creates no execution and consumes no live count.
 The harness backs off before a new logical pull. Waiting holds no lock,
 processor permit or node reservation.
@@ -333,7 +346,7 @@ query or body. Returns one `ExecutionRecord`, or a not-found failure. It is
 human inspection across registrations and server restarts. It does not
 impersonate the recorded claimant or perform an execution operation.
 
-### Proposed `ExecutionRecord` result
+### `ExecutionRecord` result
 
 All fields below are required unless the row explicitly says optional. Result
 fields are server-owned; the caller supplies none when acquiring work.
@@ -343,7 +356,7 @@ fields are server-owned; the caller supplies none when acquiring work.
 | `executionId`, `projectId`, `nodeId` | Opaque references with the identifier rules above.                                                                                                                                                                                                                                                                                                                                                                           |
 | `claimant`                           | Object with required `workerBindingId`, `resourceIdentity` and `runtimeIdentity` strings. `workerBindingId` is the latest binding row at the claim. For a registered instance, also requires `clientId` (`client_identity_<ulid>`) and `name` (nonblank string, 1–64 characters) read from the registration of `runtimeIdentity`. These two attribution fields are absent for a hosted instance without a registered client. |
 | `attempt`                            | Positive safe integer counter of the node's attempt.                                                                                                                                                                                                                                                                                                                                                                         |
-| `pinnedRevision`                     | Positive safe JSON integer revision counter; proposed scalar pending adoption with Mission.                                                                                                                                                                                                                                                                                                                                  |
+| `pinnedRevision`                     | Positive safe JSON integer revision counter from the open Mission attempt.                                                                                                                                                                                                                                                                                                                                                   |
 | `credentials`                        | Array of `credential_<ulid>` strings: the credential revisions that the execution pins, `[]` at the claim.                                                                                                                                                                                                                                                                                                                   |
 | `claimState`                         | Derived enum `running`, `lost` or `finished`: `running` when `endedAt` is null and time is before `expiredAt`; `lost` when `endedAt` is at or after `expiredAt`, or is null and time is at or after `expiredAt`; `finished` when `endedAt` is before `expiredAt` after release, assessment end or revocation.                                                                                                                |
 | `expiredAt`                          | Timestamp. The fixed deadline that the claim sets once.                                                                                                                                                                                                                                                                                                                                                                      |
@@ -378,19 +391,19 @@ No query fields are accepted. The required file supplies the following fields.
 - A release durably ends the execution and removes its live-execution count.
   Mission routes the release using its accepted facts. A supported release
   leaves the attempt open; it never opens a replacement attempt by itself.
-- A steps release with no further work requires the evidence obligation owned
-  by Mission/Worker. A steps release with further work
-  requires the checkpoint/push obligations of
-  Worker. Those records are submitted through their owning services; the
-  release body contains no evidence, assessment, outcome or shell command.
+- A steps release with no further work enforces Mission's evidence predicate.
+  A steps release with further work returns the node to `Available`; the
+  checkpoint/push obligations belong to the later Worker methods and are not
+  performed by this command. Evidence submission is a later Mission operation;
+  the release body contains no evidence, assessment, outcome or shell command.
 - A reviewer release is supported only after the current passing assessment
   and the action-performer path allow it: returned items consist solely of
   submitted request evidence and actions awaiting prerequisites.
-  When all requests are submitted, Mission routes the release to
-  `External.Requested` and inserts no job. The transaction that makes the
-  continuation condition hold inserts the evaluation job. A passing assessment
-  with no required external action already ends the claim; no fresh release
-  is needed to declare completion.
+  Mission routes an admitted reviewer release to `External.Requested` and
+  inserts a job only when the continuation condition holds. Assessment and
+  request submission, the action-performer path, and assessment-driven claim
+  completion belong to later plans. Under that design, a passing assessment
+  with no required external action ends the claim without a fresh release.
 - Mission checks the release predicate in the release transaction, before the
   terminal write, under [the release admission](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-release-admission).
   A release that fails it answers 409 `mission.release.obligation_unmet` with
@@ -401,7 +414,7 @@ No query fields are accepted. The required file supplies the following fields.
   No job exists while a node waits. The next compatible pull receives the
   continuation; there is no pushed assignment.
 
-Proposed success is HTTP `200` with required fields
+Success is HTTP `200` with required fields
 `{ "executionId": string, "endedAt": timestamp }`; the CLI adds its key.
 The invocation chain proves a live execution before the handler. The release
 transaction checks the claimant, null `endedAt` and time before `expiredAt`
@@ -413,7 +426,7 @@ cannot release. This answer is not an outcome record or an assertion that the
 node is immediately claimable.
 
 There is no `failure`, `cannotProgress`, `retryBudget`, `force` or arbitrary
-target-state field. Failure dispositions remain **blocked** under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).
+target-state field. Failure dispositions remain an open design gap under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).
 
 ### Liveness, epochs and cancellation boundaries
 
@@ -427,25 +440,32 @@ discard and the applicable success override revoke the claim through Mission;
 the revocation is accepted before a later operation's admission can read it.
 Loss revokes authority at the expiry, not at a replacement claim.
 Revocation before expiry is no loss; revocation of a lost claim takes effect
-at the expiry. Both paths remove the execution from its claimant count. An already-admitted
-remote operation follows Project's rules; revocation does not undo it.
+at the expiry. Both paths remove the execution from its claimant count.
+Completion of an already-admitted remote operation belongs to Project's design
+and the later action integration; revocation does not undo that operation.
 
 The claim fixes `expiredAt` at `createdAt` plus effective `wallTimeMs` plus
 1000 times `scheduler.releaseReserve` (default 600 seconds); a sweep settles
 expired unsettled rows every 30 seconds under the [Scheduler design](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#liveness).
 A claim, work-pull lookup, registration resume or Mission transition settles
-an expired unsettled row before checking its own preconditions. A hosted
-execution gets an in-process abort from the transaction ending it; every
-other execution learns of the end at its first refused call and aborts then.
+an expired unsettled row before checking its own preconditions. Settlement is
+part of that transaction and rolls back if the operation refuses. Under the
+Worker design, an external execution learns of the end at its first refused
+call and must abort then; the native abort behavior belongs to later Worker
+methods. Server-hosted execution and its in-process abort are outside ERD 2.
 
 Expiry is not proof that a runtime stopped. A stopped or revoked execution
-must publish no later effect, and Mission/Project refuse stale admission.
-Physical stop and safe reuse remain **blocked** under [HANDOFF SC5](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service).
+must publish no later effect. Execution release enforces stale-claim refusal
+now; later Mission/Project execution operations consume that same proof.
+Physical stop and safe reuse remain an open design gap under [HANDOFF SC5](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service).
 Inspection and cancellation make no stronger guarantee. There is no generic
 Scheduler cancellation command: a transport cancel is not a release, and a
 human pauses/discards through Mission.
 
 ## Delivery admission
+
+This section describes the ERD 3 integration boundary; no delivery ingress or
+admission path is implemented by Plan03.
 
 The Intake Service receives every platform delivery and owns the delivery
 record. Its inspection commands live in [Intake](./intake.md#delivery-commands).
@@ -470,16 +490,18 @@ signed delivery, and a human or machine token is not delivery verification.
 - **Direct claim/acquire/assign:** only work pull invokes the atomic claim
   operation. No command chooses a node and creates a claim, rewrites an
   execution record, raises a count, selects a reviewer or bypasses readiness.
-- **On-demand request:** a server service may ask to serve an already-queued
+- **On-demand request (design only):** a server service may ask to serve an already-queued
   node to the next compatible pull ahead of order. The request owns no claim,
   waits boundedly for a claim and still obeys admission. No external authority
-  or CLI operation is declared here; it is not a human `run-node` escape hatch.
-- **Wakeups, pool turns and loss sweeps:** these are
-  Scheduler-owned processing. An idle project consumes no turn, a waiting
-  pull holds no permit, and one execution occupies no scheduling processor.
+  or CLI operation is declared here; no ERD 2 service issues one and Plan03
+  implements no on-demand request.
+- **Wakeups and loss sweeps:** these are implemented Scheduler-owned processing.
+  An idle project schedules no wakeup callback, a waiting pull holds no permit,
+  and an execution holds no scheduling transaction. Processor-pool sizing and
+  numeric fairness/latency bounds remain open design gaps.
   There is no public `tick`, `drain`, `force-release`, `declare-loss`,
   `reset-epoch` or `reset-budget`.
-- **External action performance:** Worker derives action operands from the
+- **External action performance (later integration):** Worker derives action operands from the
   attempt and evidence, the Intake Service performs the action, and Mission
   owns the resulting records. It is not delivery admission or a queue write.
 - **Human recovery and outcomes:** unblock, pause, resume, discard, priority
@@ -490,22 +512,22 @@ signed delivery, and a human or machine token is not delivery verification.
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                                   | Condition                                                                                                                                                                                                                                | Commands                                        |
-| ----- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| local | `cli.scheduler.queue.list.invalid_project_id`          | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                | queue list                                      |
-| local | `cli.scheduler.queue.peek.invalid_project_id`          | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                | queue peek                                      |
-| local | `cli.scheduler.claim.get.invalid_execution_id`         | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                            | claim get                                       |
-| local | `cli.scheduler.execution.get.invalid_execution_id`     | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                            | execution get                                   |
-| local | `cli.scheduler.execution.release.invalid_execution_id` | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                            | execution release                               |
-| local | `cli.scheduler.execution.list.invalid_project_id`      | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                | execution list                                  |
-| local | `cli.scheduler.execution.list.invalid_node_id`         | The `--node` value is not a canonical `node_<ulid>` identity.                                                                                                                                                                            | execution list                                  |
-| local | `cli.scheduler.execution.list.invalid_attempt`         | The `--attempt` value is not a positive safe integer.                                                                                                                                                                                    | execution list                                  |
-| 403   | `scheduler.work.claimant_mismatch`                     | The `resourceIdentity` or `runtimeIdentity` of the pull differs from the machine identity and its live registration.                                                                                                                     | work pull                                       |
-| 404   | `scheduler.execution.not_found`                        | No execution holds the identity.                                                                                                                                                                                                         | claim get, execution get                        |
-| 403   | `scheduler.execution.not_owner`                        | The client does not own the execution.                                                                                                                                                                                                   | claim get                                       |
-| 409   | `scheduler.execution.not_running`                      | The execution is no longer running when its write transaction checks the proof.                                                                                                                                                          | execution release, and every execution mutation |
-| 409   | `mission.release.obligation_unmet`                     | The release predicate fails: a steps release with no further work names no work evidence, or a reviewer release has no current passing assessment or an eligible unrequested required action. `details.obligation` names the failed one. | execution release                               |
-| local | `scheduler.lifecycle.stopped`                          | A stopped Scheduler Service cannot start again.                                                                                                                                                                                          | serve server                                    |
+| HTTP  | Code                                                   | Condition                                                                                                                                                                                                                                             | Commands                                        |
+| ----- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| local | `cli.scheduler.queue.list.invalid_project_id`          | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                             | queue list                                      |
+| local | `cli.scheduler.queue.peek.invalid_project_id`          | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                             | queue peek                                      |
+| local | `cli.scheduler.claim.get.invalid_execution_id`         | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                                         | claim get                                       |
+| local | `cli.scheduler.execution.get.invalid_execution_id`     | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                                         | execution get                                   |
+| local | `cli.scheduler.execution.release.invalid_execution_id` | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                                         | execution release                               |
+| local | `cli.scheduler.execution.list.invalid_project_id`      | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                             | execution list                                  |
+| local | `cli.scheduler.execution.list.invalid_node_id`         | The `--node` value is not a canonical `node_<ulid>` identity.                                                                                                                                                                                         | execution list                                  |
+| local | `cli.scheduler.execution.list.invalid_attempt`         | The `--attempt` value is not a positive safe integer.                                                                                                                                                                                                 | execution list                                  |
+| 403   | `scheduler.work.claimant_mismatch`                     | The `resourceIdentity` or `runtimeIdentity` of the pull differs from the machine identity and its live registration.                                                                                                                                  | work pull                                       |
+| 404   | `scheduler.execution.not_found`                        | No execution holds the identity.                                                                                                                                                                                                                      | claim get, execution get                        |
+| 403   | `scheduler.execution.not_owner`                        | The client does not own the execution.                                                                                                                                                                                                                | claim get                                       |
+| 409   | `scheduler.execution.not_running`                      | The execution is no longer running when its write transaction checks the proof.                                                                                                                                                                       | execution release, and every execution mutation |
+| 409   | `mission.release.obligation_unmet`                     | The release predicate fails: a steps release with no further work lacks qualifying work evidence, or a reviewer release lacks a current passing assessment or has an eligible unrequested required action. `details.obligation` names the failed one. | execution release                               |
+| local | `scheduler.lifecycle.stopped`                          | A stopped Scheduler Service cannot start again.                                                                                                                                                                                                       | serve server                                    |
 
 ## Design provenance
 
