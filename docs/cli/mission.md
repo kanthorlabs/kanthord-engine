@@ -4,19 +4,28 @@
 
 ## Status and scope
 
-This is an internal specification for a **future** Mission CLI. Every leaf
-command, operation identifier, route, access assignment, JSON spelling and
-schema below is a **new proposed contract**, not an approved API or a shipped
-guarantee. Domain rules are distinguished from proposed wire representations.
+This internal specification includes implemented Mission contracts and the
+remaining target CLI. The owning design pages determine the domain rules.
 Unresolved contracts are called out explicitly; a placeholder is not an
-implementable schema.
+implementable schema. A proposed command below is available only when it is
+included in the delivered scope here.
 
-The current [CLI dispatcher](../../src/apps/cli/index.ts) implements
-`kanthord mission [--endpoint <url>]` as help only. The `project`, `scheduler`
-and `tracking` groups are also help-only. Mission currently has no service
-implementation, operation declarations or generated OpenAPI routes. The current
-help-only group has no `--token` option or mutation commands. Existing command
-spellings and options are not aliases for the proposals on this page.
+The current [Mission dispatcher](../../src/apps/cli/mission.ts) implements
+mission get, node planning and human control, criterion set, dependency edits,
+edge list, import/export, and attempt, external-action, assessment and outcome
+reads. Remote commands accept the shared endpoint and token options.
+The [Mission contract](../../src/mission/contract.ts) declares 36 operations
+with handlers and generated OpenAPI: 34 CLI operations plus the execution-only
+`mission.evidence.asset.complete` and `mission.evidence.request` operations.
+Completion checks object storage before publication and repeats claim admission
+in the publication transaction. Requests record one published platform asset
+under a live evaluation claim. Neither operation has a standalone CLI leaf.
+
+Evidence submission, evidence reads and deletes, assessment submission, node
+check, execution-scoped reads and the host upload helper remain target work.
+The execution schemas, admission checks, content checks and assessment admission
+checks are implemented building blocks. Production Intake storage/check
+collaborations remain explicitly unwired; local stand-ins verify their contracts.
 
 The [operation contract](../../src/kernel/operation.ts),
 [identity validator](../../src/kernel/identity.ts),
@@ -73,7 +82,7 @@ provides a project ID; `mission get` returns that project's mission ID.
   A request whose end state has not been observed cannot be bypassed by discard
   or a success override.
 
-## Common proposed calling convention
+## Common calling convention
 
 Every synopsis starts with `kanthord mission` and uses the
 [common synopsis notation](./common-flags.md#synopsis-markers). Shared flag
@@ -125,7 +134,7 @@ Every version, revision, `expected*Version` and `expected*Revision` field holds 
 
 | Type                                                                   | Proposed validation or unresolved boundary                                                                                                                                                                                                                                                                                                  |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ProjectId`, `MissionId`                                               | `project_<ulid>` and `mission_<ulid>` respectively; these prefixes are declared by the architecture design. They are not currently Mission schemas.                                                                                                                                                                                         |
+| `ProjectId`, `MissionId`                                               | `project_<ulid>` and `mission_<ulid>` respectively; these prefixes are declared by the architecture design and validated by the Mission schemas.                                                                                                                                                                                            |
 | `NodeId`, `EvidenceId`, `EvidenceAssetId`, `AssessmentId`, `OutcomeId` | `node_<ulid>`, `evidence_<ulid>`, `evidence_asset_<ulid>`, `assessment_<ulid>` and `outcome_<ulid>`, respectively. The [Mission identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-identities-of-the-mission-service) define these prefixes.                                         |
 | `ExecutionId`                                                          | `ExecutionId` uses `execution_<ulid>` under the [Scheduler identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-identities-of-the-scheduler-service).                                                                                                                                |
 | `BindingId`                                                            | `binding_<ulid>` under the [Project identities](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-identities-of-the-project-service).                                                                                                                                                           |
@@ -140,7 +149,7 @@ Every version, revision, `expected*Version` and `expected*Revision` field holds 
 | `State`                                                                | `Pending`, `Available`, `Executing`, `Waiting`, `Evaluating`, `Blocked`, `Paused`, `Completed`, `Discarded`, `External.Requested`, `External.Success`, `External.Failed`. Tasks reject state filters or state controls aimed at them.                                                                                                       |
 | `Result`                                                               | Proposed JSON values `success`, `criterion-not-met`, `undetermined`: success; results do not meet the criterion or default standard; nothing is established. This is a wire encoding proposal, not an added domain result.                                                                                                                  |
 
-### Proposed access legend
+### Access legend
 
 No operation in this inventory is anonymous. Project authorization still applies
 to the resource named by every operation; guessing an ID conveys no authority.
@@ -155,11 +164,11 @@ No operation accepts both a human and a machine. The read of a human (H) is keye
 [mission-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service
 [mission-recovery]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service-1
 
-## Proposed command inventory and synopsis
+## Target command inventory and synopsis
 
-All routes below are **proposed and unimplemented**. Each row is one leaf
-command. Operation IDs identify proposed Mission operations, not functions
-already declared in source. Every mutation has `[M]`; lists have `[L]`.
+The inventory describes the complete target; the delivered subset is listed
+under Status and scope. Each row is one leaf command. Operation IDs are declared
+in source for delivered operations. Every mutation has `[M]`; lists have `[L]`.
 The host-local upload helper combines two remote operations instead of one.
 
 ### Mission, graph, nodes and criterion — 17 commands
@@ -622,7 +631,7 @@ Grammar, whole-mission import and create admission have no open block.
 ## Proposed structured input schemas
 
 The following field sets cover all [`--file`](./common-flags.md#--file) inputs
-in the inventory. Each file contains one JSON object. They deliberately distinguish fully proposed shapes
+in the inventory. Each file contains one JSON object. They distinguish specified shapes
 from fields whose authoritative schema is still absent.
 
 ### Planning content and graph edits
@@ -786,7 +795,7 @@ are never echoed. The exact transport envelope follows the
 [shared rules](./other.md); the names below describe its domain data.
 
 Fields listed below are required unless marked optional or nullable. These are
-proposed output fields, with unresolved sub-schemas explicitly identified.
+output fields, with unresolved sub-schemas explicitly identified.
 List pages use descending primary-key order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
 Pagination order establishes no causal record order.
 Every node-attempt field of a record holds a nonnegative integer, including fields that inherit an execution input schema.
@@ -1008,8 +1017,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 ## Optional design provenance
 
 This specification is readable in a standalone engine checkout. These upstream
-links are background provenance, not local runtime dependencies or evidence that
-the proposed CLI has shipped:
+links are background provenance, not local runtime dependencies. The delivered
+scope above identifies the implemented subset:
 
 - [Mission Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.md)
 - [Mission vocabulary](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.vocabulary.md)
