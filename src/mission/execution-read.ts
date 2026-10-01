@@ -3,16 +3,141 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { ActorKind, actorSchema, MissionErrorCode } from "./contract.ts";
+import {
+  ActorKind,
+  actorSchema,
+  MissionErrorCode,
+  NodeKind,
+  NODE_LIST_LIMIT_DEFAULT,
+  type ExecutionObjective,
+} from "./contract.ts";
+import { identitySchema } from "../kernel/identity.ts";
 import { evidencePage } from "./evidence-read.ts";
 import { recordNotFound } from "./record-list.ts";
-import { outcomeRecord } from "./record-read.ts";
-import { readOutcomesOfAttempt } from "./record-store.ts";
+import { outcomeRecord, evidenceRecord } from "./record-read.ts";
+import {
+  readOutcomesOfAttempt,
+  readCurrentOutcome,
+  readEvidence,
+} from "./record-store.ts";
+import { readMissionNodes } from "./store.ts";
 import { admitExecution } from "./execution.ts";
-import { getRevision, revisionCursor, revisionPage } from "./node-read.ts";
+import {
+  getRevision,
+  revisionCursor,
+  revisionPage,
+  requireNode,
+  nodeRecord,
+  decode,
+  encode,
+  invalidCursor,
+} from "./node-read.ts";
 import type { Dependencies } from "./service.ts";
 
 const FIRST_ATTEMPT = 1;
+const ZERO = 0;
+
+export function currentObjectivesOf(tx: Transaction, initiativeId: string) {
+  const initiative = requireNode(tx, initiativeId);
+  assert.equal(initiative.kind, NodeKind.Initiative);
+  assert.ok(tx.database.isTransaction);
+  return readMissionNodes(tx, initiative.mission_id)
+    .filter(
+      (node) =>
+        node.kind === NodeKind.Objective &&
+        node.parent_id === initiativeId &&
+        node.retired_at === null,
+    )
+    .map((node) => ({ node, outcome: readCurrentOutcome(tx, node.id) }));
+}
+
+function identityPage<T extends { id: string }>(
+  items: T[],
+  prefix: string,
+  query: { limit?: number; cursor?: string },
+) {
+  const after = query.cursor === undefined ? undefined : decode(query.cursor);
+  if (after !== undefined && !identitySchema(prefix).safeParse(after).success)
+    invalidCursor();
+  const limit = query.limit ?? NODE_LIST_LIMIT_DEFAULT;
+  const rows = items
+    .filter((item) => after === undefined || item.id < after)
+    .sort((a, b) =>
+      a.id < b.id ? FIRST_ATTEMPT : a.id > b.id ? -FIRST_ATTEMPT : ZERO,
+    );
+  const page = rows.slice(ZERO, limit);
+  return {
+    items: page,
+    nextCursor:
+      rows.length > limit ? encode(page.at(-FIRST_ATTEMPT)!.id) : null,
+  };
+}
+
+export function executionObjectives(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+  query: { limit?: number; cursor?: string },
+) {
+  const { node } = executionRead(tx, dependencies, claim);
+  const items: ExecutionObjective[] =
+    node.kind === NodeKind.Objective
+      ? []
+      : currentObjectivesOf(tx, node.id).map(({ node: child, outcome }) => {
+          assert.ok(child.state);
+          if (!outcome) return { id: child.id, state: child.state };
+          const record = outcomeRecord(tx, dependencies.bindings, outcome);
+          const revision = getRevision(tx, child.id, record.nodeRevision);
+          const view = nodeRecord(tx, child, dependencies.bindings);
+          assert.ok(view.kind === NodeKind.Objective);
+          return {
+            ...view,
+            content: revision.content,
+            visibleRevision: revision.revision,
+            pinnedByAttempts: revision.pinnedByAttempts,
+          };
+        });
+  return identityPage(items, "node", query);
+}
+
+export function executionObjectiveOutcomes(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+  query: { limit?: number; cursor?: string },
+) {
+  const { node } = executionRead(tx, dependencies, claim);
+  const items =
+    node.kind === NodeKind.Objective
+      ? []
+      : currentObjectivesOf(tx, node.id).flatMap(({ outcome }) =>
+          outcome ? [outcomeRecord(tx, dependencies.bindings, outcome)] : [],
+        );
+  return identityPage(items, "outcome", query);
+}
+
+export function executionObjectiveEvidence(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+  query: { limit?: number; cursor?: string },
+) {
+  const { node } = executionRead(tx, dependencies, claim);
+  const ids =
+    node.kind === NodeKind.Objective
+      ? []
+      : currentObjectivesOf(tx, node.id).flatMap(({ outcome }) =>
+          outcome
+            ? outcomeRecord(tx, dependencies.bindings, outcome).evidenceIds
+            : [],
+        );
+  const items = [...new Set(ids)].map((id) => {
+    const evidence = readEvidence(tx, id);
+    assert.ok(evidence);
+    return evidenceRecord(tx, evidence);
+  });
+  return identityPage(items, "evidence", query);
+}
 
 export function executionEvidencePage(
   tx: Transaction,

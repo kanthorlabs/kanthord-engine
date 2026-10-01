@@ -63,6 +63,18 @@ engine/
 │   │   ├── control-close.ts    # Block, discard, and success override
 │   │   ├── control-unblock.ts  # Atomic direction change and next attempt
 │   │   ├── transitions.ts     # Scheduler claim, release admission, and loss
+│   │   ├── execution.ts       # Live claim and execution context admission
+│   │   ├── execution-read.ts  # Pinned revisions, attempts and current objective outcomes
+│   │   ├── evidence-content.ts # Binding, byte and verification validation
+│   │   ├── evidence-submit.ts # Evidence insertion and object upload preparation
+│   │   ├── evidence-complete.ts # Checked object upload publication
+│   │   ├── evidence-read.ts   # Evidence pagination and record reads
+│   │   ├── evidence-content-read.ts # Caller-bounded inline and object content
+│   │   ├── evidence-delete.ts # Remote-first asset and evidence deletion
+│   │   ├── evidence-request.ts # Evaluation external-action requests
+│   │   ├── assessment-admit.ts # Evidence, result and tested-input admission
+│   │   ├── assessment-submit.ts # Assessment insertion and eligible closure
+│   │   ├── node-check.ts      # On-demand checks and write-once end states
 │   │   └── service.ts          # Lifecycle, health, and collaboration implementations
 │   ├── scheduler/              # Scheduler Service: work queue, execution claims, history, and loss settlement
 │   │   ├── contract.ts         # Execution schemas, operations, and collaboration contracts

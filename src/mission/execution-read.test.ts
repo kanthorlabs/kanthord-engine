@@ -3,7 +3,12 @@ import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { MissionErrorCode, AssessmentResult } from "./contract.ts";
+import {
+  MissionErrorCode,
+  AssessmentResult,
+  NodeKind,
+  NodeState,
+} from "./contract.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   closeAttempt,
@@ -13,8 +18,8 @@ import {
   insertOutcome,
 } from "./record-store.ts";
 import { getRevision } from "./node-read.ts";
-import { insertRevision } from "./store.ts";
-import { evidenceHarness } from "./test-support.ts";
+import { insertRevision, insertNode, setNodeState } from "./store.ts";
+import { evidenceHarness, executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const ZERO = 0;
@@ -22,6 +27,136 @@ const ONE = 1;
 const TWO = 2;
 const THREE = 3;
 const PINNED = "Pinned";
+
+test("initiative reads use outcome revisions, include discarded children, minimize new children and exclude retired children", async (t) => {
+  const h = executionHarness(t, IDENTITY);
+  const childId = createIdentity("node");
+  const freshId = createIdentity("node");
+  const outcomeId = createIdentity("outcome");
+  const evidenceId = createIdentity("evidence");
+  h.store.transaction((tx) => {
+    const base = getRevision(tx, h.nodeId, ONE);
+    for (const id of [childId, freshId]) {
+      insertNode(tx, {
+        id,
+        mission_id: h.missionId,
+        kind: NodeKind.Objective,
+        filename: `${id.toLowerCase()}.md`,
+        parent_id: h.nodeId,
+        created_at: ONE,
+      });
+      insertRevision(tx, {
+        ...base,
+        nodeId: id,
+        content: { ...base.content, name: PINNED },
+        tasks: [],
+      });
+    }
+    setNodeState(tx, childId, NodeState.Discarded);
+    insertEvidence(
+      tx,
+      {
+        id: evidenceId,
+        node_id: childId,
+        attempt: ZERO,
+        subject: "Historical",
+        requirement_key: null,
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON(h.actor),
+        created_at: ONE,
+      },
+      [],
+    );
+    const assessmentId = createIdentity("assessment");
+    insertAssessment(tx, {
+      id: assessmentId,
+      node_id: childId,
+      attempt: ZERO,
+      result: AssessmentResult.Undetermined,
+      rationale: "Discard",
+      evidence_ids: canonicalJSON([evidenceId]),
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: null,
+      actor: canonicalJSON(h.actor),
+      node_revision: ONE,
+      created_at: ONE,
+    });
+    insertOutcome(tx, {
+      id: outcomeId,
+      node_id: childId,
+      result: AssessmentResult.Undetermined,
+      assessment_id: assessmentId,
+      evidence_ids: "[]",
+      created_at: ONE,
+    });
+    insertRevision(tx, {
+      ...base,
+      nodeId: childId,
+      revision: TWO,
+      content: { ...base.content, name: "Later" },
+      tasks: [],
+    });
+  });
+  const input = {
+    params: { executionId: h.claim.executionId },
+    query: {},
+    body: null,
+  };
+  const page = await h.invoke("execution.objective.list", input);
+  const child = page.items.find((item) => item.id === childId)!;
+  assert.ok("content" in child);
+  assert.equal(child.content.name, PINNED);
+  assert.equal(child.visibleRevision, ONE);
+  assert.deepEqual(
+    page.items.find((item) => item.id === freshId),
+    { id: freshId, state: NodeState.Pending },
+  );
+  assert.deepEqual(
+    (await h.invoke("execution.objective.outcome.list", input)).items.map(
+      (item) => item.id,
+    ),
+    [outcomeId],
+  );
+  assert.deepEqual(
+    (await h.invoke("execution.objective.evidence.list", input)).items.map(
+      (item) => item.id,
+    ),
+    [evidenceId],
+  );
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+      .run(THREE, childId),
+  );
+  assert.equal(
+    (await h.invoke("execution.objective.list", input)).items.length,
+    ONE,
+  );
+  assert.equal(
+    (await h.invoke("execution.objective.outcome.list", input)).items.length,
+    ZERO,
+  );
+  assert.equal(
+    (await h.invoke("execution.objective.evidence.list", input)).items.length,
+    ZERO,
+  );
+  const objective = evidenceHarness(t, IDENTITY);
+  for (const operation of [
+    "execution.objective.list",
+    "execution.objective.outcome.list",
+    "execution.objective.evidence.list",
+  ] as const)
+    assert.deepEqual(
+      await objective.invoke(operation, {
+        params: { executionId: objective.claim.executionId },
+        query: {},
+        body: null,
+      }),
+      { items: [], nextCursor: null },
+    );
+});
 
 test("execution evidence is attempt-bound and cleared outcome appears only after a human opens the next attempt", async (t) => {
   const h = evidenceHarness(t, IDENTITY);

@@ -16,6 +16,7 @@ export function addExecutionCommands(mission: Command): void {
     .description("Execution-scoped Mission reads");
   execution.action(() => execution.help());
   addRevisionReads(execution);
+  addObjectiveReads(execution);
   const evidence = execution.command("evidence").description("Bound evidence");
   evidence.action(() => evidence.help());
   addPagination(
@@ -105,6 +106,43 @@ export function addExecutionCommands(mission: Command): void {
 function executionIdentity(executionId: string, code: string): void {
   if (!identitySchema("execution").safeParse(executionId).success)
     throw new Diagnostic(code, "invalid execution ID");
+}
+
+function addObjectiveReads(execution: Command): void {
+  const objective = execution
+    .command("objective")
+    .description("Current child objectives");
+  objective.action(() => objective.help());
+  const outcome = objective
+    .command("outcome")
+    .description("Current objective outcomes");
+  outcome.action(() => outcome.help());
+  const evidence = objective
+    .command("evidence")
+    .description("Current objective evidence");
+  evidence.action(() => evidence.help());
+  for (const [group, operation] of [
+    [objective, "execution.objective.list"],
+    [outcome, "execution.objective.outcome.list"],
+    [evidence, "execution.objective.evidence.list"],
+  ] as const) {
+    addPagination(
+      group.command("list").argument("<execution-id>", "Execution ID"),
+    ).action(async (executionId: string, _options, command: Command) => {
+      executionIdentity(
+        executionId,
+        `cli.mission.${operation}.invalid_execution_id`,
+      );
+      printResult<unknown>(
+        await client(command, operation)[operation]({
+          params: { executionId },
+          query: pagination(command.optsWithGlobals()),
+          body: null,
+        }),
+        operation,
+      );
+    });
+  }
 }
 
 function addRevisionReads(execution: Command): void {

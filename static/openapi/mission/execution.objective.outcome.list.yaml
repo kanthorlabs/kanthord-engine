@@ -1,0 +1,176 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.execution.objective.outcome.list
+    tags:
+      - mission
+    description: List current outcomes of current objectives.
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: executionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.execution.objective.outcome.list.Input/prop\
+            erties/params/properties/executionId"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.execution.objective.outcome.list.Input/prop\
+            erties/query/properties/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.execution.objective.outcome.list.Input/prop\
+            erties/query/properties/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.execution.objective.outcome.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.execution.objective.outcome.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            executionId:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - executionId
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.execution.objective.outcome.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: outcome_ followed by a canonical 26-character uppercase ULID.
+              nodeId:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+              attempt:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              nodeRevision:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+              closingEvent:
+                type: string
+                enum:
+                  - success-override
+                  - human-discard
+                  - human-block
+                  - assessment-not-passed
+                  - external-failed
+                  - assessment-passed
+                  - external-success
+              result:
+                type: string
+                enum:
+                  - success
+                  - criterion-not-met
+                  - undetermined
+              assessmentId:
+                type: string
+                minLength: 37
+                maxLength: 37
+                pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: assessment_ followed by a canonical 26-character uppercase ULID.
+              evidenceIds:
+                type: array
+                items:
+                  type: string
+                  minLength: 35
+                  maxLength: 35
+                  pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: evidence_ followed by a canonical 26-character uppercase ULID.
+              createdAt:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            required:
+              - id
+              - nodeId
+              - attempt
+              - nodeRevision
+              - closingEvent
+              - result
+              - assessmentId
+              - evidenceIds
+              - createdAt
+            additionalProperties: false
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - nextCursor
+      additionalProperties: false

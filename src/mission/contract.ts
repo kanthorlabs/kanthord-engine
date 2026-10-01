@@ -1086,6 +1086,7 @@ export const nodeCheckResultSchema = z.strictObject({
     }),
   ),
 });
+export type ExecutionObjective = z.infer<typeof executionObjectiveSchema>;
 export const executionObjectiveSchema = z.union([
   nodeSchema.options[1],
   z.strictObject({ id: identitySchema("node"), state: nodeStateSchema }),
@@ -1161,6 +1162,48 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "execution.objective.list": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.objective.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/objective",
+    input: readInput(
+      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(executionObjectiveSchema),
+    description: "List current objectives at their outcome revisions.",
+  },
+  "execution.objective.outcome.list": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.objective.outcome.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/objective/outcome",
+    input: readInput(
+      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(outcomeSchema),
+    description: "List current outcomes of current objectives.",
+  },
+  "execution.objective.evidence.list": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.objective.evidence.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:executionId/objective/evidence",
+    input: readInput(
+      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(evidenceSchema),
+    description: "List evidence named by current objective outcomes.",
+  },
   "execution.evidence.list": {
     ...readOperation,
     access: AccessPolicy.Client,

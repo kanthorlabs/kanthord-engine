@@ -50,6 +50,9 @@ import {
   executionRevisionPage,
   executionEvidencePage,
   clearedOutcome,
+  executionObjectives,
+  executionObjectiveOutcomes,
+  executionObjectiveEvidence,
 } from "./execution-read.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
@@ -150,6 +153,36 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["execution.objective.list"],
+      ({ query }, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) =>
+          executionObjectives(tx, this.dependencies, claim, query),
+        );
+      },
+    );
+    registry.register(
+      missionOperations["execution.objective.outcome.list"],
+      ({ query }, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) =>
+          executionObjectiveOutcomes(tx, this.dependencies, claim, query),
+        );
+      },
+    );
+    registry.register(
+      missionOperations["execution.objective.evidence.list"],
+      ({ query }, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) =>
+          executionObjectiveEvidence(tx, this.dependencies, claim, query),
+        );
+      },
+    );
     registry.register(
       missionOperations["execution.evidence.list"],
       ({ query }, caller) => {

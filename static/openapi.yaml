@@ -62,6 +62,12 @@ paths:
     $ref: ./openapi/mission/execution.evidence.asset.content.get.yaml#/pathItem
   /api/mission/execution/{executionId}/evidence:
     $ref: ./openapi/mission/execution.evidence.list.yaml#/pathItem
+  /api/mission/execution/{executionId}/objective/evidence:
+    $ref: ./openapi/mission/execution.objective.evidence.list.yaml#/pathItem
+  /api/mission/execution/{executionId}/objective:
+    $ref: ./openapi/mission/execution.objective.list.yaml#/pathItem
+  /api/mission/execution/{executionId}/objective/outcome:
+    $ref: ./openapi/mission/execution.objective.outcome.list.yaml#/pathItem
   /api/mission/execution/{executionId}/pinned-revision:
     $ref: ./openapi/mission/execution.pinnedRevision.get.yaml#/pathItem
   /api/mission/execution/{executionId}/revision/{revision}:

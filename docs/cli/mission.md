@@ -14,8 +14,8 @@ The current [Mission dispatcher](../../src/apps/cli/mission.ts) implements
 mission get, node planning and human control, criterion set, dependency edits,
 edge list, import/export, and attempt, external-action, assessment and outcome
 reads. Remote commands accept the shared endpoint and token options.
-The [Mission contract](../../src/mission/contract.ts) declares 50 operations
-with handlers and generated OpenAPI: 48 CLI operations plus the execution-only
+The [Mission contract](../../src/mission/contract.ts) declares 53 operations
+with handlers and generated OpenAPI: 51 CLI operations plus the execution-only
 `mission.evidence.asset.complete` and `mission.evidence.request` operations.
 Completion checks object storage before publication and repeats claim admission
 in the publication transaction. Requests record one published platform asset
@@ -32,8 +32,8 @@ the row and supports a forced delete on a live chain. Whole-evidence deletion
 also removes evidence-set references and pauses an open-attempt request owner.
 Execution pinned-revision and revision list/get enforce the claim's upper bound.
 Execution evidence list and cleared-outcome get use the claimed attempt.
-The remaining execution-scoped objective reads
-and the host upload helper remain target work.
+Execution objective, outcome and evidence lists use current children and their
+current outcome revisions. Graph get and the host upload helper remain target work.
 The execution schemas, admission checks, content checks and assessment admission
 checks are implemented building blocks. Production Intake storage/check
 collaborations remain explicitly unwired; local stand-ins verify their contracts.
