@@ -1161,6 +1161,21 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "evidence.asset.complete": {
+    ...writeOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.evidence.asset.complete",
+    method: HttpMethod.Post,
+    path: "/api/mission/evidence/asset/:assetId/complete",
+    input: z.strictObject({
+      params: z.strictObject({ assetId: identitySchema("evidence_asset") }),
+      query: z.strictObject({}),
+      body: executionContextSchema,
+    }),
+    output: assetUploadResultSchema,
+    description: "Complete a verified object evidence upload.",
+  },
   "assessment.list": {
     ...readOperation,
     id: "mission.assessment.list",

@@ -1,0 +1,127 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: mission.evidence.asset.complete
+    tags:
+      - mission
+    description: Complete a verified object evidence upload.
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.evidence.asset.complete.Input/properties/pa\
+            rams/properties/assetId"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/mission.evidence.asset.complete.Input/properties/bo\
+              dy"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.evidence.asset.complete.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.evidence.asset.complete.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            assetId:
+              type: string
+              minLength: 41
+              maxLength: 41
+              pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: evidence_asset_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - assetId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            executionId:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+            attempt:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            nodeRevision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+          required:
+            - executionId
+            - attempt
+            - nodeRevision
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.evidence.asset.complete.Output:
+      type: object
+      properties:
+        assetId:
+          type: string
+          minLength: 41
+          maxLength: 41
+          pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: evidence_asset_ followed by a canonical 26-character uppercase ULID.
+        evidenceId:
+          type: string
+          minLength: 35
+          maxLength: 35
+          pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: evidence_ followed by a canonical 26-character uppercase ULID.
+        uri:
+          type: string
+          pattern: ^s3:\/\/.*
+      required:
+        - assetId
+        - evidenceId
+        - uri
+      additionalProperties: false

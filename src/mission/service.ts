@@ -37,6 +37,7 @@ import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
+import { completeEvidence } from "./evidence-complete.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -136,6 +137,11 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["evidence.asset.complete"],
+      ({ params, body }, caller) =>
+        completeEvidence(this.dependencies, caller, params.assetId, body),
+    );
     registry.register(
       missionOperations["assessment.list"],
       ({ params, query }, caller) =>

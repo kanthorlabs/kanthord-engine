@@ -30,6 +30,23 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 
+test("published evidence completion names its execution operation", () => {
+  const fragment = parse(
+    readFileSync(
+      join(
+        dirname(openapiPath()),
+        "openapi/mission/evidence.asset.complete.yaml",
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    fragment.pathItem.post.operationId,
+    missionOperations["evidence.asset.complete"].id,
+  );
+  assert.ok(missionOperations["evidence.asset.complete"].requiresExecution);
+});
+
 test("published heartbeat projection names its operation and carries no 204 content", () => {
   const fragment = readFileSync(
     join(dirname(openapiPath()), "openapi/worker/heartbeat.yaml"),
