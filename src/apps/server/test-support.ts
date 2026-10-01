@@ -95,6 +95,9 @@ export function fakeMachines(
   const worker = {
     registrations,
     findByClient: (clientId: string) => registrations.get(clientId),
+    heartbeat: (runtimeIdentity: string) => {
+      assert.ok(runtimeIdentity);
+    },
     register(
       transaction: Transaction,
       client: VerifiedClient,

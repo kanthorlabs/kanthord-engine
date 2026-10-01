@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 import convict from "convict";
 import pino, { type Logger } from "pino";
@@ -45,6 +46,9 @@ export function fakeLookups() {
   const worker = {
     registrations,
     findByClient: (client: string) => registrations.get(client),
+    heartbeat: (runtimeIdentity: string) => {
+      assert.ok(runtimeIdentity);
+    },
   };
   return {
     project: {

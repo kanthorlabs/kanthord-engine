@@ -15,15 +15,27 @@ import {
   readLiveByClient,
   readLiveOfClient,
 } from "./instances.ts";
+import type { HeartbeatClock } from "./heartbeat.ts";
 
 export class TableRegistrations implements WorkerRegistrations {
   private readonly store: Store;
   private readonly workerBindingOf: WorkerBindingOf;
-  constructor(store: Store, workerBindingOf: WorkerBindingOf) {
+  private readonly clock: HeartbeatClock;
+  constructor(
+    store: Store,
+    workerBindingOf: WorkerBindingOf,
+    clock: HeartbeatClock,
+  ) {
     assert.ok(store.database.isOpen);
     assert.ok(workerBindingOf);
     this.store = store;
     this.workerBindingOf = workerBindingOf;
+    this.clock = clock;
+  }
+  heartbeat(runtimeIdentity: string): void {
+    assert.ok(runtimeIdentity);
+    assert.ok(this.store.database.isOpen);
+    this.clock.renew(runtimeIdentity);
   }
   findByClient(clientId: string): Registration | undefined {
     assert.ok(clientId);

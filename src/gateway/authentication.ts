@@ -25,7 +25,7 @@ const BEARER_PREFIX_LENGTH = 7;
 const clientIdentitySchema = identitySchema(CLIENT_IDENTITY_PREFIX);
 export interface AuthenticationLookups {
   project: Pick<ProjectBindings, "resolveWorkerGroup">;
-  worker: Pick<WorkerRegistrations, "findByClient">;
+  worker: Pick<WorkerRegistrations, "findByClient" | "heartbeat">;
 }
 export class Authentication {
   private readonly key: Promise<CryptoKey>;
@@ -74,6 +74,8 @@ export class Authentication {
         registration.projectId !== resolved.projectId)
     )
       throw unauthorized();
+    if (registration)
+      this.machines!.worker.heartbeat(registration.runtimeIdentity);
     return mintMachineIdentity(
       { clientId, name, ...resolved, issuedAt },
       jti,

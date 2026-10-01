@@ -69,6 +69,8 @@ import {
 } from "./configuration.ts";
 import { TableRegistrations } from "./registrations.ts";
 import type { WorkerConfig } from "./config.ts";
+import { HeartbeatClock, HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
+import { readAllLive, endRegistration, readRow } from "./instances.ts";
 
 const NONE = 0;
 const LAST_PROVIDER = 1;
@@ -164,6 +166,7 @@ export interface Dependencies {
   config: WorkerConfig;
   store: Store;
   workerBindingOf: WorkerBindingOf;
+  monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;
   custodySuitability: CustodySuitability;
   credentialMetadata: CredentialMetadataFn;
@@ -174,12 +177,19 @@ export interface Dependencies {
 }
 export class WorkerService implements Service {
   readonly registrations: WorkerRegistrations;
+  readonly heartbeatClock: HeartbeatClock;
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
   private readonly dependencies: Dependencies;
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.heartbeatClock = new HeartbeatClock(dependencies.monotonicNow);
     this.registrations =
       dependencies.registrations ??
-      new TableRegistrations(dependencies.store, dependencies.workerBindingOf);
+      new TableRegistrations(
+        dependencies.store,
+        dependencies.workerBindingOf,
+        this.heartbeatClock,
+      );
     dependencies.health?.register("worker", () => this.healthcheck());
   }
   private readonly shutdown = new CancellationContext();
@@ -195,14 +205,22 @@ export class WorkerService implements Service {
           "worker: a stopped service cannot start again.",
         ),
       );
-    this.startTask ??= Promise.resolve(null);
+    if (!this.startTask) {
+      const live = this.dependencies.store.transaction(readAllLive);
+      for (let index = 0; index < live.length; index++)
+        this.heartbeatClock.set(live[index]!.runtimeIdentity);
+      this.startTask = Promise.resolve(null);
+    }
     this.started = true;
     return this.startTask;
   }
   quiesce(): Promise<Error | null> {
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
     return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
+    void this.quiesce();
     this.shutdown.cancel();
     this.started = false;
     this.stopTask ??= Promise.resolve(null);
@@ -216,6 +234,10 @@ export class WorkerService implements Service {
       if (context.err()) return (await this.stop()) ?? context.err();
       const error = await this.start();
       if (error) return error;
+      this.heartbeatTimer ??= setInterval(
+        () => this.sweepRegistrations(),
+        HEARTBEAT_SWEEP_INTERVAL_MS,
+      ).unref();
       await this.shutdown.done();
       return (await this.stop()) ?? context.err();
     } finally {
@@ -229,6 +251,24 @@ export class WorkerService implements Service {
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };
+  }
+
+  sweepRegistrations(): void {
+    const expired = this.heartbeatClock.expired(
+      this.dependencies.config.heartbeatWindow,
+    );
+    const ended = this.dependencies.store.transaction((tx) => {
+      const now = Date.now();
+      assert.ok(tx.database.isTransaction);
+      assert.ok(Number.isSafeInteger(now));
+      for (let index = 0; index < expired.length; index++)
+        endRegistration(tx, expired[index]!, now);
+      return this.heartbeatClock
+        .identities()
+        .filter((identity) => readRow(tx, identity)?.endedAt !== null);
+    });
+    for (let index = 0; index < ended.length; index++)
+      this.heartbeatClock.drop(ended[index]!);
   }
 
   private validateEffectiveConfig(
@@ -745,7 +785,7 @@ export class WorkerService implements Service {
             "gateway.authentication.unauthorized",
             "Authentication required.",
           );
-        return caller.commit((transaction) => {
+        const result = caller.commit((transaction) => {
           const registration = worker.register(
             transaction,
             identity,
@@ -765,6 +805,8 @@ export class WorkerService implements Service {
           );
           return { runtimeIdentity };
         });
+        this.heartbeatClock.set(result.runtimeIdentity);
+        return result;
       },
     );
   }

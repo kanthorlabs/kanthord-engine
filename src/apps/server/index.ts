@@ -108,6 +108,8 @@ export function composeServices(options: {
       },
       worker: {
         findByClient: (client) => worker.registrations.findByClient(client),
+        heartbeat: (runtimeIdentity) =>
+          worker.registrations.heartbeat(runtimeIdentity),
       },
     },
   });

@@ -193,6 +193,7 @@ export interface WorkerRegistrations {
     now: number,
   ): Registration;
   findByClient(clientId: string): Registration | undefined;
+  heartbeat(runtimeIdentity: string): void;
 }
 
 export const WORKER_SERVICE_NAME = "worker";

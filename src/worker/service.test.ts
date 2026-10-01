@@ -34,7 +34,12 @@ import { HttpStatus } from "../kernel/http.ts";
 import { CodedError, OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
-import { endRegistration, readAllLive } from "./instances.ts";
+import {
+  endRegistration,
+  readAllLive,
+  reopenRegistration,
+} from "./instances.ts";
+import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 
 const fakeCollaborations = {
   workerBindingOf: () => ({
@@ -244,6 +249,65 @@ test("registration admission is idempotent, bounded by the latest slot count and
 });
 
 type OperationKey = Exclude<keyof typeof workerOperations, "register">;
+
+test("start resets live heartbeats and sweep ends only expired rows while preserving reopened readings", async (t) => {
+  let now = 1000;
+  const window = 1;
+  const inside = 999;
+  const expired = 1001;
+  const zero = 0;
+  const f = enablementFixture(t, {
+    monotonicNow: () => now,
+    config: { ...WORKER_CONFIG, heartbeatWindow: window },
+  });
+  const row = f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  await f.worker.start();
+  t.after(() => f.worker.stop());
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  now += inside;
+  f.worker.sweepRegistrations();
+  assert.ok(f.worker.registrations.findByClient(client.clientId));
+  f.worker.registrations.heartbeat(row.runtimeIdentity);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  now += expired;
+  f.worker.sweepRegistrations();
+  assert.equal(f.worker.registrations.findByClient(client.clientId), undefined);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), null);
+  f.store.transaction((tx) => reopenRegistration(tx, row.runtimeIdentity));
+  f.worker.heartbeatClock.set(row.runtimeIdentity);
+  f.worker.sweepRegistrations();
+  assert.ok(f.worker.registrations.findByClient(client.clientId));
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  const restarted = new WorkerService({
+    config: WORKER_CONFIG,
+    store: f.store,
+    ...fakeCollaborations,
+    monotonicNow: () => now,
+  });
+  await restarted.start();
+  assert.equal(restarted.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  assert.ok(restarted.registrations.findByClient(client.clientId));
+  await restarted.stop();
+});
+
+test("run owns the heartbeat interval and quiescence stops it", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = enablementFixture(t);
+  const context = new CancellationContext();
+  const sweep = t.mock.method(f.worker, "sweepRegistrations", () => {});
+  const running = f.worker.run(context);
+  await f.worker.start();
+  t.mock.timers.tick(HEARTBEAT_SWEEP_INTERVAL_MS);
+  const once = 1;
+  assert.equal(sweep.mock.calls.length, once);
+  await f.worker.quiesce();
+  t.mock.timers.tick(HEARTBEAT_SWEEP_INTERVAL_MS);
+  assert.equal(sweep.mock.calls.length, once);
+  context.cancel();
+  await running;
+});
 
 function enablementFixture(
   t: TestContext,
