@@ -23,6 +23,10 @@ declare module "convict" {
       extension: string[];
       parse: (source: string) => unknown;
     }): void;
+    addFormat(format: {
+      name: string;
+      validate: (value: unknown) => void;
+    }): void;
   }
   const convict: Convict;
   export default convict;

@@ -34,6 +34,7 @@ const DEFAULT_CONSECUTIVE_LOSS_LIMIT = 3;
 const DEFAULT_TEXT_MAX_BYTES = 32768;
 const DEFAULT_HEARTBEAT_WINDOW = 300;
 const DEFAULT_GLOBAL_PROMPT = "";
+const DEFAULT_RELEASE_RESERVE = 600;
 const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
@@ -47,12 +48,17 @@ test("service fragments preserve the existing YAML field set", () => {
     "log",
     "masterKey",
     "mission",
+    "scheduler",
     "worker",
   ]);
   assert.deepEqual(Object.keys(config.worker).sort(), [
     "globalPrompt",
     "heartbeatWindow",
   ]);
+  assert.deepEqual(Object.keys(config.scheduler), ["releaseReserve"]);
+  assert.deepEqual(initial.scheduler, {
+    releaseReserve: DEFAULT_RELEASE_RESERVE,
+  });
   assert.deepEqual(initial.worker, {
     heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
     globalPrompt: DEFAULT_GLOBAL_PROMPT,
@@ -103,7 +109,7 @@ test("worker configuration defaults, path strings and strict validation", () => 
   }
 });
 
-test("config init emits both Worker fields", (t) => {
+test("config init emits Worker and Scheduler fields", (t) => {
   const path = join(temporary(t), "kanthord.yaml");
   const result = spawnSync(
     process.execPath,
@@ -122,6 +128,34 @@ test("config init emits both Worker fields", (t) => {
     heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
     globalPrompt: DEFAULT_GLOBAL_PROMPT,
   });
+  assert.deepEqual(parseMapping(readFileSync(path, "utf8")).scheduler, {
+    releaseReserve: DEFAULT_RELEASE_RESERVE,
+  });
+});
+
+test("Scheduler reserve accepts only a positive safe integer", () => {
+  const masterKey = randomBytes(32).toString("base64");
+  assert.equal(
+    configuration({ masterKey }).getProperties().scheduler.releaseReserve,
+    DEFAULT_RELEASE_RESERVE,
+  );
+  for (const releaseReserve of [
+    0,
+    -1,
+    1.5,
+    "600",
+    null,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    assert.throws(
+      () => configuration({ masterKey, scheduler: { releaseReserve } }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, INVALID_FIELD_CODE);
+        assert.match(error.message, /scheduler.releaseReserve/);
+        return true;
+      },
+    );
+  }
 });
 
 test("mission configuration defaults and strict validation", () => {

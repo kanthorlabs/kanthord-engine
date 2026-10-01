@@ -91,7 +91,7 @@ function invokePeek(
 test("WorkQueue insert adds a row and enforces the node_id unique index", (t) => {
   const store = makeStore();
   t.after(() => store.close());
-  const scheduler = new SchedulerService({ config: {} });
+  const scheduler = new SchedulerService({ config: { releaseReserve: 600 } });
   const nodeId = createIdentity(NODE_PREFIX);
   const projectId = createIdentity(PROJECT_PREFIX);
   store.transaction((tx) =>
@@ -120,7 +120,7 @@ test("WorkQueue insert adds a row and enforces the node_id unique index", (t) =>
 test("WorkQueue delete removes a row and is safe on a missing node_id", (t) => {
   const store = makeStore();
   t.after(() => store.close());
-  const scheduler = new SchedulerService({ config: {} });
+  const scheduler = new SchedulerService({ config: { releaseReserve: 600 } });
   const nodeId = createIdentity(NODE_PREFIX);
   store.transaction((tx) =>
     scheduler.insert(
@@ -150,7 +150,7 @@ test("WorkQueue delete removes a row and is safe on a missing node_id", (t) => {
 test("WorkQueue priorityUpdate changes priority and preserves id", (t) => {
   const store = makeStore();
   t.after(() => store.close());
-  const scheduler = new SchedulerService({ config: {} });
+  const scheduler = new SchedulerService({ config: { releaseReserve: 600 } });
   const nodeId = createIdentity(NODE_PREFIX);
   store.transaction((tx) =>
     scheduler.insert(
@@ -177,7 +177,7 @@ test("WorkQueue priorityUpdate changes priority and preserves id", (t) => {
 test("queue list handler orders by id descending and paginates", (t) => {
   const store = makeStore();
   t.after(() => store.close());
-  const scheduler = new SchedulerService({ config: {} });
+  const scheduler = new SchedulerService({ config: { releaseReserve: 600 } });
   const projectId = createIdentity(PROJECT_PREFIX);
   for (let index = NO_ROWS; index < LIST_TOTAL_JOBS; index += ONE_ROW)
     store.transaction((tx) =>
@@ -226,7 +226,7 @@ test("queue list handler orders by id descending and paginates", (t) => {
 test("queue peek handler returns the first job by priority desc then id asc, or null", (t) => {
   const store = makeStore();
   t.after(() => store.close());
-  const scheduler = new SchedulerService({ config: {} });
+  const scheduler = new SchedulerService({ config: { releaseReserve: 600 } });
   const projectId = createIdentity(PROJECT_PREFIX);
   store.transaction((tx) =>
     scheduler.insert(tx, createIdentity(NODE_PREFIX), projectId, PRIORITY_LOW),
@@ -270,7 +270,10 @@ test("queue peek handler returns the first job by priority desc then id asc, or 
 
 test("SchedulerService lifecycle and health registration", async () => {
   const health = new HealthRegistry();
-  const scheduler = new SchedulerService({ config: {}, health });
+  const scheduler = new SchedulerService({
+    config: { releaseReserve: 600 },
+    health,
+  });
   assert.equal(
     (await health.check(background)).scheduler?.queue,
     HealthStatus.Unavailable,

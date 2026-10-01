@@ -18,6 +18,7 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { SchedulerConfig } from "./config.ts";
 import {
   JOB_IDENTITY_PREFIX,
   QUEUE_LIST_LIMIT_DEFAULT,
@@ -65,7 +66,7 @@ function decodeCursor(cursor: string): string {
 }
 
 export interface Dependencies {
-  config: Record<string, never>;
+  config: SchedulerConfig;
   health?: HealthRegistry;
 }
 

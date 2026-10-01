@@ -25,11 +25,16 @@ import { gatewayConfigSchema, type GatewayConfig } from "../gateway/config.ts";
 import { missionConfigSchema, type MissionConfig } from "../mission/config.ts";
 import { projectConfigSchema } from "../project/index.ts";
 import { workerConfigSchema, type WorkerConfig } from "../worker/config.ts";
+import {
+  schedulerConfigSchema,
+  type SchedulerConfig,
+} from "../scheduler/config.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 export interface ServerConfig extends GlobalConfig {
   gateway: GatewayConfig;
   mission: MissionConfig;
   worker: WorkerConfig;
+  scheduler: SchedulerConfig;
 }
 
 export function configPath(
@@ -50,6 +55,7 @@ const fragments = {
   mission: missionConfigSchema,
   project: projectConfigSchema,
   worker: workerConfigSchema,
+  scheduler: schedulerConfigSchema,
 };
 const schema = {
   ...globalConfigSchema,

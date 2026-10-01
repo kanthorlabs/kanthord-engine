@@ -358,6 +358,9 @@ The implemented fields are:
   `-` disables the layer. Other values name a Markdown file. This release
   validates the field type; Plan 07 owns consuming the file.
 
+- `scheduler.releaseReserve`: optional positive safe integer in seconds, default
+  `600`. A claim adds this reserve after its effective worker wall time.
+
 The current Project fragment is empty and adds no YAML section.
 See [Gateway](./gateway.md) for authentication context.
 

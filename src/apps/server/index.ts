@@ -114,7 +114,7 @@ export function composeServices(options: {
     },
   });
   const scheduler = new SchedulerService({
-    config: {},
+    config: options.config.scheduler,
     health: options.health,
   });
   const workQueue: WorkQueue = {
