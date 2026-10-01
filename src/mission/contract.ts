@@ -1161,6 +1161,21 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
+  "evidence.submit": {
+    ...writeOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.evidence.submit",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:nodeId/evidence",
+    input: z.strictObject({
+      params: z.strictObject({ nodeId: identitySchema("node") }),
+      query: z.strictObject({}),
+      body: evidenceSubmitSchema,
+    }),
+    output: evidenceSubmitResultSchema,
+    description: "Submit execution evidence and prepare object uploads.",
+  },
   "evidence.request": {
     ...writeOperation,
     access: AccessPolicy.Client,

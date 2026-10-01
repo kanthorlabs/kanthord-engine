@@ -39,6 +39,7 @@ import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
 import { completeEvidence } from "./evidence-complete.ts";
 import { requestEvidence } from "./evidence-request.ts";
+import { submitEvidence } from "./evidence-submit.ts";
 import { claim, release, loss } from "./transitions.ts";
 import {
   attemptPage,
@@ -138,6 +139,11 @@ export class MissionService
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      missionOperations["evidence.submit"],
+      ({ params, body }, caller) =>
+        submitEvidence(this.dependencies, caller, params.nodeId, body),
+    );
     registry.register(
       missionOperations["evidence.request"],
       ({ params, body }, caller) => {

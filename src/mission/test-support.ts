@@ -29,6 +29,7 @@ import {
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, type Dependencies } from "./service.ts";
 import { openAttempt } from "./record-store.ts";
+import { getRevision } from "./node-read.ts";
 
 const CONSECUTIVE_LOSS_LIMIT = 3;
 const TEXT_MAX_BYTES = 32768;
@@ -76,6 +77,61 @@ export function executionHarness(t: TestContext, identity: CallerIdentity) {
   assert.equal(h.node().attempt, claim.attempt);
   assert.equal(h.node().state, NodeState.Executing);
   return { ...h, claim, context, executionActor: actor };
+}
+
+export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
+  const h = executionHarness(t, identity);
+  const nodeId = createIdentity("node");
+  const repositoryId = createIdentity("binding");
+  const storageId = createIdentity("binding");
+  const storage = {
+    bindingId: storageId,
+    projectId: h.projectId,
+    endpoint: "https://storage.example",
+    bucket: "bucket",
+    region: "region",
+    prefix: "prefix",
+    credential: "storage",
+    available: true,
+  };
+  h.dependencies.bindings.getBindingRevision = (_tx, bindingId) => ({
+    bindingId,
+    projectId: h.projectId,
+    name: bindingId === repositoryId ? "repo" : "storage",
+    resourceIdentity:
+      bindingId === repositoryId
+        ? "repository:github:owner/repo"
+        : "storage:s3:bucket",
+    revision: FIRST_REVISION,
+    tombstone: false,
+    disabled: false,
+  });
+  h.dependencies.bindings.storageBindingOf = () => storage;
+  h.store.transaction((tx) => {
+    insertNode(tx, {
+      id: nodeId,
+      mission_id: h.missionId,
+      kind: NodeKind.Objective,
+      filename: "objective.md",
+      parent_id: h.nodeId,
+      created_at: FIXTURE_TIME,
+    });
+    const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
+    insertRevision(tx, {
+      ...revision,
+      nodeId,
+      filename: "objective.md",
+      content: { ...revision.content, bindings: [repositoryId, storageId] },
+      tasks: [],
+    });
+    openAttempt(tx, nodeId, FIRST_REVISION, h.executionActor, FIXTURE_TIME);
+    setNodeState(tx, nodeId, NodeState.Executing);
+  });
+  h.claim.nodeId = nodeId;
+  const node = () => h.store.transaction((tx) => readNode(tx, nodeId)!);
+  assert.equal(node().kind, NodeKind.Objective);
+  assert.equal(node().attempt, h.claim.attempt);
+  return { ...h, nodeId, node, repositoryId, storageId, storage };
 }
 
 export function controlHarness(
