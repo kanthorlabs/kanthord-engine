@@ -90,6 +90,20 @@ export interface CustodyAuthorization {
   ): ModelInferenceAuthorization;
 }
 
+export type Grant = Readonly<{
+  credential: string;
+  platform: string;
+  execution: Readonly<
+    Omit<CustodyExecution, "credentials"> & { credentials: readonly string[] }
+  >;
+}>;
+export type Material = {
+  readonly credentialId: string;
+  readonly platform: string;
+  value(): unknown;
+  drop(): void;
+};
+
 export const CUSTODY_SERVICE_NAME = "custody";
 export const CREDENTIAL_OPERATION_SERVICE = "credential";
 export const CREDENTIAL_TIMEOUT_MS = 30000;

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { Logger } from "pino";
 import type { Provider } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
@@ -7,7 +8,7 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import { IdentityKind } from "../kernel/caller.ts";
+import { IdentityKind, type MachineIdentity } from "../kernel/caller.ts";
 import {
   HealthScope,
   ResourceStatus,
@@ -39,7 +40,11 @@ import {
   type EnablementsDependentOnModelFn,
   type CustodyExecutions,
   type CustodyAuthorization,
+  type CustodyExecution,
+  type Grant,
+  type Material,
 } from "./contract.ts";
+import { consumeGrant, mintGrant, MaterialBuffer } from "./facility.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 import {
   apiKeySecretSchema,
@@ -105,6 +110,7 @@ const CustodyErrorCode = {
   ModelInUse: "credential.metadata.model_in_use",
   RevisionNotFound: "credential.revision.not_found",
   RevisionEnded: "credential.revision.ended",
+  RevisionRevoked: "credential.revision.revoked",
   NewestLive: "credential.revision.newest_live",
   InvalidCursor: "system.pagination.cursor_invalid",
 } as const;
@@ -343,6 +349,69 @@ export class CustodyComponent implements Service {
     );
     registry.register(custodyOperations.login_status, (input, caller) =>
       this.loginStatus(input, caller),
+    );
+  }
+
+  authorize(
+    tx: Transaction,
+    identity: MachineIdentity,
+    execution: CustodyExecution,
+  ): Grant {
+    assert(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    const { credential, platform } = this.authorization.authorizeModelInference(
+      tx,
+      identity,
+      execution,
+    );
+    return mintGrant({ credential, platform, execution });
+  }
+
+  release(tx: Transaction, grant: Grant, now: number): Material {
+    assert(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    consumeGrant(grant);
+    const rows = rowsForName(tx, grant.credential);
+    let row = rows.find((candidate) =>
+      grant.execution.credentials.includes(candidate.id),
+    );
+    if (row && row.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionRevoked,
+        "The pinned credential revision is revoked.",
+      );
+    if (!row) {
+      row = rows.find((candidate) => candidate.ended_at === null);
+      if (!row)
+        throw new OperationError(
+          HttpStatus.NotFound,
+          CustodyErrorCode.NotFound,
+          "Credential not found.",
+        );
+      this.executions.pinCredential(tx, grant.execution.executionId, row.id);
+      this.drainRevisions(tx, row.name, now);
+    }
+    if (row.platform !== grant.platform)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.PlatformMismatch,
+        "Credential platform mismatch.",
+      );
+    const encrypted = tx.database
+      .prepare("SELECT nonce, ciphertext FROM credential WHERE id = ?")
+      .get(row.id) as { nonce: Buffer; ciphertext: Buffer };
+    assert(encrypted);
+    return new MaterialBuffer(
+      row.id,
+      row.platform,
+      decrypt(
+        this.envelopeKey,
+        row.id,
+        row.platform,
+        encrypted.nonce,
+        encrypted.ciphertext,
+      ),
     );
   }
 

@@ -35,7 +35,10 @@ import {
 import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { Platform } from "./platforms.ts";
-import { CustodyComponent } from "./service.ts";
+import { CustodyComponent, type Dependencies } from "./service.ts";
+import { testMachineIdentity } from "../kernel/test-identity.ts";
+import { createIdentity } from "../kernel/identity.ts";
+import { FacilityError } from "./facility.ts";
 import {
   COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
   OAUTH_PROVIDER_IDS,
@@ -113,6 +116,8 @@ function fixture(
     bindingsNaming?: BindingsNamingFn;
     enablementsDependentOnModel?: EnablementsDependentOnModelFn;
     pins?: Map<string, string[]>;
+    authorization?: Dependencies["authorization"];
+    executions?: Dependencies["executions"];
   } = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -127,7 +132,9 @@ function fixture(
   const health = new HealthRegistry();
   const component = new CustodyComponent({
     ...unusedExecutionDependencies,
-    executions: {
+    authorization:
+      collaborations.authorization ?? unusedExecutionDependencies.authorization,
+    executions: collaborations.executions ?? {
       requireRunning: unexpectedCollaboration,
       pinCredential: (_tx, executionId, credentialId) => {
         collaborations.pins?.set(credentialId, [executionId]);
@@ -631,6 +638,93 @@ test("list drains every returned name and revoke drains other unpinned revisions
     const revoked = f.revoke("github", THIRD_REVISION) as CredentialAnswer;
     assert.equal(revoked.revisions[0]!.endedAt, null);
     assert(revoked.revisions.slice(1).every((row) => row.endedAt !== null));
+  } finally {
+    f.store.close();
+  }
+});
+
+test("protected release pins once, keeps rotation overlap and refuses revoked or unauthorized material", () => {
+  const pins = new Map<string, string[]>();
+  const credentials: string[] = [];
+  const execution = {
+    executionId: "execution-one",
+    projectId: createIdentity("project"),
+    workerBindingId: "binding-one",
+    resourceIdentity: "worker:kanthord:general",
+    runtimeIdentity: createIdentity("worker_instance"),
+    credentials,
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      projectId: execution.projectId,
+      resourceIdentity: execution.resourceIdentity,
+      name: "machine",
+      issuedAt: 0,
+    },
+    "jti",
+    execution.runtimeIdentity,
+  );
+  let platform: string = Platform.GitHub;
+  let refused = false;
+  const f = fixture({
+    pins,
+    authorization: {
+      authorizeModelInference: () => {
+        if (refused) throw new Error("authorization refused");
+        return {
+          credential: "github",
+          platform,
+          providerId: platform,
+          agentProvider: "default",
+        };
+      },
+    },
+    executions: {
+      requireRunning: unexpectedCollaboration,
+      pinCredential: (_tx, executionId, credentialId) => {
+        credentials.push(credentialId);
+        pins.set(credentialId, [executionId]);
+      },
+      liveExecutionsPinning: (_tx, credentialId) =>
+        pins.get(credentialId) ?? [],
+    },
+  });
+  const release = () =>
+    f.store.transaction((tx) => {
+      const grant = f.component.authorize(tx, identity, execution);
+      const material = f.component.release(tx, grant, Date.now());
+      try {
+        assert.deepEqual(material.value(), apiSecret);
+        assert.throws(
+          () => f.component.release(tx, grant, Date.now()),
+          FacilityError,
+        );
+        return material.credentialId;
+      } finally {
+        material.drop();
+      }
+    });
+  try {
+    const created = f.create(inputs[0]) as CredentialAnswer;
+    assert.equal(release(), created.revisions[0]!.id);
+    assert.deepEqual(credentials, [created.revisions[0]!.id]);
+    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    assert.equal(release(), created.revisions[0]!.id);
+    assert.deepEqual(credentials, [created.revisions[0]!.id]);
+    platform = Platform.S3;
+    fails(release, HttpStatus.BadRequest, PLATFORM_MISMATCH_CODE);
+    platform = Platform.GitHub;
+    refused = true;
+    assert.throws(release, /authorization refused/);
+    refused = false;
+    f.revoke("github", FIRST_REVISION);
+    fails(release, HttpStatus.Conflict, "credential.revision.revoked");
+    credentials.length = 0;
+    const latest = f.get("github") as CredentialAnswer;
+    execution.executionId = "execution-two";
+    assert.equal(release(), latest.revisions[0]!.id);
+    noSecret(f.logs);
   } finally {
     f.store.close();
   }
