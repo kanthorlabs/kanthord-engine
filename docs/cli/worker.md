@@ -392,8 +392,10 @@ A tuning entry follows unchanged default fields at its next resolution.
 All commands below use `human` access. Required names have no default.
 `<agent-name>` maps to `params.agentName`; `<provider-name>` maps to
 `params.providerName`. Mutations use the shared replay key and print it.
-Reads and writes are unary. Unless stated otherwise, query is empty,
-body is absent and success answers HTTP `200` with the enablement record.
+Reads and writes are unary. Unless stated otherwise, query is empty and success
+answers HTTP `200` with the enablement record. Reads have no body. Enable,
+disable, remove and provider remove send `{ expectedRevision }` from
+`--expected-revision`; put and provider add use their documented file bodies.
 
 ### `agent enablement list`
 
@@ -766,7 +768,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `worker.agent.configuration.override_not_allowed`              | An entry overrides a forbidden field.                                                                                                                                                                                             | binding apply, handover, worker.execution.setup.get (API only)                                                                    |
 | 400   | `worker.agent.configuration.reasoning_effort_unsupported`      | The selected model does not support this reasoning level.                                                                                                                                                                         | agent enablement put, binding apply, handover, worker.execution.setup.get (API only)                                              |
 | 409   | `worker.agent.enablement.in_use`                               | Worker bindings still use the enablement.                                                                                                                                                                                         | agent enablement remove                                                                                                           |
-| 409   | `worker.agent.enablement.invalidates_bindings`                 | The change invalidates dependent bindings.                                                                                                                                                                                        | agent enablement put, agent enablement disable                                                                                    |
+| 409   | `worker.agent.enablement.invalidates_bindings`                 | The change invalidates dependent bindings.                                                                                                                                                                                        | agent enablement put                                                                                                              |
 | 404   | `worker.agent.enablement.not_found`                            | The live enablement does not exist.                                                                                                                                                                                               | agent enablement get, agent enablement mutations                                                                                  |
 | 409   | `worker.agent.enablement.provider.fixed`                       | An edit changes a retained provider.                                                                                                                                                                                              | agent enablement put                                                                                                              |
 | 409   | `worker.agent.enablement.provider.in_use`                      | Defaults or entries still use this provider.                                                                                                                                                                                      | agent enablement put, agent enablement provider remove                                                                            |
