@@ -186,6 +186,8 @@ transaction checks the credential name and its platform.
 **Effects and idempotency:** a success inserts exactly one inbound. A platform
 refusal inserts nothing. An indeterminate registration answer makes the create
 read the registrations and adopt the one with the address of the new inbound.
+A crash between the registration and the insert leaves a registration without
+an inbound; a human removes it at the platform.
 A repeat with the same `--idempotency-key` returns the recorded answer within
 the process-local replay TTL. A new invocation creates another inbound: no
 natural key prevents a duplicate, because a duplicate serves a rotation.
@@ -227,8 +229,10 @@ redaction and cache contract of the secret remains **[blocked][intake-contract]*
 **Effects and idempotency:** refuse while the inbound holds a pending event.
 For a registered webhook, deregister at the platform first; a not-found answer
 counts as done. Then one transaction deletes the events of the inbound and the
-inbound. A refused deregistration keeps the inbound. A repeat after a success
-answers `404`.
+inbound. A refused deregistration keeps the inbound. A pending event that
+arrives during the deregistration refuses the transaction; the inbound then
+stays without its registration, and a later delete completes it. A repeat
+after a success answers `404`.
 
 **Statuses:** `204`; `400` for an invalid identity; `404`
 `intake.inbound.not_found`; `409` `intake.inbound.events_pending` while a

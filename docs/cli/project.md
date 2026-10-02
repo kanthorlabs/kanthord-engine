@@ -34,7 +34,7 @@ The working tree inspected on 2026-09-23 contains:
   explicitly asserts zero operations and no configured binding resolution.
 
 The [command inventory](#proposed-command-inventory-and-synopsis) proposes
-**13 leaf commands**, including the blocked secret-display command. The existing help group is not counted. The
+**11 leaf commands**. The existing help group is not counted. The
 [calling convention](#common-proposed-calling-convention) defines the shared
 options used by those synopses; the resource sections define their inputs,
 results, and effects without repeating the command syntax.
@@ -52,7 +52,7 @@ starts with `kanthord project` and uses the
 
 | Named flag set                                                   | Applies to            |
 | ---------------------------------------------------------------- | --------------------- |
-| [`[R]` — Remote flags](./common-flags.md#remote-flags-r)         | All 12 remote leaves. |
+| [`[R]` — Remote flags](./common-flags.md#remote-flags-r)         | All 11 remote leaves. |
 | [`[M]` — Mutation flags](./common-flags.md#mutation-flags-m)     | Mutations only.       |
 | [`[L]` — Pagination flags](./common-flags.md#pagination-flags-l) | Paginated lists only. |
 
@@ -153,7 +153,7 @@ and includes every positional argument, command-specific option, and applicable
 shared-option marker. Route parameters are placeholders, and path resource
 names are singular.
 
-All 12 commands have `[R]` and `human` access. The three mutations have `[M]`; the four paginated lists have `[L]`.
+All 11 commands have `[R]` and `human` access. The three mutations have `[M]`; the four paginated lists have `[L]`.
 Blocked commands link their items in [HANDOFF Project Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service).
 
 | #   | Synopsis after `kanthord project`                                         | Proposed HTTP route                                               | Proposed operation ID                                      | Access/status     |

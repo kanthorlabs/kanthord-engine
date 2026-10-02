@@ -26,9 +26,9 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
-The Project inventory has 13 proposed leaves. The Credential inventory has 8
+The Project inventory has 11 proposed leaves. The Credential inventory has 8
 proposed leaves. The Worker inventory has 20 leaves: 1 implemented and 19 proposed.
-These three groups contain 41 leaves in total.
+These three groups contain 39 leaves in total.
 
 Start with [common flags](common-flags.md) and
 [shared conventions](other.md), then read the owning group page.
