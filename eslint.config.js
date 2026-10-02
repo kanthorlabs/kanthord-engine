@@ -111,6 +111,12 @@ export default tseslint.config(
                 { to: serviceEntry("contract.ts") },
                 {
                   to: element("service", {
+                    captured: { name: "custody" },
+                    fileInternalPath: "client.ts",
+                  }),
+                },
+                {
+                  to: element("service", {
                     captured: { name: "gateway" },
                     fileInternalPath: "client.ts",
                   }),

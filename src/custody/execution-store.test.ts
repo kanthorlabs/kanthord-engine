@@ -5,7 +5,8 @@ import { SecretShape, type RefreshReport } from "./contract.ts";
 import {
   executionCredentialStore,
   ExecutionStoreError,
-} from "./execution-store.ts";
+  type ExecutionCredentials,
+} from "./client.ts";
 
 const ID = "credential_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const PROVIDER = "anthropic";
@@ -18,9 +19,12 @@ const payload = () => ({
 
 test("execution views isolate material and report only changed normalized credentials", async () => {
   const reports: RefreshReport[] = [];
-  const view = executionCredentialStore(payload(), async (report) => {
-    reports.push(report);
-  });
+  const view: ExecutionCredentials = executionCredentialStore(
+    payload(),
+    async (report) => {
+      reports.push(report);
+    },
+  );
   const other = executionCredentialStore(payload(), async () => {});
   assert.equal(await view.store.read("other"), undefined);
   assert.deepEqual(await view.store.list(), [
