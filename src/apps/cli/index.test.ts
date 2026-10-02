@@ -310,6 +310,56 @@ test("project agent commands expose help and reject invalid inputs before I/O", 
   }
 });
 
+test("worker handover validates locally and prints receipt metadata without the envelope", (t) => {
+  const env = environment(temporary(t));
+  const help = invocation(["worker", "handover", "--help"], env);
+  assert.equal(help.status, ExitCode.Success);
+  assert.match(help.stdout, /<execution-id>/);
+  assert.equal(
+    invocation(["worker", "handover"], env).status,
+    ExitCode.Failure,
+  );
+  const invalid = invocation(["worker", "handover", "invalid"], env);
+  assert.equal(invalid.status, ExitCode.Failure);
+  assert.match(invalid.stderr, /^cli\.worker\.handover\.invalid_execution_id:/);
+  const executionId = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const key = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const args = [
+    "worker",
+    "handover",
+    executionId,
+    "--token",
+    "machine",
+    "--idempotency-key",
+    key,
+  ];
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    globalThis.fetch = async (_url, options) => {
+      const assert = (await import('node:assert/strict')).default;
+      assert.deepEqual(JSON.parse(options.body), { executionId: ${JSON.stringify(executionId)} });
+      assert.equal(options.headers.get('Idempotency-Key'), ${JSON.stringify(key)});
+      return Response.json({ nonce: 'secret-nonce', ciphertext: 'secret-ciphertext' });
+    };
+    process.argv = [process.execPath, 'kanthord', ...${JSON.stringify(args)}];
+    await import(${JSON.stringify(entry)});
+  `,
+    ],
+    { env, encoding: "utf8", timeout: 10000 },
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stderr, EMPTY_OUTPUT);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    received: true,
+    idempotencyKey: key,
+  });
+  assert.doesNotMatch(result.stdout, /nonce|ciphertext/);
+});
+
 test("worker agent enablement commands expose offline help and validate inputs before I/O", (t) => {
   const env = environment(temporary(t));
   for (const [path, fileRequired] of [

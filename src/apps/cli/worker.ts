@@ -127,6 +127,37 @@ async function register(command: Command): Promise<void> {
   );
 }
 
+async function handover(executionId: string, command: Command): Promise<void> {
+  assert.equal(workerOperations.handover.access, AccessPolicy.Client);
+  assert.equal(workerOperations.handover.secret, true);
+  if (!identitySchema("execution").safeParse(executionId).success)
+    throw new Diagnostic(
+      "cli.worker.handover.invalid_execution_id",
+      "Expected a canonical execution identity.",
+    );
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, "cli.worker.handover.token_required");
+  const key = resolveKey(options);
+  const result = await httpClient(workerOperations, endpoint, token).handover(
+    { params: {}, query: {}, body: { executionId } },
+    { idempotencyKey: key },
+  );
+  if (result.type === OperationResultType.Indeterminate)
+    throw new Diagnostic(
+      "cli.worker.handover.indeterminate",
+      "worker handover: result is indeterminate; retry with a new --idempotency-key.",
+    );
+  if (result.type === OperationResultType.Failure)
+    throw new Diagnostic(
+      result.error.error.code,
+      `worker handover: request failed (HTTP ${result.status}); idempotency key ${key}.`,
+    );
+  process.stdout.write(
+    `${JSON.stringify({ received: true, idempotencyKey: key })}\n`,
+  );
+}
+
 async function list(command: Command): Promise<void> {
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
@@ -575,6 +606,15 @@ export function addWorkerCommand(program: Command): void {
       "Reuse this key when retrying the same registration; generated when omitted",
     )
     .action((_options, command: Command) => register(command));
+  worker
+    .command("handover")
+    .description("Receive execution credentials and print only receipt status")
+    .argument("<execution-id>", "Execution identity")
+    .option("--token <jwt>", "Machine JWT", singleUse("--token"))
+    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .action((executionId: string, _options, command: Command) =>
+      handover(executionId, command),
+    );
   const agent = worker.command(AGENT).description("Worker agent commands");
   agent.action(() => agent.help());
   const enablement = agent

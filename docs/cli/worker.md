@@ -237,9 +237,9 @@ The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/doc
 kanthord worker [--endpoint <url>] handover <execution-id> [--token <jwt>] [--idempotency-key <key>]
 ```
 
-The proposed command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and the body `{ executionId }`, which names the execution that the invocation chain proves. It is a secret mutation with `[M]`: a repeat of its key answers 409 without the envelope, and a lost answer takes a new key.
+The command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and the body `{ executionId }`, which names the execution that the invocation chain proves. It is a secret mutation with `[M]`: a repeat of its key answers 409 without the envelope, and a lost answer takes a new key.
 The operation is implemented, requires a live execution and returns the strict AES-256-GCM envelope `{ nonce, ciphertext }` as canonical base64. It has a 30-second timeout and a 1 KiB body limit. Registration and execution proof precede replay lookup; the handler repeats execution liveness in its one write transaction before authorization, pinning and encryption.
-The proposed command prints only `{ "received": true, "idempotencyKey": "<key>" }` and never prints the envelope. API delivery does not mark the CLI leaf implemented.
+The command prints only `{ "received": true, "idempotencyKey": "<key>" }` and never prints the envelope.
 The [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-credential-handover) rules the application call after a claim and before inference.
 The [Custody handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover) rules the envelope and credential report.
 
