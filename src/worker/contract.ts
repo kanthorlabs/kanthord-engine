@@ -32,6 +32,101 @@ export interface VerifiedClient {
   projectId: string;
 }
 export const HANDOVER_TIMEOUT_MS = 30000;
+export const ACTION_REQUEST_TOOL_NAME = "repository-action-request";
+export const ACTION_REQUEST_TIMEOUT_MS = 900000;
+export const ActionResultKind = {
+  Submitted: "submitted",
+  AwaitingPrerequisite: "awaiting-prerequisite",
+  FailedBeforeEffect: "failed-before-effect",
+  Uncertain: "uncertain",
+} as const;
+export const actionResultKindSchema = z.enum(ActionResultKind);
+export type ActionResultKind = z.infer<typeof actionResultKindSchema>;
+export const RefusalClass = {
+  ConfirmedFailure: "confirmed_failure",
+  RetryableRefusal: "retryable_refusal",
+  FinalRefusal: "final_refusal",
+} as const;
+export const refusalClassSchema = z.enum(RefusalClass);
+export type RefusalClass = z.infer<typeof refusalClassSchema>;
+export const ResultClass = {
+  ...RefusalClass,
+  UnknownOutcome: "unknown_outcome",
+} as const;
+export const resultClassSchema = z.enum(ResultClass);
+export type ResultClass = z.infer<typeof resultClassSchema>;
+export const Uncertainty = {
+  Effect: "effect",
+  Recording: "recording",
+  Both: "both",
+} as const;
+export const uncertaintySchema = z.enum(Uncertainty);
+export type Uncertainty = z.infer<typeof uncertaintySchema>;
+export const ActionReadMethod = {
+  PullRequestGet: "github-pull-request-get",
+} as const;
+export const actionReadMethodSchema = z.enum(ActionReadMethod);
+export type ActionReadMethod = z.infer<typeof actionReadMethodSchema>;
+export const PlatformAddressKind = {
+  PullRequest: "pull_request",
+  BranchPush: "branch_push",
+} as const;
+export const platformAddressSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.PullRequest),
+    resourceIdentity: z.string().min(1),
+    number: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  }),
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.BranchPush),
+    resourceIdentity: z.string().min(1),
+    branch: z.string().min(1),
+    commit: z.string().min(1),
+  }),
+]);
+export type PlatformAddress = z.infer<typeof platformAddressSchema>;
+export const actionRefSchema = z.strictObject({
+  key: z.string().min(1),
+  bindingId: identitySchema("binding"),
+});
+export type ActionRef = z.infer<typeof actionRefSchema>;
+export const actionResultItemSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(ActionResultKind.Submitted),
+    evidence: z
+      .record(z.string(), z.unknown())
+      .describe("Mission Evidence record"),
+  }),
+  z.strictObject({
+    kind: z.literal(ActionResultKind.AwaitingPrerequisite),
+    action: actionRefSchema,
+    prerequisite: z.strictObject({
+      key: z.string().min(1),
+      evidenceId: identitySchema("evidence"),
+    }),
+  }),
+  z.strictObject({
+    kind: z.literal(ActionResultKind.FailedBeforeEffect),
+    action: actionRefSchema,
+    refusal: z.strictObject({
+      class: refusalClassSchema,
+      code: z.string().min(1),
+      message: z.string(),
+    }),
+  }),
+  z.strictObject({
+    kind: z.literal(ActionResultKind.Uncertain),
+    action: actionRefSchema,
+    uncertainty: uncertaintySchema,
+    address: platformAddressSchema.optional(),
+  }),
+]);
+export type ActionResultItem = z.infer<typeof actionResultItemSchema>;
+export const actionRequestResultSchema = z.strictObject({
+  toolName: z.literal(ACTION_REQUEST_TOOL_NAME),
+  items: z.array(actionResultItemSchema),
+});
+export type ActionRequestResult = z.infer<typeof actionRequestResultSchema>;
 export const HANDOVER_MAX_BODY_BYTES = 1024;
 export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 64 * 1024;
 export interface CustodyHandover {
@@ -296,6 +391,9 @@ export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
+  ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
+  AssessmentNotCurrent: "worker.action_performer.assessment_not_current",
+  SnapshotAbsent: "worker.action_performer.snapshot_absent",
   InstanceNotFound: "worker.instance.not_found",
   NoLiveExecution: "worker.instance.no_live_execution",
   ClientLive: "worker.instance.client_live",
