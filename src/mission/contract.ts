@@ -771,6 +771,34 @@ export const frozenActionSchema = z.strictObject({
   configuration: z.strictObject({ baseBranch: textSchema }),
 });
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
+export type ActionContext = {
+  state: NodeState;
+  currentAssessment: {
+    result: AssessmentResult;
+    testedInput: TestedInput;
+  } | null;
+  actions: {
+    action: FrozenAction;
+    resourceIdentity: string;
+    resolution: Resolution;
+    requestEvidenceId: string | null;
+    eligible: boolean;
+    reuseCandidates: {
+      evidenceId: string;
+      attempt: number;
+      address: PlatformAddress;
+    }[];
+  }[];
+};
+export const ACTION_CONTEXT_INVARIANT =
+  "Caller claim proof, evaluation claim, current passing assessment and eligibility share one database snapshot; the snapshot guarantees no liveness through a later external operation.";
+export interface MissionActions {
+  actionContextOf(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+  ): ActionContext;
+}
 export const attemptSchema = z.strictObject({
   nodeId: identitySchema("node"),
   attempt: z.number().int().positive(),

@@ -30,6 +30,7 @@ import {
   type SchedulerWakeup,
   type ExecutionAttribution,
   type MissionTransitions,
+  type MissionActions,
   type IntakeStorage,
   type IntakeCheck,
 } from "./contract.ts";
@@ -55,6 +56,7 @@ import {
   executionObjectiveEvidence,
 } from "./execution-read.ts";
 import { claim, release, loss } from "./transitions.ts";
+import { actionContextOf } from "./action-context.ts";
 import {
   attemptPage,
   getAttempt,
@@ -122,7 +124,7 @@ export interface Dependencies {
 }
 
 export class MissionService
-  implements Service, MissionCollaborations, MissionTransitions
+  implements Service, MissionCollaborations, MissionTransitions, MissionActions
 {
   claim(...args: Parameters<MissionTransitions["claim"]>) {
     const [tx, ...rest] = args;
@@ -804,6 +806,10 @@ export class MissionService
 
   liveNodesPinning(tx: Transaction, bindingId: string): string[] {
     return readLiveNodesPinning(tx, bindingId);
+  }
+
+  actionContextOf(tx: Transaction, nodeId: string, attempt: number) {
+    return actionContextOf(tx, this.dependencies, nodeId, attempt);
   }
 
   start(): Promise<Error | null> {
