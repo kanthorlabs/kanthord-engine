@@ -24,6 +24,7 @@ import {
 } from "../kernel/store.ts";
 import {
   custodyOperations,
+  EXECUTION_CREDENTIAL_MAX_BYTES,
   CUSTODY_SERVICE_NAME,
   type CredentialMetadataFn,
   type CustodySuitabilityFn,
@@ -38,6 +39,7 @@ import { Platform } from "./platforms.ts";
 import { CustodyComponent, type Dependencies } from "./service.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { FacilityError } from "./facility.ts";
 import {
   COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
@@ -68,6 +70,84 @@ const apiSecret = { key: secretValue };
 function unexpectedCollaboration(): never {
   throw new Error("UNEXPECTED_COLLABORATION");
 }
+
+test("credential creation and rotation enforce the serialized budget before any write", (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const overhead = Buffer.byteLength(
+    canonicalJSON({ type: "api_key", key: "" }),
+  );
+  const maximum = {
+    key: "x".repeat(EXECUTION_CREDENTIAL_MAX_BYTES - overhead),
+  };
+  const oversized = { key: maximum.key + "x" };
+  fails(
+    () => f.create({ ...inputs[0], secret: oversized }),
+    HttpStatus.BadRequest,
+    INVALID_INPUT_CODE,
+  );
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  const created = f.create({
+    ...inputs[0],
+    secret: maximum,
+  }) as CredentialAnswer;
+  const before = f.store.database.prepare("SELECT * FROM credential").all();
+  fails(
+    () =>
+      f.rotate(created.name, {
+        expectedRevision: FIRST_REVISION,
+        secret: oversized,
+      }),
+    HttpStatus.BadRequest,
+    INVALID_INPUT_CODE,
+  );
+  assert.deepEqual(
+    f.store.database.prepare("SELECT * FROM credential").all(),
+    before,
+  );
+  const rotated = f.rotate(created.name, {
+    expectedRevision: FIRST_REVISION,
+    secret: maximum,
+  }) as CredentialAnswer;
+  assert.equal(rotated.revisions[0]?.revision, NEXT_REVISION);
+});
+
+test("offline OAuth login persists the maximum aggregate credential and sanitizes the next byte", async (t) => {
+  const overhead = Buffer.byteLength(
+    canonicalJSON({
+      type: "oauth",
+      refresh: "r",
+      access: "",
+      expires: CLOCK_START,
+    }),
+  );
+  const access = "a".repeat(EXECUTION_CREDENTIAL_MAX_BYTES - overhead);
+  for (const extra of ["", "x"]) {
+    const gate = gatedLogin();
+    const f = fixture({ oauthProviders: () => [gate.provider] });
+    t.after(async () => {
+      await f.component.stop();
+      f.store.close();
+    });
+    const pending = await f.login(LOGIN_BODY);
+    gate.result.resolve({
+      type: "oauth",
+      refresh: "r",
+      access: access + extra,
+      expires: CLOCK_START,
+    });
+    const status = await terminalStatus(f, pending.sessionId);
+    if (extra.length) {
+      assert.equal(status.state, LoginSessionState.Failed);
+      assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
+      assert.equal(credentialCount(f), NO_CREDENTIALS);
+      assert.ok(!JSON.stringify(status).includes(access));
+    } else {
+      assert.equal(status.state, LoginSessionState.Completed);
+      assert.equal(credentialCount(f), FIRST_REVISION);
+    }
+  }
+});
 const unusedExecutionDependencies = {
   executions: {
     requireRunning: unexpectedCollaboration,

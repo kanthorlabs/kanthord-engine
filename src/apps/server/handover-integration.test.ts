@@ -1,4 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { setImmediate } from "node:timers/promises";
+import {
+  createProvider,
+  type Credential,
+  type OAuthCredential,
+} from "@earendil-works/pi-ai";
 import { test, type TestContext } from "node:test";
 import type { z } from "zod";
 import { ulid } from "ulid";
@@ -9,6 +17,7 @@ import {
   custodyOperations,
   handoverPayloadSchema,
   SecretShape,
+  EXECUTION_CREDENTIAL_MAX_BYTES,
 } from "../../custody/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
@@ -22,7 +31,7 @@ import {
 } from "../../kernel/operation.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { digest } from "../../kernel/json.ts";
+import { canonicalJSON, digest } from "../../kernel/json.ts";
 import {
   deriveHandoverKeys,
   handoverAad,
@@ -40,6 +49,15 @@ const HTTP = "http";
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const INVALID_REPORT = "custody.handover.report_invalid";
 const BODY_TOO_LARGE = "gateway.request.body_too_large";
+const COPILOT = "github-copilot";
+const LOGIN_COMPLETED = "completed";
+const LOGIN_PENDING = "pending";
+const LOGIN_POLL_LIMIT = 50;
+const MAX_REPORT_BYTES = 65533;
+const OVERSIZED_REPORT_BYTES = 65537;
+const CHILD_TIMEOUT_MS = 10000;
+const MAX_CHILD_BUFFER = 1024;
+const EMPTY_OUTPUT = "";
 const NO_INPUT = { params: {}, query: {}, body: null };
 const CONFIGURATION = {
   agentProvider: "default",
@@ -71,9 +89,81 @@ function refused<T>(
   assert.equal(JSON.stringify(result).includes(REFRESHED), false);
 }
 
-async function setup(t: TestContext, adapter: "direct" | "http") {
+function offlineProvider(credential: OAuthCredential) {
+  return createProvider({
+    id: COPILOT,
+    models: [],
+    api: {},
+    auth: {
+      oauth: {
+        name: "Offline boundary fixture",
+        login: async (interaction) => {
+          interaction.notify({
+            type: "device_code",
+            verificationUri: "https://github.com/login/device",
+            userCode: "ABCD-EFGH",
+          });
+          return credential;
+        },
+        refresh: async () => {
+          throw new Error("Unexpected provider refresh");
+        },
+        toAuth: async () => {
+          throw new Error("Unexpected provider auth");
+        },
+      },
+    },
+  });
+}
+
+async function loginCredential(
+  f: Awaited<ReturnType<typeof gatewayFixture>>,
+  credential: OAuthCredential,
+) {
+  assert.equal(credential.type, SecretShape.OAuth);
+  const client = httpClient(custodyOperations, f.endpoint, f.token);
+  const pending = completed(
+    await client.login(
+      { params: {}, query: {}, body: { platform: COPILOT, name: "anthro-1" } },
+      { idempotencyKey: ulid() },
+    ),
+  );
+  for (let poll = 0; poll < LOGIN_POLL_LIMIT; poll++) {
+    const state = completed(
+      await client.login_status({
+        params: { sessionId: pending.sessionId },
+        query: {},
+        body: null,
+      }),
+    );
+    if (state.state !== LOGIN_PENDING) {
+      assert.equal(state.state, LOGIN_COMPLETED);
+      return completed(
+        await client.get({
+          params: { credentialName: "anthro-1" },
+          query: {},
+          body: null,
+        }),
+      );
+    }
+    await setImmediate();
+  }
+  assert.fail("Offline OAuth login exceeded its bounded polls");
+}
+
+async function setup(
+  t: TestContext,
+  adapter: "direct" | "http",
+  boundary?: Credential,
+) {
+  const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
+  const platform = oauth ? "github-copilot" : "anthropic";
+  const configuration = oauth
+    ? { ...CONFIGURATION, modelIdentifier: "claude-sonnet-4.6" }
+    : CONFIGURATION;
   const f = await gatewayFixture(t, {
     repositoryConnector: { gitLsRemote: async () => {} },
+    oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
   });
   async function call<T extends Operation>(
     operation: T,
@@ -94,18 +184,23 @@ async function setup(t: TestContext, adapter: "direct" | "http") {
       identity,
     });
   }
-  const created = completed(
-    await call(custodyOperations.create, {
-      params: {},
-      query: {},
-      body: {
-        name: "anthro-1",
-        platform: "anthropic",
-        metadata: null,
-        secret: { key: SECRET },
-      },
-    }),
-  );
+  const created = oauth
+    ? await loginCredential(f, oauth)
+    : completed(
+        await call(custodyOperations.create, {
+          params: {},
+          query: {},
+          body: {
+            name: "anthro-1",
+            platform: "anthropic",
+            metadata: null,
+            secret: {
+              key:
+                boundary?.type === SecretShape.ApiKey ? boundary.key : SECRET,
+            },
+          },
+        }),
+      );
   completed(
     await call(custodyOperations.create, {
       params: {},
@@ -124,9 +219,9 @@ async function setup(t: TestContext, adapter: "direct" | "http") {
       query: {},
       body: {
         agentProviders: [
-          { name: "default", provider: "anthropic", credential: "anthro-1" },
+          { name: "default", provider: platform, credential: "anthro-1" },
         ],
-        defaultConfiguration: CONFIGURATION,
+        defaultConfiguration: configuration,
       },
     }),
   );
@@ -159,7 +254,7 @@ async function setup(t: TestContext, adapter: "direct" | "http") {
             config: {
               worker: "general@1",
               instanceCount: 1,
-              entries: [{ agent: "swe@1", ...CONFIGURATION }],
+              entries: [{ agent: "swe@1", ...configuration }],
             },
           },
         },
@@ -301,6 +396,154 @@ async function setup(t: TestContext, adapter: "direct" | "http") {
     open,
     credentialId: created.revisions[0]!.id,
   };
+}
+
+function boundaryCredential(
+  type: typeof SecretShape.ApiKey | typeof SecretShape.OAuth,
+): Credential {
+  const base =
+    type === SecretShape.ApiKey
+      ? { type, key: 'é🙂"\\\n' }
+      : {
+          type,
+          refresh: "r".repeat(16000),
+          access: 'é🙂"\\\n',
+          expires: 1700000000000,
+        };
+  const remaining =
+    EXECUTION_CREDENTIAL_MAX_BYTES - Buffer.byteLength(canonicalJSON(base));
+  assert.ok(remaining > MAX_CHILD_BUFFER);
+  const credential =
+    base.type === SecretShape.ApiKey
+      ? { ...base, key: base.key + "x".repeat(remaining) }
+      : { ...base, access: base.access + "x".repeat(remaining) };
+  assert.equal(
+    Buffer.byteLength(canonicalJSON(credential)),
+    EXECUTION_CREDENTIAL_MAX_BYTES,
+  );
+  return credential;
+}
+
+async function workerBoundaryRoundTrip(h: Awaited<ReturnType<typeof setup>>) {
+  const claims = JSON.parse(
+    Buffer.from(h.token.split(".")[1]!, "base64url").toString("utf8"),
+  );
+  const script = new URL(
+    "../worker/credential-budget-test-support.ts",
+    import.meta.url,
+  );
+  const { stdout, stderr } = await promisify(execFile)(
+    process.execPath,
+    [
+      script.pathname,
+      JSON.stringify({
+        endpoint: h.f.endpoint,
+        token: h.token,
+        clientSecret: deriveClientSecret(h.f.config.masterKey, claims.sub),
+        executionId: h.execution.executionId,
+        runtimeIdentity: h.runtimeIdentity,
+      }),
+    ],
+    { timeout: CHILD_TIMEOUT_MS, maxBuffer: MAX_CHILD_BUFFER },
+  );
+  assert.equal(stderr, EMPTY_OUTPUT);
+  assert.deepEqual(JSON.parse(stdout), {
+    reportBytes: MAX_REPORT_BYTES,
+    released: true,
+  });
+}
+
+for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
+  test(`${type} maximum handover and public worker store release fit HTTP; next byte refuses without writes`, async (t) => {
+    const maximum = boundaryCredential(type);
+    const h = await setup(t, HTTP, maximum);
+    await workerBoundaryRoundTrip(h);
+    const before = h.f.store.database
+      .prepare("SELECT * FROM credential ORDER BY id")
+      .all();
+    const oversized =
+      maximum.type === SecretShape.ApiKey
+        ? { ...maximum, key: maximum.key + "x" }
+        : { ...maximum, access: maximum.access + "x" };
+    const executionId = h.execution.executionId;
+    const body = {
+      executionId,
+      ...sealEnvelope(
+        h.keys.report,
+        handoverAad(executionId, h.runtimeIdentity),
+        {
+          credentialId: h.credentialId,
+          digest: digest(maximum),
+          credential: oversized,
+        },
+      ),
+    };
+    assert.equal(
+      Buffer.byteLength(JSON.stringify(body)),
+      OVERSIZED_REPORT_BYTES,
+    );
+    const identity = await h.f.gateway.authentication.authenticate(
+      `Bearer ${h.token}`,
+    );
+    refused(
+      await directClient(workerOperations, h.f.gateway.invocation).credential(
+        { params: {}, query: {}, body },
+        { identity, idempotencyKey: ulid() },
+      ),
+      HttpStatus.BadRequest,
+      INVALID_REPORT,
+    );
+    refused(
+      await httpClient(workerOperations, h.f.endpoint, h.token).credential(
+        { params: {}, query: {}, body },
+        { idempotencyKey: ulid() },
+      ),
+      HttpStatus.PayloadTooLarge,
+      BODY_TOO_LARGE,
+    );
+    assert.deepEqual(
+      h.f.store.database.prepare("SELECT * FROM credential ORDER BY id").all(),
+      before,
+    );
+    assert.deepEqual(
+      h.open(completed(await h.handover())).items[0]?.credential,
+      maximum,
+    );
+    if (oversized.type === SecretShape.ApiKey) {
+      refused(
+        await h.call(custodyOperations.create, {
+          params: {},
+          query: {},
+          body: {
+            name: "oversized",
+            platform: "anthropic",
+            metadata: null,
+            secret: { key: oversized.key },
+          },
+        }),
+        HttpStatus.BadRequest,
+        "credential.input.invalid",
+      );
+      refused(
+        await h.call(custodyOperations.rotate, {
+          params: { credentialName: "anthro-1" },
+          query: {},
+          body: {
+            expectedRevision: FIRST_REVISION,
+            secret: { key: oversized.key },
+          },
+        }),
+        HttpStatus.BadRequest,
+        "credential.input.invalid",
+      );
+      assert.deepEqual(
+        h.f.store.database
+          .prepare("SELECT * FROM credential ORDER BY id")
+          .all(),
+        before,
+      );
+    }
+  });
 }
 
 for (const adapter of ["direct", "http"] as const) {

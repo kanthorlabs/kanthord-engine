@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import type { MachineIdentity } from "../kernel/caller.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -17,21 +18,29 @@ export const SecretShape = {
 } as const;
 export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
 export const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
-export const piCredentialSchema = z.discriminatedUnion("type", [
-  z.strictObject({
-    type: z.literal(SecretShape.ApiKey),
-    key: z
-      .string()
-      .min(1)
-      .refine((key) => Boolean(key.trim())),
-  }),
-  z.strictObject({
-    type: z.literal(SecretShape.OAuth),
-    refresh: z.string().min(1),
-    access: z.string().min(1),
-    expires: z.number().int(),
-  }),
-]);
+export const EXECUTION_CREDENTIAL_MAX_BYTES = 48915;
+export const piCredentialSchema = z
+  .discriminatedUnion("type", [
+    z.strictObject({
+      type: z.literal(SecretShape.ApiKey),
+      key: z
+        .string()
+        .min(1)
+        .refine((key) => Boolean(key.trim())),
+    }),
+    z.strictObject({
+      type: z.literal(SecretShape.OAuth),
+      refresh: z.string().min(1),
+      access: z.string().min(1),
+      expires: z.number().int(),
+    }),
+  ])
+  .refine(
+    (credential) =>
+      Buffer.byteLength(canonicalJSON(credential), "utf8") <=
+      EXECUTION_CREDENTIAL_MAX_BYTES,
+    "The normalized credential exceeds the serialized byte budget.",
+  );
 export const handoverPayloadSchema = z.strictObject({
   items: z.array(
     z.strictObject({

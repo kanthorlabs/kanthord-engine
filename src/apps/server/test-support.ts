@@ -306,6 +306,7 @@ export async function gatewayFixture(
     >[0]["inventoryOverrides"];
     path?: string;
     scheduler?: Partial<SchedulerConfig>;
+    oauthProviders?: Parameters<typeof composeServices>[0]["oauthProviders"];
     standIns?: Parameters<typeof composeServices>[0]["standIns"];
   } = {},
 ) {
@@ -340,6 +341,7 @@ export async function gatewayFixture(
     registry: options.registry,
     health: options.health ?? new HealthRegistry(),
     repositoryConnector: options.repositoryConnector,
+    oauthProviders: options.oauthProviders,
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
     inventoryOverrides: options.inventoryOverrides,

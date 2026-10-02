@@ -72,6 +72,9 @@ export function composeServices(options: {
   logger: Logger;
   health: HealthRegistry;
   repositoryConnector?: RepositoryConnector;
+  oauthProviders?: ConstructorParameters<
+    typeof CustodyComponent
+  >[0]["oauthProviders"];
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
@@ -147,6 +150,7 @@ export function composeServices(options: {
       scheduler.priorityUpdate(tx, nodeId, priority),
   };
   const custody = new CustodyComponent({
+    oauthProviders: options.oauthProviders,
     executions: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
       pinCredential: (...args) => scheduler.pinCredential(...args),

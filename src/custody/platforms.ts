@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SecretShape } from "./contract.ts";
+import { piCredentialSchema, SecretShape } from "./contract.ts";
 export { SecretShape } from "./contract.ts";
 
 export const Platform = {
@@ -27,14 +27,26 @@ export function isNonblank(s: string): boolean {
   return s.trim().length > EMPTY_STRING_LENGTH;
 }
 
-export const apiKeySecretSchema = z.strictObject({
-  key: z.string().min(1).refine(isNonblank),
-});
-export const oauthSecretSchema = z.strictObject({
-  refresh: z.string().min(1),
-  access: z.string().min(1),
-  expires: z.number().int(),
-});
+export const apiKeySecretSchema = z
+  .strictObject({
+    key: z.string().min(1).refine(isNonblank),
+  })
+  .refine(
+    (secret) =>
+      piCredentialSchema.safeParse({ type: SecretShape.ApiKey, ...secret })
+        .success,
+  );
+export const oauthSecretSchema = z
+  .strictObject({
+    refresh: z.string().min(1),
+    access: z.string().min(1),
+    expires: z.number().int(),
+  })
+  .refine(
+    (secret) =>
+      piCredentialSchema.safeParse({ type: SecretShape.OAuth, ...secret })
+        .success,
+  );
 export const s3AccessKeySecretSchema = z.strictObject({
   accessKeyId: z.string().min(1).refine(isNonblank),
   secretAccessKey: z.string().min(1).refine(isNonblank),
