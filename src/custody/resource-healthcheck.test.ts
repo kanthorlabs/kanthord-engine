@@ -40,8 +40,8 @@ import {
 } from "./resource-healthcheck.ts";
 import { CustodyComponent } from "./service.ts";
 
-const SECRET = "private-resource-health-secret";
-const ACCESS_KEY_ID = "private-s3-access-id";
+const SECRET = "test_private-resource-health-secret";
+const ACCESS_KEY_ID = "test_private-s3-access-id";
 const BASE_URL = "https://models.example/v1";
 const ENDPOINT = "https://storage.example";
 const BUCKET = "test-bucket";

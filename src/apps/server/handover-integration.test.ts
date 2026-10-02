@@ -40,9 +40,9 @@ import {
 } from "../../kernel/handover.ts";
 import { gatewayFixture } from "./test-support.ts";
 
-const SECRET = "handover-integration-secret-one";
-const REFRESHED = "handover-integration-secret-two";
-const ROTATED = "handover-integration-secret-three";
+const SECRET = "test_handover-integration-secret-one";
+const REFRESHED = "test_handover-integration-secret-two";
+const ROTATED = "test_handover-integration-secret-three";
 const FIRST_REVISION = 1;
 const TWO_REVISIONS = 2;
 const HTTP = "http";
