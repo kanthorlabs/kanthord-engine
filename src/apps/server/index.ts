@@ -25,6 +25,7 @@ import {
 import { MissionService, missionMigrations } from "../../mission/index.ts";
 import {
   MISSION_SERVICE_NAME,
+  missionOperations,
   type IntakeStorage,
   type IntakeCheck,
 } from "../../mission/contract.ts";
@@ -33,7 +34,10 @@ import type {
   ProjectBindings,
   RepositoryConnector,
 } from "../../project/contract.ts";
-import type { WorkerRegistrations } from "../../worker/contract.ts";
+import type {
+  WorkerRegistrations,
+  IntakeActions,
+} from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic, asError } from "../../kernel/errors.ts";
 import {
@@ -50,6 +54,7 @@ import { GatewayService } from "../../gateway/index.ts";
 import type { ResourceInventories } from "../../gateway/contract.ts";
 import {
   gatewayMigrations,
+  directClient,
   createInvocation,
   collectInventories,
 } from "../../gateway/index.ts";
@@ -79,7 +84,11 @@ export function composeServices(options: {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   inventoryOverrides?: Partial<ResourceInventories>;
-  standIns?: { intakeStorage?: IntakeStorage; intakeCheck?: IntakeCheck };
+  standIns?: {
+    intakeStorage?: IntakeStorage;
+    intakeCheck?: IntakeCheck;
+    intakeActions?: IntakeActions;
+  };
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -112,6 +121,7 @@ export function composeServices(options: {
       },
     },
   });
+  const missionClient = directClient(missionOperations, invocation);
   const scheduler: SchedulerService = new SchedulerService({
     config: options.config.scheduler,
     store: options.store,
@@ -174,6 +184,17 @@ export function composeServices(options: {
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
   });
   const worker: WorkerService = new WorkerService({
+    missionActions: {
+      actionContextOf: (...args) => mission.actionContextOf(...args),
+    },
+    evidenceRequests: {
+      request: (input, options) =>
+        missionClient["evidence.request"](input, options),
+    },
+    intakeActions: options.standIns?.intakeActions ?? {
+      perform: unwired("IntakeActions.perform"),
+      read: unwired("IntakeActions.read"),
+    },
     custodyHandover: {
       handover: (...args) => custody.handover(...args),
       report: (...args) => custody.report(...args),
@@ -183,6 +204,7 @@ export function composeServices(options: {
     workerBindingOf: (tx, projectId, resourceIdentity) =>
       project.workerBindingOf(tx, projectId, resourceIdentity),
     schedulerClaims: {
+      requireRunning: (...args) => scheduler.requireRunning(...args),
       runningExecutionOfRuntime: (...args) =>
         scheduler.runningExecutionOfRuntime(...args),
       activityOf: (...args) => scheduler.activityOf(...args),

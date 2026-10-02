@@ -45,6 +45,24 @@ import {
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 
 const fakeCollaborations = {
+  missionActions: {
+    actionContextOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
+  intakeActions: {
+    perform: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    read: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
+  evidenceRequests: {
+    request: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
   custodyHandover: {
     handover: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
@@ -63,6 +81,9 @@ const fakeCollaborations = {
     tombstone: false,
   }),
   schedulerClaims: {
+    requireRunning: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
     runningExecutionOfRuntime: () => null,
     activityOf: () => ({ activity: InstanceActivity.Idle, executionId: null }),
   },

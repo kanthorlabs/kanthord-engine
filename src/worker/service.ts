@@ -34,6 +34,9 @@ import {
   type WorkerBindingOf,
   type SchedulerClaims,
   type CustodyHandover,
+  type MissionActions,
+  type IntakeActions,
+  type EvidenceRequests,
   type AgentEnablement,
   type AgentProviderItem,
   type AgentDependentBinding,
@@ -179,6 +182,9 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
   );
 }
 export interface Dependencies {
+  missionActions: MissionActions;
+  intakeActions: IntakeActions;
+  evidenceRequests: EvidenceRequests;
   custodyHandover: CustodyHandover;
   config: WorkerConfig;
   store: Store;

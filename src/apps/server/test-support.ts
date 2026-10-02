@@ -30,7 +30,10 @@ import {
   workerResourceIdentity,
   type ProjectBindings,
 } from "../../project/contract.ts";
-import type { WorkerRegistrations } from "../../worker/contract.ts";
+import type {
+  WorkerRegistrations,
+  IntakeActions,
+} from "../../worker/contract.ts";
 export interface MachineDependencies {
   project: ProjectBindings;
   worker: WorkerRegistrations;
@@ -172,6 +175,63 @@ export function scriptedCheck(
       return structuredClone(answer);
     },
   } satisfies IntakeCheck & { calls: typeof calls };
+}
+
+export function scriptedActions() {
+  const performAnswers: Awaited<ReturnType<IntakeActions["perform"]>>[] = [];
+  const readAnswers: Awaited<ReturnType<IntakeActions["read"]>>[] = [];
+  const performCalls: {
+    call: { executionId: string };
+    action: Parameters<IntakeActions["perform"]>[1];
+    operands: Parameters<IntakeActions["perform"]>[2];
+  }[] = [];
+  const readCalls: {
+    call: { executionId: string };
+    method: Parameters<IntakeActions["read"]>[1];
+    address: Parameters<IntakeActions["read"]>[2];
+  }[] = [];
+  let gate: Promise<void> | null = null;
+  const seam: IntakeActions = {
+    async perform(call, action, operands) {
+      performCalls.push({
+        call: { executionId: call.executionId },
+        action,
+        operands,
+      });
+      if (gate) await gate;
+      const answer = performAnswers.shift();
+      if (!answer) throw new Error("no scripted answer");
+      return answer;
+    },
+    async read(call, method, address) {
+      readCalls.push({
+        call: { executionId: call.executionId },
+        method,
+        address,
+      });
+      if (gate) await gate;
+      const answer = readAnswers.shift();
+      if (!answer) throw new Error("no scripted answer");
+      return answer;
+    },
+  };
+  return {
+    seam,
+    performAnswers,
+    readAnswers,
+    performCalls,
+    readCalls,
+    hold() {
+      assert.equal(gate, null);
+      const pending = Promise.withResolvers<void>();
+      gate = pending.promise;
+      return () => {
+        assert.equal(gate, pending.promise);
+        gate = null;
+        pending.resolve();
+      };
+    },
+  };
 }
 
 export function fakeMachines(

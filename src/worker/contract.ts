@@ -4,13 +4,16 @@ import {
   handoverEnvelopeSchema,
   type HandoverEnvelope,
 } from "../kernel/handover.ts";
-import type { MachineIdentity } from "../kernel/caller.ts";
+import type { CallerIdentity, MachineIdentity } from "../kernel/caller.ts";
+import type { Context } from "../kernel/context.ts";
 import {
   AccessPolicy,
   StoreName,
   OperationLifetime,
   emptyInput,
   type Operation,
+  type ClientOptions,
+  type OperationResult,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { ResourceCheck } from "../kernel/health.ts";
@@ -127,6 +130,134 @@ export const actionRequestResultSchema = z.strictObject({
   items: z.array(actionResultItemSchema),
 });
 export type ActionRequestResult = z.infer<typeof actionRequestResultSchema>;
+export const RepositoryAction = {
+  PullRequest: "pull_request",
+  MergePush: "merge_push",
+} as const;
+export type FrozenAction = {
+  key: string;
+  bindingId: string;
+  action: (typeof RepositoryAction)[keyof typeof RepositoryAction];
+  expectedEndState: "pull_request_merged" | "base_branch_pushed";
+  follows: string | null;
+  configuration: { baseBranch: string };
+};
+export const ActionNodeState = {
+  Pending: "Pending",
+  Available: "Available",
+  Executing: "Executing",
+  Waiting: "Waiting",
+  Evaluating: "Evaluating",
+  ExternalRequested: "External.Requested",
+  ExternalSuccess: "External.Success",
+  ExternalFailed: "External.Failed",
+  Completed: "Completed",
+  Blocked: "Blocked",
+  Paused: "Paused",
+  Discarded: "Discarded",
+} as const;
+export const ActionAssessmentResult = {
+  Success: "success",
+  CriterionNotMet: "criterion-not-met",
+  Undetermined: "undetermined",
+} as const;
+export const ActionResolution = {
+  Unrequested: "unrequested",
+  Unresolved: "unresolved",
+  ExpectedEnd: "expected-end",
+  OtherEnd: "other-end",
+} as const;
+export const TestedInputKind = {
+  Repository: "repository",
+  Produced: "produced",
+  Object: "object",
+} as const;
+export type RepositorySnapshot = {
+  kind: typeof TestedInputKind.Repository;
+  bindingId: string;
+  commit: string;
+};
+export type TestedInput =
+  | RepositorySnapshot
+  | RepositorySnapshot[]
+  | { kind: typeof TestedInputKind.Produced; sha256: string }
+  | {
+      kind: typeof TestedInputKind.Object;
+      location: string;
+      version?: string;
+      sha256?: string;
+    };
+export type ActionContext = {
+  state: (typeof ActionNodeState)[keyof typeof ActionNodeState];
+  currentAssessment: {
+    result: (typeof ActionAssessmentResult)[keyof typeof ActionAssessmentResult];
+    testedInput: TestedInput;
+  } | null;
+  actions: {
+    action: FrozenAction;
+    resourceIdentity: string;
+    resolution: (typeof ActionResolution)[keyof typeof ActionResolution];
+    requestEvidenceId: string | null;
+    eligible: boolean;
+    reuseCandidates: {
+      evidenceId: string;
+      attempt: number;
+      address: PlatformAddress;
+    }[];
+  }[];
+};
+export interface MissionActions {
+  actionContextOf(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+  ): ActionContext;
+}
+export type IntakeActionCall = {
+  context: Context;
+  identity: CallerIdentity;
+  executionId: string;
+};
+export type ActionOperands = {
+  nodeBranch: string;
+  baseBranch: string;
+  commit: string;
+  reusedAddress: PlatformAddress | null;
+};
+export type ResultClassAnswer = {
+  class: ResultClass;
+  code: string;
+  message: string;
+};
+export interface IntakeActions {
+  perform(
+    call: IntakeActionCall,
+    action: FrozenAction,
+    operands: ActionOperands,
+  ): Promise<PlatformAddress | ResultClassAnswer>;
+  read(
+    call: IntakeActionCall,
+    method: ActionReadMethod,
+    address: PlatformAddress,
+  ): Promise<{ body: unknown } | ResultClassAnswer>;
+}
+export interface EvidenceRequests {
+  request(
+    input: {
+      params: { nodeId: string };
+      query: Record<string, never>;
+      body: {
+        executionId: string;
+        attempt: number;
+        nodeRevision: number;
+        requirementKey: string;
+        subject: string;
+        address: PlatformAddress;
+      };
+    },
+    options: ClientOptions,
+  ): Promise<OperationResult<unknown>>;
+}
 export const HANDOVER_MAX_BODY_BYTES = 1024;
 export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 64 * 1024;
 export interface CustodyHandover {
@@ -231,6 +362,17 @@ export const instanceRecordSchema = z
   );
 
 export interface SchedulerClaims {
+  requireRunning(
+    tx: Transaction,
+    executionId: string,
+    runtimeIdentity: string,
+    now: number,
+  ): {
+    executionId: string;
+    nodeId: string;
+    attempt: number;
+    pinnedRevision: number;
+  };
   runningExecutionOfRuntime(
     tx: Transaction,
     runtimeIdentity: string,
