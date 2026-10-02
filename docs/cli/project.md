@@ -3,8 +3,8 @@
 [CLI specification index](./README.md) · [Shared conventions](./other.md)
 
 This contributor specification covers the future `kanthord project` group:
-project identity, resource bindings, repository policy, worker binding entries
-and source verification secrets. [Worker](./worker.md) owns agent enablement and
+project identity, resource bindings, repository policy and worker binding
+entries. [Worker](./worker.md) owns agent enablement and
 effective configuration resolution. [Credential](./credential.md) covers custody.
 It is self-contained in an engine checkout.
 
@@ -122,8 +122,7 @@ string, or `null` on the final page). It fetches no further pages implicitly.
 Binding and effective-configuration reads also report `bindingSetVersion`.
 Mutation results include the proposed `idempotencyKey` CLI field alongside
 the operation result. They contain metadata and credential references, never
-credential material. The source-secret command has a separately blocked output
-contract.
+credential material.
 
 Failures exit nonzero with a diagnostic that does not echo secrets. Proposed
 route failures distinguish invalid input, unauthenticated caller, absent or
@@ -157,24 +156,23 @@ names are singular.
 All 12 commands have `[R]` and `human` access. The three mutations have `[M]`; the four paginated lists have `[L]`.
 Blocked commands link their items in [HANDOFF Project Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service).
 
-| #   | Synopsis after `kanthord project`                                         | Proposed HTTP route                                               | Proposed operation ID                                      | Access/status                                                                                                                  |
-| --- | ------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | `create --name <name> [M] [R]`                                            | `POST /api/project`                                               | `project.create`                                           | `human`; proposed                                                                                                              |
-| 2   | `list [L] [R]`                                                            | `GET /api/project`                                                | `project.list`                                             | `human`; proposed                                                                                                              |
-| 3   | `get <project-id> [R]`                                                    | `GET /api/project/:projectId`                                     | `project.get`                                              | `human`; proposed                                                                                                              |
-| 4   | `rename <project-id> --name <name> [M] [R]`                               | `PATCH /api/project/:projectId`                                   | `project.rename`                                           | `human`; proposed                                                                                                              |
-| 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]` | `GET /api/project/:projectId/binding`                             | `project.binding.list` **[blocked][project-contract]**     | `human`; proposed                                                                                                              |
-| 6   | `binding get <project-id> <binding-id> [R]`                               | `GET /api/project/:projectId/binding/:bindingId`                  | `project.binding.get` **[blocked][project-contract]**      | `human`; proposed                                                                                                              |
-| 7   | `binding export <project-id> [R]`                                         | `GET /api/project/:projectId/binding-set`                         | `project.bindingSet.get` **[blocked][project-contract]**   | `human`; proposed                                                                                                              |
-| 8   | `binding apply <project-id> --file <path> [M] [R]`                        | `PUT /api/project/:projectId/binding-set`                         | `project.bindingSet.write` **[blocked][project-contract]** | `human`; proposed                                                                                                              |
-| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                 | `GET /api/project/:projectId/binding/:bindingId/revision`         | `project.bindingRevision.list`                             | `human`; proposed                                                                                                              |
-| 10  | `agent list <project-id> <worker-binding-id> [L] [R]`                     | `GET /api/project/:projectId/binding/:bindingId/agent`            | `project.agentConfiguration.list`                          | `human`; proposed                                                                                                              |
-| 11  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:projectId/binding/:bindingId/agent/:agentName` | `project.agentConfiguration.get`                           | `human`; proposed                                                                                                              |
-| 12  | `source secret get <project-id> <source-binding-id> [R]`                  | `GET /api/project/:projectId/binding/:bindingId/secret`           | `project.sourceSecret.get`                                 | `human`; proposed, **[blocked](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service)** |
+| #   | Synopsis after `kanthord project`                                         | Proposed HTTP route                                               | Proposed operation ID                                      | Access/status     |
+| --- | ------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- | ----------------- |
+| 1   | `create --name <name> [M] [R]`                                            | `POST /api/project`                                               | `project.create`                                           | `human`; proposed |
+| 2   | `list [L] [R]`                                                            | `GET /api/project`                                                | `project.list`                                             | `human`; proposed |
+| 3   | `get <project-id> [R]`                                                    | `GET /api/project/:projectId`                                     | `project.get`                                              | `human`; proposed |
+| 4   | `rename <project-id> --name <name> [M] [R]`                               | `PATCH /api/project/:projectId`                                   | `project.rename`                                           | `human`; proposed |
+| 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]` | `GET /api/project/:projectId/binding`                             | `project.binding.list` **[blocked][project-contract]**     | `human`; proposed |
+| 6   | `binding get <project-id> <binding-id> [R]`                               | `GET /api/project/:projectId/binding/:bindingId`                  | `project.binding.get` **[blocked][project-contract]**      | `human`; proposed |
+| 7   | `binding export <project-id> [R]`                                         | `GET /api/project/:projectId/binding-set`                         | `project.bindingSet.get` **[blocked][project-contract]**   | `human`; proposed |
+| 8   | `binding apply <project-id> --file <path> [M] [R]`                        | `PUT /api/project/:projectId/binding-set`                         | `project.bindingSet.write` **[blocked][project-contract]** | `human`; proposed |
+| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                 | `GET /api/project/:projectId/binding/:bindingId/revision`         | `project.bindingRevision.list`                             | `human`; proposed |
+| 10  | `agent list <project-id> <worker-binding-id> [L] [R]`                     | `GET /api/project/:projectId/binding/:bindingId/agent`            | `project.agentConfiguration.list`                          | `human`; proposed |
+| 11  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:projectId/binding/:bindingId/agent/:agentName` | `project.agentConfiguration.get`                           | `human`; proposed |
 
-- Rows 5 to 8 keep their marks for the source configuration in HANDOFF, not the storage credential record type.
+- Rows 5 to 8 keep their marks under HANDOFF Project Service, not for the storage credential record type.
 - Server-wide credential routes belong to `/api/credential`; provider check belongs to `/api/worker/provider/check`. Neither route is under `/api/project`.
-- There are 12 distinct route operations for the 12 CLI leaves.
+- There are 11 distinct route operations for the 11 CLI leaves.
 
 ## Project resource
 
@@ -266,7 +264,7 @@ Each `BindingEdit` value contains only:
 - `config`: **required**, the kind-specific object below.
 
 Every reference between bindings is a binding-name string of the same
-submission, for example `"repository": "kanthord-repo"` in a source configuration. A reference holds
+submission, for example `"repository": "kanthord-repo"`. A reference holds
 no revision and names no different project. The [binding-set write ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-write-of-a-binding-set)
 defines the comparison with the stored current set and the resolution of
 references to stored identities.
@@ -310,7 +308,7 @@ The repository credential in this example is an `api_key` of GitHub.
 
 Common to every `config`:
 
-- `available` applies to the repository, source and storage kinds. It is a required boolean with no default.
+- `available` applies to the repository and storage kinds. It is a required boolean with no default.
 - `false` prevents subsequent resolution. It revokes no upstream authority and cancels no operation in flight.
 - A worker binding holds no `available`; `instanceCount: 0` makes it unavailable.
 
@@ -433,27 +431,6 @@ The URL is an API answer, never part of the credential handover or the agent con
 The storage credential stays inside the server process.
 [Mission upload](./mission.md#host-local-evidence-upload) defines submit, direct PUT and asset complete.
 
-### Source configuration — partially blocked
-
-The Project Service holds no `source` binding kind. The Intake Service redesigns the delivery source under [HANDOFF Intake Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service). The text below stays until that redesign.
-
-The general design requires one binding per accepted delivery source. The
-implementation proposal derives a GitHub verification secret from the source
-binding identity and its rotation counter. Proposed `config` fields are:
-
-- `platform`: **required**, supported platform string; no default. Only GitHub
-  has a first-version platform design.
-- `repository`: **required for the proposed GitHub source**, binding-name string
-  for its repository binding; no default. This field and association are a wire
-  proposal pending the source schema, not an established payload contract.
-- `webhookSecretRotation`: **required**, integer, no default. Proposed domain
-  is a nonnegative safe integer; an initial counter and permitted increment
-  rule must be declared. A change produces a new derived secret and a binding
-  revision. Ordinary reads reveal the counter, not the secret.
-
-The complete source-binding schema remains **[blocked][project-contract]**.
-The first version holds the GitHub platform entry alone and accepts no inline secret in the binding set.
-
 ### Write validation and effects
 
 `binding apply` validates the whole submitted set before committing it in one
@@ -542,27 +519,6 @@ The [agent provider healthcheck](https://github.com/kanthorlabs/kanthord/blob/ma
 belongs to the Worker Service and the Gateway health report. This page specifies
 no healthcheck command.
 
-## Source verification secret
-
-The Intake Service redesigns this command with the delivery source under [HANDOFF Intake Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service).
-
-**[Blocked command proposal][project-contract].** `<project-id>` is a required `ProjectId` with no
-default, mapped to path `projectId`. `<source-binding-id>` is a required
-`BindingId` with no default, mapped to path `bindingId`; it must identify this
-project's supported source kind. There is no body, page option, file option,
-or idempotency option.
-
-The [delivery verification ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-verification-of-a-delivery) declares the secret GET and the address `/hooks/<binding id>`.
-Repeated reads return the current secret without rotation or mutation replay storage.
-The CLI display contract remains **blocked** under [HANDOFF Project Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service).
-
-To request a rotation under the target binding model, change the explicit
-`webhookSecretRotation` in a complete `binding apply` submission with its
-version. Once defined, the read command retrieves the new value for the human
-to paste upstream. A rotation revises the binding; the old signature must fail
-at the next verification. No overlap/grace window or upstream subscription
-update is implied. The source schema and secret display remain **[blocked][project-contract]**.
-
 ## Service boundaries: effects that are not commands
 
 - Authorization, `resolveWorkerBinding`, per-operation resolution,
@@ -578,10 +534,8 @@ update is implied. The source schema and secret display remain **[blocked][proje
 - The check of a request evidence by the Mission Service is not a human
   administration command. Its identity and association are service-owned; no
   `--service-identity` option exists.
-- Delivery verification consumes exact bytes and headers, acts on no external
-  resource, and mints no requester identity. No `project delivery verify`
-  command or caller-supplied human mapping is derived from it. The delivery
-  ingress and inbox duplicate effects belong to their owning protocols.
+- Webhook verification belongs to the [Intake Service](./intake.md#routes-without-a-command). No
+  `project delivery verify` command or caller-supplied human mapping exists.
 - Client identities are generated by the existing local `jwt --binding`
   command, and registration belongs to `worker register`. Project stores no
   client-identity secret or list. Project has no client-identity CRUD commands.

@@ -14,17 +14,17 @@ flag names, syntax, defaults, validation, and synopsis markers. Link directly
 to its flag-name headings instead of repeating those definitions. Shared
 non-flag conventions and commands outside these groups live in `other.md`.
 
-| Command group                  | Owning document                                   | Scope                                                                                                           |
-| ------------------------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `project`                      | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and worker binding entries.                                    |
-| `credential`                   | [Custody](credential.md)                          | Server-wide credential records, metadata revisions and OAuth login sessions.                                    |
-| `mission`                      | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                                  |
-| `scheduler`                    | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                            |
-| `intake`                       | [Intake Service](intake.md)                       | Subscriptions, deliveries, acquisition through a webhook, a poll or a stream, and outbound platform operations. |
-| `worker`                       | [Worker Service](worker.md)                       | Workers, agents, instance registration, and execution hosting.                                                  |
-| `tracking`                     | [Tracking Service](tracking.md)                   | Telemetry ingestion and trace inspection.                                                                       |
-| `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                             |
-| `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules.         |
+| Command group                  | Owning document                                   | Scope                                                                                                   |
+| ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `project`                      | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and worker binding entries.                            |
+| `credential`                   | [Custody](credential.md)                          | Server-wide credential records, metadata revisions and OAuth login sessions.                            |
+| `mission`                      | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                          |
+| `scheduler`                    | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                    |
+| `intake`                       | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.    |
+| `worker`                       | [Worker Service](worker.md)                       | Workers, agents, instance registration, and execution hosting.                                          |
+| `tracking`                     | [Tracking Service](tracking.md)                   | Telemetry ingestion and trace inspection.                                                               |
+| `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
+| `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
 The Project inventory has 13 proposed leaves. The Credential inventory has 8
 proposed leaves. The Worker inventory has 20 leaves: 1 implemented and 19 proposed.
