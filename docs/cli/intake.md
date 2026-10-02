@@ -313,6 +313,8 @@ and headers unchanged, following
 
 The order is verification, then durable storage, then acknowledgement to the
 platform. A redelivery inside one inbound stores nothing new and answers `2xx`.
+A verified handshake answers from the request alone and stores nothing: a
+GitHub `ping` answers `204`. A handshake skips the capacity bound.
 The receipt answers `404` `intake.inbound.not_found` for an unknown inbound or
 a poll inbound, `401` `intake.inbound.event.signature_invalid` for a failed
 verification, and `503` `intake.inbound.event.capacity_exceeded` beyond the
