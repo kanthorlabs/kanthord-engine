@@ -35,12 +35,17 @@ export const piCredentialSchema = z
       expires: z.number().int(),
     }),
   ])
-  .refine(
-    (credential) =>
+  .refine((credential) => {
+    const wellFormed =
+      credential.type === SecretShape.ApiKey
+        ? credential.key.isWellFormed()
+        : credential.refresh.isWellFormed() && credential.access.isWellFormed();
+    if (!wellFormed) return false;
+    return (
       Buffer.byteLength(canonicalJSON(credential), "utf8") <=
-      EXECUTION_CREDENTIAL_MAX_BYTES,
-    "The normalized credential exceeds the serialized byte budget.",
-  );
+      EXECUTION_CREDENTIAL_MAX_BYTES
+    );
+  }, "The normalized credential must contain well-formed Unicode and fit the serialized byte budget.");
 export const handoverPayloadSchema = z.strictObject({
   items: z.array(
     z.strictObject({

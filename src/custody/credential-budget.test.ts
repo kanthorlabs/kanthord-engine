@@ -22,6 +22,7 @@ const ID = "credential_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const PROVIDER = "test-provider";
 const NO_REPORTS = 0;
 const ONE_REPORT = 1;
+const API_KEY_FIELD = "key";
 
 function sized(
   type: typeof SecretShape.ApiKey | typeof SecretShape.OAuth,
@@ -101,3 +102,52 @@ test("storage access keys are outside the execution credential budget", () => {
     false,
   );
 });
+
+for (const field of ["key", "refresh", "access"] as const) {
+  test(`${field} rejects lone surrogates without throwing or replacing the execution credential`, async () => {
+    const valid: Credential =
+      field === API_KEY_FIELD
+        ? { type: SecretShape.ApiKey, key: "test_é🙂" }
+        : {
+            type: SecretShape.OAuth,
+            refresh: "test_é🙂",
+            access: "test_é🙂",
+            expires: 1,
+          };
+    assert.deepEqual(piCredentialSchema.safeParse(valid), {
+      success: true,
+      data: valid,
+    });
+    const reports: RefreshReport[] = [];
+    const view = executionCredentialStore(
+      {
+        items: [{ credentialId: ID, providerId: PROVIDER, credential: valid }],
+      },
+      async (report) => {
+        reports.push(report);
+      },
+    );
+    try {
+      for (const surrogate of ["\ud800", "\udc00"]) {
+        const invalid = { ...valid, [field]: surrogate };
+        assert.doesNotThrow(() => {
+          assert.equal(piCredentialSchema.safeParse(invalid).success, false);
+          const { type, ...secret } = invalid;
+          const schema =
+            type === SecretShape.ApiKey
+              ? apiKeySecretSchema
+              : oauthSecretSchema;
+          assert.equal(schema.safeParse(secret).success, false);
+        });
+        await assert.rejects(view.store.modify(PROVIDER, async () => invalid));
+        assert.deepEqual(await view.store.read(PROVIDER), valid);
+        assert.equal(reports.length, NO_REPORTS);
+      }
+      await view.release();
+      assert.equal(reports.length, ONE_REPORT);
+      assert.deepEqual(reports[0]?.credential, valid);
+    } finally {
+      view.discard();
+    }
+  });
+}

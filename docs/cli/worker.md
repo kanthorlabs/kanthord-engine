@@ -1,8 +1,8 @@
 # Worker CLI specification
 
-This specification for `kanthord worker` contains **19 command leaves: 16 implemented commands and 3 proposed commands**.
-The inventory distinguishes shipped syntax and operations from `handover`,
-`agent get` and `provider check`, which remain proposed. Requirements marked
+This specification for `kanthord worker` contains **19 command leaves: 17 implemented commands and 2 proposed commands**.
+The inventory distinguishes shipped syntax and operations from `agent get`
+and `provider check`, which remain proposed. Requirements marked
 **target design** describe later runtime behavior and do not establish implementation.
 
 See the [CLI index](./README.md) for shared conventions and
@@ -18,7 +18,7 @@ Work pull, claims, execution records and release belong to
 
 The [CLI implementation](../../src/apps/cli/worker.ts) and
 [Worker operation contract](../../src/worker/contract.ts) provide registration,
-heartbeat, catalog reads, registration-backed instance inspection and lifecycle,
+heartbeat, handover, catalog reads, registration-backed instance inspection and lifecycle,
 and eight agent-enablement commands. The
 [registration implementation](../../src/worker/registrations.ts) uses durable
 `worker_instance` rows, one live registration per client identity, and atomic
@@ -31,7 +31,7 @@ tombstones and transactional registration endings when a binding becomes
 unavailable. Scheduler running-execution and activity collaborators use the
 implemented Scheduler Service. Custody handover and refresh-report operations
 are implemented and wired to Project authorization and Scheduler execution pins.
-The `handover` CLI leaf remains pending its owning validation-code publication.
+The `handover` CLI leaf is implemented with its published validation code.
 
 The [Worker configuration fragment](../../src/worker/config.ts) declares
 `heartbeatWindow` and `globalPrompt`. The catalog, report-only instance
