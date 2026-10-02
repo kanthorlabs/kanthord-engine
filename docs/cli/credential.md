@@ -87,6 +87,7 @@ A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `c
 and `endedAt: Timestamp | null`. No answer holds `secret`.
 `platform` is the closed enum `github | github-copilot | anthropic | openai-compatible | s3`.
 Each platform holds exactly one secret shape from `api_key | oauth | s3_access_key`.
+The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) bounds `api_key` and `oauth` to 48,915 UTF-8 bytes of normalized canonical pi-ai credential JSON, including type, structure and escaping. It excludes `s3_access_key`. Creation and rotation reject an oversized value with HTTP 400 `credential.input.invalid` before writing. Oversized OAuth login material follows the sanitized failed-session path and stores nothing.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#platform-validators)
 fix the secret shape and the metadata of each platform:
 
@@ -252,7 +253,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.            | login                                                                        |
 | local | `cli.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.        | revoke                                                                       |
 | 400   | `credential.entry.unsupported`           | The platform does not support this entry method.                 | create, login                                                                |
-| 400   | `credential.input.invalid`               | The input secret or metadata fails validation.                   | create, rotate, update-metadata, login, login-code                           |
+| 400   | `credential.input.invalid`               | Secret or metadata validation fails, including the byte budget.  | create, rotate, update-metadata, login, login-code                           |
 | 409   | `credential.metadata.base_url_fixed`     | The edit changes `baseUrl` outside rotation.                     | update-metadata                                                              |
 | 409   | `credential.metadata.model_in_use`       | A removed model has dependent defaults or entries.               | update-metadata                                                              |
 | 409   | `credential.name.conflict`               | A credential already has this name; details identify the holder. | create, login                                                                |
