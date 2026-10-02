@@ -280,6 +280,6 @@ OAuth, mints a GitHub App token or rotates the master key. Custody's removal
 invariant remains in the design: dependents, including agent providers, prevent
 removal, and the dependency check and removal are atomic. No removal route is implemented.
 Secret handover and refresh reports are implemented Worker API operations; the
-handover CLI leaf is pending. Acquisition grants remain later work. None is a
+handover CLI leaf is implemented. Acquisition grants remain later work. None is a
 CLI credential-record answer. Handover first pins the newest live revision,
 subsequent uses retain that pin, and a revoked pinned revision refuses use.
