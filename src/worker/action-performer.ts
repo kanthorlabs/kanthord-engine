@@ -14,12 +14,15 @@ import {
   ActionAssessmentResult,
   ActionNodeState,
   ActionResultKind,
+  ActionReadMethod,
+  RepositoryAction,
   WorkerErrorCode,
   type ActionContext,
   type ActionRequestResult,
   type ActionResultItem,
   type ActionOperands,
   type PlatformAddress,
+  type IntakeActionCall,
 } from "./contract.ts";
 import {
   DispatchReservations,
@@ -31,7 +34,9 @@ import {
   isResultClass,
   performedItem,
   recordedItem,
+  readRefusalItem,
 } from "./action-classify.ts";
+import { fulfils, sameRepository } from "./action-reuse.ts";
 import type { Dependencies } from "./service.ts";
 
 type PerformerDependencies = Pick<
@@ -157,6 +162,8 @@ export class ActionPerformer {
     pending: Pending,
   ): Promise<ActionResultItem> {
     const call = { ...caller, executionId: claim.executionId };
+    const refusal = await this.reuse(call, pending);
+    if (refusal) return refusal;
     const answer = await this.dependencies.intakeActions.perform(
       call,
       pending.entry.action,
@@ -166,6 +173,30 @@ export class ActionPerformer {
     if (item) return item;
     assert.ok(!isResultClass(answer));
     return this.record(caller, claim, pending, answer);
+  }
+
+  private async reuse(
+    call: IntakeActionCall,
+    pending: Pending,
+  ): Promise<ActionResultItem | null> {
+    const { entry, operands } = pending;
+    assert.ok(entry.action.key);
+    assert.ok(entry.resourceIdentity);
+    if (entry.action.action !== RepositoryAction.PullRequest) return null;
+    for (const candidate of entry.reuseCandidates) {
+      if (!sameRepository(candidate, entry.resourceIdentity)) continue;
+      const answer = await this.dependencies.intakeActions.read(
+        call,
+        ActionReadMethod.PullRequestGet,
+        candidate.address,
+      );
+      if (isResultClass(answer))
+        return readRefusalItem(pending.key.action, answer);
+      if (!fulfils(answer.body, operands, entry.resourceIdentity)) continue;
+      operands.reusedAddress = candidate.address;
+      break;
+    }
+    return null;
   }
 
   private async record(

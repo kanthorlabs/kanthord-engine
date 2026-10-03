@@ -13,9 +13,11 @@ import {
   ActionNodeState,
   ActionResolution,
   ActionResultKind,
+  ActionReadMethod,
   PlatformAddressKind,
   RefusalClass,
   RepositoryAction,
+  ResultClass,
   Uncertainty,
   TestedInputKind,
   WorkerErrorCode,
@@ -304,4 +306,104 @@ test("refused or thrown recording retains the known address as recording uncerta
       },
     },
   ]);
+});
+
+function reusable(t: TestContext) {
+  const h = actionable(t);
+  h.claim.attempt = SECOND;
+  h.entry.reuseCandidates.push({
+    evidenceId: createIdentity("evidence"),
+    attempt: FIRST,
+    address: PR,
+  });
+  const body = {
+    state: "open",
+    head: {
+      ref: "kanthord/" + h.claim.nodeId,
+      repo: { full_name: "owner/repo" },
+    },
+    base: { ref: "main", repo: { full_name: "owner/repo" } },
+  };
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  assert.equal(h.entry.reuseCandidates.length, FIRST);
+  assert.equal(h.claim.attempt, SECOND);
+  return { ...h, body, performSpy: perform };
+}
+
+test("reuse forwards the matching earlier pull request through Intake perform", async (t) => {
+  const h = reusable(t);
+  const read = t.mock.method(
+    h.dependencies.intakeActions,
+    "read",
+    async () => ({ body: h.body }),
+  );
+  assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
+  assert.deepEqual(read.mock.calls[0]?.arguments, [
+    { ...h.caller, executionId: h.claim.executionId },
+    ActionReadMethod.PullRequestGet,
+    PR,
+  ]);
+  assert.deepEqual(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, PR);
+});
+
+test("closed pull request dispatches fresh and a later matching candidate is selected", async (t) => {
+  const h = reusable(t);
+  h.dependencies.intakeActions.read = async () => ({
+    body: { ...h.body, state: "closed" },
+  });
+  await h.perform();
+  assert.equal(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, null);
+  const second = { ...PR, number: 43 };
+  h.entry.reuseCandidates.push({
+    evidenceId: createIdentity("evidence"),
+    attempt: FIRST,
+    address: second,
+  });
+  h.dependencies.intakeActions.read = async (_call, _method, address) => ({
+    body: address === second ? h.body : { ...h.body, state: "closed" },
+  });
+  await h.perform();
+  assert.deepEqual(
+    h.performSpy.mock.calls[1]?.arguments[2]?.reusedAddress,
+    second,
+  );
+});
+
+test("read refusal and unknown read outcome dispatch nothing and release the reservation", async (t) => {
+  const h = reusable(t);
+  h.dependencies.intakeActions.read = async () => ({
+    class: RefusalClass.FinalRefusal,
+    code: "repository.platform.github.final_refusal",
+    message: "refused",
+  });
+  const first = (await h.perform()).items[0];
+  assert.ok(first?.kind === ActionResultKind.FailedBeforeEffect);
+  assert.equal(first.refusal.class, RefusalClass.FinalRefusal);
+  h.dependencies.intakeActions.read = async () => ({
+    class: ResultClass.UnknownOutcome,
+    code: "repository.platform.github.unknown_outcome",
+    message: "unknown",
+  });
+  const second = (await h.perform()).items[0];
+  assert.ok(second?.kind === ActionResultKind.FailedBeforeEffect);
+  assert.equal(second.refusal.class, RefusalClass.ConfirmedFailure);
+  assert.equal(h.performSpy.mock.callCount(), NO_CALLS);
+});
+
+test("merge push and foreign repository candidates never call read", async (t) => {
+  const h = reusable(t);
+  h.entry.action.action = RepositoryAction.MergePush;
+  await h.perform();
+  assert.equal(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, null);
+  h.entry.action.action = RepositoryAction.PullRequest;
+  h.entry.reuseCandidates[0]!.address = {
+    ...PR,
+    resourceIdentity: "repository:github:other/repo",
+  };
+  await h.perform();
+  assert.equal(h.performSpy.mock.calls[1]?.arguments[2]?.reusedAddress, null);
 });
