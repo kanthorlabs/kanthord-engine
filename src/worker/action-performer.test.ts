@@ -570,3 +570,19 @@ test("perform exception retains only the dispatched action and clears later rese
   );
   assert.equal(perform.mock.callCount(), FIRST);
 });
+
+test("mixed GitHub display capitalization reuses the earlier request without changing its address", async (t) => {
+  const h = reusable(t);
+  h.dependencies.intakeActions.read = async () => ({
+    body: {
+      ...h.body,
+      head: { ...h.body.head, repo: { full_name: "Owner/Repo" } },
+      base: { ...h.body.base, repo: { full_name: "OWNER/REPO" } },
+    },
+  });
+  const request = t.mock.method(h.dependencies.evidenceRequests, "request");
+  assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
+  assert.deepEqual(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, PR);
+  assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, PR);
+  assert.equal(h.performSpy.mock.callCount(), FIRST);
+});

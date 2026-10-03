@@ -29,14 +29,14 @@ export function fulfils(
   assert.ok(operands.baseBranch);
   const parsed = pullRequestSchema.safeParse(body);
   if (!parsed.success) return false;
-  const repository = repositoryOf(resourceIdentity);
+  const repository = repositoryOf(resourceIdentity).toLowerCase();
   const { state, head, base } = parsed.data;
   return (
     state === PullRequestState.Open &&
     head.ref === operands.nodeBranch &&
     base.ref === operands.baseBranch &&
-    head.repo.full_name === repository &&
-    base.repo.full_name === repository
+    head.repo.full_name.toLowerCase() === repository &&
+    base.repo.full_name.toLowerCase() === repository
   );
 }
 

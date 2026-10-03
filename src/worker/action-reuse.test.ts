@@ -63,3 +63,43 @@ test("repository identity and candidate repository must match", () => {
   assert.equal(repositoryOf(RESOURCE), REPOSITORY);
   assert.throws(() => repositoryOf("storage:s3:bucket"), assert.AssertionError);
 });
+
+test("GitHub repository capitalization is equivalent while branch refs remain exact", () => {
+  const mixed = {
+    ...body,
+    head: { ...body.head, repo: { full_name: "Owner/Repo" } },
+    base: { ...body.base, repo: { full_name: "OWNER/REPO" } },
+  };
+  assert.equal(fulfils(mixed, operands, RESOURCE), true);
+  assert.equal(fulfils(body, operands, "repository:github:Owner/Repo"), true);
+  assert.equal(
+    fulfils(
+      {
+        ...mixed,
+        head: { ...mixed.head, ref: operands.nodeBranch.toUpperCase() },
+      },
+      operands,
+      RESOURCE,
+    ),
+    false,
+  );
+  assert.equal(
+    fulfils(
+      {
+        ...mixed,
+        base: { ...mixed.base, ref: operands.baseBranch.toUpperCase() },
+      },
+      operands,
+      RESOURCE,
+    ),
+    false,
+  );
+  assert.equal(
+    fulfils(
+      { ...mixed, head: { ...mixed.head, repo: { full_name: "Fork/Repo" } } },
+      operands,
+      RESOURCE,
+    ),
+    false,
+  );
+});
