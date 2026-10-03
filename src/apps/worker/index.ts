@@ -15,6 +15,10 @@ import {
 } from "../../kernel/service.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
+import type {
+  ModelRuntimeFactory,
+  RepositoryTransport,
+} from "../../worker/index.ts";
 import {
   httpClient,
   readServerVersion,
@@ -35,6 +39,8 @@ export interface WorkerOptions extends Partial<
   env?: NodeJS.ProcessEnv;
   context?: Context;
   log?: (message: string) => void;
+  modelRuntimeFactory?: ModelRuntimeFactory;
+  repositoryTransport?: RepositoryTransport;
 }
 
 export class Worker implements Service {

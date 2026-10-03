@@ -13,7 +13,11 @@ export { discardChanges, headCommit } from "./local-git.ts";
 export { ExecutionBudget } from "./budget.ts";
 export { renderWorkPrompt } from "./prompt-composer.ts";
 export { checkAgentTools } from "./tool-table.ts";
-export { defaultModelRuntimeFactory } from "./model-runtime.ts";
+export {
+  defaultModelRuntimeFactory,
+  type ModelRuntimeFactory,
+} from "./model-runtime.ts";
+export type { RepositoryTransport } from "./contract.ts";
 export { loadPi } from "./pi.ts";
 export {
   runNativeExecution,

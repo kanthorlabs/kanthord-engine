@@ -93,6 +93,7 @@ export default tseslint.config(
                 fileInternalPath: "{test-support.ts,*.test.ts}",
               }),
               allow: [
+                { to: applicationEntry("apps-worker") },
                 {
                   to: element("service", {
                     captured: { name: "worker" },
@@ -121,6 +122,13 @@ export default tseslint.config(
               from: element("apps-worker"),
               allow: [
                 ...allow("kernel"),
+                { to: element("repository") },
+                {
+                  to: element("service", {
+                    captured: { name: "worker" },
+                    fileInternalPath: "index.ts",
+                  }),
+                },
                 { to: serviceEntry("contract.ts") },
                 {
                   to: element("service", {

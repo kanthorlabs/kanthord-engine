@@ -155,6 +155,7 @@ engine/
 │       │   ├── constants.ts    # CLI command names and exit codes
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton
+│           ├── api.ts          # Server operation clients and bounded backoff
 │           └── index.ts        # Client resolution, version check, and cancellable lifetime
 ├── static/                     # Packaged generated OpenAPI assets
 │   ├── prompt/                 # Byte-exact base, swe@1 and re@1 prompt assets
