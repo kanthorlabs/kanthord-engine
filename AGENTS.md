@@ -127,6 +127,16 @@ engine/
 │   │   ├── workspace.ts        # Private workspace keys, preparation, holds and retention
 │   │   ├── execution-setup.ts  # Proven execution setup from pinned configuration
 │   │   ├── native-agent.ts     # Composed execution-scoped agent lifetime
+│   │   ├── method-clients.ts   # Injected execution-scoped operation clients
+│   │   ├── execution-run.ts    # Refusal boundary, submissions and release reconciliation
+│   │   ├── judgement.ts        # Strict handoff parsing and method instructions
+│   │   ├── node-reads.ts       # Bounded pinned-context and objective reads
+│   │   ├── steps-objective.ts # Start checks, task revisions and objective publication
+│   │   ├── steps-initiative.ts # Current objective report and initiative release
+│   │   ├── evaluation-input.ts # Isolated snapshots and evidence placement
+│   │   ├── evaluation.ts       # Verification evidence, assessment and action requests
+│   │   ├── transcript.ts       # Execution transcript sink and no-op implementation
+│   │   ├── native-method.ts    # Injected native method dispatch and resource lifetime
 │   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and agent configuration
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure

@@ -15,3 +15,14 @@ export { renderWorkPrompt } from "./prompt-composer.ts";
 export { checkAgentTools } from "./tool-table.ts";
 export { defaultModelRuntimeFactory } from "./model-runtime.ts";
 export { loadPi } from "./pi.ts";
+export {
+  runNativeExecution,
+  type NativeExecutionInput,
+} from "./native-method.ts";
+export {
+  isExecutionEnd,
+  EndReason,
+  type ExecutionEnd,
+} from "./execution-run.ts";
+export type { MethodClients } from "./method-clients.ts";
+export { noTranscript, type TranscriptSink } from "./transcript.ts";
