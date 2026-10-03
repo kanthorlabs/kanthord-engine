@@ -8,6 +8,7 @@ import {
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import type { WorkerApi } from "./api.ts";
+import { WorkerErrorCode } from "../../worker/contract.ts";
 
 export interface Registration {
   runtimeIdentity: string;
@@ -74,4 +75,29 @@ export async function register(
     "worker.start.registration_indeterminate",
     "worker: registration answer is indeterminate.",
   );
+}
+
+export async function deregister(
+  api: WorkerApi,
+  runtimeIdentity: string,
+): Promise<Diagnostic | null> {
+  assert.ok(runtimeIdentity);
+  assert.ok(api.worker["instance.deregister"]);
+  const result = await api.worker["instance.deregister"](
+    { params: { runtimeIdentity }, query: {}, body: null },
+    { idempotencyKey: ulid(), context: background },
+  );
+  if (result.type === OperationResultType.Completed) return null;
+  if (result.type === OperationResultType.Indeterminate)
+    return new Diagnostic(
+      "worker.stop.deregistration_indeterminate",
+      "worker: deregistration answer is indeterminate.",
+    );
+  const notFound = 404;
+  if (
+    result.status === notFound &&
+    result.error.error.code === WorkerErrorCode.InstanceNotFound
+  )
+    return null;
+  return new Diagnostic(result.error.error.code, result.error.error.message);
 }

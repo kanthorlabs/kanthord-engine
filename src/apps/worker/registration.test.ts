@@ -5,6 +5,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { workerApi } from "./api.ts";
 import {
   register,
+  deregister,
   startHeartbeat,
   HEARTBEAT_INTERVAL_MS,
 } from "./registration.ts";
@@ -50,6 +51,41 @@ test("registration returns server facts with a fresh key and translates refusal 
     register(api),
     (error) => error instanceof Diagnostic && error.code === code,
   );
+});
+
+test("deregistration accepts only success or owned not-found and never retries", async (t) => {
+  const api = workerApi("http://127.0.0.1:1");
+  const runtimeIdentity = "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+  const cases = [
+    { status: 404, code: "worker.instance.not_found", expected: null },
+    {
+      status: 500,
+      code: "gateway.invocation.unknown",
+      expected: "gateway.invocation.unknown",
+    },
+  ];
+  for (const entry of cases) {
+    const mock = t.mock.method(api.worker, "instance.deregister", async () => ({
+      type: OperationResultType.Failure,
+      status: entry.status,
+      error: {
+        requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+        error: { code: entry.code, message: "test refusal", details: null },
+      },
+    }));
+    assert.equal(
+      (await deregister(api, runtimeIdentity))?.code ?? null,
+      entry.expected,
+    );
+    const once = 1;
+    assert.equal(mock.mock.callCount(), once);
+    mock.mock.restore();
+  }
+  t.mock.method(api.worker, "instance.deregister", async () => ({
+    type: OperationResultType.Indeterminate,
+  }));
+  const expected = "worker.stop.deregistration_indeterminate";
+  assert.equal((await deregister(api, runtimeIdentity))?.code, expected);
 });
 
 test("heartbeat warns once per failed tick and stop cancels the timer", async (t) => {

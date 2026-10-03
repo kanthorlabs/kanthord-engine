@@ -17,7 +17,12 @@ import { packageVersion } from "../../kernel/version.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import type { WorkspaceRoot } from "../../worker/index.ts";
 import { workerApi, type WorkerApi } from "./api.ts";
-import { register, startHeartbeat, type Registration } from "./registration.ts";
+import {
+  register,
+  deregister,
+  startHeartbeat,
+  type Registration,
+} from "./registration.ts";
 import type {
   ModelRuntimeFactory,
   RepositoryTransport,
@@ -60,6 +65,12 @@ export class Worker implements Service {
   private workspaces?: WorkspaceRoot;
   private registration?: Registration;
   private heartbeat?: { stop(): void };
+  private pulling?: Promise<unknown>;
+  private execution?: {
+    context: CancellationContext;
+    task: Promise<Diagnostic | null>;
+  };
+  private executionLive = false;
 
   constructor(options: WorkerOptions = {}) {
     this.options = options;
@@ -153,14 +164,32 @@ export class Worker implements Service {
 
   stop(): Promise<Error | null> {
     this.stopTask ??= lifecycle(async () => {
-      const watchdog = setTimeout(
-        () => process.exit(WORKER_STOP_EXIT_FAILURE),
-        WORKER_STOP_WATCHDOG_MS,
-      );
+      let watchdog: NodeJS.Timeout | undefined;
       try {
         const error = await this.quiesce();
         await this.startTask;
+        await this.pulling;
         if (error) throw error;
+        if (this.executionLive) {
+          this.execution?.context.cancel();
+          await this.execution?.task;
+          throw new Diagnostic(
+            "worker.stop.execution_live",
+            "worker: stop during a live execution.",
+          );
+        }
+        watchdog = setTimeout(
+          () => process.exit(WORKER_STOP_EXIT_FAILURE),
+          WORKER_STOP_WATCHDOG_MS,
+        );
+        if (this.registration) {
+          const failure = await deregister(
+            this.api!,
+            this.registration.runtimeIdentity,
+          );
+          if (failure) throw failure;
+          this.registration = undefined;
+        }
       } finally {
         this.started = false;
         this.clientSecret?.fill(0);

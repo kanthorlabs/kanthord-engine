@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { createServer } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { spawn } from "node:child_process";
 import { readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,6 +32,7 @@ const MISMATCH_CODE = "worker.version.mismatch";
 const UNAVAILABLE_CODE = "worker.version.unavailable";
 const OPENAPI_PATH = "/api/openapi.yaml";
 const REGISTER_PATH = "/api/worker/register";
+const DEREGISTER_PATH = `/api/worker/instance/${REGISTRATION.runtimeIdentity}`;
 const AUTHORIZATION = "Bearer test-token";
 const CLIENT_SECRET_BYTES = 32;
 const SHORT_KEY_BYTES = 16;
@@ -70,7 +75,11 @@ async function bounded<T>(promise: Promise<T>, duration: number): Promise<T> {
   }
 }
 
-async function fixture(t: TestContext, version: string) {
+async function fixture(
+  t: TestContext,
+  version: string,
+  intercept?: (request: IncomingMessage, response: ServerResponse) => boolean,
+) {
   const tools = temporary(t);
   for (const name of ["rg", "fd"])
     writeFileSync(join(tools, name), "#!/bin/sh\necho test_tool\n", {
@@ -86,6 +95,17 @@ async function fixture(t: TestContext, version: string) {
   const listener = createServer((request, response) => {
     assert.equal(request.headers.authorization, AUTHORIZATION);
     requests++;
+    if (intercept?.(request, response)) return;
+    if (request.url === DEREGISTER_PATH) {
+      response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
+      response.end(
+        JSON.stringify({
+          runtimeIdentity: REGISTRATION.runtimeIdentity,
+          registered: false,
+        }),
+      );
+      return;
+    }
     if (request.url === REGISTER_PATH) {
       response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
       response.end(JSON.stringify(REGISTRATION));
@@ -383,7 +403,7 @@ test("SIGHUP leaves worker healthy and unregisters its handler on termination", 
   assert.equal(process.listenerCount("SIGHUP"), before);
 });
 
-test("stop watchdog exits on a stalled stop and is cleared after completion", async (t) => {
+test("stop watchdog starts only after unresolved startup settles", async (t) => {
   const exits: unknown[] = [];
   const stalled = new Worker();
   t.mock.method(stalled, "quiesce", () => new Promise<null>(() => {}));
@@ -395,11 +415,11 @@ test("stop watchdog exits on a stalled stop and is cleared after completion", as
   try {
     void stalled.stop();
     t.mock.timers.tick(WORKER_STOP_WATCHDOG_MS);
-    assert.deepEqual(exits, [WORKER_STOP_EXIT_FAILURE]);
+    assert.deepEqual(exits, []);
     const finished = new Worker();
     assert.equal(await finished.stop(), null);
     t.mock.timers.tick(AFTER_WATCHDOG_MS);
-    assert.deepEqual(exits, [WORKER_STOP_EXIT_FAILURE]);
+    assert.deepEqual(exits, []);
   } finally {
     t.mock.timers.reset();
     t.mock.restoreAll();
@@ -416,4 +436,60 @@ test("worker signal stops cleanly and unavailable server yields a distinct diagn
   const error = await runWorker({ ...options, endpoint: "http://127.0.0.1:1" });
   assert.ok(error instanceof Diagnostic);
   assert.equal(error.code, UNAVAILABLE_CODE);
+});
+
+test("stop waits for registration then deregisters without emitting ready", async (t) => {
+  const received = Promise.withResolvers<ServerResponse>();
+  let deregistrations = 0;
+  const options = await fixture(t, packageVersion(), (request, response) => {
+    if (request.url === REGISTER_PATH) {
+      received.resolve(response);
+      return true;
+    }
+    if (request.url === DEREGISTER_PATH) deregistrations++;
+    return false;
+  });
+  const messages: string[] = [];
+  const worker = new Worker({
+    ...options,
+    log: (message) => messages.push(message),
+  });
+  const start = worker.start();
+  const response = await received.promise;
+  const stop = worker.stop();
+  response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
+  response.end(JSON.stringify(REGISTRATION));
+  assert.equal(await start, null);
+  assert.equal(await stop, null);
+  assert.deepEqual(messages, []);
+  assert.equal(deregistrations, ONE_RECORD);
+});
+
+test("settled stop arms a watchdog during a stalled deregistration", async (t) => {
+  const received = Promise.withResolvers<ServerResponse>();
+  const options = await fixture(t, packageVersion(), (request, response) => {
+    if (request.url !== DEREGISTER_PATH) return false;
+    received.resolve(response);
+    return true;
+  });
+  const worker = new Worker({ ...options, log: () => {} });
+  assert.equal(await worker.start(), null);
+  const exits: unknown[] = [];
+  t.mock.method(process, "exit", (code: unknown) => {
+    exits.push(code);
+    return undefined as never;
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const stop = worker.stop();
+  const response = await received.promise;
+  t.mock.timers.tick(WORKER_STOP_WATCHDOG_MS);
+  assert.deepEqual(exits, [WORKER_STOP_EXIT_FAILURE]);
+  response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
+  response.end(
+    JSON.stringify({
+      runtimeIdentity: REGISTRATION.runtimeIdentity,
+      registered: false,
+    }),
+  );
+  assert.equal(await stop, null);
 });
