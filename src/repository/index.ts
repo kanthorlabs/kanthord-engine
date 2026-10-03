@@ -2,13 +2,23 @@ import { background, type Context } from "../kernel/context.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
 import { HealthStatus, type Healthcheck } from "../kernel/service.ts";
 import { checkRepositoryTools, probeRepositoryTools } from "./check.ts";
-import { gitLsRemote } from "./connector.ts";
+import {
+  gitLsRemote,
+  clone,
+  cloneSnapshot,
+  fetchAndCheckout,
+  pushNodeBranch,
+} from "./connector.ts";
 
 export interface Dependencies {
   health?: HealthRegistry;
 }
 
 export class RepositoryComponent {
+  clone = clone;
+  cloneSnapshot = cloneSnapshot;
+  fetchAndCheckout = fetchAndCheckout;
+  pushNodeBranch = pushNodeBranch;
   constructor(dependencies: Dependencies = {}) {
     checkRepositoryTools();
     dependencies.health?.register("repository", (context) =>

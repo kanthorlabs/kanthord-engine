@@ -593,6 +593,34 @@ export const SetupRefusal = {
   CredentialAbsent: "credential_absent",
   CredentialRevisionMismatch: "credential_revision_mismatch",
 } as const;
+export interface RepositoryTransport {
+  clone(
+    address: string,
+    directory: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<void>;
+  fetchAndCheckout(
+    directory: string,
+    branch: string,
+    baseBranch: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<string>;
+  pushNodeBranch(
+    directory: string,
+    branch: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<void>;
+  cloneSnapshot(
+    address: string,
+    revision: string,
+    directory: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<string>;
+}
 export interface ExecutionSetup {
   executionId: string;
   workerName: string;
