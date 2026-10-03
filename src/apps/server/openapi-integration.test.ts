@@ -25,7 +25,7 @@ import {
   serializeOpenAPIFile,
 } from "../../gateway/local.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { AccessPolicy } from "../../kernel/operation.ts";
+import { AccessPolicy, OperationRegistry } from "../../kernel/operation.ts";
 import { ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
@@ -505,6 +505,144 @@ const apiOperations = [
   ...Object.values(projectOperations),
   ...Object.values(missionOperations),
 ];
+const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
+  ["gateway.liveness", AccessPolicy.Public],
+  ["gateway.openapi", AccessPolicy.Public],
+  ["gateway.openapiFile", AccessPolicy.Public],
+  ["gateway.healthcheck", AccessPolicy.Human],
+  ["gateway.verify", AccessPolicy.Human],
+  ["credential.create", AccessPolicy.Human],
+  ["credential.list", AccessPolicy.Human],
+  ["credential.get", AccessPolicy.Human],
+  ["credential.rotate", AccessPolicy.Human],
+  ["credential.update_metadata", AccessPolicy.Human],
+  ["credential.revoke", AccessPolicy.Human],
+  ["credential.login", AccessPolicy.Human],
+  ["credential.login_code", AccessPolicy.Human],
+  ["credential.login_status", AccessPolicy.Human],
+  ["worker.agent.enablement.list", AccessPolicy.Human],
+  ["worker.agent.enablement.get", AccessPolicy.Human],
+  ["worker.agent.enablement.put", AccessPolicy.Human],
+  ["worker.agent.enablement.enable", AccessPolicy.Human],
+  ["worker.agent.enablement.disable", AccessPolicy.Human],
+  ["worker.agent.enablement.remove", AccessPolicy.Human],
+  ["worker.agent.enablement.provider.add", AccessPolicy.Human],
+  ["worker.agent.enablement.provider.remove", AccessPolicy.Human],
+  ["worker.catalog.list", AccessPolicy.Human],
+  ["worker.catalog.get", AccessPolicy.Human],
+  ["worker.agent.get", AccessPolicy.Human],
+  ["worker.instance.list", AccessPolicy.Human],
+  ["worker.instance.get", AccessPolicy.Human],
+  ["worker.instance.resume", AccessPolicy.Human],
+  ["worker.register", AccessPolicy.Client],
+  ["worker.heartbeat", AccessPolicy.Client],
+  ["worker.handover", AccessPolicy.Client],
+  ["worker.credential", AccessPolicy.Client],
+  ["worker.instance.deregister", AccessPolicy.Client],
+  ["worker.action.request", AccessPolicy.Client],
+  ["worker.execution.setup.get", AccessPolicy.Client],
+  ["scheduler.queue.list", AccessPolicy.Human],
+  ["scheduler.queue.peek", AccessPolicy.Human],
+  ["scheduler.execution.list", AccessPolicy.Human],
+  ["scheduler.execution.get", AccessPolicy.Human],
+  ["scheduler.work.pull", AccessPolicy.Client],
+  ["scheduler.claim.get", AccessPolicy.Client],
+  ["scheduler.execution.release", AccessPolicy.Client],
+  ["project.create", AccessPolicy.Human],
+  ["project.list", AccessPolicy.Human],
+  ["project.get", AccessPolicy.Human],
+  ["project.rename", AccessPolicy.Human],
+  ["project.binding.list", AccessPolicy.Human],
+  ["project.binding.get", AccessPolicy.Human],
+  ["project.bindingSet.get", AccessPolicy.Human],
+  ["project.bindingSet.write", AccessPolicy.Human],
+  ["project.bindingRevision.list", AccessPolicy.Human],
+  ["project.agentConfiguration.list", AccessPolicy.Human],
+  ["project.agentConfiguration.get", AccessPolicy.Human],
+  ["mission.get", AccessPolicy.Human],
+  ["mission.export", AccessPolicy.Human],
+  ["mission.import.preview", AccessPolicy.Human],
+  ["mission.import.apply", AccessPolicy.Human],
+  ["mission.edge.list", AccessPolicy.Human],
+  ["mission.dependency.add", AccessPolicy.Human],
+  ["mission.dependency.remove", AccessPolicy.Human],
+  ["mission.node.list", AccessPolicy.Human],
+  ["mission.node.get", AccessPolicy.Human],
+  ["mission.node.create", AccessPolicy.Human],
+  ["mission.node.update", AccessPolicy.Human],
+  ["mission.node.move", AccessPolicy.Human],
+  ["mission.node.revision.list", AccessPolicy.Human],
+  ["mission.node.revision.get", AccessPolicy.Human],
+  ["mission.node.retire.preview", AccessPolicy.Human],
+  ["mission.node.retire", AccessPolicy.Human],
+  ["mission.node.rebind", AccessPolicy.Human],
+  ["mission.node.priority.set", AccessPolicy.Human],
+  ["mission.criterion.set", AccessPolicy.Human],
+  ["mission.node.pause", AccessPolicy.Human],
+  ["mission.node.resume", AccessPolicy.Human],
+  ["mission.node.block", AccessPolicy.Human],
+  ["mission.node.unblock", AccessPolicy.Human],
+  ["mission.node.ready", AccessPolicy.Human],
+  ["mission.node.override", AccessPolicy.Human],
+  ["mission.node.discard", AccessPolicy.Human],
+  ["mission.node.check", AccessPolicy.Human],
+  ["mission.attempt.list", AccessPolicy.Human],
+  ["mission.attempt.get", AccessPolicy.Human],
+  ["mission.evidence.list", AccessPolicy.Human],
+  ["mission.evidence.get", AccessPolicy.Human],
+  ["mission.evidence.asset.content.get", AccessPolicy.Human],
+  ["mission.evidence.asset.delete", AccessPolicy.Human],
+  ["mission.evidence.delete", AccessPolicy.Human],
+  ["mission.assessment.list", AccessPolicy.Human],
+  ["mission.assessment.get", AccessPolicy.Human],
+  ["mission.outcome.list", AccessPolicy.Human],
+  ["mission.outcome.get", AccessPolicy.Human],
+  ["mission.externalAction.list", AccessPolicy.Human],
+  ["mission.externalAction.get", AccessPolicy.Human],
+  ["mission.evidence.submit", AccessPolicy.Client],
+  ["mission.evidence.asset.complete", AccessPolicy.Client],
+  ["mission.evidence.request", AccessPolicy.Client],
+  ["mission.assessment.submit", AccessPolicy.Client],
+  ["mission.execution.pinnedRevision.get", AccessPolicy.Client],
+  ["mission.execution.revision.list", AccessPolicy.Client],
+  ["mission.execution.revision.get", AccessPolicy.Client],
+  ["mission.execution.evidence.list", AccessPolicy.Client],
+  ["mission.execution.evidence.asset.content.get", AccessPolicy.Client],
+  ["mission.execution.objective.list", AccessPolicy.Client],
+  ["mission.execution.objective.outcome.list", AccessPolicy.Client],
+  ["mission.execution.objective.evidence.list", AccessPolicy.Client],
+  ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
+];
+const OPERATION_COUNT = 106;
+
+test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
+  const expected = [...OPERATION_INVENTORY].sort();
+  assert.equal(expected.length, OPERATION_COUNT);
+  assert.deepEqual(
+    apiOperations.map(({ id, access }) => [id, access]).sort(),
+    expected,
+  );
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
+    Object.values(path ?? {})
+      .filter(
+        (item): item is ResolvedOperation =>
+          isObject(item) && "operationId" in item && isString(item.operationId),
+      )
+      .map((item) => [item.operationId, item["x-access-policy"]]),
+  );
+  assert.deepEqual(published.sort(), expected);
+  const registry = new OperationRegistry();
+  await gatewayFixture(t, { registry });
+  assert.deepEqual(
+    registry
+      .all()
+      .map(({ operation }) => [operation.id, operation.access])
+      .sort(),
+    expected,
+  );
+});
+
 function assertBlockedNode(schema: unknown): void {
   assert.ok(
     isObject(schema) && "oneOf" in schema && Array.isArray(schema.oneOf),
