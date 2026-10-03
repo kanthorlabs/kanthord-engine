@@ -7,6 +7,49 @@ import {
 } from "../kernel/context.ts";
 import { childEnvironment } from "./tool-table.ts";
 const EXPIRED = 0;
+const CLEAN_STATUS = "";
+const FIRST_ATTEMPT = 1;
+
+export function taskCommitMessage(taskId: string, attempt: number): string {
+  assert.ok(taskId);
+  assert.ok(Number.isSafeInteger(attempt) && attempt >= FIRST_ATTEMPT);
+  return `kanthord: task ${taskId} attempt ${attempt}`;
+}
+
+export function checkpointCommitMessage(
+  taskId: string,
+  attempt: number,
+): string {
+  assert.ok(taskId);
+  assert.ok(Number.isSafeInteger(attempt) && attempt >= FIRST_ATTEMPT);
+  return `kanthord: checkpoint of task ${taskId} attempt ${attempt}`;
+}
+
+export async function commitWork(
+  directory: string,
+  message: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string | null> {
+  assert.ok(directory);
+  assert.ok(message);
+  const end = performance.now() + deadlineMs;
+  const remaining = () => {
+    const duration = end - performance.now();
+    assert.ok(duration > EXPIRED, "Commit deadline reached");
+    return duration;
+  };
+  await run(directory, ["add", "--all"], context, remaining());
+  const status = await run(
+    directory,
+    ["status", "--porcelain"],
+    context,
+    remaining(),
+  );
+  if (status.trim() === CLEAN_STATUS) return null;
+  await run(directory, ["commit", "--message", message], context, remaining());
+  return headCommit(directory, context, remaining());
+}
 
 async function run(
   directory: string,
