@@ -21,6 +21,7 @@ import {
   objectLocation,
   producedContent,
   repositoryBindingOf,
+  repositoryBindingIdsOf,
   requiredVerifications,
   requireRepositoryAddress,
   requireTestedInput,
@@ -58,6 +59,7 @@ test("repository commits require complete lowercase SHA-1 or SHA-256 values", ()
 test("content checks pinned objective bindings and distinct current initiative resources including discarded objectives", (t) => {
   const h = executionHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");
+  const laterId = createIdentity("binding");
   const otherId = createIdentity("binding");
   const storageId = createIdentity("binding");
   h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
@@ -70,13 +72,14 @@ test("content checks pinned objective bindings and distinct current initiative r
         : id === otherId
           ? OTHER_RESOURCE
           : RESOURCE,
-    revision: FIRST,
+    revision: id === laterId ? FIRST + FIRST : FIRST,
     tombstone: false,
     disabled: false,
   });
   h.store.transaction((tx) => {
     const revision = getRevision(tx, h.nodeId, FIRST);
     const initiative = readNode(tx, h.nodeId)!;
+    assert.deepEqual(h.service.repositoryBindingIdsOf(tx, h.nodeId, FIRST), []);
     const address = {
       kind: AssetKind.Repository,
       bindingId,
@@ -94,7 +97,7 @@ test("content checks pinned objective bindings and distinct current initiative r
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
     const children: string[] = [];
-    for (const id of [bindingId, bindingId, otherId]) {
+    for (const id of [bindingId, laterId, otherId]) {
       const nodeId = createIdentity("node");
       children.push(nodeId);
       insertNode(tx, {
@@ -113,6 +116,10 @@ test("content checks pinned objective bindings and distinct current initiative r
       };
       insertRevision(tx, childRevision);
       setNodeState(tx, nodeId, NodeState.Discarded);
+      assert.deepEqual(
+        repositoryBindingIdsOf(tx, h.dependencies.bindings, nodeId, FIRST),
+        [id],
+      );
       const child = readNode(tx, nodeId)!;
       assert.equal(
         repositoryBindingOf(tx, h.dependencies.bindings, childRevision)
@@ -155,6 +162,10 @@ test("content checks pinned objective bindings and distinct current initiative r
         (error) => error instanceof OperationError && error.code === VALIDATION,
       );
     }
+    assert.deepEqual(h.service.repositoryBindingIdsOf(tx, h.nodeId, FIRST), [
+      laterId,
+      otherId,
+    ]);
     requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
       address,
       { ...address, bindingId: otherId },

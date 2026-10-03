@@ -47,6 +47,19 @@ import {
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 
 const fakeCollaborations = {
+  dataDirectory: "/unused",
+  workerBindingRowOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  repositoryPolicyOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  repositoryBindingIdsOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  pinnedCredentialMetadata: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   missionActions: {
     actionContextOf: () => {
       throw new Error("UNEXPECTED_COLLABORATION");

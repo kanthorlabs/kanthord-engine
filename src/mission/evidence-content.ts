@@ -23,6 +23,7 @@ import {
   readCurrentRevision,
   readMission,
   readMissionNodes,
+  readNode,
   type NodeRow,
 } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -110,11 +111,22 @@ export function requireRepositoryAddress(
     bindingMismatch(address.bindingId);
 }
 
-export function objectiveRepositories(
+export function repositoryBindingIdsOf(
   tx: Transaction,
   bindings: MissionBindings,
-  node: NodeRow,
-): Set<string> {
+  nodeId: string,
+  nodeRevision: number,
+): string[] {
+  const node = readNode(tx, nodeId);
+  assert.ok(node);
+  if (node.kind === NodeKind.Objective) {
+    const binding = repositoryBindingOf(
+      tx,
+      bindings,
+      getRevision(tx, nodeId, nodeRevision),
+    );
+    return binding ? [binding.bindingId] : [];
+  }
   assert.equal(node.kind, NodeKind.Initiative);
   assert.ok(tx.database.isTransaction);
   const objectives = readMissionNodes(tx, node.mission_id).filter(
@@ -123,14 +135,17 @@ export function objectiveRepositories(
       child.kind === NodeKind.Objective &&
       child.retired_at === null,
   );
-  const resources = new Set<string>();
+  const resources = new Map<string, { bindingId: string; revision: number }>();
   for (const child of objectives) {
     const row = readCurrentRevision(tx, child.id);
     assert.ok(row);
     const binding = repositoryBindingOf(tx, bindings, revisionFromRow(tx, row));
-    if (binding) resources.add(binding.resourceIdentity);
+    if (!binding) continue;
+    const previous = resources.get(binding.resourceIdentity);
+    if (!previous || previous.revision < binding.revision)
+      resources.set(binding.resourceIdentity, binding);
   }
-  return resources;
+  return [...resources.values()].map(({ bindingId }) => bindingId);
 }
 
 export function requireTestedInput(
@@ -148,7 +163,15 @@ export function requireTestedInput(
       requireRepositoryAddress(tx, bindings, node, revision, testedInput);
     return;
   }
-  const resources = objectiveRepositories(tx, bindings, node);
+  const resources = new Set(
+    repositoryBindingIdsOf(tx, bindings, node.id, revision.revision).map(
+      (id) => {
+        const binding = bindings.getBindingRevision(tx, id);
+        assert.ok(binding);
+        return binding.resourceIdentity;
+      },
+    ),
+  );
   if (resources.size === ZERO) {
     if (Array.isArray(testedInput) || testedInput.kind === AssetKind.Repository)
       invalidExecutionInput("testedInput");

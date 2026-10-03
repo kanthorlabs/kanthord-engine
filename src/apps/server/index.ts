@@ -203,6 +203,13 @@ export function composeServices(options: {
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>
       project.workerBindingOf(tx, projectId, resourceIdentity),
+    workerBindingRowOf: (tx, id) => project.workerBindingRowOf(tx, id),
+    repositoryPolicyOf: (tx, id) => project.repositoryPolicyOf(tx, id),
+    repositoryBindingIdsOf: (tx, nodeId, revision) =>
+      mission.repositoryBindingIdsOf(tx, nodeId, revision),
+    pinnedCredentialMetadata: (tx, execution, name, now) =>
+      custody.pinnedCredentialMetadata(tx, execution, name, now),
+    dataDirectory: directories(process.env).data,
     schedulerClaims: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
       runningExecutionOfRuntime: (...args) =>

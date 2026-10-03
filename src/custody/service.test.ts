@@ -723,6 +723,57 @@ test("list drains every returned name and revoke drains other unpinned revisions
   }
 });
 
+test("pinned metadata retains a rotated revision without creating a pin and refuses revocation", () => {
+  const noPins = 0;
+  const credentials: string[] = [];
+  const execution = {
+    executionId: "execution-one",
+    runtimeIdentity: createIdentity("worker_instance"),
+  };
+  const f = fixture({
+    executions: {
+      requireRunning: (tx, executionId, runtimeIdentity) => {
+        assert.ok(tx.database.isTransaction);
+        assert.equal(executionId, execution.executionId);
+        assert.equal(runtimeIdentity, execution.runtimeIdentity);
+        return {
+          ...execution,
+          projectId: createIdentity("project"),
+          workerBindingId: "binding-one",
+          resourceIdentity: "worker:kanthord:general",
+          credentials,
+        };
+      },
+      pinCredential: unexpectedCollaboration,
+      liveExecutionsPinning: (_tx, id) =>
+        credentials.includes(id) ? [execution.executionId] : [],
+    },
+  });
+  const metadata = () =>
+    f.store.transaction((tx) =>
+      f.component.pinnedCredentialMetadata(tx, execution, "github", Date.now()),
+    );
+  try {
+    const created = f.create(inputs[0]) as CredentialAnswer;
+    assert.equal(metadata(), null);
+    assert.equal(credentials.length, noPins);
+    credentials.push(created.revisions[0]!.id);
+    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    assert.deepEqual(metadata(), {
+      id: created.revisions[0]!.id,
+      name: "github",
+      platform: Platform.GitHub,
+      metadata: null,
+    });
+    assert.deepEqual(credentials, [created.revisions[0]!.id]);
+    f.revoke("github", FIRST_REVISION);
+    fails(metadata, HttpStatus.Conflict, "credential.revision.revoked");
+    assert.deepEqual(credentials, [created.revisions[0]!.id]);
+  } finally {
+    f.store.close();
+  }
+});
+
 test("protected release pins once, keeps rotation overlap and refuses revoked or unauthorized material", () => {
   const pins = new Map<string, string[]>();
   const credentials: string[] = [];

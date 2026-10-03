@@ -57,6 +57,7 @@ import {
 } from "./execution-read.ts";
 import { claim, release, loss } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
+import { repositoryBindingIdsOf } from "./evidence-content.ts";
 import {
   attemptPage,
   getAttempt,
@@ -810,6 +811,19 @@ export class MissionService
 
   actionContextOf(tx: Transaction, nodeId: string, attempt: number) {
     return actionContextOf(tx, this.dependencies, nodeId, attempt);
+  }
+
+  repositoryBindingIdsOf(
+    tx: Transaction,
+    nodeId: string,
+    nodeRevision: number,
+  ) {
+    return repositoryBindingIdsOf(
+      tx,
+      this.dependencies.bindings,
+      nodeId,
+      nodeRevision,
+    );
   }
 
   start(): Promise<Error | null> {

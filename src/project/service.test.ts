@@ -2417,6 +2417,47 @@ test("storageBindingOf shares the caller transaction and rollback", (t) => {
   });
 });
 
+test("workerBindingRowOf retains the pinned configuration in the caller transaction", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const original = workerBinding();
+    const pinned = persistBindings(tx, project.id, {
+      [WORKER_NAME]: original,
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings;
+    const entries = [
+      {
+        agent: "swe@1",
+        agentProvider: "default",
+        modelIdentifier: "claude-sonnet-4-5",
+        reasoningEffort: "off",
+      },
+    ];
+    persistBindings(tx, project.id, {
+      [WORKER_NAME]: { ...original, config: { ...original.config, entries } },
+    });
+    const nested = t.mock.method(f.store, "transaction", unexpected);
+    assert.deepEqual(
+      f.project.workerBindingRowOf(tx, pinned[WORKER_NAME]!.id),
+      {
+        bindingId: pinned[WORKER_NAME]!.id,
+        projectId: project.id,
+        workerName: original.config.worker,
+        entries: [],
+        resourceBudget: null,
+      },
+    );
+    assert.equal(
+      f.project.workerBindingRowOf(tx, pinned[REPOSITORY_NAME]!.id),
+      null,
+    );
+    assert.equal(f.project.workerBindingRowOf(tx, MISSING_NAME), null);
+    assert.equal(nested.mock.callCount(), NO_CALLS);
+    nested.mock.restore();
+  });
+});
+
 test("repositoryPolicyOf preserves the named revision after a strategy change", (t) => {
   const f = fixture(t);
   const baseBranch = "develop";

@@ -623,6 +623,20 @@ export class ProjectService implements Service, ProjectBindings {
       disabled,
     };
   }
+  workerBindingRowOf(tx: Transaction, bindingId: string) {
+    assert.ok(tx.database.isTransaction);
+    const binding = readBindingRevision(tx, bindingId);
+    if (!binding || kindOf(binding.resourceIdentity) !== BindingKind.Worker)
+      return null;
+    const config = workerConfigSchema.parse(binding.config);
+    return {
+      bindingId: binding.id,
+      projectId: binding.projectId,
+      workerName: config.worker,
+      entries: config.entries ?? [],
+      resourceBudget: config.resourceBudget ?? null,
+    };
+  }
   storageBindingOf(tx: Transaction, bindingId: string): StorageBinding | null {
     assert.ok(tx.database.isTransaction);
     const binding = readBindingRevision(tx, bindingId);

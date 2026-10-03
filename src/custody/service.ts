@@ -499,6 +499,37 @@ export class CustodyComponent implements Service {
       );
   }
 
+  pinnedCredentialMetadata(
+    tx: Transaction,
+    execution: { executionId: string; runtimeIdentity: string },
+    credentialName: string,
+    now: number,
+  ): CredentialMetadata | null {
+    const claim = this.executions.requireRunning(
+      tx,
+      execution.executionId,
+      execution.runtimeIdentity,
+      now,
+    );
+    const row = rowsForName(tx, credentialName).find(({ id }) =>
+      claim.credentials.includes(id),
+    );
+    if (!row) return null;
+    if (row.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionRevoked,
+        "Pinned credential revision is revoked.",
+      );
+    this.drainRevisions(tx, credentialName, now);
+    return {
+      id: row.id,
+      name: row.name,
+      platform: row.platform,
+      metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+    };
+  }
+
   credentialMetadata(
     tx: Transaction,
     credentialName: string,

@@ -34,6 +34,10 @@ import {
   WorkerHost,
   type WorkerRegistrations,
   type WorkerBindingOf,
+  type WorkerBindingRowOf,
+  type RepositoryPolicyOf,
+  type RepositoryBindingIdsOf,
+  type PinnedCredentialMetadataFn,
   type SchedulerClaims,
   type CustodyHandover,
   type MissionActions,
@@ -193,6 +197,11 @@ export interface Dependencies {
   config: WorkerConfig;
   store: Store;
   workerBindingOf: WorkerBindingOf;
+  workerBindingRowOf: WorkerBindingRowOf;
+  repositoryPolicyOf: RepositoryPolicyOf;
+  repositoryBindingIdsOf: RepositoryBindingIdsOf;
+  pinnedCredentialMetadata: PinnedCredentialMetadataFn;
+  dataDirectory: string;
   monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;
   custodySuitability: CustodySuitability;
@@ -723,6 +732,8 @@ export class WorkerService implements Service {
     workerName: string,
     agentName: string,
     entry: WorkerEntry | null,
+    credentialMetadata: CredentialMetadataFn = this.dependencies
+      .credentialMetadata,
   ): WorkerAgentView | null {
     if (
       !getWorkerDeclaration(workerName) ||
@@ -741,7 +752,10 @@ export class WorkerService implements Service {
     const defaults = current.defaultConfiguration;
     const config = effectiveConfiguration(defaults, entry);
     const issues = configurationIssues(
-      this.dependencies,
+      {
+        custodySuitability: this.dependencies.custodySuitability,
+        credentialMetadata,
+      },
       tx,
       agentName,
       current.agentProviders,

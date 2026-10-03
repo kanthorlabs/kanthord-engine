@@ -293,6 +293,34 @@ export type WorkerBindingOf = (
   tombstone: boolean;
 } | null;
 
+export type WorkerBindingRowOf = (
+  tx: Transaction,
+  bindingId: string,
+) => {
+  bindingId: string;
+  projectId: string;
+  workerName: string;
+  entries: Array<WorkerEntry & { agent: string }>;
+  resourceBudget: { turns: number; wallTimeMs: number } | null;
+} | null;
+
+export type RepositoryPolicyOf = (
+  tx: Transaction,
+  bindingId: string,
+) => {
+  bindingId: string;
+  name: string;
+  address: string;
+  baseBranch: string;
+  projectPrompt: string | null;
+} | null;
+
+export type RepositoryBindingIdsOf = (
+  tx: Transaction,
+  nodeId: string,
+  nodeRevision: number,
+) => string[];
+
 export const InstanceActivity = {
   Idle: "idle",
   Pulling: "pulling",
@@ -437,6 +465,13 @@ export type CredentialMetadataRecord = {
 export type CredentialMetadataFn = (
   tx: Transaction,
   credentialName: string,
+) => CredentialMetadataRecord | null;
+
+export type PinnedCredentialMetadataFn = (
+  tx: Transaction,
+  execution: { executionId: string; runtimeIdentity: string },
+  credentialName: string,
+  now: number,
 ) => CredentialMetadataRecord | null;
 
 export const AGENT_PROVIDER_CAPABILITY = "model-list read";
