@@ -7,7 +7,7 @@ import { configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { gatewayFixture, objectSink, sinkStorage } from "./test-support.ts";
 
 const SUCCESS = 0;
 const EMPTY = "";
@@ -18,9 +18,11 @@ export const WORKER_DEFAULTS = {
   reasoningEffort: "off",
 };
 
-export async function workerAcceptance(t: TestContext) {
+export async function workerAcceptance(t: TestContext, host = false) {
+  const sink = host ? await objectSink(t) : undefined;
   const fixture = await gatewayFixture(t, {
     repositoryConnector: { gitLsRemote: async () => {} },
+    ...(sink ? { standIns: { intakeStorage: sinkStorage(sink) } } : {}),
   });
   const directory = temporary(t);
   const human = {
@@ -57,15 +59,43 @@ export async function workerAcceptance(t: TestContext) {
     ],
     defaultConfiguration: WORKER_DEFAULTS,
   });
+  const storage = {
+    endpoint: "https://s3.example.com",
+    bucket: "evidence",
+    region: "eu-central-1",
+  };
+  if (host)
+    await write(["credential", "create"], {
+      name: "store",
+      platform: "s3",
+      metadata: storage,
+      secret: {
+        accessKeyId: "test_access_key",
+        secretAccessKey: "test_secret_key",
+      },
+    });
   const project = await read<{ id: string }>([
     "project",
     "create",
     "--name",
-    "worker-app",
+    host ? "worker-host" : "worker-app",
   ]);
   await write(["project", "binding", "apply", project.id], {
     version: 1,
     bindings: {
+      ...(host
+        ? {
+            store: {
+              kind: "storage",
+              config: {
+                available: true,
+                ...storage,
+                prefix: "kanthord",
+                credential: "store",
+              },
+            },
+          }
+        : {}),
       repo: {
         kind: "repository",
         config: {
@@ -120,14 +150,24 @@ export async function workerAcceptance(t: TestContext) {
     assert.equal(result.stderr, EMPTY);
     return parse(result.stdout) as { token: string; clientSecret: string };
   }
-  await read([
-    "worker",
-    "agent",
-    "enablement",
-    "disable",
-    "swe@1",
-    "--expected-revision",
-    "1",
-  ]);
-  return { fixture, human, projectId: project.id, read, write, machine };
+  if (!host)
+    await read([
+      "worker",
+      "agent",
+      "enablement",
+      "disable",
+      "swe@1",
+      "--expected-revision",
+      "1",
+    ]);
+  return {
+    fixture,
+    human,
+    projectId: project.id,
+    read,
+    write,
+    machine,
+    sink,
+    directory,
+  };
 }
