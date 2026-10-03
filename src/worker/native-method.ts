@@ -7,6 +7,25 @@ import {
   type ExecutionRun,
 } from "./execution-run.ts";
 import type { NativeAgent } from "./native-agent.ts";
+import type { TranscriptSink } from "./transcript.ts";
+
+export function disposeAgent(
+  run: ExecutionRun,
+  agent: NativeAgent | null,
+  transcript: TranscriptSink,
+): void {
+  if (!agent) return;
+  try {
+    transcript.record({
+      executionId: run.claim.executionId,
+      attempt: run.claim.attempt,
+      traceId: run.claim.traceId,
+      messages: agent.transcript(),
+    });
+  } finally {
+    agent.dispose();
+  }
+}
 
 export function stopOnEnd(run: ExecutionRun, agent: NativeAgent): () => void {
   return run.onStop(() => void agent.abort());
