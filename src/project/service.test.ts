@@ -1517,6 +1517,22 @@ function schemaIssues(bindings: unknown) {
   return result.error.issues.map(({ code, path }) => ({ code, path }));
 }
 
+function forbiddenFollows(name: string) {
+  return {
+    code: CUSTOM_ISSUE,
+    path: [
+      "body",
+      "bindings",
+      name,
+      "config",
+      "strategy",
+      "action",
+      "follows",
+      "binding",
+    ],
+  };
+}
+
 test("whole-set schema rejects missing, wrong-kind and actionless follows targets at the reference path", () => {
   for (const target of [
     undefined,
@@ -1529,6 +1545,7 @@ test("whole-set schema rejects missing, wrong-kind and actionless follows target
       ...(target ? { [SECOND_REPOSITORY_NAME]: target } : {}),
     };
     assert.deepEqual(schemaIssues(bindings), [
+      forbiddenFollows(REPOSITORY_NAME),
       {
         code: CUSTOM_ISSUE,
         path: [
@@ -1550,6 +1567,7 @@ test("whole-set schema rejects self and multi-binding cycles and duplicate agent
   assert.deepEqual(
     schemaIssues({ [REPOSITORY_NAME]: followingRepository(REPOSITORY_NAME) }),
     [
+      forbiddenFollows(REPOSITORY_NAME),
       {
         code: CUSTOM_ISSUE,
         path: [
@@ -1571,6 +1589,8 @@ test("whole-set schema rejects self and multi-binding cycles and duplicate agent
       [SECOND_REPOSITORY_NAME]: followingRepository(REPOSITORY_NAME),
     }),
     [
+      forbiddenFollows(REPOSITORY_NAME),
+      forbiddenFollows(SECOND_REPOSITORY_NAME),
       {
         code: CUSTOM_ISSUE,
         path: [
@@ -1614,7 +1634,7 @@ test("whole-set schema rejects self and multi-binding cycles and duplicate agent
   const valid = bindingSetWriteInputSchema.safeParse({
     version: BINDING_SET_INITIAL_VERSION,
     bindings: {
-      [REPOSITORY_NAME]: followingRepository(SECOND_REPOSITORY_NAME),
+      [REPOSITORY_NAME]: followingRepository(),
       [SECOND_REPOSITORY_NAME]: followingRepository(),
       [WORKER_NAME]: {
         ...workerBinding(),

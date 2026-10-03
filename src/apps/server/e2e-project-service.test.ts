@@ -84,6 +84,54 @@ const WORKER_BINDING = {
   },
 };
 
+test("binding apply refuses action-end-state follows through CLI validation", async (t) => {
+  const f = await setup(t);
+  const path = join(f.directory, "follows.json");
+  const repository = {
+    kind: "repository",
+    config: {
+      available: true,
+      platform: "github",
+      address: ADDRESS,
+      credential: "github",
+      strategy: {
+        baseBranch: BASE_BRANCH,
+        action: {
+          name: "pull_request",
+          follows: { type: "action_end_state", binding: "repo" },
+        },
+      },
+    },
+  };
+  writePrivate(
+    path,
+    JSON.stringify({ version: ONE, bindings: { repo: repository } }),
+  );
+  const result = await kanthord(
+    [
+      "project",
+      "binding",
+      "apply",
+      "project_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "--file",
+      path,
+    ],
+    f.env,
+  );
+  assert.equal(result.code, FAILURE);
+  assert.ok(
+    result.stderr.startsWith("cli.file.schema_invalid:"),
+    result.stderr,
+  );
+  assert.ok(
+    result.stderr.includes(
+      '"path":["bindings","repo","config","strategy","action","follows","binding"]',
+    ),
+    result.stderr,
+  );
+  assert.equal(result.stdout, EMPTY);
+});
+
 type Result = Awaited<ReturnType<typeof kanthord>>;
 type Fixture = { directory: string; env: NodeJS.ProcessEnv };
 type Project = z.infer<typeof projectOperations.get.output>;

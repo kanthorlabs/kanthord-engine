@@ -20,7 +20,56 @@ import {
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
   REPOSITORY_PLATFORM,
+  bindingSetWriteInputSchema,
 } from "./contract.ts";
+
+test("action follows accepts assessment and refuses action dependencies before relation diagnostics", () => {
+  const refusal =
+    "Action follows must name the passing assessment until a claim-source contract exists.";
+  const repository = (follows: unknown) => ({
+    kind: "repository",
+    config: {
+      available: true,
+      platform: "github",
+      address: "git@github.com:owner/repo.git",
+      credential: "github",
+      strategy: {
+        baseBranch: "main",
+        action: { name: "pull_request", follows },
+      },
+    },
+  });
+  const passing = repository({ type: "assessment_passed" });
+  assert.equal(
+    bindingSetWriteInputSchema.safeParse({
+      version: ONE,
+      bindings: { repo: passing },
+    }).success,
+    true,
+  );
+  const path = [
+    "bindings",
+    "repo",
+    "config",
+    "strategy",
+    "action",
+    "follows",
+    "binding",
+  ];
+  for (const target of ["repo", "other", "missing"]) {
+    const parsed = bindingSetWriteInputSchema.safeParse({
+      version: ONE,
+      bindings: {
+        repo: repository({ type: "action_end_state", binding: target }),
+        other: passing,
+      },
+    });
+    assert.equal(parsed.success, false);
+    assert.ok(!parsed.success);
+    assert.equal(parsed.error.issues[0]?.message, refusal);
+    assert.deepEqual(parsed.error.issues[0]?.path, path);
+  }
+});
 import { projectMigrations } from "./migrations.ts";
 import {
   deriveResourceIdentity,

@@ -240,6 +240,12 @@ function refineBindingRelations(
     if (binding.kind !== BindingKind.Repository) continue;
     const follows = binding.config.strategy.action?.follows;
     if (follows?.type !== FollowsType.ActionEndState) continue;
+    ctx.addIssue({
+      code: CUSTOM_ISSUE,
+      path: followsPath(name),
+      message:
+        "Action follows must name the passing assessment until a claim-source contract exists.",
+    });
     const target = Object.hasOwn(bindings, follows.binding)
       ? bindings[follows.binding]
       : undefined;
