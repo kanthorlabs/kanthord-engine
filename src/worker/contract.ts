@@ -533,6 +533,7 @@ export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
+  RuntimeSetupRefused: "worker.runtime.setup_refused",
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
   AssessmentNotCurrent: "worker.action_performer.assessment_not_current",
   SnapshotAbsent: "worker.action_performer.snapshot_absent",
@@ -585,6 +586,37 @@ export const effectiveConfigurationSchema = z
     reasoningEffort: reasoningEffortSchema,
   })
   .describe(CONFIGURATION_DESCRIPTION);
+export const SetupRefusal = {
+  ModelUnknown: "model_unknown",
+  ReasoningEffortUnsupported: "reasoning_effort_unsupported",
+  CredentialAbsent: "credential_absent",
+  CredentialRevisionMismatch: "credential_revision_mismatch",
+} as const;
+export interface ExecutionSetup {
+  executionId: string;
+  workerName: string;
+  agentName: string;
+  effectiveConfiguration: z.infer<typeof effectiveConfigurationSchema>;
+  credentialId: string;
+  metadata: {
+    baseUrl: string;
+    models: {
+      id: string;
+      contextWindow?: number;
+      maxTokens?: number;
+      reasoningLevels?: z.infer<typeof reasoningEffortSchema>[];
+    }[];
+  } | null;
+  resourceBudget: { turns?: number; wallTimeMs: number };
+  repositories: {
+    bindingId: string;
+    name: string;
+    address: string;
+    strategy: { baseBranch: string };
+    projectPrompt: string | null;
+  }[];
+  globalPrompt: import("./prompt-composer.ts").GlobalPromptSource;
+}
 export const toolDeclarationSchema = z.strictObject({
   name: z.string().min(1),
   source: z.enum(ToolSource),
