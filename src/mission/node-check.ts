@@ -35,6 +35,7 @@ import { claimableMap, reconcileMission } from "./routing.ts";
 import { setNodeState } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
+import { authorizeRequest } from "./authorization.ts";
 
 const ZERO = 0;
 const ONE = 1;
@@ -210,6 +211,9 @@ export async function checkNode(
   for (const item of prepared.requests) {
     let answer: CheckAnswer;
     try {
+      dependencies.store.transaction((tx) =>
+        authorizeRequest(tx, dependencies, item.request.id),
+      );
       answer = checkAnswerSchema.parse(
         await dependencies.intakeCheck.check(caller.context, {
           frozenAction: item.frozenAction,

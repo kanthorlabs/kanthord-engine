@@ -61,6 +61,7 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import { executionSetup } from "./execution-setup.ts";
+import { authorizeModelInference } from "./authorization.ts";
 import {
   agentsOfWorker,
   getAgentDeclaration,
@@ -213,6 +214,19 @@ export interface Dependencies {
   registrations?: WorkerRegistrations;
 }
 export class WorkerService implements Service {
+  authorizeModelInference(
+    tx: Transaction,
+    identity: Parameters<typeof authorizeModelInference>[3],
+    execution: Parameters<typeof authorizeModelInference>[4],
+  ) {
+    return authorizeModelInference(
+      this.dependencies,
+      this,
+      tx,
+      identity,
+      execution,
+    );
+  }
   readonly registrations: WorkerRegistrations;
   readonly heartbeatClock: HeartbeatClock;
   private heartbeatTimer?: ReturnType<typeof setInterval>;

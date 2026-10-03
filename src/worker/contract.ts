@@ -223,6 +223,16 @@ export type ActionContext = {
   }[];
 };
 export interface MissionActions {
+  authorizeRequest(
+    tx: Transaction,
+    evidenceId: string,
+    claim: import("../kernel/operation.ts").ExecutionClaim,
+  ): FrozenAction;
+  authorizeAction(
+    tx: Transaction,
+    claim: import("../kernel/operation.ts").ExecutionClaim,
+    key: string,
+  ): FrozenAction;
   actionContextOf(
     tx: Transaction,
     nodeId: string,
@@ -250,6 +260,7 @@ export interface IntakeActions {
     call: IntakeActionCall,
     action: FrozenAction,
     operands: ActionOperands,
+    requestKey: string,
   ): Promise<PlatformAddress | ResultClassAnswer>;
   read(
     call: IntakeActionCall,
@@ -309,12 +320,24 @@ export type WorkerBindingOf = (
   tombstone: boolean;
 } | null;
 
+export const AuthorizationRefusal = {
+  BindingMismatch: "binding_mismatch",
+  BindingRemoved: "binding_removed",
+  BindingDisabled: "binding_disabled",
+  NoNativeAgent: "no_native_agent",
+} as const;
+export type AuthorizationRefusal =
+  (typeof AuthorizationRefusal)[keyof typeof AuthorizationRefusal];
+
 export type WorkerBindingRowOf = (
   tx: Transaction,
   bindingId: string,
 ) => {
   bindingId: string;
   projectId: string;
+  resourceIdentity: string;
+  tombstone: boolean;
+  disabled: boolean;
   workerName: string;
   entries: Array<WorkerEntry & { agent: string }>;
   resourceBudget: { turns: number; wallTimeMs: number } | null;
@@ -584,6 +607,7 @@ export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
+  AuthorizationRefused: "worker.authorization.refused",
   ExecutionNoNativeAgent: "worker.execution.no_native_agent",
   ExecutionCredentialNotPinned: "worker.execution.credential_not_pinned",
   StartToolMissing: "worker.start.tool_missing",

@@ -16,7 +16,7 @@ import { setNodeState } from "./store.ts";
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const ZERO = 0;
 const ONE = 1;
-const NOT_RUNNING = "scheduler.execution.not_running";
+const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
 const VALIDATION = "gateway.request.validation_failed";
 const Field = {
   Subject: "subject",

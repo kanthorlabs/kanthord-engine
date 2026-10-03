@@ -28,6 +28,7 @@ import {
   type EvidenceRow,
 } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
+import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 
 type Identities = { evidenceId: string; assetIds: string[] };
 type ObjectUpload = {
@@ -47,6 +48,8 @@ export function prepareEvidence(
   now: number,
   ids: Identities,
 ) {
+  if (body.assets.some((asset) => asset.kind === AssetKind.Object))
+    authorizeClaim(tx, dependencies, claim, nodeId);
   const { node, revision, actor } = admitExecution(
     tx,
     dependencies,
@@ -115,8 +118,9 @@ export function prepareEvidence(
         MissionErrorCode.EvidenceStorageBindingAbsent,
         "The pinned revision has no storage binding.",
       );
-    const binding = dependencies.bindings.storageBindingOf(
+    const binding = authorizeStorage(
       tx,
+      dependencies.bindings,
       storageBindingId,
     );
     assert.ok(binding);

@@ -28,6 +28,7 @@ import { endLiveClaim, transition } from "./control.ts";
 import { readMissionNodes, type NodeRow } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
+import { authorizeStorage } from "./authorization.ts";
 
 export type EvidenceDelete = z.infer<typeof evidenceDeleteSchema>;
 
@@ -96,7 +97,7 @@ export async function deleteObject(
   if (asset.kind !== AssetKind.Object) return;
   const content = objectContentSchema.parse(JSON.parse(asset.content));
   const binding = dependencies.store.transaction((tx) =>
-    dependencies.bindings.storageBindingOf(tx, content.storageBindingId),
+    authorizeStorage(tx, dependencies.bindings, content.storageBindingId),
   );
   assert.ok(binding);
   await dependencies.intakeStorage.delete(
@@ -104,6 +105,7 @@ export async function deleteObject(
     binding,
     keyOfLocation(binding, content.location),
     content.objectVersion ?? null,
+    asset.id,
   );
 }
 

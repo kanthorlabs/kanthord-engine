@@ -125,6 +125,24 @@ function harness(t: TestContext) {
       activityOf: () => assert.fail("unexpected read"),
     },
     missionActions: {
+      authorizeRequest: (tx, evidenceId, suppliedClaim) => {
+        assert.ok(tx.database.isTransaction);
+        assert.deepEqual(suppliedClaim, claim);
+        const entry = context.actions.find((item) =>
+          item.reuseCandidates.some(
+            (candidate) => candidate.evidenceId === evidenceId,
+          ),
+        );
+        assert.ok(entry);
+        return entry.action;
+      },
+      authorizeAction: (tx, suppliedClaim, key) => {
+        assert.ok(tx.database.isTransaction);
+        assert.deepEqual(suppliedClaim, claim);
+        const entry = context.actions.find((item) => item.action.key === key);
+        assert.ok(entry);
+        return entry.action;
+      },
       actionContextOf: (tx, nodeId, attempt) => {
         assert.ok(tx.database.isTransaction);
         assert.equal(nodeId, claim.nodeId);
@@ -221,6 +239,7 @@ test("dispatch forwards identity, derived operands and the returned address to M
       commit: COMMIT,
       reusedAddress: null,
     },
+    `${h.claim.nodeId}/${FIRST}/${h.entry.action.key}`,
   ]);
   const [input, options] = request.mock.calls[0]!.arguments;
   assert.deepEqual(input.body, {
@@ -245,7 +264,19 @@ test("merge push records the address and commit returned by Intake", async (t) =
     branch: "main",
     commit: "d".repeat(40),
   };
-  h.dependencies.intakeActions.perform = async () => pushed;
+  h.dependencies.intakeActions.perform = async (
+    _call,
+    _action,
+    operands,
+    requestKey,
+  ) => {
+    assert.equal(
+      requestKey,
+      `${h.claim.nodeId}/${FIRST}/${h.entry.action.key}/${COMMIT}`,
+    );
+    assert.equal(operands.commit, COMMIT);
+    return pushed;
+  };
   const request = t.mock.method(h.dependencies.evidenceRequests, "request");
   assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
   assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, pushed);
@@ -272,6 +303,10 @@ test("no-effect refusal releases the reservation for a later invocation", async 
   ]);
   await h.perform();
   assert.equal(perform.mock.callCount(), SECOND);
+  assert.equal(
+    perform.mock.calls[0]!.arguments[3],
+    perform.mock.calls[1]!.arguments[3],
+  );
 });
 
 test("refused or thrown recording retains the known address as recording uncertainty", async (t) => {

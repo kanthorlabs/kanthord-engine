@@ -20,7 +20,7 @@ const FIRST = 1;
 const ZERO = 0;
 const VERSION = "stored-version";
 const KEY = "prefix/key";
-const NOT_RUNNING = "scheduler.execution.not_running";
+const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
 
 function fixture(t: TestContext, expired = false) {
   const h = executionHarness(t, IDENTITY);
@@ -38,6 +38,15 @@ function fixture(t: TestContext, expired = false) {
     assert.equal(id, binding.bindingId);
     return binding;
   };
+  h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
+    bindingId: id,
+    projectId: h.projectId,
+    name: "storage",
+    resourceIdentity: "storage:s3:bucket",
+    revision: 1,
+    tombstone: false,
+    disabled: false,
+  });
   const evidenceId = createIdentity("evidence");
   const assetId = createIdentity("evidence_asset");
   const location = "s3://bucket/prefix/key";
@@ -161,7 +170,9 @@ test("expired uploads fail before Intake and foreign claimed nodes fail context 
     foreign.complete,
     (error) =>
       error instanceof OperationError &&
-      error.code === MissionErrorCode.ExecutionContextMismatch,
+      error.code === MissionErrorCode.AuthorizationRefused &&
+      JSON.stringify(error.details) ===
+        JSON.stringify({ reason: "node_mismatch" }),
   );
   assert.equal(foreign.checks(), ZERO);
 });

@@ -173,11 +173,26 @@ export class ActionPerformer {
   ): Promise<ActionResultItem> {
     assert.ok("owner" in pending.reservation);
     assert.equal(pending.key.nodeId, claim.nodeId);
+    const authorized = this.dependencies.store.transaction((tx) =>
+      this.dependencies.missionActions.authorizeAction(
+        tx,
+        claim,
+        pending.entry.action.key,
+      ),
+    );
+    assert.deepEqual(authorized, pending.entry.action);
     const call = { ...caller, executionId: claim.executionId };
     let settlement: UncertainItem | null = null;
     try {
-      const refusal = await this.reuse(call, pending);
+      const refusal = await this.reuse(call, claim, pending);
       if (refusal) return refusal;
+      this.dependencies.store.transaction((tx) =>
+        this.dependencies.missionActions.authorizeAction(
+          tx,
+          claim,
+          pending.entry.action.key,
+        ),
+      );
       settlement = {
         kind: ActionResultKind.Uncertain,
         action: pending.key.action,
@@ -221,6 +236,7 @@ export class ActionPerformer {
         call,
         pending.entry.action,
         pending.operands,
+        `${pending.key.nodeId}/${pending.key.attempt}/${pending.entry.action.key}${pending.entry.action.action === RepositoryAction.MergePush ? `/${pending.operands.commit}` : ""}`,
       );
     } catch (error) {
       if (error instanceof CodedError && error.code === UNWIRED_CODE)
@@ -231,6 +247,7 @@ export class ActionPerformer {
 
   private async reuse(
     call: IntakeActionCall,
+    claim: ExecutionClaim,
     pending: Pending,
   ): Promise<ActionResultItem | null> {
     const { entry, operands } = pending;
@@ -239,6 +256,13 @@ export class ActionPerformer {
     if (entry.action.action !== RepositoryAction.PullRequest) return null;
     for (const candidate of entry.reuseCandidates) {
       if (!sameRepository(candidate, entry.resourceIdentity)) continue;
+      this.dependencies.store.transaction((tx) =>
+        this.dependencies.missionActions.authorizeRequest(
+          tx,
+          candidate.evidenceId,
+          claim,
+        ),
+      );
       const answer = await this.dependencies.intakeActions.read(
         call,
         ActionReadMethod.PullRequestGet,

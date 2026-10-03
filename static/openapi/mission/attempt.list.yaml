@@ -236,6 +236,12 @@ components:
                         enum:
                           - scheduler
                           - mission
+                      inbound_event_id:
+                        type: string
+                        minLength: 40
+                        maxLength: 40
+                        pattern: ^inbound_event_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: inbound_event_ followed by a canonical 26-character uppercase ULID.
                     required:
                       - kind
                       - service

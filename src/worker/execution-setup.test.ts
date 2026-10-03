@@ -53,6 +53,9 @@ test("setup resolves configured global files before its single snapshot and supp
     workerBindingRowOf: () => ({
       bindingId: claim.workerBindingId,
       projectId: claim.projectId,
+      resourceIdentity: "worker:general@1",
+      tombstone: false,
+      disabled: false,
       workerName: setup.workerName,
       entries: [entry],
       resourceBudget: null,

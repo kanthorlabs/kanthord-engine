@@ -23,7 +23,7 @@ const DATA = "aGk=";
 const KEY = "key";
 const ZERO = 0;
 const VERSION = "v1";
-const NOT_RUNNING = "scheduler.execution.not_running";
+const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
 const Change = {
   Publish: "publish",
   Delete: "delete",

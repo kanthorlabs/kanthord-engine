@@ -169,7 +169,7 @@ export function composeServices(options: {
     },
     authorization: {
       authorizeModelInference: (...args) =>
-        project.authorizeModelInference(...args),
+        worker.authorizeModelInference(...args),
     },
     clientSecret: (clientId) =>
       deriveClientSecret(options.config.masterKey, clientId),
@@ -185,6 +185,8 @@ export function composeServices(options: {
   });
   const worker: WorkerService = new WorkerService({
     missionActions: {
+      authorizeRequest: (...args) => mission.authorizeRequest(...args),
+      authorizeAction: (...args) => mission.authorizeAction(...args),
       actionContextOf: (...args) => mission.actionContextOf(...args),
     },
     evidenceRequests: {

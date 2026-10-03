@@ -27,6 +27,35 @@ import {
 } from "./contract.ts";
 
 const ZERO_ATTEMPT = 0;
+test("service provenance accepts an optional canonical snake-case inbound event identity", () => {
+  const plain = { kind: ActorKind.Service, service: ActorService.Mission };
+  const provenance = {
+    ...plain,
+    inbound_event_id: createIdentity("inbound_event"),
+  };
+  assert.deepEqual(actorSchema.parse(plain), plain);
+  assert.deepEqual(actorSchema.parse(provenance), provenance);
+  assert.equal(
+    actorSchema.safeParse({ ...plain, inbound_event_id: "invalid" }).success,
+    false,
+  );
+  assert.equal(
+    actorSchema.safeParse({
+      ...plain,
+      inboundEventId: provenance.inbound_event_id,
+    }).success,
+    false,
+  );
+  assert.equal(
+    actorSchema.safeParse({
+      kind: ActorKind.Human,
+      account: "ulrich",
+      name: "Ulrich",
+      inbound_event_id: provenance.inbound_event_id,
+    }).success,
+    false,
+  );
+});
 const FIRST_REVISION = 1;
 const REASON = "Hold the work";
 const UNKNOWN_KEY = "unexpected";

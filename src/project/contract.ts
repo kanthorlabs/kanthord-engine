@@ -74,15 +74,6 @@ export const ProjectErrorCode = {
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
 } as const;
 
-export const AuthorizationRefusal = {
-  BindingMismatch: "binding_mismatch",
-  BindingRemoved: "binding_removed",
-  BindingDisabled: "binding_disabled",
-  NoNativeAgent: "no_native_agent",
-} as const;
-export type AuthorizationRefusal =
-  (typeof AuthorizationRefusal)[keyof typeof AuthorizationRefusal];
-
 export const projectNameSchema = z
   .string()
   .min(1)

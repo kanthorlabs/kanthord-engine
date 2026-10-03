@@ -92,6 +92,7 @@ export type ModelInferenceAuthorization = {
   agentProvider: string;
 };
 export interface CustodyAuthorization {
+  /** Supplied by Worker, which owns inference authorization through the claim's worker binding. */
   authorizeModelInference(
     tx: Transaction,
     identity: MachineIdentity,

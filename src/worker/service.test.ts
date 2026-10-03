@@ -61,6 +61,12 @@ const fakeCollaborations = {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
   missionActions: {
+    authorizeRequest: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    authorizeAction: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
     actionContextOf: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },

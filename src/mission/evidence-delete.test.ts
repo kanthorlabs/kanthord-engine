@@ -32,6 +32,36 @@ const ONE = 1;
 const TWO = 2;
 const VERSION = "version";
 const KEY = "key";
+const DISABLED_FIELD = "disabled";
+
+test("force never bypasses disabled or removed storage authorization", async (t) => {
+  for (const field of ["disabled", "tombstone"] as const) {
+    const h = fixture(t);
+    const original = h.dependencies.bindings.getBindingRevision;
+    h.dependencies.bindings.getBindingRevision = (tx, id) => ({
+      ...original(tx, id)!,
+      [field]: true,
+    });
+    const remote = t.mock.method(
+      h.dependencies.intakeStorage,
+      "delete",
+      async () => undefined,
+    );
+    await assert.rejects(h.remove(true), {
+      status: 403,
+      code: MissionErrorCode.AuthorizationRefused,
+      details: {
+        reason:
+          field === DISABLED_FIELD ? "binding_disabled" : "binding_removed",
+      },
+    });
+    assert.equal(remote.mock.callCount(), ZERO);
+    assert.equal(
+      h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
+      ONE,
+    );
+  }
+});
 
 function fixture(t: TestContext, request = false) {
   const h = evidenceHarness(t, IDENTITY);
@@ -99,10 +129,12 @@ test("asset deletes require a terminal ancestor chain or force and preserve the 
     binding,
     key,
     version,
+    requestKey,
   ) => {
     assert.equal(binding.bindingId, h.storageId);
     assert.equal(key, KEY);
     assert.equal(version, VERSION);
+    assert.equal(requestKey, h.assetId);
   };
   await assert.rejects(
     h.remove(),
@@ -127,13 +159,33 @@ test("asset deletes require a terminal ancestor chain or force and preserve the 
   });
 });
 
-test("failed remote deletion preserves the row, force retries it, and stale versions refuse before remote deletion", async (t) => {
+test("failed remote deletion reads back on repeat and requires human request removal to redispatch", async (t) => {
   const h = fixture(t);
   let calls = ZERO;
   const failure = new Error("delete failed");
-  h.dependencies.intakeStorage.delete = async () => {
+  let failedRequest = false;
+  let readBacks = ZERO;
+  let fail = true;
+  h.dependencies.intakeStorage.delete = async (
+    _call,
+    binding,
+    key,
+    version,
+    requestKey,
+  ) => {
+    assert.equal(requestKey, h.assetId);
+    assert.equal(binding.bindingId, h.storageId);
+    assert.equal(key, KEY);
+    assert.equal(version, VERSION);
+    if (failedRequest) {
+      readBacks++;
+      throw failure;
+    }
     calls++;
-    throw failure;
+    if (fail) {
+      failedRequest = true;
+      throw failure;
+    }
   };
   await assert.rejects(
     h.remove(true, TWO),
@@ -147,9 +199,12 @@ test("failed remote deletion preserves the row, force retries it, and stale vers
     h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
     ONE,
   );
-  h.dependencies.intakeStorage.delete = async () => {
-    calls++;
-  };
+  await assert.rejects(h.remove(true), (error) => error === failure);
+  assert.equal(calls, ONE);
+  assert.equal(readBacks, ONE);
+  // The fake models a human deleting the failed Intake outbound request.
+  failedRequest = false;
+  fail = false;
   await h.remove(true);
   assert.equal(calls, TWO);
   assert.equal(

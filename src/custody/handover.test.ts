@@ -103,7 +103,7 @@ function fixture(t: TestContext) {
         if (!authorized)
           throw new OperationError(
             HttpStatus.Forbidden,
-            "project.authorization.refused",
+            "worker.authorization.refused",
             "Refused.",
           );
         return {
@@ -274,6 +274,6 @@ test("authorization refusal reaches no material or pin", (t) => {
   f.store.database
     .prepare("UPDATE credential SET ciphertext = ?")
     .run(Buffer.from("corrupt"));
-  assert.throws(f.handover, { code: "project.authorization.refused" });
+  assert.throws(f.handover, { code: "worker.authorization.refused" });
   assert.deepEqual(f.row.credentials, []);
 });

@@ -14,6 +14,7 @@ import { admitExecution, executionMismatch } from "./execution.ts";
 import { keyOfLocation } from "./evidence-content.ts";
 import { readEvidence, type AssetRow } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
+import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 
 const objectContentSchema = z.strictObject({
   location: z.string(),
@@ -45,6 +46,7 @@ export function prepareComplete(
     );
   const evidence = readEvidence(tx, asset.evidence_id);
   assert.ok(evidence);
+  authorizeClaim(tx, dependencies, claim, evidence.node_id);
   admitExecution(tx, dependencies, claim, evidence.node_id, context, now);
   if (evidence.attempt !== claim.attempt) executionMismatch("attempt");
   const content = objectContentSchema.parse(JSON.parse(asset.content));
@@ -61,8 +63,9 @@ export function prepareComplete(
       MissionErrorCode.EvidenceUploadExpired,
       "Evidence upload has expired.",
     );
-  const binding = dependencies.bindings.storageBindingOf(
+  const binding = authorizeStorage(
     tx,
+    dependencies.bindings,
     content.storageBindingId,
   );
   assert.ok(binding);

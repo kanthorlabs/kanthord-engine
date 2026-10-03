@@ -15,17 +15,13 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
-import {
-  testHumanIdentity,
-  testMachineIdentity,
-} from "../kernel/test-identity.ts";
+import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { WorkerErrorCode } from "../worker/contract.ts";
 import {
   BINDING_ID_PREFIX,
-  AuthorizationRefusal,
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
   BindingState,
@@ -515,126 +511,21 @@ test("worker group resolution rejects absence, disablement and removal", async (
   assert.equal(await resolve(), null);
 });
 
-test("model inference authorization preserves pinned entries and checks every chain break", (t) => {
-  const nativeAgent = "swe@1";
-  const provider = "anthropic";
-  const credential = "anthro-1";
-  const selected = "override";
-  let agents = [nativeAgent];
-  let valid = true;
-  const issues = [{ path: ["agent"], code: WorkerErrorCode.Unavailable }];
-  const f = bindingFixture(t, {
-    workerAgentsOf: () => agents,
-    workerAgentView: (tx, worker, agent, entry) => {
-      assert(tx.database.isTransaction);
-      assert.equal(agent, nativeAgent);
-      assert.equal(worker, GROUP_WORKER_NAME);
-      return {
-        valid,
-        issues: valid ? [] : issues,
-        defaults: null,
-        effective: valid
-          ? {
-              agentProvider: entry?.agentProvider ?? "default",
-              provider,
-              credential,
-              modelIdentifier: "claude-sonnet-4-5",
-              reasoningEffort: "off",
-            }
-          : null,
-      };
-    },
-  });
+test("worker binding resolution retains pinned configuration and reports later disablement and removal", (t) => {
+  const f = bindingFixture(t);
   const bindingId = f.write(SINGLE_INSTANCE);
-  const identity = testMachineIdentity(
-    {
-      clientId: createIdentity("client_identity"),
-      name: "test",
-      projectId: f.projectId,
-      resourceIdentity: WORKER_GROUP,
-      issuedAt: 0,
-    },
-    "jti",
-  );
-  const execution = {
-    executionId: createIdentity("execution"),
-    projectId: f.projectId,
-    workerBindingId: bindingId,
-    resourceIdentity: WORKER_GROUP,
-  };
-  const authorize = (change = {}) =>
-    f.store.transaction((tx) =>
-      f.project.authorizeModelInference(tx, identity, {
-        ...execution,
-        ...change,
-      }),
-    );
-  assert.deepEqual(authorize(), {
-    credential,
-    platform: provider,
-    providerId: provider,
-    agentProvider: "default",
-  });
-  f.store.transaction((tx) =>
-    tx.database
-      .prepare("UPDATE project_binding SET config = ? WHERE id = ?")
-      .run(
-        JSON.stringify({
-          worker: GROUP_WORKER_NAME,
-          instanceCount: SINGLE_INSTANCE,
-          entries: [{ agent: nativeAgent, agentProvider: selected }],
-        }),
-        bindingId,
-      ),
-  );
-  assert.equal(authorize().agentProvider, selected);
+  const read = () =>
+    f.store.transaction((tx) => f.project.workerBindingRowOf(tx, bindingId));
+  const pinned = read();
+  assert.ok(pinned);
   f.write(TWO_INSTANCES);
-  assert.equal(authorize().agentProvider, selected);
-  for (const change of [
-    { workerBindingId: "absent" },
-    { projectId: "other" },
-    { resourceIdentity: MISSING_GROUP },
-  ])
-    refuses(
-      () => authorize(change),
-      HttpStatus.Forbidden,
-      ProjectErrorCode.AuthorizationRefused,
-      { reason: AuthorizationRefusal.BindingMismatch },
-    );
-  agents = [];
-  refuses(
-    authorize,
-    HttpStatus.Forbidden,
-    ProjectErrorCode.AuthorizationRefused,
-    { reason: AuthorizationRefusal.NoNativeAgent },
-  );
-  agents = [nativeAgent];
-  valid = false;
-  refuses(authorize, HttpStatus.BadRequest, WorkerErrorCode.Unavailable, {
-    issues,
-  });
-  valid = true;
+  assert.deepEqual(read(), pinned);
   f.write(INSTANCE_COUNT_MIN);
-  refuses(
-    authorize,
-    HttpStatus.Forbidden,
-    ProjectErrorCode.AuthorizationRefused,
-    { reason: AuthorizationRefusal.BindingDisabled },
-  );
+  assert.deepEqual(read(), { ...pinned, disabled: true });
   f.write(null);
-  refuses(
-    authorize,
-    HttpStatus.Forbidden,
-    ProjectErrorCode.AuthorizationRefused,
-    { reason: AuthorizationRefusal.BindingRemoved },
-  );
+  assert.equal(read()?.tombstone, true);
   f.write(SINGLE_INSTANCE);
-  refuses(
-    authorize,
-    HttpStatus.Forbidden,
-    ProjectErrorCode.AuthorizationRefused,
-    { reason: AuthorizationRefusal.BindingRemoved },
-  );
+  assert.equal(read()?.tombstone, true);
 });
 
 test("worker group resolution uses the latest tombstone and accepts equality at its creation", async (t) => {
@@ -2444,6 +2335,9 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
         bindingId: pinned[WORKER_NAME]!.id,
         projectId: project.id,
         workerName: original.config.worker,
+        resourceIdentity: pinned[WORKER_NAME]!.resourceIdentity,
+        tombstone: false,
+        disabled: false,
         entries: [],
         resourceBudget: null,
       },

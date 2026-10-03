@@ -24,6 +24,7 @@ import {
 } from "./record-store.ts";
 import { readNode } from "./store.ts";
 import type { Dependencies } from "./service.ts";
+import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 
 export type ContentBound = (tx: Transaction, evidence: EvidenceRow) => boolean;
 const FUNCTION_TYPE = "function";
@@ -43,6 +44,7 @@ export function executionContentBound(
   claim: ExecutionClaim,
 ): ContentBound {
   return (tx, evidence) => {
+    authorizeClaim(tx, dependencies, claim, claim.nodeId);
     const admitted = admitExecution(
       tx,
       dependencies,
@@ -155,8 +157,9 @@ export async function readContent(
   const prepared = dependencies.store.transaction((tx) => {
     const content = contentOf(tx, assetId, bound);
     if (!content.object) return { ...content, binding: null };
-    const binding = dependencies.bindings.storageBindingOf(
+    const binding = authorizeStorage(
       tx,
+      dependencies.bindings,
       content.object.storageBindingId,
     );
     assert.ok(binding);

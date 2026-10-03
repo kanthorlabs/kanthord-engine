@@ -57,6 +57,7 @@ import {
 } from "./execution-read.ts";
 import { claim, release, loss } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
+import { authorizeAction, authorizeRequest } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
 import {
   attemptPage,
@@ -811,6 +812,20 @@ export class MissionService
 
   actionContextOf(tx: Transaction, nodeId: string, attempt: number) {
     return actionContextOf(tx, this.dependencies, nodeId, attempt);
+  }
+  authorizeRequest(
+    tx: Transaction,
+    evidenceId: string,
+    claim: import("../kernel/operation.ts").ExecutionClaim,
+  ) {
+    return authorizeRequest(tx, this.dependencies, evidenceId, claim);
+  }
+  authorizeAction(
+    tx: Transaction,
+    claim: import("../kernel/operation.ts").ExecutionClaim,
+    key: string,
+  ) {
+    return authorizeAction(tx, this.dependencies, claim, key);
   }
 
   repositoryBindingIdsOf(

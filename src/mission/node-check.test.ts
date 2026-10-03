@@ -30,6 +30,30 @@ const TWO = 2;
 const COMMIT = "a".repeat(40);
 const RESOURCE = "repository:github:owner/repo";
 
+test("node check reports Mission authorization refusal without calling Intake", async (t) => {
+  const h = await fixture(t);
+  const original = h.dependencies.bindings.getBindingRevision;
+  h.dependencies.bindings.getBindingRevision = (tx, id) => ({
+    ...original(tx, id)!,
+    disabled: true,
+  });
+  const remote = t.mock.method(
+    h.dependencies.intakeCheck,
+    "check",
+    async () => ({ endState: CheckEndState.None, landedCommits: [] }),
+  );
+  const result = await h.check();
+  assert.equal(remote.mock.callCount(), ZERO);
+  assert.equal(result.failures.length, ONE);
+  assert.equal(
+    result.failures[0]!.error.error.code,
+    MissionErrorCode.AuthorizationRefused,
+  );
+  assert.deepEqual(result.failures[0]!.error.error.details, {
+    reason: "binding_disabled",
+  });
+});
+
 test("invalid Intake answers leave requests unresolved and stale mission versions refuse result writes", async (t) => {
   const h = await fixture(t);
   for (const answer of [
@@ -154,6 +178,11 @@ test("expected checks write every landed commit and close successful external at
   assert.equal(h.node().state, NodeState.Completed);
   h.store.transaction((tx) => {
     assert.equal(readLandedCommitEvidence(tx, h.nodeId, ONE).length, TWO);
+    for (const evidence of readLandedCommitEvidence(tx, h.nodeId, ONE))
+      assert.deepEqual(JSON.parse(evidence.provenance), {
+        kind: "service",
+        service: "mission",
+      });
     assert.equal(
       readCurrentOutcome(tx, h.nodeId)?.result,
       AssessmentResult.Success,

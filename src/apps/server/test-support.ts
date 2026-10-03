@@ -125,6 +125,7 @@ export async function objectSink(t: TestContext): Promise<ObjectSink> {
 export function sinkStorage(sink: ObjectSink): IntakeStorage {
   assert.ok(sink.endpoint.startsWith("http://127.0.0.1:"));
   assert.ok(sink.objects instanceof Map);
+  const deletedRequests = new Set<string>();
   const get: IntakeStorage["get"] = async (call, _binding, key) => {
     throwIfCancelled(call.context);
     assert.ok(key);
@@ -154,10 +155,13 @@ export function sinkStorage(sink: ObjectSink): IntakeStorage {
     },
     get,
     executionGet: get,
-    async delete(call, _binding, key) {
+    async delete(call, _binding, key, _version, requestKey) {
       throwIfCancelled(call.context);
       assert.ok(key);
+      assert.ok(requestKey);
+      if (deletedRequests.has(requestKey)) return;
       sink.objects.delete(key);
+      deletedRequests.add(requestKey);
     },
   };
 }
@@ -179,11 +183,16 @@ export function scriptedCheck(
 
 export function scriptedActions() {
   const performAnswers: Awaited<ReturnType<IntakeActions["perform"]>>[] = [];
+  type Answer = Awaited<ReturnType<IntakeActions["perform"]>>;
+  const requests = new Map<string, Answer | null>();
+  const readBackAnswers: (Answer | null)[] = [];
+  const readBackCalls: string[] = [];
   const readAnswers: Awaited<ReturnType<IntakeActions["read"]>>[] = [];
   const performCalls: {
     call: { executionId: string };
     action: Parameters<IntakeActions["perform"]>[1];
     operands: Parameters<IntakeActions["perform"]>[2];
+    requestKey: string;
   }[] = [];
   const readCalls: {
     call: { executionId: string };
@@ -192,15 +201,34 @@ export function scriptedActions() {
   }[] = [];
   let gate: Promise<void> | null = null;
   const seam: IntakeActions = {
-    async perform(call, action, operands) {
+    async perform(call, action, operands, requestKey) {
+      assert.ok(requestKey);
+      const key = `${action.action}/${requestKey}`;
+      const previous = requests.get(key);
+      if (previous === null)
+        throw new GatewayError(
+          HttpStatus.Conflict,
+          "intake.outbound.request.in_flight",
+          "Request is running.",
+        );
+      if (previous !== undefined) {
+        if (!("class" in previous)) return structuredClone(previous);
+        readBackCalls.push(requestKey);
+        const match = readBackAnswers.shift();
+        if (match && !("class" in match)) requests.set(key, match);
+        return structuredClone(match ?? previous);
+      }
+      requests.set(key, null);
       performCalls.push({
         call: { executionId: call.executionId },
         action,
         operands,
+        requestKey,
       });
       if (gate) await gate;
       const answer = performAnswers.shift();
       if (!answer) throw new Error("no scripted answer");
+      requests.set(key, structuredClone(answer));
       return answer;
     },
     async read(call, method, address) {
@@ -218,6 +246,9 @@ export function scriptedActions() {
   return {
     seam,
     performAnswers,
+    readBackAnswers,
+    readBackCalls,
+    requests,
     readAnswers,
     performCalls,
     readCalls,

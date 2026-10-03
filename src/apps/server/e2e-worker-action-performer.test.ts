@@ -397,8 +397,21 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     });
   });
   await t.test(
-    "E06.7 later successful request records pull request 42",
+    "E06.7 human removes the failed fake outbound request before a successful write",
     async () => {
+      const requestKey = `${h.G}/${ONE}/${GATED_KEY}`;
+      assert.equal(h.actions.performCalls[0]?.requestKey, requestKey);
+      assert.equal(
+        completed(await h.request(e2)).items[0]?.kind,
+        ActionResultKind.FailedBeforeEffect,
+      );
+      assert.deepEqual(h.actions.readBackCalls, [requestKey]);
+      assert.equal(h.actions.performCalls.length, ONE);
+      // Intake is a stand-in: model the human removal of its failed request.
+      assert.equal(
+        h.actions.requests.delete(`pull_request/${requestKey}`),
+        true,
+      );
       h.actions.performAnswers.push(pr42);
       const item = completed(await h.request(e2)).items[0];
       assert.ok(item?.kind === ActionResultKind.Submitted);

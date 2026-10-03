@@ -144,6 +144,7 @@ export interface IntakeStorage {
     binding: StorageBinding,
     key: string,
     version: string | null,
+    requestKey: string,
   ): Promise<void>;
 }
 
@@ -210,6 +211,7 @@ export interface MissionTransitions {
 }
 
 export const MissionErrorCode = {
+  AuthorizationRefused: "mission.authorization.refused",
   EvidenceBindingMismatch: "mission.evidence.binding_mismatch",
   EvidenceTooLarge: "mission.evidence.too_large",
   EvidenceUploadExpired: "mission.evidence.upload_expired",
@@ -540,6 +542,7 @@ export const actorSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(ActorKind.Service),
     service: actorServiceSchema,
+    inbound_event_id: identitySchema("inbound_event").optional(),
   }),
 ]);
 export type Actor = z.infer<typeof actorSchema>;
