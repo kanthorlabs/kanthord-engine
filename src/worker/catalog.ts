@@ -3,6 +3,11 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 
 import { WorkerHost, WorkerMethod } from "./contract.ts";
+import {
+  BASE_PROMPT,
+  RE_AGENT_PROMPT,
+  SWE_AGENT_PROMPT,
+} from "./prompt-assets.ts";
 export { WorkerHost, WorkerMethod } from "./contract.ts";
 
 export const REQUIRED_NODE_FORMAT: readonly string[] = [
@@ -16,6 +21,8 @@ export const REQUIRED_NODE_FORMAT: readonly string[] = [
 export interface AgentDeclaration {
   agentName: string;
   overridableFields: readonly string[];
+  basePrompt?: string;
+  agentPrompt: string;
 }
 
 export interface WorkerDeclaration {
@@ -39,10 +46,14 @@ const FIRST_ITEM = 0;
 export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
   "swe@1": {
     agentName: "swe@1",
+    basePrompt: BASE_PROMPT,
+    agentPrompt: SWE_AGENT_PROMPT,
     overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
   },
   "re@1": {
     agentName: "re@1",
+    basePrompt: BASE_PROMPT,
+    agentPrompt: RE_AGENT_PROMPT,
     overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
   },
 };
