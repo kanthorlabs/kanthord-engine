@@ -9,7 +9,7 @@ This plan closes the ERD 2 plan set. It adds no service operation, no table and 
 - The names of a worker binding in the answer of `ProjectBindings.workerBindingOf` (debate Q1 of this plan, ruled 2026-09-30).
 - The health report entries of a registration in the inventory of the Worker Service.
 - The final OpenAPI inventory assertion: 106 operations with their access policies.
-- The CLI dispatcher completeness over every command page of `engine/docs/cli/`, with five named exemptions and two groups of later ERDs.
+- The CLI dispatcher completeness over every command page of `engine/docs/cli/`, with six named exemptions and two groups of later ERDs.
 - The machine-token helper of the journeys.
 - Two E2E journeys: the external harness as a scripted CLI client of `claude@1`, and the internal harness with two in-process `worker` applications, the scripted fake provider and local bare repositories.
 
@@ -139,7 +139,7 @@ Two differences from `00-index.md`:
   - The check reports `healthy` inside the window and `unhealthy` otherwise, with the capability `liveness of a registration`. `worker-service.impl.md:168–169`.
   - A failed check changes no instance healthcheck. `architecture.md:135`; `worker-service.impl.md:170`.
   - An owner failure adds that owner to `missingInventories`. `gateway-service.impl.md:371`, `:376`; debate Q1.
-  - One request checks each target once. `architecture.md:137`. Gap: no page names the target of a registration check; the plan takes the runtime identity, and the report lists it for Ulrich.
+  - One request checks each target once. `architecture.md:137`. `gateway-service.impl.md` declares the target `registration:<runtime identity>`.
   - A live registration never meets a removed or unavailable group, because the binding-set write ends it (plan 02 task 02.14).
 - Done when: `node --test --test-timeout=30000 src/worker/service.test.ts` passes; `pnpm run verify` passes.
 
@@ -173,20 +173,20 @@ Two differences from `00-index.md`:
 
 - Files: `src/apps/cli/completeness.test.ts` (create)
 - Do:
-  1. Read the pages of `docs/cli/` (resolved from `import.meta.url`). For each page of `PAGE_INVENTORIES`, take the lines from its heading to the next line that starts with `## `: `credential.md` "## Command inventory", `project.md` "## Proposed command inventory and synopsis", `mission.md` "## Proposed command inventory and synopsis", `scheduler.md` "## Command inventory and proposed operation mapping", `worker.md` "## Command inventory", `gateway.md` "## Complete command table", `other.md` "## Command inventory".
+  1. Read the pages of `docs/cli/` (resolved from `import.meta.url`). For each page of `PAGE_INVENTORIES`, take the lines from its heading to the next line that starts with `## `: `credential.md` "## Command inventory", `project.md` "## Proposed command inventory and synopsis", `mission.md` "## Target command inventory and synopsis", `scheduler.md` "## Command inventory and operation mapping", `worker.md` "## Command inventory", `gateway.md` "## Complete command table", `other.md` "## Command inventory".
   2. In each section, skip every separator row that starts with `| -` and the header row directly before it. For each other table row, take its first code span. Remove a leading `kanthord <group> `. The leaf is the leading tokens that match `/^[a-z][a-z-]*$/`, up to the first token that does not. Skip a row with an empty leaf. For `other.md`, read the numbered lines `N. \`kanthord …\`` in the same way, with no group.
   3. The documented path is `<group> <leaf>`, where the group is the page name; for `other.md` it is the leaf alone. Collect the operation ids of each row: every code span that matches `/^(gateway|credential|worker|scheduler|project|mission)\.[A-Za-z_.]+$/`.
   4. Walk `createProgram()` (`src/apps/cli/index.ts:126`). A command is a program leaf when it holds a registered argument (`registeredArguments.length > 0`), or when it sits below a top-level command and holds no subcommand.
-  5. Declare `EXEMPT_LEAVES`, each with its reason: `mission evidence upload` (row 35; the external-harness phase); `mission graph get` and `mission criterion list` (rows 2 and 13; no ERD 1 or ERD 2 plan); `project source secret get` (row 12; HANDOFF Intake source ruling); `worker provider check` (no ERD 1 or ERD 2 plan). Declare `LATER_GROUPS = { intake: "ERD 3", tracking: "ERD 4" }` for `intake.md` and `tracking.md`.
+  5. Declare `EXEMPT_LEAVES`, each with its reason: `mission evidence upload` (external-harness phase); `mission graph get`, `mission criterion list`, `scheduler eligibility get`, `worker agent list` and `worker provider check` (documented but no ERD 1 or ERD 2 implementation plan). Declare `LATER_GROUPS = { intake: "ERD 3", tracking: "ERD 4" }` for `intake.md` and `tracking.md`. Removed `project source secret get` is no longer an exemption.
   6. Declare `API_ONLY_OPERATIONS`: `gateway.liveness`, `gateway.healthcheck`, `gateway.openapi`, `gateway.openapiFile`, `worker.credential`, `worker.action.request`, `worker.execution.setup.get`, `mission.evidence.asset.complete`, `mission.evidence.request`.
-  7. Assert: the distinct documented paths number 110 (credential 9, project 12, mission 54, scheduler 7, worker 19, gateway 2, other 7); the documented paths without `EXEMPT_LEAVES` equal the program leaves (105); every exempt path is documented and is no program leaf; the program holds no `intake` command, and `tracking` holds no subcommand; the top-level names are a subset of `config`, `serve`, `jwt`, `project`, `mission`, `scheduler`, `intake`, `worker`, `tracking`, `gateway` and `credential`.
+  7. Assert: the distinct documented paths number 111 (credential 9, project 11, mission 54, scheduler 8, worker 20, gateway 2, other 7); the documented paths without the six `EXEMPT_LEAVES` equal the program leaves (105); every exempt path is documented and is no program leaf; the program holds no `intake` command, and `tracking` holds no subcommand; the top-level names are a subset of `config`, `serve`, `jwt`, `project`, `mission`, `scheduler`, `intake`, `worker`, `tracking`, `gateway` and `credential`.
   8. Assert that the operation ids of the rows that are not exempt, joined with `API_ONLY_OPERATIONS`, equal the ids of the six contracts of `src/apps/cli/index.ts:227–234` (106), and that the two sets are disjoint.
 - Rules:
   - A command table holds one row for each command of the group, and a command that names an operation which no route serves is a defect. `architecture.impl.md:544–545`.
   - The top-level names belong to three closed sets. `architecture.impl.md:536–541`. ERD 1 decision D12 registers no Intake stub, so the program holds no `intake` group.
   - Row 35 is the harness helper form, and the external-harness phase owns its leaf. `engine/docs/cli/mission.md:400`, `:549–550`; plan 09 "Blockers".
   - Gap: rows 2 and 13 keep the mark `[blocked][mission-contract]` (`engine/docs/cli/mission.md:170`, `:181`), and no plan builds them (ERD 1 decision D12; decision D26).
-  - Gap: row 12 waits for the Intake source redesign (`engine/docs/cli/project.md:173`; `docs/brainstorm/HANDOFF.md:41`).
+  - Existing documented `scheduler eligibility get` and `worker agent list` remain undelivered under D26; the exact named exemptions prevent silent inventory drift.
   - Gap: `worker provider check` (`engine/docs/cli/worker.md:135`, `:456–490`) has no plan; ERD 1 plan 03 deferred it (`erd-01-setup/03-worker-agent-enablement.md:14`). This is a finding under decision D26.
   - The API-only operations have no CLI leaf by their pages. `engine/docs/cli/gateway.md:224–228`; `engine/docs/cli/worker.md:139–140`; `engine/docs/cli/mission.md:503–505`, `:549–558`; plan 06 task 06.12; plan 07 task 07.16.
   - A comparison against a fixed string uses a named constant. `architecture.impl.md:15–19`.
@@ -208,11 +208,11 @@ Two differences from `00-index.md`:
 
 ### 10.8 Prove the external-harness journey
 
-- Files: `src/apps/server/e2e-external-harness.test.ts` (create)
+- Files: `src/apps/server/e2e-external-harness.test.ts`, `src/apps/server/journey-support.ts` (create)
 - Do:
   1. Start `gatewayFixture` with `repositoryConnector: { gitLsRemote: async () => {} }` and `inventoryOverrides: { custody: () => [] }`.
   2. Build fixture X of "E2E" through the CLI. Issue `T` and `S` with `generateMachineToken` of task 10.7.
-  3. Implement the rows EX10.1 to EX10.11 in one test and in table order, because each row reads the state of the rows before it.
+  3. Implement the rows EX10.1 to EX10.11 in one test and in table order, with an explicit 120-second parent timeout, because each row reads the state of the rows before it. Use valid hexadecimal `C40(b)` for the initiative test input, not `C40(m)`. Shared journey helpers write private inputs and assert secret-free output; synthetic credential values use the `test_` prefix.
   4. Read the health report with `fixture.request(gatewayOperations.healthcheck.path, …)` and the human token, and parse it with `gatewayOperations.healthcheck.output`.
 - Rules:
   - A worker that an external harness hosts declares `Available`, `Waiting` and `External.Requested`, so one instance takes both claim kinds. `worker-service.md:42`.
@@ -245,7 +245,7 @@ Two differences from `00-index.md`:
   2. Build fixture I of "E2E" through the CLI. Push `pr42` to `actions.performAnswers` after the binding write.
   3. Create the bare repositories of `repo` and `gated` with task 10.9.
   4. Start two `inProcessWorker` helpers (plan 09 task 09.11): `general` with `G`, its client secret, `scriptedModelRuntime(scriptedProvider(GENERAL_SCRIPT, { providerId: "anthropic", modelIdentifier: "claude-sonnet-4-5" }))` and the mapped transport; `review` with `R`, its client secret and `REVIEW_SCRIPT`.
-  5. Implement the rows EI10.1 to EI10.7 in one test and in table order. Declare the test option `{ timeout: JOURNEY_TIMEOUT_MS }` with `JOURNEY_TIMEOUT_MS = 120000`, because six hosted executions exceed the default of `package.json:23`. Poll a node state every 250 ms for at most 60 s.
+  5. Implement the rows EI10.1 to EI10.7 in one test and in table order, reusing `journey-support.ts`. Allow 210 seconds for the parent journey, including the existing 90-second outstanding work pull; use 120 seconds for the concurrent idle-stop subtest. Poll a node state every 250 ms for at most 60 s. Assessment expectations include uploaded supporting evidence alongside head and verification evidence. Read produced `mediaType` from the content result, not the evidence-asset projection.
 - Rules:
   - The internal-harness journey constructs the `Worker` in-process with the injected `ModelRuntimeFactory` and `RepositoryTransport`. Decision D15.
   - Every fixture uses the scripted fake provider, `claude-sonnet-4-5` and a complete entry form. Decision D16.
