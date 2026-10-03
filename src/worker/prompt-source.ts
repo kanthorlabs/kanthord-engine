@@ -7,26 +7,12 @@ import {
   throwIfCancelled,
   type Context,
 } from "../kernel/context.ts";
+import { InvalidReason, SourceState } from "./contract.ts";
+export { InvalidReason, SourceState } from "./contract.ts";
 
 export const PROMPT_SOURCE_MAX_BYTES = 32768;
 export const PROMPT_READ_DEADLINE_MS = 10000;
 export const DISABLE_VALUE = "-";
-export const SourceState = {
-  Present: "present",
-  Absent: "absent",
-  Invalid: "invalid",
-  Disabled: "disabled",
-} as const;
-export const InvalidReason = {
-  TooLarge: "too_large",
-  NotUtf8: "not_utf8",
-  ControlCharacter: "control_character",
-  NotRegularFile: "not_regular_file",
-  OutsideWorkspace: "outside_workspace",
-  Deadline: "deadline",
-  Unreadable: "unreadable",
-} as const;
-export type InvalidReason = (typeof InvalidReason)[keyof typeof InvalidReason];
 export type SourceRead =
   | { state: typeof SourceState.Present; path: string; text: string }
   | { state: typeof SourceState.Absent; path: string }

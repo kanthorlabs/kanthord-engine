@@ -1,0 +1,293 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: worker.execution.setup.get
+    tags:
+      - worker
+    description: Read native execution setup from the proven claim and its pinned
+      binding and credential revisions, without secret material or creating a
+      pin.
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: executionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.execution.setup.get.Input/properties/params/\
+            properties/executionId"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.execution.setup.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.execution.setup.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            executionId:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - executionId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.execution.setup.get.Output:
+      type: object
+      properties:
+        executionId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: execution_ followed by a canonical 26-character uppercase ULID.
+        workerName:
+          type: string
+          minLength: 1
+        agentName:
+          type: string
+          minLength: 1
+        effectiveConfiguration:
+          type: object
+          properties:
+            agentProvider:
+              type: string
+              minLength: 1
+            provider:
+              type: string
+              enum:
+                - github-copilot
+                - anthropic
+                - openai-compatible
+            credential:
+              type: string
+              minLength: 1
+            modelIdentifier:
+              type: string
+              minLength: 1
+            reasoningEffort:
+              type: string
+              enum:
+                - off
+                - minimal
+                - low
+                - medium
+                - high
+                - xhigh
+                - max
+          required:
+            - agentProvider
+            - provider
+            - credential
+            - modelIdentifier
+            - reasoningEffort
+          additionalProperties: false
+          description: The Worker Service validates the whole configuration.
+            `modelIdentifier` belongs to `getBuiltinModels(provider)` of pi-ai
+            0.86.0 or to the `models` metadata of the `openai-compatible`
+            credential. `reasoningEffort` belongs to the supported reasoning
+            levels of that model. JSON Schema validates neither lookup.
+        credentialId:
+          type: string
+          minLength: 37
+          maxLength: 37
+          pattern: ^credential_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: credential_ followed by a canonical 26-character uppercase ULID.
+        metadata:
+          anyOf:
+            - type: object
+              properties:
+                baseUrl:
+                  type: string
+                models:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        minLength: 1
+                      contextWindow:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                      maxTokens:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                      reasoningLevels:
+                        type: array
+                        items:
+                          type: string
+                          enum:
+                            - off
+                            - minimal
+                            - low
+                            - medium
+                            - high
+                            - xhigh
+                            - max
+                    required:
+                      - id
+                    additionalProperties: false
+              required:
+                - baseUrl
+                - models
+              additionalProperties: false
+            - type: "null"
+        resourceBudget:
+          type: object
+          properties:
+            wallTimeMs:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            turns:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+          required:
+            - wallTimeMs
+          additionalProperties: false
+        repositories:
+          type: array
+          items:
+            type: object
+            properties:
+              bindingId:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: binding_ followed by a canonical 26-character uppercase ULID.
+              name:
+                type: string
+              address:
+                type: string
+              strategy:
+                type: object
+                properties:
+                  baseBranch:
+                    type: string
+                required:
+                  - baseBranch
+                additionalProperties: false
+              projectPrompt:
+                anyOf:
+                  - type: string
+                  - type: "null"
+            required:
+              - bindingId
+              - name
+              - address
+              - strategy
+              - projectPrompt
+            additionalProperties: false
+        globalPrompt:
+          oneOf:
+            - type: object
+              properties:
+                state:
+                  type: string
+                  const: absent
+              required:
+                - state
+              additionalProperties: false
+            - type: object
+              properties:
+                state:
+                  type: string
+                  const: disabled
+              required:
+                - state
+              additionalProperties: false
+            - type: object
+              properties:
+                state:
+                  type: string
+                  const: present
+                path:
+                  type: string
+                text:
+                  type: string
+              required:
+                - state
+                - path
+                - text
+              additionalProperties: false
+            - type: object
+              properties:
+                state:
+                  type: string
+                  const: invalid
+                path:
+                  type: string
+                reason:
+                  type: string
+                  enum:
+                    - too_large
+                    - not_utf8
+                    - control_character
+                    - not_regular_file
+                    - outside_workspace
+                    - deadline
+                    - unreadable
+              required:
+                - state
+                - path
+                - reason
+              additionalProperties: false
+      required:
+        - executionId
+        - workerName
+        - agentName
+        - effectiveConfiguration
+        - credentialId
+        - metadata
+        - resourceBudget
+        - repositories
+        - globalPrompt
+      additionalProperties: false

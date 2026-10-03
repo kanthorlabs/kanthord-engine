@@ -176,6 +176,8 @@ paths:
     $ref: ./openapi/worker/catalog.list.yaml#/pathItem
   /api/worker/credential:
     $ref: ./openapi/worker/credential.yaml#/pathItem
+  /api/worker/execution/{executionId}/setup:
+    $ref: ./openapi/worker/execution.setup.get.yaml#/pathItem
   /api/worker/handover:
     $ref: ./openapi/worker/handover.yaml#/pathItem
   /api/worker/heartbeat:

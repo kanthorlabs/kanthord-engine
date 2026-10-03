@@ -31,6 +31,21 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 
+test("published native setup is an execution-scoped bodyless read", () => {
+  const operation = workerOperations["execution.setup.get"];
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/worker/execution.setup.get.yaml"),
+      "utf8",
+    ),
+  );
+  assert.equal(fragment.pathItem.get.operationId, operation.id);
+  assert.equal(fragment.pathItem.get.requestBody, undefined);
+  assert.equal(operation.requiresExecution, true);
+  const index = parse(readFileSync(openapiPath(), "utf8"));
+  assert.ok(index.paths["/api/worker/execution/{executionId}/setup"]);
+});
+
 test("published action performer preserves its route and discriminated result classes", () => {
   const fragment = parse(
     readFileSync(

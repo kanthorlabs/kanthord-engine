@@ -18,6 +18,22 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import type { ResourceCheck } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+export const SourceState = {
+  Present: "present",
+  Absent: "absent",
+  Invalid: "invalid",
+  Disabled: "disabled",
+} as const;
+export const InvalidReason = {
+  TooLarge: "too_large",
+  NotUtf8: "not_utf8",
+  ControlCharacter: "control_character",
+  NotRegularFile: "not_regular_file",
+  OutsideWorkspace: "outside_workspace",
+  Deadline: "deadline",
+  Unreadable: "unreadable",
+} as const;
+export type InvalidReason = (typeof InvalidReason)[keyof typeof InvalidReason];
 export const WorkerHost = {
   Kanthord: "kanthord",
   ExternalHarness: "external-harness",
@@ -568,6 +584,8 @@ export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
 export const WorkerErrorCode = {
+  ExecutionNoNativeAgent: "worker.execution.no_native_agent",
+  ExecutionCredentialNotPinned: "worker.execution.credential_not_pinned",
   StartToolMissing: "worker.start.tool_missing",
   RuntimeSetupRefused: "worker.runtime.setup_refused",
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
@@ -656,31 +674,7 @@ export interface RepositoryTransport {
     deadlineMs: number,
   ): Promise<string>;
 }
-export interface ExecutionSetup {
-  executionId: string;
-  workerName: string;
-  agentName: string;
-  effectiveConfiguration: z.infer<typeof effectiveConfigurationSchema>;
-  credentialId: string;
-  metadata: {
-    baseUrl: string;
-    models: {
-      id: string;
-      contextWindow?: number;
-      maxTokens?: number;
-      reasoningLevels?: z.infer<typeof reasoningEffortSchema>[];
-    }[];
-  } | null;
-  resourceBudget: { turns?: number; wallTimeMs: number };
-  repositories: {
-    bindingId: string;
-    name: string;
-    address: string;
-    strategy: { baseBranch: string };
-    projectPrompt: string | null;
-  }[];
-  globalPrompt: import("./prompt-composer.ts").GlobalPromptSource;
-}
+export type ExecutionSetup = z.infer<typeof executionSetupSchema>;
 export const toolDeclarationSchema = z.strictObject({
   name: z.string().min(1),
   source: z.enum(ToolSource),
@@ -704,6 +698,51 @@ export const catalogItemSchema = z.strictObject({
 const resourceBudgetSchema = z.strictObject({
   wallTimeMs: z.number().int().positive(),
   turns: z.number().int().positive().optional(),
+});
+export const globalPromptSourceSchema = z.discriminatedUnion("state", [
+  z.strictObject({ state: z.literal(SourceState.Absent) }),
+  z.strictObject({ state: z.literal(SourceState.Disabled) }),
+  z.strictObject({
+    state: z.literal(SourceState.Present),
+    path: z.string(),
+    text: z.string(),
+  }),
+  z.strictObject({
+    state: z.literal(SourceState.Invalid),
+    path: z.string(),
+    reason: z.enum(InvalidReason),
+  }),
+]);
+export const executionSetupSchema = z.strictObject({
+  executionId: identitySchema("execution"),
+  workerName: z.string().min(1),
+  agentName: z.string().min(1),
+  effectiveConfiguration: effectiveConfigurationSchema,
+  credentialId: identitySchema("credential"),
+  metadata: z
+    .strictObject({
+      baseUrl: z.string(),
+      models: z.array(
+        z.strictObject({
+          id: z.string().min(1),
+          contextWindow: z.number().int().positive().optional(),
+          maxTokens: z.number().int().positive().optional(),
+          reasoningLevels: z.array(reasoningEffortSchema).optional(),
+        }),
+      ),
+    })
+    .nullable(),
+  resourceBudget: resourceBudgetSchema,
+  repositories: z.array(
+    z.strictObject({
+      bindingId: identitySchema("binding"),
+      name: z.string(),
+      address: z.string(),
+      strategy: z.strictObject({ baseBranch: z.string() }),
+      projectPrompt: z.string().nullable(),
+    }),
+  ),
+  globalPrompt: globalPromptSourceSchema,
 });
 export const catalogEntrySchema = z.discriminatedUnion("host", [
   catalogItemSchema.extend({
@@ -748,6 +787,28 @@ const enablementMutation = {
 } as const;
 
 export const workerOperations = {
+  "execution.setup.get": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.execution.setup.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/execution/:executionId/setup",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: HANDOVER_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: z.strictObject({ executionId: identitySchema("execution") }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: executionSetupSchema,
+    description:
+      "Read native execution setup from the proven claim and its pinned binding and credential revisions, without secret material or creating a pin.",
+  },
   "action.request": {
     service: WORKER_SERVICE_NAME,
     store: StoreName.Operational,

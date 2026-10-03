@@ -94,6 +94,173 @@ function refused<T>(
   assert.equal(JSON.stringify(result).includes(REFRESHED), false);
 }
 
+for (const adapter of ["direct", "http"] as const) {
+  test(`${adapter} native setup reads pinned facts without secrets or new pins`, async (t) => {
+    const h = await setup(t, adapter, undefined, { instanceCount: 2 });
+    const input = {
+      params: { executionId: h.execution.executionId },
+      query: {},
+      body: null,
+    };
+    const read = (token = h.token) =>
+      h.call(workerOperations["execution.setup.get"], input, token);
+    refused(
+      await read(),
+      HttpStatus.Conflict,
+      "worker.execution.credential_not_pinned",
+    );
+    completed(await h.handover());
+    const before = h.f.store.database
+      .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
+      .get(h.execution.executionId);
+    const answer = completed(await read());
+    assert.equal(answer.credentialId, h.credentialId);
+    assert.deepEqual(answer.effectiveConfiguration, {
+      ...CONFIGURATION,
+      provider: "anthropic",
+      credential: "anthro-1",
+    });
+    assert.deepEqual(answer.resourceBudget, {
+      turns: 200,
+      wallTimeMs: 7200000,
+    });
+    assert.equal(answer.metadata, null);
+    assert.deepEqual(answer.globalPrompt, { state: "absent" });
+    assert.deepEqual(answer.repositories[0], {
+      bindingId: answer.repositories[0]!.bindingId,
+      name: "repo",
+      address: "git@github.com:owner/repo.git",
+      strategy: { baseBranch: "main" },
+      projectPrompt: "Follow repository conventions.",
+    });
+    assert.deepEqual(
+      h.f.store.database
+        .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
+        .get(h.execution.executionId),
+      before,
+    );
+    const human = await read(h.f.token);
+    assert.ok(human.type === OperationResultType.Failure);
+    assert.equal(human.status, HttpStatus.Unauthorized);
+    const other = await h.f.machineToken(
+      h.execution.projectId,
+      "general",
+      "other-instance",
+    );
+    completed(await h.call(workerOperations.register, NO_INPUT, other));
+    refused(await read(other), HttpStatus.Forbidden, PROOF_FAILED);
+    completed(
+      await h.call(custodyOperations.rotate, {
+        params: { credentialName: "anthro-1" },
+        query: {},
+        body: { expectedRevision: FIRST_REVISION, secret: { key: ROTATED } },
+      }),
+    );
+    completed(
+      await h.call(custodyOperations.revoke, {
+        params: { credentialName: "anthro-1", revision: FIRST_REVISION },
+        query: {},
+        body: null,
+      }),
+    );
+    refused(await read(), HttpStatus.Conflict, "credential.revision.revoked");
+    completed(await h.release());
+    refused(await read(), HttpStatus.Forbidden, PROOF_FAILED);
+  });
+
+  test(`${adapter} native setup validates against rotated compatible metadata and binding budget`, async (t) => {
+    const resourceBudget = { turns: 3, wallTimeMs: 600000 };
+    const h = await setup(t, adapter, undefined, {
+      compatible: true,
+      noEntries: true,
+      resourceBudget,
+    });
+    completed(await h.handover());
+    const read = () =>
+      h.call(
+        workerOperations["execution.setup.get"],
+        {
+          params: { executionId: h.execution.executionId },
+          query: {},
+          body: null,
+        },
+        h.token,
+      );
+    const before = completed(await read());
+    assert.deepEqual(before.resourceBudget, resourceBudget);
+    const newerModel = "new-model";
+    completed(
+      await h.call(custodyOperations.rotate, {
+        params: { credentialName: "anthro-1" },
+        query: {},
+        body: {
+          expectedRevision: TWO_REVISIONS,
+          secret: { key: ROTATED },
+          metadata: {
+            baseUrl: "http://localhost:12345/v2",
+            models: [{ id: CONFIGURATION.modelIdentifier }, { id: newerModel }],
+          },
+        },
+      }),
+    );
+    assert.deepEqual(completed(await read()), before);
+    completed(
+      await h.call(workerOperations["agent.enablement.put"], {
+        params: { agentName: "swe@1" },
+        query: {},
+        body: {
+          expectedRevision: FIRST_REVISION,
+          agentProviders: [
+            {
+              name: "default",
+              provider: "openai-compatible",
+              credential: "anthro-1",
+            },
+          ],
+          defaultConfiguration: {
+            ...CONFIGURATION,
+            modelIdentifier: newerModel,
+          },
+        },
+      }),
+    );
+    refused(
+      await read(),
+      HttpStatus.BadRequest,
+      "worker.agent.configuration.model_unknown",
+    );
+    completed(
+      await h.call(workerOperations["agent.enablement.disable"], {
+        params: { agentName: "swe@1" },
+        query: {},
+        body: { expectedRevision: TWO_REVISIONS },
+      }),
+    );
+    refused(
+      await read(),
+      HttpStatus.BadRequest,
+      "worker.agent.enablement.unavailable",
+    );
+  });
+
+  test(`${adapter} external execution refuses native setup`, async (t) => {
+    const h = await setup(t, adapter, undefined, { workerName: "claude@1" });
+    refused(
+      await h.call(
+        workerOperations["execution.setup.get"],
+        {
+          params: { executionId: h.execution.executionId },
+          query: {},
+          body: null,
+        },
+        h.token,
+      ),
+      HttpStatus.Conflict,
+      "worker.execution.no_native_agent",
+    );
+  });
+}
+
 function offlineProvider(credential: OAuthCredential) {
   return createProvider({
     id: COPILOT,
@@ -160,9 +327,20 @@ async function setup(
   t: TestContext,
   adapter: "direct" | "http",
   boundary?: Credential,
+  setupOptions: {
+    compatible?: boolean;
+    noEntries?: boolean;
+    instanceCount?: number;
+    workerName?: string;
+    resourceBudget?: { turns: number; wallTimeMs: number };
+  } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
-  const platform = oauth ? "github-copilot" : "anthropic";
+  const platform = setupOptions.compatible
+    ? "openai-compatible"
+    : oauth
+      ? "github-copilot"
+      : "anthropic";
   const configuration = oauth
     ? { ...CONFIGURATION, modelIdentifier: "claude-sonnet-4.6" }
     : CONFIGURATION;
@@ -189,7 +367,7 @@ async function setup(
       identity,
     });
   }
-  const created = oauth
+  let created = oauth
     ? await loginCredential(f, oauth)
     : completed(
         await call(custodyOperations.create, {
@@ -197,8 +375,13 @@ async function setup(
           query: {},
           body: {
             name: "anthro-1",
-            platform: "anthropic",
-            metadata: null,
+            platform,
+            metadata: setupOptions.compatible
+              ? {
+                  baseUrl: "http://localhost:12345/v1",
+                  models: [],
+                }
+              : null,
             secret: {
               key:
                 boundary?.type === SecretShape.ApiKey ? boundary.key : SECRET,
@@ -206,6 +389,25 @@ async function setup(
           },
         }),
       );
+  if (setupOptions.compatible)
+    created = completed(
+      await call(custodyOperations.update_metadata, {
+        params: { credentialName: "anthro-1" },
+        query: {},
+        body: {
+          expectedRevision: FIRST_REVISION,
+          metadata: {
+            baseUrl: "http://localhost:12345/v1",
+            models: [
+              {
+                id: CONFIGURATION.modelIdentifier,
+                reasoningLevels: ["off", "low"],
+              },
+            ],
+          },
+        },
+      }),
+    );
   completed(
     await call(custodyOperations.create, {
       params: {},
@@ -252,14 +454,19 @@ async function setup(
               address: "git@github.com:owner/repo.git",
               strategy: { baseBranch: "main" },
               credential: "github",
+              projectPrompt: "Follow repository conventions.",
             },
           },
           general: {
             kind: "worker",
             config: {
-              worker: "general@1",
-              instanceCount: 1,
-              entries: [{ agent: "swe@1", ...configuration }],
+              worker: setupOptions.workerName ?? "general@1",
+              instanceCount: setupOptions.instanceCount ?? 1,
+              resourceBudget: setupOptions.resourceBudget,
+              entries:
+                setupOptions.workerName || setupOptions.noEntries
+                  ? undefined
+                  : [{ agent: "swe@1", ...configuration }],
             },
           },
         },

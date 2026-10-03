@@ -60,6 +60,7 @@ import {
 } from "./contract.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
+import { executionSetup } from "./execution-setup.ts";
 import {
   agentsOfWorker,
   getAgentDeclaration,
@@ -1008,6 +1009,10 @@ export class WorkerService implements Service {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      workerOperations["execution.setup.get"],
+      (_input, caller) => executionSetup(this.dependencies, this, caller),
+    );
     registry.register(
       workerOperations["action.request"],
       async (_input, caller) => {
