@@ -1,8 +1,8 @@
 # Worker CLI specification
 
-This specification for `kanthord worker` contains **19 command leaves: 17 implemented commands and 2 proposed commands**.
-The inventory distinguishes shipped syntax and operations from `agent get`
-and `provider check`, which remain proposed. Requirements marked
+This specification for `kanthord worker` contains **20 command leaves: 17 implemented commands and 3 proposed commands**.
+The inventory distinguishes shipped syntax and operations from `agent list`,
+`agent get` and `provider check`, which remain proposed. Requirements marked
 **target design** describe later runtime behavior and do not establish implementation.
 
 See the [CLI index](./README.md) for shared conventions and
@@ -114,6 +114,7 @@ and deregistration require no live registration.
 | I      | `handover <execution-id> [M] [--token <jwt>]` | `POST /api/worker/handover`                         | `worker.handover`            | `client`; live registration and live execution                                    |
 | I      | `list`                                        | `GET /api/worker/catalog`                           | `worker.catalog.list`        | `human`                                                                           |
 | I      | `get <worker-name>`                           | `GET /api/worker/catalog/:workerName`               | `worker.catalog.get`         | `human`                                                                           |
+| P      | `agent list [L]`                              | `GET /api/worker/agent`                             | `worker.agent.list`          | `human`                                                                           |
 | P      | `agent get <agent-name>`                      | `GET /api/worker/agent/:agentName`                  | `worker.agent.get`           | `human`                                                                           |
 | I      | `instance list`                               | `GET /api/worker/instance`                          | `worker.instance.list`       | `human`                                                                           |
 | I      | `instance get <runtime-identity>`             | `GET /api/worker/instance/:runtimeIdentity`         | `worker.instance.get`        | `human`                                                                           |
@@ -300,6 +301,15 @@ Absent/inapplicable native fields other than `resourceBudget` are omitted for
 externally hosted workers. The result changes no registration, pool, project
 configuration or scheduling state.
 An unknown exact worker name returns `404 worker.catalog.not_found`.
+
+### `agent list`
+
+This command remains proposed. It uses `[L]`, no positional arguments and no filters.
+Required token: human JWT. Query holds `limit` and optional `cursor`. Returns
+`{ items, nextCursor }`, paged by `agentName` in ascending alphabetical order.
+It lists every catalog agent, also an agent without an enablement. Each item holds
+`agentName: AgentName`, `workerNames: WorkerName[]` and `enablement`, the
+[agent enablement record](#agent-enablement-record) or `null` when no record exists.
 
 ### `agent get <agent-name>`
 
@@ -741,6 +751,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `worker.evidence_upload.transfer_failed`                       | The PUT to the presigned destination fails or answers a status outside 2xx.                                                                                                                                                       | serve worker                                                                                                                      |
 | 409   | `worker.execution.no_native_agent`                             | The setup read names an execution of an externally hosted worker.                                                                                                                                                                 | worker.execution.setup.get (API only)                                                                                             |
 | 409   | `worker.execution.credential_not_pinned`                       | The execution pins no revision of the credential name of its effective configuration.                                                                                                                                             | worker.execution.setup.get (API only)                                                                                             |
+| local | `cli.worker.agent.list.token_required`                         | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | agent list                                                                                                                        |
+| local | `cli.worker.agent.list.indeterminate`                          | The read result is indeterminate.                                                                                                                                                                                                 | agent list                                                                                                                        |
 | local | `cli.worker.agent.get.token_required`                          | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                   | agent get                                                                                                                         |
 | local | `cli.worker.agent.get.indeterminate`                           | The read result is indeterminate.                                                                                                                                                                                                 | agent get                                                                                                                         |
 | local | `cli.worker.agent.enablement.disable.invalid_revision`         | The `<expected-revision>` argument is not a positive safe integer.                                                                                                                                                                | agent enablement disable                                                                                                          |
