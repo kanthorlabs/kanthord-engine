@@ -27,6 +27,8 @@ const PLACEMENT = "worker";
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const BINDING = {
   bindingId: "binding",
+  name: "test_worker",
+  projectName: "test_project",
   revision: 1,
   workerName: "general@1",
   instanceCount: 3,

@@ -68,6 +68,7 @@ const MISSING_GROUP = "worker:kanthord:absent";
 const GROUP_ISSUED_AT = 1000;
 const TOMBSTONE_AT = 2000;
 const GROUP_WORKER_NAME = "developer";
+const GROUP_BINDING_NAME = "worker";
 const EMPTY_QUERY = {};
 const CORE_OPERATIONS = [
   "project.create",
@@ -587,6 +588,8 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
   const first = f.write(SINGLE_INSTANCE);
   assert.deepEqual(read(), {
     bindingId: first,
+    name: GROUP_BINDING_NAME,
+    projectName: PROJECT_NAME,
     revision: REVISION_ONE,
     workerName: GROUP_WORKER_NAME,
     instanceCount: SINGLE_INSTANCE,
@@ -607,6 +610,9 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
   assert.equal(read()?.instanceCount, INSTANCE_COUNT_MIN);
   f.write(null);
   assert.equal(read()?.tombstone, true);
+  assert.equal(read()?.name, GROUP_BINDING_NAME);
+  f.invoke("rename", { name: RENAMED_NAME }, { projectId: f.projectId });
+  assert.equal(read()?.projectName, RENAMED_NAME);
 });
 
 test("worker group reads reject a repository group and preserve cancellation", async (t) => {

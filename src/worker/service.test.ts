@@ -94,6 +94,8 @@ const fakeCollaborations = {
   },
   workerBindingOf: () => ({
     bindingId: "binding",
+    name: "test_worker",
+    projectName: "test_project",
     revision: 1,
     workerName: "claude@1",
     instanceCount: 1,

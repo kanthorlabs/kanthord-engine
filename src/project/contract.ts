@@ -596,6 +596,8 @@ export interface StorageBinding {
 
 export interface WorkerBindingRow {
   bindingId: string;
+  name: string;
+  projectName: string;
   revision: number;
   workerName: string;
   instanceCount: number;

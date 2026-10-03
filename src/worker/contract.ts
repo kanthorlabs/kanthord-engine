@@ -312,6 +312,8 @@ export type WorkerBindingOf = (
   resourceIdentity: string,
 ) => {
   bindingId: string;
+  name: string;
+  projectName: string;
   revision: number;
   workerName: string;
   instanceCount: number;

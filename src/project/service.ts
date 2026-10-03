@@ -674,6 +674,8 @@ export class ProjectService implements Service, ProjectBindings {
     const config = workerConfigSchema.parse(row.config);
     return {
       bindingId: row.id,
+      name: row.name,
+      projectName: requireProject(tx, projectId).name,
       revision: row.revision,
       workerName: config.worker,
       instanceCount: config.instanceCount,
