@@ -6,6 +6,7 @@ import {
   InMemoryCredentialStore,
   contentText,
   normalizeContext,
+  getSystemMessageText,
 } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
@@ -14,6 +15,7 @@ import { temporary } from "../kernel/test-support.ts";
 import { getAgentDeclaration, WorkerMethod } from "./catalog.ts";
 import { composePrompt, renderWorkPrompt } from "./prompt-composer.ts";
 import { openSession } from "./agent-session.ts";
+import { loadPi } from "./pi.ts";
 import { countTurns, pinnedLayers } from "./pinned-layers.ts";
 import {
   anthropicSetup,
@@ -101,9 +103,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     assert.match(text, /GLOBAL_MARKER/);
     assert.match(text, /PROJECT_MARKER/);
     assert.match(text, /WORK_MARKER/);
-    assert.ok(
-      call.systemPrompt?.includes("You are a senior software engineer."),
-    );
+    assert.ok(call.systemPrompt?.includes(composed.systemPrompt));
     const userRole = "user";
     for (const marked of [
       composed.layers.global!.marked,
@@ -177,7 +177,7 @@ test("two tool calls produce three counted turns with no absent project message"
   assert.doesNotMatch(JSON.stringify(provider.calls), /project prompt/);
 });
 
-test("inference pin preserves stream arguments and later system updates across work changes and retries", () => {
+test("inference pin preserves stream arguments and later system updates across work changes and repeated calls", () => {
   const calls: Parameters<StreamFn>[] = [];
   const failure = new Error("original stream failure");
   const original: StreamFn = (...args) => {
@@ -230,3 +230,213 @@ test("inference pin preserves stream arguments and later system updates across w
     }
   }
 });
+
+for (const isSplitTurn of [false, true]) {
+  test(`SDK ${isSplitTurn ? "split-prefix" : "history"} compaction retains complete prompts and original requests through SDK retry`, async (t) => {
+    const FIRST = 0;
+    const ONE = 1;
+    const HISTORY_CALLS = 2;
+    const SPLIT_CALLS = 3;
+    const SYSTEM = "system";
+    const USER = "user";
+    const key = "test_compaction-retry-key";
+    const historySummary = "history summary result";
+    const prefixSummary = "prefix summary result";
+    const cwd = temporary(t);
+    const composed = await composePrompt(
+      {
+        workerName: "general@1",
+        agent: getAgentDeclaration("swe@1")!,
+        method: WorkerMethod.Steps,
+        globalPrompt: {
+          state: "present",
+          path: "operator",
+          text: "complete global source",
+        },
+        repository: { name: "repo", projectPrompt: "complete project source" },
+        hostHome: cwd,
+        workspace: cwd,
+      },
+      background,
+    );
+    const work = renderWorkPrompt({
+      nodeId: "node",
+      revision: ONE,
+      content: {
+        name: "current work",
+        requirement: "retain exact content",
+        criterion: "summary retains layers",
+        verifications: [],
+      },
+    });
+    const pins = pinnedLayers(composed.layers);
+    pins.setWork(work);
+    const provider = scriptedProvider([
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "terminated",
+      }),
+      fauxAssistantMessage(historySummary),
+      ...(isSplitTurn ? [fauxAssistantMessage(prefixSummary)] : []),
+    ]);
+    const setup = anthropicSetup();
+    const credentials = new InMemoryCredentialStore();
+    await credentials.modify("anthropic", async () => ({
+      type: "api_key",
+      key,
+    }));
+    const reads = t.mock.method(credentials, "read");
+    const { runtime, model } = await scriptedModelRuntime(provider)({
+      credentials,
+      setup,
+      handoverItem: {
+        credentialId: setup.credentialId,
+        providerId: "anthropic",
+      },
+      signal: new AbortController().signal,
+    });
+    const session = await openSession({
+      cwd,
+      modelRuntime: runtime,
+      model,
+      thinkingLevel: "off",
+      systemPrompt: composed.systemPrompt,
+      allowlist: [],
+      customTools: [],
+      extensions: [pins.extension],
+      context: background,
+    });
+    t.after(() => session.dispose());
+    pins.pinInference(session, composed.systemPrompt);
+    const decorated = session.agent.streamFunction;
+    const requests: Parameters<StreamFn>[1][] = [];
+    session.agent.streamFunction = (selected, context, options) => {
+      const original = structuredClone(context);
+      requests.push(original);
+      const result = decorated(selected, context, options);
+      assert.deepEqual(context, original);
+      return result;
+    };
+    const pi = await loadPi();
+    const events: unknown[][] = [];
+    const result = await pi.compact(
+      {
+        firstKeptEntryId: "kept-entry",
+        isSplitTurn,
+        tokensBefore: 1000,
+        messagesToSummarize: [
+          { role: USER, content: "history request", timestamp: ONE },
+          fauxAssistantMessage("history response"),
+        ],
+        turnPrefixMessages: isSplitTurn
+          ? [
+              {
+                role: USER,
+                content: `prefix request quoting ${work.marked}`,
+                timestamp: ONE,
+              },
+              fauxAssistantMessage("prefix response"),
+            ]
+          : [],
+        fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+        settings: { enabled: true, reserveTokens: 1000, keepRecentTokens: 100 },
+      },
+      model,
+      undefined,
+      undefined,
+      "retain the original summary focus",
+      new AbortController().signal,
+      "off",
+      session.agent.streamFunction,
+      undefined,
+      {
+        enabled: true,
+        maxRetries: ONE,
+        baseDelayMs: ONE,
+        maxAgentDelayMs: ONE,
+      },
+      {
+        onRetryScheduled: (attempt, maxAttempts, _delay, message) => {
+          events.push(["scheduled", attempt, maxAttempts, message]);
+        },
+        onRetryAttemptStart: () => {
+          events.push(["started"]);
+        },
+        onRetryFinished: (success, attempt) => {
+          events.push(["finished", success, attempt]);
+        },
+      },
+    );
+    assert.deepEqual(events, [
+      ["scheduled", ONE, ONE, "terminated"],
+      ["started"],
+      ["finished", true, ONE],
+    ]);
+    const expectedCalls = isSplitTurn ? SPLIT_CALLS : HISTORY_CALLS;
+    assert.equal(provider.calls.length, expectedCalls);
+    assert.equal(requests.length, expectedCalls);
+    assert.ok(reads.mock.callCount() >= expectedCalls);
+    assert.ok(result.summary.includes(historySummary));
+    assert.equal(result.summary.includes(prefixSummary), isSplitTurn);
+    const historyRequest = requests[FIRST]!.messages.filter(
+      (message) => message.role === USER,
+    )
+      .map((message) => contentText(message.content))
+      .join("\n");
+    assert.match(
+      historyRequest,
+      /Create a structured context checkpoint summary/,
+    );
+    assert.match(
+      historyRequest,
+      /Additional focus: retain the original summary focus/,
+    );
+    assert.match(historyRequest, /history request/);
+    assert.deepEqual(requests[FIRST], requests[ONE]);
+    if (isSplitTurn) {
+      const prefixRequest = requests
+        .at(-ONE)!
+        .messages.filter((message) => message.role === USER)
+        .map((message) => contentText(message.content))
+        .join("\n");
+      assert.match(prefixRequest, /This is the PREFIX of a turn/);
+      assert.ok(
+        prefixRequest.includes(`prefix request quoting ${work.marked}`),
+      );
+    }
+    for (const [index, call] of provider.calls.entries()) {
+      assert.equal(call.apiKey, key);
+      assert.ok(call.systemPrompt);
+      assert.ok(call.systemPrompt.includes(composed.systemPrompt));
+      assert.equal(
+        call.systemPrompt.split(composed.systemPrompt).length,
+        HISTORY_CALLS,
+      );
+      const original = requests[index]!;
+      assert.deepEqual(
+        call.messages
+          .filter((message) => message.role === SYSTEM)
+          .map(getSystemMessageText),
+        [
+          composed.systemPrompt,
+          ...original.messages
+            .filter((message) => message.role === SYSTEM)
+            .map(getSystemMessageText),
+        ],
+      );
+      assert.deepEqual(
+        call.messages
+          .filter((message) => message.role === USER)
+          .map((message) => contentText(message.content)),
+        [
+          composed.layers.global!.marked,
+          composed.layers.project!.marked,
+          work.marked,
+          ...original.messages
+            .filter((message) => message.role === USER)
+            .map((message) => contentText(message.content)),
+        ],
+      );
+    }
+  });
+}
