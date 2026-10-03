@@ -75,12 +75,14 @@ test("static agent declarations", () => {
     agentName: "swe@1",
     basePrompt: BASE_PROMPT,
     agentPrompt: SWE_AGENT_PROMPT,
+    tools: ["read", "edit", "write", "grep", "find", "ls", "bash"],
     overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
   });
   assert.deepEqual(getAgentDeclaration("re@1"), {
     agentName: "re@1",
     basePrompt: BASE_PROMPT,
     agentPrompt: RE_AGENT_PROMPT,
+    tools: ["read", "grep", "find", "ls"],
     overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
   });
 });

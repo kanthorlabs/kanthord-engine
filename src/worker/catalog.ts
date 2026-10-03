@@ -23,7 +23,19 @@ export interface AgentDeclaration {
   overridableFields: readonly string[];
   basePrompt?: string;
   agentPrompt: string;
+  tools: readonly BuiltinTool[];
 }
+
+export const BuiltinTool = {
+  Read: "read",
+  Edit: "edit",
+  Write: "write",
+  Grep: "grep",
+  Find: "find",
+  Ls: "ls",
+  Bash: "bash",
+} as const;
+export type BuiltinTool = (typeof BuiltinTool)[keyof typeof BuiltinTool];
 
 export interface WorkerDeclaration {
   name: string;
@@ -48,12 +60,27 @@ export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
     agentName: "swe@1",
     basePrompt: BASE_PROMPT,
     agentPrompt: SWE_AGENT_PROMPT,
+    tools: [
+      BuiltinTool.Read,
+      BuiltinTool.Edit,
+      BuiltinTool.Write,
+      BuiltinTool.Grep,
+      BuiltinTool.Find,
+      BuiltinTool.Ls,
+      BuiltinTool.Bash,
+    ],
     overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
   },
   "re@1": {
     agentName: "re@1",
     basePrompt: BASE_PROMPT,
     agentPrompt: RE_AGENT_PROMPT,
+    tools: [
+      BuiltinTool.Read,
+      BuiltinTool.Grep,
+      BuiltinTool.Find,
+      BuiltinTool.Ls,
+    ],
     overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
   },
 };
