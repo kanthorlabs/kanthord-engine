@@ -1,4 +1,11 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { stringify } from "yaml";
+import { Worker, type WorkerOptions } from "../worker/index.ts";
+import { temporary } from "../../kernel/test-support.ts";
+import { writePrivate } from "../../kernel/files.ts";
+import { clientConfigPath } from "../../gateway/client.ts";
 import { randomBytes } from "node:crypto";
 import {
   createServer,
@@ -58,6 +65,65 @@ export const domainHealth = {
   worker: { registrations: 200 },
   mission: { operations: 200 },
 };
+
+export function toolStubs(t: TestContext): string {
+  const directory = temporary(t);
+  for (const name of ["rg", "fd"])
+    writeFileSync(join(directory, name), "#!/bin/sh\necho test_tool\n", {
+      mode: 0o700,
+    });
+  return directory;
+}
+
+export async function inProcessWorker(
+  t: TestContext,
+  input: Pick<
+    WorkerOptions,
+    "endpoint" | "token" | "modelRuntimeFactory" | "repositoryTransport"
+  > & { clientSecret: string },
+) {
+  const root = temporary(t);
+  const previous = process.env.PATH;
+  process.env.PATH = `${toolStubs(t)}:${previous ?? ""}`;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PATH;
+    else process.env.PATH = previous;
+  });
+  const env = {
+    ...process.env,
+    HOME: root,
+    XDG_CONFIG_HOME: join(root, "config"),
+    XDG_STATE_HOME: join(root, "state"),
+  };
+  writePrivate(
+    clientConfigPath(env),
+    stringify({ clientSecret: input.clientSecret }),
+  );
+  const logs: Record<string, unknown>[] = [];
+  const ready = Promise.withResolvers<void>();
+  const readyMessage = "Worker application ready";
+  const worker = new Worker({
+    ...input,
+    env,
+    log: (line) => {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      logs.push(record);
+      if (record.msg === readyMessage) ready.resolve();
+    },
+  });
+  const running = worker.run();
+  t.after(async () => {
+    await worker.stop();
+    await running;
+  });
+  await Promise.race([
+    ready.promise,
+    running.then((error) => {
+      throw error ?? new Error("Worker ended before ready");
+    }),
+  ]);
+  return { worker, env, logs, running };
+}
 
 export const TEST_WORKER_BINDING = "binding";
 export const TEST_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
