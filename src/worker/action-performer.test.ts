@@ -4,12 +4,19 @@ import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { OperationResultType } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
   ActionAssessmentResult,
   ActionNodeState,
+  ActionResolution,
+  ActionResultKind,
+  PlatformAddressKind,
+  RefusalClass,
+  RepositoryAction,
+  Uncertainty,
   TestedInputKind,
   WorkerErrorCode,
   type ActionContext,
@@ -20,6 +27,50 @@ const FIRST = 1;
 const NO_CALLS = 0;
 const COMMIT = "b".repeat(40);
 const NOT_RUNNING = "scheduler.execution.not_running";
+const SECOND = 2;
+const RESOURCE = "repository:github:owner/repo";
+const PR = {
+  kind: PlatformAddressKind.PullRequest,
+  resourceIdentity: RESOURCE,
+  number: 42,
+};
+
+function actionable(t: TestContext) {
+  const h = harness(t);
+  const snapshot = h.context.currentAssessment!.testedInput;
+  assert.ok(
+    !Array.isArray(snapshot) && snapshot.kind === TestedInputKind.Repository,
+  );
+  const entry: ActionContext["actions"][number] = {
+    action: {
+      key: "repo.pull_request",
+      bindingId: snapshot.bindingId,
+      action: RepositoryAction.PullRequest,
+      expectedEndState: "pull_request_merged",
+      follows: null,
+      configuration: { baseBranch: "main" },
+    },
+    resourceIdentity: RESOURCE,
+    resolution: ActionResolution.Unrequested,
+    requestEvidenceId: null,
+    eligible: true,
+    reuseCandidates: [],
+  };
+  h.context.actions.push(entry);
+  const evidence = {
+    id: createIdentity("evidence"),
+    attempt: FIRST,
+    requirementKey: entry.action.key,
+    assets: [{ address: PR }],
+  };
+  h.dependencies.evidenceRequests.request = async () => ({
+    type: OperationResultType.Completed,
+    status: HttpStatus.OK,
+    data: evidence,
+  });
+  assert.equal(h.context.actions.length, FIRST);
+  return { ...h, entry, evidence };
+}
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -146,4 +197,111 @@ test("admission reads one snapshot and no-action context calls no external seam"
   });
   assert.equal(transactions.mock.callCount(), FIRST);
   assert.deepEqual(h.calls, ["claim", "mission"]);
+});
+
+test("dispatch forwards identity, derived operands and the returned address to Mission", async (t) => {
+  const h = actionable(t);
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  const request = t.mock.method(h.dependencies.evidenceRequests, "request");
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.deepEqual(perform.mock.calls[0]!.arguments, [
+    { ...h.caller, executionId: h.claim.executionId },
+    h.entry.action,
+    {
+      nodeBranch: "kanthord/" + h.claim.nodeId,
+      baseBranch: "main",
+      commit: COMMIT,
+      reusedAddress: null,
+    },
+  ]);
+  const [input, options] = request.mock.calls[0]!.arguments;
+  assert.deepEqual(input.body, {
+    executionId: h.claim.executionId,
+    attempt: FIRST,
+    nodeRevision: FIRST,
+    requirementKey: h.entry.action.key,
+    subject: h.entry.action.key,
+    address: PR,
+  });
+  assert.equal(options.identity, h.identity);
+  assert.equal(options.context, background);
+  assert.match(options.idempotencyKey!, /^[0-9A-HJKMNP-TV-Z]{26}$/);
+});
+
+test("merge push records the address and commit returned by Intake", async (t) => {
+  const h = actionable(t);
+  h.entry.action.action = RepositoryAction.MergePush;
+  const pushed = {
+    kind: PlatformAddressKind.BranchPush,
+    resourceIdentity: RESOURCE,
+    branch: "main",
+    commit: "d".repeat(40),
+  };
+  h.dependencies.intakeActions.perform = async () => pushed;
+  const request = t.mock.method(h.dependencies.evidenceRequests, "request");
+  assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
+  assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, pushed);
+});
+
+test("no-effect refusal releases the reservation for a later invocation", async (t) => {
+  const h = actionable(t);
+  const refusal = {
+    class: RefusalClass.FinalRefusal,
+    code: "repository.platform.github.final_refusal",
+    message: "refused",
+  };
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => refusal,
+  );
+  assert.deepEqual((await h.perform()).items, [
+    {
+      kind: ActionResultKind.FailedBeforeEffect,
+      action: { key: h.entry.action.key, bindingId: h.entry.action.bindingId },
+      refusal,
+    },
+  ]);
+  await h.perform();
+  assert.equal(perform.mock.callCount(), SECOND);
+});
+
+test("refused or thrown recording retains the known address as recording uncertainty", async (t) => {
+  const h = actionable(t);
+  h.dependencies.intakeActions.perform = async () => PR;
+  h.dependencies.evidenceRequests.request = async () => ({
+    type: OperationResultType.Failure,
+    status: HttpStatus.Conflict,
+    error: {
+      error: { code: NOT_RUNNING, message: "ended", details: null },
+      requestId: "request",
+    },
+  });
+  const expected = {
+    kind: ActionResultKind.Uncertain,
+    action: { key: h.entry.action.key, bindingId: h.entry.action.bindingId },
+    uncertainty: Uncertainty.Recording,
+    address: PR,
+  };
+  assert.deepEqual((await h.perform()).items, [expected]);
+  const other = actionable(t);
+  other.dependencies.intakeActions.perform = async () => PR;
+  other.dependencies.evidenceRequests.request = async () => {
+    throw new Error("socket");
+  };
+  assert.deepEqual((await other.perform()).items, [
+    {
+      ...expected,
+      action: {
+        key: other.entry.action.key,
+        bindingId: other.entry.action.bindingId,
+      },
+    },
+  ]);
 });

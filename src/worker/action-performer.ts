@@ -1,18 +1,37 @@
 import assert from "node:assert/strict";
+import { ulid } from "ulid";
 import type { MachineIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import type { ExecutionClaim } from "../kernel/operation.ts";
+import {
+  OperationResultType,
+  type ExecutionClaim,
+  type OperationResult,
+} from "../kernel/operation.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
   ActionAssessmentResult,
   ActionNodeState,
+  ActionResultKind,
   WorkerErrorCode,
   type ActionContext,
   type ActionRequestResult,
+  type ActionResultItem,
+  type ActionOperands,
+  type PlatformAddress,
 } from "./contract.ts";
-import { DispatchReservations, ExecutionMutex } from "./action-reservations.ts";
+import {
+  DispatchReservations,
+  ExecutionMutex,
+  type ReservationKey,
+} from "./action-reservations.ts";
+import { operandsOf } from "./action-operands.ts";
+import {
+  isResultClass,
+  performedItem,
+  recordedItem,
+} from "./action-classify.ts";
 import type { Dependencies } from "./service.ts";
 
 type PerformerDependencies = Pick<
@@ -24,6 +43,12 @@ type PerformerDependencies = Pick<
   | "evidenceRequests"
 >;
 type PerformerCaller = { context: Context; identity: MachineIdentity };
+type Pending = {
+  entry: ActionContext["actions"][number];
+  key: ReservationKey;
+  operands: ActionOperands;
+  reservation: ReturnType<DispatchReservations["acquire"]>;
+};
 
 export class ActionPerformer {
   private readonly dependencies: PerformerDependencies;
@@ -82,8 +107,93 @@ export class ActionPerformer {
     return this.mutex.run(claim.executionId, async () => {
       const context = this.admit(claim);
       this.reservations.prune(claim.nodeId, claim.attempt, context.actions);
-      assert.ok(context.currentAssessment);
-      return { toolName: ACTION_REQUEST_TOOL_NAME, items: [] };
+      const pending = this.reserve(claim, context);
+      const items: ActionResultItem[] = [];
+      for (const action of pending) {
+        if ("held" in action.reservation) {
+          items.push(action.reservation.held);
+          continue;
+        }
+        const item = await this.dispatch(caller, claim, action);
+        this.reservations.settle(
+          action.key,
+          action.reservation.owner,
+          item.kind === ActionResultKind.Uncertain ? item : null,
+        );
+        items.push(item);
+      }
+      return { toolName: ACTION_REQUEST_TOOL_NAME, items };
     });
+  }
+
+  private reserve(claim: ExecutionClaim, context: ActionContext): Pending[] {
+    const entries = context.actions
+      .filter((entry) => entry.eligible)
+      .sort((left, right) =>
+        left.action.key < right.action.key
+          ? -1
+          : left.action.key > right.action.key
+            ? 1
+            : 0,
+      );
+    const prepared = entries.map((entry) => ({
+      entry,
+      operands: operandsOf(claim.nodeId, context, entry),
+      key: {
+        nodeId: claim.nodeId,
+        attempt: claim.attempt,
+        action: { key: entry.action.key, bindingId: entry.action.bindingId },
+      },
+    }));
+    return prepared.map((action) => ({
+      ...action,
+      reservation: this.reservations.acquire(action.key),
+    }));
+  }
+
+  private async dispatch(
+    caller: PerformerCaller,
+    claim: ExecutionClaim,
+    pending: Pending,
+  ): Promise<ActionResultItem> {
+    const call = { ...caller, executionId: claim.executionId };
+    const answer = await this.dependencies.intakeActions.perform(
+      call,
+      pending.entry.action,
+      pending.operands,
+    );
+    const item = performedItem(pending.key.action, answer);
+    if (item) return item;
+    assert.ok(!isResultClass(answer));
+    return this.record(caller, claim, pending, answer);
+  }
+
+  private async record(
+    caller: PerformerCaller,
+    claim: ExecutionClaim,
+    pending: Pending,
+    address: PlatformAddress,
+  ): Promise<ActionResultItem> {
+    let result: OperationResult<unknown>;
+    try {
+      result = await this.dependencies.evidenceRequests.request(
+        {
+          params: { nodeId: claim.nodeId },
+          query: {},
+          body: {
+            executionId: claim.executionId,
+            attempt: claim.attempt,
+            nodeRevision: claim.pinnedRevision,
+            requirementKey: pending.entry.action.key,
+            subject: pending.entry.action.key,
+            address,
+          },
+        },
+        { ...caller, idempotencyKey: ulid() },
+      );
+    } catch {
+      result = { type: OperationResultType.Indeterminate };
+    }
+    return recordedItem(pending.key.action, address, result);
   }
 }
