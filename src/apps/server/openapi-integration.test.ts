@@ -8,7 +8,7 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 import { gatewayFixture } from "./test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "../../gateway/contract.ts";
 import { custodyOperations } from "../../custody/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
@@ -30,6 +30,28 @@ import { ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
+
+test("published action performer preserves its route and discriminated result classes", () => {
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/worker/action.request.yaml"),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    fragment.pathItem.post.operationId,
+    workerOperations["action.request"].id,
+  );
+  const output = fragment.components.schemas["worker.action.request.Output"];
+  assert.deepEqual(
+    output.properties.items.items.oneOf.map(
+      (variant: { properties: { kind: { const: string } } }) =>
+        variant.properties.kind.const,
+    ),
+    Object.values(ActionResultKind),
+  );
+  assert.equal(fragment.pathItem.post.requestBody, undefined);
+});
 
 test("published handover operations preserve execution proof and bodyless report success", () => {
   const reportName = "credential";

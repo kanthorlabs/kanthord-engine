@@ -622,6 +622,27 @@ const enablementMutation = {
 } as const;
 
 export const workerOperations = {
+  "action.request": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.action.request",
+    method: HttpMethod.Post,
+    path: "/api/worker/execution/:executionId/action/request",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: ACTION_REQUEST_TIMEOUT_MS,
+    mutation: true,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: z.strictObject({ executionId: identitySchema("execution") }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: actionRequestResultSchema,
+    description:
+      "Call the internal action performer with the execution identity alone. Return submitted evidence, awaiting prerequisites, failed-before-effect refusals or uncertainty, with no release instruction.",
+  },
   handover: {
     service: WORKER_SERVICE_NAME,
     store: StoreName.Operational,

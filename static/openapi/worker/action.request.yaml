@@ -1,0 +1,265 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: worker.action.request
+    tags:
+      - worker
+    description: Call the internal action performer with the execution identity
+      alone. Return submitted evidence, awaiting prerequisites,
+      failed-before-effect refusals or uncertainty, with no release instruction.
+    x-access-policy: client
+    x-timeout-ms: 900000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: executionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.action.request.Input/properties/params/prope\
+            rties/executionId"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.action.request.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.action.request.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            executionId:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - executionId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.action.request.Output:
+      type: object
+      properties:
+        toolName:
+          type: string
+          const: repository-action-request
+        items:
+          type: array
+          items:
+            oneOf:
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    const: submitted
+                  evidence:
+                    type: object
+                    propertyNames:
+                      type: string
+                    additionalProperties: {}
+                    description: Mission Evidence record
+                required:
+                  - kind
+                  - evidence
+                additionalProperties: false
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    const: awaiting-prerequisite
+                  action:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                        minLength: 1
+                      bindingId:
+                        type: string
+                        minLength: 34
+                        maxLength: 34
+                        pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: binding_ followed by a canonical 26-character uppercase ULID.
+                    required:
+                      - key
+                      - bindingId
+                    additionalProperties: false
+                  prerequisite:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                        minLength: 1
+                      evidenceId:
+                        type: string
+                        minLength: 35
+                        maxLength: 35
+                        pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: evidence_ followed by a canonical 26-character uppercase ULID.
+                    required:
+                      - key
+                      - evidenceId
+                    additionalProperties: false
+                required:
+                  - kind
+                  - action
+                  - prerequisite
+                additionalProperties: false
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    const: failed-before-effect
+                  action:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                        minLength: 1
+                      bindingId:
+                        type: string
+                        minLength: 34
+                        maxLength: 34
+                        pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: binding_ followed by a canonical 26-character uppercase ULID.
+                    required:
+                      - key
+                      - bindingId
+                    additionalProperties: false
+                  refusal:
+                    type: object
+                    properties:
+                      class:
+                        type: string
+                        enum:
+                          - confirmed_failure
+                          - retryable_refusal
+                          - final_refusal
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                    required:
+                      - class
+                      - code
+                      - message
+                    additionalProperties: false
+                required:
+                  - kind
+                  - action
+                  - refusal
+                additionalProperties: false
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    const: uncertain
+                  action:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                        minLength: 1
+                      bindingId:
+                        type: string
+                        minLength: 34
+                        maxLength: 34
+                        pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: binding_ followed by a canonical 26-character uppercase ULID.
+                    required:
+                      - key
+                      - bindingId
+                    additionalProperties: false
+                  uncertainty:
+                    type: string
+                    enum:
+                      - effect
+                      - recording
+                      - both
+                  address:
+                    oneOf:
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            const: pull_request
+                          resourceIdentity:
+                            type: string
+                            minLength: 1
+                          number:
+                            type: integer
+                            exclusiveMinimum: 0
+                            maximum: 9007199254740991
+                        required:
+                          - kind
+                          - resourceIdentity
+                          - number
+                        additionalProperties: false
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            const: branch_push
+                          resourceIdentity:
+                            type: string
+                            minLength: 1
+                          branch:
+                            type: string
+                            minLength: 1
+                          commit:
+                            type: string
+                            minLength: 1
+                        required:
+                          - kind
+                          - resourceIdentity
+                          - branch
+                          - commit
+                        additionalProperties: false
+                required:
+                  - kind
+                  - action
+                  - uncertainty
+                additionalProperties: false
+      required:
+        - toolName
+        - items
+      additionalProperties: false

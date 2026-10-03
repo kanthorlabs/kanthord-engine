@@ -154,6 +154,8 @@ paths:
     $ref: ./openapi/scheduler/queue.peek.yaml#/pathItem
   /api/scheduler/work/pull:
     $ref: ./openapi/scheduler/work.pull.yaml#/pathItem
+  /api/worker/execution/{executionId}/action/request:
+    $ref: ./openapi/worker/action.request.yaml#/pathItem
   /api/worker/agent/enablement/{agentName}/disable:
     $ref: ./openapi/worker/agent.enablement.disable.yaml#/pathItem
   /api/worker/agent/enablement/{agentName}/enable:

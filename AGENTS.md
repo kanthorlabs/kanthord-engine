@@ -60,6 +60,7 @@ engine/
 │   │   ├── record-read.ts      # Record projections and blocked context
 │   │   ├── record-list.ts      # Record pagination and read handlers
 │   │   ├── frozen-action.ts    # Pinned repository requirements and resolutions
+│   │   ├── action-context.ts   # Atomic action eligibility and earlier request candidates
 │   │   ├── currency.ts         # Read-time assessment currency and selection
 │   │   ├── conditions.ts       # Readiness, closure, and continuation conditions
 │   │   ├── control.ts          # Transactional human-control admission and closure
@@ -105,6 +106,12 @@ engine/
 │   │   ├── catalog.ts          # Static worker and agent declarations
 │   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
 │   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
+│   │   ├── action-performer.ts # Claim admission, dispatch, reuse and request evidence
+│   │   ├── action-reservations.ts # Execution mutex and owner-held uncertain dispatches
+│   │   ├── action-operands.ts  # Pinned assessment snapshot and action operands
+│   │   ├── action-reuse.ts     # Open pull-request repository and branch checks
+│   │   ├── action-classify.ts  # No-effect, unknown-effect and recording outcomes
+│   │   ├── node-branch.ts      # Shared deterministic node branch name
 │   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and agent configuration
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure

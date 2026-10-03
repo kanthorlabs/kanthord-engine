@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { WorkerService, type Dependencies } from "./service.ts";
+import { ActionPerformer } from "./action-performer.ts";
 import {
   workerOperations,
+  ACTION_REQUEST_TOOL_NAME,
   WorkerErrorCode,
   WORKER_SERVICE_NAME,
   LIST_LIMIT_DEFAULT,
@@ -93,6 +95,57 @@ const fakeCollaborations = {
   modelListCheck: () => async () => ResourceStatus.Unknown,
 };
 const WORKER_CONFIG = { heartbeatWindow: 300, globalPrompt: "" };
+
+test("action handler forwards only the proved claim and caller before its commit", async (t) => {
+  const f = enablementFixture(t);
+  const execution = {
+    executionId: createIdentity("execution"),
+    projectId: createIdentity("project"),
+    nodeId: createIdentity("node"),
+    attempt: 1,
+    pinnedRevision: 1,
+    runtimeIdentity: createIdentity("worker_instance"),
+    workerBindingId: createIdentity("binding"),
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "harness",
+      resourceIdentity: "worker:kanthord:harness",
+      projectId: execution.projectId,
+      issuedAt: 1,
+    },
+    "jwt",
+    execution.runtimeIdentity,
+  );
+  const answer = { toolName: ACTION_REQUEST_TOOL_NAME, items: [] };
+  const perform = t.mock.method(
+    ActionPerformer.prototype,
+    "perform",
+    async () => {
+      const noCommits = 0;
+      assert.equal(f.commits(), noCommits);
+      return answer;
+    },
+  );
+  const result = await f.registry
+    .get(workerOperations["action.request"].id)
+    .handler(
+      {
+        params: { executionId: createIdentity("execution") },
+        query: {},
+        body: null,
+      },
+      { ...f.caller, identity, execution },
+    );
+  assert.equal(result, answer);
+  assert.deepEqual(perform.mock.calls[0]?.arguments, [
+    { context: f.caller.context, identity },
+    execution,
+  ]);
+  const oneCommit = 1;
+  assert.equal(f.commits(), oneCommit);
+});
 
 const client = {
   clientId: "client",

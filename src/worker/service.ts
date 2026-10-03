@@ -52,6 +52,7 @@ import {
   agentEnablementSchema,
 } from "./contract.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
+import { ActionPerformer } from "./action-performer.ts";
 import {
   agentsOfWorker,
   getAgentDeclaration,
@@ -205,8 +206,10 @@ export class WorkerService implements Service {
   private quiesced = false;
   private runError: Error | null = null;
   private readonly dependencies: Dependencies;
+  private readonly performer: ActionPerformer;
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.performer = new ActionPerformer(dependencies);
     this.heartbeatClock = new HeartbeatClock(dependencies.monotonicNow);
     this.registrations =
       dependencies.registrations ??
@@ -964,6 +967,19 @@ export class WorkerService implements Service {
   }
 
   declare(registry: OperationRegistry): void {
+    registry.register(
+      workerOperations["action.request"],
+      async (_input, caller) => {
+        const identity = caller.identity;
+        assert.ok(isMachineIdentity(identity));
+        assert.ok(caller.execution);
+        const answer = await this.performer.perform(
+          { context: caller.context, identity },
+          caller.execution,
+        );
+        return caller.commit(() => answer);
+      },
+    );
     this.declareHandover(registry);
     this.declareInstanceReads(registry);
     this.declareDeregister(registry);
