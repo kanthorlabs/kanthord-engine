@@ -40,7 +40,7 @@ engine/
 │   │   ├── files.ts            # Private filesystem validation and publication
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
-│   ├── repository/             # Repository shared component: startup version gate and SSH reachability connector
+│   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot and node-branch transport
 │   ├── custody/                # Custody component: credential envelope, platform validators, OAuth login sessions, and platform probes
 │   │   ├── payload.ts         # Normalized execution credential and stored secret conversion
 │   │   ├── execution-store.ts # Isolated execution credential view and serialized refresh reports
@@ -112,6 +112,21 @@ engine/
 │   │   ├── action-reuse.ts     # Open pull-request repository and branch checks
 │   │   ├── action-classify.ts  # No-effect, unknown-effect and recording outcomes
 │   │   ├── node-branch.ts      # Shared deterministic node branch name
+│   │   ├── prompt-assets.ts    # Byte-exact packaged base and agent prompts
+│   │   ├── pi.ts               # Cached offline SDK loader and isolated agent directory
+│   │   ├── tool-table.ts       # Declared tools, host checks and bounded hygienic bash
+│   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
+│   │   ├── prompt-composer.ts  # Layer selection, attribution, digests and work prompts
+│   │   ├── model-runtime.ts    # Execution credentials, model selection and runtime factory
+│   │   ├── test-support.ts     # Scripted offline provider and runtime fixtures
+│   │   ├── agent-session.ts    # Isolated in-memory sessions and setup deadlines
+│   │   ├── pinned-layers.ts    # Context and inference pins across compaction
+│   │   ├── budget.ts           # Monotonic wall budget, turns and cleanup deadline
+│   │   ├── verification.ts     # Sequential deadline-bounded verification commands
+│   │   ├── local-git.ts        # Workspace head and verification cleanup
+│   │   ├── workspace.ts        # Private workspace keys, preparation, holds and retention
+│   │   ├── execution-setup.ts  # Proven execution setup from pinned configuration
+│   │   ├── native-agent.ts     # Composed execution-scoped agent lifetime
 │   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and agent configuration
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
@@ -132,6 +147,7 @@ engine/
 │       └── worker/             # Remote worker application skeleton
 │           └── index.ts        # Client resolution, version check, and cancellable lifetime
 ├── static/                     # Packaged generated OpenAPI assets
+│   ├── prompt/                 # Byte-exact base, swe@1 and re@1 prompt assets
 │   ├── openapi.yaml             # Root contract index and package version
 │   └── openapi/                # Service path items and shared schemas
 │       ├── gateway/            # Gateway operation documents
