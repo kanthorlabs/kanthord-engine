@@ -32,6 +32,10 @@ import {
   resolveClient,
   type ClientConfiguration,
 } from "../../gateway/client.ts";
+import { homedir } from "node:os";
+import { Backoff } from "./api.ts";
+import { pullLoop } from "./pull-loop.ts";
+import type { ExecutionRecord } from "../../scheduler/contract.ts";
 
 const KEEPALIVE_INTERVAL_MS = 60000;
 const CLIENT_SECRET_BYTES = 32;
@@ -66,6 +70,7 @@ export class Worker implements Service {
   private registration?: Registration;
   private heartbeat?: { stop(): void };
   private pulling?: Promise<unknown>;
+  private registering?: Promise<Registration>;
   private execution?: {
     context: CancellationContext;
     task: Promise<Diagnostic | null>;
@@ -169,6 +174,7 @@ export class Worker implements Service {
         const error = await this.quiesce();
         await this.startTask;
         await this.pulling;
+        await this.registering;
         if (error) throw error;
         if (this.executionLive) {
           this.execution?.context.cancel();
@@ -226,8 +232,37 @@ export class Worker implements Service {
         });
         this.workspaces!.startSweeping();
       }
-      await this.shutdown.done();
-      return (await this.stop()) ?? context.err();
+      const loopError = await lifecycle(async () => {
+        const failure = await pullLoop({
+          api: this.api!,
+          registration: this.registration!,
+          backoff: new Backoff(),
+          shutdown: this.shutdown,
+          pulling: (task) => {
+            this.pulling = task;
+          },
+          claimed: (claim) => this.beginExecution(claim),
+          host: async () => this.execution!.task,
+          register: async () => {
+            this.registering = register(this.api!).then((registration) => {
+              this.registration = registration;
+              this.logRecord({
+                msg: "Worker application ready",
+                ...registration,
+              });
+              return registration;
+            });
+            return this.registering;
+          },
+        });
+        if (failure) throw failure;
+      });
+      const wasStopping = this.shutdown.err() !== null;
+      const stopError = await this.stop();
+      return (
+        (wasStopping ? (stopError ?? loopError) : (loopError ?? stopError)) ??
+        context.err()
+      );
     } finally {
       unsubscribe();
       process.off("SIGINT", stop);
@@ -243,6 +278,45 @@ export class Worker implements Service {
           ? HealthStatus.Healthy
           : HealthStatus.Unavailable,
     };
+  }
+
+  private logRecord(record: Record<string, unknown>): void {
+    if (this.options.log) this.options.log(JSON.stringify(record));
+    else this.operationalLog!.logger.info(record, String(record.msg));
+  }
+
+  private beginExecution(claim: ExecutionRecord): void {
+    this.executionLive = true;
+    const context = new CancellationContext(background, claim.expiredAt);
+    if (this.shutdown.err()) context.cancel();
+    const task = this.execute(claim, context)
+      .then((result) => {
+        if (result === null) this.executionLive = false;
+        return result;
+      })
+      .finally(() => context.cancel());
+    this.execution = { context, task };
+  }
+
+  private async execute(
+    claim: ExecutionRecord,
+    context: Context,
+  ): Promise<Diagnostic | null> {
+    const { hostExecution } = await import("./execution.ts");
+    const { defaultModelRuntimeFactory } =
+      await import("../../worker/index.ts");
+    return hostExecution({
+      claim,
+      api: this.api!,
+      clientSecret: this.clientSecret!.toString("base64"),
+      workspaces: this.workspaces!,
+      transport: this.transport!,
+      modelRuntimeFactory:
+        this.options.modelRuntimeFactory ?? defaultModelRuntimeFactory,
+      hostHome: this.options.env?.HOME ?? homedir(),
+      context,
+      log: (record) => this.logRecord(record),
+    });
   }
 }
 

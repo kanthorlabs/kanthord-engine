@@ -42,7 +42,7 @@ export interface NativeExecutionInput {
   hostHome: string;
   modelRuntimeFactory: ModelRuntimeFactory;
   transcript: TranscriptSink;
-  hostTools: HostTools;
+  hostTools: (workspace: string) => HostTools;
   context: Context;
 }
 
@@ -70,7 +70,7 @@ export async function runNativeExecution(
           workspace,
           hostHome: input.hostHome,
           modelRuntimeFactory: input.modelRuntimeFactory,
-          hostTools: input.hostTools,
+          hostTools: input.hostTools(workspace),
           context: run.operationContext,
         });
         unlink = stopOnEnd(run, agent);

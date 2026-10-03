@@ -409,7 +409,7 @@ test(
           hostHome: temporary(t),
           modelRuntimeFactory: scriptedModelRuntime(provider),
           transcript: noTranscript,
-          hostTools: unusedHostTools,
+          hostTools: () => unusedHostTools,
           context: background,
         });
         return { result, execution, provider, setup };

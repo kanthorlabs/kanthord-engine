@@ -19,9 +19,16 @@ import { retryIndeterminate, type WorkerApi } from "./api.ts";
 
 export class HandoverRefused extends Diagnostic {
   readonly status: number;
-  constructor(code: string, message: string, status: number) {
+  readonly result?: Extract<OperationResult<never>, { type: "failure" }>;
+  constructor(
+    code: string,
+    message: string,
+    status: number,
+    result?: Extract<OperationResult<never>, { type: "failure" }>,
+  ) {
     super(code, message);
     this.status = status;
+    this.result = result;
   }
 }
 
@@ -32,6 +39,7 @@ export function completed<T>(result: OperationResult<T>): T {
       result.error.error.code,
       result.error.error.message,
       result.status,
+      result,
     );
   throw new HandoverRefused(
     "gateway.invocation.timeout",

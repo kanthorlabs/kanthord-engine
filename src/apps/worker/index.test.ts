@@ -20,6 +20,7 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath, resolveClient } from "../../gateway/client.ts";
 import { Worker, runWorker } from "./index.ts";
+import { testClaim } from "./test-support.ts";
 
 const STARTED_MESSAGE = "Worker application ready";
 const REGISTRATION = {
@@ -33,6 +34,7 @@ const UNAVAILABLE_CODE = "worker.version.unavailable";
 const OPENAPI_PATH = "/api/openapi.yaml";
 const REGISTER_PATH = "/api/worker/register";
 const DEREGISTER_PATH = `/api/worker/instance/${REGISTRATION.runtimeIdentity}`;
+const PULL_PATH = "/api/scheduler/work/pull";
 const AUTHORIZATION = "Bearer test-token";
 const CLIENT_SECRET_BYTES = 32;
 const SHORT_KEY_BYTES = 16;
@@ -96,6 +98,11 @@ async function fixture(
     assert.equal(request.headers.authorization, AUTHORIZATION);
     requests++;
     if (intercept?.(request, response)) return;
+    if (request.url === PULL_PATH) {
+      response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ kind: "no-work" }));
+      return;
+    }
     if (request.url === DEREGISTER_PATH) {
       response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
       response.end(
@@ -189,7 +196,7 @@ test("matching worker starts once and joins context cancellation without server 
     [{ msg: STARTED_MESSAGE, ...REGISTRATION }],
   );
   const SINGLE_REQUEST = 2;
-  assert.equal(options.requests(), SINGLE_REQUEST);
+  assert.ok(options.requests() >= SINGLE_REQUEST);
   context.cancel();
   assert.equal(await running, context.err());
   assert.equal(worker.quiesce(), worker.quiesce());
@@ -492,4 +499,52 @@ test("settled stop arms a watchdog during a stalled deregistration", async (t) =
     }),
   );
   assert.equal(await stop, null);
+});
+
+test("stop waits for a pull, deregisters no-work and retains a late claim without running it", async (t) => {
+  for (const claimed of [false, true]) {
+    const received = Promise.withResolvers<ServerResponse>();
+    let deregistrations = 0;
+    const options = await fixture(t, packageVersion(), (request, response) => {
+      if (request.url === PULL_PATH) {
+        received.resolve(response);
+        return true;
+      }
+      if (request.url === DEREGISTER_PATH) deregistrations++;
+      return false;
+    });
+    const worker = new Worker({ ...options, log: () => {} });
+    const running = worker.run();
+    const response = await received.promise;
+    const stopping = worker.stop();
+    const exits: unknown[] = [];
+    const exit = t.mock.method(process, "exit", (code: unknown) => {
+      exits.push(code);
+      return undefined as never;
+    });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    t.mock.timers.tick(WORKER_STOP_WATCHDOG_MS);
+    assert.deepEqual(exits, []);
+    t.mock.timers.reset();
+    exit.mock.restore();
+    response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify(
+        claimed
+          ? { kind: "claimed", execution: testClaim() }
+          : { kind: "no-work" },
+      ),
+    );
+    const result = await running;
+    assert.equal(await stopping, result);
+    if (claimed) {
+      assert.ok(result instanceof Diagnostic);
+      const expected = "worker.stop.execution_live";
+      assert.equal(result.code, expected);
+      assert.equal(deregistrations, NO_REQUESTS);
+    } else {
+      assert.equal(result, null);
+      assert.equal(deregistrations, ONE_RECORD);
+    }
+  }
 });

@@ -217,7 +217,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     hostHome: temporary(t),
     modelRuntimeFactory: scriptedModelRuntime(provider),
     transcript: noTranscript,
-    hostTools: unusedHostTools,
+    hostTools: () => unusedHostTools,
     context: background,
   });
   assert.deepEqual(result, { kind: "closed", outcomeId: "outcome" });
@@ -279,7 +279,7 @@ test("native entry runs an initiative report with the scripted provider", async 
     hostHome: temporary(t),
     modelRuntimeFactory: scriptedModelRuntime(provider),
     transcript: noTranscript,
-    hostTools: unusedHostTools,
+    hostTools: () => unusedHostTools,
     context: background,
   });
   assert.deepEqual(result, { kind: "released", furtherWork: false });
