@@ -67,16 +67,40 @@ const MISSION_TABLES = [
 const INTEGRITY_OK = "ok";
 const NO_PREFIX_MATCHES = 0;
 const SINGLE_PREFIX_MATCH = 1;
-const ERD1_TABLES = [
+const INDEX_SCHEMA_TYPE = "index";
+const UNIQUE_INDEX = 1;
+const ALL_TABLES = [
   CREDENTIAL_TABLE,
+  MISSION_ASSESSMENT_TABLE,
+  MISSION_ATTEMPT_TABLE,
   MISSION_DEPENDENCY_TABLE,
+  MISSION_EVIDENCE_TABLE,
+  MISSION_EVIDENCE_ASSET_TABLE,
   MISSION_MISSION_TABLE,
   MISSION_NODE_TABLE,
   MISSION_NODE_REVISION_TABLE,
+  MISSION_OUTCOME_TABLE,
   PROJECT_BINDING_TABLE,
   PROJECT_PROJECT_TABLE,
+  SCHEDULER_EXECUTION_TABLE,
   SCHEDULER_JOB_TABLE,
   WORKER_AGENT_ENABLEMENT_TABLE,
+  WORKER_INSTANCE_TABLE,
+];
+const ALL_INDEXES = [
+  "credential_name_revision",
+  MISSION_ASSESSMENT_SEQUENCE_INDEX,
+  MISSION_ATTEMPT_OPEN_INDEX,
+  MISSION_EVIDENCE_REQUEST_INDEX,
+  "mission_node_filename_active",
+  MISSION_OUTCOME_SEQUENCE_INDEX,
+  "project_binding_revision",
+  "project_project_name",
+  "scheduler_execution_node_live",
+  "scheduler_execution_runtime_live",
+  "scheduler_job_node_id",
+  "worker_agent_enablement_agent_name_revision",
+  "worker_instance_live_client",
 ];
 
 function tables(store: Store): string[] {
@@ -245,8 +269,8 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all migrations produce exactly the expected ERD 1 and implemented ERD 2 tables", () => {
-  const erd1Services: Migrations = [
+test("all ERD 1 and ERD 2 migrations produce exactly the sixteen tables", () => {
+  const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
     { service: GATEWAY_SERVICE_NAME, migrations: gatewayMigrations },
@@ -254,13 +278,13 @@ test("all migrations produce exactly the expected ERD 1 and implemented ERD 2 ta
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
   ];
-  const prefixes = erd1Services.map(({ service }) => `${service}_`);
-  assert.equal(new Set(prefixes).size, erd1Services.length);
+  const prefixes = allServices.map(({ service }) => `${service}_`);
+  assert.equal(new Set(prefixes).size, allServices.length);
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     const applied: Migrations[number][] = [];
     const owners = new Map<string, string>();
-    for (const service of erd1Services) {
+    for (const service of allServices) {
       const before = new Set(tables(store));
       applied.push(service);
       store.migrate(applied);
@@ -268,17 +292,10 @@ test("all migrations produce exactly the expected ERD 1 and implemented ERD 2 ta
         owners.set(name, service.service);
       }
     }
-    assert.deepEqual(
-      [...tables(store)].sort(),
-      [
-        ...ERD1_TABLES,
-        ...ERD2_MISSION_TABLES,
-        ...ERD2_WORKER_TABLES,
-        SCHEDULER_EXECUTION_TABLE,
-      ].sort(),
-    );
+    assert.deepEqual([...tables(store)].sort(), ALL_TABLES);
+    assertSchemaRules(store, owners);
     for (const name of tables(store)) {
-      const matches = erd1Services.filter(({ service }) =>
+      const matches = allServices.filter(({ service }) =>
         name.startsWith(`${service}_`),
       );
       if (name === CREDENTIAL_TABLE) {
@@ -298,7 +315,7 @@ test("all migrations produce exactly the expected ERD 1 and implemented ERD 2 ta
   } finally {
     store.close();
   }
-  for (const service of erd1Services) {
+  for (const service of allServices) {
     const isolated = new Store(IN_MEMORY_DATABASE);
     try {
       isolated.migrate([service]);
@@ -315,6 +332,52 @@ test("all migrations produce exactly the expected ERD 1 and implemented ERD 2 ta
     }
   }
 });
+
+function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
+  const schema = store.database
+    .prepare("SELECT name, type, sql FROM sqlite_master ORDER BY name")
+    .all();
+  assert.deepEqual(
+    schema
+      .filter((row) => row.type === INDEX_SCHEMA_TYPE && row.sql !== null)
+      .map((row) => row.name),
+    ALL_INDEXES,
+  );
+  for (const row of schema) assert.doesNotMatch(String(row.sql), /\bCHECK\b/i);
+  const executionReferences: string[] = [];
+  for (const table of ALL_TABLES) {
+    const indexes = store.database
+      .prepare("SELECT * FROM pragma_index_list(?)")
+      .all(table);
+    for (const index of indexes)
+      assert.equal(index.unique, UNIQUE_INDEX, String(index.name));
+    const references = store.database
+      .prepare("SELECT * FROM pragma_foreign_key_list(?)")
+      .all(table);
+    for (const reference of references) {
+      assert.ok(owners.has(String(reference.table)));
+      assert.equal(owners.get(table), owners.get(String(reference.table)));
+    }
+    if (ERD2_MISSION_TABLES.includes(table)) {
+      executionReferences.push(
+        ...references.map(
+          (row) =>
+            `${table}.${String(row.from)}->${String(row.table)}.${String(row.to)}`,
+        ),
+      );
+    }
+    if (table === WORKER_INSTANCE_TABLE || table === SCHEDULER_EXECUTION_TABLE)
+      assert.deepEqual(references, []);
+  }
+  assert.deepEqual(executionReferences.sort(), [
+    "mission_assessment.node_id->mission_node.id",
+    "mission_attempt.node_id->mission_node.id",
+    "mission_evidence.node_id->mission_node.id",
+    "mission_evidence_asset.evidence_id->mission_evidence.id",
+    "mission_outcome.assessment_id->mission_assessment.id",
+    "mission_outcome.node_id->mission_node.id",
+  ]);
+}
 
 test("Scheduler executions have exactly the ruled columns and partial unique indexes", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
