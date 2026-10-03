@@ -33,6 +33,21 @@ import {
 import { renderWorkPrompt } from "./prompt-composer.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import { WorkspaceKind } from "./workspace.ts";
+import { ActionResultKind } from "./contract.ts";
+
+export const ACCEPTED_ITEM_KINDS: readonly ActionResultKind[] = [
+  ActionResultKind.Submitted,
+  ActionResultKind.AwaitingPrerequisite,
+];
+
+export async function requestAndRelease(
+  run: ExecutionRun,
+): Promise<ExecutionEnd> {
+  const items = await run.requestActions();
+  if (!items.every((item) => ACCEPTED_ITEM_KINDS.includes(item.kind)))
+    return run.stop(EndReason.ActionUnsettled);
+  return run.release(false);
+}
 
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
 type OpenAgent = (directory: string) => Promise<NativeAgent>;
@@ -131,6 +146,8 @@ export async function runEvaluation(
     });
     if (answer.outcome)
       return { kind: ExecutionEndKind.Closed, outcomeId: answer.outcome.id };
+    if (answer.assessment.result === AssessmentResult.Success)
+      return await requestAndRelease(run);
     return run.stop(EndReason.OperationFailed);
   } finally {
     input.workspaces.release(prepared.directory, WorkspaceKind.Execution);

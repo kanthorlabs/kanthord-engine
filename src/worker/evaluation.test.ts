@@ -10,10 +10,73 @@ import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "./contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
-import { runEvaluation } from "./evaluation.ts";
+import { requestAndRelease, runEvaluation } from "./evaluation.ts";
+import { ActionResultKind } from "./contract.ts";
 
 const ZERO = 0;
 const ONE = 1;
+test("reviewer release accepts only settled or prerequisite-waiting action results", async (t) => {
+  for (const kinds of [
+    [],
+    [ActionResultKind.Submitted],
+    [ActionResultKind.AwaitingPrerequisite],
+    [ActionResultKind.FailedBeforeEffect],
+    [ActionResultKind.Uncertain],
+  ]) {
+    const setup = anthropicSetup();
+    const claim = {
+      executionId: setup.executionId,
+      nodeId: "node",
+      attempt: 1,
+      pinnedRevision: 1,
+      createdAt: Date.now(),
+      expiredAt: Date.now() + 60000,
+      traceId: "trace",
+    };
+    let releases = 0;
+    const clients = {
+      worker: {
+        "action.request": async (input: unknown) => {
+          assert.deepEqual(input, {
+            params: { executionId: claim.executionId },
+            query: {},
+            body: null,
+          });
+          return {
+            type: "completed",
+            status: 200,
+            data: { items: kinds.map((kind) => ({ kind })) },
+          };
+        },
+      },
+      scheduler: {
+        executionRelease: async () => {
+          releases++;
+          return { type: "completed", status: 200, data: {} };
+        },
+      },
+    } as unknown as MethodClients;
+    const run = new ExecutionRun({
+      claim,
+      clients,
+      credentials: { release: async () => {} },
+      context: background,
+    });
+    t.after(() => run.dispose());
+    const accepted = kinds.every(
+      (kind) =>
+        kind === ActionResultKind.Submitted ||
+        kind === ActionResultKind.AwaitingPrerequisite,
+    );
+    if (accepted)
+      assert.deepEqual(await requestAndRelease(run), {
+        kind: "released",
+        furtherWork: false,
+      });
+    else await assert.rejects(requestAndRelease(run), ExecutionStop);
+    assert.equal(releases, accepted ? ONE : ZERO);
+  }
+});
 test("evaluation writes failed-verification assessments without inference and gates malformed judgement", async (t) => {
   for (const scenario of [
     { command: "false", text: "", result: "criterion-not-met", opens: 0 },
