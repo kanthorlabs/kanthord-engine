@@ -25,6 +25,8 @@ const CONTENT = "written";
 const OPERATOR_PATH = "operator";
 const TOOL_RESULT = "toolResult";
 const START_POLLS = 100;
+const JUDGED = "judged";
+const TRANSCRIPT_MESSAGES = 5;
 const WORK = renderWorkPrompt({
   nodeId: NODE,
   revision: 1,
@@ -155,4 +157,32 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
   assert.equal(h.provider.calls.length, ONE);
   h.agent.dispose();
   await assert.rejects(h.agent.prompt(WORK));
+  await assert.rejects(h.agent.instruct(WORK, "judge"));
+});
+
+test("native instructions preserve pinned work and expose copied transcript and last text", async (t) => {
+  const h = await fixture(t, [
+    fauxAssistantMessage("work done"),
+    fauxAssistantMessage(JUDGED),
+  ]);
+  assert.equal(h.agent.lastText(), undefined);
+  await h.agent.prompt(WORK);
+  const before = h.agent.transcript();
+  await h.agent.instruct(WORK, "judge");
+  const call = h.provider.calls.at(-1)!;
+  const messages = JSON.stringify(call.messages);
+  assert.equal(
+    messages.split(JSON.stringify(WORK.marked).slice(1, -1)).length - 1,
+    ONE,
+  );
+  assert.deepEqual(call.messages.at(-1)?.content, [
+    { type: "text", text: "judge" },
+  ]);
+  assert.equal(h.agent.lastText(), JUDGED);
+  assert.equal(before.length, THREE);
+  assert.equal(h.agent.transcript().length, TRANSCRIPT_MESSAGES);
+  assert.deepEqual(
+    h.agent.transcript().map((message) => (message as { role: string }).role),
+    ["system", "user", "assistant", "user", "assistant"],
+  );
 });

@@ -45,6 +45,9 @@ export interface NativeAgentInput {
 }
 export interface NativeAgent {
   prompt(work: WorkPrompt): Promise<void>;
+  instruct(work: WorkPrompt, text: string): Promise<void>;
+  lastText(): string | undefined;
+  transcript(): readonly unknown[];
   abort(): Promise<void>;
   readonly budget: ExecutionBudget;
   readonly composition: CompositionRecord;
@@ -82,6 +85,21 @@ function nativeAgent(
     },
     async abort() {
       await session?.abort();
+    },
+    async instruct(work, text) {
+      assert.ok(session);
+      throwIfCancelled(context);
+      pins.setWork(work);
+      await session.prompt(text, { expandPromptTemplates: false });
+      await session.waitForIdle();
+    },
+    lastText() {
+      assert.ok(session);
+      return session.getLastAssistantText();
+    },
+    transcript() {
+      assert.ok(session);
+      return [...session.messages];
     },
     dispose() {
       unsubscribeTurns?.();
