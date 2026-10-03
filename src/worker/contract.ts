@@ -587,7 +587,7 @@ export interface WorkerRegistrations {
     transaction: Transaction,
     client: VerifiedClient,
     now: number,
-  ): Registration;
+  ): Registration & { workerName: string };
   findByClient(clientId: string): Registration | undefined;
   liveRegistrationOf(
     tx: Transaction,
@@ -1198,6 +1198,8 @@ export const workerOperations = {
     input: emptyInput,
     output: z.strictObject({
       runtimeIdentity: identitySchema("worker_instance"),
+      resourceIdentity: workerResourceIdentitySchema,
+      workerName: z.string().min(1),
     }),
     description:
       "Register a worker instance with a bearer machine JWT and an empty body. A client identity with a live registration receives that runtime identity with any key. A recorded replay after the registration ends answers 409 gateway.registration.stale. Admission and the binding instance count share one transaction.",

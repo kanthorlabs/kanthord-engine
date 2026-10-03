@@ -207,7 +207,10 @@ test("Worker owns registrations, declares its handler, and joins lifecycle calls
       worker.registrations.register(transaction, client, Date.now()),
     );
     assert.deepEqual(
-      worker.registrations.findByClient(client.clientId),
+      {
+        ...worker.registrations.findByClient(client.clientId),
+        workerName: registration.workerName,
+      },
       registration,
     );
     assert.deepEqual(
@@ -301,6 +304,12 @@ test("registration admission is idempotent, bounded by the latest slot count and
   f.caller.identity = identity;
   const input = { params: {}, query: {}, body: null };
   const first = handler(input, f.caller);
+  const facts = workerOperations.register.output.parse(first);
+  assert.equal(facts.resourceIdentity, identity.resourceIdentity);
+  assert.equal(
+    facts.workerName,
+    fakeCollaborations.workerBindingOf().workerName,
+  );
   assert.deepEqual(handler(input, f.caller), first);
   assert.equal(f.store.transaction(readAllLive).length, one);
   f.caller.identity = testMachineIdentity(
@@ -400,7 +409,7 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
   }
   f.caller.identity = owner;
   assert.deepEqual(deregister(input, f.caller), {
-    ...first,
+    runtimeIdentity: first.runtimeIdentity,
     registered: false,
   });
   assert.equal(f.worker.heartbeatClock.ageMs(first.runtimeIdentity), null);
@@ -740,7 +749,10 @@ test("registration reads retain ended attribution and observe the caller transac
     () =>
       f.store.transaction((tx) => {
         assert.deepEqual(
-          registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+          {
+            ...registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+            workerName: row.workerName,
+          },
           row,
         );
         assert.deepEqual(
@@ -762,7 +774,10 @@ test("registration reads retain ended attribution and observe the caller transac
   );
   f.store.transaction((tx) => {
     assert.deepEqual(
-      registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+      {
+        ...registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+        workerName: row.workerName,
+      },
       row,
     );
     endRegistration(tx, row.runtimeIdentity, Date.now());
@@ -777,7 +792,10 @@ test("registration reads retain ended attribution and observe the caller transac
       null,
     );
     assert.deepEqual(
-      registrations.liveRegistrationOf(tx, next.runtimeIdentity),
+      {
+        ...registrations.liveRegistrationOf(tx, next.runtimeIdentity),
+        workerName: next.workerName,
+      },
       next,
     );
     assert.deepEqual(

@@ -1126,6 +1126,12 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
       .type,
     STRING_SCHEMA_TYPE,
   );
+  assert.deepEqual(
+    Object.keys(
+      authResponse.content["application/json"].schema.properties,
+    ).sort(),
+    ["resourceIdentity", "runtimeIdentity", "workerName"],
+  );
   assert.equal(
     "requestBody" in resolved.paths!["/api/worker/register"]!.post!,
     false,

@@ -131,7 +131,10 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
   const f = await fixtureForRegistration(t);
   const registered = await f.client.register(input);
   assert.ok(registered.type === OperationResultType.Completed);
-  const target = { ...input, params: registered.data };
+  const target = {
+    ...input,
+    params: { runtimeIdentity: registered.data.runtimeIdentity },
+  };
   const identity = await f.gateway.authentication.authenticate(
     `Bearer ${f.machineJWT}`,
   );
@@ -141,7 +144,10 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
     idempotencyKey: key,
   });
   assert.ok(ended.type === OperationResultType.Completed);
-  assert.deepEqual(ended.data, { ...registered.data, registered: false });
+  assert.deepEqual(ended.data, {
+    runtimeIdentity: registered.data.runtimeIdentity,
+    registered: false,
+  });
   assert.deepEqual(
     await f.client["instance.deregister"](target, { idempotencyKey: key }),
     ended,
@@ -184,7 +190,10 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
     "worker.instance.not_found",
   );
   assert.equal(f.machines.worker.registrations.size, SINGLE_REGISTRATION);
-  const replacement = { ...input, params: next.data };
+  const replacement = {
+    ...input,
+    params: { runtimeIdentity: next.data.runtimeIdentity },
+  };
   const nextKey = ulid();
   const directEnd = await direct["instance.deregister"](replacement, {
     identity,

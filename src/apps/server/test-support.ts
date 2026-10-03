@@ -331,7 +331,7 @@ export function fakeMachines(
       transaction: Transaction,
       client: VerifiedClient,
       now: number,
-    ): Registration {
+    ): Registration & { workerName: string } {
       assert.ok(transaction.database.isTransaction);
       const binding = [...bindings].find(
         ([name, binding]) =>
@@ -345,7 +345,7 @@ export function fakeMachines(
           binding.capacity >= NO_INSTANCES,
       );
       const previous = registrations.get(client.clientId);
-      if (previous) return previous;
+      if (previous) return { ...previous, workerName: "general@1" };
       const count = [...registrations.values()].filter(
         (entry) =>
           entry.resourceIdentity === client.resourceIdentity &&
@@ -359,6 +359,7 @@ export function fakeMachines(
         );
       const registration = {
         ...client,
+        workerName: "general@1",
         runtimeIdentity: createIdentity("worker_instance"),
         registeredAt: now,
       };

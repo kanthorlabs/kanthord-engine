@@ -113,11 +113,14 @@ export class TableRegistrations implements WorkerRegistrations {
     const row = readRow(tx, runtimeIdentity);
     return row ? { clientId: row.clientId, name: row.name } : null;
   }
-  register(tx: Transaction, client: VerifiedClient, now: number): Registration {
+  register(
+    tx: Transaction,
+    client: VerifiedClient,
+    now: number,
+  ): Registration & { workerName: string } {
     assert.ok(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
     const previous = readLiveOfClient(tx, client.clientId);
-    if (previous) return previous;
     const binding = this.workerBindingOf(
       tx,
       client.projectId,
@@ -126,14 +129,18 @@ export class TableRegistrations implements WorkerRegistrations {
     if (
       !binding ||
       binding.tombstone ||
-      countLive(tx, client.projectId, client.resourceIdentity) >=
-        binding.instanceCount
+      (!previous &&
+        countLive(tx, client.projectId, client.resourceIdentity) >=
+          binding.instanceCount)
     )
       throw new OperationError(
         HttpStatus.Conflict,
         WorkerErrorCode.SlotUnavailable,
         "Worker binding has no available registration slot.",
       );
-    return insertRegistration(tx, client, now);
+    return {
+      ...(previous ?? insertRegistration(tx, client, now)),
+      workerName: binding.workerName,
+    };
   }
 }

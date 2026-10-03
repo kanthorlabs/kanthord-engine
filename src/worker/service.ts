@@ -1109,7 +1109,11 @@ export class WorkerService implements Service {
             runtimeIdentity,
             "Registration must return a runtime identity.",
           );
-          return { runtimeIdentity };
+          return {
+            runtimeIdentity,
+            resourceIdentity: identity.resourceIdentity,
+            workerName: registration.workerName,
+          };
         });
         this.heartbeatClock.set(result.runtimeIdentity);
         return result;

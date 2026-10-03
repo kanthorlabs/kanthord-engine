@@ -334,7 +334,7 @@ test("worker register requires a token and validates retry keys before any reque
   assert.equal(existsSync(clientConfigPath(env)), false);
 });
 
-test("worker register prints only the runtime identity and key to redirected stdout and replays one registration", async (t) => {
+test("worker register prints registration facts and key to redirected stdout and replays one registration", async (t) => {
   const machines = fakeMachines();
   const fixture = await gatewayFixture(t, { machines });
   const token = await fixture.machineToken(
@@ -356,7 +356,9 @@ test("worker register prints only the runtime identity and key to redirected std
     const response = JSON.parse(result.stdout);
     assert.deepEqual(Object.keys(response).sort(), [
       "idempotencyKey",
+      "resourceIdentity",
       "runtimeIdentity",
+      "workerName",
     ]);
     assert.equal(response.idempotencyKey, key);
     assert.equal(

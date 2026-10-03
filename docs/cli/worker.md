@@ -176,12 +176,10 @@ The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/do
 | `body`                   | Absent HTTP body; internal value `null`                                   | JSON `{}` is not an empty request body and is rejected. `--file` is not accepted.                  |
 
 The operation is a mutation, declares a `10,000 ms` timeout and a `40 KiB` body
-limit, and currently returns HTTP `200` with `{ "runtimeIdentity": "..." }`. The body limit
+limit, and returns HTTP `200` with `{ "runtimeIdentity": "...", "resourceIdentity": "...", "workerName": "..." }`. The body limit
 does not permit a registration payload. The runtime identity is `worker_instance_<ulid>`.
 
-The CLI currently prints one JSON line with `runtimeIdentity` and `idempotencyKey`, saves no configuration and prints no token.
-**Target design (Plan 09):** the operation and CLI answer additionally hold
-`resourceIdentity` and `workerName` for worker-application startup.
+The CLI prints one JSON line with `runtimeIdentity`, `resourceIdentity`, `workerName` and `idempotencyKey`, saves no configuration and prints no token.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
 worker definition or human account. The credential comes from local `jwt generate`
 issuance described in [other commands](./other.md).
