@@ -156,21 +156,21 @@ names are singular.
 All 11 commands have `[R]` and `human` access. The three mutations have `[M]`; the four paginated lists have `[L]`.
 Blocked commands link their items in [HANDOFF Project Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service).
 
-| #   | Synopsis after `kanthord project`                                         | Proposed HTTP route                                               | Proposed operation ID                                      | Access/status     |
-| --- | ------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- | ----------------- |
-| 1   | `create --name <name> [M] [R]`                                            | `POST /api/project`                                               | `project.create`                                           | `human`; proposed |
-| 2   | `list [L] [R]`                                                            | `GET /api/project`                                                | `project.list`                                             | `human`; proposed |
-| 3   | `get <project-id> [R]`                                                    | `GET /api/project/:projectId`                                     | `project.get`                                              | `human`; proposed |
-| 4   | `rename <project-id> --name <name> [M] [R]`                               | `PATCH /api/project/:projectId`                                   | `project.rename`                                           | `human`; proposed |
-| 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]` | `GET /api/project/:projectId/binding`                             | `project.binding.list` **[blocked][project-contract]**     | `human`; proposed |
-| 6   | `binding get <project-id> <binding-id> [R]`                               | `GET /api/project/:projectId/binding/:bindingId`                  | `project.binding.get` **[blocked][project-contract]**      | `human`; proposed |
-| 7   | `binding export <project-id> [R]`                                         | `GET /api/project/:projectId/binding-set`                         | `project.bindingSet.get` **[blocked][project-contract]**   | `human`; proposed |
-| 8   | `binding apply <project-id> --file <path> [M] [R]`                        | `PUT /api/project/:projectId/binding-set`                         | `project.bindingSet.write` **[blocked][project-contract]** | `human`; proposed |
-| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                 | `GET /api/project/:projectId/binding/:bindingId/revision`         | `project.bindingRevision.list`                             | `human`; proposed |
-| 10  | `agent list <project-id> <worker-binding-id> [L] [R]`                     | `GET /api/project/:projectId/binding/:bindingId/agent`            | `project.agentConfiguration.list`                          | `human`; proposed |
-| 11  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:projectId/binding/:bindingId/agent/:agentName` | `project.agentConfiguration.get`                           | `human`; proposed |
+| #   | Synopsis after `kanthord project`                                         | Proposed HTTP route                                               | Proposed operation ID                                  | Access/status     |
+| --- | ------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------ | ----------------- |
+| 1   | `create --name <name> [M] [R]`                                            | `POST /api/project`                                               | `project.create`                                       | `human`; proposed |
+| 2   | `list [L] [R]`                                                            | `GET /api/project`                                                | `project.list`                                         | `human`; proposed |
+| 3   | `get <project-id> [R]`                                                    | `GET /api/project/:projectId`                                     | `project.get`                                          | `human`; proposed |
+| 4   | `rename <project-id> --name <name> [M] [R]`                               | `PATCH /api/project/:projectId`                                   | `project.rename`                                       | `human`; proposed |
+| 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]` | `GET /api/project/:projectId/binding`                             | `project.binding.list` **[blocked][project-contract]** | `human`; proposed |
+| 6   | `binding get <project-id> <binding-id> [R]`                               | `GET /api/project/:projectId/binding/:bindingId`                  | `project.binding.get` **[blocked][project-contract]**  | `human`; proposed |
+| 7   | `binding export <project-id> [R]`                                         | `GET /api/project/:projectId/binding-set`                         | `project.bindingSet.get`                               | `human`; proposed |
+| 8   | `binding apply <project-id> --file <path> [M] [R]`                        | `PUT /api/project/:projectId/binding-set`                         | `project.bindingSet.write`                             | `human`; proposed |
+| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                 | `GET /api/project/:projectId/binding/:bindingId/revision`         | `project.bindingRevision.list`                         | `human`; proposed |
+| 10  | `agent list <project-id> <worker-binding-id> [L] [R]`                     | `GET /api/project/:projectId/binding/:bindingId/agent`            | `project.agentConfiguration.list`                      | `human`; proposed |
+| 11  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:projectId/binding/:bindingId/agent/:agentName` | `project.agentConfiguration.get`                       | `human`; proposed |
 
-- Rows 5 to 8 keep their marks under HANDOFF Project Service, not for the storage credential record type.
+- Rows 5 and 6 keep their marks under HANDOFF Project Service, not for the storage credential record type.
 - Server-wide credential routes belong to `/api/credential`; provider check belongs to `/api/worker/provider/check`. Neither route is under `/api/project`.
 - There are 11 distinct route operations for the 11 CLI leaves.
 
@@ -217,7 +217,7 @@ Inputs:
   `current | removed | all`, default `current`; query `state`.
   The Project Service keeps a removed binding and every revision for the life of the project; `removed` and `all` include retained bindings.
 - [`--file`](./common-flags.md#--file): required for `apply`; content is the
-  complete `BindingSetWrite` object defined below. No patch, merge, or partial-set mode.
+  complete `BindingSet` object defined below. No patch, merge, or partial-set mode.
 
 `binding list` returns a page of binding metadata and current configuration.
 `binding get` returns one revision of a binding, its configuration, and
@@ -228,7 +228,7 @@ state filters, `limit`, and `cursor` are the only list query fields.
 `binding get` has no kind query.
 
 `binding export` reads one consistent, complete current set and prints exactly
-the proposed `BindingSetWrite` shape, ready to save to a named JSON file and
+the `BindingSet` shape, ready to save to a named JSON file and
 edit. It is not paginated and contains no secret material. It includes the
 version used by `apply`. The `bindings` object uses binding names as its keys,
 and references use binding-name strings. Output size limits and snapshot consistency need
@@ -242,7 +242,7 @@ authorization grant. The Project Service keeps a removed binding and every revis
 command is proposed; copying an old configuration into a new complete-set
 write is subject to current validation.
 
-### `BindingSetWrite` request file — proposed schema
+### `BindingSet` request file
 
 The JSON file is the HTTP body. Path `projectId` supplies its project; no body
 field can redirect the edit. Required fields have no default. Optional fields
@@ -458,13 +458,12 @@ transaction. The target rules are:
   submitted set is identical. Empty and no-change submissions are still
   mutations, not read or validation commands.
 
-Proposed result fields are `projectId`, the new `bindingSetVersion`, `bindings`
-(an object keyed by binding name with current binding metadata/configurations),
-and `changes`. Each `bindings` value includes its `id`, so the result maps each
-current binding name to its identity. Each `changes` item has required `kind`
-(`created | revised | removed | unchanged`) and required `bindingId`.
-A resource change produces a removal and a creation. Exact result schemas
-require contract review.
+`binding apply` returns the committed `BindingSet` at its new version, and
+`binding export` returns the current `BindingSet`, under the
+[binding-set write ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-write-of-a-binding-set).
+A stale `version` answers 409 `project.binding_set.version_conflict` with the
+current version in `error.details`. Binding identities come from `binding list`
+and `binding get`.
 
 Use this one write operation to add repositories, add workers, configure
 agent entries, change repository strategy, set resource budgets and instance
