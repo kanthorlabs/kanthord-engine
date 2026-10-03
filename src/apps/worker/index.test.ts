@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { readdirSync, unlinkSync } from "node:fs";
+import { readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { stringify } from "yaml";
 import { CancellationContext } from "../../kernel/context.ts";
@@ -16,11 +17,17 @@ import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath, resolveClient } from "../../gateway/client.ts";
 import { Worker, runWorker } from "./index.ts";
 
-const STARTED_MESSAGE = "Worker application started";
+const STARTED_MESSAGE = "Worker application ready";
+const REGISTRATION = {
+  runtimeIdentity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  resourceIdentity: "worker:kanthord:test",
+  workerName: "general@1",
+};
 const MISMATCH_VERSION = "0.0.0-mismatch";
 const MISMATCH_CODE = "worker.version.mismatch";
 const UNAVAILABLE_CODE = "worker.version.unavailable";
 const OPENAPI_PATH = "/api/openapi.yaml";
+const REGISTER_PATH = "/api/worker/register";
 const AUTHORIZATION = "Bearer test-token";
 const CLIENT_SECRET_BYTES = 32;
 const SHORT_KEY_BYTES = 16;
@@ -64,11 +71,27 @@ async function bounded<T>(promise: Promise<T>, duration: number): Promise<T> {
 }
 
 async function fixture(t: TestContext, version: string) {
+  const tools = temporary(t);
+  for (const name of ["rg", "fd"])
+    writeFileSync(join(tools, name), "#!/bin/sh\necho test_tool\n", {
+      mode: 0o700,
+    });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${tools}:${previousPath ?? ""}`;
+  t.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
   let requests = 0;
   const listener = createServer((request, response) => {
-    assert.equal(request.url, OPENAPI_PATH);
     assert.equal(request.headers.authorization, AUTHORIZATION);
     requests++;
+    if (request.url === REGISTER_PATH) {
+      response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(REGISTRATION));
+      return;
+    }
+    assert.equal(request.url, OPENAPI_PATH);
     response.writeHead(HttpStatus.OK, { "Content-Type": "application/yaml" });
     response.end(stringify({ info: { version } }));
   });
@@ -84,7 +107,7 @@ async function fixture(t: TestContext, version: string) {
   const address = listener.address();
   assert.ok(address && !isString(address));
   const directory = temporary(t);
-  const env = { XDG_CONFIG_HOME: directory };
+  const env = { XDG_CONFIG_HOME: directory, XDG_STATE_HOME: temporary(t) };
   writePrivate(
     clientConfigPath(env),
     stringify({
@@ -141,8 +164,11 @@ test("matching worker starts once and joins context cancellation without server 
   assert.equal(worker.start(), worker.start());
   assert.equal(await worker.start(), null);
   assert.deepEqual(await worker.healthcheck(), { client: HttpStatus.OK });
-  assert.deepEqual(messages, [STARTED_MESSAGE]);
-  const SINGLE_REQUEST = 1;
+  assert.deepEqual(
+    messages.map((message) => JSON.parse(message)),
+    [{ msg: STARTED_MESSAGE, ...REGISTRATION }],
+  );
+  const SINGLE_REQUEST = 2;
   assert.equal(options.requests(), SINGLE_REQUEST);
   context.cancel();
   assert.equal(await running, context.err());

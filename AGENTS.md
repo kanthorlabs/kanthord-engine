@@ -261,10 +261,10 @@ The worker requires `clientSecret` in `cli.yaml` as canonical 32-byte base64.
 It has no option or environment variable. `jwt generate --project <project id> --binding <binding name>`
 prints the `token` and `clientSecret` fragment for this file. A `masterKey`
 field fails with `cli.config.invalid`.
-It reads the server's package version through the OpenAPI index and refuses
-an unavailable or different version. On a match it logs
-`Worker application started` and waits for cancellation, `SIGINT`, or `SIGTERM`.
-It hosts no instances yet, opens no database, and reads no server configuration.
+It checks the host tools and the server package version, opens the state-directory
+workspace root and registers its instance. It logs `Worker application ready`
+with `runtimeIdentity`, `resourceIdentity` and `workerName`.
+It opens no database and reads no server configuration.
 `--config` is not supported. `kanthord serve` still starts the server.
 
 ## Add a migration

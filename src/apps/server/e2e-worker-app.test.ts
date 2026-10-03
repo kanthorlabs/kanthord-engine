@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { writeFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { parse, stringify } from "yaml";
@@ -32,7 +33,7 @@ const EPHEMERAL_PORT = 0;
 const NOT_FOUND_STATUS = 404;
 const OPENAPI_PATH = "/api/openapi.yaml";
 const GET = "GET";
-const STARTED = "Worker application started";
+const STARTED = "Worker application ready";
 const READY = "Worker application ready";
 const EXIT_TIMEOUT = "Worker exit timed out";
 const EMPTY = "";
@@ -57,8 +58,14 @@ type WorkerProcess = {
 
 function workerEnvironment(t: TestContext): NodeJS.ProcessEnv {
   const root = temporary(t);
+  const tools = temporary(t);
+  for (const name of ["rg", "fd"])
+    writeFileSync(join(tools, name), "#!/bin/sh\necho test_tool\n", {
+      mode: 0o700,
+    });
   const env = {
     ...environment(root),
+    PATH: `${tools}:${process.env.PATH ?? ""}`,
     XDG_CONFIG_HOME: join(root, "config"),
     XDG_DATA_HOME: join(root, "data"),
     XDG_STATE_HOME: join(root, "state"),
@@ -396,7 +403,7 @@ test("E09.5 startup is one JSON record and SIGTERM exits cleanly", async (t) => 
       records.filter((record) => record.msg === STARTED).length,
       ONE,
     );
-    assert.ok(records.every((record) => record.msg !== READY));
+    assert.ok(records.every((record) => record.msg === READY));
     assert.equal(result.stdout, EMPTY);
     assert.ok(result.stderr.every((entry) => !entry.includes(token)));
     assert.equal(result.signal, null);

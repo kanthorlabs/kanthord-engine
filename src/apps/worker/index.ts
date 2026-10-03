@@ -14,13 +14,15 @@ import {
   type Service,
 } from "../../kernel/service.ts";
 import { packageVersion } from "../../kernel/version.ts";
-import { gatewayOperations } from "../../gateway/contract.ts";
+import { RepositoryComponent } from "../../repository/index.ts";
+import type { WorkspaceRoot } from "../../worker/index.ts";
+import { workerApi, type WorkerApi } from "./api.ts";
+import { register, type Registration } from "./registration.ts";
 import type {
   ModelRuntimeFactory,
   RepositoryTransport,
 } from "../../worker/index.ts";
 import {
-  httpClient,
   readServerVersion,
   resolveClient,
   type ClientConfiguration,
@@ -52,6 +54,11 @@ export class Worker implements Service {
   private started = false;
   private keepalive?: NodeJS.Timeout;
   private operationalLog?: OperationalLog;
+  private clientSecret?: Buffer;
+  private api?: WorkerApi;
+  private transport?: RepositoryTransport;
+  private workspaces?: WorkspaceRoot;
+  private registration?: Registration;
 
   constructor(options: WorkerOptions = {}) {
     this.options = options;
@@ -81,12 +88,18 @@ export class Worker implements Service {
           "worker.start.client_secret_invalid",
           "worker: clientSecret must be a base64 encoding of exactly 32 bytes.",
         );
-      const client = httpClient(
-        gatewayOperations,
-        config.endpoint,
-        config.token,
-      );
-      const version = await readServerVersion(client, {
+      this.clientSecret = secret;
+      throwIfCancelled(this.shutdown);
+      const { checkAgentTools, WorkspaceRoot } =
+        await import("../../worker/index.ts");
+      throwIfCancelled(this.shutdown);
+      checkAgentTools();
+      throwIfCancelled(this.shutdown);
+      this.transport =
+        this.options.repositoryTransport ?? new RepositoryComponent();
+      throwIfCancelled(this.shutdown);
+      this.api = workerApi(config.endpoint, config.token);
+      const version = await readServerVersion(this.api.gateway, {
         context: this.shutdown,
       });
       throwIfCancelled(this.shutdown);
@@ -101,14 +114,26 @@ export class Worker implements Service {
           "worker.version.mismatch",
           `worker: package version ${local} differs from server version ${version}.`,
         );
+      this.workspaces = WorkspaceRoot.open(directories(this.options.env).state);
+      throwIfCancelled(this.shutdown);
+      this.registration = await register(this.api);
+      if (this.shutdown.err()) return;
       if (this.options.log) {
-        this.options.log("Worker application started");
+        this.options.log(
+          JSON.stringify({
+            msg: "Worker application ready",
+            ...this.registration,
+          }),
+        );
       } else {
         this.operationalLog = new OperationalLog(
           { level: "info", destination: LogDestination.StandardError },
           directories(this.options.env).state,
         );
-        this.operationalLog.logger.info("Worker application started");
+        this.operationalLog.logger.info(
+          this.registration,
+          "Worker application ready",
+        );
       }
       this.started = true;
       this.keepalive = setInterval(() => {}, KEEPALIVE_INTERVAL_MS);
@@ -135,6 +160,8 @@ export class Worker implements Service {
         if (error) throw error;
       } finally {
         this.started = false;
+        this.clientSecret?.fill(0);
+        this.clientSecret = undefined;
         clearInterval(this.keepalive);
         try {
           await this.operationalLog?.close();

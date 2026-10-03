@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
@@ -445,6 +451,12 @@ test("serve worker rejects server configuration and requires a clientSecret befo
 test("serve worker with a clientSecret reports an unavailable server without changing cli.yaml", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
+  const tools = temporary(t);
+  for (const name of ["rg", "fd"])
+    writeFileSync(join(tools, name), "#!/bin/sh\necho test_tool\n", {
+      mode: 0o700,
+    });
+  env.PATH = `${tools}:${process.env.PATH ?? ""}`;
   const path = clientConfigPath(env);
   const content = stringify({
     clientSecret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
