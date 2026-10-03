@@ -5,8 +5,13 @@ import {
   mkdirSync,
   statSync,
   utimesSync,
+  writeFileSync,
 } from "node:fs";
 import { test } from "node:test";
+import { join } from "node:path";
+import { simpleGit } from "simple-git";
+import { background } from "../kernel/context.ts";
+import * as transport from "../repository/connector.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
@@ -61,4 +66,110 @@ test("workspace retention respects holds and release kind", (t) => {
   assert.equal(existsSync(execution), false);
   workspace.startSweeping();
   workspace.stopSweeping();
+});
+
+test("workspace preparation refreshes objective branches and creates disposable snapshots and initiatives", async (t) => {
+  const state = temporary(t);
+  const origin = join(state, "origin");
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  const commit = async (directory: string, name: string) => {
+    writeFileSync(join(directory, "file"), name);
+    await simpleGit(directory).add("file");
+    await simpleGit(directory).raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      name,
+    ]);
+    return (await simpleGit(directory).revparse(["HEAD"])).trim();
+  };
+  const base = await commit(origin, "base");
+  const workspace = WorkspaceRoot.open(state);
+  const objectiveId = createIdentity("node");
+  const repository = {
+    bindingId: createIdentity("binding"),
+    address: origin,
+    strategy: { baseBranch: "main" },
+  };
+  const common = { transport, context: background, deadlineMs: 10000 };
+  const first = await workspace.prepareObjective({
+    ...common,
+    objectiveId,
+    repository,
+  });
+  assert.equal(first.head, base);
+  const pushed = await commit(first.directory, "pushed");
+  await transport.pushNodeBranch(
+    first.directory,
+    first.nodeBranch,
+    background,
+    10000,
+  );
+  await commit(first.directory, "unpushed");
+  workspace.release(
+    workspace.objectiveKey(objectiveId),
+    WorkspaceKind.Objective,
+  );
+  const second = await workspace.prepareObjective({
+    ...common,
+    objectiveId,
+    repository,
+  });
+  assert.equal(second.directory, first.directory);
+  assert.equal(second.head, pushed);
+  workspace.release(
+    workspace.objectiveKey(objectiveId),
+    WorkspaceKind.Objective,
+  );
+  const snapshot = await workspace.prepareSnapshot({
+    ...common,
+    executionId: createIdentity("execution"),
+    repository,
+    commit: pushed,
+  });
+  assert.equal(snapshot.head, pushed);
+  workspace.release(snapshot.directory, WorkspaceKind.Execution);
+  const another = { ...repository, bindingId: createIdentity("binding") };
+  const initiative = await workspace.prepareInitiative({
+    ...common,
+    executionId: createIdentity("execution"),
+    repositories: [repository, another],
+  });
+  assert.deepEqual(
+    initiative.testedInput,
+    [repository, another].map(({ bindingId }) => ({
+      kind: "repository",
+      bindingId,
+      commit: base,
+    })),
+  );
+  workspace.release(initiative.directory, WorkspaceKind.Execution);
+  const empty = await workspace.prepareInitiative({
+    ...common,
+    executionId: createIdentity("execution"),
+    repositories: [],
+  });
+  assert.equal(empty.testedInput, null);
+  workspace.release(empty.directory, WorkspaceKind.Execution);
+  const failedId = createIdentity("node");
+  await assert.rejects(
+    workspace.prepareObjective({
+      ...common,
+      objectiveId: failedId,
+      repository: { ...repository, address: join(state, "missing") },
+    }),
+  );
+  const retried = await workspace.prepareObjective({
+    ...common,
+    objectiveId: failedId,
+    repository,
+  });
+  assert.equal(retried.head, base);
+  workspace.release(workspace.objectiveKey(failedId), WorkspaceKind.Objective);
 });

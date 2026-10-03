@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
-import { lstatSync, readdirSync, rmSync, utimesSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ensureDirectory } from "../kernel/files.ts";
 import { identitySchema } from "../kernel/identity.ts";
+import type { Context } from "../kernel/context.ts";
+import type { RepositoryTransport } from "./contract.ts";
+import { nodeBranchOf } from "./node-branch.ts";
 export { nodeBranchOf } from "./node-branch.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
@@ -13,6 +22,16 @@ export const WorkspaceKind = {
   Execution: "execution",
 } as const;
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
+interface Preparation {
+  transport: RepositoryTransport;
+  context: Context;
+  deadlineMs: number;
+}
+interface WorkspaceRepository {
+  bindingId: string;
+  address: string;
+  strategy: { baseBranch: string };
+}
 
 export class WorkspaceRoot {
   readonly root: string;
@@ -39,6 +58,127 @@ export class WorkspaceRoot {
   }
   executionKey(executionId: string): string {
     return join(this.root, identitySchema("execution").parse(executionId));
+  }
+  async prepareObjective(
+    input: Preparation & {
+      objectiveId: string;
+      repository: WorkspaceRepository;
+    },
+  ): Promise<{ directory: string; head: string; nodeBranch: string }> {
+    const key = this.objectiveKey(input.objectiveId);
+    const directory = this.objectiveDirectory(
+      input.objectiveId,
+      input.repository.bindingId,
+    );
+    const existing = existsSync(directory);
+    this.hold(key);
+    const end = performance.now() + input.deadlineMs;
+    try {
+      ensureDirectory(key);
+      ensureDirectory(directory);
+      this.touch(key);
+      if (!existing)
+        await input.transport.clone(
+          input.repository.address,
+          directory,
+          input.context,
+          end - performance.now(),
+        );
+      const nodeBranch = nodeBranchOf(input.objectiveId);
+      const head = await input.transport.fetchAndCheckout(
+        directory,
+        nodeBranch,
+        input.repository.strategy.baseBranch,
+        input.context,
+        end - performance.now(),
+      );
+      return { directory, head, nodeBranch };
+    } catch (error) {
+      this.held.delete(key);
+      if (!existing) rmSync(directory, { recursive: true, force: true });
+      throw error;
+    }
+  }
+  async prepareSnapshot(
+    input: Preparation & {
+      executionId: string;
+      repository: { address: string };
+      commit: string;
+    },
+  ): Promise<{ directory: string; head: string }> {
+    const { directory } = this.prepareExecution(input);
+    try {
+      const head = await input.transport.cloneSnapshot(
+        input.repository.address,
+        input.commit,
+        directory,
+        input.context,
+        input.deadlineMs,
+      );
+      return { directory, head };
+    } catch (error) {
+      this.release(directory, WorkspaceKind.Execution);
+      throw error;
+    }
+  }
+  async prepareInitiative(
+    input: Preparation & {
+      executionId: string;
+      repositories: WorkspaceRepository[];
+    },
+  ): Promise<{
+    directory: string;
+    testedInput:
+      { kind: "repository"; bindingId: string; commit: string }[] | null;
+  }> {
+    const { directory } = this.prepareExecution(input);
+    const end = performance.now() + input.deadlineMs;
+    const testedInput: {
+      kind: "repository";
+      bindingId: string;
+      commit: string;
+    }[] = [];
+    try {
+      for (const repository of input.repositories) {
+        const target = join(
+          directory,
+          identitySchema("binding").parse(repository.bindingId),
+        );
+        assert.ok(!existsSync(target), "Duplicate repository binding");
+        ensureDirectory(target);
+        const commit = await input.transport.cloneSnapshot(
+          repository.address,
+          `origin/${repository.strategy.baseBranch}`,
+          target,
+          input.context,
+          end - performance.now(),
+        );
+        testedInput.push({
+          kind: "repository",
+          bindingId: repository.bindingId,
+          commit,
+        });
+      }
+      return {
+        directory,
+        testedInput: testedInput.length ? testedInput : null,
+      };
+    } catch (error) {
+      this.release(directory, WorkspaceKind.Execution);
+      throw error;
+    }
+  }
+  prepareExecution(input: { executionId: string }): { directory: string } {
+    const directory = this.executionKey(input.executionId);
+    assert.ok(!existsSync(directory), "Execution workspace must be fresh");
+    this.hold(directory);
+    try {
+      ensureDirectory(directory);
+      return { directory };
+    } catch (error) {
+      this.held.delete(directory);
+      throw error;
+    }
   }
   hold(key: string): void {
     assert.equal(dirname(key), this.root);
