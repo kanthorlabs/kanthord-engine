@@ -25,6 +25,7 @@ validation in command documents. Heading anchors remain usable when lines move.
 | [`--idempotency-key`](#--idempotency-key) | Identify one logical remote mutation for retry. |
 | [`--limit`](#--limit)                     | Bound the requested page size.                  |
 | [`--cursor`](#--cursor)                   | Continue a paginated read.                      |
+| [`--force`](#--force)                     | Confirm a human override action.                |
 
 ## Synopsis markers
 
@@ -242,6 +243,15 @@ entity ID for it. The shared [pagination rule](https://github.com/kanthorlabs/ka
 uses descending primary-key order and a base64url last-key cursor that does not
 expire; a malformed cursor returns `400`. Lists take no snapshot or work
 reservation, and a refresh of the first page shows new records.
+
+## `--force`
+
+`--force` is a boolean option with default `false`. It is the one flag of a
+human override action: an action that bypasses a safety check of its command
+or accepts a stated risk. The owning command names the check that `--force`
+bypasses and states whether `--reason` is required. The body field is
+`force`, and the CLI sends `force: false` without the flag. No other flag name
+accepts a risk or bypasses a check.
 
 ## Error codes
 
