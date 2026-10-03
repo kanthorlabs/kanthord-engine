@@ -11,6 +11,7 @@ import {
   AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
   REGISTRATION_CAPABILITY,
+  REGISTRATION_TARGET_KIND,
   InstanceActivity,
   WorkerHost,
   WorkerMethod,
@@ -94,7 +95,7 @@ const fakeCollaborations = {
   },
   workerBindingOf: () => ({
     bindingId: "binding",
-    name: "test_worker",
+    name: "test_worker/%",
     projectName: "test_project",
     revision: 1,
     workerName: "claude@1",
@@ -946,6 +947,20 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
   }));
   const [item] = f.store.transaction((tx) => f.worker.registrationChecks(tx));
   assert.ok(item);
+  const [entry] = f.store.transaction((tx) => f.worker.resourceInventory(tx));
+  assert.ok(entry);
+  const binding = fakeCollaborations.workerBindingOf();
+  assert.deepEqual(
+    { ...entry, check: undefined },
+    {
+      scope: HealthScope.Project,
+      project: binding.projectName,
+      name: `${encodeURIComponent(binding.name)}/${encodeURIComponent(row.runtimeIdentity)}`,
+      target: `${REGISTRATION_TARGET_KIND}:${row.runtimeIdentity}`,
+      capability: REGISTRATION_CAPABILITY,
+      check: undefined,
+    },
+  );
   assert.deepEqual(
     { ...item, check: undefined },
     {
@@ -961,6 +976,7 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
     const expected =
       age > windowMs ? ResourceStatus.Unhealthy : ResourceStatus.Healthy;
     assert.equal(await item.check(background), expected);
+    assert.equal(await entry.check(background), expected);
     assert.equal(
       await f.store
         .transaction((tx) => f.worker.registrationChecks(tx))[0]!
@@ -1021,6 +1037,7 @@ test("registration liveness stays separate from native configuration and exclude
   f.store.transaction((tx) => {
     endRegistration(tx, row.runtimeIdentity, Date.now());
     assert.deepEqual(f.worker.registrationChecks(tx), []);
+    assert.deepEqual(f.worker.resourceInventory(tx), []);
   });
   const zero = 0;
   assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
@@ -1328,6 +1345,27 @@ test("catalog reads expose host-specific budgets and refuse unknown names and ma
     }).success,
     false,
   );
+});
+
+test("registration inventory fails closed when its binding is missing or removed", (t) => {
+  let binding: ReturnType<WorkerBindingOf> =
+    fakeCollaborations.workerBindingOf();
+  const f = enablementFixture(t, { workerBindingOf: () => binding });
+  f.store.transaction((tx) =>
+    f.worker.registrations.register(tx, client, Date.now()),
+  );
+  for (const unavailable of [
+    null,
+    { ...fakeCollaborations.workerBindingOf(), tombstone: true },
+  ]) {
+    binding = unavailable;
+    assert.throws(
+      () => f.store.transaction((tx) => f.worker.resourceInventory(tx)),
+      assert.AssertionError,
+    );
+  }
+  binding = fakeCollaborations.workerBindingOf();
+  assert.ok(f.store.transaction((tx) => f.worker.resourceInventory(tx)).length);
 });
 
 test("resource inventory includes every live provider across pages without writes", async (t) => {

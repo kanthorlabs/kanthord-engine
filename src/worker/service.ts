@@ -31,6 +31,7 @@ import {
   AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
   REGISTRATION_CAPABILITY,
+  REGISTRATION_TARGET_KIND,
   WorkerHost,
   type WorkerRegistrations,
   type WorkerBindingOf,
@@ -687,6 +688,23 @@ export class WorkerService implements Service {
       );
       cursor = page.nextCursor;
     } while (cursor !== null);
+    for (const item of this.registrationChecks(tx)) {
+      const binding = this.dependencies.workerBindingOf(
+        tx,
+        item.projectId,
+        item.resourceIdentity,
+      );
+      assert.ok(binding);
+      assert.equal(binding.tombstone, false);
+      entries.push({
+        scope: HealthScope.Project,
+        project: binding.projectName,
+        name: `${encodeURIComponent(binding.name)}/${encodeURIComponent(item.runtimeIdentity)}`,
+        target: `${REGISTRATION_TARGET_KIND}:${item.runtimeIdentity}`,
+        capability: item.capability,
+        check: item.check,
+      });
+    }
     return entries;
   }
 
