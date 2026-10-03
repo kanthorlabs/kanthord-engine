@@ -9,7 +9,12 @@ import {
   type StreamFunction,
   type Context as ModelContext,
 } from "@earendil-works/pi-ai";
-import type { ExecutionSetup } from "./contract.ts";
+import type { ExecutionSetup, HostTools } from "./contract.ts";
+
+export const unusedHostTools: HostTools = {
+  evidenceUpload: () =>
+    Promise.reject(new Error("Unexpected evidence upload in fixture")),
+};
 import {
   createModelRuntime,
   resolveModel,

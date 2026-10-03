@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
+import { unusedHostTools } from "./test-support.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../kernel/context.ts";
+import { Diagnostic } from "../kernel/errors.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { NodeKind, openNativeAgent } from "./native-agent.ts";
-import { WorkerMethod, type ExecutionSetup } from "./contract.ts";
+import {
+  WorkerMethod,
+  type ExecutionSetup,
+  type HostTools,
+} from "./contract.ts";
 import { renderWorkPrompt } from "./prompt-composer.ts";
 import {
   anthropicSetup,
@@ -44,6 +50,7 @@ async function fixture(
   t: TestContext,
   script: Parameters<typeof scriptedProvider>[0],
   overrides: Partial<ExecutionSetup> = {},
+  hostTools: HostTools = unusedHostTools,
 ) {
   const setup = anthropicSetup(overrides);
   const workspace = temporary(t);
@@ -57,6 +64,7 @@ async function fixture(
   const context = new CancellationContext(background);
   t.after(() => context.cancel());
   const agent = await openNativeAgent({
+    hostTools,
     setup,
     claim: {
       executionId: setup.executionId,
@@ -121,6 +129,81 @@ test("native reviewer refuses a scripted write tool", async (t) => {
       ),
     ),
   );
+});
+
+test("host upload is declared only for the software agent and validates arguments", async (t) => {
+  const result = {
+    evidenceId: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    assetId: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    uri: "s3://test-bucket/a.txt",
+  };
+  const paths: string[] = [];
+  const hostTools: HostTools = {
+    evidenceUpload: async (path) => {
+      paths.push(path);
+      return result;
+    },
+  };
+  const h = await fixture(
+    t,
+    [
+      tool("evidence-upload", { path: "a.txt" }),
+      tool("evidence-upload", { path: "b.txt", extra: true }),
+      fauxAssistantMessage("done"),
+    ],
+    {},
+    hostTools,
+  );
+  await h.agent.prompt(WORK);
+  assert.deepEqual(paths, ["a.txt"]);
+  const messages = h.agent.transcript() as {
+    role: string;
+    isError?: boolean;
+    details?: unknown;
+  }[];
+  assert.ok(
+    messages.some(
+      (message) =>
+        message.role === TOOL_RESULT &&
+        !message.isError &&
+        JSON.stringify(message.details) === JSON.stringify(result),
+    ),
+  );
+  assert.ok(
+    messages.some((message) => message.role === TOOL_RESULT && message.isError),
+  );
+  const reviewer = await fixture(
+    t,
+    [tool("evidence-upload", { path: "c.txt" }), fauxAssistantMessage("done")],
+    { workerName: "reviewer@1", agentName: "re@1" },
+    hostTools,
+  );
+  await reviewer.agent.prompt(WORK);
+  assert.deepEqual(paths, ["a.txt"]);
+});
+
+test("host upload rejection becomes a tool error without error details", async (t) => {
+  const message = "test_upload_refused";
+  const h = await fixture(
+    t,
+    [tool("evidence-upload", { path: "a.txt" }), fauxAssistantMessage("done")],
+    {},
+    {
+      evidenceUpload: async () => {
+        throw Object.assign(
+          new Diagnostic("worker.evidence_upload.path_refused", message),
+          {
+            details: { putUrl: "test_private_url" },
+          },
+        );
+      },
+    },
+  );
+  await h.agent.prompt(WORK);
+  const records = JSON.stringify(h.agent.transcript());
+  assert.ok(records.includes(message));
+  assert.ok(!records.includes("test_private_url"));
+  assert.ok(records.includes('"isError":true'));
 });
 
 test("native turn budget aborts after the first tool turn", async (t) => {

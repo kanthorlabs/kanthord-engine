@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 
-import { WorkerHost, WorkerMethod } from "./contract.ts";
+import { HostTool, WorkerHost, WorkerMethod } from "./contract.ts";
 import {
   BASE_PROMPT,
   RE_AGENT_PROMPT,
@@ -24,6 +24,7 @@ export interface AgentDeclaration {
   basePrompt?: string;
   agentPrompt: string;
   tools: readonly BuiltinTool[];
+  hostTools: readonly HostTool[];
 }
 
 export const BuiltinTool = {
@@ -60,6 +61,7 @@ export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
     agentName: "swe@1",
     basePrompt: BASE_PROMPT,
     agentPrompt: SWE_AGENT_PROMPT,
+    hostTools: [HostTool.EvidenceUpload],
     tools: [
       BuiltinTool.Read,
       BuiltinTool.Edit,
@@ -75,6 +77,7 @@ export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
     agentName: "re@1",
     basePrompt: BASE_PROMPT,
     agentPrompt: RE_AGENT_PROMPT,
+    hostTools: [],
     tools: [
       BuiltinTool.Read,
       BuiltinTool.Grep,

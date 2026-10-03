@@ -26,3 +26,10 @@ export {
 } from "./execution-run.ts";
 export type { MethodClients } from "./method-clients.ts";
 export { noTranscript, type TranscriptSink } from "./transcript.ts";
+export {
+  HostTool,
+  uploadResultSchema,
+  type HostTools,
+  type UploadResult,
+} from "./contract.ts";
+export { evidenceUploadTool } from "./host-tools.ts";

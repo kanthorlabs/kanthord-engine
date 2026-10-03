@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { unusedHostTools } from "./test-support.ts";
 import { test, type TestContext } from "node:test";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -109,6 +110,7 @@ async function fixture(
     key: SECRET,
   }));
   const agent = await openNativeAgent({
+    hostTools: unusedHostTools,
     setup,
     claim,
     nodeKind: NodeKind.Objective,

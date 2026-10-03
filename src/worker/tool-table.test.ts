@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { unusedHostTools } from "./test-support.ts";
 import { test } from "node:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,13 +21,14 @@ test("native tool declarations preserve the catalog allowlists", async () => {
   const reviewer = await toolDeclarations("re@1");
   assert.deepEqual(
     swe.map(({ name }) => name),
-    ["read", "edit", "write", "grep", "find", "ls", "bash"],
+    ["read", "edit", "write", "grep", "find", "ls", "bash", "evidence-upload"],
   );
   assert.deepEqual(
     reviewer.map(({ name }) => name),
     ["read", "grep", "find", "ls"],
   );
-  for (const declaration of [...swe, ...reviewer]) {
+  assert.equal(swe.at(-1)!.source, ToolSource.Host);
+  for (const declaration of [...swe.slice(0, -1), ...reviewer]) {
     assert.equal(declaration.source, ToolSource.Builtin);
     assert.equal(declaration.inputSchema.type, objectType);
   }
@@ -71,7 +73,7 @@ test("child environment removes provider keys and bash timeout stays below the b
     resourceBudget: { wallTimeMs: 5000 },
   });
   const cwd = temporary(t);
-  sessionTools(mockPi, "swe@1", cwd, budget);
+  sessionTools(mockPi, "swe@1", cwd, budget, unusedHostTools);
   await captured!.operations!.exec("true", cwd, {
     timeout: 3600,
     onData: () => {},
@@ -88,17 +90,21 @@ test("child environment removes provider keys and bash timeout stays below the b
     expiredAt: now + 10000,
     resourceBudget: { wallTimeMs: 1 },
   });
-  sessionTools(mockPi, "swe@1", cwd, ended);
+  sessionTools(mockPi, "swe@1", cwd, ended, unusedHostTools);
   await assert.rejects(
     captured!.operations!.exec("true", cwd, { onData: () => {} }),
     /resource budget ended/,
   );
-  assert.deepEqual(sessionTools(pi, "re@1", cwd, budget).customTools, []);
+  assert.deepEqual(
+    sessionTools(pi, "re@1", cwd, budget, unusedHostTools).customTools,
+    [],
+  );
   sessionTools(
     { ...mockPi, createLocalBashOperations: pi.createLocalBashOperations },
     "swe@1",
     cwd,
     budget,
+    unusedHostTools,
   );
   const output = await captured!.operations!.exec(
     'test -z "$ANTHROPIC_API_KEY"',

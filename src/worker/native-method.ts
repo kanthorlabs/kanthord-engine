@@ -16,6 +16,7 @@ import {
   WorkerMethod,
   type ExecutionSetup,
   type RepositoryTransport,
+  type HostTools,
 } from "./contract.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import { WorkspaceKind, type WorkspaceRoot } from "./workspace.ts";
@@ -41,6 +42,7 @@ export interface NativeExecutionInput {
   hostHome: string;
   modelRuntimeFactory: ModelRuntimeFactory;
   transcript: TranscriptSink;
+  hostTools: HostTools;
   context: Context;
 }
 
@@ -68,6 +70,7 @@ export async function runNativeExecution(
           workspace,
           hostHome: input.hostHome,
           modelRuntimeFactory: input.modelRuntimeFactory,
+          hostTools: input.hostTools,
           context: run.operationContext,
         });
         unlink = stopOnEnd(run, agent);

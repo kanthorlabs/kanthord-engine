@@ -7,7 +7,11 @@ import {
   type Context,
   type CancellationContext,
 } from "../kernel/context.ts";
-import { type ExecutionSetup, type WorkerMethod } from "./contract.ts";
+import {
+  type ExecutionSetup,
+  type WorkerMethod,
+  type HostTools,
+} from "./contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import {
   composePrompt,
@@ -41,6 +45,7 @@ export interface NativeAgentInput {
   workspace: string;
   hostHome: string;
   modelRuntimeFactory: ModelRuntimeFactory;
+  hostTools: HostTools;
   context: Context;
 }
 export interface NativeAgent {
@@ -160,7 +165,13 @@ export async function openNativeAgent(
       model,
       thinkingLevel: input.setup.effectiveConfiguration.reasoningEffort,
       systemPrompt: composed.systemPrompt,
-      ...sessionTools(pi, input.setup.agentName, input.workspace, budget),
+      ...sessionTools(
+        pi,
+        input.setup.agentName,
+        input.workspace,
+        budget,
+        input.hostTools,
+      ),
       extensions: [pins.extension],
       context,
     });

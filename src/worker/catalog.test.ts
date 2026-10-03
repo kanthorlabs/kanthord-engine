@@ -75,6 +75,7 @@ test("static agent declarations", () => {
     agentName: "swe@1",
     basePrompt: BASE_PROMPT,
     agentPrompt: SWE_AGENT_PROMPT,
+    hostTools: ["evidence-upload"],
     tools: ["read", "edit", "write", "grep", "find", "ls", "bash"],
     overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
   });
@@ -82,6 +83,7 @@ test("static agent declarations", () => {
     agentName: "re@1",
     basePrompt: BASE_PROMPT,
     agentPrompt: RE_AGENT_PROMPT,
+    hostTools: [],
     tools: ["read", "grep", "find", "ls"],
     overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
   });

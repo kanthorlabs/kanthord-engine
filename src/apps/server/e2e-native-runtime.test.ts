@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { unusedHostTools } from "../../worker/test-support.ts";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -340,10 +341,15 @@ test(
       );
       assert.deepEqual(
         declaration.tools.map(({ name, source }) => ({ name, source })),
-        ["read", "edit", "write", "grep", "find", "ls", "bash"].map((name) => ({
-          name,
-          source: "builtin",
-        })),
+        [
+          ...["read", "edit", "write", "grep", "find", "ls", "bash"].map(
+            (name) => ({
+              name,
+              source: "builtin",
+            }),
+          ),
+          { name: "evidence-upload", source: "host" },
+        ],
       );
       assert.equal(declaration.configurationSchema.additionalProperties, false);
       assert.deepEqual(declaration.configurationSchema.required, [
@@ -425,6 +431,7 @@ test(
       fauxAssistantMessage("done"),
     ]);
     const agent = await openNativeAgent({
+      hostTools: unusedHostTools,
       setup: runtimeX.setup,
       claim: x.execution,
       nodeKind: "objective",
@@ -564,6 +571,7 @@ test(
         tool("read", { path: "AGENTS.md" }),
       ]);
       const labAgent = await openNativeAgent({
+        hostTools: unusedHostTools,
         setup: runtimeY.setup,
         claim: y.execution,
         nodeKind: "objective",

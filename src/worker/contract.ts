@@ -649,10 +649,26 @@ export const agentEnablementSchema = z.strictObject({
 });
 const agentParams = z.strictObject({ agentName: z.string().min(1) });
 export const ToolSource = {
+  Host: "host",
   Builtin: "builtin",
   KanthordMcp: "kanthord-mcp",
 } as const;
 export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
+
+export const HostTool = { EvidenceUpload: "evidence-upload" } as const;
+export type HostTool = (typeof HostTool)[keyof typeof HostTool];
+export const uploadResultSchema = z.strictObject({
+  evidenceId: identitySchema("evidence"),
+  assetId: identitySchema("evidence_asset"),
+  uri: z.string().startsWith("s3://"),
+});
+export type UploadResult = z.infer<typeof uploadResultSchema>;
+export interface HostTools {
+  evidenceUpload(
+    path: string,
+    signal: AbortSignal | undefined,
+  ): Promise<UploadResult>;
+}
 export const CONFIGURATION_DESCRIPTION =
   "The Worker Service validates the whole configuration. `modelIdentifier` belongs to `getBuiltinModels(provider)` of pi-ai 0.86.0 or to the `models` metadata of the `openai-compatible` credential. `reasoningEffort` belongs to the supported reasoning levels of that model. JSON Schema validates neither lookup.";
 export const effectiveConfigurationSchema = z

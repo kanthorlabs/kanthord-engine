@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { unusedHostTools } from "./test-support.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -68,6 +69,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     fauxAssistantMessage("unexpected"),
   ]);
   const agent = await openNativeAgent({
+    hostTools: unusedHostTools,
     setup,
     claim,
     nodeKind: NodeKind.Objective,
@@ -215,6 +217,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     hostHome: temporary(t),
     modelRuntimeFactory: scriptedModelRuntime(provider),
     transcript: noTranscript,
+    hostTools: unusedHostTools,
     context: background,
   });
   assert.deepEqual(result, { kind: "closed", outcomeId: "outcome" });
@@ -276,6 +279,7 @@ test("native entry runs an initiative report with the scripted provider", async 
     hostHome: temporary(t),
     modelRuntimeFactory: scriptedModelRuntime(provider),
     transcript: noTranscript,
+    hostTools: unusedHostTools,
     context: background,
   });
   assert.deepEqual(result, { kind: "released", furtherWork: false });

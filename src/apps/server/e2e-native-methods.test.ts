@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { unusedHostTools } from "../../worker/test-support.ts";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -408,6 +409,7 @@ test(
           hostHome: temporary(t),
           modelRuntimeFactory: scriptedModelRuntime(provider),
           transcript: noTranscript,
+          hostTools: unusedHostTools,
           context: background,
         });
         return { result, execution, provider, setup };

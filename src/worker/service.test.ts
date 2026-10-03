@@ -1086,7 +1086,7 @@ function refuses(
 }
 
 test("agent declaration read exposes prompts, tools and current enablement without writes", async (t) => {
-  const sweToolCount = 7;
+  const sweToolCount = 8;
   const reviewerToolCount = 4;
   const schemaVersion = "https://json-schema.org/draft/2020-12/schema";
   const disabled = "disabled";

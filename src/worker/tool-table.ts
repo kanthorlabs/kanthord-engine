@@ -8,7 +8,11 @@ import type { ExecutionBudget } from "./budget.ts";
 import { BuiltinTool, getAgentDeclaration } from "./catalog.ts";
 import { loadPi, piAgentDirectory, type PiCodingAgent } from "./pi.ts";
 
-import { ToolSource, WorkerErrorCode } from "./contract.ts";
+import { ToolSource, WorkerErrorCode, type HostTools } from "./contract.ts";
+import {
+  evidenceUploadTool,
+  EVIDENCE_UPLOAD_PARAMETERS,
+} from "./host-tools.ts";
 export { ToolSource } from "./contract.ts";
 
 const SUCCESS = 0;
@@ -41,13 +45,17 @@ export function sessionTools(
   agentName: string,
   cwd: string,
   budget: ExecutionBudget,
+  hostTools: HostTools,
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
   assert.ok(cwd);
-  const allowlist = [...agent.tools];
+  const allowlist: string[] = [...agent.tools, ...agent.hostTools];
+  const customTools: ToolDefinition[] = agent.hostTools.map(() =>
+    evidenceUploadTool(hostTools),
+  );
   if (!agent.tools.includes(BuiltinTool.Bash))
-    return { allowlist, customTools: [] };
+    return { allowlist, customTools };
   const local = pi.createLocalBashOperations();
   const bash = pi.createBashToolDefinition(cwd, {
     exposeSessionEnvironment: false,
@@ -70,7 +78,10 @@ export function sessionTools(
       },
     },
   });
-  return { allowlist, customTools: [bash as unknown as ToolDefinition] };
+  return {
+    allowlist,
+    customTools: [bash as unknown as ToolDefinition, ...customTools],
+  };
 }
 
 export function checkAgentTools(): void {
@@ -109,7 +120,7 @@ export async function toolDeclarations(agentName: string): Promise<
     [BuiltinTool.Bash]: pi.createBashToolDefinition,
   };
   assert.ok(agent.tools.every((name) => Object.hasOwn(factories, name)));
-  return agent.tools.map((name) => {
+  const builtin = agent.tools.map((name) => {
     const definition = factories[name](piAgentDirectory());
     return {
       name: definition.name,
@@ -120,4 +131,14 @@ export async function toolDeclarations(agentName: string): Promise<
       >,
     };
   });
+  return [
+    ...builtin,
+    ...agent.hostTools.map((name) => ({
+      name,
+      source: ToolSource.Host,
+      inputSchema: JSON.parse(
+        JSON.stringify(EVIDENCE_UPLOAD_PARAMETERS),
+      ) as Record<string, unknown>,
+    })),
+  ];
 }
