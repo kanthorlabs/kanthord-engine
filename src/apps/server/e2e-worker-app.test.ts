@@ -3,7 +3,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { writeFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { parse, stringify } from "yaml";
@@ -12,11 +11,13 @@ import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { environment, kanthord } from "./cli-support.ts";
+import { workerAcceptance } from "./worker-acceptance.ts";
 import {
   fakeMachines,
   gatewayFixture,
   TEST_WORKER_BINDING,
   TEST_PROJECT_ID,
+  toolStubs,
 } from "./test-support.ts";
 
 const SPAWN_LINE_TIMEOUT_MS = 15000;
@@ -40,6 +41,8 @@ const EMPTY = "";
 const NEWLINE = "\n";
 const ONE = 1;
 const WORKER_ARGS = ["serve", "worker"];
+const GENERAL_RESOURCE = "worker:kanthord:general";
+const GENERAL_WORKER = "general@1";
 
 type Exit = {
   code: number | null;
@@ -58,11 +61,7 @@ type WorkerProcess = {
 
 function workerEnvironment(t: TestContext): NodeJS.ProcessEnv {
   const root = temporary(t);
-  const tools = temporary(t);
-  for (const name of ["rg", "fd"])
-    writeFileSync(join(tools, name), "#!/bin/sh\necho test_tool\n", {
-      mode: 0o700,
-    });
+  const tools = toolStubs(t);
   const env = {
     ...environment(root),
     PATH: `${tools}:${process.env.PATH ?? ""}`,
@@ -371,7 +370,7 @@ test("E09.3 invalid clientSecret refuses before network", async (t) => {
   }
 });
 
-test("E09.4 version mismatch reports both versions", async (t) => {
+test("E09.5 version mismatch reports both versions", async (t) => {
   const env = workerEnvironment(t);
   env.KANTHORD_ENDPOINT = await fakeEndpoint(t);
   clientFile(env, randomBytes(KEY_BYTES).toString("base64"));
@@ -388,7 +387,7 @@ test("E09.4 version mismatch reports both versions", async (t) => {
   }
 });
 
-test("E09.5 startup is one JSON record and SIGTERM exits cleanly", async (t) => {
+test("worker startup emits one ready record without secrets", async (t) => {
   const { env, token } = await liveEnvironment(t);
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
@@ -413,7 +412,7 @@ test("E09.5 startup is one JSON record and SIGTERM exits cleanly", async (t) => 
   }
 });
 
-test("E09.6 SIGHUP leaves the worker alive until SIGTERM", async (t) => {
+test("worker SIGHUP leaves the worker alive until SIGTERM", async (t) => {
   const { env } = await liveEnvironment(t);
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
@@ -430,3 +429,131 @@ test("E09.6 SIGHUP leaves the worker alive until SIGTERM", async (t) => {
     await stopWorker(proc);
   }
 });
+
+test("E09.4 missing host tools refuses before any network request", async (t) => {
+  let requests = 0;
+  const server = createServer((_request, response) => {
+    requests++;
+    response.end();
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(EPHEMERAL_PORT, LOOPBACK, resolve),
+  );
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && address instanceof Object);
+  const env = workerEnvironment(t);
+  env.PATH = temporary(t);
+  env.KANTHORD_ENDPOINT = `http://${LOOPBACK}:${address.port}`;
+  clientFile(env, randomBytes(KEY_BYTES).toString("base64"));
+  const proc = spawnWorker(WORKER_ARGS, env);
+  try {
+    await failure(proc, "worker.start.tool_missing");
+    assert.equal(requests, EXIT_SUCCESS);
+  } finally {
+    await stopWorker(proc);
+  }
+});
+
+test(
+  "E09.6–10 real registration, idle signals, slot refusal and reregistration",
+  { timeout: 180000 },
+  async (t) => {
+    const setup = await workerAcceptance(t);
+    const auth = setup.machine("general-a");
+    const env = {
+      ...workerEnvironment(t),
+      KANTHORD_ENDPOINT: setup.fixture.endpoint,
+      KANTHORD_TOKEN: auth.token,
+    };
+    clientFile(env, auth.clientSecret);
+    const ready = async (proc: WorkerProcess, previous?: string) => {
+      const line = await proc.waitForLine(
+        (entry) =>
+          entry.includes(READY) && (!previous || !entry.includes(previous)),
+      );
+      const record = JSON.parse(line);
+      assert.match(record.runtimeIdentity, /^worker_instance_/);
+      assert.equal(record.resourceIdentity, GENERAL_RESOURCE);
+      assert.equal(record.workerName, GENERAL_WORKER);
+      return record.runtimeIdentity as string;
+    };
+    const first = spawnWorker(WORKER_ARGS, env);
+    try {
+      const identity = await ready(first);
+      const list = await setup.read<{
+        items: { runtimeIdentity: string; registered: boolean }[];
+      }>(["worker", "instance", "list", "--project", setup.projectId]);
+      assert.ok(
+        list.items.some(
+          (item) => item.runtimeIdentity === identity && item.registered,
+        ),
+      );
+      first.kill("SIGTERM");
+      const result = await within(first.exited, CLEANUP_WAIT_MS);
+      assert.equal(result.code, EXIT_SUCCESS);
+      assert.equal(result.signal, null);
+      assert.equal(result.stdout, EMPTY);
+      for (const line of result.stderr.filter(Boolean)) {
+        JSON.parse(line);
+        assert.ok(!line.includes(auth.token));
+        assert.ok(!line.includes(auth.clientSecret));
+      }
+      const missing = await kanthord(
+        ["worker", "instance", "get", identity],
+        setup.human,
+      );
+      assert.equal(missing.code, EXIT_FAILURE);
+      assert.ok(
+        missing.stderr.startsWith("worker.instance.not_found:"),
+        missing.stderr,
+      );
+    } finally {
+      await stopWorker(first);
+    }
+    const second = spawnWorker(WORKER_ARGS, env);
+    try {
+      await ready(second);
+      second.kill("SIGHUP");
+      await delay(SIGHUP_WAIT_MS);
+      assert.ok(second.alive());
+      const other = setup.machine("general-b");
+      const otherEnv = {
+        ...workerEnvironment(t),
+        KANTHORD_ENDPOINT: setup.fixture.endpoint,
+        KANTHORD_TOKEN: other.token,
+      };
+      clientFile(otherEnv, other.clientSecret);
+      const refused = spawnWorker(WORKER_ARGS, otherEnv);
+      try {
+        await failure(refused, "worker.instance.slot_unavailable");
+      } finally {
+        await stopWorker(refused);
+      }
+      second.kill("SIGTERM");
+      assert.equal(
+        (await within(second.exited, CLEANUP_WAIT_MS)).code,
+        EXIT_SUCCESS,
+      );
+    } finally {
+      await stopWorker(second);
+    }
+    const third = spawnWorker(WORKER_ARGS, env);
+    try {
+      const identity = await ready(third);
+      await setup.read(["worker", "instance", "deregister", identity], {
+        ...setup.human,
+        KANTHORD_TOKEN: auth.token,
+      });
+      const replacement = await ready(third, identity);
+      assert.notEqual(replacement, identity);
+      third.kill("SIGTERM");
+      assert.equal(
+        (await within(third.exited, CLEANUP_WAIT_MS)).code,
+        EXIT_SUCCESS,
+      );
+    } finally {
+      await stopWorker(third);
+    }
+  },
+);
