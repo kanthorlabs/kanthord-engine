@@ -3,6 +3,7 @@ import {
   createFauxCore,
   createProvider,
   envApiKeyAuth,
+  getSystemMessageText,
   type FauxResponseStep,
   type SimpleStreamOptions,
   type StreamFunction,
@@ -44,9 +45,7 @@ export function scriptedProvider(
       const leading = context.messages[0];
       const systemPrompt =
         leading?.role === systemRole
-          ? Array.isArray(leading.content)
-            ? leading.content.map(({ text }) => text).join("\n")
-            : leading.content
+          ? getSystemMessageText(leading)
           : undefined;
       calls.push({
         systemPrompt,
