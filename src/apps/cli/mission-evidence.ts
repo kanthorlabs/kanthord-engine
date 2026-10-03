@@ -26,7 +26,7 @@ function addDeleteOptions(command: Command): Command {
       "Expected mission version",
       singleUse("--expected-mission-version"),
     )
-    .option("--force", "Force deletion", singleUse("--force"))
+    .option("--force", "Force deletion", false)
     .option("--reason <text>", "Deletion reason", singleUse("--reason"))
     .option(
       "--idempotency-key <key>",
