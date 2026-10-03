@@ -75,3 +75,34 @@ test("work commits include new and tracked files, preserve history and ignore ig
   );
   await assert.rejects(commitWork(directory, "expired", background, 1));
 });
+
+test("work commits ignore the interactive helpers of the host environment", async (t) => {
+  const interactive = {
+    PAGER: "less",
+    GIT_PAGER: "less",
+    EDITOR: "vi",
+    GIT_EDITOR: "vi",
+    GIT_SEQUENCE_EDITOR: "vi",
+    GIT_ASKPASS: "askpass",
+    SSH_ASKPASS: "askpass",
+  };
+  const saved = Object.fromEntries(
+    Object.keys(interactive).map((name) => [name, process.env[name]]),
+  );
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  Object.assign(process.env, interactive);
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, "tracked"), "original");
+  const head = await commitWork(directory, "initial", background, 10000);
+  assert.ok(head);
+  await discardChanges(directory, background, 10000);
+  assert.equal(await headCommit(directory, background, 10000), head);
+});

@@ -9,6 +9,15 @@ import { childEnvironment } from "./tool-table.ts";
 const EXPIRED = 0;
 const CLEAN_STATUS = "";
 const FIRST_ATTEMPT = 1;
+const INTERACTIVE_HELPERS = [
+  "PAGER",
+  "GIT_PAGER",
+  "EDITOR",
+  "GIT_EDITOR",
+  "GIT_SEQUENCE_EDITOR",
+  "GIT_ASKPASS",
+  "SSH_ASKPASS",
+];
 
 export function taskCommitMessage(taskId: string, attempt: number): string {
   assert.ok(taskId);
@@ -67,12 +76,19 @@ async function run(
       abort: bridge.signal,
       timeout: { block: deadlineMs },
     })
-      .env(childEnvironment(process.env))
+      .env(gitEnvironment())
       .raw(args);
   } finally {
     bridge.dispose();
   }
 }
+
+function gitEnvironment(): NodeJS.ProcessEnv {
+  const env = childEnvironment(process.env);
+  for (const name of INTERACTIVE_HELPERS) delete env[name];
+  return env;
+}
+
 export async function discardChanges(
   directory: string,
   context: Context,
