@@ -725,9 +725,9 @@ open attempt and pinned action or evidence, and resolves binding disablement
 and removal through Project. A human object access follows the asset's pinned
 storage binding. Force bypasses no binding authorization.
 
-| HTTP | Code                            | Condition                                                                                                                                                  | Operations                                                                                                                                            |
-| ---- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 403  | `mission.authorization.refused` | The protected facility chain breaks; details `{ reason }` is `claim_not_live`, `node_mismatch`, `attempt_closed`, `binding_disabled` or `binding_removed`. | evidence submit, evidence asset content get, execution asset content get, evidence delete, evidence asset delete, node check, evidence asset complete |
+| HTTP | Code                            | Condition                                                                                                                                                                      | Operations                                                                                                                                            |
+| ---- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 403  | `mission.authorization.refused` | The protected facility chain breaks; details `{ reason }` is `claim_not_live`, `node_mismatch`, `attempt_closed`, `binding_disabled`, `binding_removed` or `service_mismatch`. | evidence submit, evidence asset content get, execution asset content get, evidence delete, evidence asset delete, node check, evidence asset complete |
 
 An object delete uses the evidence asset identity as its Intake request key.
 A repeat after failure reads the object back without redispatching the delete;
