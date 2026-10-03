@@ -3,7 +3,11 @@ import { test } from "node:test";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { workerApi } from "./api.ts";
-import { register } from "./registration.ts";
+import {
+  register,
+  startHeartbeat,
+  HEARTBEAT_INTERVAL_MS,
+} from "./registration.ts";
 
 test("registration returns server facts with a fresh key and translates refusal and uncertainty", async (t) => {
   const api = workerApi("http://127.0.0.1:1");
@@ -46,4 +50,26 @@ test("registration returns server facts with a fresh key and translates refusal 
     register(api),
     (error) => error instanceof Diagnostic && error.code === code,
   );
+});
+
+test("heartbeat warns once per failed tick and stop cancels the timer", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const api = workerApi("http://127.0.0.1:1");
+  const records: unknown[] = [];
+  let calls = 0;
+  const expectedCalls = 2;
+  t.mock.method(api.worker, "heartbeat", async () => {
+    calls++;
+    return { type: OperationResultType.Indeterminate };
+  });
+  const timer = startHeartbeat(api, (record) => records.push(record));
+  t.mock.timers.tick(HEARTBEAT_INTERVAL_MS);
+  await Promise.resolve();
+  t.mock.timers.tick(HEARTBEAT_INTERVAL_MS);
+  await Promise.resolve();
+  assert.equal(calls, expectedCalls);
+  assert.equal(records.length, expectedCalls);
+  timer.stop();
+  t.mock.timers.tick(HEARTBEAT_INTERVAL_MS);
+  assert.equal(calls, expectedCalls);
 });

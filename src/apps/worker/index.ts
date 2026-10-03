@@ -17,7 +17,7 @@ import { packageVersion } from "../../kernel/version.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import type { WorkspaceRoot } from "../../worker/index.ts";
 import { workerApi, type WorkerApi } from "./api.ts";
-import { register, type Registration } from "./registration.ts";
+import { register, startHeartbeat, type Registration } from "./registration.ts";
 import type {
   ModelRuntimeFactory,
   RepositoryTransport,
@@ -59,6 +59,7 @@ export class Worker implements Service {
   private transport?: RepositoryTransport;
   private workspaces?: WorkspaceRoot;
   private registration?: Registration;
+  private heartbeat?: { stop(): void };
 
   constructor(options: WorkerOptions = {}) {
     this.options = options;
@@ -144,6 +145,8 @@ export class Worker implements Service {
   quiesce(): Promise<Error | null> {
     this.quiesceTask ??= lifecycle(async () => {
       this.shutdown.cancel();
+      this.heartbeat?.stop();
+      this.workspaces?.stopSweeping();
     });
     return this.quiesceTask;
   }
@@ -187,6 +190,13 @@ export class Worker implements Service {
       if (context.err()) return (await this.stop()) ?? context.err();
       const error = await this.start();
       if (error) return (await this.stop()) ?? context.err() ?? error;
+      if (!this.shutdown.err()) {
+        this.heartbeat = startHeartbeat(this.api!, (record) => {
+          if (this.options.log) this.options.log(JSON.stringify(record));
+          else this.operationalLog!.logger.warn(record, record.msg);
+        });
+        this.workspaces!.startSweeping();
+      }
       await this.shutdown.done();
       return (await this.stop()) ?? context.err();
     } finally {
