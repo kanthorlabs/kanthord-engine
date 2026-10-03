@@ -25,10 +25,12 @@ import {
   prepareStepsWorkspace,
   startCheck,
   runTask,
+  runStepsObjective,
 } from "./steps-objective.ts";
 
 const SECRET = "test_steps_key";
 const TWO = 2;
+const ZERO = 0;
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -127,6 +129,79 @@ async function fixture(
     bare,
   };
 }
+
+test("objective pushes the evidenced head before release and retains its workspace", async (t) => {
+  const h = await fixture(t, [], []);
+  const order: string[] = [];
+  h.run.clients.mission = {
+    "evidence.submit": async (input: {
+      body: { assets: { address: { commit: string } }[] };
+    }) => {
+      order.push("evidence");
+      const remote = (
+        await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])
+      ).trim();
+      assert.equal(input.body.assets[0]!.address.commit, remote);
+      return { type: "completed", status: 200, data: { evidence: {} } };
+    },
+  } as unknown as MethodClients["mission"];
+  h.run.clients.scheduler = {
+    executionRelease: async () => {
+      order.push("release");
+      return { type: "completed", status: 200, data: {} };
+    },
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(await runStepsObjective(h), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.deepEqual(order, ["evidence", "release"]);
+  assert.equal(h.provider.calls.length, ZERO);
+  assert.ok(existsSync(h.directory));
+});
+
+test("objective checkpoints budget-ended work and refuses release after a failed push", async (t) => {
+  const current = task("partial", "false");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "notes", content: "partial" }),
+        { stopReason: "toolUse" },
+      ),
+    ],
+    1,
+  );
+  let released = false;
+  h.run.clients.scheduler = {
+    executionRelease: async (input: { body: { furtherWork: boolean } }) => {
+      released = input.body.furtherWork;
+      return { type: "completed", status: 200, data: {} };
+    },
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(await runStepsObjective(h), {
+    kind: "released",
+    furtherWork: true,
+  });
+  assert.ok(released);
+  const log = await simpleGit(h.bare).raw([
+    "log",
+    "-1",
+    "--format=%s",
+    `refs/heads/${h.nodeBranch}`,
+  ]);
+  assert.match(log, /checkpoint of task/);
+  const other = await fixture(t, [], []);
+  other.input.transport = {
+    ...transport,
+    pushNodeBranch: async () => {
+      throw new Error("push failed");
+    },
+  };
+  await assert.rejects(runStepsObjective(other));
+  assert.ok(existsSync(other.directory));
+});
 
 test("start check judges passing tasks in order and discards verification changes", async (t) => {
   const tasks = [

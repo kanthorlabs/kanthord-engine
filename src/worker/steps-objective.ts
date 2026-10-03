@@ -1,15 +1,22 @@
 import assert from "node:assert/strict";
 import type { Revision, TaskContent } from "../mission/contract.ts";
 import type { ExecutionSetup, RepositoryTransport } from "./contract.ts";
-import type { WorkspaceRoot } from "./workspace.ts";
+import { WorkspaceKind, type WorkspaceRoot } from "./workspace.ts";
 import type { NativeAgent } from "./native-agent.ts";
-import { EndReason, ExecutionRun, type MethodClaim } from "./execution-run.ts";
+import {
+  EndReason,
+  ExecutionRun,
+  type MethodClaim,
+  type ExecutionEnd,
+} from "./execution-run.ts";
+import { CodedError } from "../kernel/errors.ts";
 import { renderWorkPrompt } from "./prompt-composer.ts";
 import {
   commitWork,
   discardChanges,
   headCommit,
   taskCommitMessage,
+  checkpointCommitMessage,
 } from "./local-git.ts";
 import { runVerifications, verificationPassed } from "./verification.ts";
 import {
@@ -19,6 +26,79 @@ import {
   taskRevisionInstruction,
   criterionRevisionInstruction,
 } from "./judgement.ts";
+
+export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
+
+async function finishObjective(
+  state: StepsState,
+  task: TaskContent | null,
+  boundary: TaskBoundary | null,
+): Promise<ExecutionEnd> {
+  const furtherWork = boundary !== null && boundary !== TaskBoundary.RunFailed;
+  const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
+  const remaining = () => state.input.claim.expiredAt - Date.now();
+  try {
+    if (furtherWork) {
+      assert.ok(task);
+      await state.agent.abort();
+      await commitWork(
+        state.directory,
+        checkpointCommitMessage(task.id, state.input.claim.attempt),
+        cleanup,
+        remaining(),
+      );
+    }
+    await state.input.transport.pushNodeBranch(
+      state.directory,
+      state.nodeBranch,
+      cleanup,
+      remaining(),
+    );
+    if (!furtherWork) {
+      const head = await headCommit(state.directory, cleanup, remaining());
+      await state.run.submitEvidence(state.input.claim.nodeId, {
+        subject: HEAD_COMMIT_SUBJECT,
+        assets: [
+          {
+            kind: "repository",
+            address: {
+              kind: "repository",
+              bindingId: state.input.setup.repositories[0]!.bindingId,
+              commit: head,
+            },
+          },
+        ],
+      });
+    }
+    return await state.run.release(furtherWork);
+  } finally {
+    cleanup.cancel();
+  }
+}
+
+export async function runStepsObjective(
+  state: StepsState,
+): Promise<ExecutionEnd> {
+  try {
+    const pending = await startCheck(state);
+    for (const task of pending) {
+      const result = await runTask(state, task);
+      if (result.kind === TaskResultKind.BudgetEnd)
+        return await finishObjective(state, task, result.boundary);
+    }
+    return await finishObjective(state, null, null);
+  } catch (error) {
+    return state.run.stop(
+      EndReason.OperationFailed,
+      error instanceof CodedError ? error.code : null,
+    );
+  } finally {
+    state.input.workspaces.release(
+      state.input.workspaces.objectiveKey(state.input.claim.nodeId),
+      WorkspaceKind.Objective,
+    );
+  }
+}
 
 export const TaskResultKind = {
   Complete: "complete",
