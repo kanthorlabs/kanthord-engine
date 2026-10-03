@@ -511,7 +511,7 @@ This section describes the ERD 3 integration boundary; no delivery ingress or
 admission path is implemented by Plan03.
 
 The Intake Service receives every platform delivery and owns the delivery
-record. Its inspection commands live in [Intake](./intake.md#delivery-commands).
+record. Its inspection commands live in [Intake](./intake.md#event-commands).
 The Mission Service owns the delivery admission operation that the Intake
 Service calls, under [delivery admission and check](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.md#delivery-admission-and-check).
 The Scheduler holds no admission record, no observation obligation and no
