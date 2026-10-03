@@ -146,3 +146,104 @@ test("credential report rejection ends the execution without a second report", a
   await assert.rejects(run.settleCredentials(), ExecutionStop);
   assert.equal(reports, ONE);
 });
+
+test("submissions pin claim fields and settle credentials before an assessment", async (t) => {
+  const order: string[] = [];
+  const run = fixture(async () => {
+    order.push("credential");
+  });
+  t.after(() => run.dispose());
+  const evidence = { id: "evidence" };
+  run.clients.mission = {
+    "evidence.submit": async (input: { body: unknown }) => {
+      assert.deepEqual(input.body, {
+        subject: "head",
+        assets: [],
+        ...run.context(),
+      });
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { evidence },
+      };
+    },
+    "assessment.submit": async () => {
+      order.push("assessment");
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { outcome: null },
+      };
+    },
+  } as unknown as MethodClients["mission"];
+  assert.equal(
+    await run.submitEvidence(CLAIM.nodeId, {
+      subject: "head",
+      assets: [],
+      ...{ executionId: "foreign", attempt: 99, nodeRevision: 99 },
+    }),
+    evidence,
+  );
+  await run.submitAssessment(CLAIM.nodeId, {
+    evidenceIds: [],
+    childOutcomeIds: [],
+    result: "undetermined",
+    rationale: "unknown",
+    testedInput: { kind: "produced", sha256: "a".repeat(64) },
+  });
+  assert.deepEqual(order, ["credential", "assessment"]);
+});
+
+test("lost release answers reconcile only a finished claim", async (t) => {
+  for (const claimState of ["finished", "running"] as const) {
+    const run = fixture();
+    t.after(() => run.dispose());
+    const calls: string[] = [];
+    run.clients.scheduler = {
+      executionRelease: async (input: { body: unknown }) => {
+        assert.deepEqual(input.body, { furtherWork: false });
+        calls.push("release");
+        return { type: OperationResultType.Indeterminate };
+      },
+      claimGet: async () => {
+        calls.push("read");
+        return {
+          type: OperationResultType.Completed,
+          status: 200,
+          data: { claimState, endedAt: Date.now() },
+        };
+      },
+    } as unknown as MethodClients["scheduler"];
+    const FINISHED = "finished";
+    if (claimState === FINISHED)
+      assert.deepEqual(await run.release(false), {
+        kind: "released",
+        furtherWork: false,
+      });
+    else await assert.rejects(run.release(false), ExecutionStop);
+    assert.deepEqual(calls, ["release", "read"]);
+  }
+});
+
+test("release refusal preserves the owning error code", async (t) => {
+  const code = "mission.release.obligation_unmet";
+  const run = fixture();
+  t.after(() => run.dispose());
+  run.clients.scheduler = {
+    executionRelease: async () => ({
+      type: OperationResultType.Failure,
+      status: 409,
+      error: {
+        error: { code, message: "unmet", details: null },
+        requestId: "test",
+      },
+    }),
+  } as unknown as MethodClients["scheduler"];
+  await assert.rejects(
+    run.release(false),
+    (error: unknown) =>
+      error instanceof ExecutionStop &&
+      error.reason === EndReason.OperationFailed &&
+      error.code === code,
+  );
+});

@@ -8,6 +8,16 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import type { MethodClients } from "./method-clients.ts";
+import { ClaimState } from "../scheduler/contract.ts";
+
+type EvidenceBody = Omit<
+  Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
+  "executionId" | "attempt" | "nodeRevision"
+>;
+type AssessmentBody = Omit<
+  Parameters<MethodClients["mission"]["assessment.submit"]>[0]["body"],
+  "executionId" | "attempt" | "nodeRevision"
+>;
 
 export const EndReason = {
   Revoked: "revoked",
@@ -156,5 +166,75 @@ export class ExecutionRun {
 
   dispose(): void {
     this.operationContext.cancel();
+  }
+
+  async submitEvidence(nodeId: string, body: EvidenceBody) {
+    const answer = await this.call((options) =>
+      this.clients.mission["evidence.submit"](
+        { params: { nodeId }, query: {}, body: { ...body, ...this.context() } },
+        options,
+      ),
+    );
+    return answer.evidence;
+  }
+
+  async submitAssessment(nodeId: string, body: AssessmentBody) {
+    await this.settleCredentials();
+    return this.call((options) =>
+      this.clients.mission["assessment.submit"](
+        { params: { nodeId }, query: {}, body: { ...body, ...this.context() } },
+        options,
+      ),
+    );
+  }
+
+  async requestActions() {
+    const answer = await this.call((options) =>
+      this.clients.worker["action.request"](
+        {
+          params: { executionId: this.claim.executionId },
+          query: {},
+          body: null,
+        },
+        options,
+      ),
+    );
+    return answer.items;
+  }
+
+  async release(furtherWork: boolean): Promise<ExecutionEnd> {
+    await this.settleCredentials();
+    await this.call(async (options) => {
+      const result = await this.clients.scheduler.executionRelease(
+        {
+          params: { executionId: this.claim.executionId },
+          query: {},
+          body: { furtherWork },
+        },
+        options,
+      );
+      if (result.type !== OperationResultType.Indeterminate) return result;
+      const claim = await this.call((readOptions) =>
+        this.clients.scheduler.claimGet(
+          {
+            params: { executionId: this.claim.executionId },
+            query: {},
+            body: null,
+          },
+          readOptions,
+        ),
+      );
+      if (claim.claimState !== ClaimState.Finished)
+        return this.stop(EndReason.OperationFailed);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: {
+          executionId: this.claim.executionId,
+          endedAt: claim.endedAt!,
+        },
+      };
+    });
+    return { kind: ExecutionEndKind.Released, furtherWork };
   }
 }
