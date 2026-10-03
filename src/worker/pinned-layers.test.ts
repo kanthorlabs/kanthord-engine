@@ -191,7 +191,7 @@ test("inference pin preserves stream arguments and later system updates across w
   const model = {} as Parameters<StreamFn>[0];
   const options = {
     signal: new AbortController().signal,
-    apiKey: "execution-key",
+    apiKey: "test_execution-key",
     temperature: 0.3,
   };
   for (const name of ["first", "second"]) {

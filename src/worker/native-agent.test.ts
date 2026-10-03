@@ -17,7 +17,7 @@ import {
   scriptedProvider,
 } from "./test-support.ts";
 
-const SECRET = "native-scripted-key";
+const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const THREE = 3;
 const ONE = 1;

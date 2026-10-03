@@ -38,7 +38,7 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
     throw new Error("Unexpected network call");
   });
   const prior = process.env.ANTHROPIC_API_KEY;
-  process.env.ANTHROPIC_API_KEY = "environment-secret";
+  process.env.ANTHROPIC_API_KEY = "test_environment-secret";
   t.after(() => {
     if (prior === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = prior;
@@ -46,7 +46,7 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("anthropic", async () => ({
     type: "api_key",
-    key: "execution-secret",
+    key: "test_execution-secret",
   }));
   const input = {
     setup,
@@ -61,12 +61,12 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
   );
   assert.ok(
     JSON.stringify(await runtime.getAuth("anthropic")).includes(
-      "execution-secret",
+      "test_execution-secret",
     ),
   );
   assert.ok(
     !JSON.stringify(await runtime.getAuth("anthropic")).includes(
-      "environment-secret",
+      "test_environment-secret",
     ),
   );
   for (const [patch, reason] of [
