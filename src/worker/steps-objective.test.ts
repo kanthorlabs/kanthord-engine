@@ -14,13 +14,18 @@ import { NodeKind, openNativeAgent } from "./native-agent.ts";
 import {
   anthropicSetup,
   fauxAssistantMessage,
+  fauxToolCall,
   scriptedProvider,
   scriptedModelRuntime,
 } from "./test-support.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
-import { prepareStepsWorkspace, startCheck } from "./steps-objective.ts";
+import {
+  prepareStepsWorkspace,
+  startCheck,
+  runTask,
+} from "./steps-objective.ts";
 
 const SECRET = "test_steps_key";
 const TWO = 2;
@@ -40,6 +45,7 @@ async function fixture(
   t: TestContext,
   tasks: TaskContent[],
   script: Parameters<typeof scriptedProvider>[0],
+  turns?: number,
 ) {
   const state = temporary(t);
   const origin = temporary(t);
@@ -54,6 +60,7 @@ async function fixture(
   const bare = join(state, "origin.git");
   await git.clone(origin, bare, ["--bare"]);
   const setup = anthropicSetup();
+  if (turns) setup.resourceBudget.turns = turns;
   setup.repositories = [
     {
       bindingId: createIdentity("binding"),
@@ -143,6 +150,64 @@ test("start check judges passing tasks in order and discards verification change
   assert.equal(existsSync(join(h.directory, "dirty")), false);
   assert.ok(JSON.stringify(h.provider.calls[0]).includes(tasks[1]!.id));
   assert.ok(JSON.stringify(h.provider.calls[1]).includes(tasks[2]!.id));
+  h.input.workspaces.release(
+    h.input.workspaces.objectiveKey(h.input.claim.nodeId),
+    WorkspaceKind.Objective,
+  );
+});
+
+test("task work commits revisions and cleans verification writes before judgement", async (t) => {
+  const current = task("work", "touch transient; grep -q good file");
+  const write = (content: string) =>
+    fauxAssistantMessage(fauxToolCall("write", { path: "file", content }), {
+      stopReason: "toolUse",
+    });
+  const h = await fixture(
+    t,
+    [current],
+    [
+      write("bad"),
+      fauxAssistantMessage("first"),
+      write("good"),
+      fauxAssistantMessage("second"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterionMet":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  assert.deepEqual(await runTask(h, current), { kind: "complete" });
+  const log = await simpleGit(h.directory).log();
+  const COMMITS = 3;
+  assert.equal(log.total, COMMITS);
+  assert.equal(log.all[0]!.message, log.all[1]!.message);
+  assert.ok(log.all[0]!.message.includes(current.id));
+  assert.equal(existsSync(join(h.directory, "transient")), false);
+  h.input.workspaces.release(
+    h.input.workspaces.objectiveKey(h.input.claim.nodeId),
+    WorkspaceKind.Objective,
+  );
+});
+
+test("turn exhaustion during task work leaves an uncommitted checkpoint boundary", async (t) => {
+  const current = task("work", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "notes", content: "partial" }),
+        { stopReason: "toolUse" },
+      ),
+    ],
+    1,
+  );
+  const before = await simpleGit(h.directory).revparse(["HEAD"]);
+  assert.deepEqual(await runTask(h, current), {
+    kind: "budget_end",
+    boundary: "in_progress",
+  });
+  assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), before);
+  assert.ok(existsSync(join(h.directory, "notes")));
   h.input.workspaces.release(
     h.input.workspaces.objectiveKey(h.input.claim.nodeId),
     WorkspaceKind.Objective,

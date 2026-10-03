@@ -5,13 +5,85 @@ import type { WorkspaceRoot } from "./workspace.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { EndReason, ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import { renderWorkPrompt } from "./prompt-composer.ts";
-import { discardChanges } from "./local-git.ts";
+import {
+  commitWork,
+  discardChanges,
+  headCommit,
+  taskCommitMessage,
+} from "./local-git.ts";
 import { runVerifications, verificationPassed } from "./verification.ts";
 import {
   parseJudgement,
   taskJudgementInstruction,
   taskJudgementSchema,
+  taskRevisionInstruction,
+  criterionRevisionInstruction,
 } from "./judgement.ts";
+
+export const TaskResultKind = {
+  Complete: "complete",
+  BudgetEnd: "budget_end",
+} as const;
+export const TaskBoundary = {
+  InProgress: "in_progress",
+  RunFailed: "run_failed",
+  RunPassed: "run_passed",
+} as const;
+export type TaskBoundary = (typeof TaskBoundary)[keyof typeof TaskBoundary];
+export type TaskResult =
+  | { kind: typeof TaskResultKind.Complete }
+  | { kind: typeof TaskResultKind.BudgetEnd; boundary: TaskBoundary };
+
+export async function runTask(
+  state: StepsState,
+  task: TaskContent,
+): Promise<TaskResult> {
+  const budget = state.agent.budget;
+  let instruction: string | null = null;
+  const ended = (boundary: TaskBoundary): TaskResult => ({
+    kind: TaskResultKind.BudgetEnd,
+    boundary,
+  });
+  while (!budget.exhausted()) {
+    if (instruction === null) await state.agent.prompt(taskWork(state, task));
+    else await state.agent.instruct(taskWork(state, task), instruction);
+    if (budget.exhausted()) return ended(TaskBoundary.InProgress);
+    await commitWork(
+      state.directory,
+      taskCommitMessage(task.id, state.input.claim.attempt),
+      state.run.operationContext,
+      budget.remainingMs(),
+    );
+    state.head = await headCommit(
+      state.directory,
+      state.run.operationContext,
+      budget.remainingMs(),
+    );
+    const verification = await verifyTask(state, task);
+    if (!verificationPassed(verification, task.content.verifications)) {
+      if (budget.exhausted()) return ended(TaskBoundary.RunFailed);
+      instruction = taskRevisionInstruction(
+        verification,
+        task.content.verifications,
+      );
+      continue;
+    }
+    if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
+    await state.agent.instruct(
+      taskWork(state, task),
+      taskJudgementInstruction(task),
+    );
+    if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
+    const judgement = parseJudgement(
+      state.agent.lastText(),
+      taskJudgementSchema,
+    );
+    if (!judgement) state.run.stop(EndReason.JudgementInvalid);
+    if (judgement.criterionMet) return { kind: TaskResultKind.Complete };
+    instruction = criterionRevisionInstruction(judgement.rationale);
+  }
+  return ended(TaskBoundary.InProgress);
+}
 
 export interface StepsInput {
   claim: MethodClaim;
