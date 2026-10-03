@@ -181,7 +181,7 @@ platform-defined representations, not an invented entity prefix. Creation time
 follows the [shared identity and time rules](./other.md#shared-identity-and-time-rules).
 The closed inbound event state set is `pending`, `succeeded`, `failed`,
 `discarded`. The state records the outcome of the handoff; the disposition of
-the Mission Service stays in its admission record.
+the Mission Service stays in the span of its admission.
 
 ### Create file schema
 
