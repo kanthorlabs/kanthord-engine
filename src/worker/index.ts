@@ -6,7 +6,7 @@ export {
   type NativeAgent,
   type NativeAgentInput,
 } from "./native-agent.ts";
-export { WorkspaceRoot } from "./workspace.ts";
+export { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
 export { nodeBranchOf } from "./node-branch.ts";
 export { runVerifications, verificationPassed } from "./verification.ts";
 export { discardChanges, headCommit } from "./local-git.ts";

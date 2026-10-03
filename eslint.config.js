@@ -89,6 +89,19 @@ export default tseslint.config(
               ],
             },
             {
+              from: element("apps-server", {
+                fileInternalPath: "{test-support.ts,*.test.ts}",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "worker" },
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
+              ],
+            },
+            {
               from: element("apps-cli"),
               allow: [
                 ...allow("kernel"),

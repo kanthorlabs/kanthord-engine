@@ -632,7 +632,9 @@ export function addWorkerCommand(program: Command): void {
   agent
     .command("get <agent-name>")
     .description("Get an agent declaration (human JWT)")
-    .action(agentGet);
+    .action((agentName: string, _options, command: Command) =>
+      agentGet(agentName, command),
+    );
   agent.action(() => agent.help());
   const enablement = agent
     .command(ENABLEMENT)

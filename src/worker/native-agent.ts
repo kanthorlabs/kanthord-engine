@@ -60,11 +60,14 @@ function nativeAgent(
   disposeSignal: () => void,
 ): NativeAgent {
   let session: AgentSession | null = opened;
-  const unsubscribeTurns = countTurns(opened, () => {
+  const shouldStopAfterTurn = opened.agent.shouldStopAfterTurn;
+  opened.agent.shouldStopAfterTurn = async (turn, signal) =>
+    budget.exhausted() || (await shouldStopAfterTurn?.(turn, signal)) === true;
+  let unsubscribeTurns: (() => void) | null = countTurns(opened, () => {
     budget.turnEnded();
     if (budget.exhausted()) void session?.abort();
   });
-  const unsubscribeCancellation = context.onCancel(() => {
+  let unsubscribeCancellation: (() => void) | null = context.onCancel(() => {
     void session?.abort();
   });
   return {
@@ -81,8 +84,10 @@ function nativeAgent(
       await session?.abort();
     },
     dispose() {
-      unsubscribeTurns();
-      unsubscribeCancellation();
+      unsubscribeTurns?.();
+      unsubscribeCancellation?.();
+      unsubscribeTurns = null;
+      unsubscribeCancellation = null;
       disposeSignal();
       context.cancel();
       session?.dispose();
