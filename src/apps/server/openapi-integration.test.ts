@@ -778,9 +778,12 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   for (const operation of [
     workerOperations["catalog.list"],
     workerOperations["catalog.get"],
+    workerOperations["agent.get"],
   ]) {
     const published = resolved.paths?.[
-      operation.path.replace(":workerName", "{workerName}")
+      operation.path
+        .replace(":workerName", "{workerName}")
+        .replace(":agentName", "{agentName}")
     ]?.get as ResolvedOperation | undefined;
     assert.equal(published?.operationId, operation.id);
     assert.equal(published?.["x-access-policy"], AccessPolicy.Human);

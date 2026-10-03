@@ -1,0 +1,191 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: worker.agent.get
+    tags:
+      - worker
+    description: Get an agent declaration and its current enablement.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: agentName
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.agent.get.Input/properties/params/properties\
+            /agentName"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.agent.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.agent.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            agentName:
+              type: string
+              minLength: 1
+          required:
+            - agentName
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.agent.get.Output:
+      type: object
+      properties:
+        agentName:
+          type: string
+          minLength: 1
+        configurationSchema:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        overridableFields:
+          type: array
+          items:
+            type: string
+        basePrompt:
+          type: string
+        agentPrompt:
+          type: string
+        tools:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                minLength: 1
+              source:
+                type: string
+                enum:
+                  - builtin
+                  - kanthord-mcp
+              inputSchema:
+                type: object
+                propertyNames:
+                  type: string
+                additionalProperties: {}
+            required:
+              - name
+              - source
+              - inputSchema
+            additionalProperties: false
+        enablement:
+          anyOf:
+            - type: object
+              properties:
+                agentName:
+                  type: string
+                state:
+                  type: string
+                  enum:
+                    - enabled
+                    - disabled
+                agentProviders:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                      provider:
+                        type: string
+                        enum:
+                          - github-copilot
+                          - anthropic
+                          - openai-compatible
+                      credential:
+                        type: string
+                        minLength: 1
+                    required:
+                      - name
+                      - provider
+                      - credential
+                    additionalProperties: false
+                defaultConfiguration:
+                  type: object
+                  properties:
+                    agentProvider:
+                      type: string
+                      minLength: 1
+                    modelIdentifier:
+                      type: string
+                      minLength: 1
+                    reasoningEffort:
+                      type: string
+                      enum:
+                        - off
+                        - minimal
+                        - low
+                        - medium
+                        - high
+                        - xhigh
+                        - max
+                  required:
+                    - agentProvider
+                    - modelIdentifier
+                    - reasoningEffort
+                  additionalProperties: false
+                revision:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+              required:
+                - agentName
+                - state
+                - agentProviders
+                - defaultConfiguration
+                - revision
+              additionalProperties: false
+            - type: "null"
+      required:
+        - agentName
+        - configurationSchema
+        - overridableFields
+        - agentPrompt
+        - tools
+        - enablement
+      additionalProperties: false

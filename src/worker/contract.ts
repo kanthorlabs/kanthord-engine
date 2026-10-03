@@ -569,6 +569,36 @@ export const agentEnablementSchema = z.strictObject({
   revision: z.number().int().positive(),
 });
 const agentParams = z.strictObject({ agentName: z.string().min(1) });
+export const ToolSource = {
+  Builtin: "builtin",
+  KanthordMcp: "kanthord-mcp",
+} as const;
+export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
+export const CONFIGURATION_DESCRIPTION =
+  "The Worker Service validates the whole configuration. `modelIdentifier` belongs to `getBuiltinModels(provider)` of pi-ai 0.86.0 or to the `models` metadata of the `openai-compatible` credential. `reasoningEffort` belongs to the supported reasoning levels of that model. JSON Schema validates neither lookup.";
+export const effectiveConfigurationSchema = z
+  .strictObject({
+    agentProvider: z.string().min(1),
+    provider: agentProviderKindSchema,
+    credential: z.string().min(1),
+    modelIdentifier: z.string().min(1),
+    reasoningEffort: reasoningEffortSchema,
+  })
+  .describe(CONFIGURATION_DESCRIPTION);
+export const toolDeclarationSchema = z.strictObject({
+  name: z.string().min(1),
+  source: z.enum(ToolSource),
+  inputSchema: z.record(z.string(), z.unknown()),
+});
+export const agentDeclarationSchema = z.strictObject({
+  agentName: z.string().min(1),
+  configurationSchema: z.record(z.string(), z.unknown()),
+  overridableFields: z.array(z.string()),
+  basePrompt: z.string().optional(),
+  agentPrompt: z.string(),
+  tools: z.array(toolDeclarationSchema),
+  enablement: agentEnablementSchema.nullable(),
+});
 export const catalogItemSchema = z.strictObject({
   name: z.string().min(1),
   host: z.enum(WorkerHost),
@@ -811,6 +841,21 @@ export const workerOperations = {
       nextCursor: z.string().nullable(),
     }),
     description: "List agent enablements in ascending agent-name order.",
+  },
+  "agent.get": {
+    ...enablementOperation,
+    id: "worker.agent.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/agent/:agentName",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: agentParams,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: agentDeclarationSchema,
+    description: "Get an agent declaration and its current enablement.",
   },
   "agent.enablement.get": {
     ...enablementOperation,

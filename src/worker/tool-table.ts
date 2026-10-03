@@ -2,11 +2,8 @@ import assert from "node:assert/strict";
 import { BuiltinTool, getAgentDeclaration } from "./catalog.ts";
 import { loadPi, piAgentDirectory } from "./pi.ts";
 
-export const ToolSource = {
-  Builtin: "builtin",
-  KanthordMcp: "kanthord-mcp",
-} as const;
-export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
+import { ToolSource } from "./contract.ts";
+export { ToolSource } from "./contract.ts";
 
 export async function toolDeclarations(agentName: string): Promise<
   {

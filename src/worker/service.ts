@@ -19,6 +19,8 @@ import {
 } from "../kernel/health.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import assert from "node:assert/strict";
+import { z } from "zod";
+import { toolDeclarations } from "./tool-table.ts";
 import { isMachineIdentity } from "../kernel/caller.ts";
 import { AccessPolicy } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -50,6 +52,7 @@ import {
   WorkerErrorCode,
   LIST_LIMIT_DEFAULT,
   agentEnablementSchema,
+  effectiveConfigurationSchema,
 } from "./contract.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
@@ -773,6 +776,30 @@ export class WorkerService implements Service {
             nextCursor: page.nextCursor,
           };
         }),
+    );
+    registry.register(
+      workerOperations["agent.get"],
+      async ({ params }, caller) => {
+        requireAgent(params.agentName);
+        const declaration = getAgentDeclaration(params.agentName);
+        assert.ok(declaration);
+        const tools = await toolDeclarations(params.agentName);
+        assert.equal(declaration.agentName, params.agentName);
+        return caller.commit((tx) => {
+          const row = getEnablement(tx, params.agentName);
+          return {
+            agentName: declaration.agentName,
+            configurationSchema: z.toJSONSchema(effectiveConfigurationSchema),
+            overridableFields: [...declaration.overridableFields],
+            ...(declaration.basePrompt === undefined
+              ? {}
+              : { basePrompt: declaration.basePrompt }),
+            agentPrompt: declaration.agentPrompt,
+            tools,
+            enablement: row ? wireRecord(row) : null,
+          };
+        });
+      },
     );
     registry.register(
       workerOperations["agent.enablement.get"],

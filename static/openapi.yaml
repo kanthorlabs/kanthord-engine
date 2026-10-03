@@ -168,6 +168,8 @@ paths:
     $ref: ./openapi/worker/agent.enablement.provider.add.yaml#/pathItem
   /api/worker/agent/enablement/{agentName}/provider/{providerName}:
     $ref: ./openapi/worker/agent.enablement.provider.remove.yaml#/pathItem
+  /api/worker/agent/{agentName}:
+    $ref: ./openapi/worker/agent.get.yaml#/pathItem
   /api/worker/catalog/{workerName}:
     $ref: ./openapi/worker/catalog.get.yaml#/pathItem
   /api/worker/catalog:

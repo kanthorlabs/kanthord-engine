@@ -31,6 +31,27 @@ const STRING_TYPE = "string";
 const NATIVE_AGENT = "swe@1";
 const EXTERNAL_HARNESS = "claude-code";
 
+test("agent get CLI publishes the declaration and rejects a machine caller", async (t) => {
+  const unauthorized = 401;
+  const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+  };
+  const leaf = ["worker", "agent", "get"];
+  const help = await command([...leaf, "--help"], env);
+  assert.equal(help.code, ExitCode.Success);
+  assert.match(help.stdout, /agent-name/);
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
+  const response = await fetch(`${fixture.endpoint}/api/worker/agent/swe%401`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert.equal(response.status, unauthorized);
+});
+
 test("deregistration CLI validates identity and token and returns replayable JSON", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
   const env = {

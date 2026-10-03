@@ -276,6 +276,19 @@ async function catalogGet(workerName: string, command: Command): Promise<void> {
   );
 }
 
+async function agentGet(agentName: string, command: Command): Promise<void> {
+  assert.equal(workerOperations["agent.get"].access, AccessPolicy.Human);
+  assert.equal(workerOperations["agent.get"].mutation, false);
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, "cli.worker.agent.get.token_required");
+  const result = await httpClient(workerOperations, endpoint, token)[
+    "agent.get"
+  ]({ params: { agentName }, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, "cli.worker.agent.get.indeterminate"))}\n`,
+  );
+}
+
 async function resume(
   runtimeIdentity: string,
   command: Command,
@@ -616,6 +629,10 @@ export function addWorkerCommand(program: Command): void {
       handover(executionId, command),
     );
   const agent = worker.command(AGENT).description("Worker agent commands");
+  agent
+    .command("get <agent-name>")
+    .description("Get an agent declaration (human JWT)")
+    .action(agentGet);
   agent.action(() => agent.help());
   const enablement = agent
     .command(ENABLEMENT)

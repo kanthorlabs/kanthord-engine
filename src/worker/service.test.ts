@@ -1048,6 +1048,61 @@ function refuses(
   });
 }
 
+test("agent declaration read exposes prompts, tools and current enablement without writes", async (t) => {
+  const sweToolCount = 7;
+  const reviewerToolCount = 4;
+  const schemaVersion = "https://json-schema.org/draft/2020-12/schema";
+  const disabled = "disabled";
+  const f = enablementFixture(t);
+  const operation = workerOperations["agent.get"];
+  const read = async (agentName = AGENT) =>
+    operation.output.parse(
+      await f.registry
+        .get(operation.id)
+        .handler({ params: { agentName }, query: {}, body: null }, f.caller),
+    );
+  const before = f.store.database
+    .prepare("SELECT total_changes() AS count")
+    .get();
+  const declaration = await read();
+  assert.equal(declaration.enablement, null);
+  assert.equal(declaration.tools.length, sweToolCount);
+  assert.ok(
+    declaration.basePrompt?.startsWith("You are a senior software engineer."),
+  );
+  assert.ok(declaration.agentPrompt.startsWith("## Role"));
+  assert.equal(declaration.configurationSchema.$schema, schemaVersion);
+  assert.equal(declaration.configurationSchema.additionalProperties, false);
+  assert.deepEqual(declaration.configurationSchema.required, [
+    "agentProvider",
+    "provider",
+    "credential",
+    "modelIdentifier",
+    "reasoningEffort",
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(declaration.configurationSchema),
+    /"(?:default|options)":/,
+  );
+  assert.match(
+    String(declaration.configurationSchema.description),
+    /JSON Schema validates neither lookup/,
+  );
+  assert.equal((await read("re@1")).tools.length, reviewerToolCount);
+  assert.deepEqual(
+    f.store.database.prepare("SELECT total_changes() AS count").get(),
+    before,
+  );
+  const enabled = f.invoke("agent.enablement.put", putBody);
+  assert.deepEqual((await read()).enablement, enabled);
+  f.invoke("agent.enablement.disable", { expectedRevision: enabled.revision });
+  assert.equal((await read()).enablement?.state, disabled);
+  await assert.rejects(read("nope@1"), {
+    code: "worker.agent.not_found",
+    status: HttpStatus.NotFound,
+  });
+});
+
 test("handover handlers pass the proven execution and one transactional clock reading", (t) => {
   const execution = {
     executionId: createIdentity("execution"),
