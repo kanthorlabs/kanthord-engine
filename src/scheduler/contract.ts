@@ -398,7 +398,7 @@ export const schedulerOperations = {
     body: false,
     status: HttpStatus.OK,
     description:
-      "List current jobs in the project's work queue, ordered by job identity descending.",
+      "List current jobs in the project's work queue, ordered by priority descending, then job identity ascending.",
     input: z.strictObject({
       params: z.strictObject({ projectId: identitySchema("project") }),
       query: z.strictObject({

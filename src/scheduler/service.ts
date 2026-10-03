@@ -51,6 +51,10 @@ const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const FIRST_ROW = 0;
 const EXTRA_ROW = 1;
+const CURSOR_SEPARATOR = "|";
+const QUEUE_CURSOR_PARTS = 2;
+
+type QueueCursor = { priority: number; jobId: string };
 
 type JobRow = {
   id: string;
@@ -80,6 +84,38 @@ function decodeCursor(cursor: string, prefix: string): string {
       "Cursor is invalid.",
     );
   return decoded;
+}
+
+function invalidCursor(): never {
+  throw new OperationError(
+    HttpStatus.BadRequest,
+    CURSOR_INVALID_CODE,
+    "Cursor is invalid.",
+  );
+}
+
+function encodeQueueCursor(job: Job): string {
+  return Buffer.from(
+    `${job.priority}${CURSOR_SEPARATOR}${job.jobId}`,
+    TEXT_ENCODING,
+  ).toString(CURSOR_ENCODING);
+}
+
+function decodeQueueCursor(cursor: string): QueueCursor {
+  const decoded = Buffer.from(cursor, CURSOR_ENCODING).toString(TEXT_ENCODING);
+  if (Buffer.from(decoded, TEXT_ENCODING).toString(CURSOR_ENCODING) !== cursor)
+    invalidCursor();
+  const parts = decoded.split(CURSOR_SEPARATOR);
+  if (parts.length !== QUEUE_CURSOR_PARTS) invalidCursor();
+  const [priorityText, jobId] = parts as [string, string];
+  const priority = Number(priorityText);
+  if (
+    !Number.isSafeInteger(priority) ||
+    String(priority) !== priorityText ||
+    !identitySchema(JOB_IDENTITY_PREFIX).safeParse(jobId).success
+  )
+    invalidCursor();
+  return { priority, jobId };
 }
 
 export interface Dependencies {
@@ -276,27 +312,29 @@ export class SchedulerService implements Service, WorkQueue {
     const after =
       input.query.cursor === undefined
         ? undefined
-        : decodeCursor(input.query.cursor, JOB_IDENTITY_PREFIX);
+        : decodeQueueCursor(input.query.cursor);
     return caller.commit((tx) => {
       const rows =
         after === undefined
           ? tx.database
               .prepare(
-                "SELECT id, project_id, node_id, priority FROM scheduler_job WHERE project_id = ? ORDER BY id DESC LIMIT ?",
+                "SELECT id, project_id, node_id, priority FROM scheduler_job WHERE project_id = ? ORDER BY priority DESC, id ASC LIMIT ?",
               )
               .all(projectId, limit + EXTRA_ROW)
           : tx.database
               .prepare(
-                "SELECT id, project_id, node_id, priority FROM scheduler_job WHERE project_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
+                "SELECT id, project_id, node_id, priority FROM scheduler_job WHERE project_id = ? AND (priority < ? OR (priority = ? AND id > ?)) ORDER BY priority DESC, id ASC LIMIT ?",
               )
-              .all(projectId, after, limit + EXTRA_ROW);
+              .all(
+                projectId,
+                after.priority,
+                after.priority,
+                after.jobId,
+                limit + EXTRA_ROW,
+              );
       const items = (rows as JobRow[]).slice(FIRST_ROW, limit).map(toJob);
       const nextCursor =
-        rows.length > limit
-          ? Buffer.from(items.at(-1)!.jobId, TEXT_ENCODING).toString(
-              CURSOR_ENCODING,
-            )
-          : null;
+        rows.length > limit ? encodeQueueCursor(items.at(-1)!) : null;
       return { items, nextCursor };
     });
   }

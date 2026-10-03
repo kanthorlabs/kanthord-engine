@@ -30,14 +30,35 @@ const JOB_PREFIX = "job";
 const INITIAL_PRIORITY = 0;
 const UPDATED_PRIORITY = 1;
 const FIRST_ITEM = 0;
-const SECOND_ITEM = 1;
 const ONE_ROW = 1;
 const NO_ROWS = 0;
-const LIST_PAGE_LIMIT = 2;
-const LIST_TOTAL_JOBS = 3;
-const LIST_SECOND_PAGE_COUNT = 1;
 const PRIORITY_LOW = 0;
 const PRIORITY_HIGH = 1;
+const LIMIT_ONE = 1;
+const LIST_PAGE_LIMIT = 2;
+const LIMIT_THREE = 3;
+const LIMIT_EXACT = 7;
+const PRIORITY_TOP = 5;
+const PRIORITY_MID = 3;
+const PRIORITY_NEGATIVE = -2;
+const JOB_A = "job_00000000000000000000000007";
+const JOB_B = "job_00000000000000000000000001";
+const JOB_C = "job_00000000000000000000000002";
+const JOB_D = "job_00000000000000000000000004";
+const JOB_E = "job_00000000000000000000000006";
+const JOB_F = "job_00000000000000000000000003";
+const JOB_G = "job_00000000000000000000000005";
+const OTHER_PROJECT_JOB_ID = "job_00000000000000000000000000";
+const QUEUE_FIXTURE: readonly [string, number][] = [
+  [JOB_B, PRIORITY_MID],
+  [JOB_C, PRIORITY_MID],
+  [JOB_F, PRIORITY_LOW],
+  [JOB_D, PRIORITY_MID],
+  [JOB_G, PRIORITY_NEGATIVE],
+  [JOB_E, PRIORITY_MID],
+  [JOB_A, PRIORITY_TOP],
+];
+const QUEUE_ORDER = [JOB_A, JOB_B, JOB_C, JOB_D, JOB_E, JOB_F, JOB_G];
 const LOWEST_JOB_ID = "job_00000000000000000000000000";
 const HIGHEST_JOB_ID = "job_7ZZZZZZZZZZZZZZZZZZZZZZZZZ";
 const MALFORMED_CURSOR = "dGVzdA";
@@ -181,53 +202,126 @@ test("WorkQueue priorityUpdate changes priority and preserves id", (t) => {
   assert.equal(updated.id, original.id);
 });
 
-test("queue list handler orders by id descending and paginates", (t) => {
+test("queue list handler pages the work queue order with no duplicate and no omission", (t) => {
   const store = makeStore();
   t.after(() => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const projectId = createIdentity(PROJECT_PREFIX);
-  for (let index = NO_ROWS; index < LIST_TOTAL_JOBS; index += ONE_ROW)
-    store.transaction((tx) =>
-      scheduler.insert(
-        tx,
-        createIdentity(NODE_PREFIX),
-        projectId,
-        INITIAL_PRIORITY,
-      ),
+  const otherProjectId = createIdentity(PROJECT_PREFIX);
+  store.transaction((tx) => {
+    const insert = tx.database.prepare(
+      "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
     );
-  const allIds = store.database
-    .prepare("SELECT id FROM scheduler_job WHERE project_id = ?")
-    .all(projectId)
-    .map((row) => row.id);
+    for (const [id, priority] of QUEUE_FIXTURE)
+      insert.run(id, projectId, createIdentity(NODE_PREFIX), priority);
+    insert.run(
+      OTHER_PROJECT_JOB_ID,
+      otherProjectId,
+      createIdentity(NODE_PREFIX),
+      PRIORITY_TOP,
+    );
+  });
   const registry = new OperationRegistry();
   scheduler.declare(registry);
   const caller = makeCallerContext(store);
-  const first = invokeList(registry, caller, projectId, {
-    limit: LIST_PAGE_LIMIT,
+  const cases: readonly [number, readonly (readonly string[])[]][] = [
+    [LIMIT_ONE, QUEUE_ORDER.map((id) => [id])],
+    [
+      LIST_PAGE_LIMIT,
+      [[JOB_A, JOB_B], [JOB_C, JOB_D], [JOB_E, JOB_F], [JOB_G]],
+    ],
+    [LIMIT_THREE, [[JOB_A, JOB_B, JOB_C], [JOB_D, JOB_E, JOB_F], [JOB_G]]],
+    [LIMIT_EXACT, [QUEUE_ORDER]],
+    [QUEUE_LIST_LIMIT_DEFAULT, [QUEUE_ORDER]],
+  ];
+  for (const [limit, expectedPages] of cases) {
+    const pages: string[][] = [];
+    const cursors: (string | null)[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = invokeList(
+        registry,
+        caller,
+        projectId,
+        cursor === undefined ? { limit } : { limit, cursor },
+      );
+      pages.push(page.items.map((job) => job.jobId));
+      cursors.push(page.nextCursor);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor !== undefined && pages.length <= QUEUE_ORDER.length);
+    assert.deepEqual(pages, expectedPages);
+    assert.deepEqual(pages.flat(), QUEUE_ORDER);
+    assert.equal(cursors.at(-1), null);
+    assert.ok(cursors.slice(FIRST_ITEM, -1).every((next) => next !== null));
+  }
+});
+
+test("queue list handler continues after a cursor whose job left the queue", (t) => {
+  const store = makeStore();
+  t.after(() => store.close());
+  const scheduler = schedulerHarness(t, { store }).service;
+  const projectId = createIdentity(PROJECT_PREFIX);
+  store.transaction((tx) => {
+    const insert = tx.database.prepare(
+      "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
+    );
+    for (const [id, priority] of QUEUE_FIXTURE)
+      insert.run(id, projectId, createIdentity(NODE_PREFIX), priority);
   });
-  assert.equal(first.items.length, LIST_PAGE_LIMIT);
-  assert.ok(first.items[FIRST_ITEM]!.jobId > first.items[SECOND_ITEM]!.jobId);
+  const registry = new OperationRegistry();
+  scheduler.declare(registry);
+  const caller = makeCallerContext(store);
+  const first = invokeList(registry, caller, projectId, { limit: LIMIT_THREE });
+  assert.deepEqual(
+    first.items.map((job) => job.jobId),
+    [JOB_A, JOB_B, JOB_C],
+  );
   assert.ok(first.nextCursor);
+  store.database.prepare("DELETE FROM scheduler_job WHERE id = ?").run(JOB_C);
   const second = invokeList(registry, caller, projectId, {
-    limit: LIST_PAGE_LIMIT,
+    limit: QUEUE_LIST_LIMIT_DEFAULT,
     cursor: first.nextCursor,
   });
-  assert.equal(second.items.length, LIST_SECOND_PAGE_COUNT);
-  assert.equal(second.nextCursor, null);
-  const pageIds = [...first.items, ...second.items].map((job) => job.jobId);
-  assert.equal(new Set(pageIds).size, LIST_TOTAL_JOBS);
-  assert.deepEqual([...pageIds].sort(), [...allIds].sort());
-  assert.throws(
-    () =>
-      invokeList(registry, caller, projectId, {
-        limit: QUEUE_LIST_LIMIT_DEFAULT,
-        cursor: MALFORMED_CURSOR,
-      }),
-    (error) =>
-      error instanceof OperationError &&
-      error.code === CURSOR_INVALID_CODE &&
-      error.status === HttpStatus.BadRequest,
+  assert.deepEqual(
+    second.items.map((job) => job.jobId),
+    [JOB_D, JOB_E, JOB_F, JOB_G],
   );
+  assert.equal(second.nextCursor, null);
+});
+
+test("queue list handler rejects an invalid cursor", (t) => {
+  const store = makeStore();
+  t.after(() => store.close());
+  const scheduler = schedulerHarness(t, { store }).service;
+  const projectId = createIdentity(PROJECT_PREFIX);
+  const registry = new OperationRegistry();
+  scheduler.declare(registry);
+  const caller = makeCallerContext(store);
+  const encode = (value: string) =>
+    Buffer.from(value, "utf8").toString("base64url");
+  for (const cursor of [
+    MALFORMED_CURSOR,
+    encode(JOB_A),
+    encode(`${PRIORITY_MID}`),
+    encode(`${PRIORITY_MID}|${JOB_A}|${JOB_B}`),
+    encode(`${PRIORITY_MID}|node_00000000000000000000000001`),
+    encode(`0${PRIORITY_MID}|${JOB_A}`),
+    encode(`${PRIORITY_MID}.5|${JOB_A}`),
+    encode(`-0|${JOB_A}`),
+    encode(`9007199254740992|${JOB_A}`),
+    `${encode(`${PRIORITY_MID}|${JOB_A}`)}=`,
+  ])
+    assert.throws(
+      () =>
+        invokeList(registry, caller, projectId, {
+          limit: QUEUE_LIST_LIMIT_DEFAULT,
+          cursor,
+        }),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === CURSOR_INVALID_CODE &&
+        error.status === HttpStatus.BadRequest,
+    );
 });
 
 test("queue peek handler returns the first job by priority desc then id asc, or null", (t) => {

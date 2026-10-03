@@ -4,8 +4,8 @@ pathItem:
     operationId: scheduler.queue.list
     tags:
       - scheduler
-    description: List current jobs in the project's work queue, ordered by job
-      identity descending.
+    description: List current jobs in the project's work queue, ordered by priority
+      descending, then job identity ascending.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
