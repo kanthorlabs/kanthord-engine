@@ -12,6 +12,8 @@ import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "./contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { runStepsInitiative } from "./steps-initiative.ts";
+import { DeadlineExceeded } from "../kernel/context.ts";
+import { setTimeout } from "node:timers/promises";
 
 const FIRST = 1;
 const ZERO = 0;
@@ -134,5 +136,65 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
     assert.equal(evidence, scenario.evidence ? FIRST : ZERO);
     assert.equal(opens, scenario.opens);
     assert.equal(existsSync(workspaces.executionKey(claim.executionId)), false);
+  }
+});
+
+test("B4 initiative releases when reads or agent opening consume the wall budget", async (t) => {
+  for (const duringOpen of [false, true]) {
+    const setup = anthropicSetup({
+      repositories: [],
+      resourceBudget: { wallTimeMs: 100 },
+    });
+    const claim = {
+      executionId: setup.executionId,
+      nodeId: createIdentity("node"),
+      attempt: 1,
+      pinnedRevision: 1,
+      createdAt: Date.now() - (duringOpen ? 0 : 10000),
+      expiredAt: Date.now() + 60000,
+      traceId: "trace",
+    };
+    const page = async () => ({
+      type: "completed",
+      status: 200,
+      data: { items: [], nextCursor: null },
+    });
+    let releases = 0;
+    const clients = {
+      mission: {
+        "execution.objective.list": page,
+        "execution.objective.outcome.list": page,
+        "execution.objective.evidence.list": page,
+      },
+      scheduler: {
+        executionRelease: async () => {
+          releases++;
+          return { type: "completed", status: 200, data: {} };
+        },
+      },
+    } as unknown as MethodClients;
+    const run = new ExecutionRun({
+      claim,
+      clients,
+      credentials: { release: async () => {} },
+      context: background,
+    });
+    t.after(() => run.dispose());
+    const open = async () => {
+      assert.ok(duringOpen);
+      await setTimeout(120);
+      throw new DeadlineExceeded();
+    };
+    const workspaces = WorkspaceRoot.open(temporary(t));
+    assert.deepEqual(
+      await runStepsInitiative(
+        { setup, claim, workspaces, transport: {} as RepositoryTransport },
+        run,
+        {} as Revision,
+        open,
+      ),
+      { kind: "released", furtherWork: true },
+    );
+    assert.equal(releases, FIRST);
   }
 });

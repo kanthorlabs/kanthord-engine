@@ -5,12 +5,14 @@ import { identitySchema } from "../kernel/identity.ts";
 import {
   AssetKind,
   type Evidence,
+  type EvidenceAsset,
   type Revision,
 } from "../mission/contract.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
+import type { TestedInput } from "./verification.ts";
 
 export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
   const candidates = evidence
@@ -46,20 +48,18 @@ export function placedOf(evidence: readonly Evidence[]) {
   return null;
 }
 
-async function placeEvidence(
+async function placeAsset(
   directory: string,
   run: ExecutionRun,
-  evidence: readonly Evidence[],
+  asset: EvidenceAsset,
   deadline: number,
 ) {
-  const placed = placedOf(evidence);
-  if (!placed) return run.stop(EndReason.OperationFailed);
   const content = await run.call((options) =>
     run.clients.mission["execution.evidence.asset.content.get"](
       {
         params: {
           executionId: run.claim.executionId,
-          assetId: placed.asset.id,
+          assetId: asset.id,
         },
         query: {},
         body: null,
@@ -80,24 +80,20 @@ async function placeEvidence(
       }
       bytes = Buffer.from(await response.arrayBuffer());
     }
-    const assetId = identitySchema("evidence_asset").parse(placed.asset.id);
+    const assetId = identitySchema("evidence_asset").parse(asset.id);
     await writeFile(join(directory, assetId), bytes, {
       mode: 0o600,
       flag: "wx",
       signal: bridge.signal,
     });
-    return {
-      directory,
-      testedInput: placed.asset.address,
-      evidenceIds: [placed.evidenceId],
-    };
+    return assetId;
   } finally {
     bridge.dispose();
     context.cancel();
   }
 }
 
-export async function prepareEvaluation(
+async function prepareWorkspace(
   input: StepsInput,
   run: ExecutionRun,
   kind: NodeKind,
@@ -140,14 +136,52 @@ export async function prepareEvaluation(
           repositories: input.setup.repositories,
         })
       : { ...input.workspaces.prepareExecution(common), testedInput: null };
-  if (workspace.testedInput)
+  return { ...workspace, evidenceIds: [] as string[] };
+}
+
+export async function prepareEvaluation(
+  input: StepsInput,
+  run: ExecutionRun,
+  kind: NodeKind,
+  evidence: readonly Evidence[],
+) {
+  const workspace = await prepareWorkspace(input, run, kind, evidence);
+  try {
+    const testedInput: TestedInput | undefined =
+      workspace.testedInput ?? placedOf(evidence)?.asset.address;
+    if (!testedInput) return run.stop(EndReason.OperationFailed);
+    const evidenceIds = new Set(workspace.evidenceIds);
+    const assets: { evidenceId: string; assetId: string; path: string }[] = [];
+    const support = evidence.filter(
+      (item) => !item.verification && !item.requirementKey,
+    );
+    const selected = support.flatMap((item) =>
+      item.assets
+        .filter(
+          (asset) =>
+            asset.kind === AssetKind.Produced ||
+            asset.kind === AssetKind.Object,
+        )
+        .map((asset) => ({ evidenceId: item.id, asset })),
+    );
+    const deadline = Math.min(
+      input.claim.createdAt + input.setup.resourceBudget.wallTimeMs,
+      input.claim.expiredAt,
+    );
+    for (const { evidenceId, asset } of selected) {
+      const path = await placeAsset(workspace.directory, run, asset, deadline);
+      evidenceIds.add(evidenceId);
+      assets.push({ evidenceId, assetId: asset.id, path });
+    }
     return {
       directory: workspace.directory,
-      testedInput: workspace.testedInput,
-      evidenceIds: [] as string[],
+      testedInput,
+      evidenceIds: [...evidenceIds],
+      reviewBundle: {
+        evidence: evidence.filter((item) => evidenceIds.has(item.id)),
+        assets,
+      },
     };
-  try {
-    return await placeEvidence(workspace.directory, run, evidence, deadline);
   } catch (error) {
     input.workspaces.release(workspace.directory, WorkspaceKind.Execution);
     throw error;

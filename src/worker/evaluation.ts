@@ -1,9 +1,5 @@
 import { canonicalJSON } from "../kernel/json.ts";
-import {
-  AssessmentResult,
-  type Evidence,
-  type Revision,
-} from "../mission/contract.ts";
+import { AssessmentResult, type Revision } from "../mission/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import {
   EndReason,
@@ -56,10 +52,11 @@ async function judge(
   input: StepsInput,
   run: ExecutionRun,
   revision: Revision,
-  evidence: Evidence[],
+  evidence: unknown,
   verification: Verification,
   directory: string,
   openAgent: OpenAgent,
+  objectives: Awaited<ReturnType<typeof readObjectives>> | null,
 ) {
   const commands = verificationCommands(revision);
   if (!verificationPassed(verification, commands))
@@ -80,6 +77,7 @@ async function judge(
       tasks: revision.tasks ?? [],
       testedInput: verification.testedInput,
       evidence,
+      objectives,
     }),
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
@@ -125,18 +123,19 @@ export async function runEvaluation(
       ],
       verification,
     });
+    const objectives =
+      kind === NodeKind.Initiative ? await readObjectives(run) : null;
     const childOutcomeIds =
-      kind === NodeKind.Initiative
-        ? (await readObjectives(run)).outcomes.map((outcome) => outcome.id)
-        : [];
+      objectives?.outcomes.map((outcome) => outcome.id) ?? [];
     const judgement = await judge(
       input,
       run,
       revision,
-      evidence,
+      prepared.reviewBundle,
       verification,
       prepared.directory,
       openAgent,
+      objectives,
     );
     const answer = await run.submitAssessment(input.claim.nodeId, {
       evidenceIds: [recorded.id, ...prepared.evidenceIds],

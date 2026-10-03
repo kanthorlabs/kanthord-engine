@@ -506,6 +506,12 @@ test(
         );
         const AVAILABLE = "Available";
         assert.equal(await state(B), AVAILABLE);
+        const claim = await read<{ claimState: string }>(
+          ["scheduler", "claim", "get", answer.execution.executionId],
+          lab.env,
+        );
+        const FINISHED = "finished";
+        assert.equal(claim.claimState, FINISHED);
       },
     );
     await t.test(
@@ -517,6 +523,11 @@ test(
         const verified = (await evidence(A)).items.find(
           (item) => item.verification,
         )!;
+        assert.deepEqual(verified.verification!.testedInput, {
+          kind: "repository",
+          bindingId: answer.setup.repositories[0]!.bindingId,
+          commit: headA,
+        });
         assert.deepEqual(
           verified.verification!.results.map((result) => result.exitCode),
           [ZERO, ZERO],

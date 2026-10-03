@@ -10,6 +10,8 @@ import { reportInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "./prompt-composer.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
+import { ExecutionBudget } from "./budget.ts";
+import { ContextCancelled, DeadlineExceeded } from "../kernel/context.ts";
 
 export const REPORT_SUBJECT = "Report on current objective outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
@@ -20,13 +22,19 @@ export async function runStepsInitiative(
   revision: Revision,
   openAgent: (directory: string) => Promise<NativeAgent>,
 ): Promise<ExecutionEnd> {
+  const budget = new ExecutionBudget({
+    ...input.claim,
+    resourceBudget: input.setup.resourceBudget,
+  });
   const { directory } = input.workspaces.prepareExecution({
     executionId: input.claim.executionId,
   });
   try {
     const current = await readObjectives(run);
     if (!allTerminal(current.objectives)) return await run.release(true);
+    if (budget.exhausted()) return await run.release(true);
     const agent = await openAgent(directory);
+    if (agent.budget.exhausted()) return await run.release(true);
     const work = renderWorkPrompt({
       nodeId: input.claim.nodeId,
       revision: input.claim.pinnedRevision,
@@ -55,6 +63,15 @@ export async function runStepsInitiative(
       ],
     });
     return await run.release(false);
+  } catch (error) {
+    if (
+      (error instanceof ContextCancelled ||
+        error instanceof DeadlineExceeded) &&
+      budget.exhausted() &&
+      !run.operationContext.err()
+    )
+      return await run.release(true);
+    throw error;
   } finally {
     input.workspaces.release(directory, WorkspaceKind.Execution);
   }

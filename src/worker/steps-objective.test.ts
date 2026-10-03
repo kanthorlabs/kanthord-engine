@@ -21,11 +21,13 @@ import {
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
+import { TaskBoundary } from "./steps-objective.ts";
 import {
   prepareStepsWorkspace,
   startCheck,
   runTask,
   runStepsObjective,
+  verifyTask,
 } from "./steps-objective.ts";
 
 const SECRET = "test_steps_key";
@@ -218,7 +220,7 @@ test("start check judges passing tasks in order and discards verification change
     ),
   ]);
   assert.deepEqual(
-    (await startCheck(h)).map(({ id }) => id),
+    (await startCheck(h)).pending.map(({ task }) => task.id),
     [tasks[0]!.id, tasks[2]!.id],
   );
   assert.equal(h.provider.calls.length, TWO);
@@ -287,4 +289,126 @@ test("turn exhaustion during task work leaves an uncommitted checkpoint boundary
     h.input.workspaces.objectiveKey(h.input.claim.nodeId),
     WorkspaceKind.Objective,
   );
+});
+
+test("B1 retains a failed-run boundary when the budget expires between iterations", async (t) => {
+  const current = task("failed", "false");
+  const h = await fixture(t, [current], [fauxAssistantMessage("work")]);
+  let checks = 0;
+  const EXPIRE_AT = 4;
+  h.agent.prompt = async () => {};
+  h.agent.budget.exhausted = () => ++checks >= EXPIRE_AT;
+  assert.deepEqual(await runTask(h, current), {
+    kind: "budget_end",
+    boundary: "run_failed",
+  });
+  h.agent.budget.exhausted = () => true;
+  assert.deepEqual(await runTask(h, current, TaskBoundary.RunFailed), {
+    kind: "budget_end",
+    boundary: "run_failed",
+  });
+});
+
+test("B1 start-check timeout keeps failed disposition and cleanup runs after the wall deadline", async (t) => {
+  const current = task("timeout", "touch transient; sleep 30");
+  const h = await fixture(t, [current], []);
+  let deadline = Date.now() + 10000;
+  h.agent.budget.wallDeadline = () => {
+    deadline = Date.now() + 30;
+    return deadline;
+  };
+  h.agent.budget.exhausted = () => Date.now() >= deadline;
+  const checked = await startCheck(h);
+  assert.equal(checked.budgetEnd?.boundary, TaskBoundary.RunFailed);
+  assert.equal(existsSync(join(h.directory, "transient")), false);
+  assert.ok(Date.now() >= deadline && Date.now() < h.input.claim.expiredAt);
+  assert.equal(h.provider.calls.length, ZERO);
+  const verification = await verifyTask(h, current);
+  assert.equal(verification.results[0]!.timedOut, true);
+});
+
+test("S1 budget-ended task verification releases the evidenced head without further work", async (t) => {
+  const current = task("failed-budget", "false");
+  const h = await fixture(t, [current], []);
+  h.agent.budget.exhausted = () => true;
+  let evidenced = false;
+  let released = false;
+  h.run.clients.mission = {
+    "evidence.submit": async () => {
+      evidenced = true;
+      return { type: "completed", status: 200, data: { evidence: {} } };
+    },
+  } as unknown as MethodClients["mission"];
+  h.run.clients.scheduler = {
+    executionRelease: async (input: { body: { furtherWork: boolean } }) => {
+      assert.ok(evidenced);
+      assert.equal(input.body.furtherWork, false);
+      released = true;
+      return { type: "completed", status: 200, data: {} };
+    },
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(await runStepsObjective(h), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.ok(released);
+  const timed = await fixture(
+    t,
+    [task("timed", "touch transient; sleep 30")],
+    [fauxAssistantMessage("work")],
+  );
+  let deadline = Date.now() + 60000;
+  timed.agent.budget.wallDeadline = () => {
+    deadline = Date.now() + 30;
+    return deadline;
+  };
+  timed.agent.budget.exhausted = () => Date.now() >= deadline;
+  assert.deepEqual(await runTask(timed, timed.revision.tasks![0]!), {
+    kind: "budget_end",
+    boundary: "run_failed",
+  });
+  assert.equal(existsSync(join(timed.directory, "transient")), false);
+});
+
+test("criterion-negative judgement revises work and a budget-ended judgement keeps passing disposition", async (t) => {
+  const current = task("criterion", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterionMet":false,"rationale":"revise"}',
+      ),
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "revision", content: "fixed" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("revised"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterionMet":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  assert.deepEqual(await runTask(h, current), { kind: "complete" });
+  assert.ok(existsSync(join(h.directory, "revision")));
+  const other = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterionMet":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  const instruct = other.agent.instruct.bind(other.agent);
+  other.agent.instruct = async (...args) => {
+    await instruct(...args);
+    other.agent.budget.exhausted = () => true;
+  };
+  assert.deepEqual(await runTask(other, current), {
+    kind: "budget_end",
+    boundary: "run_passed",
+  });
 });

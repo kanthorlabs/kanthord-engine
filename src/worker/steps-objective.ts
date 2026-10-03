@@ -80,9 +80,15 @@ export async function runStepsObjective(
   state: StepsState,
 ): Promise<ExecutionEnd> {
   try {
-    const pending = await startCheck(state);
-    for (const task of pending) {
-      const result = await runTask(state, task);
+    const checked = await startCheck(state);
+    if (checked.budgetEnd)
+      return await finishObjective(
+        state,
+        checked.budgetEnd.task,
+        checked.budgetEnd.boundary,
+      );
+    for (const { task, boundary } of checked.pending) {
+      const result = await runTask(state, task, boundary);
       if (result.kind === TaskResultKind.BudgetEnd)
         return await finishObjective(state, task, result.boundary);
     }
@@ -117,14 +123,17 @@ export type TaskResult =
 export async function runTask(
   state: StepsState,
   task: TaskContent,
+  initialBoundary: TaskBoundary = TaskBoundary.InProgress,
 ): Promise<TaskResult> {
   const budget = state.agent.budget;
   let instruction: string | null = null;
+  let boundary = initialBoundary;
   const ended = (boundary: TaskBoundary): TaskResult => ({
     kind: TaskResultKind.BudgetEnd,
     boundary,
   });
   while (!budget.exhausted()) {
+    boundary = TaskBoundary.InProgress;
     if (instruction === null) await state.agent.prompt(taskWork(state, task));
     else await state.agent.instruct(taskWork(state, task), instruction);
     if (budget.exhausted()) return ended(TaskBoundary.InProgress);
@@ -141,6 +150,7 @@ export async function runTask(
     );
     const verification = await verifyTask(state, task);
     if (!verificationPassed(verification, task.content.verifications)) {
+      boundary = TaskBoundary.RunFailed;
       if (budget.exhausted()) return ended(TaskBoundary.RunFailed);
       instruction = taskRevisionInstruction(
         verification,
@@ -148,6 +158,7 @@ export async function runTask(
       );
       continue;
     }
+    boundary = TaskBoundary.RunPassed;
     if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
     await state.agent.instruct(
       taskWork(state, task),
@@ -162,7 +173,7 @@ export async function runTask(
     if (judgement.criterionMet) return { kind: TaskResultKind.Complete };
     instruction = criterionRevisionInstruction(judgement.rationale);
   }
-  return ended(TaskBoundary.InProgress);
+  return ended(boundary);
 }
 
 export interface StepsInput {
@@ -231,17 +242,21 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
   return verification;
 }
 
-export async function startCheck(state: StepsState): Promise<TaskContent[]> {
+export async function startCheck(state: StepsState): Promise<{
+  pending: { task: TaskContent; boundary: TaskBoundary }[];
+  budgetEnd: { task: TaskContent; boundary: TaskBoundary } | null;
+}> {
   assert.ok(state.revision.tasks);
   assert.ok(state.head);
-  const pending: TaskContent[] = [];
+  const pending: { task: TaskContent; boundary: TaskBoundary }[] = [];
   for (const task of state.revision.tasks) {
     const verification = await verifyTask(state, task);
-    if (
-      !verificationPassed(verification, task.content.verifications) ||
-      state.agent.budget.exhausted()
-    ) {
-      pending.push(task);
+    const passed = verificationPassed(verification, task.content.verifications);
+    const boundary = passed ? TaskBoundary.RunPassed : TaskBoundary.RunFailed;
+    if (state.agent.budget.exhausted())
+      return { pending, budgetEnd: { task, boundary } };
+    if (!passed) {
+      pending.push({ task, boundary });
       continue;
     }
     await state.agent.instruct(
@@ -249,15 +264,14 @@ export async function startCheck(state: StepsState): Promise<TaskContent[]> {
       taskJudgementInstruction(task),
     );
     if (state.agent.budget.exhausted()) {
-      pending.push(task);
-      continue;
+      return { pending, budgetEnd: { task, boundary } };
     }
     const judgement = parseJudgement(
       state.agent.lastText(),
       taskJudgementSchema,
     );
     if (!judgement) state.run.stop(EndReason.JudgementInvalid);
-    if (!judgement.criterionMet) pending.push(task);
+    if (!judgement.criterionMet) pending.push({ task, boundary });
   }
-  return pending;
+  return { pending, budgetEnd: null };
 }

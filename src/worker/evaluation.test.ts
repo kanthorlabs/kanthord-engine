@@ -10,6 +10,7 @@ import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "./contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
+import type { WorkPrompt } from "./prompt-composer.ts";
 import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { ActionResultKind } from "./contract.ts";
 
@@ -87,6 +88,14 @@ test("evaluation writes failed-verification assessments without inference and ga
       opens: 1,
     },
     { command: "true", text: "invalid", result: null, opens: 1 },
+    {
+      command: "true",
+      text: 'kanthord-judgement: {"result":"success","rationale":"children weighed"}',
+      result: "success",
+      opens: 1,
+      initiative: true,
+    },
+    { command: "true", text: "", result: null, opens: 0, refused: true },
   ]) {
     const setup = anthropicSetup({ repositories: [] });
     const claim = {
@@ -123,10 +132,35 @@ test("evaluation writes failed-verification assessments without inference and ga
               verifications: [scenario.command],
               bindings: [],
             },
-            tasks: [],
+            ...(scenario.initiative ? {} : { tasks: [] }),
           }),
         "execution.evidence.list": async () =>
-          complete({ items: [evidence], nextCursor: null }),
+          complete({
+            items: [
+              evidence,
+              {
+                id: "request",
+                requirementKey: "action",
+                endState: "expected",
+                assets: [],
+              },
+            ],
+            nextCursor: null,
+          }),
+        "execution.objective.list": async () =>
+          complete({
+            items: [{ id: "child", state: "Completed" }],
+            nextCursor: null,
+          }),
+        "execution.objective.outcome.list": async () =>
+          complete({
+            items: [
+              { id: "child-outcome", result: "success", nodeId: "child" },
+            ],
+            nextCursor: null,
+          }),
+        "execution.objective.evidence.list": async () =>
+          complete({ items: [], nextCursor: null }),
         "execution.evidence.asset.content.get": async () =>
           complete({
             assetId,
@@ -139,6 +173,19 @@ test("evaluation writes failed-verification assessments without inference and ga
           body: { verification: { results: unknown[] } };
         }) => {
           assert.equal(input.body.verification.results.length, ONE);
+          if (scenario.refused)
+            return {
+              type: "failure",
+              status: 403,
+              error: {
+                error: {
+                  code: "gateway.invocation.execution_proof_failed",
+                  message: "ended",
+                  details: null,
+                },
+                requestId: "test",
+              },
+            };
           return complete({ evidence: { id: "verification" } });
         },
         "assessment.submit": async (input: {
@@ -153,7 +200,10 @@ test("evaluation writes failed-verification assessments without inference and ga
           assert.ok(reported);
           assert.equal(input.body.result, scenario.result);
           assert.deepEqual(input.body.evidenceIds, ["verification", "placed"]);
-          assert.deepEqual(input.body.childOutcomeIds, []);
+          assert.deepEqual(
+            input.body.childOutcomeIds,
+            scenario.initiative ? ["child-outcome"] : [],
+          );
           if (!scenario.opens)
             assert.match(input.body.rationale, /Verification 1 `false` failed/);
           return complete({ outcome: { id: "outcome" } });
@@ -176,7 +226,13 @@ test("evaluation writes failed-verification assessments without inference and ga
       opens++;
       return {
         budget: { exhausted: () => false },
-        instruct: async () => {},
+        instruct: async (_work: WorkPrompt, instruction: string) => {
+          assert.ok(instruction.includes(assetId));
+          if (scenario.initiative) {
+            assert.match(instruction, /child-outcome/);
+            assert.match(instruction, /Completed/);
+          }
+        },
         lastText: () => scenario.text,
       } as unknown as NativeAgent;
     };
