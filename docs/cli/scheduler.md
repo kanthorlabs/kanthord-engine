@@ -7,7 +7,9 @@ provenance links at the end provide design context.
 
 ## Status and ownership
 
-**Implemented, inspected 2026-10-01:** all seven commands below are callable.
+**Implemented, inspected 2026-10-01:** seven commands below are callable.
+**Declared, not implemented:** the work-queue order of `queue list`, which
+the code still pages by job identity descending, and `eligibility get`, under [the eligibility report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-eligibility-report).
 The [Scheduler CLI](../../src/apps/cli/scheduler.ts) and
 [execution CLI](../../src/apps/cli/scheduler-execution.ts) use the
 [operation contracts](../../src/scheduler/contract.ts), with generated
@@ -35,7 +37,7 @@ Worker owns registrations, runtime identities, healthchecks, compatibility
 declarations and execution hosting. Project owns bindings, configured counts,
 resource authorization and delivery verification.
 
-The public surface has **7 remote commands**: five read operations
+The public surface has **8 remote commands**: six read operations
 and two mutations. Group/resource help is local and calls no operation.
 
 ## Shared input, output and access rules
@@ -168,18 +170,20 @@ cancels waiting pulls, and preserves accepted execution obligations.
 
 The literal service prefix is `/api/scheduler`. Path variables become required
 path parameters with the scalar rules above; query fields are only those
-listed by a command. Read requests have no body. Every route in this table is
-implemented in the operation declaration and generated OpenAPI.
+listed by a command. Read requests have no body. Every route in this table
+except the eligibility route is implemented in the operation declaration and
+generated OpenAPI.
 
-| Command suffix / synopsis                                                                              | Operation identifier          | HTTP route                                           | Access / effect                         |
-| ------------------------------------------------------------------------------------------------------ | ----------------------------- | ---------------------------------------------------- | --------------------------------------- |
-| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                                        | `scheduler.queue.list`        | `GET /api/scheduler/project/:projectId/queue`        | `human`; read                           |
-| `queue peek <project-id>`                                                                              | `scheduler.queue.peek`        | `GET /api/scheduler/project/:projectId/queue/peek`   | `human`; read                           |
-| `work pull --file <path> [--idempotency-key <key>]`                                                    | `scheduler.work.pull`         | `POST /api/scheduler/work/pull`                      | `client`; mutation, bounded wait        |
-| `claim get <execution-id>`                                                                             | `scheduler.claim.get`         | `GET /api/scheduler/claim/:executionId`              | `client`; owned claim read              |
-| `execution list <project-id> [--node <node-id> [--attempt <n>]] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list`    | `GET /api/scheduler/project/:projectId/execution`    | `human`; read                           |
-| `execution get <execution-id>`                                                                         | `scheduler.execution.get`     | `GET /api/scheduler/execution/:executionId`          | `human`; read                           |
-| `execution release <execution-id> --file <path> [--idempotency-key <key>]`                             | `scheduler.execution.release` | `POST /api/scheduler/execution/:executionId/release` | `client`; owned live execution mutation |
+| Command suffix / synopsis                                                                              | Operation identifier          | HTTP route                                                  | Access / effect                         |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------- | ----------------------------------------------------------- | --------------------------------------- |
+| `queue list <project-id> [--limit <count>] [--cursor <opaque>]`                                        | `scheduler.queue.list`        | `GET /api/scheduler/project/:projectId/queue`               | `human`; read                           |
+| `queue peek <project-id>`                                                                              | `scheduler.queue.peek`        | `GET /api/scheduler/project/:projectId/queue/peek`          | `human`; read                           |
+| `eligibility get <project-id> <node-id>`                                                               | `scheduler.eligibility.get`   | `GET /api/scheduler/project/:projectId/eligibility/:nodeId` | `human`; read                           |
+| `work pull --file <path> [--idempotency-key <key>]`                                                    | `scheduler.work.pull`         | `POST /api/scheduler/work/pull`                             | `client`; mutation, bounded wait        |
+| `claim get <execution-id>`                                                                             | `scheduler.claim.get`         | `GET /api/scheduler/claim/:executionId`                     | `client`; owned claim read              |
+| `execution list <project-id> [--node <node-id> [--attempt <n>]] [--limit <count>] [--cursor <opaque>]` | `scheduler.execution.list`    | `GET /api/scheduler/project/:projectId/execution`           | `human`; read                           |
+| `execution get <execution-id>`                                                                         | `scheduler.execution.get`     | `GET /api/scheduler/execution/:executionId`                 | `human`; read                           |
+| `execution release <execution-id> --file <path> [--idempotency-key <key>]`                             | `scheduler.execution.release` | `POST /api/scheduler/execution/:executionId/release`        | `client`; owned live execution mutation |
 
 These read operations provide operational visibility through the invocation
 chain, with no authorization to inspect service tables directly. `claim get` provides a
@@ -198,8 +202,11 @@ kanthord scheduler queue list <project-id> [--limit <count>] [--cursor <opaque>]
 [`--limit`](./common-flags.md#--limit) and
 [`--cursor`](./common-flags.md#--cursor) have the shared definitions. There are
 no other query fields or JSON body. The list returns a page of `Job`
-records in descending job-identity order under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
-This inspection order does not change queue selection. Reading changes no job.
+records in the order of the work queue: priority descending, then job
+identity ascending, under the [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#operation-contracts).
+The cursor encodes the priority and the job identity of the last job of a page.
+The server defines the order across all pages, and a client never re-sorts a
+page. Reading changes no job.
 The list is a live view of current jobs and holds no history.
 
 ### `queue peek`
@@ -229,6 +236,41 @@ A priority change preserves the job identity. A release with further work
 creates a new job when the node is claimable. Membership means claimable work,
 not necessarily Mission state `Available`. Neither priority, age, inspection nor a stale job admits
 a claim. Mission state and every admission condition are rechecked at claim.
+
+### `eligibility get`
+
+```text
+kanthord scheduler eligibility get <project-id> <node-id>
+```
+
+Required `<project-id>` maps to path `projectId` and required `<node-id>` maps
+to path `nodeId`; neither has a default. No query or body is accepted. Returns
+one `EligibilityReport` under [the eligibility report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-eligibility-report).
+The report answers only the admission checks that need no claimant. It writes
+nothing, moves no job and predicts no claim.
+
+| Field                 | Type and meaning                                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `projectId`, `nodeId` | The path references.                                                                                            |
+| `state`               | The Mission `State` of the node at the read.                                                                    |
+| `claimable`           | `true` exactly when no check holds `failed`.                                                                    |
+| `checks`              | Four `EligibilityCheck` objects in this order: `node-state`, `mission-condition`, `queue-job`, `no-live-claim`. |
+
+`EligibilityCheck` holds `name`, `result` (`passed`, `failed` or
+`not-applicable`) and `condition` (`initiative-steps`, `readiness`,
+`continuation` or `null`). Only `mission-condition` holds a non-null
+`condition`. `node-state` passes for a node that is not retired in
+`Available`, `Waiting` or `External.Requested`. `mission-condition` reads the
+initiative steps condition for an initiative in `Available`, the readiness
+condition for `Waiting` and the continuation condition for
+`External.Requested`; it is `not-applicable` for an objective in `Available`
+and when `node-state` fails. `queue-job` passes when the queue holds a job of
+the node. `no-live-claim` passes when no execution of the node is `running`.
+
+The report never answers binding availability and instance count, declared
+node states, claimant count, the instance healthcheck or the compatibility
+match, because each needs a selected claimant. It takes no instance
+healthcheck, reads no registration and names no binding, instance or claimant.
 
 ## Work acquisition
 
@@ -517,6 +559,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | ----- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | local | `cli.scheduler.queue.list.invalid_project_id`          | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                             | queue list                                      |
 | local | `cli.scheduler.queue.peek.invalid_project_id`          | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                             | queue peek                                      |
+| local | `cli.scheduler.eligibility.get.invalid_project_id`     | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                                                             | eligibility get                                 |
+| local | `cli.scheduler.eligibility.get.invalid_node_id`        | The `<node-id>` argument is not a canonical `node_<ulid>` identity.                                                                                                                                                                                   | eligibility get                                 |
 | local | `cli.scheduler.claim.get.invalid_execution_id`         | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                                         | claim get                                       |
 | local | `cli.scheduler.execution.get.invalid_execution_id`     | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                                         | execution get                                   |
 | local | `cli.scheduler.execution.release.invalid_execution_id` | The `<execution-id>` argument is not a canonical `execution_<ulid>` identity.                                                                                                                                                                         | execution release                               |
@@ -524,6 +568,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.scheduler.execution.list.invalid_node_id`         | The `--node` value is not a canonical `node_<ulid>` identity.                                                                                                                                                                                         | execution list                                  |
 | local | `cli.scheduler.execution.list.invalid_attempt`         | The `--attempt` value is not a positive safe integer.                                                                                                                                                                                                 | execution list                                  |
 | 403   | `scheduler.work.claimant_mismatch`                     | The `resourceIdentity` or `runtimeIdentity` of the pull differs from the machine identity and its live registration.                                                                                                                                  | work pull                                       |
+| 404   | `scheduler.eligibility.node_not_found`                 | No node of the project holds the identity, or the project is absent.                                                                                                                                                                                  | eligibility get                                 |
+| 400   | `scheduler.eligibility.node_task`                      | The node is a task, which is never a unit of scheduling; details `{ nodeId }`.                                                                                                                                                                        | eligibility get                                 |
 | 404   | `scheduler.execution.not_found`                        | No execution holds the identity.                                                                                                                                                                                                                      | claim get, execution get                        |
 | 403   | `scheduler.execution.not_owner`                        | The client does not own the execution.                                                                                                                                                                                                                | claim get                                       |
 | 409   | `scheduler.execution.not_running`                      | The execution is no longer running when its write transaction checks the proof.                                                                                                                                                                       | execution release, and every execution mutation |
