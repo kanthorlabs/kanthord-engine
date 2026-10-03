@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { CodedError, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationResultType } from "../kernel/operation.ts";
@@ -406,4 +406,167 @@ test("merge push and foreign repository candidates never call read", async (t) =
   };
   await h.perform();
   assert.equal(h.performSpy.mock.calls[1]?.arguments[2]?.reusedAddress, null);
+});
+
+test("concurrent calls of one execution take a new snapshot after submission", async (t) => {
+  const h = actionable(t);
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => {
+      entered.resolve();
+      await gate.promise;
+      return PR;
+    },
+  );
+  h.dependencies.evidenceRequests.request = async () => {
+    h.entry.eligible = false;
+    h.entry.resolution = ActionResolution.Unresolved;
+    h.entry.requestEvidenceId = h.evidence.id;
+    return {
+      type: OperationResultType.Completed,
+      status: HttpStatus.OK,
+      data: h.evidence,
+    };
+  };
+  const first = h.perform();
+  await entered.promise;
+  const second = h.perform();
+  gate.resolve();
+  assert.equal((await first).items[0]?.kind, ActionResultKind.Submitted);
+  assert.deepEqual((await second).items, []);
+  assert.equal(perform.mock.callCount(), FIRST);
+});
+
+test("unknown effect remains reserved across invocations and later executions", async (t) => {
+  const h = actionable(t);
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => ({
+      class: ResultClass.UnknownOutcome,
+      code: "repository.platform.github.unknown_outcome",
+      message: "lost",
+    }),
+  );
+  const first = await h.perform();
+  assert.deepEqual(await h.perform(), first);
+  h.claim.executionId = createIdentity("execution");
+  assert.deepEqual(await h.perform(), first);
+  assert.equal(perform.mock.callCount(), FIRST);
+});
+
+test("another execution cannot steal an in-flight reservation or invalidate its settlement", async (t) => {
+  const h = actionable(t);
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => {
+      entered.resolve();
+      await gate.promise;
+      return PR;
+    },
+  );
+  const firstClaim = { ...h.claim };
+  const first = h.performer.perform(h.caller, firstClaim);
+  await entered.promise;
+  h.claim.executionId = createIdentity("execution");
+  const contender = (await h.perform()).items[0];
+  assert.ok(contender?.kind === ActionResultKind.Uncertain);
+  assert.equal(contender.uncertainty, Uncertainty.Effect);
+  gate.resolve();
+  assert.equal((await first).items[0]?.kind, ActionResultKind.Submitted);
+  assert.equal(perform.mock.callCount(), FIRST);
+  await h.perform();
+  assert.equal(perform.mock.callCount(), SECOND);
+});
+
+test("unclassified perform error persists but unwired proves no effect", async (t) => {
+  const h = actionable(t);
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => {
+      throw new Error("socket");
+    },
+  );
+  await assert.rejects(h.perform(), /socket/);
+  assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Uncertain);
+  assert.equal(perform.mock.callCount(), FIRST);
+  const other = actionable(t);
+  const unwired = t.mock.method(
+    other.dependencies.intakeActions,
+    "perform",
+    async () => {
+      throw new CodedError("system.composition.unwired", "unwired");
+    },
+  );
+  await assert.rejects(other.perform(), { code: "system.composition.unwired" });
+  await assert.rejects(other.perform(), { code: "system.composition.unwired" });
+  assert.equal(unwired.mock.callCount(), SECOND);
+});
+
+test("same-attempt request evidence prunes uncertainty without dispatch", async (t) => {
+  const h = actionable(t);
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => ({
+      class: ResultClass.UnknownOutcome,
+      code: "repository.platform.github.unknown_outcome",
+      message: "lost",
+    }),
+  );
+  await h.perform();
+  h.entry.eligible = false;
+  h.entry.resolution = ActionResolution.Unresolved;
+  h.entry.requestEvidenceId = h.evidence.id;
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(perform.mock.callCount(), FIRST);
+});
+
+test("read exception clears its reservation and every undispatched owned action", async (t) => {
+  const h = reusable(t);
+  const second = structuredClone(h.entry);
+  second.action.key = "z.pull_request";
+  second.reuseCandidates = [];
+  h.context.actions.push(second);
+  h.dependencies.intakeActions.read = async () => {
+    throw new Error("read failed");
+  };
+  await assert.rejects(h.perform(), /read failed/);
+  assert.equal(h.performSpy.mock.callCount(), NO_CALLS);
+  h.dependencies.intakeActions.read = async () => ({ body: h.body });
+  const answer = await h.perform();
+  assert.deepEqual(
+    answer.items.map((item) => item.kind),
+    [ActionResultKind.Submitted, ActionResultKind.Submitted],
+  );
+  assert.equal(h.performSpy.mock.callCount(), SECOND);
+});
+
+test("perform exception retains only the dispatched action and clears later reservations", async (t) => {
+  const h = actionable(t);
+  const second = structuredClone(h.entry);
+  second.action.key = "z.pull_request";
+  h.context.actions.push(second);
+  h.dependencies.intakeActions.perform = async () => {
+    throw new Error("socket");
+  };
+  await assert.rejects(h.perform(), /socket/);
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  const answer = await h.perform();
+  assert.deepEqual(
+    answer.items.map((item) => item.kind),
+    [ActionResultKind.Uncertain, ActionResultKind.Submitted],
+  );
+  assert.equal(perform.mock.callCount(), FIRST);
 });

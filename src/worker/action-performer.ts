@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { ulid } from "ulid";
 import type { MachineIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { CodedError, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
   OperationResultType,
@@ -16,6 +16,7 @@ import {
   ActionResultKind,
   ActionReadMethod,
   RepositoryAction,
+  Uncertainty,
   WorkerErrorCode,
   type ActionContext,
   type ActionRequestResult,
@@ -54,6 +55,11 @@ type Pending = {
   operands: ActionOperands;
   reservation: ReturnType<DispatchReservations["acquire"]>;
 };
+type UncertainItem = Extract<
+  ActionResultItem,
+  { kind: typeof ActionResultKind.Uncertain }
+>;
+const UNWIRED_CODE = "system.composition.unwired";
 
 export class ActionPerformer {
   private readonly dependencies: PerformerDependencies;
@@ -114,20 +120,24 @@ export class ActionPerformer {
       this.reservations.prune(claim.nodeId, claim.attempt, context.actions);
       const pending = this.reserve(claim, context);
       const items: ActionResultItem[] = [];
-      for (const action of pending) {
-        if ("held" in action.reservation) {
-          items.push(action.reservation.held);
-          continue;
+      try {
+        for (const action of pending)
+          items.push(
+            "held" in action.reservation
+              ? action.reservation.held
+              : await this.dispatch(caller, claim, action),
+          );
+        return { toolName: ACTION_REQUEST_TOOL_NAME, items };
+      } finally {
+        for (const action of pending) {
+          if ("owner" in action.reservation)
+            this.reservations.settle(
+              action.key,
+              action.reservation.owner,
+              null,
+            );
         }
-        const item = await this.dispatch(caller, claim, action);
-        this.reservations.settle(
-          action.key,
-          action.reservation.owner,
-          item.kind === ActionResultKind.Uncertain ? item : null,
-        );
-        items.push(item);
       }
-      return { toolName: ACTION_REQUEST_TOOL_NAME, items };
     });
   }
 
@@ -161,18 +171,62 @@ export class ActionPerformer {
     claim: ExecutionClaim,
     pending: Pending,
   ): Promise<ActionResultItem> {
+    assert.ok("owner" in pending.reservation);
+    assert.equal(pending.key.nodeId, claim.nodeId);
     const call = { ...caller, executionId: claim.executionId };
-    const refusal = await this.reuse(call, pending);
-    if (refusal) return refusal;
-    const answer = await this.dependencies.intakeActions.perform(
-      call,
-      pending.entry.action,
-      pending.operands,
-    );
-    const item = performedItem(pending.key.action, answer);
-    if (item) return item;
-    assert.ok(!isResultClass(answer));
-    return this.record(caller, claim, pending, answer);
+    let settlement: UncertainItem | null = null;
+    try {
+      const refusal = await this.reuse(call, pending);
+      if (refusal) return refusal;
+      settlement = {
+        kind: ActionResultKind.Uncertain,
+        action: pending.key.action,
+        uncertainty: Uncertainty.Effect,
+      };
+      const answer = await this.performIntake(call, pending, () => {
+        settlement = null;
+      });
+      const item = performedItem(pending.key.action, answer);
+      if (item) {
+        settlement = item.kind === ActionResultKind.Uncertain ? item : null;
+        return item;
+      }
+      assert.ok(!isResultClass(answer));
+      settlement = {
+        kind: ActionResultKind.Uncertain,
+        action: pending.key.action,
+        uncertainty: Uncertainty.Recording,
+        address: answer,
+      };
+      const recorded = await this.record(caller, claim, pending, answer);
+      settlement =
+        recorded.kind === ActionResultKind.Uncertain ? recorded : null;
+      return recorded;
+    } finally {
+      this.reservations.settle(
+        pending.key,
+        pending.reservation.owner,
+        settlement,
+      );
+    }
+  }
+
+  private async performIntake(
+    call: IntakeActionCall,
+    pending: Pending,
+    noEffect: () => void,
+  ) {
+    try {
+      return await this.dependencies.intakeActions.perform(
+        call,
+        pending.entry.action,
+        pending.operands,
+      );
+    } catch (error) {
+      if (error instanceof CodedError && error.code === UNWIRED_CODE)
+        noEffect();
+      throw error;
+    }
   }
 
   private async reuse(
