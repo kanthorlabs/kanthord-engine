@@ -225,14 +225,14 @@ export class Worker implements Service {
       if (context.err()) return (await this.stop()) ?? context.err();
       const error = await this.start();
       if (error) return (await this.stop()) ?? context.err() ?? error;
-      if (!this.shutdown.err()) {
-        this.heartbeat = startHeartbeat(this.api!, (record) => {
-          if (this.options.log) this.options.log(JSON.stringify(record));
-          else this.operationalLog!.logger.warn(record, record.msg);
-        });
-        this.workspaces!.startSweeping();
-      }
       const loopError = await lifecycle(async () => {
+        if (!this.shutdown.err()) {
+          this.heartbeat = startHeartbeat(this.api!, (record) => {
+            if (this.options.log) this.options.log(JSON.stringify(record));
+            else this.operationalLog!.logger.warn(record, record.msg);
+          });
+          this.workspaces!.startSweeping();
+        }
         const failure = await pullLoop({
           api: this.api!,
           registration: this.registration!,

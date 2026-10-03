@@ -6,7 +6,7 @@ import { Worker, type WorkerOptions } from "../worker/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath } from "../../gateway/client.ts";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   createServer,
   type IncomingMessage,
@@ -212,11 +212,17 @@ export function sinkStorage(sink: ObjectSink): IntakeStorage {
         expiresAt: Date.now() + OBJECT_GRANT_LIFETIME_MS,
       };
     },
-    async check(call, binding, key, size) {
+    async check(call, binding, key, size, sha256) {
       throwIfCancelled(call.context);
       assert.ok(size >= ZERO_BYTES);
       if (sink.objects.get(key)?.byteLength !== size)
         throw new Error("object size mismatch");
+      if (
+        sha256 !== null &&
+        createHash("sha256").update(sink.objects.get(key)!).digest("hex") !==
+          sha256
+      )
+        throw new Error("object checksum mismatch");
       return { location: `s3://${binding.bucket}/${key}`, version: null };
     },
     get,

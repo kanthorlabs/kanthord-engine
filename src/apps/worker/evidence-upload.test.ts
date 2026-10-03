@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { writeFile, symlink, mkdir } from "node:fs/promises";
+import {
+  writeFile,
+  symlink,
+  mkdir,
+  open,
+  lstat,
+  realpath,
+  rename,
+  unlink,
+  truncate,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -16,8 +26,68 @@ import {
 } from "./evidence-upload.ts";
 import { testClaim } from "./test-support.ts";
 import { isString } from "../../kernel/values.ts";
+import { OBJECT_SIZE_MAX } from "../../mission/contract.ts";
 const FILE_CONTENT = "test bytes";
 const GRANT_HEADER = "test_grant_header";
+
+test("evidence open refuses a parent swap even when pathname checks would see a restored parent", async (t) => {
+  const workspace = temporary(t);
+  const outside = temporary(t);
+  const directory = join(workspace, "directory");
+  const held = join(workspace, "held");
+  await mkdir(directory);
+  await writeFile(join(directory, "a.txt"), "inside");
+  await writeFile(join(outside, "a.txt"), "outside");
+  const io = { open, lstat, realpath };
+  let swapped = false;
+  let parentReads = 0;
+  t.mock.method(io, "lstat", async (...args: Parameters<typeof lstat>) => {
+    if (!swapped) {
+      await rename(directory, held);
+      await symlink(outside, directory);
+      swapped = true;
+    }
+    return lstat(...args);
+  });
+  t.mock.method(
+    io,
+    "realpath",
+    async (...args: Parameters<typeof realpath>) => {
+      const restoreAt = 3;
+      if (++parentReads === restoreAt && swapped) {
+        await unlink(directory);
+        await rename(held, directory);
+        swapped = false;
+      }
+      return realpath(...args);
+    },
+  );
+  await assert.rejects(openEvidence(workspace, "directory/a.txt", io));
+  assert.ok(swapped);
+});
+
+test("oversized sparse evidence refuses before allocating or submitting metadata", async (t) => {
+  const workspace = temporary(t);
+  const path = join(workspace, "large");
+  await writeFile(path, "");
+  await truncate(path, OBJECT_SIZE_MAX + 1);
+  const api = workerApi("http://127.0.0.1:1");
+  const submit = t.mock.method(api.mission, "evidence.submit", () =>
+    assert.fail("Oversized object submitted"),
+  );
+  await assert.rejects(
+    uploadEvidence({
+      workspace,
+      path: "large",
+      claim: testClaim(),
+      api,
+      context: background,
+    }),
+    { code: WorkerErrorCode.EvidenceUploadTransferFailed },
+  );
+  const noCalls = 0;
+  assert.equal(submit.mock.callCount(), noCalls);
+});
 
 test("safe evidence open refuses traversal, absolute paths, symlinks and directories", async (t) => {
   const workspace = temporary(t);
@@ -48,11 +118,14 @@ test("upload submits metadata then transfers bytes then completes without exposi
   const bytes = Buffer.from("test uploaded bytes");
   await writeFile(join(workspace, "a.txt"), bytes);
   const events: string[] = [];
+  let mutateAfterHash = false;
+  let transferred = Buffer.alloc(0);
   let status = 200;
   const listener = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    assert.deepEqual(Buffer.concat(chunks), bytes);
+    transferred = Buffer.concat(chunks);
+    if (!mutateAfterHash) assert.deepEqual(transferred, bytes);
     assert.equal(request.headers["x-test-header"], GRANT_HEADER);
     events.push("PUT");
     response.writeHead(status).end();
@@ -88,6 +161,11 @@ test("upload submits metadata then transfers bytes then completes without exposi
           sha256: createHash("sha256").update(bytes).digest("hex"),
         },
       ]);
+      if (mutateAfterHash)
+        await writeFile(
+          join(workspace, "a.txt"),
+          Buffer.alloc(bytes.length, 120),
+        );
       return {
         type: OperationResultType.Completed,
         status: 200,
@@ -107,6 +185,11 @@ test("upload submits metadata then transfers bytes then completes without exposi
   );
   t.mock.method(api.mission, "evidence.asset.complete", async () => {
     events.push("complete");
+    if (
+      createHash("sha256").update(transferred).digest("hex") !==
+      createHash("sha256").update(bytes).digest("hex")
+    )
+      throw new Error("object checksum mismatch");
     return { type: OperationResultType.Completed, status: 200, data: result };
   });
   const input = {
@@ -128,4 +211,9 @@ test("upload submits metadata then transfers bytes then completes without exposi
     );
   });
   assert.deepEqual(events, ["submit", "PUT", "complete", "submit", "PUT"]);
+  status = 200;
+  mutateAfterHash = true;
+  await assert.rejects(uploadEvidence(input), /object checksum mismatch/);
+  assert.equal(transferred.length, bytes.length);
+  assert.notDeepEqual(transferred, bytes);
 });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { WorkspaceRoot } from "../../worker/index.ts";
 import { test, type TestContext } from "node:test";
 import {
   createServer,
@@ -149,6 +150,25 @@ async function fixture(
     requests: () => requests,
   };
 }
+
+test("initial sweep failure deregisters and stops the acquired lifetime", async (t) => {
+  let deregistered = false;
+  const options = await fixture(t, packageVersion(), (request) => {
+    if (request.url === DEREGISTER_PATH) deregistered = true;
+    return false;
+  });
+  const failure = new Error("test_initial_sweep_failure");
+  t.mock.method(WorkspaceRoot.prototype, "startSweeping", () => {
+    throw failure;
+  });
+  const worker = new Worker({ ...options, log: () => {} });
+  assert.equal(await bounded(worker.run(), CHILD_START_TIMEOUT_MS), failure);
+  assert.ok(deregistered);
+  assert.equal(await worker.stop(), null);
+  assert.deepEqual(await worker.healthcheck(), {
+    client: HealthStatus.Unavailable,
+  });
+});
 
 test("worker healthcheck is unavailable before start", async () => {
   const worker = new Worker();

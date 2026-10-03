@@ -39,6 +39,7 @@ export async function hostExecution(
   assert.ok(input.claim.executionId);
   assert.ok(input.clientSecret);
   let handover: Awaited<ReturnType<typeof takeHandover>> | undefined;
+  let revoked = false;
   const context = new CancellationContext(input.context, input.claim.expiredAt);
   try {
     throwIfCancelled(context);
@@ -84,6 +85,16 @@ export async function hostExecution(
               api: input.api,
               context: uploadContext,
             });
+          } catch (error) {
+            if (
+              error instanceof HandoverRefused &&
+              error.result &&
+              isExecutionEnd(error.result)
+            ) {
+              revoked = true;
+              context.cancel();
+            }
+            throw error;
           } finally {
             signal?.removeEventListener("abort", abort);
             uploadContext.cancel();
@@ -91,6 +102,7 @@ export async function hostExecution(
         },
       }),
     });
+    if (revoked) return null;
     if (context.err()) throw context.err();
     input.log({
       msg: "execution ended",
@@ -105,6 +117,7 @@ export async function hostExecution(
       "worker: execution cannot progress.",
     );
   } catch (error) {
+    if (revoked) return null;
     if (
       error instanceof HandoverRefused &&
       error.result &&

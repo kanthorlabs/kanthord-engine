@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { background } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
@@ -99,6 +101,67 @@ test("host takes handover before setup and method, discards on every method end"
     expected,
   );
   assert.equal(await stored!.store.read(credential.providerId), undefined);
+  const workspace = temporary(t);
+  await writeFile(join(workspace, "a.txt"), "test evidence");
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(null, { status: 200 }),
+  );
+  for (const operation of [
+    "evidence.submit",
+    "evidence.asset.complete",
+  ] as const) {
+    for (const [status, code] of [
+      [403, "gateway.invocation.execution_proof_failed"],
+      [409, "scheduler.execution.not_running"],
+    ] as const) {
+      const failure = {
+        type: OperationResultType.Failure,
+        status,
+        error: {
+          requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+          error: { code, message: "Ended", details: null },
+        },
+      };
+      t.mock.method(api.mission, "evidence.submit", async () => ({
+        type: OperationResultType.Completed,
+        status: 200,
+        data: {
+          evidence: { id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA" },
+          uploads: [
+            {
+              assetId: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+              putUrl: "http://127.0.0.1/test_upload",
+              headers: {},
+              expiresAt: Date.now() + 60000,
+            },
+          ],
+        },
+      }));
+      t.mock.method(api.mission, operation, async () => failure);
+      assert.equal(
+        await hostExecution(input, async (native) => {
+          let aborted = false;
+          const unsubscribe = native.context.onCancel(() => {
+            aborted = true;
+          });
+          try {
+            await assert.rejects(
+              native.hostTools(workspace).evidenceUpload("a.txt", undefined),
+              { code },
+            );
+            assert.ok(aborted);
+            assert.ok(native.context.err());
+            return { kind: "released", furtherWork: false };
+          } finally {
+            unsubscribe();
+          }
+        }),
+        null,
+      );
+    }
+  }
   t.mock.method(api.worker, "execution.setup.get", async () => ({
     type: OperationResultType.Failure,
     status: 403,
