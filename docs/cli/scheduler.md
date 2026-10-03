@@ -8,8 +8,7 @@ provenance links at the end provide design context.
 ## Status and ownership
 
 **Implemented, inspected 2026-10-01:** seven commands below are callable.
-**Declared, not implemented:** the work-queue order of `queue list`, which
-the code still pages by job identity descending, and `eligibility get`, under [the eligibility report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-eligibility-report).
+**Declared, not implemented:** `eligibility get`, under [the eligibility report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#the-eligibility-report).
 The [Scheduler CLI](../../src/apps/cli/scheduler.ts) and
 [execution CLI](../../src/apps/cli/scheduler-execution.ts) use the
 [operation contracts](../../src/scheduler/contract.ts), with generated
