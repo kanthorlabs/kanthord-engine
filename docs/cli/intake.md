@@ -16,9 +16,9 @@ contract, database initialization, or Intake OpenAPI document.
 event. An inbound receives through a webhook or a poll. A human creates an
 inbound to start its acquisition and deletes it to stop; no field of its
 configuration changes after the insert. The create validates before the
-insert: a registered webhook registers at the platform, and a poll performs one
-request. A passive webhook names no credential, and kanthord registers nothing
-for it. The Intake Service verifies a webhook event with a secret that it
+insert: a poll performs one request. A webhook names no credential, kanthord
+calls no platform for it, and a human sets its address and secret at the
+platform. The Intake Service verifies a webhook event with a secret that it
 derives from `masterKey` and the inbound identity. It hands a pending event
 over once to the delivery admission operation of the Mission Service and
 retries nothing by itself. A human retries, discards and deletes events. The
@@ -52,7 +52,7 @@ authorizes no Intake command.
 | `inbound create`                         | `intake.inbound.create`           | `POST /api/intake/inbound`                             | `human` | Mutation; validates at the platform, then inserts one inbound.                                           |
 | `inbound list`                           | `intake.inbound.list`             | `GET /api/intake/inbound`                              | `human` | Bounded page, optionally filtered by project, kind and platform.                                         |
 | `inbound get <inbound-id>`               | `intake.inbound.get`              | `GET /api/intake/inbound/:inboundId`                   | `human` | One inbound; for a webhook, its address and its secret, whose display is **[blocked][intake-contract]**. |
-| `inbound delete <inbound-id>`            | `intake.inbound.delete`           | `DELETE /api/intake/inbound/:inboundId`                | `human` | Mutation; deregisters a registered webhook, then deletes the inbound and its events.                     |
+| `inbound delete <inbound-id>`            | `intake.inbound.delete`           | `DELETE /api/intake/inbound/:inboundId`                | `human` | Mutation; deletes the inbound and its events, and calls no platform.                                     |
 | `event list`                             | `intake.inbound.event.list`       | `GET /api/intake/event`                                | `human` | Bounded page, optionally filtered by inbound and state.                                                  |
 | `event get <inbound-event-id>`           | `intake.inbound.event.get`        | `GET /api/intake/event/:inboundEventId`                | `human` | One event with its state and errors; content inclusion is **[blocked][intake-contract]**.                |
 | `event retry <inbound-event-id>`         | `intake.inbound.event.retry`      | `POST /api/intake/event/:inboundEventId/retry`         | `human` | Mutation; turns a failed event back to `pending`.                                                        |
@@ -176,8 +176,8 @@ entity prefix and canonical uppercase ULID; a bare ULID or another kind's
 prefix is invalid. The inbound prefix is `inbound_`, and the inbound event
 prefix is `inbound_event_`.
 
-A platform event identity and a webhook registration identity keep their
-platform-defined representations, not an invented entity prefix. Creation time
+A platform event identity keeps its
+platform-defined representation, not an invented entity prefix. Creation time
 follows the [shared identity and time rules](./other.md#shared-identity-and-time-rules).
 The closed inbound event state set is `pending`, `succeeded`, `failed`,
 `discarded`. The state records the outcome of the handoff; the disposition of
@@ -194,31 +194,27 @@ shared file rules apply. The schema is closed.
 | `kind`          | Required enum string.                             | None    | Closed set `webhook`, `poll`.                                                                                                                                                       |
 | `platform`      | Required enum string.                             | None    | Closed set of supported platforms, today `github`.                                                                                                                                  |
 | `consumer`      | Required enum string.                             | None    | Closed set of admission operations, today `mission.delivery.admit`.                                                                                                                 |
-| `credential`    | Credential name string, or absent.                | Absent  | Required for a poll. Absent on a webhook makes a passive webhook. The name must exist, and its platform must suit `platform`.                                                       |
+| `credential`    | Credential name string, or absent.                | Absent  | Required for a poll, refused for a webhook. The name must exist, and its platform must suit `platform`.                                                                             |
 | `configuration` | Required object, validated per kind and platform. | None    | Holds `resource` and the options of the kind and the platform. Every property name is snake_case, the stored form. Every field beyond `resource` is **[blocked][intake-contract]**. |
 
-The file accepts no verification secret, registration identity, checkpoint,
+The file accepts no verification secret, checkpoint,
 state, error or arbitrary consumer operation.
 
 ## Inbound commands
 
 The inbound read projection contains `id`, `projectId`, `kind`, `platform`,
-`consumer`, `credential`, `configuration`, `registrationId`, `checkpoint` and
+`consumer`, `credential`, `configuration`, `checkpoint` and
 `createdAt`. It exposes no credential material.
 
 ### `inbound create`
 
 **Request and validation:** send the file object described above. Validate
 the fields and the configuration schema, then perform the remote validation of
-the kind: a registration of `/hooks/<inbound id>` for a webhook with a
-credential, one request for a poll, nothing for a passive webhook. The insert
+the kind: one request for a poll, nothing for a webhook. The insert
 transaction checks the credential name and its platform.
 
 **Effects and idempotency:** a success inserts exactly one inbound. A platform
-refusal inserts nothing. An indeterminate registration answer makes the create
-read the registrations and adopt the one with the address of the new inbound.
-A crash between the registration and the insert leaves a registration without
-an inbound; a human removes it at the platform.
+refusal inserts nothing.
 A repeat with the same `--idempotency-key` returns the recorded answer within
 the process-local replay TTL. A new invocation creates another inbound: no
 natural key prevents a duplicate, because a duplicate serves a rotation.
@@ -227,7 +223,7 @@ natural key prevents a duplicate, because a duplicate serves a rotation.
 `404` `intake.inbound.project_not_found` for an unknown project; `422`
 `intake.inbound.credential_invalid` for an unknown or unsuitable credential;
 `422` `intake.inbound.platform_refused` when the platform refuses the
-registration or the poll request.
+first request of a poll.
 
 ### `inbound list`
 
@@ -258,17 +254,13 @@ redaction and cache contract of the secret remains **[blocked][intake-contract]*
 **Request and validation:** use `params.inboundId`, with no query or body.
 
 **Effects and idempotency:** refuse while the inbound holds a pending event.
-For a registered webhook, deregister at the platform first; a not-found answer
-counts as done. Then one transaction deletes the events of the inbound and the
-inbound. A refused deregistration keeps the inbound. A pending event that
-arrives during the deregistration refuses the transaction; the inbound then
-stays without its registration, and a later delete completes it. A repeat
-after a success answers `404`.
+Otherwise one transaction deletes the events of the inbound and the inbound.
+The delete calls no platform; a human removes a webhook at the platform. A
+repeat after a success answers `404`.
 
 **Statuses:** `204`; `400` for an invalid identity; `404`
 `intake.inbound.not_found`; `409` `intake.inbound.events_pending` while a
-pending event exists; `422` `intake.inbound.platform_refused` when the platform
-refuses the deregistration.
+pending event exists.
 
 ## Event commands
 
@@ -466,7 +458,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `mission.evidence.upload_expired`                      | The pending asset expired before its complete.                                                                | `intake.storage.check`                                                                                                                                                     |
 | 409   | `mission.execution.context_mismatch`                   | The execution context differs from the proven claim; details `{ field }`.                                     | `intake.storage.put`, `intake.storage.check`, `intake.execution.storage.get`                                                                                               |
 | 422   | `intake.inbound.credential_invalid`                    | The credential name does not exist, or its platform does not suit the inbound.                                | inbound create                                                                                                                                                             |
-| 422   | `intake.inbound.platform_refused`                      | The platform refuses the registration, the poll request or the deregistration.                                | inbound create, inbound delete                                                                                                                                             |
+| 422   | `intake.inbound.platform_refused`                      | The platform refuses the first request of a poll create.                                                      | inbound create                                                                                                                                                             |
 | 422   | `intake.outbound.request.action_unmapped`              | The configured action has no row in the action table.                                                         | `intake.action.perform`                                                                                                                                                    |
 | 502   | `repository.platform.github.<class>`                   | A GitHub call of the check answers a result class; details `{ status }` hold the GitHub HTTP status.          | `intake.action.check`                                                                                                                                                      |
 | 503   | `intake.inbound.event.capacity_exceeded`               | The count of pending events is at its bound.                                                                  | receipt route                                                                                                                                                              |
