@@ -5,7 +5,7 @@
 ## Scope
 
 This specification covers the implemented `kanthord credential` group, with
-**10 implemented command leaves**. Custody is a shared
+**11 command leaves**. Custody is a shared
 component, not a service or a part of Project. It owns server-wide credential
 records and OAuth login sessions. A credential belongs to no project.
 
@@ -60,7 +60,7 @@ non-secret diagnostic. A supplied identity never proves authorization.
 
 ## Command inventory
 
-Each synopsis follows `kanthord credential`. All ten commands have `[R]` and
+Each synopsis follows `kanthord credential`. All eleven commands have `[R]` and
 `human` access; seven mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/credential` prefix.
 
@@ -76,8 +76,9 @@ All paths below are implemented routes under the ruled `/api/credential` prefix.
 | 8   | `login-status <session> [R]`                                      | `GET /api/credential/login/:sessionId`                           | `credential.login_status`    | `human`; implemented |
 | 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/credential/:credentialName/revision/:revision/revoke` | `credential.revoke`          | `human`; implemented |
 | 10  | `archive <credential-name> [M] [R]`                               | `POST /api/credential/:credentialName/archive`                   | `credential.archive`         | `human`; implemented |
+| 11  | `platforms [R]`                                                   | `GET /api/credential/platform`                                   | `credential.platform_list`   | `human`; ruled       |
 
-The static `/api/credential/login` path takes precedence over `/:credentialName`, so custody refuses the name `login`.
+The static `/api/credential/login` and `/api/credential/platform` paths take precedence over `/:credentialName`, so custody refuses the names `login` and `platform`.
 These routes have no project identity. The proposed provider check is in
 [Worker](./worker.md#provider-check--proposed), not this group.
 
@@ -86,27 +87,32 @@ These routes have no project identity. The proposed provider check is in
 A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
 A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `createdAt: Timestamp`
 and `endedAt: Timestamp | null`. No answer holds `secret`.
-`platform` is the closed enum `github | github-copilot | openai-codex | anthropic | openai-compatible | openrouter | s3`.
+`platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#platform-validators): `github`, `s3`, `openai-compatible` and every `KnownProvider` of pi-ai 0.86.0. [`platforms`](#platforms) answers the set.
 Each platform holds exactly one secret shape from `api_key | oauth | s3_access_key`.
 The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) bounds `api_key` and `oauth` to 48,915 UTF-8 bytes of normalized canonical pi-ai credential JSON, including type, structure and escaping. It excludes `s3_access_key`. Creation and rotation reject an oversized value with HTTP 400 `credential.input.invalid` before writing. Oversized OAuth login material follows the sanitized failed-session path and stores nothing.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#platform-validators)
 fix the secret shape and the metadata of each platform:
 
-| Platform            | Secret shape    | Metadata                                 |
-| ------------------- | --------------- | ---------------------------------------- |
-| `github`            | `api_key`       | None; wire value `null`.                 |
-| `github-copilot`    | `oauth`         | None; wire value `null`.                 |
-| `openai-codex`      | `oauth`         | None; wire value `null`.                 |
-| `anthropic`         | `api_key`       | None; wire value `null`.                 |
-| `openai-compatible` | `api_key`       | Required `{ baseUrl, models }`.          |
-| `openrouter`        | `api_key`       | None; wire value `null`.                 |
-| `s3`                | `s3_access_key` | Required `{ endpoint, bucket, region }`. |
+| Platform                 | Secret shape    | Metadata                                 |
+| ------------------------ | --------------- | ---------------------------------------- |
+| `github`                 | `api_key`       | None; wire value `null`.                 |
+| `github-copilot`         | `oauth`         | None; wire value `null`.                 |
+| `openai-codex`           | `oauth`         | None; wire value `null`.                 |
+| `anthropic`              | `api_key`       | None; wire value `null`.                 |
+| `openai-compatible`      | `api_key`       | Required `{ baseUrl, models }`.          |
+| `openrouter`             | `api_key`       | None; wire value `null`.                 |
+| `amazon-bedrock`         | `api_key`       | Required `{ region }`.                   |
+| `google-vertex`          | `api_key`       | Required `{ project, location }`.        |
+| `azure-openai-responses` | `api_key`       | Required `{ resource_name }`.            |
+| `cloudflare-workers-ai`  | `api_key`       | Required `{ account_id }`.               |
+| `cloudflare-ai-gateway`  | `api_key`       | Required `{ account_id, gateway_id }`.   |
+| `s3`                     | `s3_access_key` | Required `{ endpoint, bucket, region }`. |
+| Every other platform     | `api_key`       | None; wire value `null`.                 |
 
 For `openai-compatible`:
 
 - `baseUrl` is required, uses `https` or `http`, and has no query, no fragment and no trailing slash.
   It is fixed for the life of the revision. A rotation can set a different endpoint; a metadata edit cannot.
-  An official OpenAI record uses `https://api.openai.com/v1`.
 - `models` is required and starts as `[]` at creation. A human adds approved
   models through a metadata revision after `worker provider check`.
 - Each model has a required `id` and optional `contextWindow`, `maxTokens` and
@@ -132,7 +138,7 @@ The required file supplies the body; params and query are empty. Required
 fields have no default:
 
 - `name`: `CredentialName`.
-- `platform`: one of the five platforms whose secret shape is not `oauth`;
+- `platform`: a platform whose secret shape is not `oauth`;
   `github-copilot` and `openai-codex` require `login`.
 - `metadata`: the platform schema above, with explicit `null` for no metadata.
 - `secret`: a closed object of the secret shape of the platform. For `api_key`, `{ key }`, with a required nonempty
@@ -154,6 +160,15 @@ It is single-use with no default filter. The platform enum is defined above.
 HTTP `200` returns one credential answer for each name in `items`, in ascending name
 order under [pagination](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination).
 The CLI fetches no further page implicitly. Custody drains unpinned older live revisions of each returned name in the read transaction before projecting the page.
+
+## `platforms`
+
+No positional arguments, no body and no pagination. HTTP `200` returns
+`{ items: [{ kind, platforms: [{ platform, secretShape, loginModes, metadataFields, verifiable }] }] }`.
+`kind` is `git`, `llm` or `storage`, in that order. `loginModes` is `[]` for a
+platform whose secret shape is not `oauth`. `metadataFields` names the required
+string fields of the metadata. `verifiable` is `true` when the platform validation
+makes a remote call. The command answers only the shared error codes.
 
 ## `get <credential-name>`
 
