@@ -373,6 +373,15 @@ export function readDependencies(
     .all(missionId) as DepEdge[];
 }
 
+export function readDependsOnIds(tx: Transaction, nodeId: string): string[] {
+  const rows = tx.database
+    .prepare(
+      "SELECT depends_on_id AS id FROM mission_dependency WHERE dependent_id = ? ORDER BY depends_on_id",
+    )
+    .all(nodeId) as { id: string }[];
+  return rows.map((row) => row.id);
+}
+
 export interface EdgeListFilter {
   kind?: EdgeKind;
   nodeId?: string;

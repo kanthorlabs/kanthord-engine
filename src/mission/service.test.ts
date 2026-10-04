@@ -52,6 +52,7 @@ import {
   type NodeUpdate,
   type CriterionSet,
   type Move,
+  type Node,
   type NodeChange,
   type Retire,
   type RetirePreview,
@@ -745,6 +746,17 @@ function nodeFixture(
   function node(id: string) {
     return f.store.transaction((tx) => readNode(tx, id));
   }
+  function read(nodeId: string) {
+    const operation = missionOperations["node.get"];
+    const input = operation.input.parse({
+      params: { nodeId },
+      query: {},
+      body: null,
+    });
+    return nodeSchema.parse(
+      f.registry.get(operation.id).handler(input, f.caller),
+    );
+  }
   function setState(id: string, state: NodeState) {
     f.store.database
       .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
@@ -806,6 +818,7 @@ function nodeFixture(
     initiative,
     objective,
     node,
+    read,
     setState,
     snapshot,
     refuses,
@@ -1691,6 +1704,12 @@ function dependencyFixture(
   return { ...f, edit, refuses, jobs, edges, pair };
 }
 
+function dependsOnOf(node: Node): string[] {
+  assert.notEqual(node.kind, NodeKind.Task);
+  if (node.kind === NodeKind.Task) throw new Error(UNEXPECTED_COLLABORATION);
+  return node.dependsOn;
+}
+
 function emptyChange(missionVersion: number): NodeChange {
   return {
     missionVersion,
@@ -1713,6 +1732,7 @@ test("dependency edits reroute objectives and jobs atomically without revisions 
     addedEdges: [edge],
   });
   assert.equal(f.node(nodeId)?.state, NodeState.Pending);
+  assert.deepEqual(dependsOnOf(f.read(nodeId)), [dependsOnId]);
   assert.equal(
     f.jobs().some((job) => job.node_id === nodeId),
     false,
@@ -1725,6 +1745,7 @@ test("dependency edits reroute objectives and jobs atomically without revisions 
     removedEdges: [edge],
   });
   assert.equal(f.node(nodeId)?.state, NodeState.Available);
+  assert.deepEqual(dependsOnOf(f.read(nodeId)), []);
   assert.equal(
     f.jobs().some((job) => job.node_id === nodeId),
     true,
@@ -1739,6 +1760,27 @@ test("dependency edits reroute objectives and jobs atomically without revisions 
   ]);
   assert.deepEqual(f.snapshot().revisions, before.revisions);
   assert.deepEqual(f.snapshot().dependencies, []);
+});
+
+test("node reads answer dependsOn in ascending order on initiatives and objectives and omit it on tasks", (t) => {
+  const f = dependencyFixture(t);
+  const objective = f.objective();
+  const initiative = f.node(objective)!.parent_id!;
+  const first = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
+    ZERO
+  ]!.nodeId;
+  const second = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
+    ZERO
+  ]!.nodeId;
+  const task = f.create(f.body(NodeKind.Task, objective)).revisions[ZERO]!
+    .tasks![ZERO]!.id;
+  assert.deepEqual(dependsOnOf(f.read(initiative)), []);
+  f.edit(DependencyOperation.Add, initiative, second);
+  f.edit(DependencyOperation.Add, initiative, first);
+  f.edit(DependencyOperation.Add, objective, first);
+  assert.deepEqual(dependsOnOf(f.read(initiative)), [first, second].sort());
+  assert.deepEqual(dependsOnOf(f.read(objective)), [first]);
+  assert.equal("dependsOn" in f.read(task), false);
 });
 
 test("dependency addition rejects direct, self and inherited ancestor closure cycles without writes", (t) => {
@@ -3416,8 +3458,11 @@ test("node.retire refuses sorted unique nonterminal dependents without force, in
       a.dependsOnId.localeCompare(b.dependsOnId),
   );
   assert.deepEqual(plan.removedEdges, expected);
+  assert.deepEqual(dependsOnOf(f.read(dependent)), [first, second].sort());
   const result = f.apply(root, f.request(plan));
   assert.deepEqual(result.removedEdges, expected);
+  assert.deepEqual(dependsOnOf(f.read(dependent)), []);
+  assert.deepEqual(dependsOnOf(f.read(another)), []);
   assert.equal(f.node(dependent)?.state, NodeState.Available);
   assert.equal(f.node(another)?.state, NodeState.Available);
   assert.deepEqual(
@@ -4273,6 +4318,9 @@ test("import.apply is a human mutation and imports a full graph in one commit an
   const task = ids.get(TASK_FILENAME)!;
   assert.equal(f.node(task)?.parent_id, objective);
   assert.equal(f.node(ids.get(OTHER_FILENAME)!)?.state, NodeState.Pending);
+  assert.deepEqual(dependsOnOf(f.read(ids.get(OTHER_FILENAME)!)), [objective]);
+  assert.deepEqual(dependsOnOf(f.read(ids.get(INITIATIVE_FILENAME)!)), []);
+  assert.equal("dependsOn" in f.read(task), false);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
     [objective],

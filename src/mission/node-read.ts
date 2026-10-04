@@ -19,6 +19,7 @@ import {
   listNodes,
   listRevisions,
   readCurrentRevision,
+  readDependsOnIds,
   readLastTaskSnapshot,
   readMission,
   readNode,
@@ -118,6 +119,7 @@ export function nodeRecord(
       state: node.state,
       attempt: node.attempt ?? 0,
       priority: node.priority ?? 0,
+      dependsOn: readDependsOnIds(tx, node.id),
       ...(node.state === NodeState.Blocked
         ? { blockedContext: blockedContextOf(tx, bindings, node) }
         : {}),

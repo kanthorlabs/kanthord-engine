@@ -816,6 +816,7 @@ test("objective list exception preserves full objective and identity-only varian
     "state",
     "attempt",
     "priority",
+    "dependsOn",
   ]);
   assert.deepEqual(full.properties.blockedContext.required, [
     "outcome",

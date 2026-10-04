@@ -958,6 +958,7 @@ const runnableNodeFields = {
     .int()
     .min(Number.MIN_SAFE_INTEGER)
     .max(Number.MAX_SAFE_INTEGER),
+  dependsOn: z.array(identitySchema("node")),
 };
 export const nodeSchema = z.discriminatedUnion("kind", [
   z.strictObject({
