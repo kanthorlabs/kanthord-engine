@@ -378,7 +378,8 @@ request.
 
 ## Routes without a command
 
-The webhook receipt uses `POST /hooks/<inbound id>` with the access policy
+The webhook receipt `intake.inbound.event.receive` uses `POST /hooks/<inbound id>`
+with the access policy
 `delivery`, as declared by
 [Gateway access policy](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#access-policy).
 `delivery` means no JWT and verification by the Intake Service with the secret
@@ -400,9 +401,15 @@ simulates a platform signature with a human JWT.
 A poll has no receipt route because the Intake Service initiates it. A poll
 pauses beyond the capacity bound.
 
-The outbound operations `intake.action.perform` and `intake.storage.delete`
-have no CLI command. Their callers, the action performer and the Mission
-Service, track a request by a repeat with the same request key. A repeat
+The API operations `intake.action.perform`, `intake.action.read`,
+`intake.storage.put`, `intake.storage.check`, `intake.storage.get`,
+`intake.execution.storage.get` and `intake.storage.delete` have no CLI command
+and no HTTP route. They declare `direct: true`, and the action performer, the
+MCP server and the Mission Service reach them through the direct adapter.
+
+The callers of the outbound operations `intake.action.perform` and
+`intake.storage.delete`, the action performer and the Mission Service, track a
+request by a repeat with the same request key. A repeat
 answers `409` `intake.outbound.request.in_flight` while the call runs and
 `409` `intake.outbound.request.discarded` for a discarded request.
 `intake.action.perform` answers `422` `intake.outbound.request.action_unmapped`
