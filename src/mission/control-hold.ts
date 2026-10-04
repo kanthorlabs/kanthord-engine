@@ -46,6 +46,17 @@ function requireReady(
     );
 }
 
+function openCurrentAttempt(
+  tx: Transaction,
+  nodeId: string,
+  actor: HumanActor,
+  now: number,
+): void {
+  const revision = readCurrentRevision(tx, nodeId);
+  assert.ok(revision);
+  openAttempt(tx, nodeId, revision.revision, actor, now);
+}
+
 export function readyNode(
   tx: Transaction,
   dependencies: Dependencies,
@@ -63,11 +74,7 @@ export function readyNode(
     now,
   );
   requireReady(tx, node, false);
-  if (node.attempt === ZERO) {
-    const revision = readCurrentRevision(tx, nodeId);
-    assert.ok(revision);
-    openAttempt(tx, nodeId, revision.revision, actor, now);
-  }
+  if (node.attempt === ZERO) openCurrentAttempt(tx, nodeId, actor, now);
   transition(tx, dependencies, mission, node, NodeState.Waiting, now);
   return controlResult(tx, dependencies, nodeId, null, actor, now);
 }
@@ -102,7 +109,10 @@ export function resumeNode(
     )
       ? NodeState.ExternalSuccess
       : NodeState.ExternalRequested;
-  else if (body.target === ResumeTarget.Waiting) requireReady(tx, node, true);
+  else if (body.target === ResumeTarget.Waiting) {
+    requireReady(tx, node, true);
+    if (node.attempt === ZERO) openCurrentAttempt(tx, nodeId, actor, now);
+  }
   transition(tx, dependencies, mission, node, target, now);
   const current = readNode(tx, nodeId);
   assert.ok(current);

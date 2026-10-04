@@ -363,8 +363,9 @@ only.
   `Waiting` requires readiness and closure, and otherwise answers 409 `mission.node.not_ready`.
   `Available` selects `Available` or `Pending` by closure, under the
   [node resume ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#node-resume).
-  It never opens an attempt, resets no loss count, and never invalidates a
-  passing assessment merely by resuming.
+  `Waiting` opens the attempt when the node holds none, as `node ready` does;
+  an open attempt stays open. Every other target opens no attempt.
+  It resets no loss count and never invalidates a passing assessment merely by resuming.
 - Block accepts `HumanAct`, returns `ControlResult`, and requires `Paused`.
   It records the human reason in an outcome and closes an open attempt.
   When the attempt reads 0, it opens or closes no attempt.

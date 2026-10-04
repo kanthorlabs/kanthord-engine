@@ -120,6 +120,63 @@ test("ready refuses a nonterminal objective child before opening an attempt", as
   );
 });
 
+test("resume Waiting at attempt 0 opens attempt 1 as ready does; Available opens none", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  await h.invoke("node.pause", {
+    params: { nodeId: h.nodeId },
+    query: {},
+    body: h.body(),
+  });
+  const resumed = await h.invoke("node.resume", {
+    params: { nodeId: h.nodeId },
+    query: {},
+    body: { ...h.body(NodeState.Paused), target: ResumeTarget.Waiting },
+  });
+  assert.ok(resumed.node.kind !== NodeKind.Task);
+  assert.equal(resumed.node.state, NodeState.Waiting);
+  assert.equal(h.node().attempt, FIRST);
+  assert.equal(resumed.attempt?.nodeRevision, FIRST);
+  assert.deepEqual(resumed.attempt?.openedBy, h.actor);
+  assert.ok(h.calls.some((call) => call.method === INSERT));
+});
+
+test("resume Waiting keeps an open attempt; resume Available at attempt 0 opens none", async (t) => {
+  const open = controlHarness(t, IDENTITY);
+  await open.invoke("node.ready", {
+    params: { nodeId: open.nodeId },
+    query: {},
+    body: open.body(),
+  });
+  await open.invoke("node.pause", {
+    params: { nodeId: open.nodeId },
+    query: {},
+    body: open.body(NodeState.Waiting, FIRST),
+  });
+  const kept = await open.invoke("node.resume", {
+    params: { nodeId: open.nodeId },
+    query: {},
+    body: {
+      ...open.body(NodeState.Paused, FIRST),
+      target: ResumeTarget.Waiting,
+    },
+  });
+  assert.equal(open.node().attempt, FIRST);
+  assert.equal(kept.attempt?.nodeRevision, FIRST);
+  const fresh = controlHarness(t, IDENTITY);
+  await fresh.invoke("node.pause", {
+    params: { nodeId: fresh.nodeId },
+    query: {},
+    body: fresh.body(),
+  });
+  const result = await fresh.invoke("node.resume", {
+    params: { nodeId: fresh.nodeId },
+    query: {},
+    body: { ...fresh.body(NodeState.Paused), target: ResumeTarget.Available },
+  });
+  assert.equal(result.attempt, null);
+  assert.equal(fresh.node().attempt, ZERO);
+});
+
 test("resume Waiting refuses unsatisfied closure; Available routes to Pending without opening an attempt", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const target = createIdentity("node");
