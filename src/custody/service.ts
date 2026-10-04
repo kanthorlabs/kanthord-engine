@@ -164,8 +164,8 @@ const platformProbes: Record<Platform, PlatformProbe> = {
   [Platform.GitHub]: (secret, _metadata, context) =>
     probeGitHub(apiKeySecretSchema.parse(secret).key, context),
   [Platform.GitHubCopilot]: (secret, _metadata, context) => {
-    const { access, expires } = oauthSecretSchema.parse(secret);
-    return probeGitHubCopilot(access, expires, context);
+    const { refresh, expires } = oauthSecretSchema.parse(secret);
+    return probeGitHubCopilot(refresh, expires, context);
   },
   [Platform.OpenAICodex]: llmProbe(Platform.OpenAICodex),
   [Platform.Anthropic]: llmProbe(Platform.Anthropic),

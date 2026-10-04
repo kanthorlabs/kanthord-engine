@@ -65,6 +65,15 @@ const SECOND_REVISION = 2;
 const THIRD_REVISION = 3;
 const ENVELOPE_KEY = Buffer.alloc(32, 7);
 const BEARER_HEADERS = { [AUTHORIZATION_HEADER]: `Bearer ${SECRET}` };
+const REFRESH_SECRET = "test_private-copilot-refresh";
+const COPILOT_HEADERS = {
+  [AUTHORIZATION_HEADER]: `Bearer ${REFRESH_SECRET}`,
+  Accept: "application/json",
+  "User-Agent": "GitHubCopilotChat/0.35.0",
+  "Editor-Version": "vscode/1.107.0",
+  "Editor-Plugin-Version": "copilot-chat/0.35.0",
+  "Copilot-Integration-Id": "vscode-chat",
+};
 const ANTHROPIC_HEADERS = {
   [ANTHROPIC_API_KEY_HEADER]: SECRET,
   [ANTHROPIC_VERSION_HEADER]: ANTHROPIC_VERSION,
@@ -85,9 +94,9 @@ const httpProbes: {
   {
     name: Platform.GitHubCopilot,
     url: GITHUB_COPILOT_TOKEN_URL,
-    headers: BEARER_HEADERS,
+    headers: COPILOT_HEADERS,
     check: (context) =>
-      probeGitHubCopilot(SECRET, Date.now() + FUTURE_MS, context),
+      probeGitHubCopilot(REFRESH_SECRET, Date.now() + FUTURE_MS, context),
   },
   {
     name: Platform.Anthropic,
@@ -499,13 +508,13 @@ const credentials = [
     platform: Platform.GitHubCopilot,
     secret: {
       access: SECRET,
-      refresh: SECRET,
+      refresh: REFRESH_SECRET,
       expires: Date.now() + FUTURE_MS,
     },
     metadata: null,
     capability: CAPABILITY_COPILOT_TOKEN_READ,
     url: GITHUB_COPILOT_TOKEN_URL,
-    headers: BEARER_HEADERS,
+    headers: COPILOT_HEADERS,
   },
   {
     platform: Platform.Anthropic,

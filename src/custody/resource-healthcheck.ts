@@ -58,6 +58,13 @@ export const AUTHORIZATION_HEADER = "Authorization";
 export const ANTHROPIC_API_KEY_HEADER = "x-api-key";
 export const ANTHROPIC_VERSION_HEADER = "anthropic-version";
 export const ANTHROPIC_VERSION = "2023-06-01";
+export const GITHUB_COPILOT_HEADERS: Record<string, string> = {
+  Accept: "application/json",
+  "User-Agent": "GitHubCopilotChat/0.35.0",
+  "Editor-Version": "vscode/1.107.0",
+  "Editor-Plugin-Version": "copilot-chat/0.35.0",
+  "Copilot-Integration-Id": "vscode-chat",
+};
 
 async function probeHttp(
   url: string,
@@ -100,14 +107,17 @@ export async function probeGitHub(
 }
 
 export async function probeGitHubCopilot(
-  access: string,
+  refresh: string,
   expires: number,
   context: Context,
 ): Promise<ResourceStatusValue> {
   if (expires <= Date.now()) return ResourceStatus.Unknown;
   return probeHttp(
     GITHUB_COPILOT_TOKEN_URL,
-    { [AUTHORIZATION_HEADER]: `Bearer ${access}` },
+    {
+      ...GITHUB_COPILOT_HEADERS,
+      [AUTHORIZATION_HEADER]: `Bearer ${refresh}`,
+    },
     context,
   );
 }
