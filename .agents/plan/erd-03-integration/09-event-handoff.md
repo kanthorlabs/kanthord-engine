@@ -105,7 +105,7 @@ Out of scope:
   - The input of `mission.delivery.admit` holds `inboundEventId`, `projectId`, `platform`, `resource`, `event` and `metadata`. `mission-service.impl.md:253`; `engine/docs/cli/mission.md:888`.
   - The disposition stays in the span of the consumer. `intake-service.md:111`; decision D15.
   - The dispatcher runs outside a handler and owns its transactions (decision D3).
-  - A declared failure appends its error code, and an indeterminate result appends the code `indeterminate`. `intake-service.impl.md:79`. Gap: `engine/docs/cli/intake.md` names no stored error code of an event, so `indeterminate` stays `code: proposed` in `00-index.md`, and the task waits for its CLI row (decision D2).
+  - A declared failure appends its error code, and an indeterminate result appends the code `indeterminate`. `intake-service.impl.md:79`. `engine/docs/cli/intake.md` names the item shape and `indeterminate` in the event read projection.
 - Done when: `node --test --test-timeout=30000 src/intake/dispatcher.test.ts` passes; `pnpm run verify` passes.
 
 ### 09.3 Declare and implement `retry` and `discard`

@@ -267,6 +267,9 @@ pending event exists.
 The event read projection contains `id`, `inboundId`, `eventId`, `metadata`,
 `state`, `error` and `createdAt`. Content inclusion and its size and redaction
 remain **[blocked][intake-contract]**. No output contains a credential.
+Each item of `error` holds `{ code, message, created_at }`. `code` is the error
+code of a declared failure of the consumer, or `indeterminate` when the handoff
+ends with no answer.
 
 ### `event list`
 
@@ -327,7 +330,10 @@ pending event deletes nothing. The bound of rows per call remains
 
 The outbound read projection contains `id`, `projectId`, `operation`,
 `requestKey`, `state`, `result`, `error` and `createdAt`. No output contains a
-credential or the operands of the write.
+credential or the operands of the write. Each item of `error` holds
+`{ code, message, created_at }`. `code` is a result class of the Repository
+component or the Storage component, the HTTP status, `timeout` or
+`cli.exit_<n>`.
 
 ### `outbound list`
 
