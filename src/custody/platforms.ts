@@ -92,7 +92,11 @@ export const approvedModelSchema = z
 
 export const openaiCompatibleMetadataSchema = z.strictObject({
   baseUrl: z.string().regex(/^https?:\/\/[^?#]+[^?#/]$/),
-  models: z.array(approvedModelSchema),
+  models: z
+    .array(approvedModelSchema)
+    .refine(
+      (models) => new Set(models.map(({ id }) => id)).size === models.length,
+    ),
 });
 export const s3MetadataSchema = z.strictObject({
   endpoint: z.url(),

@@ -895,6 +895,45 @@ test("revoke ends only an older live revision", () => {
   }
 });
 
+test("a repeated approved model id answers invalid input at create, rotate and update-metadata and stores nothing", () => {
+  const f = fixture({ pins: new Map() });
+  try {
+    const duplicated = {
+      baseUrl: "https://example.com/v1",
+      models: [{ id: "same" }, { id: "same", maxTokens: 1000 }],
+    };
+    fails(
+      () => f.create({ ...inputs[2], name: "dup", metadata: duplicated }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+    assert.equal(credentialCount(f), NO_CREDENTIALS);
+    f.create(inputs[2]);
+    fails(
+      () =>
+        f.rotate("openai", {
+          expectedRevision: FIRST_REVISION,
+          secret: apiSecret,
+          metadata: duplicated,
+        }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+    fails(
+      () =>
+        f.updateMetadata("openai", {
+          expectedRevision: FIRST_REVISION,
+          metadata: duplicated,
+        }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+    assert.equal(credentialCount(f), FIRST_REVISION);
+  } finally {
+    f.store.close();
+  }
+});
+
 test("openrouter takes an api key with null metadata and differs from openai-compatible", () => {
   const f = fixture({ pins: new Map() });
   try {
