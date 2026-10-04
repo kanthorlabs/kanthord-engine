@@ -5,7 +5,7 @@
 ## Scope
 
 This specification covers the implemented `kanthord credential` group, with
-**9 implemented command leaves**. Custody is a shared
+**10 implemented command leaves**. Custody is a shared
 component, not a service or a part of Project. It owns server-wide credential
 records and OAuth login sessions. A credential belongs to no project.
 
@@ -60,8 +60,8 @@ non-secret diagnostic. A supplied identity never proves authorization.
 
 ## Command inventory
 
-Each synopsis follows `kanthord credential`. All nine commands have `[R]` and
-`human` access; six mutations have `[M]`, and one list has `[L]`.
+Each synopsis follows `kanthord credential`. All ten commands have `[R]` and
+`human` access; seven mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/credential` prefix.
 
 | #   | Synopsis after `kanthord credential`                              | HTTP route                                                       | Operation ID                 | Access/status        |
@@ -75,6 +75,7 @@ All paths below are implemented routes under the ruled `/api/credential` prefix.
 | 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/credential/login/:sessionId/code`                     | `credential.login_code`      | `human`; implemented |
 | 8   | `login-status <session> [R]`                                      | `GET /api/credential/login/:sessionId`                           | `credential.login_status`    | `human`; implemented |
 | 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/credential/:credentialName/revision/:revision/revoke` | `credential.revoke`          | `human`; implemented |
+| 10  | `archive <credential-name> [M] [R]`                               | `POST /api/credential/:credentialName/archive`                   | `credential.archive`         | `human`; implemented |
 
 The static `/api/credential/login` path takes precedence over `/:credentialName`, so custody refuses the name `login`.
 These routes have no project identity. The proposed provider check is in
@@ -147,6 +148,7 @@ that identity, never the submitted secret.
 ## `list`
 
 No positional arguments and no body. The optional filter maps to query `platform`.
+The optional `--include-archived` flag maps to query `includeArchived`, a boolean that defaults to `false`. Without it, the list leaves out an archived name.
 It is single-use with no default filter. The platform enum is defined above.
 `limit` and optional `cursor` use the shared pagination contract.
 HTTP `200` returns one credential answer for each name in `items`, in ascending name
@@ -186,6 +188,15 @@ The edit inserts the next revision with the secret of the newest live revision, 
 the credential answer. An `openai-compatible.baseUrl` change fails; a rotation sets a new one.
 Removal of a model used by a default or entry fails and lists its dependents;
 the check and update are atomic. No remote probe supplies approval.
+
+## `archive <credential-name>`
+
+The required `CredentialName` maps to `params.credentialName`. Query is empty and body absent.
+The archive checks every dependent in one transaction: every agent provider, every binding revision that `bindingsNaming` answers and every inbound that `inboundsNaming` answers.
+A dependent refuses the archive with `409 credential.credential.in_use`, and `error.details` lists the dependents as `{ agentProviders: [{ agentName, providerName }], bindings: [{ bindingId, projectId }], inbounds: [{ inboundId }] }`.
+Without a dependent, the archive sets `ended_at` on every live revision of the name and keeps the rows, because an execution record references them.
+A name with no live revision is archived. An archive is final: an archived name refuses `rotate`, `update-metadata` and `archive` with `409 credential.credential.archived`, and the name stays taken.
+HTTP `200` returns the credential answer with every revision ended. An unknown name answers `404 credential.credential.not_found`.
 
 ## `revoke <credential-name> <revision>`
 
@@ -251,7 +262,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.login.pending`               | Another login is pending for this platform and human.                                          | login                                                                        |
 | 404   | `credential.login.not_found`             | The login session does not exist.                                                              | login-code, login-status                                                     |
 | 400   | `credential.login.mode_unsupported`      | The platform does not support the selected login mode.                                         | login                                                                        |
-| 404   | `credential.credential.not_found`        | The credential does not exist.                                                                 | get, rotate, update-metadata, revoke, worker handover                        |
+| 404   | `credential.credential.not_found`        | The credential does not exist.                                                                 | get, rotate, update-metadata, revoke, archive, worker handover               |
 | local | `cli.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.                                          | login                                                                        |
 | local | `cli.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                      | revoke                                                                       |
 | 400   | `credential.entry.unsupported`           | The platform does not support this entry method.                                               | create, login                                                                |
@@ -264,6 +275,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.revision.conflict`           | The expected revision is stale.                                                                | rotate, update-metadata                                                      |
 | 409   | `credential.revision.ended`              | The revision is already ended, by a revoke or by a drain.                                      | revoke                                                                       |
 | 409   | `credential.revision.newest_live`        | The revoke names the newest live revision.                                                     | revoke                                                                       |
+| 409   | `credential.credential.in_use`           | A dependent names the credential; `details` holds `agentProviders`, `bindings` and `inbounds`. | archive                                                                      |
+| 409   | `credential.credential.archived`         | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive                                             |
 | 404   | `credential.revision.not_found`          | The revision does not exist.                                                                   | revoke                                                                       |
 | local | `custody.lifecycle.stopped`              | Custody cannot accept a login or restart after shutdown.                                       | login, serve server                                                          |
 | 409   | `credential.revision.revoked`            | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                                |
@@ -278,10 +291,9 @@ no remote call. No check refreshes OAuth; expired access reports `unknown`.
 The S3 `HeadBucket` probe maps 200 to `ok`, 404 to a missing bucket and 403 to
 `unknown`; a write-only key can work despite a forbidden probe.
 
-No command here exports or removes a credential, refreshes
-OAuth, mints a GitHub App token or rotates the master key. Custody's removal
-invariant remains in the design: dependents, including agent providers, prevent
-removal, and the dependency check and removal are atomic. No removal route is implemented.
+No command here exports a credential, refreshes
+OAuth, mints a GitHub App token or rotates the master key. Dependents, including agent providers, prevent
+an archive, and the dependency check and the archive are atomic.
 Secret handover and refresh reports are implemented Worker API operations; the
 handover CLI leaf is implemented. Acquisition grants remain later work. None is a
 CLI credential-record answer. Handover first pins the newest live revision,

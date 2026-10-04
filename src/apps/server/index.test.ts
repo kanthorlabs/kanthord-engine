@@ -161,6 +161,7 @@ test("composed Custody and Worker share credential and enablement collaborations
           { agentName: AGENT_NAME, providerName: PROVIDER_NAME },
         ],
         bindings: [],
+        inbounds: [],
       },
     );
     assert.equal(

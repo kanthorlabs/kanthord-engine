@@ -4,6 +4,8 @@ info:
   title: kanthord
   version: 28.0.1
 paths:
+  /api/credential/{credentialName}/archive:
+    $ref: ./openapi/credential/archive.yaml#/pathItem
   /api/credential:
     $ref: ./openapi/credential/create.yaml#/pathItem
   /api/credential/{credentialName}:

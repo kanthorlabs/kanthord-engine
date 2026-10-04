@@ -30,6 +30,7 @@ import {
   type CustodySuitabilityFn,
   type AgentProvidersDependentOnFn,
   type BindingsNamingFn,
+  type InboundsNamingFn,
   type EnablementsDependentOnModelFn,
   type CredentialAnswer,
 } from "./contract.ts";
@@ -194,6 +195,7 @@ function fixture(
     now?: () => number;
     agentProvidersDependentOn?: AgentProvidersDependentOnFn;
     bindingsNaming?: BindingsNamingFn;
+    inboundsNaming?: InboundsNamingFn;
     enablementsDependentOnModel?: EnablementsDependentOnModelFn;
     pins?: Map<string, string[]>;
     authorization?: Dependencies["authorization"];
@@ -231,6 +233,7 @@ function fixture(
     agentProvidersDependentOn:
       collaborations.agentProvidersDependentOn ?? (() => []),
     bindingsNaming: collaborations.bindingsNaming ?? (() => []),
+    inboundsNaming: collaborations.inboundsNaming ?? (() => []),
     enablementsDependentOnModel:
       collaborations.enablementsDependentOnModel ?? (() => []),
   });
@@ -1148,6 +1151,7 @@ for (const mode of Object.values(RemovalMode)) {
 test("credentialDependents returns both injected collaborations' results", () => {
   const agentProviders = [{ agentName: "agent", providerName: "provider" }];
   const bindings = [{ bindingId: "binding", projectId: "project" }];
+  const inbounds = [{ inboundId: "inbound" }];
   const calls: { tx: Transaction; name: string }[] = [];
   const f = fixture({
     agentProvidersDependentOn: (tx, name) => {
@@ -1158,18 +1162,270 @@ test("credentialDependents returns both injected collaborations' results", () =>
       calls.push({ tx, name });
       return bindings;
     },
+    inboundsNaming: (tx, name) => {
+      calls.push({ tx, name });
+      return inbounds;
+    },
   });
   try {
     f.store.transaction((tx) => {
       assert.deepEqual(f.component.credentialDependents(tx, "openai"), {
         agentProviders,
         bindings,
+        inbounds,
       });
       assert.deepEqual(calls, [
         { tx, name: "openai" },
         { tx, name: "openai" },
+        { tx, name: "openai" },
       ]);
     });
+  } finally {
+    f.store.close();
+  }
+});
+
+const IN_USE_CODE = "credential.credential.in_use";
+const GITHUB_NAME = "github";
+const CHECKS_OF_TWO_ARCHIVES = 6;
+
+function archiveCall(f: ReturnType<typeof fixture>, name: string) {
+  return () =>
+    f.registry.get(custodyOperations.archive.id).handler(
+      custodyOperations.archive.input.parse({
+        params: { credentialName: name },
+        query: {},
+        body: null,
+      }),
+      f.caller,
+    );
+}
+
+function inUseDetails(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (error) {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, HttpStatus.Conflict);
+    assert.equal(error.code, IN_USE_CODE);
+    return error.details;
+  }
+  return assert.fail("archive must refuse");
+}
+
+const NO_DEPENDENTS = { agentProviders: [], bindings: [], inbounds: [] };
+const AGENT_DEPENDENT = [{ agentName: "agent", providerName: "provider" }];
+const BINDING_DEPENDENT = [{ bindingId: "binding", projectId: "project" }];
+const INBOUND_DEPENDENT = [{ inboundId: "inbound" }];
+
+for (const [kind, collaboration, dependents] of [
+  [
+    "agent provider",
+    { agentProvidersDependentOn: () => AGENT_DEPENDENT },
+    { ...NO_DEPENDENTS, agentProviders: AGENT_DEPENDENT },
+  ],
+  [
+    "binding",
+    { bindingsNaming: () => BINDING_DEPENDENT },
+    { ...NO_DEPENDENTS, bindings: BINDING_DEPENDENT },
+  ],
+  [
+    "inbound",
+    { inboundsNaming: () => INBOUND_DEPENDENT },
+    { ...NO_DEPENDENTS, inbounds: INBOUND_DEPENDENT },
+  ],
+] as const) {
+  test(`archive refuses a ${kind} dependent with its details`, () => {
+    const f = fixture(collaboration);
+    try {
+      f.create(inputs[0]);
+      assert.deepEqual(inUseDetails(archiveCall(f, "github")), dependents);
+      const read = f.get("github") as CredentialAnswer;
+      assert(read.revisions.every((row) => row.endedAt === null));
+    } finally {
+      f.store.close();
+    }
+  });
+}
+
+test("archive ends every live revision and keeps every row", () => {
+  const pins = new Map<string, string[]>();
+  const f = fixture({ pins });
+  try {
+    const created = f.create(inputs[0]) as CredentialAnswer;
+    pins.set(created.revisions[0]!.id, ["live-execution"]);
+    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    const archived = archiveCall(f, "github")() as CredentialAnswer;
+    assert.equal(archived.name, GITHUB_NAME);
+    assert.equal(archived.revisions.length, NEXT_REVISION);
+    assert(archived.revisions.every((row) => row.endedAt !== null));
+    const read = f.get("github") as CredentialAnswer;
+    assert.equal(read.revisions.length, NEXT_REVISION);
+    noSecret(archived);
+  } finally {
+    f.store.close();
+  }
+});
+
+test("archive answers not found for an unknown name", () => {
+  const f = fixture();
+  try {
+    fails(
+      archiveCall(f, "missing"),
+      HttpStatus.NotFound,
+      "credential.credential.not_found",
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+const ARCHIVED_CODE = "credential.credential.archived";
+const REVOKE_ENDED_CODE = "credential.revision.ended";
+const EVERY_ARCHIVE_STEP = 3;
+const PAGE_OF_ONE = 1;
+
+function archivedFixture() {
+  const f = fixture();
+  f.create(inputs[0]);
+  archiveCall(f, "github")();
+  return f;
+}
+
+test("an archived name refuses rotate, update-metadata and a second archive", () => {
+  const f = archivedFixture();
+  try {
+    fails(
+      () =>
+        f.rotate("github", {
+          expectedRevision: FIRST_REVISION,
+          secret: apiSecret,
+        }),
+      HttpStatus.Conflict,
+      ARCHIVED_CODE,
+    );
+    fails(
+      () =>
+        f.updateMetadata("github", {
+          expectedRevision: FIRST_REVISION,
+          metadata: null,
+        }),
+      HttpStatus.Conflict,
+      ARCHIVED_CODE,
+    );
+    fails(archiveCall(f, "github"), HttpStatus.Conflict, ARCHIVED_CODE);
+    fails(
+      () => f.revoke("github", FIRST_REVISION),
+      HttpStatus.Conflict,
+      REVOKE_ENDED_CODE,
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("an archived name stays taken", () => {
+  const f = archivedFixture();
+  try {
+    fails(() => f.create(inputs[0]), HttpStatus.Conflict, NAME_CONFLICT_CODE);
+  } finally {
+    f.store.close();
+  }
+});
+
+test("get answers an archived name unchanged", () => {
+  const f = archivedFixture();
+  try {
+    const read = f.get("github") as CredentialAnswer;
+    assert.equal(read.name, GITHUB_NAME);
+    assert(read.revisions.every((row) => row.endedAt !== null));
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a rotation never archives a name", () => {
+  const f = fixture();
+  try {
+    f.create(inputs[0]);
+    for (let step = 0; step < EVERY_ARCHIVE_STEP; step += 1) {
+      const read = f.get("github") as CredentialAnswer;
+      const answer = f.rotate("github", {
+        expectedRevision: read.revisions[0]!.revision,
+        secret: apiSecret,
+      }) as CredentialAnswer;
+      assert(answer.revisions.some((row) => row.endedAt === null));
+      assert.equal(answer.revisions[0]!.endedAt, null);
+    }
+  } finally {
+    f.store.close();
+  }
+});
+
+test("list leaves out an archived name unless includeArchived is true and pages correctly", () => {
+  const f = fixture();
+  try {
+    for (const input of [inputs[0], inputs[1], inputs[2]]) f.create(input);
+    archiveCall(f, "anthropic")();
+    const names = (value: unknown) =>
+      (value as { items: CredentialAnswer[] }).items.map(({ name }) => name);
+    assert.deepEqual(names(f.list()), ["github", "openai"]);
+    assert.deepEqual(names(f.list({ includeArchived: "false" })), [
+      "github",
+      "openai",
+    ]);
+    assert.deepEqual(names(f.list({ includeArchived: "true" })), [
+      "anthropic",
+      "github",
+      "openai",
+    ]);
+    const first = f.list({ limit: PAGE_OF_ONE }) as {
+      items: CredentialAnswer[];
+      nextCursor: string | null;
+    };
+    assert.deepEqual(names(first), ["github"]);
+    const second = f.list({
+      limit: PAGE_OF_ONE,
+      cursor: first.nextCursor,
+    }) as { items: CredentialAnswer[]; nextCursor: string | null };
+    assert.deepEqual(names(second), ["openai"]);
+    assert.equal(second.nextCursor, null);
+  } finally {
+    f.store.close();
+  }
+});
+
+test("archive checks every dependent in the transaction of the write", () => {
+  const seen: Transaction[] = [];
+  const dependents: { inbounds: { inboundId: string }[] } = { inbounds: [] };
+  const f = fixture({
+    agentProvidersDependentOn: (tx) => {
+      seen.push(tx);
+      return [];
+    },
+    bindingsNaming: (tx) => {
+      seen.push(tx);
+      return [];
+    },
+    inboundsNaming: (tx) => {
+      seen.push(tx);
+      return dependents.inbounds;
+    },
+  });
+  try {
+    f.create(inputs[0]);
+    dependents.inbounds = INBOUND_DEPENDENT;
+    assert.deepEqual(inUseDetails(archiveCall(f, "github")), {
+      ...NO_DEPENDENTS,
+      inbounds: INBOUND_DEPENDENT,
+    });
+    dependents.inbounds = [];
+    archiveCall(f, "github")();
+    assert.equal(seen.length, CHECKS_OF_TWO_ARCHIVES);
+    assert.strictEqual(seen[3], f.lastTransaction());
+    assert.strictEqual(seen[4], f.lastTransaction());
+    assert.strictEqual(seen[5], f.lastTransaction());
+    assert.notStrictEqual(seen[0], seen[3]);
   } finally {
     f.store.close();
   }
@@ -1861,6 +2117,7 @@ test("lifecycle reports health and joins cancellation", async () => {
       logger: { info() {} } as unknown as Logger,
       agentProvidersDependentOn: () => [],
       bindingsNaming: () => [],
+      inboundsNaming: () => [],
       enablementsDependentOnModel: () => [],
     });
     const context = new CancellationContext();

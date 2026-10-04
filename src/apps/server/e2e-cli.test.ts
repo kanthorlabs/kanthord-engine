@@ -25,6 +25,7 @@ const cases = [
       "list",
       "get",
       "rotate",
+      "archive",
       "update-metadata",
       "revoke",
       "login",

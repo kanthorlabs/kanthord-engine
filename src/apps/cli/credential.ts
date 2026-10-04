@@ -28,6 +28,9 @@ const CREATE = "create";
 const ROTATE = "rotate";
 const UPDATE_METADATA = "update-metadata";
 const REVOKE = "revoke";
+const ARCHIVE = "archive";
+const QUERY_TRUE = "true";
+const QUERY_FALSE = "false";
 const LOGIN = "login";
 const LOGIN_CODE = "login-code";
 const IDEMPOTENCY_KEY_OPTION = "--idempotency-key";
@@ -38,6 +41,7 @@ const CREATE_TOKEN_REQUIRED = "cli.credential.create.token_required";
 const ROTATE_TOKEN_REQUIRED = "cli.credential.rotate.token_required";
 const UPDATE_METADATA_TOKEN_REQUIRED =
   "cli.credential.update_metadata.token_required";
+const ARCHIVE_TOKEN_REQUIRED = "cli.credential.archive.token_required";
 const REVOKE_TOKEN_REQUIRED = "cli.credential.revoke.token_required";
 const LOGIN_TOKEN_REQUIRED = "cli.credential.login.token_required";
 const LOGIN_CODE_TOKEN_REQUIRED = "cli.credential.login_code.token_required";
@@ -45,6 +49,7 @@ const CREATE_INDETERMINATE = "cli.credential.create.indeterminate";
 const ROTATE_INDETERMINATE = "cli.credential.rotate.indeterminate";
 const UPDATE_METADATA_INDETERMINATE =
   "cli.credential.update_metadata.indeterminate";
+const ARCHIVE_INDETERMINATE = "cli.credential.archive.indeterminate";
 const REVOKE_INDETERMINATE = "cli.credential.revoke.indeterminate";
 const LOGIN_INDETERMINATE = "cli.credential.login.indeterminate";
 const LOGIN_CODE_INDETERMINATE = "cli.credential.login_code.indeterminate";
@@ -79,6 +84,7 @@ async function list(command: Command): Promise<void> {
     params: {},
     query: {
       ...(options.platform !== undefined ? { platform: options.platform } : {}),
+      includeArchived: options.includeArchived ? QUERY_TRUE : QUERY_FALSE,
       limit,
       ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
     },
@@ -186,6 +192,22 @@ async function revoke(
   process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
+async function archive(
+  credentialName: string,
+  command: Command,
+): Promise<void> {
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, ARCHIVE_TOKEN_REQUIRED);
+  const key = resolveKey(options);
+  const result = await httpClient(custodyOperations, endpoint, token).archive(
+    { params: { credentialName }, query: {}, body: null },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(result, ARCHIVE_INDETERMINATE, key);
+  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+}
+
 async function login(platform: string, command: Command): Promise<void> {
   const options = command.optsWithGlobals();
   const mode = options.mode;
@@ -258,6 +280,7 @@ export function addCredentialCommand(program: Command): void {
       "Filter by platform",
       singleUse("--platform"),
     )
+    .option("--include-archived", "Include archived credentials", false)
     .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
     .option(
       "--cursor <cursor>",
@@ -337,6 +360,18 @@ export function addCredentialCommand(program: Command): void {
     )
     .action((name: string, revision: string, _options, command: Command) =>
       revoke(name, revision, command),
+    );
+  credential
+    .command(ARCHIVE)
+    .description("Archive a credential as JSON")
+    .argument("<credential-name>", "Credential name")
+    .option(
+      "--idempotency-key <key>",
+      "Mutation key",
+      singleUse(IDEMPOTENCY_KEY_OPTION),
+    )
+    .action((name: string, _options, command: Command) =>
+      archive(name, command),
     );
   credential
     .command(LOGIN)

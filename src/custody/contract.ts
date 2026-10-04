@@ -151,6 +151,9 @@ export type BindingRevision = {
   bindingId: string;
   projectId: string;
 };
+export type InboundDependent = {
+  inboundId: string;
+};
 export type AgentEnablement = { agentName: string };
 export type AgentProvidersDependentOnFn = (
   tx: Transaction,
@@ -160,6 +163,10 @@ export type BindingsNamingFn = (
   tx: Transaction,
   credentialName: string,
 ) => BindingRevision[];
+export type InboundsNamingFn = (
+  tx: Transaction,
+  credentialName: string,
+) => InboundDependent[];
 export type EnablementsDependentOnModelFn = (
   tx: Transaction,
   credentialName: string,
@@ -260,6 +267,7 @@ export const custodyOperations = {
       params: emptyParams,
       query: z.strictObject({
         platform: z.string().optional(),
+        includeArchived: z.enum(["true", "false"]).default("false").optional(),
         limit: z.coerce
           .number()
           .int()
@@ -358,6 +366,26 @@ export const custodyOperations = {
     }),
     output: credentialAnswerSchema,
     description: "End an older credential revision.",
+  },
+  archive: {
+    id: "credential.archive",
+    service: CREDENTIAL_OPERATION_SERVICE,
+    method: HttpMethod.Post,
+    path: "/api/credential/:credentialName/archive",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: true,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: credentialParams,
+      query: emptyQuery,
+      body: z.null(),
+    }),
+    output: credentialAnswerSchema,
+    description: "Archive a credential that no dependent names.",
   },
   login: {
     id: "credential.login",

@@ -13,7 +13,10 @@ import {
   custodyMigrations,
   deriveEnvelopeKey,
 } from "../../custody/index.ts";
-import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
+import {
+  CUSTODY_SERVICE_NAME,
+  type InboundsNamingFn,
+} from "../../custody/contract.ts";
 import {
   SchedulerService,
   schedulerMigrations,
@@ -88,6 +91,7 @@ export function composeServices(options: {
     intakeStorage?: IntakeStorage;
     intakeCheck?: IntakeCheck;
     intakeActions?: IntakeActions;
+    inboundsNaming?: InboundsNamingFn;
   };
 }) {
   const repoConnector =
@@ -182,6 +186,7 @@ export function composeServices(options: {
     enablementsDependentOnModel: (tx, name, model) =>
       worker.enablementsDependentOnModel(tx, name, model),
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
+    inboundsNaming: options.standIns?.inboundsNaming ?? (() => []),
   });
   const worker: WorkerService = new WorkerService({
     missionActions: {

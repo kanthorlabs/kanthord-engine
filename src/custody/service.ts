@@ -38,6 +38,8 @@ import {
   type BindingRevision,
   type AgentProvidersDependentOnFn,
   type BindingsNamingFn,
+  type InboundDependent,
+  type InboundsNamingFn,
   type EnablementsDependentOnModelFn,
   type CustodyExecutions,
   type CustodyAuthorization,
@@ -101,6 +103,7 @@ export interface Dependencies {
   health?: HealthRegistry;
   agentProvidersDependentOn: AgentProvidersDependentOnFn;
   bindingsNaming: BindingsNamingFn;
+  inboundsNaming: InboundsNamingFn;
   enablementsDependentOnModel: EnablementsDependentOnModelFn;
 }
 
@@ -115,6 +118,8 @@ const CustodyErrorCode = {
   RevisionConflict: "credential.revision.conflict",
   BaseUrlFixed: "credential.metadata.base_url_fixed",
   ModelInUse: "credential.metadata.model_in_use",
+  InUse: "credential.credential.in_use",
+  Archived: "credential.credential.archived",
   RevisionNotFound: "credential.revision.not_found",
   RevisionEnded: "credential.revision.ended",
   RevisionRevoked: REVISION_REVOKED,
@@ -123,6 +128,9 @@ const CustodyErrorCode = {
 } as const;
 const FIRST_REVISION = 1;
 const NO_ROWS = 0;
+const QUERY_TRUE = "true";
+const INCLUDE = 1;
+const EXCLUDE = 0;
 const EXTRA_ROW = 1;
 const EMPTY_MODELS = 0;
 const CREDENTIAL_PREFIX = "credential";
@@ -207,7 +215,18 @@ function newestLive(tx: Transaction, name: string): LiveRow | undefined {
     .get(name) as LiveRow | undefined;
 }
 
+function refuseArchived(tx: Transaction, name: string): void {
+  const rows = rowsForName(tx, name);
+  if (rows.length !== NO_ROWS && rows.every((row) => row.ended_at !== null))
+    throw new OperationError(
+      HttpStatus.Conflict,
+      CustodyErrorCode.Archived,
+      "Credential is archived.",
+    );
+}
+
 function requireLive(tx: Transaction, name: string, expected: number): LiveRow {
+  refuseArchived(tx, name);
   const row = newestLive(tx, name);
   if (!row)
     throw new OperationError(
@@ -307,6 +326,7 @@ export class CustodyComponent implements Service {
   private readonly logger: Logger;
   private readonly agentProvidersDependentOn: AgentProvidersDependentOnFn;
   private readonly bindingsNaming: BindingsNamingFn;
+  private readonly inboundsNaming: InboundsNamingFn;
   private readonly enablementsDependentOnModel: EnablementsDependentOnModelFn;
   private readonly executions: CustodyExecutions;
   private readonly authorization: CustodyAuthorization;
@@ -325,6 +345,7 @@ export class CustodyComponent implements Service {
     this.logger = dependencies.logger;
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.bindingsNaming = dependencies.bindingsNaming;
+    this.inboundsNaming = dependencies.inboundsNaming;
     this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
@@ -349,6 +370,9 @@ export class CustodyComponent implements Service {
     );
     registry.register(custodyOperations.revoke, (input, caller) =>
       this.revoke(input, caller),
+    );
+    registry.register(custodyOperations.archive, (input, caller) =>
+      this.archive(input, caller),
     );
     registry.register(custodyOperations.login, (input, caller) =>
       this.login(input, caller),
@@ -572,10 +596,15 @@ export class CustodyComponent implements Service {
   credentialDependents(
     tx: Transaction,
     credentialName: string,
-  ): { agentProviders: AgentProviderDependent[]; bindings: BindingRevision[] } {
+  ): {
+    agentProviders: AgentProviderDependent[];
+    bindings: BindingRevision[];
+    inbounds: InboundDependent[];
+  } {
     return {
       agentProviders: this.agentProvidersDependentOn(tx, credentialName),
       bindings: this.bindingsNaming(tx, credentialName),
+      inbounds: this.inboundsNaming(tx, credentialName),
     };
   }
 
@@ -682,14 +711,25 @@ export class CustodyComponent implements Service {
     caller: CallerContext,
   ): { items: CredentialAnswer[]; nextCursor: string | null } {
     return caller.commit((tx) => {
-      const { platform, limit: requestedLimit, cursor } = input.query;
+      const {
+        platform,
+        includeArchived,
+        limit: requestedLimit,
+        cursor,
+      } = input.query;
       const after = cursor === undefined ? "" : decodeCursor(cursor);
       const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
       const names = tx.database
         .prepare(
-          "SELECT DISTINCT name FROM credential WHERE name > ? AND (? IS NULL OR platform = ?) ORDER BY name ASC LIMIT ?",
+          "SELECT name FROM credential WHERE name > ? AND (? IS NULL OR platform = ?) GROUP BY name HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC LIMIT ?",
         )
-        .all(after, platform ?? null, platform ?? null, limit + EXTRA_ROW) as {
+        .all(
+          after,
+          platform ?? null,
+          platform ?? null,
+          includeArchived === QUERY_TRUE ? INCLUDE : EXCLUDE,
+          limit + EXTRA_ROW,
+        ) as {
         name: string;
       }[];
       const page = names.slice(NO_ROWS, limit);
@@ -911,6 +951,41 @@ export class CustodyComponent implements Service {
         .prepare("UPDATE credential SET ended_at = ? WHERE id = ?")
         .run(now, row.id);
       this.drainRevisions(tx, credentialName, now);
+      return answerForName(tx, credentialName)!;
+    });
+  }
+
+  private archive(
+    input: typeof custodyOperations.archive.input._output,
+    caller: CallerContext,
+  ): CredentialAnswer {
+    return caller.commit((tx) => {
+      const { credentialName } = input.params;
+      refuseArchived(tx, credentialName);
+      if (rowsForName(tx, credentialName).length === NO_ROWS)
+        throw new OperationError(
+          HttpStatus.NotFound,
+          CustodyErrorCode.NotFound,
+          "Credential not found.",
+        );
+      const dependents = this.credentialDependents(tx, credentialName);
+      if (
+        dependents.agentProviders.length +
+          dependents.bindings.length +
+          dependents.inbounds.length >
+        NO_ROWS
+      )
+        throw new OperationError(
+          HttpStatus.Conflict,
+          CustodyErrorCode.InUse,
+          "Credential is in use.",
+          dependents,
+        );
+      tx.database
+        .prepare(
+          "UPDATE credential SET ended_at = ? WHERE name = ? AND ended_at IS NULL",
+        )
+        .run(Date.now(), credentialName);
       return answerForName(tx, credentialName)!;
     });
   }

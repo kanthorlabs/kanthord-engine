@@ -480,6 +480,7 @@ function fixture(t: TestContext) {
     logger: pino({ enabled: false }),
     agentProvidersDependentOn: () => [],
     bindingsNaming: () => [],
+    inboundsNaming: () => [],
     enablementsDependentOnModel: () => [],
   });
   return { store, component };

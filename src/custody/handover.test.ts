@@ -77,6 +77,7 @@ function fixture(t: TestContext) {
     envelopeKey: Buffer.alloc(32, 7),
     clientSecret: () => SECRET,
     bindingsNaming: () => [],
+    inboundsNaming: () => [],
     agentProvidersDependentOn: () => [],
     enablementsDependentOnModel: () => [],
     executions: {

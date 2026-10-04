@@ -334,6 +334,33 @@ test("create refuses a missing file without a server", async (t) => {
   );
 });
 
+test("archive ends every revision of an unused credential and refuses a repeat as unknown", async (t) => {
+  const { directory, env } = await setup(t);
+  const file = createFile(directory, GITHUB);
+  success(await kanthord(["credential", "create", "--file", file], env));
+  const archived = success(
+    await kanthord(["credential", "archive", NAME], env),
+  );
+  assert.equal(archived.name, NAME);
+  assert.equal(archived.revisions.length, FIRST_REVISION);
+  assert.notEqual(archived.revisions[0]!.endedAt, null);
+  const read = success(await kanthord(["credential", "get", NAME], env));
+  assert.equal(read.revisions.length, FIRST_REVISION);
+  assert.notEqual(read.revisions[0]!.endedAt, null);
+  refusal(
+    await kanthord(["credential", "archive", "missing"], env),
+    "credential.credential.not_found",
+  );
+});
+
+test("archive requires a token without a server", async (t) => {
+  const env = environment(temporary(t));
+  refusal(
+    await kanthord(["credential", "archive", NAME], env),
+    "cli.credential.archive.token_required",
+  );
+});
+
 test("create refuses duplicate file options without a server", async (t) => {
   const env = { ...environment(temporary(t)), KANTHORD_TOKEN: LOCAL_TOKEN };
   refusal(
