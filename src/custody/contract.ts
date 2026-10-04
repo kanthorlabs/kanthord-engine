@@ -17,6 +17,18 @@ export const SecretShape = {
   S3AccessKey: "s3_access_key",
 } as const;
 export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
+export const PlatformKind = {
+  Git: "git",
+  Llm: "llm",
+  Storage: "storage",
+} as const;
+export type PlatformKind = (typeof PlatformKind)[keyof typeof PlatformKind];
+export const LoginSessionMode = {
+  Browser: "browser",
+  Device: "device",
+} as const;
+export type LoginSessionMode =
+  (typeof LoginSessionMode)[keyof typeof LoginSessionMode];
 export const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
 export const EXECUTION_CREDENTIAL_MAX_BYTES = 48915;
 export const piCredentialSchema = z
@@ -229,7 +241,44 @@ const loginStatusAnswerSchema = z.strictObject({
   failureReason: z.string().nullable(),
 });
 
+const platformListAnswerSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      kind: z.enum(PlatformKind),
+      platforms: z.array(
+        z.strictObject({
+          platform: z.string(),
+          secretShape: z.enum(SecretShape),
+          loginModes: z.array(z.enum(LoginSessionMode)),
+          metadataFields: z.array(z.string()),
+          verifiable: z.boolean(),
+        }),
+      ),
+    }),
+  ),
+});
+
 export const custodyOperations = {
+  platform_list: {
+    id: "credential.platform_list",
+    service: CREDENTIAL_OPERATION_SERVICE,
+    method: HttpMethod.Get,
+    path: "/api/credential/platform",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyParams,
+      query: emptyQuery,
+      body: z.null(),
+    }),
+    output: platformListAnswerSchema,
+    description: "List the credential platforms grouped by kind.",
+  },
   create: {
     id: "credential.create",
     service: CREDENTIAL_OPERATION_SERVICE,

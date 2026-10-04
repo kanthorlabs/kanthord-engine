@@ -62,16 +62,22 @@ import {
   oauthSecretSchema,
   s3AccessKeySecretSchema,
   s3MetadataSchema,
+  isPlatform,
+  metadataFieldsForPlatform,
   metadataSchemaForPlatform,
   openaiCompatibleMetadataSchema,
-  OAUTH_PLATFORMS,
   Platform,
+  PLATFORM_VALIDATORS,
+  PlatformKind,
   RESERVED_NAME_LOGIN,
+  RESERVED_NAME_PLATFORM,
+  SecretShape,
   secretSchemaForPlatform,
   validateNameForm,
 } from "./platforms.ts";
 
 import {
+  CAPABILITY_NONE,
   PLATFORM_CAPABILITY,
   TARGET_KIND_CREDENTIAL,
   probeGitHub,
@@ -167,7 +173,7 @@ function llmProbe(platform: Platform): PlatformProbe {
     );
 }
 
-const platformProbes: Record<Platform, PlatformProbe> = {
+const platformProbes: Partial<Record<Platform, PlatformProbe>> = {
   [Platform.GitHub]: (secret, _metadata, context, observe) =>
     probeGitHub(apiKeySecretSchema.parse(secret).key, context, observe),
   [Platform.GitHubCopilot]: (secret, _metadata, context, observe) => {
@@ -178,6 +184,7 @@ const platformProbes: Record<Platform, PlatformProbe> = {
   [Platform.Anthropic]: llmProbe(Platform.Anthropic),
   [Platform.OpenAICompatible]: llmProbe(Platform.OpenAICompatible),
   [Platform.OpenRouter]: llmProbe(Platform.OpenRouter),
+  [Platform.OpenAI]: llmProbe(Platform.OpenAI),
   [Platform.S3]: (secret, metadata, context, observe) => {
     const { accessKeyId, secretAccessKey } =
       s3AccessKeySecretSchema.parse(secret);
@@ -204,8 +211,10 @@ function capturedResourceCheck(row: LiveRow, key: Buffer): ResourceCheck {
   return async (context, observe) => {
     if (context.err()) return ResourceStatus.Unknown;
     try {
+      if (!PLATFORM_VALIDATORS[platform as Platform].verifiable)
+        return ResourceStatus.Unknown;
       const secret = decrypt(key, id, platform, nonce, ciphertext);
-      return await platformProbes[platform as Platform](
+      return await platformProbes[platform as Platform]!(
         secret,
         metadata,
         context,
@@ -267,6 +276,31 @@ function validatedMetadata(
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw invalidInput();
   return parsed.data as Record<string, unknown>;
+}
+
+function isReservedName(name: string): boolean {
+  return name === RESERVED_NAME_LOGIN || name === RESERVED_NAME_PLATFORM;
+}
+
+function platformList(): typeof custodyOperations.platform_list.output._output {
+  const platforms = Object.entries(PLATFORM_VALIDATORS) as [
+    Platform,
+    (typeof PLATFORM_VALIDATORS)[Platform],
+  ][];
+  return {
+    items: Object.values(PlatformKind).map((kind) => ({
+      kind,
+      platforms: platforms
+        .filter(([, validator]) => validator.kind === kind)
+        .map(([platform, validator]) => ({
+          platform,
+          secretShape: validator.secretShape,
+          loginModes: [...validator.loginModes],
+          metadataFields: metadataFieldsForPlatform(platform),
+          verifiable: validator.verifiable,
+        })),
+    })),
+  };
 }
 
 function invalidInput(): OperationError {
@@ -367,6 +401,7 @@ export class CustodyComponent implements Service {
     registry.register(custodyOperations.create, (input, caller) =>
       this.create(input, caller),
     );
+    registry.register(custodyOperations.platform_list, () => platformList());
     registry.register(custodyOperations.get, (input, caller) =>
       this.get(input, caller),
     );
@@ -592,7 +627,8 @@ export class CustodyComponent implements Service {
       project: null,
       name: encodeURIComponent(row.name),
       target: `${TARGET_KIND_CREDENTIAL}:${row.id}`,
-      capability: PLATFORM_CAPABILITY[row.platform as Platform],
+      capability:
+        PLATFORM_CAPABILITY[row.platform as Platform] ?? CAPABILITY_NONE,
       check: capturedResourceCheck(row, this.envelopeKey),
     }));
   }
@@ -627,16 +663,17 @@ export class CustodyComponent implements Service {
       const bodyResult = credentialCreateSchema.safeParse(input.body);
       if (!bodyResult.success) throw invalidInput();
       const { name, platform, secret, metadata } = bodyResult.data;
-      if (!validateNameForm(name) || name === RESERVED_NAME_LOGIN)
-        throw invalidInput();
-      if (!Object.values(Platform).some((value) => value === platform))
+      if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
+      if (!isPlatform(platform))
         throw new OperationError(
           HttpStatus.BadRequest,
           CustodyErrorCode.UnsupportedPlatform,
           "Unsupported platform.",
         );
-      const supportedPlatform = platform as Platform;
-      if (OAUTH_PLATFORMS.includes(supportedPlatform))
+      const supportedPlatform = platform;
+      if (
+        PLATFORM_VALIDATORS[supportedPlatform].secretShape === SecretShape.OAuth
+      )
         throw new OperationError(
           HttpStatus.BadRequest,
           CustodyErrorCode.UnsupportedEntry,
@@ -1059,21 +1096,20 @@ export class CustodyComponent implements Service {
         "custody: login is stopped.",
       );
     const { platform, name, mode: requested } = input.body;
-    if (!Object.values(Platform).some((value) => value === platform))
+    if (!isPlatform(platform))
       throw new OperationError(
         HttpStatus.BadRequest,
         CustodyErrorCode.UnsupportedPlatform,
         "Unsupported platform.",
       );
-    const supported = platform as Platform;
-    if (!OAUTH_PLATFORMS.includes(supported))
+    const supported = platform;
+    if (PLATFORM_VALIDATORS[supported].secretShape !== SecretShape.OAuth)
       throw new OperationError(
         HttpStatus.BadRequest,
         CustodyErrorCode.UnsupportedEntry,
         "Unsupported credential entry.",
       );
-    if (!validateNameForm(name) || name === RESERVED_NAME_LOGIN)
-      throw invalidInput();
+    if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
     const mode = loginMode(supported, requested);
     this.store.transaction((tx) => this.requireAvailableName(tx, name));
     if (caller.identity?.kind !== IdentityKind.Human) throw invalidInput();

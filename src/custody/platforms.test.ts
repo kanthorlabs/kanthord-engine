@@ -1,26 +1,37 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { KnownProvider } from "@earendil-works/pi-ai";
+import type { z } from "zod";
 import {
+  amazonBedrockMetadataSchema,
   apiKeySecretSchema,
   approvedModelSchema,
+  azureOpenAIResponsesMetadataSchema,
+  cloudflareAIGatewayMetadataSchema,
+  cloudflareWorkersAIMetadataSchema,
+  googleVertexMetadataSchema,
+  isPlatform,
+  metadataFieldsForPlatform,
   CREDENTIAL_NAME_MAX_LENGTH,
   isNonblank,
   metadataSchemaForPlatform,
   MODEL_DEFAULT_CONTEXT_WINDOW,
   MODEL_DEFAULT_REASONING_LEVELS,
-  OAUTH_PLATFORMS,
   oauthSecretSchema,
   openaiCompatibleMetadataSchema,
   Platform,
-  PLATFORM_SECRET_SHAPE,
+  PLATFORM_VALIDATORS,
+  PlatformKind,
   ReasoningLevel,
   RESERVED_NAME_LOGIN,
+  RESERVED_NAME_PLATFORM,
   s3AccessKeySecretSchema,
   s3MetadataSchema,
   SecretShape,
   secretSchemaForPlatform,
   validateNameForm,
 } from "./platforms.ts";
+import { LoginSessionMode } from "./sessions.ts";
 
 const baseUrl = "https://example.com/v1";
 const s3Metadata = {
@@ -29,20 +40,134 @@ const s3Metadata = {
   region: "us-east-1",
 };
 
-test("platforms map to the correct secret shapes", () => {
-  assert.deepEqual(PLATFORM_SECRET_SHAPE, {
-    [Platform.GitHub]: SecretShape.ApiKey,
-    [Platform.GitHubCopilot]: SecretShape.OAuth,
-    [Platform.OpenAICodex]: SecretShape.OAuth,
-    [Platform.Anthropic]: SecretShape.ApiKey,
-    [Platform.OpenAICompatible]: SecretShape.ApiKey,
-    [Platform.OpenRouter]: SecretShape.ApiKey,
-    [Platform.S3]: SecretShape.S3AccessKey,
-  });
-  assert.deepEqual(OAUTH_PLATFORMS, [
-    Platform.GitHubCopilot,
-    Platform.OpenAICodex,
-  ]);
+const PI_KNOWN_PROVIDERS = [
+  "amazon-bedrock",
+  "ant-ling",
+  "anthropic",
+  "google",
+  "google-vertex",
+  "openai",
+  "azure-openai-responses",
+  "openai-codex",
+  "radius",
+  "nvidia",
+  "deepseek",
+  "github-copilot",
+  "xai",
+  "groq",
+  "cerebras",
+  "openrouter",
+  "vercel-ai-gateway",
+  "zai",
+  "zai-coding-cn",
+  "mistral",
+  "minimax",
+  "minimax-cn",
+  "moonshotai",
+  "moonshotai-cn",
+  "huggingface",
+  "fireworks",
+  "together",
+  "baseten",
+  "opencode",
+  "opencode-go",
+  "kimi-coding",
+  "cloudflare-workers-ai",
+  "cloudflare-ai-gateway",
+  "qwen-token-plan",
+  "qwen-token-plan-cn",
+  "qwen-token-plan-individual",
+  "xiaomi",
+  "xiaomi-token-plan-cn",
+  "xiaomi-token-plan-ams",
+  "xiaomi-token-plan-sgp",
+] as const satisfies readonly KnownProvider[];
+const PLATFORM_COUNT = 43;
+const VERIFIABLE_PLATFORMS: Platform[] = [
+  Platform.GitHub,
+  Platform.GitHubCopilot,
+  Platform.OpenAICodex,
+  Platform.Anthropic,
+  Platform.OpenAICompatible,
+  Platform.OpenRouter,
+  Platform.OpenAI,
+  Platform.S3,
+];
+const METADATA_FIELDS: Partial<Record<Platform, string[]>> = {
+  [Platform.OpenAICompatible]: ["baseUrl"],
+  [Platform.S3]: ["endpoint", "bucket", "region"],
+  [Platform.AmazonBedrock]: ["region"],
+  [Platform.GoogleVertex]: ["project", "location"],
+  [Platform.AzureOpenAIResponses]: ["resource_name"],
+  [Platform.CloudflareWorkersAI]: ["account_id"],
+  [Platform.CloudflareAIGateway]: ["account_id", "gateway_id"],
+};
+
+test("the platform table holds github, s3, openai-compatible and every pi-ai known provider", () => {
+  const platforms = Object.keys(PLATFORM_VALIDATORS);
+  assert.equal(platforms.length, PLATFORM_COUNT);
+  assert.deepEqual(
+    platforms.toSorted(),
+    [
+      Platform.GitHub,
+      Platform.S3,
+      Platform.OpenAICompatible,
+      ...PI_KNOWN_PROVIDERS,
+    ].toSorted(),
+  );
+  assert.equal(isPlatform("groq"), true);
+  assert.equal(isPlatform("unknown"), false);
+  assert.equal(isPlatform("toString"), false);
+});
+
+test("the platform table fixes kind, secret shape, login modes, metadata fields and verifiability", () => {
+  for (const [platform, validator] of Object.entries(PLATFORM_VALIDATORS) as [
+    Platform,
+    (typeof PLATFORM_VALIDATORS)[Platform],
+  ][]) {
+    assert.equal(
+      validator.kind,
+      platform === Platform.GitHub
+        ? PlatformKind.Git
+        : platform === Platform.S3
+          ? PlatformKind.Storage
+          : PlatformKind.Llm,
+      platform,
+    );
+    assert.equal(
+      validator.secretShape,
+      platform === Platform.GitHubCopilot || platform === Platform.OpenAICodex
+        ? SecretShape.OAuth
+        : platform === Platform.S3
+          ? SecretShape.S3AccessKey
+          : SecretShape.ApiKey,
+      platform,
+    );
+    assert.deepEqual(
+      validator.loginModes,
+      platform === Platform.GitHubCopilot
+        ? [LoginSessionMode.Device]
+        : platform === Platform.OpenAICodex
+          ? [LoginSessionMode.Browser, LoginSessionMode.Device]
+          : [],
+      platform,
+    );
+    assert.deepEqual(
+      metadataFieldsForPlatform(platform),
+      METADATA_FIELDS[platform] ?? [],
+      platform,
+    );
+    assert.equal(
+      validator.metadataSchema === null,
+      METADATA_FIELDS[platform] === undefined,
+      platform,
+    );
+    assert.equal(
+      validator.verifiable,
+      VERIFIABLE_PLATFORMS.includes(platform),
+      platform,
+    );
+  }
 });
 
 test("secret schema is selected for every platform", () => {
@@ -65,6 +190,8 @@ test("secret schema is selected for every platform", () => {
     apiKeySecretSchema,
   );
   assert.equal(secretSchemaForPlatform(Platform.S3), s3AccessKeySecretSchema);
+  assert.equal(secretSchemaForPlatform(Platform.OpenAI), apiKeySecretSchema);
+  assert.equal(secretSchemaForPlatform("groq"), apiKeySecretSchema);
 });
 
 test("secret schemas reject unknown fields and blank key material", () => {
@@ -216,7 +343,9 @@ test("model defaults permit id alone and constrain maxTokens after defaults", ()
   );
 });
 
-test("only openai-compatible and s3 platforms have metadata schemas", () => {
+test("only the platforms with metadata fields have metadata schemas", () => {
+  assert.equal(metadataSchemaForPlatform("groq"), null);
+  assert.equal(metadataSchemaForPlatform(Platform.OpenAI), null);
   assert.equal(metadataSchemaForPlatform(Platform.GitHub), null);
   assert.equal(metadataSchemaForPlatform(Platform.GitHubCopilot), null);
   assert.equal(metadataSchemaForPlatform(Platform.Anthropic), null);
@@ -246,6 +375,43 @@ test("s3 metadata requires a URL and nonblank bucket and region", () => {
   );
 });
 
+const llmMetadataSchemas: {
+  schema: z.ZodType;
+  valid: Record<string, string>;
+}[] = [
+  { schema: amazonBedrockMetadataSchema, valid: { region: "us-east-1" } },
+  {
+    schema: googleVertexMetadataSchema,
+    valid: { project: "project", location: "us-central1" },
+  },
+  {
+    schema: azureOpenAIResponsesMetadataSchema,
+    valid: { resource_name: "resource" },
+  },
+  { schema: cloudflareWorkersAIMetadataSchema, valid: { account_id: "acct" } },
+  {
+    schema: cloudflareAIGatewayMetadataSchema,
+    valid: { account_id: "acct", gateway_id: "gateway" },
+  },
+];
+
+test("llm metadata requires every field as a nonblank string and refuses unknown fields", () => {
+  for (const { schema, valid } of llmMetadataSchemas) {
+    assert.deepEqual(schema.parse(valid), valid);
+    assert.equal(schema.safeParse({ ...valid, extra: "x" }).success, false);
+    for (const field of Object.keys(valid)) {
+      assert.equal(
+        schema.safeParse({ ...valid, [field]: "  " }).success,
+        false,
+      );
+      assert.equal(schema.safeParse({ ...valid, [field]: 1 }).success, false);
+      const missing: Record<string, string> = { ...valid };
+      delete missing[field];
+      assert.equal(schema.safeParse(missing).success, false);
+    }
+  }
+});
+
 test("names must be lower-case, start with a letter and fit in 63 chars", () => {
   assert.equal(validateNameForm("a"), true);
   assert.equal(validateNameForm("valid-name-123"), true);
@@ -259,6 +425,7 @@ test("names must be lower-case, start with a letter and fit in 63 chars", () => 
   assert.equal(validateNameForm(""), false);
   assert.equal(validateNameForm("a_b"), false);
   assert.equal(validateNameForm(RESERVED_NAME_LOGIN), true);
+  assert.equal(validateNameForm(RESERVED_NAME_PLATFORM), true);
   assert.equal(isNonblank("  "), false);
   assert.equal(isNonblank(" a "), true);
 });

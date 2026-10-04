@@ -322,6 +322,24 @@ test("E01.14 login-code refuses an absent session", async (t) => {
   );
 });
 
+test("E01.15 platforms answers the platform list ahead of the credential name route", async (t) => {
+  const { env } = await setup(t);
+  const answer = success<{
+    items: { kind: string; platforms: { platform: string }[] }[];
+  }>(await kanthord(["credential", "platforms"], env));
+  assert.deepEqual(
+    answer.items.map(({ kind }) => kind),
+    ["git", "llm", "storage"],
+  );
+  assert.deepEqual(
+    answer.items[0]?.platforms.map(({ platform }) => platform),
+    [GITHUB],
+  );
+  assert.ok(
+    answer.items[1]?.platforms.some(({ platform }) => platform === ANTHROPIC),
+  );
+});
+
 test("create refuses a missing file without a server", async (t) => {
   const directory = temporary(t);
   const env = { ...environment(directory), KANTHORD_TOKEN: LOCAL_TOKEN };

@@ -35,10 +35,12 @@ import {
   probeOpenAICodex,
   type ModelCall,
   CAPABILITY_MODEL_LIST_READ,
+  CAPABILITY_NONE,
   CAPABILITY_RATE_LIMIT_READ,
   GITHUB_COPILOT_TOKEN_URL,
   GITHUB_RATE_LIMIT_URL,
   MODELS_PATH,
+  OPENAI_MODELS_URL,
   OPENROUTER_KEY_URL,
   PLATFORM_CAPABILITY,
   LLM_PROVIDER_VALIDATORS,
@@ -46,6 +48,7 @@ import {
   probeAnthropic,
   probeGitHub,
   probeGitHubCopilot,
+  probeOpenAI,
   probeOpenAICompatible,
   probeOpenRouter,
   probeS3,
@@ -117,16 +120,27 @@ const httpProbes: {
     headers: BEARER_HEADERS,
     check: (context) => probeOpenRouter(SECRET, context),
   },
+  {
+    name: Platform.OpenAI,
+    url: OPENAI_MODELS_URL,
+    headers: BEARER_HEADERS,
+    check: (context) => probeOpenAI(SECRET, context),
+  },
 ];
 
 test("every LLM platform selects its validator by platform", async (t) => {
   assert.deepEqual(Object.keys(LLM_PROVIDER_VALIDATORS).sort(), [
     Platform.Anthropic,
+    Platform.OpenAI,
     Platform.OpenAICodex,
     Platform.OpenAICompatible,
     Platform.OpenRouter,
   ]);
   assert.equal(PLATFORM_CAPABILITY[Platform.OpenRouter], CAPABILITY_KEY_READ);
+  assert.equal(
+    PLATFORM_CAPABILITY[Platform.OpenAI],
+    CAPABILITY_MODEL_LIST_READ,
+  );
   const urls: unknown[] = [];
   t.mock.method(globalThis, "fetch", async (url: unknown) => {
     urls.push(url);
@@ -137,6 +151,7 @@ test("every LLM platform selects its validator by platform", async (t) => {
     Platform.Anthropic,
     Platform.OpenAICompatible,
     Platform.OpenRouter,
+    Platform.OpenAI,
   ]) {
     assert.equal(
       await LLM_PROVIDER_VALIDATORS[platform]!.probe(
@@ -151,6 +166,7 @@ test("every LLM platform selects its validator by platform", async (t) => {
     ANTHROPIC_MODELS_URL,
     BASE_URL + MODELS_PATH,
     OPENROUTER_KEY_URL,
+    OPENAI_MODELS_URL,
   ]);
 });
 
@@ -609,6 +625,14 @@ const credentials = [
     headers: BEARER_HEADERS,
   },
   {
+    platform: Platform.OpenAI,
+    secret: { key: SECRET },
+    metadata: null,
+    capability: CAPABILITY_MODEL_LIST_READ,
+    url: OPENAI_MODELS_URL,
+    headers: BEARER_HEADERS,
+  },
+  {
     platform: Platform.S3,
     secret: { accessKeyId: ACCESS_KEY_ID, secretAccessKey: SECRET },
     metadata: { endpoint: ENDPOINT, bucket: BUCKET, region: REGION },
@@ -743,6 +767,49 @@ for (const credential of credentials) {
     assert.equal(destroy.mock.callCount(), send.mock.callCount());
     assert.ok(!JSON.stringify({ entries, result }).includes(SECRET));
     assert.ok(!JSON.stringify({ entries, result }).includes(ACCESS_KEY_ID));
+  });
+}
+
+for (const credential of [
+  { platform: "groq", secret: { key: SECRET }, metadata: null },
+  {
+    platform: Platform.AmazonBedrock,
+    secret: { key: SECRET },
+    metadata: { region: REGION },
+  },
+]) {
+  test(`inventory reports unknown for ${credential.platform} without a remote call`, async (t) => {
+    const { store, component } = fixture(t);
+    const id = insert(store, {
+      ...credential,
+      capability: CAPABILITY_NONE,
+      url: null,
+      headers: null,
+    } as unknown as CredentialInput);
+    const fetch = t.mock.method(globalThis, "fetch", async () => {
+      throw new Error("unexpected request");
+    });
+    const send = t.mock.method(S3Client.prototype, "send", async () => {
+      throw new Error("unexpected request");
+    });
+    const entries = store.transaction((tx) => component.resourceInventory(tx));
+    const check = store.transaction((tx) =>
+      component.modelListCheck(tx, credential.platform),
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(entries)), [
+      {
+        scope: HealthScope.Global,
+        project: null,
+        name: credential.platform,
+        target: `${TARGET_KIND_CREDENTIAL}:${id}`,
+        capability: CAPABILITY_NONE,
+      },
+    ]);
+    store.close();
+    assert.equal(await entries[0]!.check(background), ResourceStatus.Unknown);
+    assert.equal(await check(background), ResourceStatus.Unknown);
+    assert.equal(fetch.mock.callCount(), NO_CALLS);
+    assert.equal(send.mock.callCount(), NO_CALLS);
   });
 }
 

@@ -76,7 +76,7 @@ All paths below are implemented routes under the ruled `/api/credential` prefix.
 | 8   | `login-status <session> [R]`                                      | `GET /api/credential/login/:sessionId`                           | `credential.login_status`    | `human`; implemented |
 | 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/credential/:credentialName/revision/:revision/revoke` | `credential.revoke`          | `human`; implemented |
 | 10  | `archive <credential-name> [M] [R]`                               | `POST /api/credential/:credentialName/archive`                   | `credential.archive`         | `human`; implemented |
-| 11  | `platforms [R]`                                                   | `GET /api/credential/platform`                                   | `credential.platform_list`   | `human`; ruled       |
+| 11  | `platforms [R]`                                                   | `GET /api/credential/platform`                                   | `credential.platform_list`   | `human`; implemented |
 
 The static `/api/credential/login` and `/api/credential/platform` paths take precedence over `/:credentialName`, so custody refuses the names `login` and `platform`.
 These routes have no project identity. The proposed provider check is in

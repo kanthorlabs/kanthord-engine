@@ -36,7 +36,12 @@ import {
 } from "./contract.ts";
 import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
-import { Platform } from "./platforms.ts";
+import {
+  Platform,
+  PLATFORM_VALIDATORS,
+  PlatformKind,
+  SecretShape,
+} from "./platforms.ts";
 import { CustodyComponent, type Dependencies } from "./service.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -279,6 +284,12 @@ function fixture(
       query: {},
       body,
     });
+  const platformList = () =>
+    invoke(custodyOperations.platform_list, {
+      params: {},
+      query: {},
+      body: null,
+    }) as typeof custodyOperations.platform_list.output._output;
   const revoke = (name: string, revision: number) =>
     invoke(custodyOperations.revoke, {
       params: { credentialName: name, revision },
@@ -320,6 +331,7 @@ function fixture(
     rotate,
     updateMetadata,
     revoke,
+    platformList,
   };
 }
 
@@ -377,6 +389,11 @@ test("create validates platforms, schema, conflicts and encrypts each first revi
     );
     fails(
       () => f.create({ ...inputs[0], name: "login" }),
+      HttpStatus.BadRequest,
+      "credential.input.invalid",
+    );
+    fails(
+      () => f.create({ ...inputs[0], name: "platform" }),
       HttpStatus.BadRequest,
       "credential.input.invalid",
     );
@@ -1736,6 +1753,7 @@ test("OAuth validates entry, name, mode and start-time name conflict before star
       code: UNSUPPORTED_PLATFORM_CODE,
     },
     { body: { ...LOGIN_BODY, name: "login" }, code: INVALID_INPUT_CODE },
+    { body: { ...LOGIN_BODY, name: "platform" }, code: INVALID_INPUT_CODE },
     { body: { ...LOGIN_BODY, name: "Bad Name" }, code: INVALID_INPUT_CODE },
     { body: { ...LOGIN_BODY, mode: "unknown" }, code: INVALID_INPUT_CODE },
   ];
@@ -2128,3 +2146,185 @@ test("lifecycle reports health and joins cancellation", async () => {
     f.store.close();
   }
 });
+
+test("platform list answers the platform table grouped by kind in kind order", (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const answer = f.platformList();
+  assert.deepEqual(
+    answer.items.map(({ kind }) => kind),
+    [PlatformKind.Git, PlatformKind.Llm, PlatformKind.Storage],
+  );
+  const listed = answer.items.flatMap(({ kind, platforms }) =>
+    platforms.map((entry) => ({ kind, ...entry })),
+  );
+  assert.deepEqual(
+    listed.map(({ platform }) => platform).toSorted(),
+    Object.keys(PLATFORM_VALIDATORS).toSorted(),
+  );
+  for (const entry of listed) {
+    const validator = PLATFORM_VALIDATORS[entry.platform as Platform];
+    assert.equal(entry.kind, validator.kind);
+    assert.equal(entry.secretShape, validator.secretShape);
+    assert.deepEqual(entry.loginModes, validator.loginModes);
+    assert.equal(entry.verifiable, validator.verifiable);
+  }
+  const byPlatform = new Map(listed.map((entry) => [entry.platform, entry]));
+  assert.deepEqual(answer.items[0]!.platforms, [
+    {
+      platform: Platform.GitHub,
+      secretShape: SecretShape.ApiKey,
+      loginModes: [],
+      metadataFields: [],
+      verifiable: true,
+    },
+  ]);
+  assert.deepEqual(answer.items[2]!.platforms, [
+    {
+      platform: Platform.S3,
+      secretShape: SecretShape.S3AccessKey,
+      loginModes: [],
+      metadataFields: ["endpoint", "bucket", "region"],
+      verifiable: true,
+    },
+  ]);
+  assert.deepEqual(byPlatform.get(Platform.OpenAICodex), {
+    kind: PlatformKind.Llm,
+    platform: Platform.OpenAICodex,
+    secretShape: SecretShape.OAuth,
+    loginModes: ["browser", "device"],
+    metadataFields: [],
+    verifiable: true,
+  });
+  assert.deepEqual(byPlatform.get(Platform.GitHubCopilot)?.loginModes, [
+    "device",
+  ]);
+  assert.deepEqual(byPlatform.get(Platform.OpenAICompatible)?.metadataFields, [
+    "baseUrl",
+  ]);
+  assert.deepEqual(byPlatform.get(Platform.CloudflareAIGateway), {
+    kind: PlatformKind.Llm,
+    platform: Platform.CloudflareAIGateway,
+    secretShape: SecretShape.ApiKey,
+    loginModes: [],
+    metadataFields: ["account_id", "gateway_id"],
+    verifiable: false,
+  });
+  assert.equal(byPlatform.get(Platform.OpenAI)?.verifiable, true);
+  assert.equal(byPlatform.get("groq")?.verifiable, false);
+});
+
+const GROQ = "groq";
+
+test("create accepts a plain api_key record for groq and refuses metadata", (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  fails(
+    () =>
+      f.create({
+        name: GROQ,
+        platform: GROQ,
+        secret: apiSecret,
+        metadata: { region: "x" },
+      }),
+    HttpStatus.BadRequest,
+    INVALID_INPUT_CODE,
+  );
+  fails(
+    () =>
+      f.create({
+        name: GROQ,
+        platform: GROQ,
+        secret: { accessKeyId: "id", secretAccessKey: secretValue },
+        metadata: null,
+      }),
+    HttpStatus.BadRequest,
+    INVALID_INPUT_CODE,
+  );
+  const answer = f.create({
+    name: GROQ,
+    platform: GROQ,
+    secret: apiSecret,
+    metadata: null,
+  }) as CredentialAnswer;
+  assert.equal(answer.platform, GROQ);
+  assert.equal(answer.revisions[0]!.metadata, null);
+  noSecret(answer);
+});
+
+const llmMetadataCases = [
+  {
+    platform: Platform.AmazonBedrock,
+    metadata: { region: "us-east-1" },
+    edited: { region: "eu-west-1" },
+  },
+  {
+    platform: Platform.GoogleVertex,
+    metadata: { project: "project", location: "us-central1" },
+    edited: { project: "project", location: "europe-west4" },
+  },
+  {
+    platform: Platform.AzureOpenAIResponses,
+    metadata: { resource_name: "resource" },
+    edited: { resource_name: "other" },
+  },
+  {
+    platform: Platform.CloudflareWorkersAI,
+    metadata: { account_id: "account" },
+    edited: { account_id: "other" },
+  },
+  {
+    platform: Platform.CloudflareAIGateway,
+    metadata: { account_id: "account", gateway_id: "gateway" },
+    edited: { account_id: "account", gateway_id: "other" },
+  },
+];
+
+for (const { platform, metadata, edited } of llmMetadataCases) {
+  test(`${platform} create and metadata edit accept its metadata schema and refuse other metadata`, (t) => {
+    const f = fixture();
+    t.after(() => f.store.close());
+    const refused: unknown[] = [
+      null,
+      {},
+      { ...metadata, extra: "x" },
+      ...Object.keys(metadata).map((field) => ({ ...metadata, [field]: " " })),
+    ];
+    for (const invalid of refused)
+      fails(
+        () =>
+          f.create({
+            name: "llm",
+            platform,
+            secret: apiSecret,
+            metadata: invalid,
+          }),
+        HttpStatus.BadRequest,
+        INVALID_INPUT_CODE,
+      );
+    const created = f.create({
+      name: "llm",
+      platform,
+      secret: apiSecret,
+      metadata,
+    }) as CredentialAnswer;
+    assert.deepEqual(created.revisions[0]!.metadata, metadata);
+    for (const invalid of refused)
+      fails(
+        () =>
+          f.updateMetadata("llm", {
+            expectedRevision: FIRST_REVISION,
+            metadata: invalid,
+          }),
+        HttpStatus.BadRequest,
+        INVALID_INPUT_CODE,
+      );
+    const updated = f.updateMetadata("llm", {
+      expectedRevision: FIRST_REVISION,
+      metadata: edited,
+    }) as CredentialAnswer;
+    assert.equal(updated.revisions[0]!.revision, NEXT_REVISION);
+    assert.deepEqual(updated.revisions[0]!.metadata, edited);
+    noSecret(updated);
+  });
+}

@@ -21,7 +21,7 @@ import {
   dropExtraOAuthFields,
   secretOfCredential,
 } from "./payload.ts";
-import { PLATFORM_SECRET_SHAPE, type Platform } from "./platforms.ts";
+import { PLATFORM_VALIDATORS, type Platform } from "./platforms.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 
 export const CUSTODY_REPORT_INVALID = "custody.handover.report_invalid";
@@ -43,7 +43,8 @@ export function sealMaterial(
 ): HandoverEnvelope {
   const keys = deriveHandoverKeys(secret);
   try {
-    const shape = PLATFORM_SECRET_SHAPE[material.platform as Platform];
+    const shape =
+      PLATFORM_VALIDATORS[material.platform as Platform]?.secretShape;
     assert(shape);
     assert(material.credentialId.length);
     const payload = {
@@ -121,7 +122,7 @@ export function applyReport(
       REVISION_REVOKED,
       "The pinned credential revision is revoked.",
     );
-  const shape = PLATFORM_SECRET_SHAPE[row.platform];
+  const shape = PLATFORM_VALIDATORS[row.platform].secretShape;
   if (shape !== report.credential.type) throw invalidReport();
   const stored = decrypt(key, row.id, row.platform, row.nonce, row.ciphertext);
   if (digest(credentialOfSecret(shape, stored)) !== report.digest) return false;

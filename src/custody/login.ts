@@ -8,7 +8,11 @@ import {
 } from "@earendil-works/pi-ai";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { oauthSecretSchema, Platform } from "./platforms.ts";
+import {
+  oauthSecretSchema,
+  Platform,
+  PLATFORM_VALIDATORS,
+} from "./platforms.ts";
 import {
   LoginSessionMode,
   LoginSessionState,
@@ -20,12 +24,6 @@ export const COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER = "company.ghe.com";
 export const OAUTH_PROVIDER_IDS: Partial<Record<Platform, string>> = {
   [Platform.GitHubCopilot]: "github-copilot",
   [Platform.OpenAICodex]: "openai-codex",
-};
-export const OAUTH_SUPPORTED_MODES: Partial<
-  Record<Platform, readonly LoginSessionMode[]>
-> = {
-  [Platform.GitHubCopilot]: [LoginSessionMode.Device],
-  [Platform.OpenAICodex]: [LoginSessionMode.Browser, LoginSessionMode.Device],
 };
 const PI_LOGIN_MODES = {
   [LoginSessionMode.Browser]: "browser",
@@ -65,12 +63,12 @@ export function loginMode(
       INVALID_INPUT,
       "Invalid input.",
     );
-  const modes = OAUTH_SUPPORTED_MODES[platform];
+  const modes = PLATFORM_VALIDATORS[platform].loginModes;
   const selected =
-    modes?.length === SINGLE_MODE
+    modes.length === SINGLE_MODE
       ? modes[FIRST_MODE]
-      : (requested ?? modes?.[FIRST_MODE]);
-  if (!selected || !modes?.includes(selected as LoginSessionMode))
+      : (requested ?? modes[FIRST_MODE]);
+  if (!selected || !modes.includes(selected as LoginSessionMode))
     throw new OperationError(
       HttpStatus.BadRequest,
       MODE_UNSUPPORTED,

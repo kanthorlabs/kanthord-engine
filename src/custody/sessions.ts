@@ -11,12 +11,7 @@ export const LoginSessionState = {
 export type LoginSessionState =
   (typeof LoginSessionState)[keyof typeof LoginSessionState];
 
-export const LoginSessionMode = {
-  Browser: "browser",
-  Device: "device",
-} as const;
-export type LoginSessionMode =
-  (typeof LoginSessionMode)[keyof typeof LoginSessionMode];
+export { LoginSessionMode } from "./contract.ts";
 
 export const SESSION_EXPIRY_MS = 15 * 60 * 1000;
 const LOGIN_PENDING_CODE = "credential.login.pending";

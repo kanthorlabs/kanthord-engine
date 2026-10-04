@@ -36,15 +36,17 @@ export const CAPABILITY_MODEL_LIST_READ = "model-list read";
 export const CAPABILITY_KEY_READ = "key read";
 export const CAPABILITY_MODEL_CALL = "model call";
 export const CAPABILITY_BUCKET_HEAD = "bucket head";
+export const CAPABILITY_NONE = "none";
 export const TARGET_KIND_CREDENTIAL = "credential";
 
-export const PLATFORM_CAPABILITY: Record<Platform, string> = {
+export const PLATFORM_CAPABILITY: Partial<Record<Platform, string>> = {
   [Platform.GitHub]: CAPABILITY_RATE_LIMIT_READ,
   [Platform.GitHubCopilot]: CAPABILITY_COPILOT_TOKEN_READ,
   [Platform.OpenAICodex]: CAPABILITY_MODEL_CALL,
   [Platform.Anthropic]: CAPABILITY_MODEL_LIST_READ,
   [Platform.OpenAICompatible]: CAPABILITY_MODEL_LIST_READ,
   [Platform.OpenRouter]: CAPABILITY_KEY_READ,
+  [Platform.OpenAI]: CAPABILITY_MODEL_LIST_READ,
   [Platform.S3]: CAPABILITY_BUCKET_HEAD,
 };
 
@@ -53,6 +55,7 @@ export const GITHUB_COPILOT_TOKEN_URL =
   "https://api.github.com/copilot_internal/v2/token";
 export const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models";
 export const OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key";
+export const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 export const OPENAI_CODEX_PROVIDER_ID = "openai-codex";
 export const OPENAI_CODEX_PROBE_MODEL = "gpt-5.6-luna";
 export const OPENAI_CODEX_PROBE_REASONING = "low";
@@ -205,6 +208,19 @@ export async function probeOpenRouter(
   );
 }
 
+export async function probeOpenAI(
+  apiKey: string,
+  context: Context,
+  observe?: ResourceObserver,
+): Promise<ResourceStatusValue> {
+  return probeHttp(
+    OPENAI_MODELS_URL,
+    { [AUTHORIZATION_HEADER]: `Bearer ${apiKey}` },
+    context,
+    observe,
+  );
+}
+
 export type ModelCall = (
   model: Model<Api>,
   context: ModelContext,
@@ -337,6 +353,10 @@ export const LLM_PROVIDER_VALIDATORS: Partial<
   [Platform.OpenRouter]: {
     probe: (secret, _metadata, context, observe) =>
       probeOpenRouter(apiKeySecretSchema.parse(secret).key, context, observe),
+  },
+  [Platform.OpenAI]: {
+    probe: (secret, _metadata, context, observe) =>
+      probeOpenAI(apiKeySecretSchema.parse(secret).key, context, observe),
   },
 };
 

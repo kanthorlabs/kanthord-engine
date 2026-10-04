@@ -23,6 +23,7 @@ import {
 
 const LIST = "list";
 const GET = "get";
+const PLATFORMS = "platforms";
 const LOGIN_STATUS = "login-status";
 const CREATE = "create";
 const ROTATE = "rotate";
@@ -59,12 +60,14 @@ const LOGIN_MODE_BROWSER = "browser";
 const LOGIN_MODE_DEVICE = "device";
 const LIST_TOKEN_REQUIRED = "cli.credential.list.token_required";
 const GET_TOKEN_REQUIRED = "cli.credential.get.token_required";
+const PLATFORMS_TOKEN_REQUIRED = "cli.credential.platforms.token_required";
 const LOGIN_STATUS_TOKEN_REQUIRED =
   "cli.credential.login_status.token_required";
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 const LIST_INDETERMINATE = "cli.credential.list.indeterminate";
 const GET_INDETERMINATE = "cli.credential.get.indeterminate";
+const PLATFORMS_INDETERMINATE = "cli.credential.platforms.indeterminate";
 const LOGIN_STATUS_INDETERMINATE = "cli.credential.login_status.indeterminate";
 
 async function list(command: Command): Promise<void> {
@@ -105,6 +108,23 @@ async function get(credentialName: string, command: Command): Promise<void> {
   });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, GET_INDETERMINATE))}\n`,
+  );
+}
+
+async function platforms(command: Command): Promise<void> {
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, PLATFORMS_TOKEN_REQUIRED);
+  const result = await httpClient(
+    custodyOperations,
+    endpoint,
+    token,
+  ).platform_list({
+    params: {},
+    query: {},
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, PLATFORMS_INDETERMINATE))}\n`,
   );
 }
 
@@ -293,6 +313,10 @@ export function addCredentialCommand(program: Command): void {
     .description("Get a credential as JSON")
     .argument("<credential-name>", "Credential name")
     .action((name: string, _options, command: Command) => get(name, command));
+  credential
+    .command(PLATFORMS)
+    .description("List credential platforms as JSON")
+    .action((_options, command: Command) => platforms(command));
   credential
     .command(LOGIN_STATUS)
     .description("Get a login session status as JSON")

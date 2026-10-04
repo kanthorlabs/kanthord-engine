@@ -31,6 +31,7 @@ const cases = [
       "login",
       "login-code",
       "login-status",
+      "platforms",
     ],
     exact: true,
   },
