@@ -24,6 +24,7 @@ export const ADAPTER_ID: Record<AgentProviderKind, string> = {
   [AgentProviderKind.Anthropic]: "anthropic",
   [AgentProviderKind.GithubCopilot]: "github-copilot",
   [AgentProviderKind.OpenaiCompatible]: "openai-compatible",
+  [AgentProviderKind.Openrouter]: "openrouter",
 };
 const OFF = "off";
 export interface ModelRuntimeInput {

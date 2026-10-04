@@ -895,6 +895,48 @@ test("revoke ends only an older live revision", () => {
   }
 });
 
+test("openrouter takes an api key with null metadata and differs from openai-compatible", () => {
+  const f = fixture({ pins: new Map() });
+  try {
+    f.create({
+      name: "router",
+      platform: Platform.OpenRouter,
+      secret: apiSecret,
+      metadata: null,
+    });
+    fails(
+      () =>
+        f.create({
+          name: "router-meta",
+          platform: Platform.OpenRouter,
+          secret: apiSecret,
+          metadata: { baseUrl: "https://example.com/v1", models: [] },
+        }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+    fails(
+      () =>
+        f.store.transaction((tx) =>
+          f.component.custodySuitability(tx, {
+            credential: "router",
+            platform: Platform.OpenAICompatible,
+          }),
+        ),
+      HttpStatus.BadRequest,
+      PLATFORM_MISMATCH_CODE,
+    );
+    f.store.transaction((tx) =>
+      f.component.custodySuitability(tx, {
+        credential: "router",
+        platform: Platform.OpenRouter,
+      }),
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
 test("custody suitability checks the newest live revision and platform", () => {
   const pins = new Map<string, string[]>();
   const f = fixture({ pins });

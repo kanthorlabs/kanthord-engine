@@ -7,6 +7,7 @@ export const Platform = {
   GitHubCopilot: "github-copilot",
   Anthropic: "anthropic",
   OpenAICompatible: "openai-compatible",
+  OpenRouter: "openrouter",
   S3: "s3",
 } as const;
 export type Platform = (typeof Platform)[keyof typeof Platform];
@@ -16,6 +17,7 @@ export const PLATFORM_SECRET_SHAPE: Record<Platform, SecretShape> = {
   [Platform.GitHubCopilot]: SecretShape.OAuth,
   [Platform.Anthropic]: SecretShape.ApiKey,
   [Platform.OpenAICompatible]: SecretShape.ApiKey,
+  [Platform.OpenRouter]: SecretShape.ApiKey,
   [Platform.S3]: SecretShape.S3AccessKey,
 };
 export const OAUTH_PLATFORMS: readonly Platform[] = [Platform.GitHubCopilot];
@@ -98,6 +100,7 @@ const secretSchemas: Record<Platform, z.ZodType> = {
   [Platform.GitHubCopilot]: oauthSecretSchema,
   [Platform.Anthropic]: apiKeySecretSchema,
   [Platform.OpenAICompatible]: apiKeySecretSchema,
+  [Platform.OpenRouter]: apiKeySecretSchema,
   [Platform.S3]: s3AccessKeySecretSchema,
 };
 const metadataSchemas: Record<Platform, z.ZodType | null> = {
@@ -105,6 +108,7 @@ const metadataSchemas: Record<Platform, z.ZodType | null> = {
   [Platform.GitHubCopilot]: null,
   [Platform.Anthropic]: null,
   [Platform.OpenAICompatible]: openaiCompatibleMetadataSchema,
+  [Platform.OpenRouter]: null,
   [Platform.S3]: s3MetadataSchema,
 };
 

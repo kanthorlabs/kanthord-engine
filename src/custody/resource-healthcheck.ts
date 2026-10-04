@@ -7,11 +7,12 @@ import { abortSignal, type Context } from "../kernel/context.ts";
 import { ResourceStatus, type ResourceStatusValue } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { isObject } from "../kernel/values.ts";
-import { Platform } from "./platforms.ts";
+import { openaiCompatibleMetadataSchema, Platform } from "./platforms.ts";
 
 export const CAPABILITY_RATE_LIMIT_READ = "rate-limit read";
 export const CAPABILITY_COPILOT_TOKEN_READ = "copilot token read";
 export const CAPABILITY_MODEL_LIST_READ = "model-list read";
+export const CAPABILITY_KEY_READ = "key read";
 export const CAPABILITY_BUCKET_HEAD = "bucket head";
 export const TARGET_KIND_CREDENTIAL = "credential";
 
@@ -20,6 +21,7 @@ export const PLATFORM_CAPABILITY: Record<Platform, string> = {
   [Platform.GitHubCopilot]: CAPABILITY_COPILOT_TOKEN_READ,
   [Platform.Anthropic]: CAPABILITY_MODEL_LIST_READ,
   [Platform.OpenAICompatible]: CAPABILITY_MODEL_LIST_READ,
+  [Platform.OpenRouter]: CAPABILITY_KEY_READ,
   [Platform.S3]: CAPABILITY_BUCKET_HEAD,
 };
 
@@ -27,6 +29,7 @@ export const GITHUB_RATE_LIMIT_URL = "https://api.github.com/rate_limit";
 export const GITHUB_COPILOT_TOKEN_URL =
   "https://api.github.com/copilot_internal/v2/token";
 export const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models";
+export const OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key";
 export const MODELS_PATH = "/models";
 export const AUTHORIZATION_HEADER = "Authorization";
 export const ANTHROPIC_API_KEY_HEADER = "x-api-key";
@@ -111,6 +114,44 @@ export async function probeOpenAICompatible(
     context,
   );
 }
+
+export async function probeOpenRouter(
+  apiKey: string,
+  context: Context,
+): Promise<ResourceStatusValue> {
+  return probeHttp(
+    OPENROUTER_KEY_URL,
+    { [AUTHORIZATION_HEADER]: `Bearer ${apiKey}` },
+    context,
+  );
+}
+
+export interface LlmProviderValidator {
+  probe(
+    apiKey: string,
+    metadata: unknown,
+    context: Context,
+  ): Promise<ResourceStatusValue>;
+}
+
+export const LLM_PROVIDER_VALIDATORS: Partial<
+  Record<Platform, LlmProviderValidator>
+> = {
+  [Platform.Anthropic]: {
+    probe: (apiKey, _metadata, context) => probeAnthropic(apiKey, context),
+  },
+  [Platform.OpenAICompatible]: {
+    probe: (apiKey, metadata, context) =>
+      probeOpenAICompatible(
+        apiKey,
+        openaiCompatibleMetadataSchema.parse(metadata).baseUrl,
+        context,
+      ),
+  },
+  [Platform.OpenRouter]: {
+    probe: (apiKey, _metadata, context) => probeOpenRouter(apiKey, context),
+  },
+};
 
 type BucketClient = {
   send(

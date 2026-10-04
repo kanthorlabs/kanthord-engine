@@ -534,6 +534,7 @@ export const agentProviderKindSchema = z.enum([
   "github-copilot",
   "anthropic",
   "openai-compatible",
+  "openrouter",
 ]);
 
 export const reasoningEffortSchema = z.enum([

@@ -35,6 +35,7 @@ test("platforms map to the correct secret shapes", () => {
     [Platform.GitHubCopilot]: SecretShape.OAuth,
     [Platform.Anthropic]: SecretShape.ApiKey,
     [Platform.OpenAICompatible]: SecretShape.ApiKey,
+    [Platform.OpenRouter]: SecretShape.ApiKey,
     [Platform.S3]: SecretShape.S3AccessKey,
   });
   assert.deepEqual(OAUTH_PLATFORMS, [Platform.GitHubCopilot]);
@@ -49,6 +50,10 @@ test("secret schema is selected for every platform", () => {
   assert.equal(secretSchemaForPlatform(Platform.Anthropic), apiKeySecretSchema);
   assert.equal(
     secretSchemaForPlatform(Platform.OpenAICompatible),
+    apiKeySecretSchema,
+  );
+  assert.equal(
+    secretSchemaForPlatform(Platform.OpenRouter),
     apiKeySecretSchema,
   );
   assert.equal(secretSchemaForPlatform(Platform.S3), s3AccessKeySecretSchema);
@@ -207,6 +212,7 @@ test("only openai-compatible and s3 platforms have metadata schemas", () => {
   assert.equal(metadataSchemaForPlatform(Platform.GitHub), null);
   assert.equal(metadataSchemaForPlatform(Platform.GitHubCopilot), null);
   assert.equal(metadataSchemaForPlatform(Platform.Anthropic), null);
+  assert.equal(metadataSchemaForPlatform(Platform.OpenRouter), null);
   assert.equal(metadataSchemaForPlatform(Platform.S3), s3MetadataSchema);
 });
 

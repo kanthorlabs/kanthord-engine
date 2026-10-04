@@ -87,6 +87,7 @@ components:
                 - github-copilot
                 - anthropic
                 - openai-compatible
+                - openrouter
             credential:
               type: string
               minLength: 1
@@ -125,6 +126,7 @@ components:
                   - github-copilot
                   - anthropic
                   - openai-compatible
+                  - openrouter
               credential:
                 type: string
                 minLength: 1

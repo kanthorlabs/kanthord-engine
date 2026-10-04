@@ -20,6 +20,7 @@ export const AgentProviderKind = {
   GithubCopilot: "github-copilot",
   Anthropic: "anthropic",
   OpenaiCompatible: "openai-compatible",
+  Openrouter: "openrouter",
 } as const;
 export type AgentProviderKind =
   (typeof AgentProviderKind)[keyof typeof AgentProviderKind];

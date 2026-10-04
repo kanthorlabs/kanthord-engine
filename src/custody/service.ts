@@ -72,8 +72,7 @@ import {
   TARGET_KIND_CREDENTIAL,
   probeGitHub,
   probeGitHubCopilot,
-  probeAnthropic,
-  probeOpenAICompatible,
+  LLM_PROVIDER_VALIDATORS,
   probeS3,
 } from "./resource-healthcheck.ts";
 import {
@@ -147,6 +146,15 @@ type PlatformProbe = (
   context: Context,
 ) => Promise<ResourceStatusValue>;
 
+function llmProbe(platform: Platform): PlatformProbe {
+  return (secret, metadata, context) =>
+    LLM_PROVIDER_VALIDATORS[platform]!.probe(
+      apiKeySecretSchema.parse(secret).key,
+      metadata,
+      context,
+    );
+}
+
 const platformProbes: Record<Platform, PlatformProbe> = {
   [Platform.GitHub]: (secret, _metadata, context) =>
     probeGitHub(apiKeySecretSchema.parse(secret).key, context),
@@ -154,14 +162,9 @@ const platformProbes: Record<Platform, PlatformProbe> = {
     const { access, expires } = oauthSecretSchema.parse(secret);
     return probeGitHubCopilot(access, expires, context);
   },
-  [Platform.Anthropic]: (secret, _metadata, context) =>
-    probeAnthropic(apiKeySecretSchema.parse(secret).key, context),
-  [Platform.OpenAICompatible]: (secret, metadata, context) =>
-    probeOpenAICompatible(
-      apiKeySecretSchema.parse(secret).key,
-      openaiCompatibleMetadataSchema.parse(metadata).baseUrl,
-      context,
-    ),
+  [Platform.Anthropic]: llmProbe(Platform.Anthropic),
+  [Platform.OpenAICompatible]: llmProbe(Platform.OpenAICompatible),
+  [Platform.OpenRouter]: llmProbe(Platform.OpenRouter),
   [Platform.S3]: (secret, metadata, context) => {
     const { accessKeyId, secretAccessKey } =
       s3AccessKeySecretSchema.parse(secret);
@@ -562,11 +565,7 @@ export class CustodyComponent implements Service {
 
   modelListCheck(tx: Transaction, credentialName: string): ResourceCheck {
     const row = newestLive(tx, credentialName);
-    if (
-      !row ||
-      (row.platform !== Platform.Anthropic &&
-        row.platform !== Platform.OpenAICompatible)
-    )
+    if (!row || !((row.platform as Platform) in LLM_PROVIDER_VALIDATORS))
       return async () => ResourceStatus.Unknown;
     return capturedResourceCheck(row, this.envelopeKey);
   }

@@ -1847,6 +1847,29 @@ test("anthropic uses the built-in catalog, not absent credential metadata", (t) 
   );
 });
 
+test("openrouter uses the built-in catalog and refuses an unknown model", (t) => {
+  const f = enablementFixture(t, {
+    credentialMetadata: () => {
+      throw new Error("Built-in catalog must not read metadata.");
+    },
+  });
+  const router = { ...provider, provider: AgentProviderKind.Openrouter };
+  const body = (modelIdentifier: string) => ({
+    agentProviders: [router],
+    defaultConfiguration: { ...defaults, modelIdentifier },
+  });
+  refuses(
+    () => f.invoke("agent.enablement.put", body(MODEL)),
+    WorkerErrorCode.ModelUnknown,
+  );
+  const builtin = "anthropic/claude-3-haiku";
+  assert.equal(
+    f.invoke("agent.enablement.put", body(builtin)).defaultConfiguration
+      .modelIdentifier,
+    builtin,
+  );
+});
+
 test("openai-compatible metadata establishes models and reasoning levels, including an explicit empty set", (t) => {
   let metadata: Record<string, unknown> | null = {
     models: [{ id: MODEL, extra: true }],

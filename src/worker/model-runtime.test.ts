@@ -4,7 +4,12 @@ import {
   InMemoryCredentialStore,
   getSupportedThinkingLevels,
 } from "@earendil-works/pi-ai";
-import { createModelRuntime, resolveModel } from "./model-runtime.ts";
+import { AgentProviderKind } from "./enablements.ts";
+import {
+  ADAPTER_ID,
+  createModelRuntime,
+  resolveModel,
+} from "./model-runtime.ts";
 import {
   SetupRefusal,
   WorkerErrorCode,
@@ -156,4 +161,50 @@ test("compatible models retain metadata and exact supported reasoning levels", a
       cacheWrite: 0,
     });
   }
+});
+
+test("openrouter runs with the built-in pi provider and its credential", async (t) => {
+  t.mock.method(globalThis, "fetch", () => {
+    throw new Error("Unexpected network call");
+  });
+  const openrouter: ExecutionSetup = {
+    ...setup,
+    effectiveConfiguration: {
+      ...setup.effectiveConfiguration,
+      provider: "openrouter",
+      modelIdentifier: "anthropic/claude-3-haiku",
+    },
+  };
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("openrouter", async () => ({
+    type: "api_key",
+    key: "test_execution-secret",
+  }));
+  const runtime = await createModelRuntime({
+    setup: openrouter,
+    handoverItem: { ...handoverItem, providerId: "openrouter" },
+    credentials,
+    signal: new AbortController().signal,
+  });
+  const model = resolveModel(runtime, openrouter);
+  assert.equal(model.provider, ADAPTER_ID[AgentProviderKind.Openrouter]);
+  assert.ok(
+    JSON.stringify(await runtime.getAuth("openrouter")).includes(
+      "test_execution-secret",
+    ),
+  );
+  assert.throws(
+    () =>
+      resolveModel(runtime, {
+        ...openrouter,
+        effectiveConfiguration: {
+          ...openrouter.effectiveConfiguration,
+          modelIdentifier: "unknown",
+        },
+      }),
+    {
+      code: WorkerErrorCode.RuntimeSetupRefused,
+      details: { reason: SetupRefusal.ModelUnknown },
+    },
+  );
 });

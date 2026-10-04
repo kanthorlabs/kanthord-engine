@@ -26,16 +26,21 @@ import {
   AUTHORIZATION_HEADER,
   CAPABILITY_BUCKET_HEAD,
   CAPABILITY_COPILOT_TOKEN_READ,
+  CAPABILITY_KEY_READ,
   CAPABILITY_MODEL_LIST_READ,
   CAPABILITY_RATE_LIMIT_READ,
   GITHUB_COPILOT_TOKEN_URL,
   GITHUB_RATE_LIMIT_URL,
   MODELS_PATH,
+  OPENROUTER_KEY_URL,
+  PLATFORM_CAPABILITY,
+  LLM_PROVIDER_VALIDATORS,
   TARGET_KIND_CREDENTIAL,
   probeAnthropic,
   probeGitHub,
   probeGitHubCopilot,
   probeOpenAICompatible,
+  probeOpenRouter,
   probeS3,
 } from "./resource-healthcheck.ts";
 import { CustodyComponent } from "./service.ts";
@@ -90,7 +95,47 @@ const httpProbes: {
     headers: BEARER_HEADERS,
     check: (context) => probeOpenAICompatible(SECRET, BASE_URL, context),
   },
+  {
+    name: Platform.OpenRouter,
+    url: OPENROUTER_KEY_URL,
+    headers: BEARER_HEADERS,
+    check: (context) => probeOpenRouter(SECRET, context),
+  },
 ];
+
+test("every LLM platform selects its validator by platform", async (t) => {
+  assert.deepEqual(Object.keys(LLM_PROVIDER_VALIDATORS).sort(), [
+    Platform.Anthropic,
+    Platform.OpenAICompatible,
+    Platform.OpenRouter,
+  ]);
+  assert.equal(PLATFORM_CAPABILITY[Platform.OpenRouter], CAPABILITY_KEY_READ);
+  const urls: unknown[] = [];
+  t.mock.method(globalThis, "fetch", async (url: unknown) => {
+    urls.push(url);
+    return new Response(null, { status: HttpStatus.OK });
+  });
+  const metadata = { baseUrl: BASE_URL, models: [] };
+  for (const platform of [
+    Platform.Anthropic,
+    Platform.OpenAICompatible,
+    Platform.OpenRouter,
+  ]) {
+    assert.equal(
+      await LLM_PROVIDER_VALIDATORS[platform]!.probe(
+        SECRET,
+        platform === Platform.OpenAICompatible ? metadata : null,
+        background,
+      ),
+      ResourceStatus.Healthy,
+    );
+  }
+  assert.deepEqual(urls, [
+    ANTHROPIC_MODELS_URL,
+    BASE_URL + MODELS_PATH,
+    OPENROUTER_KEY_URL,
+  ]);
+});
 
 for (const probe of httpProbes) {
   for (const [status, expected] of [
