@@ -380,17 +380,21 @@ test("two proved releases race at the transaction, for equal and different paylo
   for (const furtherWork of [true, false]) {
     const result = completed(await h.pull());
     assert.ok(result.kind === WorkPullKind.Claimed);
+    const firstAdmitted = Promise.withResolvers<void>();
     const gate = Promise.withResolvers<void>();
     let admitted = 0;
     registered.handler = async (input, caller) => {
       admitted++;
+      if (admitted === ONE) firstAdmitted.resolve();
       if (admitted === TWO) gate.resolve();
       await gate.promise;
       return original(input, caller);
     };
     try {
+      const winning = h.release(result.execution.executionId);
+      await firstAdmitted.promise;
       const [winner, loser] = await Promise.all([
-        h.release(result.execution.executionId),
+        winning,
         h.release(result.execution.executionId, furtherWork),
       ]);
       completed(winner);
