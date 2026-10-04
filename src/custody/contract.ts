@@ -19,8 +19,8 @@ export const SecretShape = {
 export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
 export const PlatformKind = {
   Git: "git",
-  Llm: "llm",
   Storage: "storage",
+  Llm: "llm",
 } as const;
 export type PlatformKind = (typeof PlatformKind)[keyof typeof PlatformKind];
 export const LoginSessionMode = {

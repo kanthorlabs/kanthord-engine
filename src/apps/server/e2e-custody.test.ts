@@ -329,14 +329,14 @@ test("E01.15 platforms answers the platform list ahead of the credential name ro
   }>(await kanthord(["credential", "platforms"], env));
   assert.deepEqual(
     answer.items.map(({ kind }) => kind),
-    ["git", "llm", "storage"],
+    ["git", "storage", "llm"],
   );
   assert.deepEqual(
     answer.items[0]?.platforms.map(({ platform }) => platform),
     [GITHUB],
   );
   assert.ok(
-    answer.items[1]?.platforms.some(({ platform }) => platform === ANTHROPIC),
+    answer.items[2]?.platforms.some(({ platform }) => platform === ANTHROPIC),
   );
 });
 

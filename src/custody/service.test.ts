@@ -2153,7 +2153,7 @@ test("platform list answers the platform table grouped by kind in kind order", (
   const answer = f.platformList();
   assert.deepEqual(
     answer.items.map(({ kind }) => kind),
-    [PlatformKind.Git, PlatformKind.Llm, PlatformKind.Storage],
+    [PlatformKind.Git, PlatformKind.Storage, PlatformKind.Llm],
   );
   const listed = answer.items.flatMap(({ kind, platforms }) =>
     platforms.map((entry) => ({ kind, ...entry })),
@@ -2179,7 +2179,7 @@ test("platform list answers the platform table grouped by kind in kind order", (
       verifiable: true,
     },
   ]);
-  assert.deepEqual(answer.items[2]!.platforms, [
+  assert.deepEqual(answer.items[1]!.platforms, [
     {
       platform: Platform.S3,
       secretShape: SecretShape.S3AccessKey,

@@ -165,7 +165,7 @@ The CLI fetches no further page implicitly. Custody drains unpinned older live r
 
 No positional arguments, no body and no pagination. HTTP `200` returns
 `{ items: [{ kind, platforms: [{ platform, secretShape, loginModes, metadataFields, verifiable }] }] }`.
-`kind` is `git`, `llm` or `storage`, in that order. `loginModes` is `[]` for a
+`kind` is `git`, `storage` or `llm`, in that order. `loginModes` is `[]` for a
 platform whose secret shape is not `oauth`. `metadataFields` names the required
 string fields of the metadata. `verifiable` is `true` when the platform validation
 makes a remote call. The command answers only the shared error codes.
