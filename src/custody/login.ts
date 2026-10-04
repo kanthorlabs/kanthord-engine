@@ -19,11 +19,13 @@ import {
 export const COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER = "company.ghe.com";
 export const OAUTH_PROVIDER_IDS: Partial<Record<Platform, string>> = {
   [Platform.GitHubCopilot]: "github-copilot",
+  [Platform.OpenAICodex]: "openai-codex",
 };
 export const OAUTH_SUPPORTED_MODES: Partial<
   Record<Platform, readonly LoginSessionMode[]>
 > = {
   [Platform.GitHubCopilot]: [LoginSessionMode.Device],
+  [Platform.OpenAICodex]: [LoginSessionMode.Browser, LoginSessionMode.Device],
 };
 const PI_LOGIN_MODES = {
   [LoginSessionMode.Browser]: "browser",

@@ -1,5 +1,6 @@
 import type { Credential } from "@earendil-works/pi-ai";
 import type { z } from "zod";
+import { isObject } from "../kernel/values.ts";
 import { piCredentialSchema } from "./contract.ts";
 import {
   apiKeySecretSchema,
@@ -19,6 +20,27 @@ export function normalizeCredential(credential: Credential): Credential {
     access: credential.access,
     expires: credential.expires,
   });
+}
+
+export function dropExtraOAuthFields(value: unknown): unknown {
+  if (!isObject(value) || !("credential" in value)) return value;
+  const { credential } = value;
+  if (
+    !isObject(credential) ||
+    !("type" in credential) ||
+    credential.type !== SecretShape.OAuth
+  )
+    return value;
+  const { refresh, access, expires } = credential as Record<string, unknown>;
+  return {
+    ...value,
+    credential: {
+      type: credential.type,
+      refresh,
+      access,
+      expires,
+    },
+  };
 }
 
 export function credentialOfSecret(

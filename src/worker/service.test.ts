@@ -1847,6 +1847,29 @@ test("anthropic uses the built-in catalog, not absent credential metadata", (t) 
   );
 });
 
+test("openai-codex uses the built-in catalog and refuses an unknown model", (t) => {
+  const f = enablementFixture(t, {
+    credentialMetadata: () => {
+      throw new Error("Built-in catalog must not read metadata.");
+    },
+  });
+  const codex = { ...provider, provider: AgentProviderKind.OpenaiCodex };
+  const body = (modelIdentifier: string) => ({
+    agentProviders: [codex],
+    defaultConfiguration: { ...defaults, modelIdentifier },
+  });
+  refuses(
+    () => f.invoke("agent.enablement.put", body(MODEL)),
+    WorkerErrorCode.ModelUnknown,
+  );
+  const builtin = "gpt-5.5";
+  assert.equal(
+    f.invoke("agent.enablement.put", body(builtin)).defaultConfiguration
+      .modelIdentifier,
+    builtin,
+  );
+});
+
 test("openrouter uses the built-in catalog and refuses an unknown model", (t) => {
   const f = enablementFixture(t, {
     credentialMetadata: () => {

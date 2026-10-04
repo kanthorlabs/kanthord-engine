@@ -16,7 +16,11 @@ import {
   type CustodyExecution,
   type Material,
 } from "./contract.ts";
-import { credentialOfSecret, secretOfCredential } from "./payload.ts";
+import {
+  credentialOfSecret,
+  dropExtraOAuthFields,
+  secretOfCredential,
+} from "./payload.ts";
 import { PLATFORM_SECRET_SHAPE, type Platform } from "./platforms.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 
@@ -82,7 +86,7 @@ export function openReport(
     keys.handover.fill(0);
     keys.report.fill(0);
   }
-  const parsed = refreshReportSchema.safeParse(value);
+  const parsed = refreshReportSchema.safeParse(dropExtraOAuthFields(value));
   if (
     !parsed.success ||
     !execution.credentials.includes(parsed.data.credentialId)

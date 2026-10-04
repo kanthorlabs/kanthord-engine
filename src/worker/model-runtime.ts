@@ -23,6 +23,7 @@ import { loadPi } from "./pi.ts";
 export const ADAPTER_ID: Record<AgentProviderKind, string> = {
   [AgentProviderKind.Anthropic]: "anthropic",
   [AgentProviderKind.GithubCopilot]: "github-copilot",
+  [AgentProviderKind.OpenaiCodex]: "openai-codex",
   [AgentProviderKind.OpenaiCompatible]: "openai-compatible",
   [AgentProviderKind.Openrouter]: "openrouter",
 };

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { Logger } from "pino";
 import type { Provider } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
+import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import {
   background,
   CancellationContext,
@@ -148,11 +149,7 @@ type PlatformProbe = (
 
 function llmProbe(platform: Platform): PlatformProbe {
   return (secret, metadata, context) =>
-    LLM_PROVIDER_VALIDATORS[platform]!.probe(
-      apiKeySecretSchema.parse(secret).key,
-      metadata,
-      context,
-    );
+    LLM_PROVIDER_VALIDATORS[platform]!.probe(secret, metadata, context);
 }
 
 const platformProbes: Record<Platform, PlatformProbe> = {
@@ -162,6 +159,7 @@ const platformProbes: Record<Platform, PlatformProbe> = {
     const { access, expires } = oauthSecretSchema.parse(secret);
     return probeGitHubCopilot(access, expires, context);
   },
+  [Platform.OpenAICodex]: llmProbe(Platform.OpenAICodex),
   [Platform.Anthropic]: llmProbe(Platform.Anthropic),
   [Platform.OpenAICompatible]: llmProbe(Platform.OpenAICompatible),
   [Platform.OpenRouter]: llmProbe(Platform.OpenRouter),
@@ -320,7 +318,8 @@ export class CustodyComponent implements Service {
     this.clientSecret = dependencies.clientSecret;
     this.store = dependencies.store;
     this.oauthProviders =
-      dependencies.oauthProviders ?? (() => [githubCopilotProvider()]);
+      dependencies.oauthProviders ??
+      (() => [githubCopilotProvider(), openaiCodexProvider()]);
     this.now = dependencies.now ?? Date.now;
     this.envelopeKey = dependencies.envelopeKey;
     this.logger = dependencies.logger;

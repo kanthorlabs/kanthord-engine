@@ -27,6 +27,12 @@ import {
   CAPABILITY_BUCKET_HEAD,
   CAPABILITY_COPILOT_TOKEN_READ,
   CAPABILITY_KEY_READ,
+  CAPABILITY_MODEL_CALL,
+  OPENAI_CODEX_PROBE_MODEL,
+  OPENAI_CODEX_PROBE_PROMPT,
+  OPENAI_CODEX_PROBE_REASONING,
+  probeOpenAICodex,
+  type ModelCall,
   CAPABILITY_MODEL_LIST_READ,
   CAPABILITY_RATE_LIMIT_READ,
   GITHUB_COPILOT_TOKEN_URL,
@@ -106,6 +112,7 @@ const httpProbes: {
 test("every LLM platform selects its validator by platform", async (t) => {
   assert.deepEqual(Object.keys(LLM_PROVIDER_VALIDATORS).sort(), [
     Platform.Anthropic,
+    Platform.OpenAICodex,
     Platform.OpenAICompatible,
     Platform.OpenRouter,
   ]);
@@ -123,7 +130,7 @@ test("every LLM platform selects its validator by platform", async (t) => {
   ]) {
     assert.equal(
       await LLM_PROVIDER_VALIDATORS[platform]!.probe(
-        SECRET,
+        { key: SECRET },
         platform === Platform.OpenAICompatible ? metadata : null,
         background,
       ),
@@ -222,6 +229,97 @@ for (const probe of httpProbes) {
     assert.equal(dispose.mock.callCount(), ONE_CALL);
   });
 }
+
+const USER_ROLE = "user";
+const codexCall =
+  (status: number, stopReason: "stop" | "error"): ModelCall =>
+  async (_model, _context, options) => {
+    await options.onResponse?.({ status, headers: {} }, _model);
+    return { stopReason } as Awaited<ReturnType<ModelCall>>;
+  };
+
+test("openai-codex probe sends one model call and maps replies and failures", async (t) => {
+  assert.equal(
+    PLATFORM_CAPABILITY[Platform.OpenAICodex],
+    CAPABILITY_MODEL_CALL,
+  );
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("unexpected request");
+  });
+  const seen: unknown[] = [];
+  const recording: ModelCall = async (model, modelContext, options) => {
+    seen.push([
+      model.id,
+      modelContext.messages,
+      options.reasoning,
+      options.apiKey,
+    ]);
+    return codexCall(HttpStatus.OK, "stop")(model, modelContext, options);
+  };
+  const future = Date.now() + FUTURE_MS;
+  assert.equal(
+    await probeOpenAICodex(SECRET, future, background, recording),
+    ResourceStatus.Healthy,
+  );
+  assert.equal(seen.length, ONE_CALL);
+  const [id, messages, reasoning, apiKey] = seen[0] as [
+    string,
+    { role: string; content: string }[],
+    string,
+    string,
+  ];
+  assert.equal(id, OPENAI_CODEX_PROBE_MODEL);
+  assert.equal(reasoning, OPENAI_CODEX_PROBE_REASONING);
+  assert.equal(apiKey, SECRET);
+  assert.equal(messages.length, ONE_CALL);
+  assert.equal(messages[0]!.role, USER_ROLE);
+  assert.equal(messages[0]!.content, OPENAI_CODEX_PROBE_PROMPT);
+  for (const [status, expected] of [
+    [HttpStatus.Unauthorized, ResourceStatus.Unhealthy],
+    [HttpStatus.Forbidden, ResourceStatus.Unhealthy],
+    [HttpStatus.InternalServerError, ResourceStatus.Unknown],
+  ] as const)
+    assert.equal(
+      await probeOpenAICodex(
+        SECRET,
+        future,
+        background,
+        codexCall(status, "error"),
+      ),
+      expected,
+    );
+  assert.equal(
+    await probeOpenAICodex(SECRET, future, background, async () => {
+      throw new Error(SECRET);
+    }),
+    ResourceStatus.Unknown,
+  );
+  assert.equal(fetch.mock.callCount(), NO_CALLS);
+});
+
+test("openai-codex probe makes no call for an expired token or a cancelled context", async () => {
+  let calls = NO_CALLS;
+  const counting: ModelCall = async (model, modelContext, options) => {
+    calls += ONE_CALL;
+    return codexCall(HttpStatus.OK, "stop")(model, modelContext, options);
+  };
+  assert.equal(
+    await probeOpenAICodex(
+      SECRET,
+      Date.now() - FUTURE_MS,
+      background,
+      counting,
+    ),
+    ResourceStatus.Unknown,
+  );
+  const cancelled = new CancellationContext();
+  cancelled.cancel();
+  assert.equal(
+    await probeOpenAICodex(SECRET, Date.now() + FUTURE_MS, cancelled, counting),
+    ResourceStatus.Unknown,
+  );
+  assert.equal(calls, NO_CALLS);
+});
 
 test("Copilot tokens at or before expiry never make a request", async (t) => {
   const now = Date.now();

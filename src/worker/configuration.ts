@@ -104,6 +104,7 @@ function modelLevels(
   assert.ok(
     item.provider === AgentProviderKind.Anthropic ||
       item.provider === AgentProviderKind.GithubCopilot ||
+      item.provider === AgentProviderKind.OpenaiCodex ||
       item.provider === AgentProviderKind.Openrouter,
     "Unknown stored agent provider kind.",
   );

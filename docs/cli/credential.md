@@ -85,7 +85,7 @@ These routes have no project identity. The proposed provider check is in
 A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
 A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `createdAt: Timestamp`
 and `endedAt: Timestamp | null`. No answer holds `secret`.
-`platform` is the closed enum `github | github-copilot | anthropic | openai-compatible | s3`.
+`platform` is the closed enum `github | github-copilot | openai-codex | anthropic | openai-compatible | openrouter | s3`.
 Each platform holds exactly one secret shape from `api_key | oauth | s3_access_key`.
 The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) bounds `api_key` and `oauth` to 48,915 UTF-8 bytes of normalized canonical pi-ai credential JSON, including type, structure and escaping. It excludes `s3_access_key`. Creation and rotation reject an oversized value with HTTP 400 `credential.input.invalid` before writing. Oversized OAuth login material follows the sanitized failed-session path and stores nothing.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#platform-validators)
@@ -95,19 +95,21 @@ fix the secret shape and the metadata of each platform:
 | ------------------- | --------------- | ---------------------------------------- |
 | `github`            | `api_key`       | None; wire value `null`.                 |
 | `github-copilot`    | `oauth`         | None; wire value `null`.                 |
+| `openai-codex`      | `oauth`         | None; wire value `null`.                 |
 | `anthropic`         | `api_key`       | None; wire value `null`.                 |
 | `openai-compatible` | `api_key`       | Required `{ baseUrl, models }`.          |
+| `openrouter`        | `api_key`       | None; wire value `null`.                 |
 | `s3`                | `s3_access_key` | Required `{ endpoint, bucket, region }`. |
 
 For `openai-compatible`:
 
-- `baseUrl` is required, uses `https` or `http`, and has no query or fragment.
+- `baseUrl` is required, uses `https` or `http`, and has no query, no fragment and no trailing slash.
   It is fixed for the life of the revision. A rotation can set a different endpoint; a metadata edit cannot.
   An official OpenAI record uses `https://api.openai.com/v1`.
 - `models` is required and starts as `[]` at creation. A human adds approved
   models through a metadata revision after `worker provider check`.
 - Each model has a required `id` and optional `contextWindow`, `maxTokens` and
-  `reasoningLevels`. `id` is a nonblank string. An omitted value takes the pi 0.86.0
+  `reasoningLevels`. `id` is a nonblank string, unique inside `models`. An omitted value takes the pi 0.86.0
   default: `contextWindow` `128000`, `maxTokens` `16384`, `reasoningLevels` `["off"]`.
   Both limits are positive integers, and `maxTokens` is at most `contextWindow`.
 - `reasoningLevels` is an array of established levels from `off`, `minimal`,
@@ -129,8 +131,8 @@ The required file supplies the body; params and query are empty. Required
 fields have no default:
 
 - `name`: `CredentialName`.
-- `platform`: one of the four platforms whose secret shape is not `oauth`;
-  `github-copilot` requires `login`.
+- `platform`: one of the five platforms whose secret shape is not `oauth`;
+  `github-copilot` and `openai-codex` require `login`.
 - `metadata`: the platform schema above, with explicit `null` for no metadata.
 - `secret`: a closed object of the secret shape of the platform. For `api_key`, `{ key }`, with a required nonempty
   string whose exact value is preserved. For `s3_access_key`, required nonempty
@@ -198,7 +200,7 @@ at its next use of the credential. A revoke of the newest live revision answers
 
 The [OAuth login contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-oauth-login)
 requires a platform that accepts `oauth`; the implemented platform set permits
-`github-copilot` only. The positional platform is required with no default.
+`github-copilot` and `openai-codex`. The positional platform is required with no default.
 `--name` is required `CredentialName` with no default.
 
 The body is `{ platform, mode?, name }`, with empty
@@ -243,28 +245,28 @@ not poll until completion or change the session. No mutation key is accepted.
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                     | Condition                                                        | Commands                                                                     |
-| ----- | ---------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| 409   | `credential.login.value_not_awaited`     | The session does not await a code.                               | login-code                                                                   |
-| 409   | `credential.login.pending`               | Another login is pending for this platform and human.            | login                                                                        |
-| 404   | `credential.login.not_found`             | The login session does not exist.                                | login-code, login-status                                                     |
-| 400   | `credential.login.mode_unsupported`      | The platform does not support the selected login mode.           | login                                                                        |
-| 404   | `credential.credential.not_found`        | The credential does not exist.                                   | get, rotate, update-metadata, revoke, worker handover                        |
-| local | `cli.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.            | login                                                                        |
-| local | `cli.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.        | revoke                                                                       |
-| 400   | `credential.entry.unsupported`           | The platform does not support this entry method.                 | create, login                                                                |
-| 400   | `credential.input.invalid`               | Secret or metadata validation fails, including the byte budget.  | create, rotate, update-metadata, login, login-code                           |
-| 409   | `credential.metadata.base_url_fixed`     | The edit changes `baseUrl` outside rotation.                     | update-metadata                                                              |
-| 409   | `credential.metadata.model_in_use`       | A removed model has dependent defaults or entries.               | update-metadata                                                              |
-| 409   | `credential.name.conflict`               | A credential already has this name; details identify the holder. | create, login                                                                |
-| 400   | `credential.platform.mismatch`           | The requested platform differs from the stored platform.         | binding apply, agent enablement put (custody collaboration), worker handover |
-| 400   | `credential.platform.unsupported`        | The platform is not supported.                                   | create, login                                                                |
-| 409   | `credential.revision.conflict`           | The expected revision is stale.                                  | rotate, update-metadata                                                      |
-| 409   | `credential.revision.ended`              | The revision is already ended, by a revoke or by a drain.        | revoke                                                                       |
-| 409   | `credential.revision.newest_live`        | The revoke names the newest live revision.                       | revoke                                                                       |
-| 404   | `credential.revision.not_found`          | The revision does not exist.                                     | revoke                                                                       |
-| local | `custody.lifecycle.stopped`              | Custody cannot accept a login or restart after shutdown.         | login, serve server                                                          |
-| 409   | `credential.revision.revoked`            | A pinned use names a revoked revision.                           | worker handover, worker credential (API only)                                |
+| HTTP  | Code                                     | Condition                                                                                      | Commands                                                                     |
+| ----- | ---------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 409   | `credential.login.value_not_awaited`     | The session does not await a code.                                                             | login-code                                                                   |
+| 409   | `credential.login.pending`               | Another login is pending for this platform and human.                                          | login                                                                        |
+| 404   | `credential.login.not_found`             | The login session does not exist.                                                              | login-code, login-status                                                     |
+| 400   | `credential.login.mode_unsupported`      | The platform does not support the selected login mode.                                         | login                                                                        |
+| 404   | `credential.credential.not_found`        | The credential does not exist.                                                                 | get, rotate, update-metadata, revoke, worker handover                        |
+| local | `cli.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.                                          | login                                                                        |
+| local | `cli.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                      | revoke                                                                       |
+| 400   | `credential.entry.unsupported`           | The platform does not support this entry method.                                               | create, login                                                                |
+| 400   | `credential.input.invalid`               | Secret or metadata validation fails, including the byte budget.                                | create, rotate, update-metadata, login, login-code                           |
+| 409   | `credential.metadata.base_url_fixed`     | The edit changes `baseUrl` outside rotation.                                                   | update-metadata                                                              |
+| 409   | `credential.metadata.model_in_use`       | A removed model has dependent defaults or entries. Details: `{ models: [{ model, agents }] }`. | update-metadata                                                              |
+| 409   | `credential.name.conflict`               | A credential already has this name; details identify the holder.                               | create, login                                                                |
+| 400   | `credential.platform.mismatch`           | The requested platform differs from the stored platform.                                       | binding apply, agent enablement put (custody collaboration), worker handover |
+| 400   | `credential.platform.unsupported`        | The platform is not supported.                                                                 | create, login                                                                |
+| 409   | `credential.revision.conflict`           | The expected revision is stale.                                                                | rotate, update-metadata                                                      |
+| 409   | `credential.revision.ended`              | The revision is already ended, by a revoke or by a drain.                                      | revoke                                                                       |
+| 409   | `credential.revision.newest_live`        | The revoke names the newest live revision.                                                     | revoke                                                                       |
+| 404   | `credential.revision.not_found`          | The revision does not exist.                                                                   | revoke                                                                       |
+| local | `custody.lifecycle.stopped`              | Custody cannot accept a login or restart after shutdown.                                       | login, serve server                                                          |
+| 409   | `credential.revision.revoked`            | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                                |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 

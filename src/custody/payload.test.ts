@@ -9,6 +9,7 @@ import {
 } from "./contract.ts";
 import {
   credentialOfSecret,
+  dropExtraOAuthFields,
   normalizeCredential,
   secretOfCredential,
 } from "./payload.ts";
@@ -61,4 +62,21 @@ test("handover and report contracts refuse extra keys, wrong identities and dige
   assert.throws(() =>
     refreshReportSchema.parse({ ...report, digest: "invalid" }),
   );
+});
+
+test("a refresh report with extra OAuth fields normalizes before validation", () => {
+  const report = {
+    credentialId: ID,
+    digest: digest(OAUTH),
+    credential: { ...OAUTH, accountId: "account" },
+  };
+  assert.throws(() => refreshReportSchema.parse(report));
+  assert.deepEqual(refreshReportSchema.parse(dropExtraOAuthFields(report)), {
+    credentialId: ID,
+    digest: digest(OAUTH),
+    credential: OAUTH,
+  });
+  assert.equal(dropExtraOAuthFields(null), null);
+  const apiReport = { credentialId: ID, digest: "x", credential: KEY };
+  assert.equal(dropExtraOAuthFields(apiReport), apiReport);
 });

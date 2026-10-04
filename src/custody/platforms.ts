@@ -5,6 +5,7 @@ export { SecretShape } from "./contract.ts";
 export const Platform = {
   GitHub: "github",
   GitHubCopilot: "github-copilot",
+  OpenAICodex: "openai-codex",
   Anthropic: "anthropic",
   OpenAICompatible: "openai-compatible",
   OpenRouter: "openrouter",
@@ -15,12 +16,16 @@ export type Platform = (typeof Platform)[keyof typeof Platform];
 export const PLATFORM_SECRET_SHAPE: Record<Platform, SecretShape> = {
   [Platform.GitHub]: SecretShape.ApiKey,
   [Platform.GitHubCopilot]: SecretShape.OAuth,
+  [Platform.OpenAICodex]: SecretShape.OAuth,
   [Platform.Anthropic]: SecretShape.ApiKey,
   [Platform.OpenAICompatible]: SecretShape.ApiKey,
   [Platform.OpenRouter]: SecretShape.ApiKey,
   [Platform.S3]: SecretShape.S3AccessKey,
 };
-export const OAUTH_PLATFORMS: readonly Platform[] = [Platform.GitHubCopilot];
+export const OAUTH_PLATFORMS: readonly Platform[] = [
+  Platform.GitHubCopilot,
+  Platform.OpenAICodex,
+];
 export const RESERVED_NAME_LOGIN = "login";
 export const CREDENTIAL_NAME_MAX_LENGTH = 63;
 const EMPTY_STRING_LENGTH = 0;
@@ -98,6 +103,7 @@ export const s3MetadataSchema = z.strictObject({
 const secretSchemas: Record<Platform, z.ZodType> = {
   [Platform.GitHub]: apiKeySecretSchema,
   [Platform.GitHubCopilot]: oauthSecretSchema,
+  [Platform.OpenAICodex]: oauthSecretSchema,
   [Platform.Anthropic]: apiKeySecretSchema,
   [Platform.OpenAICompatible]: apiKeySecretSchema,
   [Platform.OpenRouter]: apiKeySecretSchema,
@@ -106,6 +112,7 @@ const secretSchemas: Record<Platform, z.ZodType> = {
 const metadataSchemas: Record<Platform, z.ZodType | null> = {
   [Platform.GitHub]: null,
   [Platform.GitHubCopilot]: null,
+  [Platform.OpenAICodex]: null,
   [Platform.Anthropic]: null,
   [Platform.OpenAICompatible]: openaiCompatibleMetadataSchema,
   [Platform.OpenRouter]: null,

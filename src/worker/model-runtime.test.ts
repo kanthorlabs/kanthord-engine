@@ -208,3 +208,37 @@ test("openrouter runs with the built-in pi provider and its credential", async (
     },
   );
 });
+
+test("openai-codex resolves a built-in model against its OAuth credential", async (t) => {
+  t.mock.method(globalThis, "fetch", () => {
+    throw new Error("Unexpected network call");
+  });
+  const codex: ExecutionSetup = {
+    ...setup,
+    effectiveConfiguration: {
+      ...setup.effectiveConfiguration,
+      provider: "openai-codex",
+      modelIdentifier: "gpt-5.5",
+    },
+  };
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("openai-codex", async () => ({
+    type: "oauth",
+    refresh: "test_refresh",
+    access: "test_access",
+    expires: Date.now() + 3600000,
+  }));
+  const runtime = await createModelRuntime({
+    setup: codex,
+    handoverItem: { ...handoverItem, providerId: "openai-codex" },
+    credentials,
+    signal: new AbortController().signal,
+  });
+  const model = resolveModel(runtime, codex);
+  assert.equal(model.provider, ADAPTER_ID[AgentProviderKind.OpenaiCodex]);
+  assert.ok(
+    JSON.stringify(await runtime.getAuth("openai-codex")).includes(
+      "test_access",
+    ),
+  );
+});

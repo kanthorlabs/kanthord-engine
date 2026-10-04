@@ -18,6 +18,7 @@ export type EnablementState =
 
 export const AgentProviderKind = {
   GithubCopilot: "github-copilot",
+  OpenaiCodex: "openai-codex",
   Anthropic: "anthropic",
   OpenaiCompatible: "openai-compatible",
   Openrouter: "openrouter",

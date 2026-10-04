@@ -1164,9 +1164,10 @@ const oauthCredential: OAuthCredential = {
 
 function fakeProvider(
   login: (interaction: ProviderAuthInteraction) => Promise<OAuthCredential>,
+  id: string = Platform.GitHubCopilot,
 ): Provider {
   return createProvider({
-    id: Platform.GitHubCopilot,
+    id,
     models: [],
     api: {},
     auth: {
@@ -1357,6 +1358,66 @@ test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only
     () => f.loginCode(answer.sessionId, MANUAL_VALUE),
     HttpStatus.Conflict,
     LOGIN_VALUE_NOT_AWAITED,
+  );
+});
+
+test("openai-codex login offers both modes and stores only refresh, access and expires", async (t) => {
+  let selected: string | undefined;
+  const provider = fakeProvider(async (interaction) => {
+    selected = await interaction.prompt({
+      type: "select",
+      message: "Mode",
+      options: [
+        { id: DEVICE_OPTION, label: "Device" },
+        { id: "browser", label: "Browser" },
+      ],
+    });
+    deviceAddress(interaction);
+    return { ...oauthCredential, accountId: "account-extra" };
+  }, Platform.OpenAICodex);
+  const f = fixture({
+    oauthProviders: () => [provider],
+    now: () => CLOCK_START,
+  });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login({
+    platform: Platform.OpenAICodex,
+    name: "codex",
+    mode: "device",
+  });
+  const status = await terminalStatus(f, answer.sessionId);
+  assert.equal(status.state, LoginSessionState.Completed);
+  assert.equal(selected, DEVICE_OPTION);
+  const row = f.store.database.prepare("SELECT * FROM credential").get() as {
+    id: string;
+    platform: string;
+    metadata: null;
+    nonce: Buffer;
+    ciphertext: Buffer;
+  };
+  assert.equal(row.platform, Platform.OpenAICodex);
+  assert.equal(row.metadata, null);
+  assert.deepEqual(
+    decrypt(key, row.id, row.platform, row.nonce, row.ciphertext),
+    {
+      refresh: oauthCredential.refresh,
+      access: oauthCredential.access,
+      expires: oauthCredential.expires,
+    },
+  );
+  fails(
+    () =>
+      f.create({
+        name: "codex-direct",
+        platform: Platform.OpenAICodex,
+        secret: apiSecret,
+        metadata: null,
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_ENTRY_CODE,
   );
 });
 

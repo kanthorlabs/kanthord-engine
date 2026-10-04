@@ -197,6 +197,7 @@ components:
                 type: string
                 enum:
                   - github-copilot
+                  - openai-codex
                   - anthropic
                   - openai-compatible
                   - openrouter
@@ -279,6 +280,7 @@ components:
                     type: string
                     enum:
                       - github-copilot
+                      - openai-codex
                       - anthropic
                       - openai-compatible
                       - openrouter
@@ -345,6 +347,7 @@ components:
                 type: string
                 enum:
                   - github-copilot
+                  - openai-codex
                   - anthropic
                   - openai-compatible
                   - openrouter

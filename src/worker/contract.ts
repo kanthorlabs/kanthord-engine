@@ -532,6 +532,7 @@ export type EntriesOfAgent = (
 
 export const agentProviderKindSchema = z.enum([
   "github-copilot",
+  "openai-codex",
   "anthropic",
   "openai-compatible",
   "openrouter",
