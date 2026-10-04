@@ -22,6 +22,7 @@ import {
   SCHEDULER_TIMEOUT_MS,
 } from "../../scheduler/contract.ts";
 import {
+  AccessPolicy,
   OperationResultType,
   OperationLifetime,
   type Operation,
@@ -536,10 +537,12 @@ test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and b
     const path = operation.path
       .replace(":projectId", h.projectId)
       .replace(":executionId", createIdentity("execution"));
+    const token =
+      operation.access === AccessPolicy.Client ? h.generalToken : h.f.token;
     const response = await h.f.request(path + "?unexpected=true", {
       method: operation.method,
       headers: {
-        Authorization: `Bearer ${h.f.token}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       ...(operation.body ? { body: "{}" } : {}),

@@ -418,6 +418,7 @@ export class GatewayService implements Service {
           const work = (async () => {
             let body: unknown = null;
             let delivery;
+            let rejection: GatewayError | undefined;
             if (operation.delivery)
               delivery = {
                 bytes: await context.req.arrayBuffer(),
@@ -431,18 +432,24 @@ export class GatewayService implements Service {
                   ?.trim()
                   .toLowerCase() !== MediaType.JSON
               )
-                throw new GatewayError(
+                rejection = new GatewayError(
                   415,
                   "gateway.request.unsupported_media_type",
                   "Request body requires application/json.",
                 );
-              body = parseJSON(await context.req.text());
+              else
+                try {
+                  body = parseJSON(await context.req.text());
+                } catch (error) {
+                  if (!(error instanceof GatewayError)) throw error;
+                  rejection = error;
+                }
             } else if (
               context.req.raw.body &&
               operation.lifetime !== OperationLifetime.Stream
             ) {
               if ((await context.req.text()).length)
-                throw new GatewayError(
+                rejection = new GatewayError(
                   400,
                   "gateway.request.unexpected_body",
                   "This operation accepts no request body.",
@@ -466,6 +473,7 @@ export class GatewayService implements Service {
                 requestId: context.get("requestId"),
                 context: requestContext,
                 delivery,
+                rejection,
                 request: context.req.raw,
                 traceparent: context.req.header("traceparent"),
                 tracestate: context.req.header("tracestate"),

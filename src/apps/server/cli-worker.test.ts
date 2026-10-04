@@ -207,6 +207,7 @@ test("instance inspection CLI validates filters and identity and denies machine 
   assert.deepEqual(JSON.parse(page.stdout), { items: [], nextCursor: null });
   const invalidQuery = await fixture.request(
     "/api/worker/instance?resourceIdentity=worker:kanthord:general",
+    { headers: { Authorization: `Bearer ${fixture.token}` } },
   );
   const badRequest = 400;
   const validationFailed = "gateway.request.validation_failed";

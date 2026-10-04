@@ -699,3 +699,62 @@ test("direct and HTTP client cancellation uses Context", async (t) => {
     await request;
   }
 });
+
+test("HTTP authentication precedes body framing and schema validation", async (t) => {
+  const registry = new OperationRegistry();
+  const create = {
+    ...protectedRead,
+    id: "test.create",
+    method: "POST",
+    path: "/api/named",
+    body: true,
+    input: emptyInput.extend({ body: z.strictObject({ name: z.string() }) }),
+  } as const;
+  const touch = {
+    ...protectedRead,
+    id: "test.touch",
+    method: "POST",
+    path: "/api/touch",
+  } as const;
+  registry.register(create, () => ({ accountId: HUMAN_USERNAME }));
+  registry.register(touch, () => ({ accountId: HUMAN_USERNAME }));
+  const fixture = await gatewayFixture(t, { registry });
+  const json = "application/json";
+  const attempts = [
+    { path: create.path, type: json, body: "{}" },
+    { path: create.path, type: json, body: "{" },
+    { path: create.path, type: "text/plain", body: "{}" },
+    { path: touch.path, type: json, body: "{}" },
+  ];
+  const refusals = [
+    ExpectedErrorCode.ValidationFailed,
+    "gateway.request.invalid_json",
+    "gateway.request.unsupported_media_type",
+    "gateway.request.unexpected_body",
+  ];
+  const send = (attempt: (typeof attempts)[number], authorization?: string) =>
+    fixture.request(attempt.path, {
+      method: "POST",
+      headers: {
+        "Content-Type": attempt.type,
+        ...(authorization ? { Authorization: authorization } : {}),
+      },
+      body: attempt.body,
+    });
+  for (const authorization of [undefined, "Bearer garbage"])
+    for (const attempt of attempts) {
+      const response = await send(attempt, authorization);
+      assert.equal(response.status, HttpStatus.Unauthorized);
+      assert.equal(
+        errorSchema.parse(await response.json()).error.code,
+        ExpectedErrorCode.Unauthorized,
+      );
+    }
+  for (const [index, attempt] of attempts.entries()) {
+    const response = await send(attempt, `Bearer ${fixture.token}`);
+    assert.equal(
+      errorSchema.parse(await response.json()).error.code,
+      refusals[index],
+    );
+  }
+});

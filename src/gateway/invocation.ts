@@ -40,6 +40,7 @@ export interface InvocationOptions {
   traceparent?: string;
   tracestate?: string;
   delivery?: CallerContext["delivery"];
+  rejection?: GatewayError;
   request?: Request;
 }
 
@@ -285,30 +286,6 @@ export class Invocation {
               context,
               operation.requiresRegistration !== false,
             );
-      const parsed = operation.delivery
-        ? { success: true as const, data: raw }
-        : operation.input.safeParse(raw);
-      if (!parsed.success)
-        throw new GatewayError(
-          400,
-          "gateway.request.validation_failed",
-          "Request validation failed.",
-          parsed.error.issues.map((issue) => ({
-            path: issue.path.map(String),
-            code: issue.code,
-          })),
-        );
-      const input = parsed.data as {
-        params: unknown;
-        query: unknown;
-        body: unknown;
-      };
-      if (context.err())
-        throw new GatewayError(
-          503,
-          "gateway.invocation.cancelled",
-          "Request cancelled.",
-        );
       if (
         operation.access === AccessPolicy.Human ||
         operation.access === AccessPolicy.Client
@@ -334,6 +311,31 @@ export class Invocation {
           HttpStatus.Forbidden,
           "gateway.registration.required",
           "A live worker registration is required.",
+        );
+      if (options.rejection) throw options.rejection;
+      const parsed = operation.delivery
+        ? { success: true as const, data: raw }
+        : operation.input.safeParse(raw);
+      if (!parsed.success)
+        throw new GatewayError(
+          400,
+          "gateway.request.validation_failed",
+          "Request validation failed.",
+          parsed.error.issues.map((issue) => ({
+            path: issue.path.map(String),
+            code: issue.code,
+          })),
+        );
+      const input = parsed.data as {
+        params: unknown;
+        query: unknown;
+        body: unknown;
+      };
+      if (context.err())
+        throw new GatewayError(
+          503,
+          "gateway.invocation.cancelled",
+          "Request cancelled.",
         );
       const execution = operation.requiresExecution
         ? this.proveExecution(input, identity)

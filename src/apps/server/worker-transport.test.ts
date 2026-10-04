@@ -5,6 +5,7 @@ import { testClient } from "hono/testing";
 import {
   gatewayFixture,
   domainHealth,
+  fakeMachines,
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
 } from "./test-support.ts";
@@ -113,7 +114,20 @@ test("real listener serves unversioned liveness, applies host/origin policy and 
 });
 
 test("body limits cover declared sizes and streaming auth bodies; unexpected registration bodies are rejected", async (t) => {
-  const fixture = await gatewayFixture(t);
+  const fixture = await gatewayFixture(t, {
+    machines: fakeMachines({
+      bindings: new Map([
+        [
+          TEST_WORKER_BINDING,
+          { projectId: TEST_PROJECT_ID, capacity: 1, available: true },
+        ],
+      ]),
+    }),
+  });
+  const token = await fixture.machineToken(
+    TEST_PROJECT_ID,
+    TEST_WORKER_BINDING,
+  );
   const tooLarge = await new Promise<number>((resolve, reject) => {
     const request = httpRequest(
       fixture.endpoint + "/api/worker/register",
@@ -152,7 +166,10 @@ test("body limits cover declared sizes and streaming auth bodies; unexpected reg
   );
   const duplicate = await fixture.request("/api/worker/register", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
     body: '{"binding":"unexpected"}',
   });
   assert.equal(duplicate.status, HttpStatus.BadRequest);

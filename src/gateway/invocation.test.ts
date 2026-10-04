@@ -39,6 +39,8 @@ const operation = {
 const input = { params: {}, query: {}, body: null };
 const COMMITTED_VALUE = 42;
 const EXECUTION_PROOF_FAILED = "gateway.invocation.execution_proof_failed";
+const UNAUTHORIZED = "gateway.authentication.unauthorized";
+const VALIDATION_FAILED = "gateway.request.validation_failed";
 
 async function fixture(t: TestContext, registry: OperationRegistry) {
   const store = new Store(":memory:");
@@ -273,4 +275,36 @@ test("execution proof precedes reservation and replay and supplies only proven c
     (refusal.body as { error: { code: string } }).error.code,
     registrationRequired,
   );
+});
+
+test("authentication precedes request validation on a credentialed route", async (t) => {
+  const registry = new OperationRegistry();
+  const named = {
+    ...operation,
+    id: "test.named.create",
+    method: "POST",
+    path: "/api/test/named",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({ name: z.string() }),
+    }),
+  } as const;
+  registry.register(named, () => COMMITTED_VALUE);
+  const { invocation, token } = await fixture(t, registry);
+  const invalid = { params: {}, query: {}, body: {} };
+  const codeOf = (body: unknown) =>
+    (body as { error: { code: string } }).error.code;
+  for (const authorization of [undefined, "Bearer garbage"]) {
+    const response = await invocation.invoke(named.id, invalid, {
+      authorization,
+    });
+    assert.equal(response.status, HttpStatus.Unauthorized);
+    assert.equal(codeOf(response.body), UNAUTHORIZED);
+  }
+  const response = await invocation.invoke(named.id, invalid, {
+    authorization: `Bearer ${token}`,
+  });
+  assert.equal(response.status, HttpStatus.BadRequest);
+  assert.equal(codeOf(response.body), VALIDATION_FAILED);
 });
