@@ -144,6 +144,37 @@ test("assessment admission requires one passing verification with matching teste
   refusal(() => h.admit(), MissionErrorCode.AssessmentVerificationFailed);
 });
 
+test("assessment success counts only the verification that covers every required command", (t) => {
+  const h = fixture(t);
+  const partial = h.seed({ testedInput: INPUT, results: [RESULT] });
+  const full = {
+    testedInput: INPUT,
+    results: [RESULT, { ...RESULT, command: "task" }],
+  };
+  const failing = {
+    ...full,
+    results: [RESULT, { ...RESULT, command: "task", exitCode: FIRST }],
+  };
+  const fullId = h.seed(full);
+  h.body.evidenceIds = [partial, fullId];
+  h.admit(h.body, true);
+  h.body.evidenceIds = [partial, fullId, h.seed(full)];
+  refusal(
+    () => h.admit(h.body, true),
+    MissionErrorCode.AssessmentVerificationFailed,
+  );
+  h.body.evidenceIds = [partial];
+  refusal(
+    () => h.admit(h.body, true),
+    MissionErrorCode.AssessmentVerificationFailed,
+  );
+  h.body.evidenceIds = [h.seed(failing), partial];
+  refusal(
+    () => h.admit(h.body, true),
+    MissionErrorCode.AssessmentVerificationFailed,
+  );
+});
+
 test("assessment result order permits criterion-not-met for a failed run but rejects undetermined", (t) => {
   const h = fixture(t);
   h.body.evidenceIds = [

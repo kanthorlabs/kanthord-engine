@@ -15,6 +15,7 @@ import {
 import {
   requiredVerifications,
   requireTestedInput,
+  verificationCovers,
   verificationPasses,
 } from "./evidence-content.ts";
 import { invalidExecutionInput, requireTextBound } from "./execution.ts";
@@ -65,9 +66,12 @@ function requireResult(
   expected: string[],
 ): void {
   if (body.result === AssessmentResult.Success) {
-    const verification = verifications[ZERO];
+    const covering = verifications.filter((candidate) =>
+      verificationCovers(candidate, expected),
+    );
+    const verification = covering[ZERO];
     if (
-      verifications.length !== ONE ||
+      covering.length !== ONE ||
       !verification ||
       !verificationPasses(verification, expected)
     )

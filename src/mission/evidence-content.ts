@@ -260,7 +260,7 @@ export function requiredVerifications(
   return commands;
 }
 
-export function verificationPasses(
+export function verificationCovers(
   verification: Verification,
   expected: readonly string[],
 ): boolean {
@@ -270,8 +270,18 @@ export function verificationPasses(
     remaining.set(command, (remaining.get(command) ?? ZERO) + ONE);
   for (const result of verification.results) {
     const count = remaining.get(result.command) ?? ZERO;
-    if (result.exitCode !== ZERO || count === ZERO) return false;
+    if (count === ZERO) return false;
     remaining.set(result.command, count - ONE);
   }
   return true;
+}
+
+export function verificationPasses(
+  verification: Verification,
+  expected: readonly string[],
+): boolean {
+  return (
+    verificationCovers(verification, expected) &&
+    verification.results.every((result) => result.exitCode === ZERO)
+  );
 }
