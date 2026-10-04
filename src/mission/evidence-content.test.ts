@@ -96,9 +96,13 @@ test("content checks pinned objective bindings and distinct current initiative r
         ]),
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
+    const childBindingIds = [bindingId, laterId, otherId];
+    const childNodeIds = childBindingIds
+      .map(() => createIdentity("node"))
+      .sort();
     const children: string[] = [];
-    for (const id of [bindingId, laterId, otherId]) {
-      const nodeId = createIdentity("node");
+    for (const [index, id] of childBindingIds.entries()) {
+      const nodeId = childNodeIds[index]!;
       children.push(nodeId);
       insertNode(tx, {
         id: nodeId,
