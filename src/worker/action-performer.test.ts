@@ -383,6 +383,10 @@ test("reuse forwards the matching earlier pull request through Intake perform", 
     PR,
   ]);
   assert.deepEqual(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, PR);
+  assert.equal(
+    h.performSpy.mock.calls[0]?.arguments[3],
+    `${h.claim.nodeId}/${SECOND}/${h.entry.action.key}/${PR.number}/${COMMIT}`,
+  );
 });
 
 test("closed pull request dispatches fresh and a later matching candidate is selected", async (t) => {

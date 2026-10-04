@@ -15,6 +15,7 @@ import {
   ActionNodeState,
   ActionResultKind,
   ActionReadMethod,
+  PlatformAddressKind,
   RepositoryAction,
   Uncertainty,
   WorkerErrorCode,
@@ -60,6 +61,16 @@ type UncertainItem = Extract<
   { kind: typeof ActionResultKind.Uncertain }
 >;
 const UNWIRED_CODE = "system.composition.unwired";
+
+function requestKeyOf(pending: Pending): string {
+  const base = `${pending.key.nodeId}/${pending.key.attempt}/${pending.entry.action.key}`;
+  if (pending.entry.action.action === RepositoryAction.MergePush)
+    return `${base}/${pending.operands.commit}`;
+  const reused = pending.operands.reusedAddress;
+  if (reused?.kind === PlatformAddressKind.PullRequest)
+    return `${base}/${reused.number}/${pending.operands.commit}`;
+  return base;
+}
 
 export class ActionPerformer {
   private readonly dependencies: PerformerDependencies;
@@ -236,7 +247,7 @@ export class ActionPerformer {
         call,
         pending.entry.action,
         pending.operands,
-        `${pending.key.nodeId}/${pending.key.attempt}/${pending.entry.action.key}${pending.entry.action.action === RepositoryAction.MergePush ? `/${pending.operands.commit}` : ""}`,
+        requestKeyOf(pending),
       );
     } catch (error) {
       if (error instanceof CodedError && error.code === UNWIRED_CODE)
