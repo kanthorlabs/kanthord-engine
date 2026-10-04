@@ -290,7 +290,11 @@ for (const attempt of [ZERO, FIRST]) {
     await assert.rejects(
       h.invoke("node.unblock", input),
       (error) =>
-        error instanceof OperationError && error.code === ControlError.Refused,
+        error instanceof OperationError &&
+        error.code ===
+          (attempt === ZERO
+            ? ControlError.Refused
+            : ControlError.StateConflict),
     );
   });
 }

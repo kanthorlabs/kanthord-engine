@@ -213,8 +213,8 @@ export function unblockNode(
   dependencies.schedulerClaims.settle(tx, nodeId, now);
   const node = requireNode(tx, nodeId);
   requireNonterminal(node);
-  requireControlState(node, [NodeState.Blocked]);
   if (node.attempt !== body.blockedAttempt) stateConflict(node);
+  requireControlState(node, [NodeState.Blocked]);
   const row = readCurrentRevision(tx, nodeId);
   assert.ok(row && node.attempt !== null);
   if (row.revision !== body.expectedRevision)

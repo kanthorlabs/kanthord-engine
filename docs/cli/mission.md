@@ -345,6 +345,11 @@ authorship/approval. Attribution records the submitting human only.
 `<node-id>` is required; state-changing controls accept initiatives/objectives
 only.
 
+- A human control on a node in a terminal state answers `mission.node.terminal`
+  before it checks `expectedState`, `expectedAttempt` or the admitted states.
+  `mission.node.state_conflict` comes next. `mission.node.control_refused` comes
+  last.
+
 - Priority set accepts `PrioritySet` and returns `Node`. No Mission record keeps
   the earlier value, the actor, the reason or the time of the act. Admission requires a nonterminal node with
   no claim. A human sets priority on an initiative or an objective only.
