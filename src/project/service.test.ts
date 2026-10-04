@@ -2448,6 +2448,36 @@ test("resolveBindingIdentity pins the latest revision of a live binding of its p
   });
 });
 
+test("resolveBindingIdentity refuses an identity from before a removal of the binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const before = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    persistBindings(tx, project.id, {});
+    const added = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    const latest = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: {
+        ...repositoryBinding(),
+        config: { ...repositoryBinding().config, available: false },
+      },
+    }).bindings[REPOSITORY_NAME]!;
+    assert.equal(added.resourceIdentity, before.resourceIdentity);
+    assert.equal(
+      f.project.resolveBindingIdentity(tx, project.id, before.id),
+      null,
+    );
+    for (const id of [added.id, latest.id])
+      assert.deepEqual(f.project.resolveBindingIdentity(tx, project.id, id), {
+        bindingId: latest.id,
+        resourceIdentity: latest.resourceIdentity,
+      });
+  });
+});
+
 test("storageBindingOf reads the pinned configuration after a prefix revision", (t) => {
   const f = fixture(t);
   const prefix = "later";

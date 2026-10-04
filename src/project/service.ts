@@ -613,9 +613,10 @@ export class ProjectService implements Service, ProjectBindings {
   ): { bindingId: string; resourceIdentity: string } | null {
     const binding = readBindingRevision(tx, bindingId);
     if (!binding || binding.projectId !== projectId) return null;
+    if (hasBindingTombstone(tx, binding)) return null;
     const latest = readLatestBinding(tx, projectId, binding.resourceIdentity);
     assert.ok(latest, "A retained binding must have a latest revision.");
-    if (latest.removedAt !== null) return null;
+    assert.equal(latest.removedAt, null);
     return {
       bindingId: latest.id,
       resourceIdentity: latest.resourceIdentity,
