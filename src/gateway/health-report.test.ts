@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
+import {
+  setImmediate as turn,
+  setTimeout as delay,
+} from "node:timers/promises";
 import pino from "pino";
 import { mintHumanIdentity } from "../kernel/caller-mint.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
@@ -27,7 +30,7 @@ const SINGLE_CHECK = 1;
 const EXPECTED_MAX = 3;
 const TARGET_COUNT = 12;
 const REPORT_BUDGET_MS = 40;
-const MAX_REPORT_ELAPSED_MS = 1500;
+const ONE_MS = 1;
 const CHECK_DEADLINE_MS = 20;
 const ACCOUNT = "health-reader";
 const SICK_REASON = "status=500";
@@ -376,14 +379,21 @@ test("report budget abandons active and unstarted targets, cancels contexts and 
       }),
     })),
   );
-  const start = Date.now();
-  const report = await f.report({
-    ...LIMITS,
-    reportBudgetMs: REPORT_BUDGET_MS,
-  });
-  const elapsed = Date.now() - start;
-  assert.ok(elapsed >= REPORT_BUDGET_MS);
-  assert.ok(elapsed < MAX_REPORT_ELAPSED_MS);
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  let settled = false;
+  const pending = f
+    .report({ ...LIMITS, reportBudgetMs: REPORT_BUDGET_MS })
+    .finally(() => {
+      settled = true;
+    });
+  await turn();
+  assert.equal(contexts.length, EXPECTED_MAX);
+  t.mock.timers.tick(REPORT_BUDGET_MS - ONE_MS);
+  await turn();
+  assert.equal(settled, false);
+  assert.ok(contexts.every((context) => !context.err()));
+  t.mock.timers.tick(ONE_MS);
+  const report = await pending;
   assert.equal(contexts.length, EXPECTED_MAX);
   assert.ok(contexts.every((context) => context.err()));
   assert.equal(Object.keys(report.shared.custody.global).length, TARGET_COUNT);
@@ -395,7 +405,7 @@ test("report budget abandons active and unstarted targets, cancels contexts and 
   assert.equal(f.logs.length, TARGET_COUNT);
   const answer = structuredClone(report);
   late.resolve(ResourceStatus.Healthy);
-  await delay(5);
+  await turn();
   assert.deepEqual(report, answer);
   assert.equal(f.logs.length, TARGET_COUNT);
 });
