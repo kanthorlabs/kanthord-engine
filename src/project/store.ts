@@ -224,7 +224,7 @@ export function deriveResourceIdentity(
       throw new OperationError(
         HttpStatus.BadRequest,
         ProjectErrorCode.RepositoryAddressInvalid,
-        "Repository address must be a GitHub SSH address.",
+        "Repository address must have the form git@<host>:<owner>/<repository>.git.",
       );
     const { owner, repository } = parsed;
     return `${BindingKind.Repository}:${REPOSITORY_PLATFORM}:${owner}/${repository}`;

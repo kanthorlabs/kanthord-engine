@@ -262,6 +262,13 @@ test("invalid repository addresses have the public address-invalid error", () =>
       () => deriveResourceIdentity(BindingKind.Repository, MAIN, { address }),
       errorIs(HttpStatus.BadRequest, ProjectErrorCode.RepositoryAddressInvalid),
     );
+    assert.throws(
+      () => deriveResourceIdentity(BindingKind.Repository, MAIN, { address }),
+      {
+        message:
+          "Repository address must have the form git@<host>:<owner>/<repository>.git.",
+      },
+    );
   }
 });
 
