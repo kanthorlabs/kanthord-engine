@@ -117,7 +117,10 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     liveNodesPinning: unexpected,
     validateEntry: unexpected,
     custodySuitability: unexpected,
-    repositoryConnector: { gitLsRemote: unexpected },
+    repositoryConnector: {
+      gitLsRemote: unexpected,
+      resolveSshHostname: unexpected,
+    },
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,
     endRegistrations: (tx, projectId, resourceIdentity, now) => {
@@ -718,6 +721,8 @@ const UNKNOWN_AGENT = "undeclared";
 const MODEL = "model";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
 const HEALTH_DEADLINE_MS = 1000;
+const ALIAS_HOST = "kanthorlabs.github.com";
+const ALIAS_ADDRESS = `git@${ALIAS_HOST}:owner/repo.git`;
 const SECOND_REPOSITORY_ADDRESS = "git@github.com:owner/other.git";
 const REPOSITORY_CREDENTIAL = "github-key";
 const STORAGE_CREDENTIAL = "s3-key";
@@ -785,6 +790,9 @@ function writeFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   const f = fixture(t, {
     createMission: allowMission,
     repositoryConnector: {
+      async resolveSshHostname(host) {
+        return host;
+      },
       async gitLsRemote(address, context, timeout) {
         ssh.push({
           address,
@@ -1071,6 +1079,9 @@ test("concurrent writes probe before committing and only one expected version wi
   let calls = NO_CALLS;
   const f = writeFixture(t, {
     repositoryConnector: {
+      async resolveSshHostname() {
+        return "github.com";
+      },
       async gitLsRemote() {
         calls++;
         assert.equal(f.store.database.isTransaction, false);
@@ -1083,6 +1094,7 @@ test("concurrent writes probe before committing and only one expected version wi
     f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
     f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
   ];
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(calls, TWO_CALLS);
   assert.deepEqual(f.snapshot(), before);
   release();
@@ -1131,12 +1143,143 @@ test("invalid repository addresses and duplicate resources are refused before an
   assert.deepEqual(f.snapshot(), before);
 });
 
+test("an SSH alias that resolves to a GitHub SSH host is accepted and probed with the alias address", async (t) => {
+  const hosts: string[] = [];
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async resolveSshHostname(host, context, deadlineMs) {
+        hosts.push(host);
+        assert.equal(f.store.database.isTransaction, false);
+        assert.equal(context, f.caller.context);
+        assert.ok(deadlineMs <= LS_REMOTE_TIMEOUT_MS);
+        return "ssh.github.com";
+      },
+      async gitLsRemote(address, _context, remaining) {
+        f.ssh.push({
+          address,
+          context: null,
+          timeout: remaining,
+          transaction: false,
+          commits: f.commits(),
+        });
+        assert.ok(remaining <= LS_REMOTE_TIMEOUT_MS);
+      },
+    },
+  });
+  const result = await f.write({
+    [REPOSITORY_NAME]: repositoryBinding(ALIAS_ADDRESS),
+  });
+  assert.ok(result.bindings[REPOSITORY_NAME]);
+  assert.deepEqual(hosts, [ALIAS_HOST]);
+  assert.deepEqual(
+    f.ssh.map((call) => call.address),
+    [ALIAS_ADDRESS],
+  );
+});
+
+test("an alias that resolves outside the GitHub SSH host set is refused before the read and the commit", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async resolveSshHostname() {
+        return "gitlab.com";
+      },
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  const before = f.snapshot();
+  const commits = f.commits();
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: repositoryBinding(ALIAS_ADDRESS) }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositoryAddressInvalid,
+  );
+  assert.equal(f.commits(), commits);
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a failed host resolution is refused with address_invalid before the read and the commit", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async resolveSshHostname() {
+        throw new Error("ssh -G failed");
+      },
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  const before = f.snapshot();
+  const commits = f.commits();
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositoryAddressInvalid,
+  );
+  assert.equal(f.commits(), commits);
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a host that starts with a hyphen is refused without a resolution", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async resolveSshHostname() {
+        assert.fail("The resolution must not run.");
+      },
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  await rejectsWrite(
+    f.write({
+      [REPOSITORY_NAME]: repositoryBinding("git@-oProxyCommand:owner/repo.git"),
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositoryAddressInvalid,
+  );
+});
+
+test("the resource check reports an unresolved host as unhealthy and skips the read", async (t) => {
+  const reasons: string[] = [];
+  const f = fixture(t, {
+    repositoryConnector: {
+      async resolveSshHostname() {
+        throw new Error("ssh -G failed");
+      },
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  const entry = f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, project.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return f.project.resourceInventory(tx)[NO_ITEMS];
+  });
+  assert.ok(entry);
+  const context = new CancellationContext(
+    background,
+    Date.now() + HEALTH_DEADLINE_MS,
+  );
+  t.after(() => context.cancel());
+  assert.equal(
+    await entry.check(context, (reason) => reasons.push(reason)),
+    ResourceStatus.Unhealthy,
+  );
+  assert.deepEqual(reasons, [ProjectErrorCode.RepositoryAddressInvalid]);
+});
+
 test("SSH failure leaves all rows and the version unchanged without entering commit", async (t) => {
   const failure = new Error("SSH failed");
   let fail = false;
   const addresses: string[] = [];
   const f = writeFixture(t, {
     repositoryConnector: {
+      async resolveSshHostname() {
+        return "github.com";
+      },
       async gitLsRemote(address, context, timeout) {
         addresses.push(address);
         assert.equal(f.store.database.isTransaction, false);
@@ -1172,6 +1315,9 @@ test("cancellation during gitLsRemote propagates the context error, whether the 
     let calls = NO_CALLS;
     const f = writeFixture(t, {
       repositoryConnector: {
+        async resolveSshHostname() {
+          return "github.com";
+        },
         async gitLsRemote(_address, received) {
           calls++;
           assert.equal(received, context);
@@ -1867,6 +2013,9 @@ test("resource inventory reads current repository revisions and excludes removed
   let calls = NO_CALLS;
   const f = fixture(t, {
     repositoryConnector: {
+      async resolveSshHostname() {
+        return "github.com";
+      },
       async gitLsRemote() {
         calls++;
       },
@@ -1929,6 +2078,9 @@ test("resource checks pass the caller deadline and distinguish success, failure 
   let failure: Error | null = null;
   const f = fixture(t, {
     repositoryConnector: {
+      async resolveSshHostname() {
+        return "github.com";
+      },
       async gitLsRemote(address, context, remaining) {
         calls++;
         assert.equal(address, REPOSITORY_ADDRESS);
@@ -1967,13 +2119,16 @@ test("resource checks pass the caller deadline and distinguish success, failure 
   cancelled.cancel();
   beforeCall = Date.now();
   assert.equal(await entry.check(cancelled), ResourceStatus.Unknown);
-  assert.equal(calls, REVISION_THREE);
+  assert.equal(calls, TWO_CALLS);
 });
 
 test("resource inventory keeps separate checks for the same repository address across projects", async (t) => {
   let calls = NO_CALLS;
   const f = fixture(t, {
     repositoryConnector: {
+      async resolveSshHostname() {
+        return "github.com";
+      },
       async gitLsRemote(address, context, remaining) {
         calls++;
         assert.equal(address, REPOSITORY_ADDRESS);

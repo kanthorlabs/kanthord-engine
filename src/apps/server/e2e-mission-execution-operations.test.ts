@@ -85,7 +85,10 @@ function completed<T>(result: OperationResult<T>): T {
 async function setup(t: TestContext) {
   const sink = await objectSink(t);
   const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
     standIns: {
       intakeStorage: sinkStorage(sink),
       intakeCheck: scriptedCheck({

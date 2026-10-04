@@ -76,7 +76,10 @@ async function setup(
 ) {
   const actions = scriptedActions();
   const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
     standIns: wired ? { intakeActions: actions.seam } : {},
   });
   async function call<T extends Operation>(

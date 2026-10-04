@@ -145,7 +145,10 @@ function bindings(instanceCount: number) {
 
 async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
   });
   const directory = temporary(t);
   const H = {

@@ -95,7 +95,10 @@ test(
   async (t) => {
     const actions = scriptedActions();
     const f = await gatewayFixture(t, {
-      repositoryConnector: { gitLsRemote: async () => {} },
+      repositoryConnector: {
+        gitLsRemote: async () => {},
+        resolveSshHostname: async () => "github.com",
+      },
       standIns: { intakeActions: actions.seam },
     });
     const directory = temporary(t);

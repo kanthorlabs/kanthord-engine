@@ -91,7 +91,10 @@ const FIRST_RESOURCE = "credential-first";
 const SECOND_RESOURCE = "credential-second";
 const RESOURCE_TARGET = "credential:e2e-target";
 const CAPABILITY = "model-inference";
-const FAKE_REPOSITORY = { gitLsRemote: async () => {} };
+const FAKE_REPOSITORY = {
+  gitLsRemote: async () => {},
+  resolveSshHostname: async () => "github.com",
+};
 
 type Result = Awaited<ReturnType<typeof kanthord>>;
 type Fixture = { directory: string; env: NodeJS.ProcessEnv };

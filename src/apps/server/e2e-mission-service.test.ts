@@ -297,7 +297,10 @@ function isolated(t: TestContext): Fixture {
 
 async function setup(t: TestContext): Promise<Fixture> {
   const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
   });
   const { directory, env } = isolated(t);
   assert.ok(fixture.endpoint);

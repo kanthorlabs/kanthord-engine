@@ -191,6 +191,21 @@ function assertChange(
   assert.ok(identitySchema(BINDING_ID_PREFIX).safeParse(bindingId).success);
 }
 
+test("an SSH alias address and the github.com address derive the same repository identity", () => {
+  const identity = (address: string) =>
+    deriveResourceIdentity(
+      BindingKind.Repository,
+      MAIN,
+      repository(address).config,
+    );
+  assert.equal(
+    identity("git@kanthorlabs.github.com:owner/repo.git"),
+    identity("git@github.com:owner/repo.git"),
+  );
+  assert.throws(() => identity("git@-oProxyCommand:owner/repo.git"));
+  assert.throws(() => identity("git@.github.com:owner/repo.git"));
+});
+
 test("resource identities normalize each kind and kindOf enforces the closed set", () => {
   assert.equal(
     deriveResourceIdentity(BindingKind.Repository, MAIN, repository().config),
@@ -236,7 +251,7 @@ test("resource identities normalize each kind and kindOf enforces the closed set
 test("invalid repository addresses have the public address-invalid error", () => {
   for (const address of [
     "https://github.com/owner/repo.git",
-    "git@gitlab.com:owner/repo.git",
+    "git@-github.com:owner/repo.git",
     "git@github.com:owner/repo",
     "git@github.com:owner/repo.git\n",
     "git@github.com:owner/nested/repo.git",

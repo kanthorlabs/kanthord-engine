@@ -7,6 +7,7 @@ import { simpleGit } from "simple-git";
 import { background, CancellationContext } from "../kernel/context.ts";
 import {
   gitLsRemote,
+  resolveSshHostname,
   clone,
   cloneSnapshot,
   fetchAndCheckout,
@@ -16,7 +17,24 @@ import { temporary } from "../kernel/test-support.ts";
 
 const DEADLINE_MS = 5000;
 const EXPIRED_DEADLINE_MS = 1;
+const LOCAL_HOST = "localhost";
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_plan04_test";
+
+test("resolveSshHostname reads the hostname line of ssh -G", async () => {
+  assert.equal(
+    await resolveSshHostname(LOCAL_HOST, background, DEADLINE_MS),
+    LOCAL_HOST,
+  );
+});
+
+test("resolveSshHostname rejects when the deadline elapses or the context was cancelled", async () => {
+  await assert.rejects(
+    resolveSshHostname(LOCAL_HOST, background, EXPIRED_DEADLINE_MS - 1),
+  );
+  const context = new CancellationContext();
+  context.cancel();
+  await assert.rejects(resolveSshHostname(LOCAL_HOST, context, DEADLINE_MS));
+});
 
 test("gitLsRemote resolves for a local git repository", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "kanthord-repository-"));

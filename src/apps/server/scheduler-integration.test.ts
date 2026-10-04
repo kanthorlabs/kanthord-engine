@@ -82,7 +82,10 @@ function refused<T>(
 async function setup(t: TestContext, adapter: Adapter, path?: string) {
   const f = await gatewayFixture(t, {
     path,
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
   });
   async function call<T extends Operation>(
     operation: T,

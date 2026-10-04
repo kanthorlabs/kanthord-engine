@@ -345,7 +345,10 @@ async function setup(
     ? { ...CONFIGURATION, modelIdentifier: "claude-sonnet-4.6" }
     : CONFIGURATION;
   const f = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
     oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
   });
   async function call<T extends Operation>(

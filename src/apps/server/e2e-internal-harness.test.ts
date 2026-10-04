@@ -115,7 +115,10 @@ async function setupInternal(t: TestContext) {
     landedCommits: ["c".repeat(40)],
   });
   const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
     standIns: {
       intakeStorage: sinkStorage(sink),
       intakeCheck: check,

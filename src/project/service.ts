@@ -22,6 +22,7 @@ import {
 } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { throwIfCancelled } from "../kernel/context.ts";
+import { isPlatformSshHost } from "../repository/platform.ts";
 import {
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
@@ -74,6 +75,7 @@ import {
   readLatestTombstone,
   kindOf,
   deriveResourceIdentity,
+  parseRepositoryAddress,
   listBindings,
   listRevisions,
   readCurrentBindingSet,
@@ -407,16 +409,43 @@ export class ProjectService implements Service, ProjectBindings {
     this.wakeup.wake(projectId);
     return answer;
   }
+  private async proveRepositoryHost(
+    address: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<void> {
+    const parsed = parseRepositoryAddress(address);
+    let hostname: string | null = null;
+    if (parsed)
+      try {
+        hostname = await this.repositoryConnector.resolveSshHostname(
+          parsed.host,
+          context,
+          deadlineMs,
+        );
+      } catch {
+        throwIfCancelled(context);
+      }
+    throwIfCancelled(context);
+    if (hostname === null || !isPlatformSshHost(REPOSITORY_PLATFORM, hostname))
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.RepositoryAddressInvalid,
+        "Repository address must resolve to a GitHub SSH host.",
+      );
+  }
   private async checkRepository(
     address: string,
     context: Context,
   ): Promise<void> {
     throwIfCancelled(context);
+    const end = Date.now() + LS_REMOTE_TIMEOUT_MS;
+    await this.proveRepositoryHost(address, context, LS_REMOTE_TIMEOUT_MS);
     try {
       await this.repositoryConnector.gitLsRemote(
         address,
         context,
-        LS_REMOTE_TIMEOUT_MS,
+        end - Date.now(),
       );
     } catch {
       throwIfCancelled(context);
@@ -760,15 +789,30 @@ export class ProjectService implements Service, ProjectBindings {
   }
   resourceInventory(tx: Transaction): ResourceEntry[] {
     return readCurrentRepositories(tx).map(({ projectName, name, address }) => {
-      const check: ResourceCheck = async (context) => {
+      const check: ResourceCheck = async (context, observe) => {
         try {
           const deadline = context.deadline();
           assert.ok(deadline !== null);
-          await this.repositoryConnector.gitLsRemote(
-            address,
-            context,
-            deadline - Date.now(),
-          );
+          try {
+            await this.proveRepositoryHost(
+              address,
+              context,
+              deadline - Date.now(),
+            );
+          } catch (error) {
+            if (error instanceof OperationError) observe?.(error.code);
+            throw error;
+          }
+          try {
+            await this.repositoryConnector.gitLsRemote(
+              address,
+              context,
+              deadline - Date.now(),
+            );
+          } catch (error) {
+            observe?.(ProjectErrorCode.RepositorySshUnreachable);
+            throw error;
+          }
           return ResourceStatus.Healthy;
         } catch {
           return context.err()

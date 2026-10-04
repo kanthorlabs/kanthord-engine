@@ -1,11 +1,16 @@
 import { simpleGit } from "simple-git";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
+const SSH_RESOLVE_FAILED = "repository.connector.ssh_resolve_failed";
 const EMPTY = "";
 const EXPIRED = 0;
+const HOSTNAME_PREFIX = "hostname ";
+const execFileAsync = promisify(execFile);
 
 async function runGit(
   directory: string | undefined,
@@ -32,6 +37,40 @@ async function runGit(
     }).raw(args);
   } catch {
     throw new Diagnostic(GIT_FAILED, `${operation}: git failed.`);
+  } finally {
+    clearTimeout(timer);
+    unsubscribe();
+  }
+}
+
+export async function resolveSshHostname(
+  host: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string> {
+  assert.ok(host !== EMPTY);
+  assert.ok(!host.startsWith("-"));
+  const controller = new AbortController();
+  const unsubscribe = context.onCancel(() => controller.abort());
+  const timer = setTimeout(
+    () => controller.abort(),
+    Math.max(EXPIRED, deadlineMs),
+  );
+  try {
+    throwIfCancelled(context);
+    if (deadlineMs <= EXPIRED) throw new Error("SSH deadline exceeded");
+    const { stdout } = await execFileAsync("ssh", ["-G", "--", host], {
+      signal: controller.signal,
+    });
+    const line = stdout
+      .split("\n")
+      .find((candidate) => candidate.startsWith(HOSTNAME_PREFIX));
+    assert.ok(line);
+    const hostname = line.slice(HOSTNAME_PREFIX.length).trim();
+    assert.ok(hostname !== EMPTY);
+    return hostname;
+  } catch {
+    throw new Diagnostic(SSH_RESOLVE_FAILED, "ssh -G: resolution failed.");
   } finally {
     clearTimeout(timer);
     unsubscribe();

@@ -36,7 +36,7 @@ const CREDENTIAL_KEY = "credential";
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const REPOSITORY_ADDRESS_PATTERN =
-  /^git@github\.com:([^/\s:]+)\/([^/\s:]+)\.git(?![\s\S])/;
+  /^git@([A-Za-z0-9][A-Za-z0-9.-]*):([^/\s:]+)\/([^/\s:]+)\.git(?![\s\S])/;
 const REVISION_PATTERN = /^[1-9][0-9]*(?![\s\S])/;
 const bindingIdentitySchema = identitySchema(BINDING_ID_PREFIX);
 const projectIdentitySchema = identitySchema(PROJECT_ID_PREFIX);
@@ -198,6 +198,18 @@ export function kindOf(
   return kind;
 }
 
+export function parseRepositoryAddress(
+  address: unknown,
+): { host: string; owner: string; repository: string } | null {
+  const match = isString(address)
+    ? REPOSITORY_ADDRESS_PATTERN.exec(address)
+    : null;
+  if (!match) return null;
+  const [, host, owner, repository] = match;
+  assert.ok(host && owner && repository);
+  return { host, owner, repository };
+}
+
 export function deriveResourceIdentity(
   kind: string,
   bindingName: string,
@@ -207,16 +219,14 @@ export function deriveResourceIdentity(
   if (kind === BindingKind.Repository) {
     const address =
       isObject(config) && "address" in config ? config.address : null;
-    const match = isString(address)
-      ? REPOSITORY_ADDRESS_PATTERN.exec(address)
-      : null;
-    if (!match)
+    const parsed = parseRepositoryAddress(address);
+    if (!parsed)
       throw new OperationError(
         HttpStatus.BadRequest,
         ProjectErrorCode.RepositoryAddressInvalid,
         "Repository address must be a GitHub SSH address.",
       );
-    const [, owner, repository] = match;
+    const { owner, repository } = parsed;
     return `${BindingKind.Repository}:${REPOSITORY_PLATFORM}:${owner}/${repository}`;
   }
   if (kind !== BindingKind.Storage)

@@ -4,6 +4,7 @@ import { HealthStatus, type Healthcheck } from "../kernel/service.ts";
 import { checkRepositoryTools, probeRepositoryTools } from "./check.ts";
 import {
   gitLsRemote,
+  resolveSshHostname,
   clone,
   cloneSnapshot,
   fetchAndCheckout,
@@ -31,6 +32,14 @@ export class RepositoryComponent {
     return {
       toolchain: available ? HealthStatus.Healthy : HealthStatus.Unavailable,
     };
+  }
+
+  resolveSshHostname(
+    host: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<string> {
+    return resolveSshHostname(host, context, deadlineMs);
   }
 
   gitLsRemote(

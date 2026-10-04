@@ -40,7 +40,10 @@ test(
   { timeout: JOURNEY_TIMEOUT_MS },
   async (t) => {
     const fixture = await gatewayFixture(t, {
-      repositoryConnector: { gitLsRemote: async () => {} },
+      repositoryConnector: {
+        gitLsRemote: async () => {},
+        resolveSshHostname: async () => "github.com",
+      },
       inventoryOverrides: { custody: () => [] },
     });
     const cli = journeyClient(t, fixture.endpoint, fixture.token);

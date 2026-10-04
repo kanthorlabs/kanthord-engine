@@ -280,6 +280,11 @@ export type CreateMission = (
 ) => void;
 export type LiveNodesPinning = (tx: Transaction, bindingId: string) => string[];
 export type RepositoryConnector = {
+  resolveSshHostname(
+    host: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<string>;
   gitLsRemote(
     sshUrl: string,
     context: Context,

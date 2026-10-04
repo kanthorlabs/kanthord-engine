@@ -99,7 +99,10 @@ test(
   { timeout: 180000 },
   async (t) => {
     const f = await gatewayFixture(t, {
-      repositoryConnector: { gitLsRemote: async () => {} },
+      repositoryConnector: {
+        gitLsRemote: async () => {},
+        resolveSshHostname: async () => "github.com",
+      },
     });
     const directory = temporary(t);
     const human = {

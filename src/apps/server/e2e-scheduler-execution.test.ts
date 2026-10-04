@@ -101,7 +101,10 @@ function machineToken(
 async function setup(t: TestContext, short = false) {
   const fixture = await gatewayFixture(t, {
     scheduler: short ? { releaseReserve: 1 } : {},
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
   });
   const directory = temporary(t);
   const H = {

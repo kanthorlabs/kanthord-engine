@@ -148,7 +148,10 @@ type Page<T> = { items: T[]; nextCursor: string | null };
 
 async function setup(t: TestContext): Promise<Fixture> {
   const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
   });
   const directory = temporary(t);
   const env = {

@@ -85,7 +85,10 @@ function refused<T>(result: OperationResult<T>, status: number, code: string) {
 async function setup(t: TestContext) {
   const actions = scriptedActions();
   const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
     standIns: {
       intakeActions: actions.seam,
       intakeCheck: scriptedCheck({

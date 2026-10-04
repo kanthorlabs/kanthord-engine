@@ -21,7 +21,10 @@ export const WORKER_DEFAULTS = {
 export async function workerAcceptance(t: TestContext, host = false) {
   const sink = host ? await objectSink(t) : undefined;
   const fixture = await gatewayFixture(t, {
-    repositoryConnector: { gitLsRemote: async () => {} },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshHostname: async () => "github.com",
+    },
     ...(sink ? { standIns: { intakeStorage: sinkStorage(sink) } } : {}),
   });
   const directory = temporary(t);

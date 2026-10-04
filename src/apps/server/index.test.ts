@@ -82,7 +82,10 @@ test("composition starts all six services and registers the real repository tool
 
 test("injected repository connector skips the tool gate and probe", async (t) => {
   const health = new HealthRegistry();
-  const repositoryConnector = { gitLsRemote: async () => {} };
+  const repositoryConnector = {
+    gitLsRemote: async () => {},
+    resolveSshHostname: async () => "github.com",
+  };
   const fixture = await gatewayFixture(t, { health, repositoryConnector });
   const checks = await health.check();
   assert.equal(Object.hasOwn(checks, "repository"), false);
