@@ -227,10 +227,36 @@ export async function checkNode(
       });
       continue;
     }
-    dependencies.store.transaction((tx) => {
+    const live = dependencies.store.transaction((tx) => {
       requireMission(tx, prepared.mission.id, expectedMissionVersion);
-      applyEndState(tx, dependencies, item.request.id, answer, Date.now());
+      const now = Date.now();
+      const claim =
+        answer.endState === CheckEndState.None
+          ? null
+          : dependencies.schedulerClaims.liveExecutionOf(
+              tx,
+              item.request.node_id,
+              now,
+            );
+      if (claim === null)
+        applyEndState(tx, dependencies, item.request.id, answer, now);
+      return claim;
     });
+    if (live !== null) {
+      failures.push({
+        evidenceId: item.request.id,
+        error: checkError(
+          new OperationError(
+            HttpStatus.Conflict,
+            MissionErrorCode.ClaimLive,
+            "Node has a live claim.",
+            { nodeId: item.request.node_id, executionId: live.executionId },
+          ),
+          caller.requestId,
+        ),
+      });
+      continue;
+    }
     checked.push(item.request.id);
   }
   const result = caller.commit((tx) => ({

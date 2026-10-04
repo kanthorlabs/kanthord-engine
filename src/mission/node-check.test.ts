@@ -153,6 +153,8 @@ async function fixture(t: TestContext) {
       },
     },
   });
+  const claim = h.dependencies.schedulerClaims.liveExecutionOf;
+  h.dependencies.schedulerClaims.liveExecutionOf = () => null;
   h.store.transaction((tx) =>
     setNodeState(tx, h.nodeId, NodeState.ExternalRequested),
   );
@@ -164,7 +166,7 @@ async function fixture(t: TestContext) {
     });
   assert.equal(h.node().state, NodeState.ExternalRequested);
   assert.ok(request.requirementKey);
-  return { ...h, request, check };
+  return { ...h, request, check, claim };
 }
 
 test("expected checks write every landed commit and close successful external attempts without changing mission version", async (t) => {
@@ -246,6 +248,35 @@ test("other checks block while none stays unresolved and failed checks retain fa
   });
   await h.check();
   assert.equal(h.node().state, NodeState.Blocked);
+});
+
+test("a live claim refuses a conclusive result and keeps a none result unresolved", async (t) => {
+  const h = await fixture(t);
+  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
+  h.dependencies.schedulerClaims.liveExecutionOf = h.claim;
+  h.dependencies.intakeCheck.check = async () => ({
+    endState: CheckEndState.None,
+    landedCommits: [],
+  });
+  const none = await h.check();
+  assert.equal(none.results[ZERO]!.resolution, Resolution.Unresolved);
+  assert.equal(none.failures.length, ZERO);
+  h.dependencies.intakeCheck.check = async () => ({
+    endState: CheckEndState.Expected,
+    landedCommits: [COMMIT],
+  });
+  const refused = await h.check();
+  assert.equal(refused.results.length, ZERO);
+  assert.equal(refused.failures.length, ONE);
+  assert.equal(
+    refused.failures[ZERO]!.error.error.code,
+    MissionErrorCode.ClaimLive,
+  );
+  assert.equal(h.node().state, NodeState.Evaluating);
+  h.store.transaction((tx) => {
+    assert.equal(readEvidence(tx, h.request.id)?.end_state, null);
+    assert.equal(readLandedCommitEvidence(tx, h.nodeId, ONE).length, ZERO);
+  });
 });
 
 test("paused nodes keep their state and a concurrent conclusive end state wins", async (t) => {
