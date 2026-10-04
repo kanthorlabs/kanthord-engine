@@ -317,7 +317,7 @@ Common to every `config`:
 - `platform`: **required**, supported platform-name string; no default and no
   inference from the address. Proposed first value `github`; display name
   GitHub. The platform set is extensible, not an arbitrary accepted string.
-- `address`: **required**, nonblank SSH repository address; no default. An HTTPS address fails. The adapter validates and normalizes the repository address.
+- `address`: **required**, SSH repository address `git@<host>:<owner>/<repository>.git`; no default. An HTTPS address fails. The host can be an SSH alias of `~/.ssh/config`, for example `git@kanthorlabs.github.com:kanthorlabs/kanthord.git`. `ssh -G` must resolve the host to an SSH host of the platform, `github.com` or `ssh.github.com` for `github`.
 - Unsupported addresses and contradictory platform/address combinations fail.
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
 - `credential`: **required**, one `CredentialName` of platform `github`; no default. It serves every platform action of the Intake Service and the check of a request evidence. Git uses the SSH configuration of the host.
@@ -439,7 +439,7 @@ version and refuses a stale one. No network operation belongs in that
 transaction. The target rules are:
 
 - One binding per repository and per storage bucket; any number per worker.
-- Resource identity derives from configuration. A repository identity derives from its SSH address alone. A worker identity derives from its binding name, and a storage identity derives from its endpoint host and its bucket.
+- Resource identity derives from configuration. A repository identity derives from the platform and from the owner and the repository of its SSH address, never from the host. A worker identity derives from its binding name, and a storage identity derives from its endpoint host and its bucket.
 - Every repository binding write performs one `git ls-remote` with a 30 s deadline before the transaction.
 - A failed or timed-out read refuses the write with `project.bindings.repository.ssh_unreachable`.
 - A strategy with more than one action refuses the write.
@@ -569,7 +569,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 404   | `project.binding.not_found`                            | The binding is absent, belongs to another project or is not a worker binding.                                                                                                                      | binding get, binding revision list, agent list, agent get                    |
 | 409   | `project.binding_set.version_conflict`                 | The submitted binding-set version differs from the current version.                                                                                                                                | binding apply                                                                |
 | 400   | `project.bindings.duplicate_resource`                  | Two bindings use the same resource.                                                                                                                                                                | binding apply                                                                |
-| 400   | `project.bindings.repository.address_invalid`          | The repository address is invalid.                                                                                                                                                                 | binding apply                                                                |
+| 400   | `project.bindings.repository.address_invalid`          | The repository address is invalid, or `ssh -G` resolves its host outside the SSH host set of the platform.                                                                                         | binding apply                                                                |
 | 400   | `project.bindings.repository.project_prompt_too_large` | The repository project prompt exceeds the limit.                                                                                                                                                   | binding apply                                                                |
 | 422   | `project.bindings.repository.ssh_unreachable`          | The repository SSH read fails.                                                                                                                                                                     | binding apply                                                                |
 | 400   | `project.bindings.worker.agent_unknown`                | An entry names an agent the worker does not declare.                                                                                                                                               | binding apply                                                                |
