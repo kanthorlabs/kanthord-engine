@@ -6,9 +6,9 @@ This plan delivers:
 
 - The GitHub implementation of the Repository component for pull requests over `octokit` 5.0.5: create, the open-list read-back, read, the review-comment list, the fold of a pull request, and the result classes of decision D11.
 - The server-side network git write of the Repository connector: the fresh clone, the merge and push of `git.merge_push`, the push of a reused pull request, the landing read and fold of a branch push, and the removal of the clone.
-- The generalized protected facility of custody (decision D9): `authorizeOperation`, `release` with the pin of an execution alone, `consume`, `grantFacts` and `reportRefusal`.
-- The Mission authorization of a `FrozenAction` and of a request evidence for the facility, with the refusal reason `service_mismatch` (`code: proposed`).
-- The operations `intake.action.perform` (with the action table, the outbound runner of plan 02, the read-backs and the snapshot codec of its result), `intake.action.read` and `intake.action.check`; the reuse of a pull request waits for blocker B10.
+- The generalized protected facility of custody (decision D9): `authorizeOperation`, `release` with the pin of an execution alone, `consume` and `grantFacts`.
+- The Mission authorization of a `FrozenAction` and of a request evidence for the facility, with the refusal reason `service_mismatch`.
+- The operations `intake.action.perform` (with the action table, the outbound runner of plan 02, the read-backs and the snapshot codec of its result), `intake.action.read` and `intake.action.check`, with the read-back of a reused pull request on the node branch. The first two declare `direct: true`.
 - The Mission service identity and the replacement of the ERD 2 seams `IntakeCheck.check`, `IntakeActions.perform` and `IntakeActions.read` (decisions D6, D8).
 - The fixture platforms `fakeGitHub`, `bareRepository`, `mappedTransport` and `remoteHead`, and the move of the ERD 2 tests that used `scriptedCheck` and `scriptedActions` (decision D17).
 
@@ -16,62 +16,63 @@ Out of scope:
 
 - The storage operations (plan 04) and every inbound operation (plans 05 to 07).
 - The MCP read tools; `intake.action.read` serves the action performer here (decision D5).
-- The reconciliation of an uncertain result across attempts (`docs/brainstorm/HANDOFF.md:121`, B9 A3 / W1 / W4 / PR2).
+- The reconciliation of an uncertain result across attempts (`docs/brainstorm/HANDOFF.md:133`, the failure and recovery item A3 / W1 / W4 / PR2).
 - The CLI write of a configured action (`docs/reference/erd/03-integration.md:23`).
 
 ## Sources
 
-- `docs/reference/erd/03-integration.md:13`, `:23`, `:141–151` — the outbound requests and the outbound operations of ERD 3.
-- `docs/brainstorm/intake-service.md:17–46` — the boundary: forward the caller identity, the owner authorizes, custody releases, the Intake Service performs; a fresh clone for a network git write.
-- `docs/brainstorm/intake-service.md:133–143` — the configured action, the check, the read, the action table.
-- `docs/brainstorm/intake-service.md:145–182` — the outbound requests and the read-back.
-- `docs/brainstorm/intake-service.vocabulary.md:57–83` — outbound operation, request key, read-back.
-- `docs/brainstorm/intake-service.impl.md:116–136` — the operations and their authorization.
-- `docs/brainstorm/intake-service.impl.md:174–179` — the read-backs.
-- `docs/brainstorm/intake-service.impl.md:238–243` — the tests of the operations and of the outbound record.
+- `docs/reference/erd/03-integration.md:13`, `:23`, `:140–150` — the outbound requests and the outbound operations of ERD 3.
+- `docs/brainstorm/intake-service.md:17–47` — the boundary: forward the caller identity, the owner authorizes, custody releases, the Intake Service performs; a fresh clone for a network git write.
+- `docs/brainstorm/intake-service.md:124–134` — the configured action, the check, the read, the action table.
+- `docs/brainstorm/intake-service.md:136–173` — the outbound requests and the read-back.
+- `docs/brainstorm/intake-service.vocabulary.md:55–82` — outbound operation, request key, read-back.
+- `docs/brainstorm/intake-service.impl.md:117–138` — the operations, their authorization and their `direct: true` declaration.
+- `docs/brainstorm/intake-service.impl.md:176–182` — the read-backs, with the read-back of a reused pull request.
+- `docs/brainstorm/intake-service.vocabulary.md:65–70` — the request key of a reused pull request.
+- `docs/brainstorm/intake-service.impl.md:237–242` — the tests of the operations and of the outbound record.
 - `docs/brainstorm/repository.md:34–56`, `:58–69`, `:78–83` — the platform connector, the write operations, the result classes.
 - `docs/brainstorm/repository.vocabulary.md:28–36` — the result class.
-- `docs/brainstorm/repository.impl.md:13–40` — the GitHub implementation, the read-backs.
-- `docs/brainstorm/repository.impl.md:42–61` — the connector and the SSH environment.
-- `docs/brainstorm/custody.impl.md:95–126` — the protected facility and the release.
-- `docs/brainstorm/custody.impl.md:161–170` — the pin of an execution.
-- `docs/brainstorm/custody.impl.md:232` — the release tests.
-- `docs/brainstorm/mission-service.impl.md:241–252` — the request record, `PlatformAddress`, the Intake check and its answer.
-- `docs/brainstorm/mission-service.impl.md:557–563` — the Mission authorization integration.
-- `docs/brainstorm/mission-service.md:257–273`, `:851–856` — the request evidence and the human check.
+- `docs/brainstorm/repository.impl.md:13–43` — the GitHub implementation, the read-backs.
+- `docs/brainstorm/repository.impl.md:45–68` — the connector and the SSH environment.
+- `docs/brainstorm/custody.impl.md:108–140` — the protected facility, the release, the pin and drain commit before a remote call, and the refusal in the span of the holder.
+- `docs/brainstorm/custody.impl.md:175–184` — the pin of an execution.
+- `docs/brainstorm/custody.impl.md:260` — the release tests.
+- `docs/brainstorm/mission-service.impl.md:243–262` — the request record, `PlatformAddress`, the Intake check and its answer.
+- `docs/brainstorm/mission-service.impl.md:567–574` — the Mission authorization integration.
+- `docs/brainstorm/mission-service.md:257–273`, `:856–861` — the request evidence and the human check.
 - `docs/brainstorm/worker-service.impl.md:410–447` — the action performer, the request key, the result items.
 - `docs/brainstorm/worker-service.impl.md:497–500` — the two read methods.
-- `docs/brainstorm/worker-service.vocabulary.md:316` — the node branch `kanthord/<node id>`.
+- `docs/brainstorm/worker-service.vocabulary.md:318` — the node branch `kanthord/<node id>`.
 - `docs/brainstorm/project-service.impl.md:18–24`, `:210–214` — the action catalog, the action key, the authorization integration.
-- `docs/brainstorm/architecture.impl.md:592–594`, `:664–669`, `:679–692`, `:695–708` — Kind 2, the `service` policy, caller propagation, the handler.
-- `docs/brainstorm/gateway-service.impl.md:298`, `:302`, `:393–433` — the timeouts and idempotency.
-- `engine/docs/cli/intake.md:411–419`, `:457–462` — the routes without a command and their codes.
+- `docs/brainstorm/architecture.impl.md:593–595`, `:665–671`, `:681–694`, `:697–712` — Kind 2, the `service` policy and the `direct` flag, caller propagation, the handler and the index of ruled writes.
+- `docs/brainstorm/gateway-service.impl.md:298`, `:302`, `:394–434` — the timeouts and idempotency.
+- `engine/docs/cli/intake.md:404–418`, `:443–476` — the operations without a route and their codes.
 - `engine/src/custody/facility.ts:1–57`, `engine/src/custody/contract.ts:85–118`, `engine/src/custody/service.ts:362–440` — the ERD 2 facility.
 - `engine/src/mission/authorization.ts:1–137` — `authorizeClaim`, `authorizeAction`, `authorizeRequest`.
 - `engine/src/mission/node-check.ts:183–256` — the human check over `IntakeCheck`.
 - `engine/src/mission/contract.ts:151–166`, `:731–776` — `IntakeCheck`, `PlatformAddress`, `FrozenAction`.
 - `engine/src/worker/contract.ts:55–76`, `:224–269` — the result classes, `MissionActions`, `IntakeActions`.
-- `engine/src/worker/action-performer.ts:170–300` — the dispatch, the reuse and the request key.
+- `engine/src/worker/action-performer.ts:65–73`, `:170–310` — `requestKeyOf` (engine commit 91ebf4a), the dispatch and the reuse.
 - `engine/src/repository/connector.ts`, `engine/src/repository/index.ts:1–43` — the connector over `simple-git`.
 - `engine/src/apps/server/index.ts:186–239`, `engine/src/apps/server/test-support.ts:169–260` — the stand-ins and their fakes.
 - Decisions D6, D8, D9, D10, D11, D12, D17, D24 of `decisions.md`.
 
 ### Contract keys
 
-| Key                                                      | Where                                                            | Owner line                                                                                          |
-| -------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `executionId`                                            | path of `intake.action.perform` and `intake.action.read`         | decision D10 of ERD 2; `engine/docs/cli/mission.md` `ExecutionContext`                              |
-| `key`                                                    | body of `intake.action.perform`                                  | `project-service.impl.md:24` (the key of a configured action)                                       |
-| `commit`                                                 | body of `intake.action.perform`: the snapshot of the request key | `worker-service.impl.md:434`; `mission-service.impl.md:244`                                         |
-| `requestKey`                                             | body of `intake.action.perform`                                  | `intake-service.vocabulary.md:67–71`                                                                |
-| `reusedEvidenceId`                                       | body of `intake.action.perform`                                  | decision D8; `worker-service.impl.md:429` (request evidence of an earlier attempt)                  |
-| `evidenceId`                                             | path of `intake.action.read`, body of `intake.action.check`      | `mission-service.impl.md:251` (`evidenceId`)                                                        |
-| `method`                                                 | query of `intake.action.read`                                    | `worker-service.impl.md:490` (`github-pull-request-get`, `github-pull-request-review-comment-list`) |
-| `limit`, `cursor`                                        | query of `intake.action.read`                                    | `repository.impl.md:20–23`                                                                          |
-| `kind`, `resourceIdentity`, `number`, `branch`, `commit` | `PlatformAddress`                                                | `mission-service.impl.md:244`                                                                       |
-| `class`, `code`, `message`                               | a result class answer                                            | `worker-service.impl.md:441`                                                                        |
-| `body`                                                   | the answer of a read                                             | `intake-service.impl.md:124` "returns the platform body unchanged"                                  |
-| `endState`, `landedCommits`                              | the answer of `intake.action.check`                              | `mission-service.impl.md:245–246`                                                                   |
+| Key                                                      | Where                                                             | Owner line                                                                                          |
+| -------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `executionId`                                            | declared path of `intake.action.perform` and `intake.action.read` | decision D10 of ERD 2; `engine/docs/cli/mission.md` `ExecutionContext`                              |
+| `key`                                                    | body of `intake.action.perform`                                   | `project-service.impl.md:24` (the key of a configured action)                                       |
+| `commit`                                                 | body of `intake.action.perform`: the snapshot of the request key  | `worker-service.impl.md:434`; `mission-service.impl.md:246`                                         |
+| `requestKey`                                             | body of `intake.action.perform`                                   | `intake-service.vocabulary.md:65–70`                                                                |
+| `reusedEvidenceId`                                       | body of `intake.action.perform`                                   | decision D8; `worker-service.impl.md:429` (request evidence of an earlier attempt)                  |
+| `evidenceId`                                             | path of `intake.action.read`, body of `intake.action.check`       | `mission-service.impl.md:261` (`evidenceId`)                                                        |
+| `method`                                                 | query of `intake.action.read`                                     | `worker-service.impl.md:490` (`github-pull-request-get`, `github-pull-request-review-comment-list`) |
+| `limit`, `cursor`                                        | query of `intake.action.read`                                     | `repository.impl.md:23–26`                                                                          |
+| `kind`, `resourceIdentity`, `number`, `branch`, `commit` | `PlatformAddress`                                                 | `mission-service.impl.md:246`                                                                       |
+| `class`, `code`, `message`                               | a result class answer                                             | `worker-service.impl.md:441`                                                                        |
+| `body`                                                   | the answer of a read                                              | `intake-service.impl.md:125` "returns the platform body unchanged"                                  |
+| `endState`, `landedCommits`                              | the answer of `intake.action.check`                               | `mission-service.impl.md:247–248`                                                                   |
 
 ## Depends on
 
@@ -90,9 +91,9 @@ Out of scope:
 | Platform registry                | `platformImplementations = { github: GitHubPlatform }`, keyed by the platform value, static                                                                                                                                                                                                                                                                                                                                                                                                  | `src/repository/index.ts`                                                         | 03–10              |
 | `GitHubPlatform` (pull requests) | `createPullRequest(call, target, { head; base; title })`; `openPullRequests(call, target, { head; base })`; `getPullRequest(call, target, { number })`; `listReviewComments(call, target, { number; limit; cursor })`; `foldPullRequest(body, expectedEndState)`. `GitHubCall = { token; requester; signal; deadlineAt }`; `GitHubTarget = { kind: "binding"; address } \| { kind: "inbound"; resource }`; each answers `{ ok: true; value } \| { ok: false; class; code; status; message }` | `src/repository/github.ts`                                                        | 03, 06, 07, 08, 10 |
 | `GitWriter`                      | `mergePushFresh({ address; baseBranch; commit }, context, deadlineAt): Promise<{ commit }>`; `pushSnapshotFresh({ address; branch; commit }, context, deadlineAt)`; `landedOn({ address; branch; commit }, context, deadlineAt): Promise<{ landed: boolean; firstParent: string \| null }>`; `foldBranchPush(landed, commit, expectedEndState): { endState; landedCommits }`                                                                                                                 | `src/repository/connector.ts`, `src/repository/index.ts`                          | 03                 |
-| Facility                         | `authorizeOperation(tx, request: GrantRequest, now): Grant`; `release(tx, grant, now): Material`; `consume(grant): void`; `grantFacts(grant): GrantFacts`, which holds `projectId`, `credential` and the owner facts; `reportRefusal(credentialId, platform, code)`; `GrantKind` with `model_inference`, `frozen_action`, `request_evidence`                                                                                                                                                 | `src/custody/contract.ts`, `src/custody/facility.ts`, `src/custody/service.ts`    | 03, 04, 05         |
+| Facility                         | `authorizeOperation(tx, request: GrantRequest, now): Grant`; `release(tx, grant, now): Material`; `consume(grant): void`; `grantFacts(grant): GrantFacts`, which holds `projectId`, `credential` and the owner facts; `GrantKind` with `model_inference`, `frozen_action`, `request_evidence`                                                                                                                                                                                                | `src/custody/contract.ts`, `src/custody/facility.ts`, `src/custody/service.ts`    | 03, 04, 05         |
 | `MissionAuthorization` (part)    | `frozenAction(tx, identity, claim, { key; commit; reusedEvidenceId }): Authorized<ActionFacts>`; `requestEvidence(tx, identity, evidenceId, claim \| null): Authorized<RequestFacts>`; `Authorized<F> = { credential: string \| null; platform: string; projectId: string; facts: F }`                                                                                                                                                                                                       | `src/mission/authorization.ts` (implements); `src/custody/contract.ts` (declares) | custody            |
-| Intake action operations         | `intake.action.perform`, `intake.action.read` (`client`); `intake.action.check` (`service`)                                                                                                                                                                                                                                                                                                                                                                                                  | `src/intake/contract.ts`                                                          | 08, 10             |
+| Intake action operations         | `intake.action.perform`, `intake.action.read` (`client`, `direct: true`); `intake.action.check` (`service`)                                                                                                                                                                                                                                                                                                                                                                                  | `src/intake/contract.ts`                                                          | 08, 10             |
 | Address codec                    | `encodeAddress(address): StoredAddress` with snake_case properties (`kind`, `resource_identity`, `number`, `branch`, `commit`); `decodeAddress(stored): PlatformAddress`                                                                                                                                                                                                                                                                                                                     | `src/intake/address-codec.ts`                                                     | 03, 10             |
 | `IntakeCheck` (changed)          | `check(context: Context, evidenceId: string): Promise<{ endState; landedCommits }>`                                                                                                                                                                                                                                                                                                                                                                                                          | `src/mission/contract.ts`                                                         | 08                 |
 | `IntakeActions` (changed)        | `perform(call, { key; commit; reusedEvidenceId }, requestKey): Promise<PlatformAddress \| ResultClassAnswer>`; `read(call, method, evidenceId, page)`; `call = { context; identity; executionId }`                                                                                                                                                                                                                                                                                           | `src/worker/contract.ts`                                                          | Worker             |
@@ -108,16 +109,16 @@ Out of scope:
   1. Add `octokit` at exactly `5.0.5` with `pnpm add octokit@5.0.5`. The lockfile counts toward the budget of decision D19; when the diff exceeds it, the install is a commit of its own.
   2. In `src/repository/github.ts`, build one `Octokit` per call with `auth: call.token`, `baseUrl` from the constructor option (default `https://api.github.com`), the header `X-GitHub-Api-Version: 2022-11-28`, the `signal` of the call, and the retry and throttling plugins disabled, so one write sends one HTTP request. Cache no client and no token.
   3. Derive `owner` and `repo` from the target alone: a binding address of the pattern `git@github.com:<owner>/<repo>.git` (`engine/src/project/store.ts:38–39`) or an inbound `resource` `<owner>/<repo>`. The public methods take no `owner` or `repo` parameter.
-  4. Implement the classification of decision D11 in one function `classify(error, phase, kind)`, with `kind` = `read` or `write`: a transport error before dispatch of a write answers `confirmed_failure`; 429, 408 and a 403 with `x-ratelimit-remaining: 0` answer `retryable_refusal`; another 4xx answers `final_refusal`; a 5xx, a lost answer, an abort or the deadline of a write answers `unknown_outcome`; a read retries a transport error until the absolute deadline `deadlineAt` and then answers `retryable_refusal`, and a read 5xx answers `retryable_refusal` with no retry. Answer `{ ok: false, class, code: "repository.platform.github." + class, status, message }`.
+  4. Implement the classification of decision D11 in one function `classify(error, phase, kind)`, with `kind` = `read` or `write`: a transport error before dispatch of a write answers `confirmed_failure`; 429, 408 and a 403 with `x-ratelimit-remaining: 0` answer `retryable_refusal`; another 4xx answers `final_refusal`; a 5xx, a lost answer, an abort or the deadline of a write answers `unknown_outcome`; a read retries a transport error until the absolute deadline `deadlineAt` and then answers `retryable_refusal`, and a read 5xx answers `retryable_refusal` with no retry. Answer `{ ok: false, class, code: "repository.platform.github." + class, status, message }`, where `status` is the HTTP status of GitHub or null when the failure carries none.
   5. Export `platformImplementations = { github }` from `src/repository/index.ts`, and add `github.ts` to the `src/repository/` entry of `engine/AGENTS.md`.
-  6. Add tests against a local HTTP server that counts the requests: a write answers one request for a 429, a 502 and a lost response; a read retries a closed connection inside its deadline and stops at the deadline; each class of step 4; the token reaches the `Authorization` header and no error, message or log record.
+  6. Add tests against a local HTTP server that counts the requests: a write answers one request for a 429, a 502 and a lost response; a lost response answers `status` null; a read retries a closed connection inside its deadline and stops at the deadline; each class of step 4; the token reaches the `Authorization` header and no error, message or log record.
 - Rules:
-  - The GitHub implementation uses `octokit` at 5.0.5 with `X-GitHub-Api-Version: 2022-11-28`; a result class answers `repository.platform.github.<class>` with the HTTP status and the GitHub message. `repository.impl.md:15`, `:26`.
-  - A platform implementation is a module with its own signatures; the platform connector is a registry keyed by the platform value with static registration. `repository.impl.md:30–32`.
+  - The GitHub implementation uses `octokit` at 5.0.5 with `X-GitHub-Api-Version: 2022-11-28`; a result class answers 502 `repository.platform.github.<class>` with `details: { status }` and the GitHub message, and `status` is null when the failure carries no HTTP status. `repository.impl.md:15`, `:29`.
+  - A platform implementation is a module with its own signatures; the platform connector is a registry keyed by the platform value with static registration. `repository.impl.md:33–35`.
   - A platform implementation derives the resource of a call from the binding or the inbound, and a caller supplies no resource selector. `repository.md:43–47`.
-  - A platform implementation retries a read on a transport error within the deadline that the caller supplies, and it retries no write. `repository.md:82–83`; `repository.impl.md:36`.
+  - A platform implementation retries a read on a transport error within the deadline that the caller supplies, and it retries no write. `repository.md:82–83`; `repository.impl.md:39`.
   - The meaning of each class. `repository.vocabulary.md:28–42`; decision D11.
-  - The holder builds its client for one call and caches no client and no token. `intake-service.impl.md:119`.
+  - The holder builds its client for one call and caches no client and no token. `intake-service.impl.md:120`.
 - Done when: `node --test --test-timeout=30000 src/repository/github.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.2 Add the pull-request methods and their fold
@@ -128,9 +129,9 @@ Out of scope:
   2. Add `foldPullRequest(body, expectedEndState)`: for `pull_request_merged`, a merged pull request answers `expected` with `[merge_commit_sha]`, a closed unmerged one `other`, an open one `none`. Use the closed set `CheckEndState` of `src/mission/contract.ts:151–156` by its values, declared again inline in the Repository module.
   3. Add tests: each method answers the body unchanged; the cursor refusal; `nextCursor` from a `Link` header; the fold of the three states.
 - Rules:
-  - Pull request read and review comment list; both return the response body unchanged; `limit` and `cursor`. `repository.impl.md:17–23`.
-  - The check method folds the state of an external object against the expected end state and answers the landed commits of an `expected` repository result. `repository.impl.md:35`; `mission-service.impl.md:246–248`.
-  - The read-back of `github.pull_request` lists the open pull requests of the node branch into the base branch. `repository.impl.md:39`.
+  - Pull request read and review comment list; both return the response body unchanged; `limit` and `cursor`. `repository.impl.md:20–26`.
+  - The check method folds the state of an external object against the expected end state and answers the landed commits of an `expected` repository result. `repository.impl.md:38`; `mission-service.impl.md:248–250`.
+  - The read-back of the create of `github.pull_request` lists the open pull requests of the node branch into the base branch. `repository.impl.md:42`; `intake-service.impl.md:178`.
 - Done when: `node --test --test-timeout=30000 src/repository/github.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.3 Add the server-side git write and the landing read
@@ -144,10 +145,10 @@ Out of scope:
   5. Every call takes one absolute deadline and the `Context` abort of its caller through the timeout and abort plugins.
   6. Add tests over local bare repositories: a merge and push lands a merge commit whose second parent is the snapshot; a conflict throws `before_push` and leaves the base unchanged; a rejected push throws `push`; `landedOn` answers the merge commit after a merge, `landed: false` for a rewritten branch, and throws for an unreachable commit and a missing repository; every path leaves no temporary directory; an abort ends the operation.
 - Rules:
-  - A network git write creates a fresh clone with the SSH configuration of the server host and removes the clone after the call; `git.merge_push` answers the pushed commit. `intake-service.md:136`; `intake-service.impl.md:122`.
-  - The read-back of `git.merge_push` fetches the base branch and checks that the snapshot commit is an ancestor; a match answers the oldest first-parent commit that contains it. `intake-service.impl.md:177`; `repository.impl.md:40`.
-  - The connector spawns `git` through `simple-git` with its timeout and abort plugins; no credential enters a URL or a command line; a failure answers `repository.connector.git_failed`. `repository.impl.md:47–52`, `:56–60`.
-  - The check of a platform implementation folds the state of the external object. `repository.impl.md:35`.
+  - A network git write creates a fresh clone with the SSH configuration of the server host and removes the clone after the call; `git.merge_push` answers the pushed commit. `intake-service.md:127`; `intake-service.impl.md:123`.
+  - The read-back of `git.merge_push` fetches the base branch and checks that the snapshot commit is an ancestor; a match answers the oldest first-parent commit that contains it. `intake-service.impl.md:180`; `repository.impl.md:43`.
+  - The connector spawns `git` through `simple-git` with its timeout and abort plugins; no credential enters a URL or a command line; a failure answers `repository.connector.git_failed`. `repository.impl.md:50–58`, `:62–67`.
+  - The check of a platform implementation folds the state of the external object. `repository.impl.md:38`.
   - Gap: the carrier of commit attribution is an epic decision (`worker-service.impl.md:504–507`); the merge commit takes the fixed identity of step 1.
 - Done when: `node --test --test-timeout=30000 src/repository/connector.test.ts` passes; `pnpm run verify` passes.
 
@@ -155,16 +156,16 @@ Out of scope:
 
 - Files: `src/mission/authorization.ts`, `src/mission/authorization.test.ts`, `src/mission/service.ts`, `src/mission/contract.ts` (all edit)
 - Do:
-  1. Add `ServiceMismatch: "service_mismatch"` to `AuthorizationRefusal` (`code: proposed` reason of `mission.authorization.refused`).
+  1. Add `ServiceMismatch: "service_mismatch"` to `AuthorizationRefusal`, the reason of `mission.authorization.refused` that `mission-service.impl.md:573–574` rules.
   2. Implement `authorizeFrozenAction(tx, identity, claim, { key, commit, reusedEvidenceId })`: run `authorizeAction` (`src/mission/authorization.ts:80–100`); require a current passing assessment of the open attempt through the currency evaluator, else refuse with `claim_not_live`; read the pinned repository binding through `repositoryPolicyOf`; take the snapshot commit from the tested input of that assessment for the binding of the action, refuse with `node_mismatch` when it is absent or differs from `commit`. With `reusedEvidenceId`, require a request evidence of the same node whose `platform` asset is a `pull_request` address of the resource identity of the binding, else refuse with `node_mismatch`. Answer `credential` = the binding credential for `pull_request` and null for `merge_push`, `platform`, `projectId` and the facts `{ frozenAction, repository: { bindingId, address, resourceIdentity, baseBranch }, snapshotCommit, reusedAddress }`.
   3. Implement `authorizeRequestEvidence(tx, identity, evidenceId, claim)`: for a service identity, require `identity.service === "mission"`, else refuse with `service_mismatch`, then run `authorizeRequest` without a claim; for a machine identity, run `authorizeRequest` with the claim (`:114–137`). Both branches resolve the attempt of the request, its `FrozenAction` and the pinned binding with its disablement and removal. Read the `platform` asset; answer `credential` = the binding credential for a `pull_request` address and null for a `branch_push` address, `platform`, `projectId` and the facts `{ frozenAction, address, repository }`.
   4. Add tests: every refusal reason refuses before any answer; a removed or a disabled binding refuses both functions, the service branch included; a steps claim refuses an action; an evaluation claim without a current passing assessment refuses; a commit that differs from the assessed snapshot refuses; a request evidence of another node refuses a read; the Mission service identity authorizes a request evidence of any project, and the Intake service identity refuses with `service_mismatch`. The tests that mint a service identity sit in `src/apps/server/mission-authorization.test.ts` (decision D7).
 - Rules:
-  - For `github.pull_request` and `git.merge_push` the Mission Service authorizes the forwarded execution identity through its live evaluation claim, the node, the open attempt, the `FrozenAction` and the pinned binding revision; the Project resolution checks that revision. `intake-service.impl.md:132`.
+  - For `github.pull_request` and `git.merge_push` the Mission Service authorizes the forwarded execution identity through its live evaluation claim, the node, the open attempt, the `FrozenAction` and the pinned binding revision; the Project resolution checks that revision. `intake-service.impl.md:134`.
   - A configured-action write requires a live evaluation claim whose attempt holds a current passing assessment, and every operand comes from the records. `repository.md:62–64`. The caller names the snapshot of its request key, and the authorization proves it against the record (decision D8).
-  - `intake.action.check` and `intake.action.read`: the Mission Service authorizes the caller through the request evidence. `intake-service.impl.md:135`.
-  - A broken chain answers 403 `mission.authorization.refused` with `details: { reason }`, and the authorization takes no association from the caller. `mission-service.impl.md:562–563`.
-  - The owning service authorizes the calling service by name. `architecture.impl.md:669`; decision D7.
+  - `intake.action.check` and `intake.action.read`: the Mission Service authorizes the caller through the request evidence. `intake-service.impl.md:137`.
+  - A broken chain answers 403 `mission.authorization.refused` with `details: { reason }`, and the authorization takes no association from the caller. `mission-service.impl.md:572–574`.
+  - The owning service authorizes the calling service by name; the authorization of a request evidence for `intake.action.check` admits only the Mission Service, and another service identity answers `service_mismatch`. `architecture.impl.md:671`; `mission-service.impl.md:574`; decision D7.
 - Done when: `node --test --test-timeout=30000 src/mission/authorization.test.ts src/apps/server/mission-authorization.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.5 Generalize the protected facility
@@ -175,17 +176,18 @@ Out of scope:
   2. In `authorizeOperation(tx, request, now)`, resolve the execution of a request with a claim through `executions.requireRunning(tx, claim.executionId, claim.runtimeIdentity, now)` and refuse a claim whose row differs from it; dispatch `model_inference` to the Worker path and the two Mission kinds to `missionAuthorization`; mint a frozen grant of `{ kind, credential, platform, projectId, execution: <resolved row or null>, facts }`. Keep `authorize(tx, identity, execution)` as a thin call of `model_inference` for the handover.
   3. In `src/custody/facility.ts`, keep the module-private `WeakSet`; add `grantFacts(grant)`, which answers a frozen copy of `projectId`, `credential` and `facts` and consumes nothing.
   4. Change `release(tx, grant, now)`: throw `FacilityError` for a null credential; pin under `pinCredential` only when the grant holds an execution and the execution pins no revision of the name; resolve the pinned revision, else the newest live one; run the drain check of the name at every release; keep the suitability check and the decryption. Add `consume(grant)` for a grant with a null credential, which throws for a credentialed grant.
-  5. Add `reportRefusal(credentialId, platform, code)`, which writes one operational log record with the record identity, the platform and the code, and no material.
+  5. Removed: custody stores no refusal and gains no refusal method (`custody.impl.md:140`; decision D9).
   6. Add the required `missionAuthorization` to every listed constructor with a fake. In `src/apps/server/index.ts`, pass `missionAuthorization: { frozenAction: (...args) => mission.authorizeFrozenAction(...args), requestEvidence: (...args) => mission.authorizeRequestEvidence(...args) }`.
   7. Add tests: a grant under a claim pins once, and a second release of the same execution after a rotation reads the pin; a grant without an execution pins nothing and releases the newest live revision; a claim whose execution row differs refuses; `release` of a credential-less grant and `consume` of a credentialed grant throw; a consumed and a fabricated grant throw; a refusal of the Mission authorization reaches no decryption; `grantFacts` answers the project and the credential name; the handover of ERD 2 plan 05 keeps its behavior.
 - Rules:
-  - The facility consumes the authorization result of the service that owns the entity; its authorization function accepts requester identity, entity and requested operation. `custody.impl.md:97–98`.
-  - A module-private `WeakSet` records each frozen grant; custody consumes a grant at its first use. `custody.impl.md:99–101`.
-  - An execution identity resolves through the Scheduler Service to the node of its live claim; the facility takes no association from the caller. `custody.impl.md:105–106`.
-  - At the first use of a credential name in an execution custody pins the newest live revision; a later use reads the pin; the drain check runs at each pin, rotation, revoke and credential read. `custody.impl.md:163–169`; decision D24.
-  - `git.merge_push` takes no release. `intake-service.impl.md:133`; decision D9.
-  - The holder reports a remote refusal to custody. `custody.impl.md:126`. Gap: no page names the stored record; the log record stands until ERD 4 (decision D15).
-  - The Mission authorization is a Kind 2 collaboration, because the pin and the authorized chain commit in one transaction. `architecture.impl.md:592–594`; decision D9.
+  - The facility consumes the authorization result of the service that owns the entity; its authorization function accepts requester identity, entity and requested operation. `custody.impl.md:110–111`.
+  - A module-private `WeakSet` records each frozen grant; custody consumes a grant at its first use. `custody.impl.md:112–114`.
+  - An execution identity resolves through the Scheduler Service to the node of its live claim; the facility takes no association from the caller. `custody.impl.md:118–119`.
+  - At the first use of a credential name in an execution custody pins the newest live revision; a later use reads the pin; the drain check runs at each pin, rotation, revoke and credential read. `custody.impl.md:177–183`; decision D24.
+  - `git.merge_push` takes no release. `intake-service.impl.md:135`; decision D9.
+  - A handler that releases material before a remote call commits any pin and drain of that release in its transaction before the call, and a later failure keeps them. `custody.impl.md:131`; `architecture.impl.md:702`.
+  - The holder of the material writes a remote refusal into the span of its operation with the credential name and revision; custody stores no refusal. `custody.impl.md:140`. Gap: the span is ERD 4 work (decision D15).
+  - The Mission authorization is a Kind 2 collaboration, because the pin and the authorized chain commit in one transaction. `architecture.impl.md:593–595`; decision D9.
 - Done when: `node --test --test-timeout=30000 src/custody/facility.test.ts src/custody/service.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.6 Add the GitHub and repository fixtures
@@ -206,57 +208,61 @@ Out of scope:
 - Files: `src/intake/contract.ts`, `src/intake/action-check.ts` (create), `src/intake/service.ts`, `src/mission/contract.ts`, `src/mission/service.ts`, `src/mission/node-check.ts`, `src/mission/node-check.test.ts`, `src/mission/test-support.ts`, `src/mission/service.test.ts`, `src/apps/server/index.ts`, `src/apps/server/test-support.ts`, `src/apps/server/action-check.test.ts` (create), `src/apps/server/e2e-mission-execution-operations.test.ts`, `src/apps/server/e2e-worker-action-performer.test.ts`, `src/apps/server/intake-fixtures.test.ts`, `src/apps/server/unwired-import.test.ts` (edit)
 - Do:
   1. Declare `action.check`: `access: Service`, `mutation: false`, `lifetime: Unary`, body `z.strictObject({ evidenceId: identitySchema("evidence") })`, output `z.strictObject({ endState: z.enum(CheckEndState), landedCommits: z.array(commitSchema) })`. Its `POST /api/intake/action/check` is the identity of the declaration and no route (task 01.2).
-  2. Implement the handler: in one `store.transaction`, authorize the `request_evidence` kind with no claim and release the credential of a `pull_request` address or consume the grant of a `branch_push` address. Outside it, call `getPullRequest` and `foldPullRequest`, or `landedOn` on the base branch of the `FrozenAction` and `foldBranchPush(landed, address.commit, expectedEndState)`. A GitHub result class throws `OperationError(502, code, message, { status })` (`code: proposed` status) and reaches `reportRefusal` for a 401 or 403; a git failure throws `repository.connector.git_failed`. Drop the material in `finally`; answer through one `caller.commit` that writes nothing.
+  2. Implement the handler: in one `store.transaction`, authorize the `request_evidence` kind with no claim and release the credential of a `pull_request` address or consume the grant of a `branch_push` address. Outside it, call `getPullRequest` and `foldPullRequest`, or `landedOn` on the base branch of the `FrozenAction` and `foldBranchPush(landed, address.commit, expectedEndState)`. Commit any pin and drain of the release in that transaction before the platform call. A GitHub result class throws `OperationError(502, code, message, { status })`, with `status` null when the failure carries none; a git failure throws `repository.connector.git_failed`. A 401 or 403 of GitHub is a refusal that belongs in the span of the operation (decision D9). Drop the material in `finally`; answer through one `caller.commit` that writes nothing.
   3. Change `IntakeCheck` to `check(context, evidenceId)` and pass `item.request.id` in `checkNode` (`src/mission/node-check.ts:218–221`). Mint `missionIdentity` in `composeServices`, keep it in the closure of the seam, build `intakeClient = directClient(intakeOperations, invocation)`, and pass `intakeCheck: { check: (context, evidenceId) => resultOf(intakeClient["action.check"]({ params: {}, query: {}, body: { evidenceId } }, { identity: missionIdentity, context })) }`, where `resultOf` answers the data of `Completed`, throws an `OperationError` with the status and the code of `Failure`, and throws `system.operation.unknown` for `Indeterminate`.
   4. Delete `unwired("IntakeCheck.check")`, the `intakeCheck` member of `standIns` and `scriptedCheck`. Move `e2e-mission-execution-operations.test.ts`, `e2e-worker-action-performer.test.ts` and `intake-fixtures.test.ts` from `scriptedCheck` onto `fakeGitHub`: a scripted `expected` answer becomes a merged pull request, `other` a closed one and `none` an open one.
-  5. Add tests in `src/apps/server/action-check.test.ts`: a merged, a closed and an open pull request; a landed and a rewritten branch push; a failed inspection answers a failure, never `other`; the Intake service identity refuses with `service_mismatch`; the HTTP adapter answers 404 for the path; no outbound request is recorded; the material drops after a success, a refusal and a thrown error.
+  5. Add tests in `src/apps/server/action-check.test.ts`: a merged, a closed and an open pull request; a landed and a rewritten branch push; a failed inspection answers a failure, never `other`; a GitHub 502 answers `repository.platform.github.<class>` with `details.status` and a lost answer with `details.status` null; the Intake service identity refuses with `service_mismatch`; the HTTP adapter answers 404 for the path; no outbound request is recorded; the material drops after a success, a refusal and a thrown error.
 - Rules:
-  - `intake.action.check` is a `service` operation under the service identity of the Mission Service; it takes the request evidence, reads the binding and its credential from the pinned `FrozenAction`, and answers `{ endState, landedCommits }` that the platform implementation folds. `intake-service.impl.md:123`; `mission-service.impl.md:245`.
-  - An `expected` result of a repository action holds a nonempty `landedCommits`; every other result an empty list. `mission-service.impl.md:248`.
-  - The operations decide no end state beyond the fold of the platform implementation. `intake-service.impl.md:128`.
-  - A check records no outbound request. `intake-service.md:148`.
-  - The Mission Service calls the check under its service identity. `mission-service.md:843`. The release under a service identity pins nothing. Decision D24.
+  - `intake.action.check` is a `service` operation under the service identity of the Mission Service; it takes the request evidence, reads the binding and its credential from the pinned `FrozenAction`, and answers `{ endState, landedCommits }` that the platform implementation folds. `intake-service.impl.md:124`; `mission-service.impl.md:247`.
+  - An `expected` result of a repository action holds a nonempty `landedCommits`; every other result an empty list. `mission-service.impl.md:250`.
+  - The operations decide no end state beyond the fold of the platform implementation. `intake-service.impl.md:129`.
+  - A check records no outbound request. `intake-service.md:139`.
+  - The Mission Service calls the check under its service identity. `mission-service.md:846`. The release under a service identity pins nothing. Decision D24.
   - The plan that implements a seam deletes its `unwired` literal, its `standIns` member and its fake, and moves the tests that use them. Decision D6.
-  - Gap: the HTTP status of a result class of a check is `code: proposed` in `00-index.md`. The drain of the release before the call waits for B1 (decision D3).
+  - A result class of the check answers 502 `repository.platform.github.<class>` with `details: { status }`. `repository.impl.md:29`; `engine/docs/cli/intake.md:470`.
+  - The drain of the release commits before the call. `custody.impl.md:131`; decision D3.
 - Done when: `node --test --test-timeout=30000 src/apps/server/action-check.test.ts src/mission/node-check.test.ts src/apps/server/e2e-mission-execution-operations.test.ts src/apps/server/e2e-worker-action-performer.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.8 Declare and implement `intake.action.perform` for a new pull request and a merge
 
-- Files: `src/intake/contract.ts`, `src/intake/address-codec.ts` (create), `src/intake/action-perform.ts` (create), `src/apps/server/action-perform.test.ts` (create), `src/intake/service.ts`, `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml`, `static/openapi/**` (regenerated)
+- Files: `src/intake/contract.ts`, `src/intake/address-codec.ts` (create), `src/intake/action-perform.ts` (create), `src/apps/server/action-perform.test.ts` (create), `src/intake/service.ts`, `src/apps/server/openapi-integration.test.ts` (edit)
 - Do:
-  1. Declare `action.perform`: `POST /api/intake/execution/:executionId/action/perform`, `access: Client`, `requiresExecution: true`, `mutation: true`, `lifetime: Unary`, `timeoutMs: ACTION_PERFORM_TIMEOUT_MS`, body `z.strictObject({ key: actionKeySchema, commit: commitSchema, reusedEvidenceId: identitySchema("evidence").nullable(), requestKey: z.string().min(1) })`, output the union of the inline `platformAddressSchema` and `resultClassAnswerSchema = z.strictObject({ class: z.enum(ResultClass), code: z.string(), message: z.string() })`.
+  1. Declare `action.perform`: `POST /api/intake/execution/:executionId/action/perform` as the identity of the declaration, `access: Client`, `direct: true`, `requiresExecution: true`, `mutation: true`, `lifetime: Unary`, `timeoutMs: ACTION_PERFORM_TIMEOUT_MS`, body `z.strictObject({ key: actionKeySchema, commit: commitSchema, reusedEvidenceId: identitySchema("evidence").nullable(), requestKey: z.string().min(1) })`, output the union of the inline `platformAddressSchema` and `resultClassAnswerSchema = z.strictObject({ class: z.enum(ResultClass), code: z.string(), message: z.string() })`.
   2. Declare the action table `ACTION_TABLE`: `{ action: "pull_request", platform: "github" } → "github.pull_request"` and `{ action: "merge_push", platform: "github" } → "git.merge_push"`, the git platforms of today.
   3. Implement `encodeAddress` and `decodeAddress` with the snake_case stored form, and give `runOutbound` this codec as its result codec.
   4. Implement the handler with `runOutbound`. Its `authorize(tx, now)` calls `custody.authorizeOperation(tx, { kind: "frozen_action", identity, claim: caller.execution, key, commit, reusedEvidenceId }, now)`, reads `grantFacts`, maps the action and the binding platform through the table and throws 422 `intake.outbound.request.action_unmapped` for a missing row before any insert, then releases the grant (`github.pull_request`) or consumes it (`git.merge_push`), and answers the operation, the project and the credential name of the facts (null for `git.merge_push`). A non-null `reusedEvidenceId` answers 400 `gateway.request.validation_failed` until task 03.10.
-  5. The call: `github.pull_request` runs `createPullRequest(target, { head: "kanthord/" + claim.nodeId, base: baseBranch, title: "kanthord " + claim.nodeId })` and answers `{ kind: "pull_request", resourceIdentity, number }`. `git.merge_push` runs `mergePushFresh({ address, baseBranch, commit: snapshotCommit })` and answers `{ kind: "branch_push", resourceIdentity, branch: baseBranch, commit }`; `before_push` maps to `confirmed_failure` and `push` to `unknown_outcome`, each with `repository.connector.git_failed`. A 401 or 403 reaches `reportRefusal` with the credential identity of the material.
-  6. The read-backs: `github.pull_request` calls `openPullRequests` with the node branch and the base branch, and one item answers its address, and a 401 or 403 reaches `reportRefusal`; `git.merge_push` calls `landedOn` on the base branch and a landing answers the branch push of `firstParent`.
+  5. The call: `github.pull_request` runs `createPullRequest(target, { head: "kanthord/" + claim.nodeId, base: baseBranch, title: "kanthord " + claim.nodeId })` and answers `{ kind: "pull_request", resourceIdentity, number }`. `git.merge_push` runs `mergePushFresh({ address, baseBranch, commit: snapshotCommit })` and answers `{ kind: "branch_push", resourceIdentity, branch: baseBranch, commit }`; `before_push` maps to `confirmed_failure` and `push` to `unknown_outcome`, each with `repository.connector.git_failed`. A 401 or 403 of GitHub is a refusal that belongs in the span of the operation (decision D9).
+  6. The read-backs: the create of `github.pull_request` calls `openPullRequests` with the node branch and the base branch, and one item answers its address; `git.merge_push` calls `landedOn` on the base branch and a landing answers the branch push of `firstParent`.
   7. `finalize` maps the runner answer to `{ kind: "answer", body }`: `ok: true` answers the decoded address, `ok: false` the result class body; the state write and that body commit together in the final `caller.commit`. A 409 or a 422 of the runner propagates as an error.
-  8. Regenerate OpenAPI; assert the path, the `client` policy and the `executionId` path parameter.
-  9. Add tests through the direct adapter with a forwarded machine identity: a refusal of another node reaches no release, no material and no row; `drop()` runs after a success, a failure and a thrown call; an unmapped action answers 422 and records no request; a timed-out create that GitHub applied answers `unknown_outcome`, and a repeat finds the pull request by the read-back with one create in total; two concurrent calls with one key create once and answer one 409 `intake.outbound.request.in_flight`; `git.merge_push` leaves no clone; the stored `result` holds `resource_identity`, and the answer holds `resourceIdentity`.
+  8. In `openapi-integration.test.ts`, assert that the emitted OpenAPI holds no path of `intake.action.perform`; the HTTP adapter answers 404 `gateway.routing.not_found` for its path.
+  9. Add tests through the direct adapter with a forwarded machine identity: a refusal of another node reaches no release, no material and no row; `drop()` runs after a success, a failure and a thrown call; an unmapped action answers 422 and records no request; a timed-out create that GitHub applied answers `unknown_outcome`, and a repeat finds the pull request by the read-back with one create in total; two concurrent calls with one key create once and answer one 409 `intake.outbound.request.in_flight`; `git.merge_push` leaves no clone; the stored `result` holds `resource_identity`, and the answer holds `resourceIdentity`; a failure after the `pending` insert and after the release keeps the row, the pin and the drain.
 - Rules:
-  - `intake.action.perform` is a `client` operation under the forwarded execution identity; it takes the configured action and its request key, maps the action to its outbound operation, and answers the `PlatformAddress` or the result class. `intake-service.impl.md:120`.
-  - The action table maps `pull_request` on a `github` binding to `github.pull_request` and `merge_push` on a git binding to `git.merge_push`; an action without a row answers 422 `intake.outbound.request.action_unmapped` and records no request. `intake-service.impl.md:121`; `intake-service.md:142–143`.
-  - `github.pull_request` takes a custody release of the credential of the pinned repository binding revision, which custody pins to the execution at its first use; `git.merge_push` takes no release. `intake-service.impl.md:133`.
-  - The read-backs of the two writes. `intake-service.impl.md:176–177`; `repository.impl.md:39–40`.
-  - Every property name inside `result` is snake_case; the external `PlatformAddress` keeps its field names. `docs/reference/erd/03-integration.md:127`; `mission-service.impl.md:244`.
-  - The node branch is `kanthord/<node id>`. `worker-service.vocabulary.md:316`.
-  - The `pending` insert, the pin and the drain before the call wait for the ruling of B1 (decision D3). The route waits for B5 and the policy for B6.
-  - A pull request that a human merges before the repeat leaves the request `failed`. `intake-service.impl.md:179`.
+  - `intake.action.perform` is a `client` operation under the forwarded execution identity; it takes the configured action and its request key, maps the action to its outbound operation, and answers the `PlatformAddress` or the result class. `intake-service.impl.md:121`.
+  - The action table maps `pull_request` on a `github` binding to `github.pull_request` and `merge_push` on a git binding to `git.merge_push`; an action without a row answers 422 `intake.outbound.request.action_unmapped` and records no request. `intake-service.impl.md:122`; `intake-service.md:133–134`.
+  - `github.pull_request` takes a custody release of the credential of the pinned repository binding revision, which custody pins to the execution at its first use; `git.merge_push` takes no release. `intake-service.impl.md:135`.
+  - The read-backs of the two writes. `intake-service.impl.md:178–180`; `repository.impl.md:42–43`.
+  - Every property name inside `result` is snake_case; the external `PlatformAddress` keeps its field names. `docs/reference/erd/03-integration.md:126`; `mission-service.impl.md:246`.
+  - The node branch is `kanthord/<node id>`. `worker-service.vocabulary.md:318`.
+  - The `pending` insert, the pin and the drain commit before the call as ruled writes of the index. `architecture.impl.md:700–704`; `custody.impl.md:131`; decision D3.
+  - `intake.action.perform` declares `direct: true`: the direct adapter alone reaches it, and no HTTP route and no OpenAPI path exist. `intake-service.impl.md:130`; `architecture.impl.md:667–668`; `engine/docs/cli/intake.md:404–408`.
+  - The peers reach the Intake Service through the `client`, `human` and `service` operations of the owning sibling. `docs/reference/erd/03-integration.md:24`.
+  - A pull request that a human merges before the repeat of its create leaves the request `failed`. `intake-service.impl.md:182`.
 - Done when: `node --test --test-timeout=30000 src/apps/server/action-perform.test.ts src/apps/server/openapi-integration.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.9 Declare and implement `intake.action.read`
 
-- Files: `src/intake/contract.ts`, `src/intake/action-read.ts` (create), `src/apps/server/action-read.test.ts` (create), `src/intake/service.ts`, `src/apps/server/openapi-integration.test.ts` (edit), `static/openapi.yaml`, `static/openapi/**` (regenerated)
+- Files: `src/intake/contract.ts`, `src/intake/action-read.ts` (create), `src/apps/server/action-read.test.ts` (create), `src/intake/service.ts`, `src/apps/server/openapi-integration.test.ts` (edit)
 - Do:
-  1. Declare `action.read`: `GET /api/intake/execution/:executionId/request/:evidenceId`, `access: Client`, `requiresExecution: true`, `mutation: false`, query `{ method: z.enum(ActionReadMethod), limit?: 1 to 100, cursor? }`, output the union of `z.strictObject({ body: z.unknown(), nextCursor: z.string().nullable() })` and `resultClassAnswerSchema`.
-  2. Implement the handler: in one `store.transaction`, authorize the `request_evidence` kind with the claim and release the credential; outside it, call `getPullRequest` (answering `nextCursor: null`) or `listReviewComments` with the number of the `pull_request` address; a 401 or 403 reaches `reportRefusal` with the credential identity of the material; drop the material in `finally`; answer the body unchanged or the result class; then one `caller.commit` that writes nothing. A `branch_push` address answers 400 `gateway.request.validation_failed`.
-  3. Add tests: the body passes unchanged; a result class answers its body; another node refuses before the release; the release pins the credential under the execution; no outbound request is recorded; the material drops on every path.
+  1. Declare `action.read`: `GET /api/intake/execution/:executionId/request/:evidenceId` as the identity of the declaration, `access: Client`, `direct: true`, `requiresExecution: true`, `mutation: false`, query `{ method: z.enum(ActionReadMethod), limit?: 1 to 100, cursor? }`, output the union of `z.strictObject({ body: z.unknown(), nextCursor: z.string().nullable() })` and `resultClassAnswerSchema`.
+  2. Implement the handler: in one `store.transaction`, authorize the `request_evidence` kind with the claim, release the credential and commit the pin and the drain before the call; outside it, call `getPullRequest` (answering `nextCursor: null`) or `listReviewComments` with the number of the `pull_request` address; a 401 or 403 of GitHub is a refusal that belongs in the span of the operation (decision D9); drop the material in `finally`; answer the body unchanged or the result class; then one `caller.commit` that writes nothing. A `branch_push` address answers 400 `gateway.request.validation_failed`.
+  3. Add tests: the body passes unchanged; a result class answers its body; another node refuses before the release; the release pins the credential under the execution; no outbound request is recorded; the material drops on every path; the HTTP adapter answers 404 `gateway.routing.not_found` for its path, and the emitted OpenAPI holds no path of it.
 - Rules:
-  - `intake.action.read` is a `client` operation under the forwarded execution identity; it returns the platform body unchanged. `intake-service.impl.md:124`.
-  - A read records no outbound request. `intake-service.md:148`.
-  - The two read methods and the pagination. `worker-service.impl.md:497–500`; `repository.impl.md:20–23`.
+  - `intake.action.read` is a `client` operation under the forwarded execution identity; it returns the platform body unchanged. `intake-service.impl.md:125`.
+  - A read records no outbound request. `intake-service.md:139`.
+  - The two read methods and the pagination. `worker-service.impl.md:497–500`; `repository.impl.md:23–26`.
   - A read requires a live claim of any kind. `worker-service.impl.md:491`.
-  - The pin and the drain of the release before the call wait for B1; the route waits for B5.
+  - The pin and the drain of the release commit before the call. `custody.impl.md:131`; decision D3.
+  - `intake.action.read` declares `direct: true` and has no HTTP route. `intake-service.impl.md:130`; `engine/docs/cli/intake.md:404–408`.
 - Done when: `node --test --test-timeout=30000 src/apps/server/action-read.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.10 Add the reuse of a pull request
@@ -264,28 +270,29 @@ Out of scope:
 - Files: `src/intake/action-perform.ts`, `src/apps/server/action-perform.test.ts`, `src/worker/action-performer.ts`, `src/worker/action-performer.test.ts` (edit)
 - Do:
   1. Admit a non-null `reusedEvidenceId`. The call runs `pushSnapshotFresh({ address, branch: "kanthord/" + claim.nodeId, commit: snapshotCommit })`, maps its stages as in task 03.8, and answers the reused address of the facts.
-  2. Implement the read-back that the ruling of B10 names; the recommendation is `landedOn({ address, branch: "kanthord/" + claim.nodeId, commit: snapshotCommit })`, whose landing answers the reused address.
-  3. Apply the request key that the ruling of B10 names in `performIntake` (`src/worker/action-performer.ts:235–239`); the recommendation appends `/<snapshot commit>` to the key of a reused pull request.
-  4. Add tests: a reuse pushes the snapshot to the node branch and answers the reused address; a failed push leaves `failed`, and a repeat whose read-back finds no snapshot keeps `failed`; the performer key of a reuse holds the snapshot; a push-stage failure answers `unknown_outcome` with `repository.connector.git_failed` and reports no refusal to custody, because a network git operation has no attribution to a credential record (`repository.impl.md:61`).
+  2. Implement the read-back of a reuse as `landedOn({ address, branch: "kanthord/" + claim.nodeId, commit: snapshotCommit })`. A landing answers the reused address of the facts. The open state of the pull request is no condition of the match. A thrown inspection is no match and leaves the state unchanged.
+  3. Keep the request key of the performer: `requestKeyOf` of engine commit 91ebf4a (`src/worker/action-performer.ts:65–73`) already appends `/<pull request number>/<snapshot commit>` to the key of a reused pull request. This task changes no performer code.
+  4. Add tests: a reuse pushes the snapshot to the node branch and answers the reused address; a candidate change from pull request 42 to pull request 43 with one snapshot gives two keys and two requests; a push that lands and loses its answer, then a repeat with the same key, answers the reused address with one push in total; a missing commit object and a transport failure of `landedOn` throw and leave the request `failed`, never `landed: false`; a rebased node branch that no longer contains the snapshot gives a repeat that keeps `failed`; a push-stage failure answers `unknown_outcome` with `repository.connector.git_failed`, and its span holds no credential, because a network git operation has no attribution to a credential record (`repository.impl.md:68`).
 - Rules:
-  - For the reuse of a pull request the handler creates a fresh clone, performs the network git write and removes the clone. `intake-service.impl.md:122`.
-  - Blocker B10: the read-back of `github.pull_request` finds an open pull request (`intake-service.impl.md:176`), which existed before a reuse, and the request key of a pull request holds no snapshot (`worker-service.impl.md:434`). The task waits for the ruling of B10.
+  - For the reuse of a pull request the handler creates a fresh clone, performs the network git write and removes the clone. `intake-service.impl.md:123`.
+  - The reuse of a `github.pull_request` fetches the node branch and checks that the snapshot commit of the call is an ancestor of it; a match answers the reused address, and the open state is no condition. The rule serves a repeat with the reuse operands and defines no reconciliation after a merge. `intake-service.impl.md:179`; `repository.impl.md:42`.
+  - The request key of a reuse is `<node id>/<attempt>/<FrozenAction.key>/<pull request number>/<snapshot commit>`. `worker-service.impl.md:435`; `intake-service.vocabulary.md:70`.
 - Done when: `node --test --test-timeout=30000 src/apps/server/action-perform.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.11 Wire the action performer through the Intake operations
 
 - Files: `src/worker/contract.ts`, `src/worker/action-performer.ts`, `src/worker/action-performer.test.ts`, `src/apps/server/index.ts`, `src/apps/server/test-support.ts`, `src/apps/server/action-performer-integration.test.ts`, `src/apps/server/e2e-native-methods.test.ts`, `src/apps/server/e2e-worker-action-performer.test.ts`, `src/apps/server/intake-fixtures.test.ts`, `src/apps/server/unwired-import.test.ts` (all edit)
 - Do:
-  1. Change `IntakeActions` to `perform(call, { key, commit, reusedEvidenceId }, requestKey)` and `read(call, method, evidenceId, page)`. In `performIntake`, pass the action key, `pending.operands.commit` and the reused evidence identity with the unchanged request key; in `reuse` (`src/worker/action-performer.ts:270–300`), pass `candidate.evidenceId` to `read` and keep it as the reused evidence.
+  1. Change `IntakeActions` to `perform(call, { key, commit, reusedEvidenceId }, requestKey)` and `read(call, method, evidenceId, page)`. In `performIntake`, pass the action key, `pending.operands.commit` and the reused evidence identity with the request key of `requestKeyOf`, unchanged; in `reuse` (`src/worker/action-performer.ts:270–300`), pass `candidate.evidenceId` to `read` and keep it as the reused evidence.
   2. In `composeServices`, pass `intakeActions` over `intakeClient["action.perform"]` and `intakeClient["action.read"]` with `{ identity: call.identity, context: call.context }`, the execution identity in the path, and a fresh ULID as the idempotency key of `perform`; map each result through `resultOf`. Map an indeterminate `perform` to an error that is not `system.composition.unwired`, so the performer keeps its uncertain reservation.
   3. Delete `unwired("IntakeActions.perform")`, `unwired("IntakeActions.read")`, the `intakeActions` member of `standIns` and `scriptedActions`; set `UNWIRED_SEAMS` to the five storage seams.
   4. Move the four listed test files onto `fakeGitHub` and the repository fixtures: a scripted address becomes a created pull request, a refusal `respondNext`, an unknown outcome `dropNextAfterApply`, a gate `hold`, and a read answer a pull request of `fakeGitHub`; assert the same performer items and node states.
 - Rules:
-  - The action performer passes the request key `<node id>/<attempt>/<FrozenAction.key>`, plus the snapshot commit for `merge_push`. `worker-service.impl.md:433–434`.
+  - The action performer passes the request key `<node id>/<attempt>/<FrozenAction.key>`, plus the snapshot commit for `merge_push`, plus the pull request number and the snapshot commit for a reuse. `worker-service.impl.md:434–435`.
   - A failure of `intake.action.read` removes the reservation; a failure of `perform` that proves no write started removes it; every other failure keeps it as `uncertain`. `worker-service.impl.md:425–427`.
-  - Each operation forwards the identity of its caller. `intake-service.impl.md:118`; `architecture.impl.md:681–684`.
+  - Each operation forwards the identity of its caller. `intake-service.impl.md:119`; `architecture.impl.md:683–686`.
   - Decisions D6, D8.
-  - The moved reuse scenarios (`src/apps/server/e2e-worker-action-performer.test.ts:482–521`) need task 03.10, so this task waits for the ruling of B10 with it; no scenario is deleted or weakened.
+  - The moved reuse scenarios (`src/apps/server/e2e-worker-action-performer.test.ts:482–521`) need task 03.10, so this task follows it; no scenario is deleted or weakened.
 - Done when: `node --test --test-timeout=30000 src/worker/action-performer.test.ts src/apps/server/action-performer-integration.test.ts src/apps/server/e2e-native-methods.test.ts src/apps/server/e2e-worker-action-performer.test.ts src/apps/server/unwired-import.test.ts` passes; `pnpm run verify` passes.
 
 ### 03.E E2E proof
@@ -332,11 +339,4 @@ Setup, in order (each command exits 0, token H unless marked):
 | E03.7 | `kanthord mission node create` of an objective `Q` with `"bindings": ["merge"]` under `I`; push `q` to `refs/heads/kanthord/<Q>` of the merge bare repository; the flow of E03.1 for Q with `mergeBindingId` and `q` → `e4`; `POST /api/worker/execution/<e4>/action/request` with T; `kanthord scheduler execution release <e4> --file release(false)` [T]; `kanthord intake outbound list --operation git.merge_push`                                                | 0 each, 200, 0, 0 | the claims name Q; `items[0].kind` `submitted` with `{ kind: "branch_push", resourceIdentity: "repository:github:owner/merge", branch: "main", commit: c }`, where `c` = `remoteHead(mergeBare, "refs/heads/main")`; the outbound request `succeeded` with `requestKey` `<Q>/1/merge.merge_push/<q>`; the merge commit `c` holds `q` as its second parent |
 | E03.8 | `kanthord mission node check <Q> --file check.json`; `kanthord mission node get <Q>`                                                                                                                                                                                                                                                                                                                                                                                   | 0, 0              | `results[0].resolution` `expected-end`; `state` `Completed`                                                                                                                                                                                                                                                                                               |
 
-No row asserts a `code: proposed` code. The reuse of a pull request waits for B10, so no row covers it.
-
-## Blockers
-
-- B1 of `00-index.md`: tasks 03.8 and 03.9 write before their call (the `pending` insert, the pin) and wait for its ruling.
-- B5 and B6 of `00-index.md`: no page names the routes of `intake.action.perform` and `intake.action.read`, and the ERD names another policy. Tasks 03.8 and 03.9 wait for both rulings.
-- B10 of `00-index.md`: the read-back and the request key of a reused pull request prove no push of the snapshot. Tasks 03.10 and 03.11 wait for its ruling.
-- `code: proposed`: the reason `service_mismatch` (task 03.4) and the HTTP status 502 of a result class of a check (task 03.7).
+No row covers the reuse of a pull request, because a reuse needs a second attempt of the node; the tests of tasks 03.10 and 03.11 cover it.

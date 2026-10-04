@@ -13,31 +13,31 @@ Out of scope:
 
 - Every outbound operation and its platform call (plans 03 and 04). The runner takes the authorization, the call and the read-back as functions.
 - The CLI transport and its code `intake.outbound.request.cli_unavailable` (decision D5).
-- A caller read of a request: no `client` or `service` operation reads one (`intake-service.impl.md:189`).
+- A caller read of a request: no `client` or `service` operation reads one (`intake-service.impl.md:192`).
 
 ## Sources
 
-- `docs/reference/erd/03-integration.md:74–84` — the columns of `intake_outbound_request`.
-- `docs/reference/erd/03-integration.md:119–120` — no remote effect commits with a SQLite transaction; a request commits as `pending` before its call; `succeeded` commits only after a 2xx answer or a read-back match.
-- `docs/reference/erd/03-integration.md:141–151` — the constraints of the outbound request.
+- `docs/reference/erd/03-integration.md:73–83` — the columns of `intake_outbound_request`.
+- `docs/reference/erd/03-integration.md:118–119` — no remote effect commits with a SQLite transaction; a request commits as `pending` before its call; `succeeded` commits only after a 2xx answer or a read-back match.
+- `docs/reference/erd/03-integration.md:140–150` — the constraints of the outbound request.
 - `docs/reference/erd/03-integration.md:30` — the set of running requests stays in memory.
-- `docs/brainstorm/intake-service.md:145–182` — outbound requests, the state, the repeat and the read-back.
-- `docs/brainstorm/intake-service.md:197–199` — the human delete with a filter and with force.
-- `docs/brainstorm/intake-service.md:203–204` — every authenticated human holds the authority to list, read, discard and delete an outbound request.
-- `docs/brainstorm/intake-service.vocabulary.md:62–83` — outbound request, request key, outbound request state, read-back.
-- `docs/brainstorm/intake-service.impl.md:94–114` — the error codes.
-- `docs/brainstorm/intake-service.impl.md:158–172` — the outbound record.
-- `docs/brainstorm/intake-service.impl.md:181–189` — the human operations.
-- `docs/brainstorm/intake-service.impl.md:239–244` — the tests of the outbound record.
-- `docs/brainstorm/architecture.impl.md:116–121`, `:695–708` — a transaction awaits nothing; a handler separates asynchronous work from its commit (blocker B1).
+- `docs/brainstorm/intake-service.md:136–173` — outbound requests, the state, the repeat and the read-back.
+- `docs/brainstorm/intake-service.md:188–190` — the human delete with a filter and with force.
+- `docs/brainstorm/intake-service.md:194–195` — every authenticated human holds the authority to list, read, discard and delete an outbound request.
+- `docs/brainstorm/intake-service.vocabulary.md:60–82` — outbound request, request key, outbound request state, read-back.
+- `docs/brainstorm/intake-service.impl.md:94–115` — the error codes.
+- `docs/brainstorm/intake-service.impl.md:160–174` — the outbound record.
+- `docs/brainstorm/intake-service.impl.md:184–192` — the human operations.
+- `docs/brainstorm/intake-service.impl.md:238–243` — the tests of the outbound record.
+- `docs/brainstorm/architecture.impl.md:116–121`, `:697–712` — a transaction awaits nothing; a handler separates asynchronous work from its commit; the index of ruled writes admits the `pending` insert and the `failed` write of an outbound request.
 - `docs/brainstorm/architecture.impl.md:179–189` — pagination.
-- `docs/brainstorm/architecture.impl.md:348` — the CLI code of one command.
-- `docs/brainstorm/gateway-service.impl.md:393–433` — idempotency of a mutation.
+- `docs/brainstorm/architecture.impl.md:349` — the CLI code of one command.
+- `docs/brainstorm/gateway-service.impl.md:394–434` — idempotency of a mutation.
 - `engine/docs/cli/intake.md:41–69` — the command table, the routes, the lifetime and the mutation flag.
 - `engine/docs/cli/intake.md:113–127`, `:129–133` — the synopses and the shared rules of a leaf.
 - `engine/docs/cli/intake.md:137–169` — the flags and their request mapping.
-- `engine/docs/cli/intake.md:334–385` — the outbound commands and their statuses.
-- `engine/docs/cli/intake.md:421–464` — the output conventions and the error codes.
+- `engine/docs/cli/intake.md:326–377` — the outbound commands and their statuses.
+- `engine/docs/cli/intake.md:420–473` — the output conventions and the error codes.
 - `engine/docs/cli/other.md` "Error codes" — `cli.<group>.<command>.token_required`, `cli.<group>.<command>.indeterminate`, `cli.idempotency_key.invalid`, `cli.pagination.*`, `system.pagination.cursor_invalid`.
 - `engine/docs/cli/common-flags.md` — `[M]`, `[R]`, `[L]`.
 - `engine/src/kernel/identity.ts` — `identitySchema`, `createIdentity`.
@@ -49,14 +49,14 @@ Out of scope:
 
 | Key                                                                                   | Where                                  | Owner line                                         |
 | ------------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
-| `id`, `projectId`, `operation`, `requestKey`, `state`, `result`, `error`, `createdAt` | the outbound read projection           | `engine/docs/cli/intake.md:336–338`                |
+| `id`, `projectId`, `operation`, `requestKey`, `state`, `result`, `error`, `createdAt` | the outbound read projection           | `engine/docs/cli/intake.md:328–330`                |
 | `outboundRequestId`                                                                   | path parameter                         | `engine/docs/cli/intake.md:158`                    |
 | `projectId`, `state`, `operation`, `limit`, `cursor`                                  | query of `outbound list`               | `engine/docs/cli/intake.md:159–161`, `:144`        |
-| `force`, `state`, `from`, `to`, `ids`                                                 | body of `outbound delete`              | `engine/docs/cli/intake.md:160–164`, `:369–370`    |
-| `count`                                                                               | answer of `outbound delete`            | `engine/docs/cli/intake.md:376`                    |
+| `force`, `state`, `from`, `to`, `ids`                                                 | body of `outbound delete`              | `engine/docs/cli/intake.md:160–164`, `:361–362`    |
+| `count`                                                                               | answer of `outbound delete`            | `engine/docs/cli/intake.md:368`                    |
 | `items`, `nextCursor`                                                                 | a list page                            | `architecture.impl.md:184`                         |
-| `code`, `message`, `created_at`                                                       | an item of `error`, in its stored form | `docs/reference/erd/03-integration.md:138`, `:149` |
-| `idempotencyKey`                                                                      | stdout of a mutation leaf              | `engine/docs/cli/intake.md:429`                    |
+| `code`, `message`, `created_at`                                                       | an item of `error`, in its stored form | `docs/reference/erd/03-integration.md:137`, `:148` |
+| `idempotencyKey`                                                                      | stdout of a mutation leaf              | `engine/docs/cli/intake.md:428`                    |
 
 ## Depends on
 
@@ -86,11 +86,11 @@ Out of scope:
   4. Implement the conditional writes: `succeed(tx, id, result, expected)` runs `UPDATE intake_outbound_request SET state = 'succeeded', result = ? WHERE id = ? AND state IN (…)` with the canonical JSON of `result`; `fail(tx, id, item, now)` sets `failed` and `appendError` from `pending` only; `discard(tx, id)` sets `discarded` from `pending` only. Each answers whether one row changed.
   5. Add tests: the insert starts `pending` with null `result` and `error` and answers its identity; a second insert of one key throws `OutboundKeyConflict`; `succeed` from `pending` and from `failed` changes one row and from `succeeded` or `discarded` changes none; `fail` from `failed` changes none; two failures through two requests keep their own arrays; the projection answers `error` items with `created_at`.
 - Rules:
-  - `id` is `outbound_request_` and a ULID; `result` is JSON text of the bounded 2xx body or null; `error` holds the shape and the byte bound of an inbound event; every property name is snake_case. `intake-service.impl.md:160`, `:163`.
-  - A unique index covers `(operation, request_key)`, and an insert that meets it reads the existing request. `intake-service.impl.md:162`, `:165`.
-  - The call sets `succeeded` or `failed` through an update conditional on `pending`; a read-back match sets `succeeded` from `pending` or `failed`. `intake-service.impl.md:168–169`; `docs/reference/erd/03-integration.md:146–147`.
-  - A human discard sets `discarded` on a `pending` request; `succeeded` and `discarded` are terminal. `docs/reference/erd/03-integration.md:148`.
-  - No row holds credential material, the operands of the write or a digest of the operands. `docs/reference/erd/03-integration.md:150`.
+  - `id` is `outbound_request_` and a ULID; `result` is JSON text of the bounded 2xx body or null; `error` holds the shape and the byte bound of an inbound event; every property name is snake_case. `intake-service.impl.md:162`, `:165`.
+  - A unique index covers `(operation, request_key)`, and an insert that meets it reads the existing request. `intake-service.impl.md:164`, `:167`.
+  - The call sets `succeeded` or `failed` through an update conditional on `pending`; a read-back match sets `succeeded` from `pending` or `failed`. `intake-service.impl.md:170–171`; `docs/reference/erd/03-integration.md:145–146`.
+  - A human discard sets `discarded` on a `pending` request; `succeeded` and `discarded` are terminal. `docs/reference/erd/03-integration.md:147`.
+  - No row holds credential material, the operands of the write or a digest of the operands. `docs/reference/erd/03-integration.md:149`.
 - Done when: `node --test --test-timeout=30000 src/intake/outbound-store.test.ts` passes; `pnpm run verify` passes.
 
 ### 02.2 Add the outbound runner
@@ -120,20 +120,20 @@ Out of scope:
      - a result that fails its codec or its bound fails the commit and leaves no owned identity in the set;
      - `drop()` runs after a success, a failure and a refusal; no stored result, error or log record holds the material of the fake.
 - Rules:
-  - The handler authorizes, obtains the release, inserts the request as `pending`, commits, and only then performs the call. `intake-service.impl.md:164`; `docs/reference/erd/03-integration.md:145–146`. This write before the asynchronous call, and the state write of an error answer outside `caller.commit`, are blocker B1; the task waits for its ruling (decisions D1, D3).
-  - An insert that meets the unique index reads the existing request and answers the repeat rule. `intake-service.impl.md:165`.
-  - A module-private `Set` holds every request whose call runs; the handler adds the identity in the synchronous step of its insert and removes it after the write of the answer; a repeat and a discard read the set and write in one synchronous step. `intake-service.impl.md:166`. A refused repeat owns no membership, so it removes none.
-  - The deadline aborts the call through an `AbortController`; the handler then sets `failed` with `timeout`, and a late answer writes nothing. `intake-service.impl.md:167`. The timeout write belongs to the fresh call alone; a read-back that finds nothing changes no state. `intake-service.md:178`.
-  - `code` holds the result class, the HTTP status, `timeout` or `cli.exit_<n>`. `intake-service.impl.md:168`. The runner stores the result class or `timeout`; the message keeps the Repository code (decision D11).
-  - A repeat of `succeeded` answers `result`; of a running request 409 `intake.outbound.request.in_flight`; of `discarded` 409 `intake.outbound.request.discarded`; of `pending` with no running call or of `failed` the read-back once; no match answers `unknown_outcome` for `pending` and the newest error for `failed`. `intake-service.impl.md:170–171`; `intake-service.md:169–173`.
-  - A read-back runs only inside a repeat, under the authorization and the release path of the write. `intake-service.md:175–177`.
-  - Every outbound operation of ERD 3 declares a read-back (`intake-service.impl.md:176–178`), so `readBack` is required. `intake-service.md:180` lets an operation without a read-back leave `failed` through a discard, and `intake-service.impl.md:185` admits a discard of `pending` alone; no in-scope operation meets that conflict, and the report lists it for Ulrich.
-  - `result` holds the bounded body of the 2xx answer with snake_case properties. `docs/reference/erd/03-integration.md:127`, `:149`. Each operation names its result codec, so a stored result keeps snake_case and the answer keeps the external field names.
+  - The handler authorizes, obtains the release, inserts the request as `pending`, commits, and only then performs the call. `intake-service.impl.md:166`; `docs/reference/erd/03-integration.md:144–145`. The `pending` insert and the `failed` write of an error answer are ruled writes of the index, each in a synchronous transaction that the handler owns; a later failure of the handler keeps them. `architecture.impl.md:700–704`; `intake-service.impl.md:170`; decision D3.
+  - An insert that meets the unique index reads the existing request and answers the repeat rule. `intake-service.impl.md:167`.
+  - A module-private `Set` holds every request whose call runs; the handler adds the identity in the synchronous step of its insert and removes it after the write of the answer; a repeat and a discard read the set and write in one synchronous step. `intake-service.impl.md:168`. A refused repeat owns no membership, so it removes none.
+  - The deadline aborts the call through an `AbortController`; the handler then sets `failed` with `timeout`, and a late answer writes nothing. `intake-service.impl.md:169`. The timeout write belongs to the fresh call alone; a read-back that finds nothing changes no state. `intake-service.md:169`.
+  - `code` holds the result class, the HTTP status, `timeout` or `cli.exit_<n>`. `intake-service.impl.md:170`. The runner stores the result class or `timeout`; the message keeps the Repository code (decision D11).
+  - A repeat of `succeeded` answers `result`; of a running request 409 `intake.outbound.request.in_flight`; of `discarded` 409 `intake.outbound.request.discarded`; of `pending` with no running call or of `failed` the read-back once; no match answers `unknown_outcome` for `pending` and the newest error for `failed`. `intake-service.impl.md:172–173`; `intake-service.md:160–164`.
+  - A read-back runs only inside a repeat, under the authorization and the release path of the write. `intake-service.md:166–168`.
+  - Every outbound operation of ERD 3 declares a read-back (`intake-service.impl.md:178–181`), so `readBack` is required. `intake-service.md:171` lets an operation without a read-back leave `failed` through a discard, and `intake-service.impl.md:188` admits a discard of `pending` alone; no in-scope operation meets that conflict, and the report lists it for Ulrich.
+  - `result` holds the bounded body of the 2xx answer with snake_case properties. `docs/reference/erd/03-integration.md:126`, `:148`. Each operation names its result codec, so a stored result keeps snake_case and the answer keeps the external field names.
   - A delete removes the row (`architecture.impl.md:103`), so a delete during a read-back is final.
-  - A start runs nothing for an outbound request. `intake-service.impl.md:172`.
-  - The holder drops the material in `finally`. `custody.impl.md:122`.
-  - A read-back holds the in-flight set, so a discard during a read-back answers 409 `intake.outbound.request.in_flight`. The read-back is the call of the repeat (`intake-service.md:175`).
-  - Gap: the byte bound of `result` is open (`docs/brainstorm/HANDOFF.md:39`); the constant follows decision D12.
+  - A start runs nothing for an outbound request. `intake-service.impl.md:174`.
+  - The holder drops the material in `finally`. `custody.impl.md:136`.
+  - A read-back holds the in-flight set, so a discard during a read-back answers 409 `intake.outbound.request.in_flight`. The read-back is the call of the repeat (`intake-service.md:166`).
+  - Gap: the byte bound of `result` is open (`docs/brainstorm/HANDOFF.md:46`); the constant follows decision D12.
 - Done when: `node --test --test-timeout=30000 src/intake/outbound.test.ts` passes; `pnpm run verify` passes.
 
 ### 02.3 Declare the outbound list and get
@@ -147,9 +147,9 @@ Out of scope:
   3. Register both handlers. Run `pnpm run build && node bin/kanthord.mjs gateway openapi`. Add `intakeOperations` to `apiOperations` of `openapi-integration.test.ts`, and assert both paths and their `x-access-policy` `human`.
   4. Add tests: an empty list answers `{ items: [], nextCursor: null }`; each filter and their combination; a page of two answers the newest first and a cursor; a malformed cursor answers 400 `system.pagination.cursor_invalid`; an unknown identity answers 404.
 - Rules:
-  - The two operations are `human`, `unary` reads at the routes of the command table. `engine/docs/cli/intake.md:61–62`, `:66–69`; `intake-service.impl.md:183–184`.
-  - The list answers a bounded page in the order of `id`, filtered by project, state and operation. `intake-service.impl.md:183`; decision D23.
-  - The projection holds no credential and no operand. `engine/docs/cli/intake.md:336–338`.
+  - The two operations are `human`, `unary` reads at the routes of the command table. `engine/docs/cli/intake.md:61–62`, `:66–69`; `intake-service.impl.md:186–187`.
+  - The list answers a bounded page in the order of `id`, filtered by project, state and operation. `intake-service.impl.md:186`; decision D23.
+  - The projection holds no credential and no operand. `engine/docs/cli/intake.md:328–330`.
   - Each task publishes exactly the operations that it registers. ERD 2 `00-index.md` "Shared files".
 - Done when: `node --test --test-timeout=30000 src/intake/outbound-read.test.ts src/apps/server/openapi-integration.test.ts` passes; `pnpm run verify` passes.
 
@@ -163,11 +163,11 @@ Out of scope:
   4. Register both handlers, regenerate OpenAPI and assert both paths.
   5. Add tests through the HTTP adapter: a delete with `force` absent and with `force: false` answers 400 `intake.outbound.request.force_required`; no filter, both filters and the state `pending` answer 400 `intake.outbound.request.filter_invalid`; an `ids` list with a `succeeded` and a `pending` row deletes nothing; a range of `failed` removes the `failed` rows of the range alone; an `ids` delete with a missing identity counts the others; a discard of a running request answers 409 and the running write keeps its result; a discard of a `failed` request answers 409 `intake.outbound.request.state_conflict`.
 - Rules:
-  - A discard turns a `pending` request with no running call to `discarded`; a running request answers 409 `intake.outbound.request.in_flight`; every other state answers 409 `intake.outbound.request.state_conflict`. `intake-service.impl.md:185`.
-  - A delete without `force: true` answers 400 `intake.outbound.request.force_required`; without a filter, with both filters or with the state `pending` 400 `intake.outbound.request.filter_invalid`; a list that names a pending request answers 409 and deletes nothing; one transaction deletes and answers the count. `intake-service.impl.md:186–188`; `docs/reference/erd/03-integration.md:151`.
-  - The handler answers `force_required` itself, so the schema admits an absent `force`. `engine/docs/cli/intake.md:164`, `:369–373`.
+  - A discard turns a `pending` request with no running call to `discarded`; a running request answers 409 `intake.outbound.request.in_flight`; every other state answers 409 `intake.outbound.request.state_conflict`. `intake-service.impl.md:188`.
+  - A delete without `force: true` answers 400 `intake.outbound.request.force_required`; without a filter, with both filters or with the state `pending` 400 `intake.outbound.request.filter_invalid`; a list that names a pending request answers 409 and deletes nothing; one transaction deletes and answers the count. `intake-service.impl.md:189–191`; `docs/reference/erd/03-integration.md:150`.
+  - The handler answers `force_required` itself, so the schema admits an absent `force`. `engine/docs/cli/intake.md:164`, `:361–365`.
   - A human override takes the body field `force: true`. Root `AGENTS.md` "Contracts".
-  - Gap: the bound of `ids` and the row bound of a range are open (`engine/docs/cli/intake.md:163`, `:327–328`; `docs/brainstorm/HANDOFF.md:39`); decision D12.
+  - Gap: the bound of `ids` and the row bound of a range are open (`engine/docs/cli/intake.md:163`, `:319–320`; `docs/brainstorm/HANDOFF.md:46`); decision D12.
 - Done when: `node --test --test-timeout=30000 src/intake/outbound-write.test.ts src/apps/server/openapi-integration.test.ts` passes; `pnpm run verify` passes.
 
 ### 02.5 Add the `intake` CLI group and the `outbound` leaves
@@ -176,14 +176,14 @@ Out of scope:
 - Do:
   1. Add `Intake: "intake"` to `CommandName`. Register the `intake` group in `createProgram` with the subgroup `outbound`, and add `intakeOperations` to `apiOperations` of `src/apps/cli/index.ts`.
   2. Add the leaves of the synopses of `engine/docs/cli/intake.md:113–127`: `outbound list [--project <id>] [--state <state>] [--operation <operation>] [--limit <n>] [--cursor <cursor>]`; `outbound get <outbound-request-id>`; `outbound discard <outbound-request-id> [--idempotency-key <ulid>]`; `outbound delete [--force] [--state <state>] [--from <id>] [--to <id>] [--id <id> ...] [--idempotency-key <ulid>]`, where `--id` accumulates and every other value option is single-use (`cli.option.duplicate`). Every leaf takes `--endpoint` and `--token`.
-  3. Validate each positional identity with `identitySchema("outbound_request")` and refuse it with `cli.intake.outbound.get.invalid_outbound_request_id` or `cli.intake.outbound.discard.invalid_outbound_request_id` (`code: proposed`). Send `body.force` as `false` when `--force` is absent, and send an omitted filter as absent.
+  3. Validate each positional identity with `identitySchema("outbound_request")` and refuse it with `cli.intake.outbound.get.invalid_outbound_request_id` or `cli.intake.outbound.discard.invalid_outbound_request_id` (`engine/docs/cli/intake.md:474`). Send `body.force` as `false` when `--force` is absent, and send an omitted filter as absent.
   4. Resolve the token with `requireToken(token, "cli.intake.outbound.<command>.token_required")`. Map each result through `handleMutationResult` or `handleReadResult` of `src/apps/cli/shared.ts`, so an indeterminate mutation answers `cli.intake.outbound.<command>.indeterminate` with the effective key. A mutation prints the answer with `idempotencyKey`.
   5. Add tests: `intake --help`, `intake outbound --help` and each leaf `--help` exit 0 with no server; each leaf rejects `--config`; `outbound get bad` exits 1 with `cli.intake.outbound.get.invalid_outbound_request_id:`; an indeterminate `outbound discard` with a generated key prints that key on stderr.
 - Rules:
   - Every group and leaf supports help without a server or credential; the commands reject unknown arguments, missing values and `--config`. `engine/docs/cli/intake.md:129–131`.
   - The flags map to the query and the body of the request; `--id` is repeatable. `engine/docs/cli/intake.md:143–164`.
-  - Mutation results include the effective `idempotencyKey`; the CLI performs no automatic retry. `engine/docs/cli/intake.md:429–433`.
-  - The CLI code of one command names that command. `architecture.impl.md:348`. The `invalid_<argument>` codes are `code: proposed` in `00-index.md` "Codes for Ulrich"; the `token_required` and `indeterminate` codes follow the templates of `engine/docs/cli/other.md` "Error codes".
+  - Mutation results include the effective `idempotencyKey`; the CLI performs no automatic retry. `engine/docs/cli/intake.md:428–432`.
+  - The CLI code of one command names that command. `architecture.impl.md:349`. The `invalid_<argument>` codes stand on `engine/docs/cli/intake.md:474`; the `token_required` and `indeterminate` codes follow the templates of `engine/docs/cli/other.md` "Error codes".
   - A machine token authorizes no Intake command. `engine/docs/cli/intake.md:47–48`.
 - Done when: `node --test --test-timeout=30000 src/apps/cli/index.test.ts` passes; `pnpm run verify` passes.
 
@@ -214,9 +214,3 @@ Out of scope:
 | E02.5 | `kanthord intake outbound delete --force --state failed --from R --to R`                                                                                                                              | 0      | `count` 0, `idempotencyKey` a ULID                                                                                                |
 | E02.6 | `kanthord intake outbound get bad`; `kanthord intake outbound list --state done`                                                                                                                      | 1, 1   | first stderr starts with `cli.intake.outbound.get.invalid_outbound_request_id:`; second with `gateway.request.validation_failed:` |
 | E02.7 | `kanthord intake outbound list` [M]                                                                                                                                                                   | 1      | stderr starts with `gateway.authentication.unauthorized:`                                                                         |
-
-E02.6 asserts a `code: proposed` code; the task waits for its publication (decision D2).
-
-## Blockers
-
-- B1 of `00-index.md`: the insert before the call of task 02.2 conflicts with `architecture.impl.md:698–699`. Task 02.2 waits for the ruling of B1, then implements `intake-service.impl.md:164`.
