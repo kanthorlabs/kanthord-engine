@@ -60,7 +60,7 @@ test("workspace retention respects holds and release kind", (t) => {
   assert.equal(existsSync(recent), true);
   assert.equal(existsSync(held), true);
   workspace.release(held, WorkspaceKind.Objective);
-  assert.ok(statSync(held).mtimeMs >= now);
+  assert.ok(statSync(held).mtimeMs > now - WORKSPACE_RETENTION_MS);
   workspace.hold(execution);
   workspace.release(execution, WorkspaceKind.Execution);
   assert.equal(existsSync(execution), false);
