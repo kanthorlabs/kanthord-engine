@@ -29,6 +29,7 @@ import {
   CAPABILITY_KEY_READ,
   CAPABILITY_MODEL_CALL,
   OPENAI_CODEX_PROBE_MODEL,
+  OPENAI_CODEX_PROVIDER_ID,
   OPENAI_CODEX_PROBE_PROMPT,
   OPENAI_CODEX_PROBE_REASONING,
   probeOpenAICodex,
@@ -240,11 +241,23 @@ for (const probe of httpProbes) {
 }
 
 const USER_ROLE = "user";
+const REASON_COUNT = 2;
+const REASON_LIMIT = 400;
+const REFRESH = "test_private-refresh-token-value-0123456789";
+const credentialOf = (expires: number) => ({
+  refresh: REFRESH,
+  access: SECRET,
+  expires,
+});
 const codexCall =
-  (status: number, stopReason: "stop" | "error"): ModelCall =>
+  (
+    status: number,
+    stopReason: "stop" | "error",
+    errorMessage?: string,
+  ): ModelCall =>
   async (_model, _context, options) => {
     await options.onResponse?.({ status, headers: {} }, _model);
-    return { stopReason } as Awaited<ReturnType<ModelCall>>;
+    return { stopReason, errorMessage } as Awaited<ReturnType<ModelCall>>;
   };
 
 test("openai-codex probe sends one model call and maps replies and failures", async (t) => {
@@ -256,30 +269,47 @@ test("openai-codex probe sends one model call and maps replies and failures", as
     throw new Error("unexpected request");
   });
   const seen: unknown[] = [];
-  const recording: ModelCall = async (model, modelContext, options) => {
+  const recording: ModelCall = async (model, modelContext, options, store) => {
     seen.push([
       model.id,
       modelContext.messages,
-      options.reasoning,
-      options.apiKey,
+      options,
+      await store.read(OPENAI_CODEX_PROVIDER_ID),
+      await store.list(),
     ]);
-    return codexCall(HttpStatus.OK, "stop")(model, modelContext, options);
+    return codexCall(HttpStatus.OK, "stop")(
+      model,
+      modelContext,
+      options,
+      store,
+    );
   };
   const future = Date.now() + FUTURE_MS;
   assert.equal(
-    await probeOpenAICodex(SECRET, future, background, recording),
+    await probeOpenAICodex(credentialOf(future), background, recording),
     ResourceStatus.Healthy,
   );
   assert.equal(seen.length, ONE_CALL);
-  const [id, messages, reasoning, apiKey] = seen[0] as [
+  const [id, messages, options, stored, listed] = seen[0] as [
     string,
     { role: string; content: string }[],
-    string,
-    string,
+    Record<string, unknown>,
+    unknown,
+    unknown,
   ];
   assert.equal(id, OPENAI_CODEX_PROBE_MODEL);
-  assert.equal(reasoning, OPENAI_CODEX_PROBE_REASONING);
-  assert.equal(apiKey, SECRET);
+  assert.equal(options.reasoning, OPENAI_CODEX_PROBE_REASONING);
+  assert.equal(Object.hasOwn(options, "apiKey"), false);
+  assert.equal(Object.hasOwn(options, "transport"), false);
+  assert.deepEqual(stored, {
+    type: "oauth",
+    refresh: REFRESH,
+    access: SECRET,
+    expires: future,
+  });
+  assert.deepEqual(listed, [
+    { providerId: OPENAI_CODEX_PROVIDER_ID, type: "oauth" },
+  ]);
   assert.equal(messages.length, ONE_CALL);
   assert.equal(messages[0]!.role, USER_ROLE);
   assert.equal(messages[0]!.content, OPENAI_CODEX_PROBE_PROMPT);
@@ -290,15 +320,14 @@ test("openai-codex probe sends one model call and maps replies and failures", as
   ] as const)
     assert.equal(
       await probeOpenAICodex(
-        SECRET,
-        future,
+        credentialOf(future),
         background,
         codexCall(status, "error"),
       ),
       expected,
     );
   assert.equal(
-    await probeOpenAICodex(SECRET, future, background, async () => {
+    await probeOpenAICodex(credentialOf(future), background, async () => {
       throw new Error(SECRET);
     }),
     ResourceStatus.Unknown,
@@ -306,16 +335,58 @@ test("openai-codex probe sends one model call and maps replies and failures", as
   assert.equal(fetch.mock.callCount(), NO_CALLS);
 });
 
-test("openai-codex probe makes no call for an expired token or a cancelled context", async () => {
+test("openai-codex probe reports a reason without token material", async () => {
+  const reasons: string[] = [];
+  const observe = (reason: string) => reasons.push(reason);
+  const future = Date.now() + FUTURE_MS;
+  const long = "A".repeat(500);
+  await probeOpenAICodex(
+    credentialOf(future),
+    background,
+    codexCall(
+      HttpStatus.Unauthorized,
+      "error",
+      `denied Bearer abc.def ${SECRET} ${REFRESH} ${long}`,
+    ),
+    observe,
+  );
+  await probeOpenAICodex(
+    credentialOf(future),
+    background,
+    async () => {
+      throw new Error(`failed with ${SECRET}`);
+    },
+    observe,
+  );
+  assert.equal(reasons.length, REASON_COUNT);
+  assert.match(reasons[0]!, /^status=401 stopReason=error errorMessage=denied/);
+  assert.match(reasons[1]!, /^Error: failed with/);
+  for (const reason of reasons) {
+    assert.ok(reason.length <= REASON_LIMIT);
+    assert.ok(!reason.includes(SECRET));
+    assert.ok(!reason.includes(REFRESH));
+    assert.ok(!reason.includes("abc.def"));
+    assert.ok(!reason.includes(long));
+  }
+});
+
+test("openai-codex probe makes no call and refreshes nothing for an expired token or a cancelled context", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("unexpected request");
+  });
   let calls = NO_CALLS;
-  const counting: ModelCall = async (model, modelContext, options) => {
+  const counting: ModelCall = async (model, modelContext, options, store) => {
     calls += ONE_CALL;
-    return codexCall(HttpStatus.OK, "stop")(model, modelContext, options);
+    return codexCall(HttpStatus.OK, "stop")(
+      model,
+      modelContext,
+      options,
+      store,
+    );
   };
   assert.equal(
     await probeOpenAICodex(
-      SECRET,
-      Date.now() - FUTURE_MS,
+      credentialOf(Date.now() - FUTURE_MS),
       background,
       counting,
     ),
@@ -324,10 +395,15 @@ test("openai-codex probe makes no call for an expired token or a cancelled conte
   const cancelled = new CancellationContext();
   cancelled.cancel();
   assert.equal(
-    await probeOpenAICodex(SECRET, Date.now() + FUTURE_MS, cancelled, counting),
+    await probeOpenAICodex(
+      credentialOf(Date.now() + FUTURE_MS),
+      cancelled,
+      counting,
+    ),
     ResourceStatus.Unknown,
   );
   assert.equal(calls, NO_CALLS);
+  assert.equal(fetch.mock.callCount(), NO_CALLS);
 });
 
 test("Copilot tokens at or before expiry never make a request", async (t) => {

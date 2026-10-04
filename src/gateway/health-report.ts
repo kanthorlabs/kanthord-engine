@@ -10,6 +10,7 @@ import {
 import {
   HealthScope,
   ResourceStatus,
+  type ResourceObserver,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -113,6 +114,7 @@ async function checkResource(
   reportContext: Context,
   checkDeadlineMs: number,
   reportAt: number,
+  observe: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   const deadline = Date.now() + checkDeadlineMs;
   const context = new CancellationContext(parent, deadline);
@@ -123,7 +125,7 @@ async function checkResource(
         .then(() => {
           throwIfCancelled(context);
           if (Date.now() >= reportAt) return ResourceStatus.Unknown;
-          return entry.check(context);
+          return entry.check(context, observe);
         })
         .catch(() => ResourceStatus.Unknown),
       context.done().then(() => ResourceStatus.Unknown),
@@ -150,6 +152,7 @@ async function runChecks(
   const statuses = new Map<string, ResourceStatusValue>(
     entries.map(({ entry }) => [entry.target, ResourceStatus.Unknown]),
   );
+  const reasons = new Map<string, string>();
   const reportContext = new CancellationContext(caller.context);
   const timer = setTimeout(
     () => reportContext.cancel(),
@@ -171,6 +174,7 @@ async function runChecks(
         reportContext,
         limits.checkDeadlineMs,
         reportAt,
+        (reason) => reasons.set(item.entry.target, reason),
       );
       statuses.set(item.entry.target, status);
     }
@@ -186,16 +190,22 @@ async function runChecks(
   } finally {
     clearTimeout(timer);
     reportContext.cancel();
-    for (const { owner, entry } of entries)
+    for (const { owner, entry } of entries) {
+      const status = statuses.get(entry.target);
+      const reason = reasons.get(entry.target);
       logger.info(
         {
           caller: caller.identity.accountId,
           owner,
           target: entry.target,
-          status: statuses.get(entry.target),
+          status,
+          ...(status !== ResourceStatus.Healthy && reason !== undefined
+            ? { reason }
+            : {}),
         },
         "resource.health.check",
       );
+    }
   }
 }
 

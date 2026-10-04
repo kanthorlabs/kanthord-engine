@@ -8,6 +8,7 @@ import {
   InMemoryCredentialStore,
   type Api,
   type AssistantMessage,
+  type CredentialStore,
   type Context as ModelContext,
   type Model,
   type ModelsSimpleStreamOptions,
@@ -15,7 +16,11 @@ import {
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { abortSignal, type Context } from "../kernel/context.ts";
-import { ResourceStatus, type ResourceStatusValue } from "../kernel/health.ts";
+import {
+  ResourceStatus,
+  type ResourceObserver,
+  type ResourceStatusValue,
+} from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { isObject } from "../kernel/values.ts";
 import {
@@ -66,10 +71,39 @@ export const GITHUB_COPILOT_HEADERS: Record<string, string> = {
   "Copilot-Integration-Id": "vscode-chat",
 };
 
+const REASON_MAX_LENGTH = 300;
+const EMPTY_LENGTH = 0;
+const REDACTED = "[redacted]";
+const BEARER_PATTERN = /Bearer\s+\S+/gi;
+const JWT_PATTERN = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g;
+const TOKEN_PATTERN = /[A-Za-z0-9_\-+/=.]{32,}/g;
+
+export function redactReason(
+  text: string,
+  secrets: readonly string[] = [],
+): string {
+  let result = text;
+  for (const secret of secrets)
+    if (secret.length > EMPTY_LENGTH)
+      result = result.split(secret).join(REDACTED);
+  return result
+    .replace(BEARER_PATTERN, REDACTED)
+    .replace(JWT_PATTERN, REDACTED)
+    .replace(TOKEN_PATTERN, REDACTED)
+    .slice(0, REASON_MAX_LENGTH);
+}
+
+function thrownReason(error: unknown, secrets: readonly string[]): string {
+  const name = error instanceof Error ? error.name : typeof error;
+  const message = error instanceof Error ? error.message : String(error);
+  return redactReason(`${name}: ${message}`, secrets);
+}
+
 async function probeHttp(
   url: string,
   headers: Record<string, string>,
   context: Context,
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   try {
     const { signal, dispose } = abortSignal(context);
@@ -84,13 +118,15 @@ async function probeHttp(
       await response.body?.cancel();
       if (signal.aborted) return ResourceStatus.Unknown;
       if (response.status === HttpStatus.OK) return ResourceStatus.Healthy;
+      observe?.(`status=${response.status}`);
       if (response.status === HttpStatus.Forbidden)
         return ResourceStatus.Unknown;
       return ResourceStatus.Unhealthy;
     } finally {
       dispose();
     }
-  } catch {
+  } catch (error) {
+    observe?.(thrownReason(error, Object.values(headers)));
     return ResourceStatus.Unknown;
   }
 }
@@ -98,11 +134,13 @@ async function probeHttp(
 export async function probeGitHub(
   apiKey: string,
   context: Context,
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   return probeHttp(
     GITHUB_RATE_LIMIT_URL,
     { [AUTHORIZATION_HEADER]: `Bearer ${apiKey}` },
     context,
+    observe,
   );
 }
 
@@ -110,6 +148,7 @@ export async function probeGitHubCopilot(
   refresh: string,
   expires: number,
   context: Context,
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   if (expires <= Date.now()) return ResourceStatus.Unknown;
   return probeHttp(
@@ -119,12 +158,14 @@ export async function probeGitHubCopilot(
       [AUTHORIZATION_HEADER]: `Bearer ${refresh}`,
     },
     context,
+    observe,
   );
 }
 
 export async function probeAnthropic(
   apiKey: string,
   context: Context,
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   return probeHttp(
     ANTHROPIC_MODELS_URL,
@@ -133,6 +174,7 @@ export async function probeAnthropic(
       [ANTHROPIC_VERSION_HEADER]: ANTHROPIC_VERSION,
     },
     context,
+    observe,
   );
 }
 
@@ -140,22 +182,26 @@ export async function probeOpenAICompatible(
   apiKey: string,
   baseUrl: string,
   context: Context,
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   return probeHttp(
     baseUrl + MODELS_PATH,
     { [AUTHORIZATION_HEADER]: `Bearer ${apiKey}` },
     context,
+    observe,
   );
 }
 
 export async function probeOpenRouter(
   apiKey: string,
   context: Context,
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   return probeHttp(
     OPENROUTER_KEY_URL,
     { [AUTHORIZATION_HEADER]: `Bearer ${apiKey}` },
     context,
+    observe,
   );
 }
 
@@ -163,21 +209,42 @@ export type ModelCall = (
   model: Model<Api>,
   context: ModelContext,
   options: ModelsSimpleStreamOptions,
+  credentials: CredentialStore,
 ) => Promise<AssistantMessage>;
 
-const defaultModelCall: ModelCall = (model, context, options) => {
-  const models = createModels({ credentials: new InMemoryCredentialStore() });
+const defaultModelCall: ModelCall = (model, context, options, credentials) => {
+  const models = createModels({ credentials });
   models.setProvider(openaiCodexProvider());
   return models.completeSimple(model, context, options);
 };
 
+export interface CodexCredential {
+  refresh: string;
+  access: string;
+  expires: number;
+}
+
+function failureReason(
+  status: number,
+  reply: AssistantMessage,
+  secrets: readonly string[],
+): string {
+  const message = redactReason(reply.errorMessage ?? "", secrets);
+  return `status=${status} stopReason=${reply.stopReason} errorMessage=${message}`;
+}
+
 export async function probeOpenAICodex(
-  access: string,
-  expires: number,
+  credential: CodexCredential,
   context: Context,
   call: ModelCall = defaultModelCall,
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
-  if (expires <= Date.now()) return ResourceStatus.Unknown;
+  const { refresh, access, expires } = credential;
+  const secrets = [refresh, access];
+  if (expires <= Date.now()) {
+    observe?.("access token expired");
+    return ResourceStatus.Unknown;
+  }
   try {
     const { signal, dispose } = abortSignal(context);
     try {
@@ -185,7 +252,17 @@ export async function probeOpenAICodex(
       const model = getBuiltinModels(OPENAI_CODEX_PROVIDER_ID).find(
         ({ id }) => id === OPENAI_CODEX_PROBE_MODEL,
       );
-      if (!model) return ResourceStatus.Unknown;
+      if (!model) {
+        observe?.("probe model not found");
+        return ResourceStatus.Unknown;
+      }
+      const credentials = new InMemoryCredentialStore();
+      await credentials.modify(OPENAI_CODEX_PROVIDER_ID, async () => ({
+        type: "oauth" as const,
+        refresh,
+        access,
+        expires,
+      }));
       let status = 0;
       const reply = await call(
         model,
@@ -199,25 +276,26 @@ export async function probeOpenAICodex(
           ],
         },
         {
-          apiKey: access,
           reasoning: OPENAI_CODEX_PROBE_REASONING,
-          transport: "sse",
           signal,
           onResponse: (response) => {
             status = response.status;
           },
         },
+        credentials,
       );
       if (signal.aborted) return ResourceStatus.Unknown;
       if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
         return ResourceStatus.Healthy;
+      observe?.(failureReason(status, reply, secrets));
       if (status === HttpStatus.Unauthorized || status === HttpStatus.Forbidden)
         return ResourceStatus.Unhealthy;
       return ResourceStatus.Unknown;
     } finally {
       dispose();
     }
-  } catch {
+  } catch (error) {
+    observe?.(thrownReason(error, secrets));
     return ResourceStatus.Unknown;
   }
 }
@@ -227,6 +305,7 @@ export interface LlmProviderValidator {
     secret: unknown,
     metadata: unknown,
     context: Context,
+    observe?: ResourceObserver,
   ): Promise<ResourceStatusValue>;
 }
 
@@ -234,26 +313,30 @@ export const LLM_PROVIDER_VALIDATORS: Partial<
   Record<Platform, LlmProviderValidator>
 > = {
   [Platform.OpenAICodex]: {
-    probe: (secret, _metadata, context) => {
-      const { access, expires } = oauthSecretSchema.parse(secret);
-      return probeOpenAICodex(access, expires, context);
-    },
+    probe: (secret, _metadata, context, observe) =>
+      probeOpenAICodex(
+        oauthSecretSchema.parse(secret),
+        context,
+        undefined,
+        observe,
+      ),
   },
   [Platform.Anthropic]: {
-    probe: (secret, _metadata, context) =>
-      probeAnthropic(apiKeySecretSchema.parse(secret).key, context),
+    probe: (secret, _metadata, context, observe) =>
+      probeAnthropic(apiKeySecretSchema.parse(secret).key, context, observe),
   },
   [Platform.OpenAICompatible]: {
-    probe: (secret, metadata, context) =>
+    probe: (secret, metadata, context, observe) =>
       probeOpenAICompatible(
         apiKeySecretSchema.parse(secret).key,
         openaiCompatibleMetadataSchema.parse(metadata).baseUrl,
         context,
+        observe,
       ),
   },
   [Platform.OpenRouter]: {
-    probe: (secret, _metadata, context) =>
-      probeOpenRouter(apiKeySecretSchema.parse(secret).key, context),
+    probe: (secret, _metadata, context, observe) =>
+      probeOpenRouter(apiKeySecretSchema.parse(secret).key, context, observe),
   },
 };
 
@@ -266,13 +349,22 @@ type BucketClient = {
 };
 type CreateBucketClient = (config: S3ClientConfig) => BucketClient;
 
-function bucketStatus(value: unknown): ResourceStatusValue {
-  if (!isObject(value) || !("$metadata" in value))
+function bucketStatus(
+  value: unknown,
+  secrets: readonly string[],
+  observe?: ResourceObserver,
+): ResourceStatusValue {
+  if (!isObject(value) || !("$metadata" in value)) {
+    observe?.(thrownReason(value, secrets));
     return ResourceStatus.Unknown;
+  }
   const metadata = value.$metadata;
-  if (!isObject(metadata) || !("httpStatusCode" in metadata))
+  if (!isObject(metadata) || !("httpStatusCode" in metadata)) {
+    observe?.(thrownReason(value, secrets));
     return ResourceStatus.Unknown;
+  }
   if (metadata.httpStatusCode === HttpStatus.OK) return ResourceStatus.Healthy;
+  observe?.(`status=${String(metadata.httpStatusCode)}`);
   if (metadata.httpStatusCode === HttpStatus.NotFound)
     return ResourceStatus.Unhealthy;
   return ResourceStatus.Unknown;
@@ -282,6 +374,8 @@ async function headBucket(
   client: BucketClient,
   bucket: string,
   signal: AbortSignal,
+  secrets: readonly string[],
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   try {
     const response = await client.send(
@@ -290,9 +384,13 @@ async function headBucket(
         abortSignal: signal,
       },
     );
-    return signal.aborted ? ResourceStatus.Unknown : bucketStatus(response);
+    return signal.aborted
+      ? ResourceStatus.Unknown
+      : bucketStatus(response, secrets, observe);
   } catch (error) {
-    return signal.aborted ? ResourceStatus.Unknown : bucketStatus(error);
+    return signal.aborted
+      ? ResourceStatus.Unknown
+      : bucketStatus(error, secrets, observe);
   } finally {
     client.destroy();
   }
@@ -306,6 +404,7 @@ export async function probeS3(
   region: string,
   context: Context,
   createClient: CreateBucketClient = (config) => new S3Client(config),
+  observe?: ResourceObserver,
 ): Promise<ResourceStatusValue> {
   try {
     const { signal, dispose } = abortSignal(context);
@@ -316,11 +415,18 @@ export async function probeS3(
         region,
         credentials: { accessKeyId, secretAccessKey },
       });
-      return await headBucket(client, bucket, signal);
+      return await headBucket(
+        client,
+        bucket,
+        signal,
+        [accessKeyId, secretAccessKey],
+        observe,
+      );
     } finally {
       dispose();
     }
-  } catch {
+  } catch (error) {
+    observe?.(thrownReason(error, [accessKeyId, secretAccessKey]));
     return ResourceStatus.Unknown;
   }
 }

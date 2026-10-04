@@ -15,6 +15,7 @@ import {
   ResourceStatus,
   type HealthRegistry,
   type ResourceCheck,
+  type ResourceObserver,
   type ResourceEntry,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
@@ -153,25 +154,31 @@ type PlatformProbe = (
   secret: unknown,
   metadata: unknown,
   context: Context,
+  observe?: ResourceObserver,
 ) => Promise<ResourceStatusValue>;
 
 function llmProbe(platform: Platform): PlatformProbe {
-  return (secret, metadata, context) =>
-    LLM_PROVIDER_VALIDATORS[platform]!.probe(secret, metadata, context);
+  return (secret, metadata, context, observe) =>
+    LLM_PROVIDER_VALIDATORS[platform]!.probe(
+      secret,
+      metadata,
+      context,
+      observe,
+    );
 }
 
 const platformProbes: Record<Platform, PlatformProbe> = {
-  [Platform.GitHub]: (secret, _metadata, context) =>
-    probeGitHub(apiKeySecretSchema.parse(secret).key, context),
-  [Platform.GitHubCopilot]: (secret, _metadata, context) => {
+  [Platform.GitHub]: (secret, _metadata, context, observe) =>
+    probeGitHub(apiKeySecretSchema.parse(secret).key, context, observe),
+  [Platform.GitHubCopilot]: (secret, _metadata, context, observe) => {
     const { refresh, expires } = oauthSecretSchema.parse(secret);
-    return probeGitHubCopilot(refresh, expires, context);
+    return probeGitHubCopilot(refresh, expires, context, observe);
   },
   [Platform.OpenAICodex]: llmProbe(Platform.OpenAICodex),
   [Platform.Anthropic]: llmProbe(Platform.Anthropic),
   [Platform.OpenAICompatible]: llmProbe(Platform.OpenAICompatible),
   [Platform.OpenRouter]: llmProbe(Platform.OpenRouter),
-  [Platform.S3]: (secret, metadata, context) => {
+  [Platform.S3]: (secret, metadata, context, observe) => {
     const { accessKeyId, secretAccessKey } =
       s3AccessKeySecretSchema.parse(secret);
     const { endpoint, bucket, region } = s3MetadataSchema.parse(metadata);
@@ -182,6 +189,8 @@ const platformProbes: Record<Platform, PlatformProbe> = {
       bucket,
       region,
       context,
+      undefined,
+      observe,
     );
   },
 };
@@ -192,7 +201,7 @@ function capturedResourceCheck(row: LiveRow, key: Buffer): ResourceCheck {
   const ciphertext = Buffer.from(row.ciphertext);
   const metadata: unknown =
     row.metadata === null ? null : JSON.parse(row.metadata);
-  return async (context) => {
+  return async (context, observe) => {
     if (context.err()) return ResourceStatus.Unknown;
     try {
       const secret = decrypt(key, id, platform, nonce, ciphertext);
@@ -200,8 +209,10 @@ function capturedResourceCheck(row: LiveRow, key: Buffer): ResourceCheck {
         secret,
         metadata,
         context,
+        observe,
       );
     } catch {
+      observe?.("probe failed before the remote call");
       return ResourceStatus.Unknown;
     }
   };

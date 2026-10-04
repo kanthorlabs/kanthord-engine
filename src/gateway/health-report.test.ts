@@ -30,6 +30,9 @@ const REPORT_BUDGET_MS = 40;
 const MAX_REPORT_ELAPSED_MS = 1500;
 const CHECK_DEADLINE_MS = 20;
 const ACCOUNT = "health-reader";
+const SICK_REASON = "status=500";
+const SICK_TARGET = "sick";
+const FINE_TARGET = "fine";
 const LOG_MESSAGE = "resource.health.check";
 const CAPABILITY = "reachability";
 const CHECK_ERROR = new Error("secret credential or private endpoint");
@@ -225,6 +228,40 @@ test("shared targets use the first check once across owners and projects and log
     },
   );
   assert.doesNotMatch(f.logs.join(""), /secret|credential|endpoint/);
+});
+
+test("a non-healthy check logs its observed reason and a healthy check logs none", async (t) => {
+  const f = fixture(t, [
+    {
+      owner: OWNER_CUSTODY,
+      entry: entry(SICK_TARGET, {
+        check: async (_context, observe) => {
+          observe?.(SICK_REASON);
+          return ResourceStatus.Unknown;
+        },
+      }),
+    },
+    {
+      owner: OWNER_WORKER,
+      entry: entry(FINE_TARGET, {
+        check: async (_context, observe) => {
+          observe?.("status=200");
+          return ResourceStatus.Healthy;
+        },
+      }),
+    },
+  ]);
+  await f.report();
+  const logs = f.logs.map((line) => JSON.parse(line));
+  const sick = logs.find((log) => log.target === SICK_TARGET);
+  assert.equal(sick?.reason, SICK_REASON);
+  assert.equal(
+    Object.hasOwn(
+      logs.find((log) => log.target === FINE_TARGET),
+      "reason",
+    ),
+    false,
+  );
 });
 
 test("a never-settling check expires, releases its slot and retains its unknown entry", async (t) => {

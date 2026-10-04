@@ -128,7 +128,12 @@ export const HealthScope = {
 } as const;
 export type HealthScopeValue = (typeof HealthScope)[keyof typeof HealthScope];
 
-export type ResourceCheck = (context: Context) => Promise<ResourceStatusValue>;
+export type ResourceObserver = (reason: string) => void;
+
+export type ResourceCheck = (
+  context: Context,
+  observe?: ResourceObserver,
+) => Promise<ResourceStatusValue>;
 
 export interface ResourceEntry {
   scope: HealthScopeValue;
