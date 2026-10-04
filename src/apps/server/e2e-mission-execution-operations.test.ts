@@ -208,7 +208,10 @@ async function setup(t: TestContext) {
       {
         filename,
         kind,
-        content: { ...CONTENT, bindings: names },
+        content: {
+          ...CONTENT,
+          bindings: names.map((name) => binding(name).id),
+        },
         reason: "plan",
         expectedMissionVersion: version,
         ...(parentId ? { parentId, expectedParentRevision: ONE } : {}),

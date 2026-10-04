@@ -256,6 +256,8 @@ export function composeServices(options: {
     },
     bindings: {
       resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
+      resolveBindingIdentity: (tx, pid, bid) =>
+        project.resolveBindingIdentity(tx, pid, bid),
       getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
       repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
       storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid),

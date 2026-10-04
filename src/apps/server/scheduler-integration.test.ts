@@ -151,7 +151,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       body: { name: "execution" },
     }),
   ).id;
-  completed(
+  const bindingSet = completed(
     await call(projectOperations["bindingSet.write"], {
       params: { projectId },
       query: {},
@@ -215,7 +215,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       body: {
         filename: "objective-1.md",
         kind: NodeKind.Objective,
-        content: { ...CONTENT, bindings: ["repo"] },
+        content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
         reason: "plan",
         expectedMissionVersion: 2,
         parentId: initiative.revisions[0]!.nodeId,

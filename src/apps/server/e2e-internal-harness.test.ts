@@ -224,7 +224,7 @@ async function setupInternal(t: TestContext) {
     project.id,
     "objective-a.md",
     "objective",
-    ["repo", "store"],
+    [bindingSet.bindings.repo!.id, bindingSet.bindings.store!.id],
     initiative,
   );
   await createJourneyNode(cli, project.id, "task-a.md", "task", [], objective);
@@ -233,7 +233,7 @@ async function setupInternal(t: TestContext) {
     project.id,
     "objective-c.md",
     "objective",
-    ["gated"],
+    [bindingSet.bindings.gated!.id],
     initiative,
   );
   await createJourneyNode(cli, project.id, "task-c.md", "task", [], gated);

@@ -234,6 +234,8 @@ const ONE_COMMIT = 1;
 const BINDING_ID = "binding_00000000000000000000000000";
 const OTHER_BINDING_ID = "binding_00000000000000000000000001";
 const UNKNOWN_BINDING_ID = "binding_00000000000000000000000002";
+const OLDER_BINDING_ID = "binding_00000000000000000000000004";
+const MISSING_BINDING_ID = "binding_00000000000000000000000005";
 const FIRST_REVISION = 1;
 const NEXT_REVISION = 2;
 const CREATED_AT = 1000;
@@ -261,6 +263,9 @@ const bindings: MissionBindings = {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
   resolveBinding() {
+    throw new Error(UNEXPECTED_COLLABORATION);
+  },
+  resolveBindingIdentity() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
   getBindingRevision() {
@@ -664,6 +669,15 @@ function nodeFixture(
           assert.equal(projectId, PROJECT_ID);
           return bindingMap.get(name) ?? null;
         },
+        resolveBindingIdentity: (_tx, projectId, id) => {
+          assert.equal(projectId, PROJECT_ID);
+          const latest = id === OLDER_BINDING_ID ? BINDING_ID : id;
+          return (
+            [...bindingMap.values()].find(
+              (value) => value.bindingId === latest,
+            ) ?? null
+          );
+        },
         getBindingRevision: bindingRevision,
       },
       ...collaborators,
@@ -727,7 +741,7 @@ function nodeFixture(
         requirement: NODE_TEXT,
         criterion: NODE_TEXT,
         verifications: [VERIFICATION],
-        bindings: kind === NodeKind.Objective ? [REPOSITORY_NAME] : [],
+        bindings: kind === NodeKind.Objective ? [BINDING_ID] : [],
       },
       reason: REASON,
       expectedMissionVersion: version(),
@@ -828,7 +842,7 @@ function nodeFixture(
 test("node.create initiative stores human attribution, pins, revision one and one version increment in one commit", (t) => {
   const f = nodeFixture(t);
   const body = f.body();
-  body.content.bindings = [STORAGE_NAME];
+  body.content.bindings = [OTHER_BINDING_ID];
   const commits = f.commits();
   const result = f.create(body);
   assert.equal(f.commits(), commits + ONE_COMMIT);
@@ -1184,17 +1198,28 @@ test("node insert translates only the active filename unique constraint", (t) =>
   assert.equal(f.version(), before);
 });
 
-test("node.create refuses unresolved bindings before filename conflicts", (t) => {
+for (const binding of [MISSING_BINDING_ID, STORAGE_NAME]) {
+  test(`node.create refuses the unresolved binding identity ${binding} before filename conflicts`, (t) => {
+    const f = nodeFixture(t);
+    f.initiative();
+    const body = f.body();
+    body.content.bindings = [binding];
+    f.refuses(
+      body,
+      MissionErrorCode.BindingsInvalid,
+      { binding },
+      HttpStatus.BadRequest,
+    );
+  });
+}
+
+test("node.create pins the latest revision for an older binding revision identity", (t) => {
   const f = nodeFixture(t);
-  f.initiative();
-  const body = f.body();
-  body.content.bindings = [UNKNOWN_NAME];
-  f.refuses(
-    body,
-    MissionErrorCode.BindingsInvalid,
-    { binding: UNKNOWN_NAME },
-    HttpStatus.BadRequest,
-  );
+  const body = f.body(NodeKind.Objective, f.initiative());
+  body.content.bindings = [OLDER_BINDING_ID];
+  const revision = f.create(body).revisions[ZERO]!;
+  assert.deepEqual(revision.content.bindings, [BINDING_ID]);
+  assert.deepEqual(f.read(revision.nodeId).content.bindings, [BINDING_ID]);
 });
 
 for (const kind of Object.values(NodeKind)) {
@@ -1207,15 +1232,14 @@ for (const kind of Object.values(NodeKind)) {
           ? f.initiative()
           : f.objective();
     const body = f.body(kind, parentId);
-    body.content.bindings = [WORKER_NAME];
+    body.content.bindings = [UNKNOWN_BINDING_ID];
     f.refuses(
       body,
       MissionErrorCode.BindingsInvalid,
       undefined,
       HttpStatus.BadRequest,
     );
-    body.content.bindings =
-      kind === NodeKind.Objective ? [] : [REPOSITORY_NAME];
+    body.content.bindings = kind === NodeKind.Objective ? [] : [BINDING_ID];
     f.refuses(
       body,
       MissionErrorCode.BindingsInvalid,
@@ -2208,7 +2232,7 @@ function updateBody(f: ReturnType<typeof nodeFixture>, id: string): NodeUpdate {
     expectedRevision: node.expectedRevision,
     content: {
       ...node.content,
-      bindings: node.kind === NodeKind.Objective ? [REPOSITORY_NAME] : [],
+      bindings: node.kind === NodeKind.Objective ? [BINDING_ID] : [],
     },
     expectedMissionVersion: f.version(),
     reason: REASON,
@@ -2478,7 +2502,7 @@ test("node.update initiative lists only changed content fields in canonical orde
       verifications: ["new verification"],
       requirement: "new requirement",
       name: "new name",
-      bindings: [STORAGE_NAME],
+      bindings: [OTHER_BINDING_ID],
     },
   });
   assert.deepEqual(changed.revisions[ZERO]?.change, {
@@ -2492,6 +2516,36 @@ test("node.update initiative lists only changed content fields in canonical orde
     OTHER_BINDING_ID,
   ]);
   assert.equal(changed.revisions[ZERO]?.tasks, undefined);
+});
+
+test("node.update accepts the binding identities of a node read and refuses a binding name", (t) => {
+  const f = nodeFixture(t);
+  const id = f.objective();
+  const body = updateBody(f, id);
+  const read = f.read(id);
+  assert.deepEqual(read.content.bindings, [BINDING_ID]);
+  const changed = f.update(id, {
+    ...body,
+    content: { ...read.content, name: "new name" },
+  });
+  assert.deepEqual(changed.revisions[ZERO]?.content.bindings, [BINDING_ID]);
+  const next = updateBody(f, id);
+  const before = f.snapshot();
+  assert.throws(
+    () =>
+      f.update(id, {
+        ...next,
+        content: { ...next.content, bindings: [REPOSITORY_NAME] },
+      }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.BadRequest);
+      assert.equal(error.code, MissionErrorCode.BindingsInvalid);
+      assert.deepEqual(error.details, { binding: REPOSITORY_NAME });
+      return true;
+    },
+  );
+  assert.deepEqual(f.snapshot(), before);
 });
 
 test("node.update task no-op leaves objective revision and mission unchanged", (t) => {
@@ -5254,10 +5308,10 @@ test("mission.node.rebind declares a human write and advances a pin without chan
 test("mission rebind changes initiative and objective once, preserving unrelated pins and objective snapshots", (t) => {
   const f = rebindFixture(t);
   const initiativeBody = f.body();
-  initiativeBody.content.bindings = [STORAGE_NAME];
+  initiativeBody.content.bindings = [OTHER_BINDING_ID];
   const initiative = f.create(initiativeBody).revisions[ZERO]!.nodeId;
   const objectiveBody = f.body(NodeKind.Objective, initiative);
-  objectiveBody.content.bindings.push(STORAGE_NAME);
+  objectiveBody.content.bindings.push(OTHER_BINDING_ID);
   const objective = f.create(objectiveBody).revisions[ZERO]!.nodeId;
   const version = f.version();
   const result = f.rebind({ bindingId: NEXT_STORAGE_ID });

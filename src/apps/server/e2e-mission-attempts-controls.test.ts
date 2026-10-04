@@ -95,30 +95,30 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: "test-secret" },
   });
-  const binding = await write<{ bindingSetVersion: number }>(
-    ["project", "binding", "apply", project.id],
-    {
-      version: ONE,
-      bindings: {
-        repo: {
-          kind: "repository",
-          config: {
-            available: true,
-            platform: "github",
-            address: "git@github.com:owner/repo.git",
-            strategy: {
-              baseBranch: "main",
-              action: {
-                name: "pull_request",
-                follows: { type: "assessment_passed" },
-              },
+  const binding = await write<{
+    bindingSetVersion: number;
+    bindings: Record<string, { id: string }>;
+  }>(["project", "binding", "apply", project.id], {
+    version: ONE,
+    bindings: {
+      repo: {
+        kind: "repository",
+        config: {
+          available: true,
+          platform: "github",
+          address: "git@github.com:owner/repo.git",
+          strategy: {
+            baseBranch: "main",
+            action: {
+              name: "pull_request",
+              follows: { type: "assessment_passed" },
             },
-            credential: "github",
           },
+          credential: "github",
         },
       },
     },
-  );
+  });
   assert.equal(binding.bindingSetVersion, TWO);
   const create = (body: unknown) =>
     write<NodeChange>(["mission", "node", "create", mission.id], body);
@@ -133,7 +133,7 @@ async function setup(t: TestContext) {
   const objectiveBody = {
     filename: "objective-1.md",
     kind: NodeKind.Objective,
-    content: { ...CONTENT, bindings: ["repo"] },
+    content: { ...CONTENT, bindings: [binding.bindings.repo!.id] },
     reason: "plan",
     parentId: initiativeId,
     expectedParentRevision: ONE,

@@ -355,16 +355,14 @@ async function createNode(
   version: number,
   parentId?: string,
   parentRevision = ONE,
+  bindings: string[] = [],
 ): Promise<Mutation> {
   assert.ok(missionId);
   assert.ok(Number.isSafeInteger(version));
   const body = {
     filename: `${kind}-${version}.md`,
     kind,
-    content: {
-      ...CONTENT,
-      bindings: kind === NodeKind.Objective ? [REPOSITORY_NAME] : [],
-    },
+    content: { ...CONTENT, bindings },
     reason: REASON,
     expectedMissionVersion: version,
     ...(parentId === undefined
@@ -575,13 +573,17 @@ test(
         },
       },
     });
-    const binding = success<{ bindingSetVersion: number }>(
+    const binding = success<{
+      bindingSetVersion: number;
+      bindings: Record<string, { id: string }>;
+    }>(
       await kanthord(
         [PROJECT, BINDING, APPLY, mission.projectId, FILE, bindingFile],
         fixture.env,
       ),
     );
     assert.equal(binding.bindingSetVersion, TWO);
+    const bindingId = binding.bindings[REPOSITORY_NAME]!.id;
     const first = await createNode(
       fixture,
       mission.id,
@@ -589,6 +591,7 @@ test(
       updated.missionVersion,
       initiativeId,
       TWO,
+      [bindingId],
     );
     const second = await createNode(
       fixture,
@@ -597,6 +600,7 @@ test(
       first.missionVersion,
       initiativeId,
       TWO,
+      [bindingId],
     );
     const oldParent = first.revisions[0]!.nodeId;
     const newParent = second.revisions[0]!.nodeId;
@@ -841,7 +845,7 @@ for (const action of [PREVIEW, APPLY] as const) {
 async function configureRepository(
   fixture: Fixture,
   projectId: string,
-): Promise<void> {
+): Promise<string> {
   const credential = jsonFile(fixture, "import-credential.json", {
     name: REPOSITORY_PLATFORM,
     platform: REPOSITORY_PLATFORM,
@@ -864,7 +868,10 @@ async function configureRepository(
       },
     },
   });
-  const result = success<{ bindingSetVersion: number }>(
+  const result = success<{
+    bindingSetVersion: number;
+    bindings: Record<string, { id: string }>;
+  }>(
     await kanthord(
       [PROJECT, BINDING, APPLY, projectId, FILE, bindingFile],
       fixture.env,
@@ -872,6 +879,7 @@ async function configureRepository(
   );
   assert.equal(result.bindingSetVersion, TWO);
   assert.ok(projectId);
+  return result.bindings[REPOSITORY_NAME]!.id;
 }
 
 async function previewImport(
@@ -931,7 +939,7 @@ test(
   async (t) => {
     const fixture = await setup(t);
     const mission = await createMission(fixture);
-    await configureRepository(fixture, mission.projectId);
+    const bindingId = await configureRepository(fixture, mission.projectId);
     const initiative = await createNode(
       fixture,
       mission.id,
@@ -944,6 +952,8 @@ test(
       NodeKind.Objective,
       initiative.missionVersion,
       initiative.revisions[0]!.nodeId,
+      ONE,
+      [bindingId],
     );
     const task = await createNode(
       fixture,
@@ -1309,6 +1319,8 @@ async function scenarioChildren(scenario: Scenario): Promise<void> {
     NodeKind.Objective,
     scenario.version,
     initiativeId,
+    ONE,
+    [scenario.bindingId],
   );
   assert.equal(objective.missionVersion, scenario.version + ONE);
   assert.equal(objective.revisions.length, ONE);
@@ -1344,11 +1356,7 @@ async function scenarioRevisions(scenario: Scenario): Promise<void> {
   const before = await readNode(fixture, objectiveId);
   await scenarioChange(scenario, [NODE, UPDATE, objectiveId], {
     filename: before.filename,
-    content: {
-      ...before.content,
-      name: UPDATED_NAME,
-      bindings: [REPOSITORY_NAME],
-    },
+    content: { ...before.content, name: UPDATED_NAME },
     expectedRevision: before.visibleRevision,
   });
   const updated = await readNode(fixture, objectiveId);
@@ -1379,6 +1387,7 @@ async function scenarioMove(scenario: Scenario): Promise<void> {
     scenario.version,
     initiativeId,
     initiative.visibleRevision,
+    [scenario.bindingId],
   );
   assert.equal(second.missionVersion, scenario.version + ONE);
   assert.equal(second.revisions.length, ONE);

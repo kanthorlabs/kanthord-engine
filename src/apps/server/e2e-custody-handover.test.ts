@@ -191,39 +191,40 @@ async function resources(c: ReturnType<typeof cli>) {
     "--name",
     "handover",
   ]);
-  const applied = await c.write<{ bindingSetVersion: number }>(
-    ["project", "binding", "apply", project.id],
-    {
-      version: ONE,
-      bindings: {
-        repo: {
-          kind: "repository",
-          config: {
-            available: true,
-            platform: "github",
-            address: "git@github.com:owner/repo.git",
-            strategy: { baseBranch: "main" },
-            credential: "github",
-          },
+  const applied = await c.write<{
+    bindingSetVersion: number;
+    bindings: Record<string, { id: string }>;
+  }>(["project", "binding", "apply", project.id], {
+    version: ONE,
+    bindings: {
+      repo: {
+        kind: "repository",
+        config: {
+          available: true,
+          platform: "github",
+          address: "git@github.com:owner/repo.git",
+          strategy: { baseBranch: "main" },
+          credential: "github",
         },
-        general: {
-          kind: "worker",
-          config: {
-            worker: "general@1",
-            instanceCount: ONE,
-            entries: [{ agent: "swe@1", ...CONFIGURATION }],
-          },
+      },
+      general: {
+        kind: "worker",
+        config: {
+          worker: "general@1",
+          instanceCount: ONE,
+          entries: [{ agent: "swe@1", ...CONFIGURATION }],
         },
       },
     },
-  );
+  });
   assert.equal(applied.bindingSetVersion, TWO);
-  return project.id;
+  return { projectId: project.id, bindingId: applied.bindings.repo!.id };
 }
 
 async function graph(
   c: ReturnType<typeof cli>,
   projectId: string,
+  bindingId: string,
 ): Promise<void> {
   const mission = await c.read<{ id: string }>(["mission", "get", projectId]);
   const initiative = await c.write<Change>(
@@ -242,7 +243,7 @@ async function graph(
     {
       filename: "objective-1.md",
       kind: "objective",
-      content: { ...CONTENT, bindings: ["repo"] },
+      content: { ...CONTENT, bindings: [bindingId] },
       reason: "plan",
       parentId: initiative.revisions[0].nodeId,
       expectedParentRevision: ONE,
@@ -266,8 +267,8 @@ async function setup(t: TestContext) {
     KANTHORD_TOKEN: fixture.token,
   };
   const c = cli(directory, human);
-  const projectId = await resources(c);
-  await graph(c, projectId);
+  const { projectId, bindingId } = await resources(c);
+  await graph(c, projectId, bindingId);
   writePrivate(
     join(directory, "server.yaml"),
     stringify(

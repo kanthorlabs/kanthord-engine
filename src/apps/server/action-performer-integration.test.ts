@@ -189,7 +189,7 @@ async function setup(
       body: {
         filename: "objective-1.md",
         kind: NodeKind.Objective,
-        content: { ...CONTENT, bindings: ["repo"] },
+        content: { ...CONTENT, bindings: [binding.id] },
         reason: "plan",
         expectedMissionVersion: TWO,
         parentId: initiative.revisions[0]!.nodeId,

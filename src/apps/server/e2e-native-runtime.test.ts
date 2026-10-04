@@ -82,7 +82,7 @@ const CONTENT = {
   requirement: "Write hello.txt",
   criterion: "hello.txt exists",
   verifications: ["test -f hello.txt"],
-  bindings: ["repo"],
+  bindings: [] as string[],
 };
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
   fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
@@ -153,7 +153,9 @@ test(
       instanceCount: ONE,
       entries: [{ agent: "swe@1", ...DEFAULTS }],
     };
-    await write(["project", "binding", "apply", project.id], {
+    const bindingSet = await write<{
+      bindings: Record<string, { id: string }>;
+    }>(["project", "binding", "apply", project.id], {
       version: ONE,
       bindings: {
         repo: {
@@ -192,7 +194,7 @@ test(
       await write(["mission", "node", "create", mission.id], {
         filename: `${name}.md`,
         kind: "objective",
-        content: CONTENT,
+        content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
         reason: "runtime acceptance",
         expectedMissionVersion: index + TWO,
         parentId: initiative.revisions[0]!.nodeId,

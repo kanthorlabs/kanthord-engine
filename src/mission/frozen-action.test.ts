@@ -70,6 +70,8 @@ test("required actions preserve pinned policies across later revisions and omit 
       assert.fail("Actions do not read storage configuration."),
     resolveBinding: () =>
       assert.fail("Pinned reads never resolve the latest name."),
+    resolveBindingIdentity: () =>
+      assert.fail("Pinned reads never resolve the latest revision."),
     getBindingRevision: (_tx, bindingId) => ({
       bindingId,
       projectId,

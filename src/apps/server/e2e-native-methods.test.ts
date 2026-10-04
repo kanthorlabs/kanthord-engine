@@ -157,7 +157,9 @@ test(
       strategy: { baseBranch: "main" },
       credential: "github",
     });
-    await write(["project", "binding", "apply", project.id], {
+    const bindingSet = await write<{
+      bindings: Record<string, { id: string }>;
+    }>(["project", "binding", "apply", project.id], {
       version: ONE,
       bindings: {
         repo: { kind: "repository", config: repository("repo") },
@@ -222,7 +224,7 @@ test(
     const nodes: string[] = [];
     const tasks: string[] = [];
     for (const [index, name] of ["a", "b", "c"].entries()) {
-      const binding = index === TWO ? "gated" : "repo";
+      const binding = bindingSet.bindings[index === TWO ? "gated" : "repo"]!.id;
       const node = await create({
         filename: `${name}.md`,
         kind: "objective",

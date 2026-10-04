@@ -2398,6 +2398,56 @@ test("resolveBinding selects the latest named group in its project after revisio
   });
 });
 
+test("resolveBindingIdentity pins the latest revision of a live binding of its project", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const first = insertProject(tx, PROJECT_NAME);
+    const second = insertProject(tx, OTHER_NAME);
+    const other = persistBindings(tx, second.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    const older = persistBindings(tx, first.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings[REPOSITORY_NAME]!;
+    const latest = persistBindings(tx, first.id, {
+      [REPOSITORY_NAME]: {
+        ...repositoryBinding(),
+        config: { ...repositoryBinding().config, available: false },
+      },
+    }).bindings[REPOSITORY_NAME]!;
+    assert.notEqual(older.id, latest.id);
+    for (const id of [older.id, latest.id])
+      assert.deepEqual(f.project.resolveBindingIdentity(tx, first.id, id), {
+        bindingId: latest.id,
+        resourceIdentity: latest.resourceIdentity,
+      });
+    assert.equal(
+      f.project.resolveBindingIdentity(tx, first.id, other.id),
+      null,
+    );
+    assert.equal(
+      f.project.resolveBindingIdentity(tx, first.id, REPOSITORY_NAME),
+      null,
+    );
+    const replacement = persistBindings(tx, first.id, {
+      [REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+    }).bindings[REPOSITORY_NAME]!;
+    assert.equal(
+      f.project.resolveBindingIdentity(tx, first.id, latest.id),
+      null,
+    );
+    assert.equal(
+      f.project.resolveBindingIdentity(tx, first.id, replacement.id)?.bindingId,
+      replacement.id,
+    );
+    persistBindings(tx, first.id, {});
+    assert.equal(
+      f.project.resolveBindingIdentity(tx, first.id, replacement.id),
+      null,
+    );
+  });
+});
+
 test("storageBindingOf reads the pinned configuration after a prefix revision", (t) => {
   const f = fixture(t);
   const prefix = "later";

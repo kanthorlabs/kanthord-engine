@@ -47,6 +47,11 @@ export interface MissionBindings {
     projectId: string,
     bindingName: string,
   ): { bindingId: string; resourceIdentity: string } | null;
+  resolveBindingIdentity(
+    tx: Transaction,
+    projectId: string,
+    bindingId: string,
+  ): { bindingId: string; resourceIdentity: string } | null;
   getBindingRevision(
     tx: Transaction,
     bindingId: string,

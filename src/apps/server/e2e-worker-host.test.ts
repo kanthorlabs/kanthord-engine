@@ -70,7 +70,10 @@ async function fixture(t: TestContext) {
       kind: "objective",
       parentId: initiative.revisions[0]!.nodeId,
       expectedParentRevision: ONE,
-      content: { ...content, bindings: ["repo", "store"] },
+      content: {
+        ...content,
+        bindings: [setup.bindings.repo!.id, setup.bindings.store!.id],
+      },
       reason: "plan",
       expectedMissionVersion: TWO,
     },

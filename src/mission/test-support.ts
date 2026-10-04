@@ -224,6 +224,10 @@ export function missionHarness(
         record("bindings.resolveBinding", args);
         return null;
       },
+      resolveBindingIdentity: (...args) => {
+        record("bindings.resolveBindingIdentity", args);
+        return null;
+      },
       getBindingRevision: (...args) => {
         record("bindings.getBindingRevision", args);
         return null;

@@ -83,6 +83,8 @@ const bindings: MissionBindings = {
       ? { bindingId: BINDING_ID, resourceIdentity: "repository:example" }
       : null;
   },
+  resolveBindingIdentity: () =>
+    assert.fail("Import resolves names, not binding identities."),
   getBindingRevision: () =>
     assert.fail("Import resolves names, not historical bindings."),
 };

@@ -195,15 +195,11 @@ async function setup(t: TestContext, short = false) {
         }
       : {}),
   };
-  assert.equal(
-    (
-      await write<{ bindingSetVersion: number }>(
-        ["project", "binding", "apply", project.id],
-        { version: 1, bindings },
-      )
-    ).bindingSetVersion,
-    TWO,
-  );
+  const applied = await write<{
+    bindingSetVersion: number;
+    bindings: Record<string, { id: string }>;
+  }>(["project", "binding", "apply", project.id], { version: 1, bindings });
+  assert.equal(applied.bindingSetVersion, TWO);
   const mission = await read<{ id: string }>(["mission", "get", project.id]);
   const initiative = await write<Change>(
     ["mission", "node", "create", mission.id],
@@ -220,7 +216,7 @@ async function setup(t: TestContext, short = false) {
     {
       filename: "objective-1.md",
       kind: "objective",
-      content: { ...CONTENT, bindings: ["repo"] },
+      content: { ...CONTENT, bindings: [applied.bindings.repo!.id] },
       reason: "plan",
       parentId: initiative.revisions[0]!.nodeId,
       expectedParentRevision: 1,

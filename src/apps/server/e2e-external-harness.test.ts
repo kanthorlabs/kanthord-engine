@@ -92,7 +92,7 @@ test(
       project.id,
       "objective-a.md",
       "objective",
-      ["repo"],
+      [bindings.bindings.repo!.id],
       initiative,
     );
     const issue = (name: string) =>

@@ -59,10 +59,10 @@ for (const filenames of [
       filename: ["a.md", "b.md"][index]!,
       content,
     }));
-    h.dependencies.bindings.resolveBinding = () => ({
-      bindingId,
-      resourceIdentity: "repository:github:owner/repo",
-    });
+    h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
+      projectId === h.projectId && id === bindingId
+        ? { bindingId, resourceIdentity: "repository:github:owner/repo" }
+        : null;
     h.store.transaction((tx) => {
       tx.database
         .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
@@ -89,7 +89,7 @@ for (const filenames of [
       body: h.body(NodeState.Paused, FIRST),
     });
     const change = {
-      content: { ...content, bindings: ["repo"] },
+      content: { ...content, bindings: [bindingId] },
       reason: "Rename",
       tasks: tasks.map((task, index) => ({
         ...task,
@@ -167,10 +167,10 @@ test("objective unblock validates the exact task set and writes the changed task
     verifications: ["true"],
     bindings: [],
   };
-  h.dependencies.bindings.resolveBinding = () => ({
-    bindingId,
-    resourceIdentity: "repository:github:owner/repo",
-  });
+  h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
+    projectId === h.projectId && id === bindingId
+      ? { bindingId, resourceIdentity: "repository:github:owner/repo" }
+      : null;
   h.store.transaction((tx) => {
     tx.database
       .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
@@ -199,7 +199,7 @@ test("objective unblock validates the exact task set and writes the changed task
     body: h.body(NodeState.Paused),
   });
   const change = {
-    content: { ...content, bindings: ["repo"] },
+    content: { ...content, bindings: [bindingId] },
     reason: "Redirect",
     tasks: [
       {
@@ -228,8 +228,30 @@ test("objective unblock validates the exact task set and writes the changed task
       error instanceof OperationError &&
       error.code === MissionErrorCode.ContentInvalid,
   );
+  await assert.rejects(
+    h.invoke("node.unblock", {
+      ...input,
+      body: {
+        ...input.body,
+        change: { ...change, content: { ...content, bindings: ["repo"] } },
+      },
+    }),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.BindingsInvalid &&
+      JSON.stringify(error.details) === JSON.stringify({ binding: "repo" }),
+  );
   assert.equal(h.node().state, NodeState.Blocked);
-  const result = await h.invoke("node.unblock", input);
+  const read = await h.invoke("node.get", {
+    params: { nodeId: h.nodeId },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual(read.content.bindings, [bindingId]);
+  const result = await h.invoke("node.unblock", {
+    ...input,
+    body: { ...input.body, change: { ...change, content: read.content } },
+  });
   assert.equal(result.node.visibleRevision, SECOND);
   const stored = h.store.transaction((tx) =>
     readCurrentRevision(tx, h.nodeId),

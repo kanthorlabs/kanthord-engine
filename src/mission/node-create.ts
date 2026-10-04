@@ -132,14 +132,14 @@ export function resolveContent(
   validateFilename(body.filename);
   validateNodeContent(body.kind, body.content, textMaxBytes);
   validateText(Field.Reason, body.reason, textMaxBytes);
-  const resolved = body.content.bindings.map((name) => {
-    const binding = bindings.resolveBinding(tx, projectId, name);
+  const resolved = body.content.bindings.map((bindingId) => {
+    const binding = bindings.resolveBindingIdentity(tx, projectId, bindingId);
     if (!binding)
       throw new OperationError(
         HttpStatus.BadRequest,
         MissionErrorCode.BindingsInvalid,
-        "Binding name could not be resolved.",
-        { binding: name },
+        "Binding identity could not be resolved.",
+        { binding: bindingId },
       );
     return binding;
   });

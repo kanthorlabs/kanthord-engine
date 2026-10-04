@@ -83,7 +83,9 @@ export async function workerAcceptance(t: TestContext, host = false) {
     "--name",
     host ? "worker-host" : "worker-app",
   ]);
-  await write(["project", "binding", "apply", project.id], {
+  const bindingSet = await write<{
+    bindings: Record<string, { id: string }>;
+  }>(["project", "binding", "apply", project.id], {
     version: 1,
     bindings: {
       ...(host
@@ -167,6 +169,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
     fixture,
     human,
     projectId: project.id,
+    bindings: bindingSet.bindings,
     read,
     write,
     machine,
