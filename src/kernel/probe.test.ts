@@ -3,7 +3,13 @@ import { test } from "node:test";
 import { background, CancellationContext, type Context } from "./context.ts";
 import { ResourceStatus } from "./health.ts";
 import { HttpMethod, HttpStatus } from "./http.ts";
-import { AUTHORIZATION_HEADER, probeHttp, redactReason } from "./probe.ts";
+import {
+  AUTHORIZATION_HEADER,
+  headerSecrets,
+  probeHttp,
+  redactReason,
+  thrownReason,
+} from "./probe.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const URL = "https://probe.example/v1/check";
@@ -110,4 +116,17 @@ test("redactReason removes secrets, bearer values, JWTs and long tokens and boun
   assert.ok(!reason.includes("abc.def"));
   assert.ok(!reason.includes(jwt));
   assert.ok(reason.length <= REASON_LIMIT);
+});
+
+test("thrownReason removes a short bare secret of a header value", () => {
+  const short = "ghp_short1";
+  const headers = {
+    [AUTHORIZATION_HEADER]: `Bearer ${short}`,
+    "x-api-key": short,
+  };
+  const reason = thrownReason(
+    new Error(`request failed for ${short}`),
+    headerSecrets(headers),
+  );
+  assert.ok(!reason.includes(short));
 });

@@ -30,6 +30,15 @@ export function redactReason(
     .slice(0, REASON_MAX_LENGTH);
 }
 
+export function headerSecrets(
+  headers: Record<string, string>,
+): readonly string[] {
+  return Object.values(headers).flatMap((value) => [
+    value,
+    ...value.split(/\s+/),
+  ]);
+}
+
 export function thrownReason(
   error: unknown,
   secrets: readonly string[],
@@ -66,7 +75,7 @@ export async function probeHttp(
       dispose();
     }
   } catch (error) {
-    observe?.(thrownReason(error, Object.values(headers)));
+    observe?.(thrownReason(error, headerSecrets(headers)));
     return ResourceStatus.Unknown;
   }
 }

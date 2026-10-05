@@ -21,6 +21,7 @@ import type { ResourceObserver } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AUTHORIZATION_HEADER,
+  headerSecrets,
   redactReason,
   thrownReason,
 } from "../kernel/probe.ts";
@@ -139,7 +140,7 @@ async function httpCheck(
       dispose();
     }
   } catch (error) {
-    observe?.(thrownReason(error, Object.values(headers)));
+    observe?.(thrownReason(error, headerSecrets(headers)));
     return UNREACHABLE;
   }
 }
