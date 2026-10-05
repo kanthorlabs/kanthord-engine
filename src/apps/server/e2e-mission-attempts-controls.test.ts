@@ -89,7 +89,7 @@ async function setup(t: TestContext) {
   ]);
   const mission = await read<Mission>(["mission", "get", project.id]);
   assert.equal(mission.version, ONE);
-  await write(["credential", "create"], {
+  await write(["repository", "credential", "create"], {
     name: "github",
     platform: "github",
     metadata: null,

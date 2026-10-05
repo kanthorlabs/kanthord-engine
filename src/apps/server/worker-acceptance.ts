@@ -46,11 +46,11 @@ export async function workerAcceptance(t: TestContext, host = false) {
     writePrivate(path, JSON.stringify(body));
     return read<T>([...args, "--file", path]);
   }
-  for (const [name, platform, key] of [
-    ["anthro-1", "anthropic", WORKER_TEST_KEY],
-    ["github", "github", "test_github_key"],
-  ])
-    await write(["credential", "create"], {
+  for (const [group, name, platform, key] of [
+    ["llm", "anthro-1", "anthropic", WORKER_TEST_KEY],
+    ["repository", "github", "github", "test_github_key"],
+  ] as const)
+    await write([group, "credential", "create"], {
       name,
       platform,
       metadata: null,
@@ -68,7 +68,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
     region: "eu-central-1",
   };
   if (host)
-    await write(["credential", "create"], {
+    await write(["storage", "credential", "create"], {
       name: "store",
       platform: "s3",
       metadata: storage,

@@ -126,11 +126,11 @@ async function setupInternal(t: TestContext) {
     },
   });
   const cli = journeyClient(t, fixture.endpoint, fixture.token);
-  for (const [name, platform, key] of [
-    ["anthro-1", "anthropic", PROVIDER_KEY],
-    ["github", "github", GITHUB_KEY],
-  ])
-    await cli.write(["credential", "create"], {
+  for (const [group, name, platform, key] of [
+    ["llm", "anthro-1", "anthropic", PROVIDER_KEY],
+    ["repository", "github", "github", GITHUB_KEY],
+  ] as const)
+    await cli.write([group, "credential", "create"], {
       name,
       platform,
       metadata: null,
@@ -141,7 +141,7 @@ async function setupInternal(t: TestContext) {
     bucket: "evidence",
     region: "eu-central-1",
   };
-  await cli.write(["credential", "create"], {
+  await cli.write(["storage", "credential", "create"], {
     name: "store",
     platform: "s3",
     metadata: storage,

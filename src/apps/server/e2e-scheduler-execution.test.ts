@@ -132,13 +132,13 @@ async function setup(t: TestContext, short = false) {
     assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
     assert.equal(result.stdout, EMPTY);
   };
-  await write(["credential", "create"], {
+  await write(["llm", "credential", "create"], {
     name: "anthro-1",
     platform: "anthropic",
     metadata: null,
     secret: { key: "e2e-execution-secret" },
   });
-  await write(["credential", "create"], {
+  await write(["repository", "credential", "create"], {
     name: "github",
     platform: "github",
     metadata: null,

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { digest } from "../kernel/json.ts";
-import { SecretShape } from "./platforms.ts";
 import {
+  SecretShape,
   handoverPayloadSchema,
   piCredentialSchema,
   refreshReportSchema,

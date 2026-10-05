@@ -1,21 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { setImmediate } from "node:timers/promises";
-import {
-  createModels,
-  createProvider,
-  type AuthPrompt,
-  type Provider,
-  type ProviderAuthInteraction,
-  type OAuthCredential,
-} from "@earendil-works/pi-ai";
-import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import type { Logger } from "pino";
-import { background, CancellationContext } from "../kernel/context.ts";
+import { z } from "zod";
+import { CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import {
   IN_MEMORY_DATABASE,
@@ -23,35 +13,74 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import {
-  custodyOperations,
-  EXECUTION_CREDENTIAL_MAX_BYTES,
   CUSTODY_SERVICE_NAME,
+  SecretShape,
   type CredentialMetadataFn,
+  type CredentialPlatform,
+  type CredentialPlatformSet,
   type CustodySuitabilityFn,
   type AgentProvidersDependentOnFn,
   type BindingsNamingFn,
   type InboundsNamingFn,
-  type EnablementsDependentOnModelFn,
   type CredentialAnswer,
 } from "./contract.ts";
 import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
-import {
-  Platform,
-  PLATFORM_VALIDATORS,
-  PlatformKind,
-  SecretShape,
-} from "./platforms.ts";
 import { CustodyComponent, type Dependencies } from "./service.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { FacilityError } from "./facility.ts";
-import {
-  COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
-  OAUTH_PROVIDER_IDS,
-} from "./login.ts";
-import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
+import { EXECUTION_CREDENTIAL_MAX_BYTES } from "./contract.ts";
+
+const TestPlatform = {
+  Key: "key-platform",
+  OtherKey: "other-key-platform",
+  Metadata: "metadata-platform",
+  OAuth: "oauth-platform",
+  AccessKey: "access-key-platform",
+} as const;
+const FOREIGN_PLATFORM = "foreign-platform";
+const NO_CAPABILITY = "none";
+
+function testPlatform(
+  secretShape: SecretShape,
+  metadataSchema: z.ZodObject | null = null,
+): CredentialPlatform {
+  return {
+    secretShape,
+    loginModes: [],
+    metadataSchema,
+    capability: NO_CAPABILITY,
+    probe: null,
+  };
+}
+
+const TEST_SET: CredentialPlatformSet = {
+  platforms: {
+    [TestPlatform.Key]: testPlatform(SecretShape.ApiKey),
+    [TestPlatform.OtherKey]: testPlatform(SecretShape.ApiKey),
+    [TestPlatform.Metadata]: testPlatform(
+      SecretShape.ApiKey,
+      z.strictObject({
+        baseUrl: z.string(),
+        models: z.array(z.strictObject({ id: z.string() })),
+      }),
+    ),
+    [TestPlatform.OAuth]: testPlatform(SecretShape.OAuth),
+    [TestPlatform.AccessKey]: testPlatform(
+      SecretShape.S3AccessKey,
+      z.strictObject({
+        endpoint: z.url(),
+        bucket: z.string().min(1),
+        region: z.string().min(1),
+      }),
+    ),
+  },
+};
+const FOREIGN_SET: CredentialPlatformSet = {
+  platforms: { [FOREIGN_PLATFORM]: testPlatform(SecretShape.ApiKey) },
+};
 
 const FIRST_REVISION = 1;
 const HUMAN_ACCOUNT_ID = "alice";
@@ -59,17 +88,9 @@ const NAME_CONFLICT_CODE = "credential.name.conflict";
 const REVISION_CONFLICT_CODE = "credential.revision.conflict";
 const CREDENTIAL_NOT_FOUND_CODE = "credential.credential.not_found";
 const PLATFORM_MISMATCH_CODE = "credential.platform.mismatch";
-const MODEL_IN_USE_CODE = "credential.metadata.model_in_use";
-const REMOVED_MODEL = "removed";
-const KEPT_MODEL = "kept";
-const DEPENDENT_AGENT = "dependent-agent";
-const RemovalMode = {
-  MetadataEdit: "metadata edit",
-  Rotation: "rotation",
-} as const;
 const NEXT_REVISION = FIRST_REVISION + 1;
-const THIRD_REVISION = NEXT_REVISION + 1;
 const ROTATED_BASE_URL = "https://other.example/v1";
+const THIRD_REVISION = NEXT_REVISION + 1;
 const key = Buffer.alloc(32, 7);
 const secretValue = "private-credential-value";
 const apiSecret = { key: secretValue };
@@ -118,42 +139,6 @@ test("credential creation and rotation enforce the serialized budget before any 
   assert.equal(rotated.revisions[0]?.revision, NEXT_REVISION);
 });
 
-test("offline OAuth login persists the maximum aggregate credential and sanitizes the next byte", async (t) => {
-  const overhead = Buffer.byteLength(
-    canonicalJSON({
-      type: "oauth",
-      refresh: "r",
-      access: "",
-      expires: CLOCK_START,
-    }),
-  );
-  const access = "a".repeat(EXECUTION_CREDENTIAL_MAX_BYTES - overhead);
-  for (const extra of ["", "x"]) {
-    const gate = gatedLogin();
-    const f = fixture({ oauthProviders: () => [gate.provider] });
-    t.after(async () => {
-      await f.component.stop();
-      f.store.close();
-    });
-    const pending = await f.login(LOGIN_BODY);
-    gate.result.resolve({
-      type: "oauth",
-      refresh: "r",
-      access: access + extra,
-      expires: CLOCK_START,
-    });
-    const status = await terminalStatus(f, pending.sessionId);
-    if (extra.length) {
-      assert.equal(status.state, LoginSessionState.Failed);
-      assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
-      assert.equal(credentialCount(f), NO_CREDENTIALS);
-      assert.ok(!JSON.stringify(status).includes(access));
-    } else {
-      assert.equal(status.state, LoginSessionState.Completed);
-      assert.equal(credentialCount(f), FIRST_REVISION);
-    }
-  }
-});
 const unusedExecutionDependencies = {
   executions: {
     requireRunning: unexpectedCollaboration,
@@ -166,25 +151,25 @@ const unusedExecutionDependencies = {
 const inputs = [
   {
     name: "github",
-    platform: Platform.GitHub,
+    platform: TestPlatform.Key,
     secret: apiSecret,
     metadata: null,
   },
   {
     name: "anthropic",
-    platform: Platform.Anthropic,
+    platform: TestPlatform.OtherKey,
     secret: apiSecret,
     metadata: null,
   },
   {
     name: "openai",
-    platform: Platform.OpenAICompatible,
+    platform: TestPlatform.Metadata,
     secret: apiSecret,
     metadata: { baseUrl: "https://example.com/v1", models: [] },
   },
   {
     name: "storage",
-    platform: Platform.S3,
+    platform: TestPlatform.AccessKey,
     secret: { accessKeyId: "id", secretAccessKey: secretValue },
     metadata: {
       endpoint: "https://example.com",
@@ -196,12 +181,9 @@ const inputs = [
 
 function fixture(
   collaborations: {
-    oauthProviders?: () => readonly Provider[];
-    now?: () => number;
     agentProvidersDependentOn?: AgentProvidersDependentOnFn;
     bindingsNaming?: BindingsNamingFn;
     inboundsNaming?: InboundsNamingFn;
-    enablementsDependentOnModel?: EnablementsDependentOnModelFn;
     pins?: Map<string, string[]>;
     authorization?: Dependencies["authorization"];
     executions?: Dependencies["executions"];
@@ -230,8 +212,7 @@ function fixture(
         collaborations.pins?.get(credentialId) ?? [],
     },
     store,
-    oauthProviders: collaborations.oauthProviders,
-    now: collaborations.now,
+    platforms: { ...TEST_SET.platforms, ...FOREIGN_SET.platforms },
     envelopeKey: key,
     logger,
     health,
@@ -239,90 +220,56 @@ function fixture(
       collaborations.agentProvidersDependentOn ?? (() => []),
     bindingsNaming: collaborations.bindingsNaming ?? (() => []),
     inboundsNaming: collaborations.inboundsNaming ?? (() => []),
-    enablementsDependentOnModel:
-      collaborations.enablementsDependentOnModel ?? (() => []),
   });
-  const registry = new OperationRegistry();
-  component.declare(registry);
   let lastTransaction: Transaction | undefined;
-  const caller: CallerContext = {
-    identity: { kind: "human", accountId: "alice", name: "Alice", jti: "j" },
-    context: background,
-    requestId: "request",
-    commit: (write) =>
-      store.transaction((tx) => {
-        lastTransaction = tx;
-        return write(tx);
-      }),
-  };
-  function invoke(
-    operation: (typeof custodyOperations)[keyof typeof custodyOperations],
-    input: unknown,
-  ): unknown {
-    const parsed = operation.input.parse(input);
-    return registry.get(operation.id).handler(parsed, caller);
-  }
-  const create = (body: unknown) =>
-    invoke(custodyOperations.create, { params: {}, query: {}, body });
-  const get = (name: string) =>
-    invoke(custodyOperations.get, {
-      params: { credentialName: name },
-      query: {},
-      body: null,
+  const commit = <T>(write: (tx: Transaction) => T): T =>
+    store.transaction((tx) => {
+      lastTransaction = tx;
+      return write(tx);
     });
-  const list = (query: Record<string, unknown> = {}) =>
-    invoke(custodyOperations.list, { params: {}, query, body: null });
-  const rotate = (name: string, body: unknown) =>
-    invoke(custodyOperations.rotate, {
-      params: { credentialName: name },
-      query: {},
-      body,
-    });
-  const updateMetadata = (name: string, body: unknown) =>
-    invoke(custodyOperations.update_metadata, {
-      params: { credentialName: name },
-      query: {},
-      body,
-    });
-  const platformList = () =>
-    invoke(custodyOperations.platform_list, {
-      params: {},
-      query: {},
-      body: null,
-    }) as typeof custodyOperations.platform_list.output._output;
-  const revoke = (name: string, revision: number) =>
-    invoke(custodyOperations.revoke, {
-      params: { credentialName: name, revision },
-      query: {},
-      body: null,
-    });
-  const login = async (body: unknown) =>
-    (await invoke(custodyOperations.login, {
-      params: {},
-      query: {},
-      body,
-    })) as typeof custodyOperations.login.output._output;
-  const loginCode = (sessionId: string, value: string) =>
-    invoke(custodyOperations.login_code, {
-      params: { sessionId },
-      query: {},
-      body: { value },
-    });
-  const loginStatus = (sessionId: string) =>
-    invoke(custodyOperations.login_status, {
-      params: { sessionId },
-      query: {},
-      body: null,
-    }) as typeof custodyOperations.login_status.output._output;
+  const create = (body: unknown, set = TEST_SET) =>
+    commit((tx) =>
+      component.create(
+        tx,
+        set,
+        body as Parameters<CustodyComponent["create"]>[2],
+        HUMAN_ACCOUNT_ID,
+      ),
+    );
+  const get = (name: string, set = TEST_SET) =>
+    commit((tx) => component.get(tx, set, name));
+  const list = (query: Record<string, unknown> = {}, set = TEST_SET) =>
+    commit((tx) =>
+      component.list(tx, set, query as Parameters<CustodyComponent["list"]>[2]),
+    );
+  const rotate = (name: string, body: unknown, set = TEST_SET) =>
+    commit((tx) =>
+      component.rotate(
+        tx,
+        set,
+        name,
+        body as Parameters<CustodyComponent["rotate"]>[3],
+        HUMAN_ACCOUNT_ID,
+      ),
+    );
+  const updateMetadata = (name: string, body: unknown, set = TEST_SET) =>
+    commit((tx) =>
+      component.updateMetadata(
+        tx,
+        set,
+        name,
+        body as Parameters<CustodyComponent["updateMetadata"]>[3],
+        HUMAN_ACCOUNT_ID,
+      ),
+    );
+  const revoke = (name: string, revision: number, set = TEST_SET) =>
+    commit((tx) => component.revoke(tx, set, name, revision));
+  const archive = (name: string, set = TEST_SET) =>
+    commit((tx) => component.archive(tx, set, name));
   return {
     store,
     component,
-    caller,
-    login,
-    loginCode,
-    loginStatus,
     lastTransaction: () => lastTransaction,
-    registry,
     health,
     logs,
     create,
@@ -331,7 +278,7 @@ function fixture(
     rotate,
     updateMetadata,
     revoke,
-    platformList,
+    archive,
   };
 }
 
@@ -398,17 +345,7 @@ test("create validates platforms, schema, conflicts and encrypts each first revi
       "credential.input.invalid",
     );
     fails(
-      () =>
-        f.create({
-          ...inputs[2],
-          name: "nonempty-models",
-          metadata: { ...inputs[2]!.metadata, models: [{ id: "gpt" }] },
-        }),
-      HttpStatus.BadRequest,
-      "credential.input.invalid",
-    );
-    fails(
-      () => f.create({ ...inputs[0], platform: Platform.GitHubCopilot }),
+      () => f.create({ ...inputs[0], platform: TestPlatform.OAuth }),
       HttpStatus.BadRequest,
       "credential.entry.unsupported",
     );
@@ -454,7 +391,7 @@ test("get orders revisions and list paginates sorted names with filters", () => 
       HttpStatus.NotFound,
       "credential.credential.not_found",
     );
-    const filtered = f.list({ platform: Platform.S3 }) as {
+    const filtered = f.list({ platform: TestPlatform.AccessKey }) as {
       items: { name: string }[];
     };
     assert.deepEqual(
@@ -488,7 +425,7 @@ test("get orders revisions and list paginates sorted names with filters", () => 
   }
 });
 
-test("rotate copies or replaces metadata, allows new base URL and guards revisions", () => {
+test("rotate copies or replaces metadata and guards revisions", () => {
   const f = fixture();
   try {
     f.create(inputs[3]);
@@ -520,17 +457,7 @@ test("rotate copies or replaces metadata, allows new base URL and guards revisio
         error.code === REVISION_CONFLICT_CODE &&
         (error.details as { revision: number }).revision === THIRD_REVISION,
     );
-    f.create(inputs[2]);
-    const changed = f.rotate("openai", {
-      expectedRevision: FIRST_REVISION,
-      secret: apiSecret,
-      metadata: {
-        baseUrl: ROTATED_BASE_URL,
-        models: [{ id: "new" }],
-      },
-    }) as { revisions: { id: string; metadata: { baseUrl: string } }[] };
-    assert.equal(changed.revisions[0]!.metadata.baseUrl, ROTATED_BASE_URL);
-    noSecret(changed);
+    const changed = replaced;
     fails(
       () =>
         f.rotate("missing", {
@@ -578,7 +505,7 @@ test("two rotations with the same expected revision reject the second", () => {
   }
 });
 
-test("metadata edits re-encrypt under new identity and enforce base URL and revision", () => {
+test("metadata edits re-encrypt under new identity and enforce revision", () => {
   const f = fixture();
   try {
     f.create(inputs[2]);
@@ -598,25 +525,10 @@ test("metadata edits re-encrypt under new identity and enforce base URL and revi
       ciphertext: Buffer;
     };
     assert.deepEqual(
-      decrypt(
-        key,
-        row.id,
-        Platform.OpenAICompatible,
-        row.nonce,
-        row.ciphertext,
-      ),
+      decrypt(key, row.id, TestPlatform.Metadata, row.nonce, row.ciphertext),
       apiSecret,
     );
     noSecret(answer);
-    fails(
-      () =>
-        f.updateMetadata("openai", {
-          expectedRevision: NEXT_REVISION,
-          metadata: { ...metadata, baseUrl: ROTATED_BASE_URL },
-        }),
-      HttpStatus.Conflict,
-      "credential.metadata.base_url_fixed",
-    );
     fails(
       () =>
         f.updateMetadata("openai", {
@@ -782,7 +694,7 @@ test("pinned metadata retains a rotated revision without creating a pin and refu
     assert.deepEqual(metadata(), {
       id: created.revisions[0]!.id,
       name: "github",
-      platform: Platform.GitHub,
+      platform: TestPlatform.Key,
       metadata: null,
     });
     assert.deepEqual(credentials, [created.revisions[0]!.id]);
@@ -816,7 +728,7 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
     "jti",
     execution.runtimeIdentity,
   );
-  let platform: string = Platform.GitHub;
+  let platform: string = TestPlatform.Key;
   let refused = false;
   const f = fixture({
     pins,
@@ -863,9 +775,9 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
     f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
     assert.equal(release(), created.revisions[0]!.id);
     assert.deepEqual(credentials, [created.revisions[0]!.id]);
-    platform = Platform.S3;
+    platform = TestPlatform.AccessKey;
     fails(release, HttpStatus.BadRequest, PLATFORM_MISMATCH_CODE);
-    platform = Platform.GitHub;
+    platform = TestPlatform.Key;
     refused = true;
     assert.throws(release, /authorization refused/);
     refused = false;
@@ -915,87 +827,6 @@ test("revoke ends only an older live revision", () => {
   }
 });
 
-test("a repeated approved model id answers invalid input at create, rotate and update-metadata and stores nothing", () => {
-  const f = fixture({ pins: new Map() });
-  try {
-    const duplicated = {
-      baseUrl: "https://example.com/v1",
-      models: [{ id: "same" }, { id: "same", maxTokens: 1000 }],
-    };
-    fails(
-      () => f.create({ ...inputs[2], name: "dup", metadata: duplicated }),
-      HttpStatus.BadRequest,
-      INVALID_INPUT_CODE,
-    );
-    assert.equal(credentialCount(f), NO_CREDENTIALS);
-    f.create(inputs[2]);
-    fails(
-      () =>
-        f.rotate("openai", {
-          expectedRevision: FIRST_REVISION,
-          secret: apiSecret,
-          metadata: duplicated,
-        }),
-      HttpStatus.BadRequest,
-      INVALID_INPUT_CODE,
-    );
-    fails(
-      () =>
-        f.updateMetadata("openai", {
-          expectedRevision: FIRST_REVISION,
-          metadata: duplicated,
-        }),
-      HttpStatus.BadRequest,
-      INVALID_INPUT_CODE,
-    );
-    assert.equal(credentialCount(f), FIRST_REVISION);
-  } finally {
-    f.store.close();
-  }
-});
-
-test("openrouter takes an api key with null metadata and differs from openai-compatible", () => {
-  const f = fixture({ pins: new Map() });
-  try {
-    f.create({
-      name: "router",
-      platform: Platform.OpenRouter,
-      secret: apiSecret,
-      metadata: null,
-    });
-    fails(
-      () =>
-        f.create({
-          name: "router-meta",
-          platform: Platform.OpenRouter,
-          secret: apiSecret,
-          metadata: { baseUrl: "https://example.com/v1", models: [] },
-        }),
-      HttpStatus.BadRequest,
-      INVALID_INPUT_CODE,
-    );
-    fails(
-      () =>
-        f.store.transaction((tx) =>
-          f.component.custodySuitability(tx, {
-            credential: "router",
-            platform: Platform.OpenAICompatible,
-          }),
-        ),
-      HttpStatus.BadRequest,
-      PLATFORM_MISMATCH_CODE,
-    );
-    f.store.transaction((tx) =>
-      f.component.custodySuitability(tx, {
-        credential: "router",
-        platform: Platform.OpenRouter,
-      }),
-    );
-  } finally {
-    f.store.close();
-  }
-});
-
 test("custody suitability checks the newest live revision and platform", () => {
   const pins = new Map<string, string[]>();
   const f = fixture({ pins });
@@ -1004,12 +835,15 @@ test("custody suitability checks the newest live revision and platform", () => {
     const created = f.create(inputs[0]) as CredentialAnswer;
     pins.set(created.revisions[0]!.id, ["live-execution"]);
     f.store.transaction((tx) =>
-      suitability(tx, { credential: "github", platform: Platform.GitHub }),
+      suitability(tx, { credential: "github", platform: TestPlatform.Key }),
     );
     fails(
       () =>
         f.store.transaction((tx) =>
-          suitability(tx, { credential: "missing", platform: Platform.GitHub }),
+          suitability(tx, {
+            credential: "missing",
+            platform: TestPlatform.Key,
+          }),
         ),
       HttpStatus.NotFound,
       CREDENTIAL_NOT_FOUND_CODE,
@@ -1017,7 +851,10 @@ test("custody suitability checks the newest live revision and platform", () => {
     fails(
       () =>
         f.store.transaction((tx) =>
-          suitability(tx, { credential: "github", platform: Platform.S3 }),
+          suitability(tx, {
+            credential: "github",
+            platform: TestPlatform.AccessKey,
+          }),
         ),
       HttpStatus.BadRequest,
       PLATFORM_MISMATCH_CODE,
@@ -1025,7 +862,7 @@ test("custody suitability checks the newest live revision and platform", () => {
     f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
     f.revoke("github", FIRST_REVISION);
     f.store.transaction((tx) =>
-      suitability(tx, { credential: "github", platform: Platform.GitHub }),
+      suitability(tx, { credential: "github", platform: TestPlatform.Key }),
     );
   } finally {
     f.store.close();
@@ -1049,7 +886,7 @@ test("credential metadata returns only nonsecret fields from the newest live rev
       "metadata",
     ]);
     assert.equal(openai?.name, inputs[2]!.name);
-    assert.equal(openai?.platform, Platform.OpenAICompatible);
+    assert.equal(openai?.platform, TestPlatform.Metadata);
     noSecret(openai);
     const github = f.store.transaction((tx) => metadata(tx, "github"));
     assert.equal(github?.metadata, null);
@@ -1084,90 +921,74 @@ test("credential metadata returns only nonsecret fields from the newest live rev
   }
 });
 
-for (const mode of Object.values(RemovalMode)) {
-  test(`${mode} refuses dependent model removal and permits unused model removal`, () => {
-    const calls: {
-      tx: Transaction;
-      credentialName: string;
-      modelId: string;
-    }[] = [];
-    let dependents = [{ agentName: DEPENDENT_AGENT }];
-    const f = fixture({
-      enablementsDependentOnModel: (tx, credentialName, modelId) => {
-        calls.push({ tx, credentialName, modelId });
-        return dependents;
+test("create refuses a platform outside the platform set of the caller", () => {
+  const f = fixture();
+  try {
+    fails(
+      () => f.create({ ...inputs[0], platform: FOREIGN_PLATFORM }),
+      HttpStatus.BadRequest,
+      "credential.platform.unsupported",
+    );
+    fails(
+      () => f.create({ ...inputs[0], platform: TestPlatform.Key }, FOREIGN_SET),
+      HttpStatus.BadRequest,
+      "credential.platform.unsupported",
+    );
+    assert.equal(credentialCount(f), NO_CREDENTIALS);
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a name of another platform set answers not found on every read and write", () => {
+  const f = fixture();
+  try {
+    f.create(inputs[0]);
+    f.create(
+      {
+        name: "foreign",
+        platform: FOREIGN_PLATFORM,
+        secret: apiSecret,
+        metadata: null,
       },
-    });
-    try {
-      f.create(inputs[2]);
-      const baseUrl = (inputs[2]!.metadata as { baseUrl: string }).baseUrl;
-      const existing = {
-        baseUrl,
-        models: [{ id: REMOVED_MODEL }, { id: KEPT_MODEL }],
-      };
-      f.updateMetadata("openai", {
-        expectedRevision: FIRST_REVISION,
-        metadata: existing,
-      });
-      const next = { baseUrl, models: [{ id: KEPT_MODEL }] };
-      const change = () =>
-        mode === RemovalMode.Rotation
-          ? f.rotate("openai", {
-              expectedRevision: NEXT_REVISION,
-              secret: apiSecret,
-              metadata: next,
-            })
-          : f.updateMetadata("openai", {
-              expectedRevision: NEXT_REVISION,
-              metadata: next,
-            });
-      assert.throws(change, (error) => {
-        assert.ok(error instanceof OperationError);
-        assert.equal(error.status, HttpStatus.Conflict);
-        assert.equal(error.code, MODEL_IN_USE_CODE);
-        assert.deepEqual(error.details, {
-          models: [{ model: REMOVED_MODEL, agents: [DEPENDENT_AGENT] }],
-        });
-        return true;
-      });
-      assert.strictEqual(calls[0]!.tx, f.lastTransaction());
-      assert.equal(
-        (f.get("openai") as { revisions: unknown[] }).revisions.length,
-        NEXT_REVISION,
-      );
-      assert.equal(calls.length, FIRST_REVISION);
-      assert.deepEqual(
-        calls.map(({ credentialName, modelId }) => ({
-          credentialName,
-          modelId,
-        })),
-        [{ credentialName: "openai", modelId: REMOVED_MODEL }],
-      );
-      dependents = [];
-      const result = change() as { revisions: { revision: number }[] };
-      assert.equal(result.revisions.length, THIRD_REVISION);
-      assert.equal(result.revisions[0]!.revision, THIRD_REVISION);
-      assert.equal(calls.length, NEXT_REVISION);
-      assert.deepEqual(
-        calls.map(({ credentialName, modelId }) => ({
-          credentialName,
-          modelId,
-        })),
-        [
-          { credentialName: "openai", modelId: REMOVED_MODEL },
-          { credentialName: "openai", modelId: REMOVED_MODEL },
-        ],
-      );
-      assert.strictEqual(calls[1]!.tx, f.lastTransaction());
-    } finally {
-      f.store.close();
-    }
-  });
-}
+      FOREIGN_SET,
+    );
+    for (const call of [
+      () => f.get("foreign"),
+      () =>
+        f.rotate("foreign", {
+          expectedRevision: FIRST_REVISION,
+          secret: apiSecret,
+        }),
+      () =>
+        f.updateMetadata("foreign", {
+          expectedRevision: FIRST_REVISION,
+          metadata: null,
+        }),
+      () => f.revoke("foreign", FIRST_REVISION),
+      () => f.archive("foreign"),
+      () => f.get("github", FOREIGN_SET),
+      () => f.archive("github", FOREIGN_SET),
+    ])
+      fails(call, HttpStatus.NotFound, CREDENTIAL_NOT_FOUND_CODE);
+    const names = (value: unknown) =>
+      (value as { items: CredentialAnswer[] }).items.map(({ name }) => name);
+    assert.deepEqual(names(f.list({ includeArchived: "true" })), ["github"]);
+    assert.deepEqual(names(f.list({ platform: FOREIGN_PLATFORM })), []);
+    assert.deepEqual(names(f.list({}, FOREIGN_SET)), ["foreign"]);
+    assert.equal(
+      (f.get("foreign", FOREIGN_SET) as CredentialAnswer).platform,
+      FOREIGN_PLATFORM,
+    );
+  } finally {
+    f.store.close();
+  }
+});
 
 test("credentialDependents returns both injected collaborations' results", () => {
   const agentProviders = [{ agentName: "agent", providerName: "provider" }];
   const bindings = [{ bindingId: "binding", projectId: "project" }];
+  const namings = [{ ...bindings[0]!, projectName: "alpha", name: "repo" }];
   const inbounds = [{ inboundId: "inbound" }];
   const calls: { tx: Transaction; name: string }[] = [];
   const f = fixture({
@@ -1177,7 +998,7 @@ test("credentialDependents returns both injected collaborations' results", () =>
     },
     bindingsNaming: (tx, name) => {
       calls.push({ tx, name });
-      return bindings;
+      return namings;
     },
     inboundsNaming: (tx, name) => {
       calls.push({ tx, name });
@@ -1207,15 +1028,7 @@ const GITHUB_NAME = "github";
 const CHECKS_OF_TWO_ARCHIVES = 6;
 
 function archiveCall(f: ReturnType<typeof fixture>, name: string) {
-  return () =>
-    f.registry.get(custodyOperations.archive.id).handler(
-      custodyOperations.archive.input.parse({
-        params: { credentialName: name },
-        query: {},
-        body: null,
-      }),
-      f.caller,
-    );
+  return () => f.archive(name);
 }
 
 function inUseDetails(fn: () => unknown): unknown {
@@ -1233,6 +1046,9 @@ function inUseDetails(fn: () => unknown): unknown {
 const NO_DEPENDENTS = { agentProviders: [], bindings: [], inbounds: [] };
 const AGENT_DEPENDENT = [{ agentName: "agent", providerName: "provider" }];
 const BINDING_DEPENDENT = [{ bindingId: "binding", projectId: "project" }];
+const BINDING_NAMING = [
+  { ...BINDING_DEPENDENT[0]!, projectName: "alpha", name: "repo" },
+];
 const INBOUND_DEPENDENT = [{ inboundId: "inbound" }];
 
 for (const [kind, collaboration, dependents] of [
@@ -1243,7 +1059,7 @@ for (const [kind, collaboration, dependents] of [
   ],
   [
     "binding",
-    { bindingsNaming: () => BINDING_DEPENDENT },
+    { bindingsNaming: () => BINDING_NAMING },
     { ...NO_DEPENDENTS, bindings: BINDING_DEPENDENT },
   ],
   [
@@ -1448,85 +1264,8 @@ test("archive checks every dependent in the transaction of the write", () => {
   }
 });
 
-const LOGIN_NAME = "copilot";
-const LOGIN_BODY = { platform: Platform.GitHubCopilot, name: LOGIN_NAME };
-const LOGIN_ADDRESS = "https://github.com/login/device";
-const LOGIN_CODE = "ABCD-EFGH";
-const LOGIN_PENDING = "credential.login.pending";
-const LOGIN_NOT_FOUND = "credential.login.not_found";
-const LOGIN_VALUE_NOT_AWAITED = "credential.login.value_not_awaited";
-const LOGIN_FAILED_MESSAGE = "login failed";
 const INVALID_INPUT_CODE = "credential.input.invalid";
-const UNSUPPORTED_ENTRY_CODE = "credential.entry.unsupported";
-const UNSUPPORTED_PLATFORM_CODE = "credential.platform.unsupported";
-const EMPTY_DOMAIN = "";
-const DEVICE_OPTION = "device_code";
-const MANUAL_VALUE = "manual-answer";
-const LAST_MESSAGE = "Waiting for authorization";
 const NO_CREDENTIALS = 0;
-const CLOCK_START = 1700000000000;
-const MAX_TURNS = 20;
-const oauthCredential: OAuthCredential = {
-  type: "oauth",
-  refresh: "private-refresh-token",
-  access: "private-access-token",
-  expires: CLOCK_START + SESSION_EXPIRY_MS,
-  availableModelIds: ["not-stored"],
-};
-
-function fakeProvider(
-  login: (interaction: ProviderAuthInteraction) => Promise<OAuthCredential>,
-  id: string = Platform.GitHubCopilot,
-): Provider {
-  return createProvider({
-    id,
-    models: [],
-    api: {},
-    auth: {
-      oauth: {
-        name: "Fake OAuth",
-        login,
-        refresh: async () => {
-          throw new Error("unexpected refresh");
-        },
-        toAuth: async () => {
-          throw new Error("unexpected auth resolution");
-        },
-      },
-    },
-  });
-}
-
-function deviceAddress(interaction: ProviderAuthInteraction): void {
-  interaction.notify({
-    type: "device_code",
-    verificationUri: LOGIN_ADDRESS,
-    userCode: LOGIN_CODE,
-  });
-}
-
-function gatedLogin() {
-  const result = Promise.withResolvers<OAuthCredential>();
-  const entered = Promise.withResolvers<ProviderAuthInteraction>();
-  const provider = fakeProvider(async (interaction) => {
-    entered.resolve(interaction);
-    deviceAddress(interaction);
-    return await result.promise;
-  });
-  return { result, entered, provider };
-}
-
-async function terminalStatus(
-  f: ReturnType<typeof fixture>,
-  sessionId: string,
-) {
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const status = f.loginStatus(sessionId);
-    if (status.state !== LoginSessionState.Pending) return status;
-    await setImmediate();
-  }
-  assert.fail("Login did not finish within the bounded event-loop turns");
-}
 
 function credentialCount(f: ReturnType<typeof fixture>): number {
   return (
@@ -1535,579 +1274,6 @@ function credentialCount(f: ReturnType<typeof fixture>): number {
       .get() as { count: number }
   ).count;
 }
-
-function noOAuthSecret(value: unknown): void {
-  const serialized = JSON.stringify(value);
-  assert.ok(!serialized.includes(oauthCredential.access));
-  assert.ok(!serialized.includes(oauthCredential.refresh));
-  assert.ok(!serialized.includes('"ciphertext"'));
-  assert.ok(!serialized.includes('"access"'));
-  assert.ok(!serialized.includes('"refresh"'));
-}
-
-function rejectsWith(status: number, code: string) {
-  return (error: unknown) =>
-    error instanceof OperationError &&
-    error.status === status &&
-    error.code === code;
-}
-
-test("Copilot built-in OAuth prompt matches the enterprise placeholder", async (t) => {
-  const originalFetch = globalThis.fetch;
-  const textPromptType = "text";
-  const noFetchCalls = 0;
-  let fetchCalls = noFetchCalls;
-  globalThis.fetch = async () => {
-    fetchCalls++;
-    throw new Error("OAuth prompt test must not fetch");
-  };
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-  const controller = new AbortController();
-  let firstPrompt: AuthPrompt | undefined;
-  const models = createModels();
-  models.setProvider(githubCopilotProvider());
-  await assert.rejects(
-    models.login(OAUTH_PROVIDER_IDS[Platform.GitHubCopilot]!, "oauth", {
-      signal: controller.signal,
-      prompt: async (prompt) => {
-        firstPrompt ??= prompt;
-        controller.abort();
-        throw new Error("Stop before network access");
-      },
-      notify: () => {},
-    }),
-  );
-  assert.equal(firstPrompt?.type, textPromptType);
-  assert.equal(
-    firstPrompt?.type === textPromptType ? firstPrompt.placeholder : undefined,
-    COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
-  );
-  assert.equal(fetchCalls, noFetchCalls);
-});
-
-test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only the encrypted secret", async (t) => {
-  const finish = Promise.withResolvers<OAuthCredential>();
-  const prompted = Promise.withResolvers<void>();
-  let selected: string | undefined;
-  let domain: string | undefined;
-  const provider = fakeProvider(async (interaction) => {
-    domain = await interaction.prompt({
-      type: "text",
-      message: "GitHub Enterprise URL/domain (blank for github.com)",
-      placeholder: COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
-    });
-    selected = await interaction.prompt({
-      type: "select",
-      message: "Mode",
-      options: [{ id: DEVICE_OPTION, label: "Device" }],
-    });
-    interaction.notify({ type: "info", message: "Starting" });
-    deviceAddress(interaction);
-    interaction.notify({ type: "progress", message: LAST_MESSAGE });
-    prompted.resolve();
-    return await finish.promise;
-  });
-  const f = fixture({
-    oauthProviders: () => [provider],
-    now: () => CLOCK_START,
-  });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login({ ...LOGIN_BODY, mode: "browser" });
-  await prompted.promise;
-  assert.match(answer.sessionId, /^login_session_[0-9A-HJKMNP-TV-Z]{26}$/);
-  assert.equal(answer.address, LOGIN_ADDRESS);
-  assert.equal(answer.code, LOGIN_CODE);
-  assert.equal(answer.expiresAt, CLOCK_START + SESSION_EXPIRY_MS);
-  assert.equal(domain, EMPTY_DOMAIN);
-  assert.equal(selected, DEVICE_OPTION);
-  assert.equal(f.loginStatus(answer.sessionId).lastMessage, LAST_MESSAGE);
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-  fails(
-    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
-    HttpStatus.Conflict,
-    LOGIN_VALUE_NOT_AWAITED,
-  );
-  await assert.rejects(
-    f.login({ ...LOGIN_BODY, name: "second" }),
-    rejectsWith(HttpStatus.Conflict, LOGIN_PENDING),
-  );
-  finish.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.sessionId);
-  assert.equal(status.state, LoginSessionState.Completed);
-  assert.equal(status.failureReason, null);
-  assert.equal(credentialCount(f), FIRST_REVISION);
-  const row = f.store.database.prepare("SELECT * FROM credential").get() as {
-    id: string;
-    revision: number;
-    metadata: null;
-    platform: string;
-    ended_at: null;
-    nonce: Buffer;
-    ciphertext: Buffer;
-  };
-  assert.equal(row.revision, FIRST_REVISION);
-  assert.equal(row.metadata, null);
-  assert.equal(row.ended_at, null);
-  assert.equal(row.platform, Platform.GitHubCopilot);
-  assert.deepEqual(
-    decrypt(key, row.id, row.platform, row.nonce, row.ciphertext),
-    {
-      refresh: oauthCredential.refresh,
-      access: oauthCredential.access,
-      expires: oauthCredential.expires,
-    },
-  );
-  assert.deepEqual(f.logs, [
-    { credentialId: row.id, humanIdentity: HUMAN_ACCOUNT_ID },
-  ]);
-  noOAuthSecret([answer, status, f.logs]);
-  fails(
-    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
-    HttpStatus.Conflict,
-    LOGIN_VALUE_NOT_AWAITED,
-  );
-});
-
-test("openai-codex login offers both modes and stores only refresh, access and expires", async (t) => {
-  let selected: string | undefined;
-  const provider = fakeProvider(async (interaction) => {
-    selected = await interaction.prompt({
-      type: "select",
-      message: "Mode",
-      options: [
-        { id: DEVICE_OPTION, label: "Device" },
-        { id: "browser", label: "Browser" },
-      ],
-    });
-    deviceAddress(interaction);
-    return { ...oauthCredential, accountId: "account-extra" };
-  }, Platform.OpenAICodex);
-  const f = fixture({
-    oauthProviders: () => [provider],
-    now: () => CLOCK_START,
-  });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login({
-    platform: Platform.OpenAICodex,
-    name: "codex",
-    mode: "device",
-  });
-  const status = await terminalStatus(f, answer.sessionId);
-  assert.equal(status.state, LoginSessionState.Completed);
-  assert.equal(selected, DEVICE_OPTION);
-  const row = f.store.database.prepare("SELECT * FROM credential").get() as {
-    id: string;
-    platform: string;
-    metadata: null;
-    nonce: Buffer;
-    ciphertext: Buffer;
-  };
-  assert.equal(row.platform, Platform.OpenAICodex);
-  assert.equal(row.metadata, null);
-  assert.deepEqual(
-    decrypt(key, row.id, row.platform, row.nonce, row.ciphertext),
-    {
-      refresh: oauthCredential.refresh,
-      access: oauthCredential.access,
-      expires: oauthCredential.expires,
-    },
-  );
-  fails(
-    () =>
-      f.create({
-        name: "codex-direct",
-        platform: Platform.OpenAICodex,
-        secret: apiSecret,
-        metadata: null,
-      }),
-    HttpStatus.BadRequest,
-    UNSUPPORTED_ENTRY_CODE,
-  );
-});
-
-test("OAuth validates entry, name, mode and start-time name conflict before starting a provider", async (t) => {
-  const f = fixture({
-    oauthProviders: () => {
-      assert.fail("Invalid input must not start OAuth");
-    },
-  });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const cases = [
-    {
-      body: { ...LOGIN_BODY, platform: Platform.GitHub },
-      code: UNSUPPORTED_ENTRY_CODE,
-    },
-    {
-      body: { ...LOGIN_BODY, platform: "unknown" },
-      code: UNSUPPORTED_PLATFORM_CODE,
-    },
-    { body: { ...LOGIN_BODY, name: "login" }, code: INVALID_INPUT_CODE },
-    { body: { ...LOGIN_BODY, name: "platform" }, code: INVALID_INPUT_CODE },
-    { body: { ...LOGIN_BODY, name: "Bad Name" }, code: INVALID_INPUT_CODE },
-    { body: { ...LOGIN_BODY, mode: "unknown" }, code: INVALID_INPUT_CODE },
-  ];
-  for (const { body, code } of cases)
-    await assert.rejects(
-      f.login(body),
-      rejectsWith(HttpStatus.BadRequest, code),
-    );
-  const existing = f.create({ ...inputs[0], name: LOGIN_NAME }) as {
-    revisions: { id: string }[];
-  };
-  await assert.rejects(f.login(LOGIN_BODY), (error) => {
-    assert.ok(rejectsWith(HttpStatus.Conflict, NAME_CONFLICT_CODE)(error));
-    assert.deepEqual((error as OperationError).details, {
-      id: existing.revisions[0]!.id,
-    });
-    return true;
-  });
-  fails(
-    () => f.loginCode("unknown", MANUAL_VALUE),
-    HttpStatus.NotFound,
-    LOGIN_NOT_FOUND,
-  );
-  fails(() => f.loginStatus("unknown"), HttpStatus.NotFound, LOGIN_NOT_FOUND);
-});
-
-test("OAuth commit-time name conflict survives pi-ai's error wrapper without storing another row", async (t) => {
-  const gate = gatedLogin();
-  const f = fixture({ oauthProviders: () => [gate.provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login(LOGIN_BODY);
-  f.create({ ...inputs[0], name: LOGIN_NAME });
-  gate.result.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.sessionId);
-  assert.equal(status.state, LoginSessionState.Failed);
-  assert.equal(status.failureReason, NAME_CONFLICT_CODE);
-  assert.equal(credentialCount(f), FIRST_REVISION);
-  noOAuthSecret([answer, status, f.logs]);
-});
-
-for (const type of ["manual_code", "text", "secret"] as const) {
-  test(`OAuth ${type} prompt waits for login_code, including unrelated pre-address text`, async (t) => {
-    const awaiting = Promise.withResolvers<void>();
-    const received = Promise.withResolvers<string>();
-    const provider = fakeProvider(async (interaction) => {
-      const pending = interaction.prompt({
-        type,
-        message: "Supply a value",
-        placeholder: "unrelated",
-      });
-      awaiting.resolve();
-      deviceAddress(interaction);
-      received.resolve(await pending);
-      return oauthCredential;
-    });
-    const f = fixture({ oauthProviders: () => [provider] });
-    t.after(async () => {
-      await f.component.stop();
-      f.store.close();
-    });
-    const answer = await f.login(LOGIN_BODY);
-    await awaiting.promise;
-    assert.equal(
-      f.loginStatus(answer.sessionId).state,
-      LoginSessionState.Pending,
-    );
-    assert.deepEqual(f.loginCode(answer.sessionId, MANUAL_VALUE), {
-      sessionId: answer.sessionId,
-    });
-    assert.equal(await received.promise, MANUAL_VALUE);
-    assert.equal(
-      (await terminalStatus(f, answer.sessionId)).state,
-      LoginSessionState.Completed,
-    );
-    noOAuthSecret([answer, f.loginStatus(answer.sessionId), f.logs]);
-  });
-}
-
-test("OAuth provider failure records a non-secret reason and no credential", async (t) => {
-  const gate = gatedLogin();
-  const f = fixture({ oauthProviders: () => [gate.provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login(LOGIN_BODY);
-  gate.result.reject(new Error(oauthCredential.access));
-  const status = await terminalStatus(f, answer.sessionId);
-  assert.equal(status.state, LoginSessionState.Failed);
-  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-  noOAuthSecret([answer, status, f.logs]);
-});
-
-test("OAuth expiry aborts an unanswered prompt and never writes credentials", async (t) => {
-  let now = CLOCK_START;
-  const entered = Promise.withResolvers<ProviderAuthInteraction>();
-  const provider = fakeProvider(async (interaction) => {
-    entered.resolve(interaction);
-    deviceAddress(interaction);
-    await interaction.prompt({ type: "manual_code", message: "Code" });
-    return oauthCredential;
-  });
-  const f = fixture({ oauthProviders: () => [provider], now: () => now });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login(LOGIN_BODY);
-  now = answer.expiresAt;
-  fails(
-    () => f.loginStatus(answer.sessionId),
-    HttpStatus.NotFound,
-    LOGIN_NOT_FOUND,
-  );
-  fails(
-    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
-    HttpStatus.NotFound,
-    LOGIN_NOT_FOUND,
-  );
-  assert.ok((await entered.promise).signal.aborted);
-  await setImmediate();
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-  noOAuthSecret(f.logs);
-});
-
-test("OAuth expiry timer cancels a pre-address wait without any status polling", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: CLOCK_START });
-  const entered = Promise.withResolvers<ProviderAuthInteraction>();
-  const provider = fakeProvider(async (interaction) => {
-    entered.resolve(interaction);
-    await interaction.prompt({ type: "manual_code", message: "Code" });
-    return oauthCredential;
-  });
-  const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const pending = f.login(LOGIN_BODY);
-  const rejected = assert.rejects(
-    pending,
-    rejectsWith(HttpStatus.NotFound, LOGIN_NOT_FOUND),
-  );
-  const interaction = await entered.promise;
-  t.mock.timers.tick(SESSION_EXPIRY_MS);
-  await rejected;
-  assert.ok(interaction.signal.aborted);
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-});
-
-test("OAuth rechecks expiry on completion before a delayed expiry timer fires", async (t) => {
-  let now = CLOCK_START;
-  const gate = gatedLogin();
-  const f = fixture({ oauthProviders: () => [gate.provider], now: () => now });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login(LOGIN_BODY);
-  now = answer.expiresAt;
-  gate.result.resolve(oauthCredential);
-  await setImmediate();
-  assert.ok((await gate.entered.promise).signal.aborted);
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-  assert.deepEqual(f.logs, []);
-  fails(
-    () => f.loginStatus(answer.sessionId),
-    HttpStatus.NotFound,
-    LOGIN_NOT_FOUND,
-  );
-});
-
-test("OAuth rejects an invalid returned secret without logging or storing it", async (t) => {
-  const gate = gatedLogin();
-  const f = fixture({ oauthProviders: () => [gate.provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login(LOGIN_BODY);
-  gate.result.resolve({ ...oauthCredential, expires: Number.NaN });
-  const status = await terminalStatus(f, answer.sessionId);
-  assert.equal(status.state, LoginSessionState.Failed);
-  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-  assert.deepEqual(f.logs, []);
-  noOAuthSecret([answer, status]);
-});
-
-test("OAuth a failed insert never completes the session or emits a success log", async (t) => {
-  const gate = gatedLogin();
-  const f = fixture({ oauthProviders: () => [gate.provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  f.store.database.exec(
-    "CREATE TRIGGER refuse_login BEFORE INSERT ON credential BEGIN SELECT RAISE(ABORT, 'private-access-token'); END",
-  );
-  const answer = await f.login(LOGIN_BODY);
-  gate.result.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.sessionId);
-  assert.equal(status.state, LoginSessionState.Failed);
-  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-  assert.deepEqual(f.logs, []);
-  noOAuthSecret([answer, status]);
-});
-
-test("OAuth the enterprise-shaped prompt after an address still requires login_code", async (t) => {
-  const received = Promise.withResolvers<string>();
-  const provider = fakeProvider(async (interaction) => {
-    deviceAddress(interaction);
-    received.resolve(
-      await interaction.prompt({
-        type: "text",
-        message: "Another domain",
-        placeholder: COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
-      }),
-    );
-    return oauthCredential;
-  });
-  const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login(LOGIN_BODY);
-  assert.equal(
-    f.loginStatus(answer.sessionId).state,
-    LoginSessionState.Pending,
-  );
-  f.loginCode(answer.sessionId, MANUAL_VALUE);
-  assert.equal(await received.promise, MANUAL_VALUE);
-  assert.equal(
-    (await terminalStatus(f, answer.sessionId)).state,
-    LoginSessionState.Completed,
-  );
-});
-
-for (const shutdown of ["stop", "quiesce"] as const) {
-  test(`OAuth ${shutdown} aborts running work and refuses late persistence`, async (t) => {
-    const gate = gatedLogin();
-    const f = fixture({ oauthProviders: () => [gate.provider] });
-    t.after(async () => {
-      await f.component.stop();
-      f.store.close();
-    });
-    const answer = await f.login(LOGIN_BODY);
-    await f.component[shutdown]();
-    assert.ok((await gate.entered.promise).signal.aborted);
-    gate.result.resolve(oauthCredential);
-    const status = await terminalStatus(f, answer.sessionId);
-    await setImmediate();
-    assert.equal(status.state, LoginSessionState.Failed);
-    assert.equal(credentialCount(f), NO_CREDENTIALS);
-    await assert.rejects(f.login({ ...LOGIN_BODY, name: "after-stop" }));
-  });
-}
-
-test("OAuth waiting for an address observes caller cancellation", async (t) => {
-  const entered = Promise.withResolvers<ProviderAuthInteraction>();
-  const provider = fakeProvider(async (interaction) => {
-    entered.resolve(interaction);
-    await interaction.prompt({ type: "manual_code", message: "Code" });
-    return oauthCredential;
-  });
-  const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const context = new CancellationContext();
-  f.caller.context = context;
-  const pending = f.login(LOGIN_BODY);
-  const rejected = assert.rejects(pending, (error) => error === context.err());
-  const interaction = await entered.promise;
-  context.cancel();
-  await rejected;
-  assert.ok(interaction.signal.aborted);
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-});
-
-test("OAuth pre-address failures preserve OperationError and sanitize arbitrary provider errors", async (t) => {
-  for (const original of [
-    new OperationError(
-      HttpStatus.Conflict,
-      NAME_CONFLICT_CODE,
-      "Credential name already exists.",
-    ),
-    new Error(oauthCredential.refresh),
-  ]) {
-    const provider = fakeProvider(async () => {
-      throw original;
-    });
-    const f = fixture({ oauthProviders: () => [provider] });
-    t.after(async () => {
-      await f.component.stop();
-      f.store.close();
-    });
-    await assert.rejects(f.login(LOGIN_BODY), (error) => {
-      if (original instanceof OperationError) assert.equal(error, original);
-      else {
-        assert.ok(error instanceof Error);
-        assert.equal(error.message, LOGIN_FAILED_MESSAGE);
-      }
-      noOAuthSecret(error);
-      return true;
-    });
-    assert.equal(credentialCount(f), NO_CREDENTIALS);
-  }
-});
-
-test("OAuth unsupported select options fail without an address or a credential", async (t) => {
-  const provider = fakeProvider(async (interaction) => {
-    await interaction.prompt({
-      type: "select",
-      message: "Mode",
-      options: [{ id: "unsupported", label: "Unsupported" }],
-    });
-    return oauthCredential;
-  });
-  const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  await assert.rejects(f.login(LOGIN_BODY), { message: LOGIN_FAILED_MESSAGE });
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-});
-
-test("OAuth auth_url records a browser address with a null code", async (t) => {
-  const gate = Promise.withResolvers<OAuthCredential>();
-  const provider = fakeProvider(async (interaction) => {
-    interaction.notify({ type: "auth_url", url: LOGIN_ADDRESS });
-    return await gate.promise;
-  });
-  const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login(LOGIN_BODY);
-  assert.equal(answer.address, LOGIN_ADDRESS);
-  assert.equal(answer.code, null);
-  assert.equal(
-    f.loginStatus(answer.sessionId).state,
-    LoginSessionState.Pending,
-  );
-});
 
 test("lifecycle reports health and joins cancellation", async () => {
   const f = fixture();
@@ -2136,7 +1302,7 @@ test("lifecycle reports health and joins cancellation", async () => {
       agentProvidersDependentOn: () => [],
       bindingsNaming: () => [],
       inboundsNaming: () => [],
-      enablementsDependentOnModel: () => [],
+      platforms: TEST_SET.platforms,
     });
     const context = new CancellationContext();
     const running = other.run(context);
@@ -2146,185 +1312,3 @@ test("lifecycle reports health and joins cancellation", async () => {
     f.store.close();
   }
 });
-
-test("platform list answers the platform table grouped by kind in kind order", (t) => {
-  const f = fixture();
-  t.after(() => f.store.close());
-  const answer = f.platformList();
-  assert.deepEqual(
-    answer.items.map(({ kind }) => kind),
-    [PlatformKind.Git, PlatformKind.Storage, PlatformKind.Llm],
-  );
-  const listed = answer.items.flatMap(({ kind, platforms }) =>
-    platforms.map((entry) => ({ kind, ...entry })),
-  );
-  assert.deepEqual(
-    listed.map(({ platform }) => platform).toSorted(),
-    Object.keys(PLATFORM_VALIDATORS).toSorted(),
-  );
-  for (const entry of listed) {
-    const validator = PLATFORM_VALIDATORS[entry.platform as Platform];
-    assert.equal(entry.kind, validator.kind);
-    assert.equal(entry.secretShape, validator.secretShape);
-    assert.deepEqual(entry.loginModes, validator.loginModes);
-    assert.equal(entry.verifiable, validator.verifiable);
-  }
-  const byPlatform = new Map(listed.map((entry) => [entry.platform, entry]));
-  assert.deepEqual(answer.items[0]!.platforms, [
-    {
-      platform: Platform.GitHub,
-      secretShape: SecretShape.ApiKey,
-      loginModes: [],
-      metadataFields: [],
-      verifiable: true,
-    },
-  ]);
-  assert.deepEqual(answer.items[1]!.platforms, [
-    {
-      platform: Platform.S3,
-      secretShape: SecretShape.S3AccessKey,
-      loginModes: [],
-      metadataFields: ["endpoint", "bucket", "region"],
-      verifiable: true,
-    },
-  ]);
-  assert.deepEqual(byPlatform.get(Platform.OpenAICodex), {
-    kind: PlatformKind.Llm,
-    platform: Platform.OpenAICodex,
-    secretShape: SecretShape.OAuth,
-    loginModes: ["browser", "device"],
-    metadataFields: [],
-    verifiable: true,
-  });
-  assert.deepEqual(byPlatform.get(Platform.GitHubCopilot)?.loginModes, [
-    "device",
-  ]);
-  assert.deepEqual(byPlatform.get(Platform.OpenAICompatible)?.metadataFields, [
-    "baseUrl",
-  ]);
-  assert.deepEqual(byPlatform.get(Platform.CloudflareAIGateway), {
-    kind: PlatformKind.Llm,
-    platform: Platform.CloudflareAIGateway,
-    secretShape: SecretShape.ApiKey,
-    loginModes: [],
-    metadataFields: ["account_id", "gateway_id"],
-    verifiable: false,
-  });
-  assert.equal(byPlatform.get(Platform.OpenAI)?.verifiable, true);
-  assert.equal(byPlatform.get("groq")?.verifiable, false);
-});
-
-const GROQ = "groq";
-
-test("create accepts a plain api_key record for groq and refuses metadata", (t) => {
-  const f = fixture();
-  t.after(() => f.store.close());
-  fails(
-    () =>
-      f.create({
-        name: GROQ,
-        platform: GROQ,
-        secret: apiSecret,
-        metadata: { region: "x" },
-      }),
-    HttpStatus.BadRequest,
-    INVALID_INPUT_CODE,
-  );
-  fails(
-    () =>
-      f.create({
-        name: GROQ,
-        platform: GROQ,
-        secret: { accessKeyId: "id", secretAccessKey: secretValue },
-        metadata: null,
-      }),
-    HttpStatus.BadRequest,
-    INVALID_INPUT_CODE,
-  );
-  const answer = f.create({
-    name: GROQ,
-    platform: GROQ,
-    secret: apiSecret,
-    metadata: null,
-  }) as CredentialAnswer;
-  assert.equal(answer.platform, GROQ);
-  assert.equal(answer.revisions[0]!.metadata, null);
-  noSecret(answer);
-});
-
-const llmMetadataCases = [
-  {
-    platform: Platform.AmazonBedrock,
-    metadata: { region: "us-east-1" },
-    edited: { region: "eu-west-1" },
-  },
-  {
-    platform: Platform.GoogleVertex,
-    metadata: { project: "project", location: "us-central1" },
-    edited: { project: "project", location: "europe-west4" },
-  },
-  {
-    platform: Platform.AzureOpenAIResponses,
-    metadata: { resource_name: "resource" },
-    edited: { resource_name: "other" },
-  },
-  {
-    platform: Platform.CloudflareWorkersAI,
-    metadata: { account_id: "account" },
-    edited: { account_id: "other" },
-  },
-  {
-    platform: Platform.CloudflareAIGateway,
-    metadata: { account_id: "account", gateway_id: "gateway" },
-    edited: { account_id: "account", gateway_id: "other" },
-  },
-];
-
-for (const { platform, metadata, edited } of llmMetadataCases) {
-  test(`${platform} create and metadata edit accept its metadata schema and refuse other metadata`, (t) => {
-    const f = fixture();
-    t.after(() => f.store.close());
-    const refused: unknown[] = [
-      null,
-      {},
-      { ...metadata, extra: "x" },
-      ...Object.keys(metadata).map((field) => ({ ...metadata, [field]: " " })),
-    ];
-    for (const invalid of refused)
-      fails(
-        () =>
-          f.create({
-            name: "llm",
-            platform,
-            secret: apiSecret,
-            metadata: invalid,
-          }),
-        HttpStatus.BadRequest,
-        INVALID_INPUT_CODE,
-      );
-    const created = f.create({
-      name: "llm",
-      platform,
-      secret: apiSecret,
-      metadata,
-    }) as CredentialAnswer;
-    assert.deepEqual(created.revisions[0]!.metadata, metadata);
-    for (const invalid of refused)
-      fails(
-        () =>
-          f.updateMetadata("llm", {
-            expectedRevision: FIRST_REVISION,
-            metadata: invalid,
-          }),
-        HttpStatus.BadRequest,
-        INVALID_INPUT_CODE,
-      );
-    const updated = f.updateMetadata("llm", {
-      expectedRevision: FIRST_REVISION,
-      metadata: edited,
-    }) as CredentialAnswer;
-    assert.equal(updated.revisions[0]!.revision, NEXT_REVISION);
-    assert.deepEqual(updated.revisions[0]!.metadata, edited);
-    noSecret(updated);
-  });
-}

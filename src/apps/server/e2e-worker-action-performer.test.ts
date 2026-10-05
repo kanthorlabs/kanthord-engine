@@ -124,7 +124,7 @@ async function setup(t: TestContext) {
     "actions",
   ]);
   const mission = await read<{ id: string }>(["mission", "get", project.id]);
-  await write(["credential", "create"], {
+  await write(["repository", "credential", "create"], {
     name: "github",
     platform: "github",
     metadata: null,

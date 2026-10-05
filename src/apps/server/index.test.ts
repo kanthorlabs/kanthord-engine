@@ -20,7 +20,7 @@ import { isString } from "../../kernel/values.ts";
 import { GATEWAY_STARTED_MESSAGE } from "../../gateway/index.ts";
 import { ulid } from "ulid";
 import { domainHealth, gatewayFixture } from "./test-support.ts";
-import { custodyOperations } from "../../custody/contract.ts";
+import { llmOperations } from "../../llm/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
@@ -99,8 +99,8 @@ test("composed Custody and Worker share credential and enablement collaborations
     "Content-Type": "application/json",
     "Idempotency-Key": ulid(),
   };
-  const created = await fixture.request(custodyOperations.create.path, {
-    method: custodyOperations.create.method,
+  const created = await fixture.request(llmOperations.create.path, {
+    method: llmOperations.create.method,
     headers,
     body: JSON.stringify({
       name: CREDENTIAL_NAME,
@@ -114,12 +114,12 @@ test("composed Custody and Worker share credential and enablement collaborations
   });
   assert.equal(created.status, HttpStatus.OK, await created.text());
   const updated = await fixture.request(
-    custodyOperations.update_metadata.path.replace(
+    llmOperations.update_metadata.path.replace(
       ":credentialName",
       CREDENTIAL_NAME,
     ),
     {
-      method: custodyOperations.update_metadata.method,
+      method: llmOperations.update_metadata.method,
       headers: { ...headers, "Idempotency-Key": ulid() },
       body: JSON.stringify({
         expectedRevision: FIRST_REVISION,

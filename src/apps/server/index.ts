@@ -63,7 +63,13 @@ import {
 } from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
 import { WorkerService, workerMigrations } from "../../worker/index.ts";
-import { RepositoryComponent } from "../../repository/index.ts";
+import {
+  RepositoryComponent,
+  RepositoryCredentials,
+  REPOSITORY_PLATFORMS,
+} from "../../repository/index.ts";
+import { LlmComponent, LLM_PLATFORMS } from "../../llm/index.ts";
+import { StorageComponent, STORAGE_PLATFORMS } from "../../storage/index.ts";
 import { OperationRegistry, StoreName } from "../../kernel/operation.ts";
 import {
   background,
@@ -81,7 +87,7 @@ export function composeServices(options: {
   health: HealthRegistry;
   repositoryConnector?: RepositoryConnector;
   oauthProviders?: ConstructorParameters<
-    typeof CustodyComponent
+    typeof LlmComponent
   >[0]["oauthProviders"];
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
@@ -164,7 +170,11 @@ export function composeServices(options: {
       scheduler.priorityUpdate(tx, nodeId, priority),
   };
   const custody = new CustodyComponent({
-    oauthProviders: options.oauthProviders,
+    platforms: {
+      ...LLM_PLATFORMS,
+      ...REPOSITORY_PLATFORMS,
+      ...STORAGE_PLATFORMS,
+    },
     executions: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
       pinCredential: (...args) => scheduler.pinCredential(...args),
@@ -183,10 +193,26 @@ export function composeServices(options: {
     health: options.health,
     agentProvidersDependentOn: (tx, name) =>
       worker.agentProvidersDependentOn(tx, name),
-    enablementsDependentOnModel: (tx, name, model) =>
-      worker.enablementsDependentOnModel(tx, name, model),
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
     inboundsNaming: options.standIns?.inboundsNaming ?? (() => []),
+  });
+  const llm = new LlmComponent({
+    records: custody,
+    store: options.store,
+    logger: options.logger,
+    oauthProviders: options.oauthProviders,
+    agentProvidersDependentOn: (tx, name) =>
+      worker.agentProvidersDependentOn(tx, name),
+    enablementsDependentOnModel: (tx, name, model) =>
+      worker.enablementsDependentOnModel(tx, name, model),
+  });
+  const repositoryCredentials = new RepositoryCredentials({
+    records: custody,
+    bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
+  });
+  const storage = new StorageComponent({
+    records: custody,
+    bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
   });
   const worker: WorkerService = new WorkerService({
     missionActions: {
@@ -227,7 +253,7 @@ export function composeServices(options: {
     registrations: options.registrations,
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
-    modelListCheck: (tx, name) => custody.modelListCheck(tx, name),
+    modelListCheck: (tx, name) => llm.modelListCheck(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
   });
   const mission: MissionService = new MissionService({
@@ -281,7 +307,9 @@ export function composeServices(options: {
     bindings: options.bindings,
   });
   scheduler.declare(registry);
-  custody.declare(registry);
+  llm.declare(registry);
+  repositoryCredentials.declare(registry);
+  storage.declare(registry);
   worker.declare(registry);
   mission.declare(registry);
   project.declare(registry);
@@ -299,7 +327,11 @@ export function composeServices(options: {
         collectInventories(tx, {
           custody:
             options.inventoryOverrides?.custody ??
-            ((tx) => custody.resourceInventory(tx)),
+            ((tx) => [
+              ...llm.resourceInventory(tx),
+              ...repositoryCredentials.resourceInventory(tx),
+              ...storage.resourceInventory(tx),
+            ]),
           worker:
             options.inventoryOverrides?.worker ??
             ((tx) => worker.resourceInventory(tx)),
@@ -315,6 +347,9 @@ export function composeServices(options: {
     scheduler,
     workQueue,
     custody,
+    llm,
+    repositoryCredentials,
+    storage,
     mission,
     project,
     worker,
@@ -391,6 +426,7 @@ export class Server implements Service {
       const {
         scheduler,
         custody,
+        llm,
         worker,
         mission,
         project,
@@ -405,7 +441,15 @@ export class Server implements Service {
       this.gateway = gateway;
       this.invocation = invocation;
       this.releases.push(() => invocation.stop());
-      const services = [scheduler, custody, worker, mission, project, gateway];
+      const services = [
+        scheduler,
+        custody,
+        llm,
+        worker,
+        mission,
+        project,
+        gateway,
+      ];
       this.services = services;
       for (const service of services) this.releases.push(() => service.stop());
       for (const service of services) {

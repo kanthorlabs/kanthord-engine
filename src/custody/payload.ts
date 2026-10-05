@@ -1,12 +1,12 @@
 import type { Credential } from "@earendil-works/pi-ai";
 import type { z } from "zod";
 import { isObject } from "../kernel/values.ts";
-import { piCredentialSchema } from "./contract.ts";
 import {
   apiKeySecretSchema,
   oauthSecretSchema,
+  piCredentialSchema,
   SecretShape,
-} from "./platforms.ts";
+} from "./contract.ts";
 
 export function normalizeCredential(credential: Credential): Credential {
   if (credential.type === SecretShape.ApiKey)

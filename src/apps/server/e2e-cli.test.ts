@@ -15,11 +15,19 @@ const cases = [
   {
     id: "E08.1",
     args: [],
-    names: ["credential", "project", "mission", "scheduler", "worker"],
+    names: [
+      "llm",
+      "repository",
+      "storage",
+      "project",
+      "mission",
+      "scheduler",
+      "worker",
+    ],
   },
   {
     id: "E08.2",
-    args: ["credential"],
+    args: ["llm", "credential"],
     names: [
       "create",
       "list",

@@ -23,7 +23,11 @@ export default tseslint.config(
     settings: {
       "boundaries/elements": [
         { type: "kernel", pattern: "src/kernel" },
-        { type: "repository", pattern: "src/repository" },
+        {
+          type: "component",
+          pattern: "src/(repository|llm|storage)",
+          capture: ["name"],
+        },
         {
           type: "service",
           pattern:
@@ -54,7 +58,28 @@ export default tseslint.config(
           policies: [
             { allow: [{ dependency: { relationship: { to: "internal" } } }] },
             { from: element("kernel"), allow: allow("kernel") },
-            { from: element("repository"), allow: allow("kernel") },
+            {
+              from: element("component"),
+              allow: [...allow("kernel"), { to: serviceEntry("contract.ts") }],
+            },
+            {
+              from: element("component", { fileInternalPath: "*.test.ts" }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "custody" },
+                    fileInternalPath: "{index,envelope}.ts",
+                  }),
+                },
+                {
+                  to: element("service", {
+                    captured: { name: "worker" },
+                    fileInternalPath: "pi.ts",
+                  }),
+                },
+                { to: element("component", { fileInternalPath: "index.ts" }) },
+              ],
+            },
             { from: file("config-global"), allow: allow("kernel") },
             {
               from: file("config"),
@@ -68,7 +93,7 @@ export default tseslint.config(
               from: element("service"),
               allow: [
                 ...allow("kernel"),
-                { to: element("repository") },
+                { to: element("component") },
                 { to: file("config-global") },
                 { to: serviceEntry("contract.ts") },
               ],
@@ -77,7 +102,7 @@ export default tseslint.config(
               from: element("apps-server"),
               allow: [
                 ...allow("kernel"),
-                { to: element("repository") },
+                { to: element("component") },
                 { to: file("config") },
                 { to: serviceEntry("{index,contract}.ts") },
                 {
@@ -111,6 +136,9 @@ export default tseslint.config(
                 { to: applicationEntry("apps-worker") },
                 { to: serviceEntry("contract.ts") },
                 {
+                  to: element("component", { fileInternalPath: "contract.ts" }),
+                },
+                {
                   to: element("service", {
                     captured: { name: "gateway" },
                     fileInternalPath: "{client,local}.ts",
@@ -122,7 +150,7 @@ export default tseslint.config(
               from: element("apps-worker"),
               allow: [
                 ...allow("kernel"),
-                { to: element("repository") },
+                { to: element("component") },
                 {
                   to: element("service", {
                     captured: { name: "worker" },
@@ -166,7 +194,7 @@ export default tseslint.config(
                   }),
                 },
                 { from: file({ anyOf: ["config", "config-global", "main"] }) },
-                { from: element("repository") },
+                { from: element("component") },
                 {
                   from: element("service", {
                     captured: { name: "!(gateway)" },
@@ -188,7 +216,26 @@ export default tseslint.config(
                   }),
                 },
                 { to: file({ anyOf: ["config-global", "config", "main"] }) },
-                { to: element("repository") },
+                { to: element("component") },
+              ],
+            },
+            {
+              from: element("component", { fileInternalPath: "contract.ts" }),
+              disallow: [
+                {
+                  to: element({
+                    anyOf: ["apps-server", "apps-cli", "apps-worker"],
+                  }),
+                },
+                {
+                  to: element("service", { fileInternalPath: "!contract.ts" }),
+                },
+                {
+                  to: element("component", {
+                    fileInternalPath: "!contract.ts",
+                  }),
+                },
+                { to: file({ anyOf: ["config-global", "config", "main"] }) },
               ],
             },
           ],

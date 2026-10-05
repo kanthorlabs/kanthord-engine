@@ -198,7 +198,16 @@ async function createCredential(
     secret: SECRET,
   });
   const answer = success<CredentialAnswer>(
-    await kanthord(["credential", "create", "--file", path], fixture.env),
+    await kanthord(
+      [
+        platform === REPOSITORY_PLATFORM ? "repository" : "llm",
+        "credential",
+        "create",
+        "--file",
+        path,
+      ],
+      fixture.env,
+    ),
   );
   assert.equal(answer.name, name);
   assert.equal(answer.platform, platform);

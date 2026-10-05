@@ -7,7 +7,9 @@ import { dirname, join } from "node:path";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import { gatewayFixture } from "./test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "../../gateway/contract.ts";
-import { custodyOperations } from "../../custody/contract.ts";
+import { llmOperations } from "../../llm/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
+import { storageOperations } from "../../storage/contract.ts";
 import {
   ActionResultKind,
   agentProviderKindSchema,
@@ -355,7 +357,9 @@ const STRING_SCHEMA_TYPE = "string";
 const NONEMPTY_STRING_MIN_LENGTH = 1;
 const OPERATION_PREFIXES = [
   "gateway.",
-  "credential.",
+  "llm.",
+  "repository.",
+  "storage.",
   "scheduler.",
   "worker.",
   "project.",
@@ -509,7 +513,9 @@ const MISSION_GET_PATH = "/api/mission/project/{projectId}";
 const MISSION_PROJECT_NAME = "openapi-mission";
 const apiOperations = [
   ...Object.values(gatewayOperations),
-  ...Object.values(custodyOperations),
+  ...Object.values(llmOperations),
+  ...Object.values(repositoryOperations),
+  ...Object.values(storageOperations),
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
   ...Object.values(projectOperations),
@@ -521,17 +527,33 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["gateway.openapiFile", AccessPolicy.Public],
   ["gateway.healthcheck", AccessPolicy.Human],
   ["gateway.verify", AccessPolicy.Human],
-  ["credential.create", AccessPolicy.Human],
-  ["credential.list", AccessPolicy.Human],
-  ["credential.get", AccessPolicy.Human],
-  ["credential.rotate", AccessPolicy.Human],
-  ["credential.update_metadata", AccessPolicy.Human],
-  ["credential.revoke", AccessPolicy.Human],
-  ["credential.archive", AccessPolicy.Human],
-  ["credential.login", AccessPolicy.Human],
-  ["credential.login_code", AccessPolicy.Human],
-  ["credential.login_status", AccessPolicy.Human],
-  ["credential.platform_list", AccessPolicy.Human],
+  ["llm.credential.create", AccessPolicy.Human],
+  ["llm.credential.list", AccessPolicy.Human],
+  ["llm.credential.get", AccessPolicy.Human],
+  ["llm.credential.rotate", AccessPolicy.Human],
+  ["llm.credential.update_metadata", AccessPolicy.Human],
+  ["llm.credential.revoke", AccessPolicy.Human],
+  ["llm.credential.archive", AccessPolicy.Human],
+  ["llm.credential.login", AccessPolicy.Human],
+  ["llm.credential.login_code", AccessPolicy.Human],
+  ["llm.credential.login_status", AccessPolicy.Human],
+  ["llm.credential.platform_list", AccessPolicy.Human],
+  ["repository.credential.create", AccessPolicy.Human],
+  ["repository.credential.list", AccessPolicy.Human],
+  ["repository.credential.get", AccessPolicy.Human],
+  ["repository.credential.rotate", AccessPolicy.Human],
+  ["repository.credential.update_metadata", AccessPolicy.Human],
+  ["repository.credential.revoke", AccessPolicy.Human],
+  ["repository.credential.archive", AccessPolicy.Human],
+  ["repository.credential.platform_list", AccessPolicy.Human],
+  ["storage.credential.create", AccessPolicy.Human],
+  ["storage.credential.list", AccessPolicy.Human],
+  ["storage.credential.get", AccessPolicy.Human],
+  ["storage.credential.rotate", AccessPolicy.Human],
+  ["storage.credential.update_metadata", AccessPolicy.Human],
+  ["storage.credential.revoke", AccessPolicy.Human],
+  ["storage.credential.archive", AccessPolicy.Human],
+  ["storage.credential.platform_list", AccessPolicy.Human],
   ["worker.agent.enablement.list", AccessPolicy.Human],
   ["worker.agent.enablement.get", AccessPolicy.Human],
   ["worker.agent.enablement.put", AccessPolicy.Human],
@@ -625,7 +647,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.execution.objective.evidence.list", AccessPolicy.Client],
   ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
 ];
-const OPERATION_COUNT = 108;
+const OPERATION_COUNT = 124;
 
 test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();
@@ -883,12 +905,12 @@ test("the agent enablement fragment exceeds the soft limit only through the agen
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);
   const emitted = files["openapi.yaml"];
-  const custodyPaths = new Set(
-    Object.values(custodyOperations).map(({ path }) =>
-      path.replace(/:([^/]+)/g, "{$1}"),
-    ),
+  const credentialPaths = new Set(
+    [llmOperations, repositoryOperations, storageOperations]
+      .flatMap((operations) => Object.values(operations))
+      .map(({ path }) => path.replace(/:([^/]+)/g, "{$1}")),
   );
-  for (const path of custodyPaths) assert.ok(path in emitted.paths, path);
+  for (const path of credentialPaths) assert.ok(path in emitted.paths, path);
   const root = dirname(openapiPath());
   const stored = readFileSync(openapiPath(), "utf8");
   const fragments = readdirSync(join(root, "openapi"), { recursive: true })
@@ -1068,7 +1090,11 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     "worker.agent.enablement.provider.remove",
   ])
     assert.ok(emittedWorkerIds.includes(id), id);
-  for (const operation of Object.values(custodyOperations)) {
+  for (const operation of [
+    llmOperations,
+    repositoryOperations,
+    storageOperations,
+  ].flatMap((operations) => Object.values(operations))) {
     const path = operation.path.replace(/:([^/]+)/g, "{$1}");
     const method = operation.method.toLowerCase() as "get" | "post" | "put";
     assert.equal(resolved.paths?.[path]?.[method]?.operationId, operation.id);

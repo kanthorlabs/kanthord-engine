@@ -108,7 +108,10 @@ async function createCredential(fixture: Fixture): Promise<void> {
     secret: SECRET,
   });
   const answer = success<CredentialResult>(
-    await kanthord(["credential", "create", "--file", credential], fixture.env),
+    await kanthord(
+      ["llm", "credential", "create", "--file", credential],
+      fixture.env,
+    ),
   );
   assert.equal(answer.name, CREDENTIAL);
   assert.equal(answer.platform, ANTHROPIC);
@@ -299,7 +302,7 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
     secret: SECRET,
   });
   const createdCredential = success<CredentialResult>(
-    await kanthord(["credential", "create", "--file", credential], env),
+    await kanthord(["llm", "credential", "create", "--file", credential], env),
   );
   assert.ok(createdCredential.revisions[0]);
   const metadata = (name: string, expectedRevision: number, models: string[]) =>
@@ -314,7 +317,14 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
   );
   const updated = success<CredentialResult>(
     await kanthord(
-      ["credential", "update-metadata", OPENAI_CREDENTIAL, "--file", twoModels],
+      [
+        "llm",
+        "credential",
+        "update-metadata",
+        OPENAI_CREDENTIAL,
+        "--file",
+        twoModels,
+      ],
       env,
     ),
   );
@@ -340,7 +350,14 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
   );
   const retained = success<CredentialResult>(
     await kanthord(
-      ["credential", "update-metadata", OPENAI_CREDENTIAL, "--file", dropTurbo],
+      [
+        "llm",
+        "credential",
+        "update-metadata",
+        OPENAI_CREDENTIAL,
+        "--file",
+        dropTurbo,
+      ],
       env,
     ),
   );
@@ -352,13 +369,20 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
   );
   refusal(
     await kanthord(
-      ["credential", "update-metadata", OPENAI_CREDENTIAL, "--file", dropGpt],
+      [
+        "llm",
+        "credential",
+        "update-metadata",
+        OPENAI_CREDENTIAL,
+        "--file",
+        dropGpt,
+      ],
       env,
     ),
-    "credential.metadata.model_in_use",
+    "llm.metadata.model_in_use",
   );
   const read = success<CredentialAnswer>(
-    await kanthord(["credential", "get", OPENAI_CREDENTIAL], env),
+    await kanthord(["llm", "credential", "get", OPENAI_CREDENTIAL], env),
   );
   assert.equal(read.revisions[0]?.revision, retained.revisions[0].revision);
   const models = read.revisions[0]?.metadata?.models;

@@ -27,6 +27,8 @@ const SECRET_VALUE = "e2e-custody-secret-never-print-this";
 const SECRET = { key: SECRET_VALUE };
 const SESSION_ID = "login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const LOCAL_TOKEN = "local-validation-token";
+const LLM = ["llm", "credential"];
+const REPOSITORY = ["repository", "credential"];
 
 type CommandResult = Awaited<ReturnType<typeof kanthord>>;
 type ListAnswer = { items: CredentialAnswer[]; nextCursor: string | null };
@@ -91,13 +93,13 @@ test("E01.1 create and get an anthropic credential without secrets", async (t) =
   const { directory, env } = await setup(t);
   const file = createFile(directory, ANTHROPIC);
   const created = success(
-    await kanthord(["credential", "create", "--file", file], env),
+    await kanthord([...LLM, "create", "--file", file], env),
   );
   assert.equal(created.name, NAME);
   assert.equal(created.platform, ANTHROPIC);
   assert.ok(created.revisions[0]);
   assert.equal(created.revisions[0].revision, FIRST_REVISION);
-  const read = success(await kanthord(["credential", "get", NAME], env));
+  const read = success(await kanthord([...LLM, "get", NAME], env));
   assert.equal(read.name, NAME);
   assert.equal(read.platform, ANTHROPIC);
   assert.ok(read.revisions[0]);
@@ -112,13 +114,13 @@ test("E01.2 creating the same name with a different key conflicts", async (t) =>
   assert.notEqual(firstKey, secondKey);
   success(
     await kanthord(
-      ["credential", "create", "--file", file, "--idempotency-key", firstKey],
+      [...LLM, "create", "--file", file, "--idempotency-key", firstKey],
       env,
     ),
   );
   refusal(
     await kanthord(
-      ["credential", "create", "--file", file, "--idempotency-key", secondKey],
+      [...LLM, "create", "--file", file, "--idempotency-key", secondKey],
       env,
     ),
     "credential.name.conflict",
@@ -128,18 +130,11 @@ test("E01.2 creating the same name with a different key conflicts", async (t) =>
 test("E01.3 replaying the same create key returns the original JSON", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, ANTHROPIC);
-  const args = [
-    "credential",
-    "create",
-    "--file",
-    file,
-    "--idempotency-key",
-    ulid(),
-  ];
+  const args = [...LLM, "create", "--file", file, "--idempotency-key", ulid()];
   const created = success(await kanthord(args, env));
   const replayed = success(await kanthord(args, env));
   assert.deepEqual(replayed, created);
-  const read = success(await kanthord(["credential", "get", NAME], env));
+  const read = success(await kanthord([...LLM, "get", NAME], env));
   assert.equal(read.revisions.length, SINGLE_REVISION_COUNT);
   assert.ok(read.revisions[0]);
   assert.equal(read.revisions[0].revision, FIRST_REVISION);
@@ -148,10 +143,8 @@ test("E01.3 replaying the same create key returns the original JSON", async (t) 
 test("E01.4 list contains the created credential without secrets", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, ANTHROPIC);
-  success(await kanthord(["credential", "create", "--file", file], env));
-  const listed = success<ListAnswer>(
-    await kanthord(["credential", "list"], env),
-  );
+  success(await kanthord([...LLM, "create", "--file", file], env));
+  const listed = success<ListAnswer>(await kanthord([...LLM, "list"], env));
   assert.ok(listed.items.some((item) => item.name === NAME));
   assert.equal(listed.nextCursor, null);
 });
@@ -159,13 +152,13 @@ test("E01.4 list contains the created credential without secrets", async (t) => 
 test("E01.5 list filters credentials by platform", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, ANTHROPIC);
-  success(await kanthord(["credential", "create", "--file", file], env));
+  success(await kanthord([...LLM, "create", "--file", file], env));
   const anthropic = success<ListAnswer>(
-    await kanthord(["credential", "list", "--platform", ANTHROPIC], env),
+    await kanthord([...LLM, "list", "--platform", ANTHROPIC], env),
   );
   assert.ok(anthropic.items.some((item) => item.name === NAME));
   const github = success<ListAnswer>(
-    await kanthord(["credential", "list", "--platform", GITHUB], env),
+    await kanthord([...LLM, "list", "--platform", GITHUB], env),
   );
   assert.deepEqual(github.items, []);
 });
@@ -173,7 +166,7 @@ test("E01.5 list filters credentials by platform", async (t) => {
 test("E01.6 get refuses a nonexistent credential", async (t) => {
   const { env } = await setup(t);
   refusal(
-    await kanthord(["credential", "get", "nonexistent"], env),
+    await kanthord([...LLM, "get", "nonexistent"], env),
     "credential.credential.not_found",
   );
 });
@@ -181,14 +174,14 @@ test("E01.6 get refuses a nonexistent credential", async (t) => {
 test("E01.7 rotating a github credential adds a secret-free revision", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, GITHUB);
-  success(await kanthord(["credential", "create", "--file", file], env));
+  success(await kanthord([...REPOSITORY, "create", "--file", file], env));
   success(
     await kanthord(
-      ["credential", "rotate", NAME, "--file", rotateFile(directory)],
+      [...REPOSITORY, "rotate", NAME, "--file", rotateFile(directory)],
       env,
     ),
   );
-  const read = success(await kanthord(["credential", "get", NAME], env));
+  const read = success(await kanthord([...REPOSITORY, "get", NAME], env));
   assert.equal(read.revisions.length, TWO_REVISION_COUNT);
   assert.ok(read.revisions[0]);
   assert.equal(read.revisions[0].revision, SECOND_REVISION);
@@ -202,7 +195,7 @@ test(
     const { directory, env } = await setup(t);
     const file = createFile(directory, GITHUB);
     const created = success(
-      await kanthord(["credential", "create", "--file", file], env),
+      await kanthord([...REPOSITORY, "create", "--file", file], env),
     );
     assert.ok(created.revisions[0]);
     const observed = created.revisions[0].revision;
@@ -211,13 +204,13 @@ test(
       rotation,
       JSON.stringify({ expectedRevision: observed, secret: SECRET }),
     );
-    const args = ["credential", "rotate", NAME, "--file", rotation];
+    const args = [...REPOSITORY, "rotate", NAME, "--file", rotation];
     success(await kanthord(args, env));
-    const rotated = success(await kanthord(["credential", "get", NAME], env));
+    const rotated = success(await kanthord([...REPOSITORY, "get", NAME], env));
     assert.ok(rotated.revisions[0]);
     assert.notEqual(rotated.revisions[0].revision, observed);
     refusal(await kanthord(args, env), "credential.revision.conflict");
-    const read = success(await kanthord(["credential", "get", NAME], env));
+    const read = success(await kanthord([...REPOSITORY, "get", NAME], env));
     assert.deepEqual(read, rotated);
   },
 );
@@ -228,7 +221,7 @@ test("E01.9 updating metadata adds a model in a secret-free revision", async (t)
     baseUrl: BASE_URL,
     models: [],
   });
-  success(await kanthord(["credential", "create", "--file", file], env));
+  success(await kanthord([...LLM, "create", "--file", file], env));
   const metadata = join(directory, "metadata.json");
   writeFileSync(
     metadata,
@@ -238,12 +231,9 @@ test("E01.9 updating metadata adds a model in a secret-free revision", async (t)
     }),
   );
   success(
-    await kanthord(
-      ["credential", "update-metadata", NAME, "--file", metadata],
-      env,
-    ),
+    await kanthord([...LLM, "update-metadata", NAME, "--file", metadata], env),
   );
-  const read = success(await kanthord(["credential", "get", NAME], env));
+  const read = success(await kanthord([...LLM, "get", NAME], env));
   assert.equal(read.revisions.length, TWO_REVISION_COUNT);
   assert.ok(read.revisions[0]);
   assert.equal(read.revisions[0].revision, SECOND_REVISION);
@@ -255,14 +245,14 @@ test("E01.9 updating metadata adds a model in a secret-free revision", async (t)
 test("E01.10 a rotation drains an unpinned revision 1", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, GITHUB);
-  success(await kanthord(["credential", "create", "--file", file], env));
+  success(await kanthord([...REPOSITORY, "create", "--file", file], env));
   success(
     await kanthord(
-      ["credential", "rotate", NAME, "--file", rotateFile(directory)],
+      [...REPOSITORY, "rotate", NAME, "--file", rotateFile(directory)],
       env,
     ),
   );
-  const read = success(await kanthord(["credential", "get", NAME], env));
+  const read = success(await kanthord([...REPOSITORY, "get", NAME], env));
   const first = read.revisions.find(
     (entry) => entry.revision === FIRST_REVISION,
   );
@@ -274,7 +264,10 @@ test("E01.10 a rotation drains an unpinned revision 1", async (t) => {
   assert.notEqual(first.endedAt, null);
   assert.equal(second.endedAt, null);
   refusal(
-    await kanthord(["credential", "revoke", NAME, String(FIRST_REVISION)], env),
+    await kanthord(
+      [...REPOSITORY, "revoke", NAME, String(FIRST_REVISION)],
+      env,
+    ),
     "credential.revision.ended",
   );
 });
@@ -282,34 +275,38 @@ test("E01.10 a rotation drains an unpinned revision 1", async (t) => {
 test("E01.11 revoke refuses the newest live revision", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, GITHUB);
-  success(await kanthord(["credential", "create", "--file", file], env));
+  success(await kanthord([...REPOSITORY, "create", "--file", file], env));
   success(
     await kanthord(
-      ["credential", "rotate", NAME, "--file", rotateFile(directory)],
+      [...REPOSITORY, "rotate", NAME, "--file", rotateFile(directory)],
       env,
     ),
   );
   refusal(
     await kanthord(
-      ["credential", "revoke", NAME, String(SECOND_REVISION)],
+      [...REPOSITORY, "revoke", NAME, String(SECOND_REVISION)],
       env,
     ),
     "credential.revision.newest_live",
   );
 });
 
-test("E01.12 github refuses OAuth login", async (t) => {
+test("E01.12 an api_key platform refuses OAuth login and github is no LLM platform", async (t) => {
   const { env } = await setup(t);
   refusal(
-    await kanthord(["credential", "login", GITHUB, "--name", NAME], env),
+    await kanthord([...LLM, "login", ANTHROPIC, "--name", NAME], env),
     "credential.entry.unsupported",
+  );
+  refusal(
+    await kanthord([...LLM, "login", GITHUB, "--name", NAME], env),
+    "credential.platform.unsupported",
   );
 });
 
 test("E01.13 login-status refuses an absent session", async (t) => {
   const { env } = await setup(t);
   refusal(
-    await kanthord(["credential", "login-status", SESSION_ID], env),
+    await kanthord([...LLM, "login-status", SESSION_ID], env),
     "credential.login.not_found",
   );
 });
@@ -317,26 +314,35 @@ test("E01.13 login-status refuses an absent session", async (t) => {
 test("E01.14 login-code refuses an absent session", async (t) => {
   const { env } = await setup(t);
   refusal(
-    await kanthord(["credential", "login-code", SESSION_ID, "value"], env),
+    await kanthord([...LLM, "login-code", SESSION_ID, "value"], env),
     "credential.login.not_found",
   );
 });
 
-test("E01.15 platforms answers the platform list ahead of the credential name route", async (t) => {
+test("E01.15 platforms answers the platform list of each group ahead of the credential name route", async (t) => {
   const { env } = await setup(t);
-  const answer = success<{
-    items: { kind: string; platforms: { platform: string }[] }[];
-  }>(await kanthord(["credential", "platforms"], env));
-  assert.deepEqual(
-    answer.items.map(({ kind }) => kind),
-    ["git", "storage", "llm"],
+  const platforms = async (group: string[]) =>
+    success<{ items: { platform: string }[] }>(
+      await kanthord([...group, "platforms"], env),
+    ).items.map(({ platform }) => platform);
+  const llm = await platforms(LLM);
+  assert.ok(llm.includes(ANTHROPIC));
+  assert.ok(!llm.includes(GITHUB));
+  assert.deepEqual(await platforms(REPOSITORY), [GITHUB]);
+  assert.deepEqual(await platforms(["storage", "credential"]), ["s3"]);
+});
+
+test("a name of another group answers not found", async (t) => {
+  const { directory, env } = await setup(t);
+  const file = createFile(directory, GITHUB);
+  success(await kanthord([...REPOSITORY, "create", "--file", file], env));
+  refusal(
+    await kanthord([...LLM, "get", NAME], env),
+    "credential.credential.not_found",
   );
-  assert.deepEqual(
-    answer.items[0]?.platforms.map(({ platform }) => platform),
-    [GITHUB],
-  );
-  assert.ok(
-    answer.items[2]?.platforms.some(({ platform }) => platform === ANTHROPIC),
+  refusal(
+    await kanthord([...LLM, "create", "--file", file], env),
+    "credential.platform.unsupported",
   );
 });
 
@@ -345,7 +351,7 @@ test("create refuses a missing file without a server", async (t) => {
   const env = { ...environment(directory), KANTHORD_TOKEN: LOCAL_TOKEN };
   refusal(
     await kanthord(
-      ["credential", "create", "--file", join(directory, "missing.json")],
+      [...LLM, "create", "--file", join(directory, "missing.json")],
       env,
     ),
     "cli.file.not_found",
@@ -355,18 +361,18 @@ test("create refuses a missing file without a server", async (t) => {
 test("archive ends every revision of an unused credential and refuses a repeat as unknown", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, GITHUB);
-  success(await kanthord(["credential", "create", "--file", file], env));
+  success(await kanthord([...REPOSITORY, "create", "--file", file], env));
   const archived = success(
-    await kanthord(["credential", "archive", NAME], env),
+    await kanthord([...REPOSITORY, "archive", NAME], env),
   );
   assert.equal(archived.name, NAME);
   assert.equal(archived.revisions.length, FIRST_REVISION);
   assert.notEqual(archived.revisions[0]!.endedAt, null);
-  const read = success(await kanthord(["credential", "get", NAME], env));
+  const read = success(await kanthord([...REPOSITORY, "get", NAME], env));
   assert.equal(read.revisions.length, FIRST_REVISION);
   assert.notEqual(read.revisions[0]!.endedAt, null);
   refusal(
-    await kanthord(["credential", "archive", "missing"], env),
+    await kanthord([...REPOSITORY, "archive", "missing"], env),
     "credential.credential.not_found",
   );
 });
@@ -374,15 +380,15 @@ test("archive ends every revision of an unused credential and refuses a repeat a
 test("archive requires a token without a server", async (t) => {
   const env = environment(temporary(t));
   refusal(
-    await kanthord(["credential", "archive", NAME], env),
-    "cli.credential.archive.token_required",
+    await kanthord([...LLM, "archive", NAME], env),
+    "cli.llm.credential.archive.token_required",
   );
 });
 
 test("create refuses duplicate file options without a server", async (t) => {
   const env = { ...environment(temporary(t)), KANTHORD_TOKEN: LOCAL_TOKEN };
   refusal(
-    await kanthord(["credential", "create", "--file", "a", "--file", "b"], env),
+    await kanthord([...LLM, "create", "--file", "a", "--file", "b"], env),
     "cli.option.duplicate",
   );
 });
@@ -390,11 +396,8 @@ test("create refuses duplicate file options without a server", async (t) => {
 test("revoke refuses revision zero without a server", async (t) => {
   const env = { ...environment(temporary(t)), KANTHORD_TOKEN: LOCAL_TOKEN };
   refusal(
-    await kanthord(
-      ["credential", "revoke", NAME, String(INVALID_REVISION)],
-      env,
-    ),
-    "cli.credential.revoke.invalid_revision",
+    await kanthord([...LLM, "revoke", NAME, String(INVALID_REVISION)], env),
+    "cli.llm.credential.revoke.invalid_revision",
   );
 });
 
@@ -407,7 +410,7 @@ test("rotate refuses expected revision zero without a server", async (t) => {
     JSON.stringify({ expectedRevision: INVALID_REVISION, secret: SECRET }),
   );
   refusal(
-    await kanthord(["credential", "rotate", NAME, "--file", rotation], env),
+    await kanthord([...LLM, "rotate", NAME, "--file", rotation], env),
     "cli.file.schema_invalid",
   );
 });
@@ -416,9 +419,9 @@ test("login refuses an invalid mode without a server", async (t) => {
   const env = { ...environment(temporary(t)), KANTHORD_TOKEN: LOCAL_TOKEN };
   refusal(
     await kanthord(
-      ["credential", "login", "github-copilot", "--name", NAME, "--mode", "tv"],
+      [...LLM, "login", "github-copilot", "--name", NAME, "--mode", "tv"],
       env,
     ),
-    "cli.credential.login.invalid_mode",
+    "cli.llm.credential.login.invalid_mode",
   );
 });

@@ -120,13 +120,13 @@ test(
       writePrivate(path, JSON.stringify(body));
       return read<T>([...args, "--file", path], env);
     }
-    await write(["credential", "create"], {
+    await write(["llm", "credential", "create"], {
       name: "anthro-1",
       platform: "anthropic",
       metadata: null,
       secret: { key: SECRET },
     });
-    await write(["credential", "create"], {
+    await write(["repository", "credential", "create"], {
       name: "github",
       platform: "github",
       metadata: null,

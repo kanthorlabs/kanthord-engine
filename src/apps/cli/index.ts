@@ -1,5 +1,7 @@
 import { workerOperations } from "../../worker/contract.ts";
-import { custodyOperations } from "../../custody/contract.ts";
+import { llmOperations } from "../../llm/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
+import { storageOperations } from "../../storage/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
@@ -20,7 +22,9 @@ import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
 import { addJWTCommand } from "./jwt.ts";
 import { configHelp, effectivePath } from "./config-path.ts";
-import { addCredentialCommand } from "./credential.ts";
+import { addLlmCommand } from "./llm.ts";
+import { addRepositoryCommand } from "./repository.ts";
+import { addStorageCommand } from "./storage.ts";
 import { addProjectCommand } from "./project.ts";
 import { addMissionCommand } from "./mission.ts";
 import { addSchedulerCommand } from "./scheduler.ts";
@@ -153,7 +157,9 @@ export function createProgram(
   addConfigCommand(program);
   addServeCommand(program, onServer);
   addJWTCommand(program);
-  addCredentialCommand(program);
+  addLlmCommand(program);
+  addRepositoryCommand(program);
+  addStorageCommand(program);
   addProjectCommand(program);
   addSchedulerCommand(program);
   addMissionCommand(program);
@@ -235,7 +241,9 @@ export async function runCLI(
 
 const apiOperations = [
   ...Object.values(gatewayOperations),
-  ...Object.values(custodyOperations),
+  ...Object.values(llmOperations),
+  ...Object.values(repositoryOperations),
+  ...Object.values(storageOperations),
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
   ...Object.values(projectOperations),

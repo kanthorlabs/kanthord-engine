@@ -15,11 +15,12 @@ import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { deriveClientSecret } from "../../gateway/local.ts";
 import {
-  custodyOperations,
   handoverPayloadSchema,
   SecretShape,
   EXECUTION_CREDENTIAL_MAX_BYTES,
 } from "../../custody/contract.ts";
+import { llmOperations } from "../../llm/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { missionOperations, NodeKind } from "../../mission/contract.ts";
@@ -150,14 +151,14 @@ for (const adapter of ["direct", "http"] as const) {
     completed(await h.call(workerOperations.register, NO_INPUT, other));
     refused(await read(other), HttpStatus.Forbidden, PROOF_FAILED);
     completed(
-      await h.call(custodyOperations.rotate, {
+      await h.call(llmOperations.rotate, {
         params: { credentialName: "anthro-1" },
         query: {},
         body: { expectedRevision: FIRST_REVISION, secret: { key: ROTATED } },
       }),
     );
     completed(
-      await h.call(custodyOperations.revoke, {
+      await h.call(llmOperations.revoke, {
         params: { credentialName: "anthro-1", revision: FIRST_REVISION },
         query: {},
         body: null,
@@ -190,7 +191,7 @@ for (const adapter of ["direct", "http"] as const) {
     assert.deepEqual(before.resourceBudget, resourceBudget);
     const newerModel = "new-model";
     completed(
-      await h.call(custodyOperations.rotate, {
+      await h.call(llmOperations.rotate, {
         params: { credentialName: "anthro-1" },
         query: {},
         body: {
@@ -293,7 +294,7 @@ async function loginCredential(
   credential: OAuthCredential,
 ) {
   assert.equal(credential.type, SecretShape.OAuth);
-  const client = httpClient(custodyOperations, f.endpoint, f.token);
+  const client = httpClient(llmOperations, f.endpoint, f.token);
   const pending = completed(
     await client.login(
       { params: {}, query: {}, body: { platform: COPILOT, name: "anthro-1" } },
@@ -373,7 +374,7 @@ async function setup(
   let created = oauth
     ? await loginCredential(f, oauth)
     : completed(
-        await call(custodyOperations.create, {
+        await call(llmOperations.create, {
           params: {},
           query: {},
           body: {
@@ -394,7 +395,7 @@ async function setup(
       );
   if (setupOptions.compatible)
     created = completed(
-      await call(custodyOperations.update_metadata, {
+      await call(llmOperations.update_metadata, {
         params: { credentialName: "anthro-1" },
         query: {},
         body: {
@@ -412,7 +413,7 @@ async function setup(
       }),
     );
   completed(
-    await call(custodyOperations.create, {
+    await call(repositoryOperations.create, {
       params: {},
       query: {},
       body: {
@@ -580,7 +581,7 @@ async function setup(
       token,
     );
   const read = () =>
-    call(custodyOperations.get, {
+    call(llmOperations.get, {
       params: { credentialName: "anthro-1" },
       query: {},
       body: null,
@@ -806,7 +807,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
     );
     if (oversized.type === SecretShape.ApiKey) {
       refused(
-        await h.call(custodyOperations.create, {
+        await h.call(llmOperations.create, {
           params: {},
           query: {},
           body: {
@@ -820,7 +821,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
         "credential.input.invalid",
       );
       refused(
-        await h.call(custodyOperations.rotate, {
+        await h.call(llmOperations.rotate, {
           params: { credentialName: "anthro-1" },
           query: {},
           body: {
@@ -862,7 +863,7 @@ for (const adapter of ["direct", "http"] as const) {
       h.credentialId,
     );
     completed(
-      await h.call(custodyOperations.rotate, {
+      await h.call(llmOperations.rotate, {
         params: { credentialName: "anthro-1" },
         query: {},
         body: {

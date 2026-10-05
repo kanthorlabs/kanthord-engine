@@ -10,6 +10,11 @@ import {
   fetchAndCheckout,
   pushNodeBranch,
 } from "./connector.ts";
+export {
+  RepositoryCredentials,
+  type CredentialDependencies,
+} from "./credential.ts";
+export { REPOSITORY_PLATFORMS } from "./credential-platform.ts";
 
 export interface Dependencies {
   health?: HealthRegistry;

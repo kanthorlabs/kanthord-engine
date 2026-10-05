@@ -2276,11 +2276,21 @@ test("bindingsNaming finds exact credential keys at any depth across projects an
     assert.equal(results.length, TWO_CALLS);
     assert.deepEqual(
       results.find(({ bindingId }) => bindingId === repository.id),
-      { bindingId: repository.id, projectId: first.id },
+      {
+        bindingId: repository.id,
+        projectId: first.id,
+        projectName: PROJECT_NAME,
+        name: REPOSITORY_NAME,
+      },
     );
     assert.deepEqual(
       results.find(({ bindingId }) => bindingId === storage.id),
-      { bindingId: storage.id, projectId: second.id },
+      {
+        bindingId: storage.id,
+        projectId: second.id,
+        projectName: OTHER_NAME,
+        name: STORAGE_NAME,
+      },
     );
     assert.deepEqual(f.project.bindingsNaming(tx, MISSING_NAME), []);
   });
@@ -2328,7 +2338,12 @@ test("bindingsNaming checks only matching older live revisions and frees depende
     calls.length = NO_CALLS;
     pinned.clear();
     assert.deepEqual(f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL), [
-      { bindingId: latest.id, projectId: project.id },
+      {
+        bindingId: latest.id,
+        projectId: project.id,
+        projectName: PROJECT_NAME,
+        name: REPOSITORY_NAME,
+      },
     ]);
     assert.deepEqual(calls, [original.id]);
   });
@@ -2354,7 +2369,12 @@ test("bindingsNaming excludes tombstones and earlier pins even after the group i
       [REPOSITORY_NAME]: repositoryBinding(),
     }).bindings[REPOSITORY_NAME]!;
     assert.deepEqual(f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL), [
-      { bindingId: rebound.id, projectId: first.id },
+      {
+        bindingId: rebound.id,
+        projectId: first.id,
+        projectName: PROJECT_NAME,
+        name: REPOSITORY_NAME,
+      },
     ]);
     assert.deepEqual(calls, []);
   });

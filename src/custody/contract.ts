@@ -2,13 +2,13 @@ import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { MachineIdentity } from "../kernel/caller.ts";
-import { HttpMethod, HttpStatus } from "../kernel/http.ts";
-import {
-  AccessPolicy,
-  OperationLifetime,
-  StoreName,
-  type Operation,
-} from "../kernel/operation.ts";
+import type { Context } from "../kernel/context.ts";
+import type {
+  ResourceCheck,
+  ResourceEntry,
+  ResourceObserver,
+  ResourceStatusValue,
+} from "../kernel/health.ts";
 import type { Transaction } from "../kernel/store.ts";
 
 export const SecretShape = {
@@ -17,12 +17,6 @@ export const SecretShape = {
   S3AccessKey: "s3_access_key",
 } as const;
 export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
-export const PlatformKind = {
-  Git: "git",
-  Storage: "storage",
-  Llm: "llm",
-} as const;
-export type PlatformKind = (typeof PlatformKind)[keyof typeof PlatformKind];
 export const LoginSessionMode = {
   Browser: "browser",
   Device: "device",
@@ -132,7 +126,6 @@ export type Material = {
 };
 
 export const CUSTODY_SERVICE_NAME = "custody";
-export const CREDENTIAL_OPERATION_SERVICE = "credential";
 export const CREDENTIAL_TIMEOUT_MS = 30000;
 export const CREATE_MAX_BODY_BYTES = 64 * 1024;
 export const METADATA_MAX_BODY_BYTES = 16 * 1024;
@@ -163,10 +156,13 @@ export type BindingRevision = {
   bindingId: string;
   projectId: string;
 };
+export type BindingNaming = BindingRevision & {
+  projectName: string;
+  name: string;
+};
 export type InboundDependent = {
   inboundId: string;
 };
-export type AgentEnablement = { agentName: string };
 export type AgentProvidersDependentOnFn = (
   tx: Transaction,
   credentialName: string,
@@ -174,22 +170,89 @@ export type AgentProvidersDependentOnFn = (
 export type BindingsNamingFn = (
   tx: Transaction,
   credentialName: string,
-) => BindingRevision[];
+) => BindingNaming[];
 export type InboundsNamingFn = (
   tx: Transaction,
   credentialName: string,
 ) => InboundDependent[];
-export type EnablementsDependentOnModelFn = (
-  tx: Transaction,
-  credentialName: string,
-  modelId: string,
-) => AgentEnablement[];
 
-const emptyParams = z.strictObject({});
-const emptyQuery = z.strictObject({});
-const credentialParams = z.strictObject({ credentialName: z.string().min(1) });
-const sessionParams = z.strictObject({ sessionId: z.string().min(1) });
+const EMPTY_STRING_LENGTH = 0;
+const STRING_FIELD_TYPE = "string";
 
+export function isNonblank(s: string): boolean {
+  return s.trim().length > EMPTY_STRING_LENGTH;
+}
+
+export const apiKeySecretSchema = z
+  .strictObject({
+    key: z.string().min(1).refine(isNonblank),
+  })
+  .refine(
+    (secret) =>
+      piCredentialSchema.safeParse({ type: SecretShape.ApiKey, ...secret })
+        .success,
+  );
+export const oauthSecretSchema = z
+  .strictObject({
+    refresh: z.string().min(1),
+    access: z.string().min(1),
+    expires: z.number().int(),
+  })
+  .refine(
+    (secret) =>
+      piCredentialSchema.safeParse({ type: SecretShape.OAuth, ...secret })
+        .success,
+  );
+export const s3AccessKeySecretSchema = z.strictObject({
+  accessKeyId: z.string().min(1).refine(isNonblank),
+  secretAccessKey: z.string().min(1).refine(isNonblank),
+});
+export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
+  [SecretShape.ApiKey]: apiKeySecretSchema,
+  [SecretShape.OAuth]: oauthSecretSchema,
+  [SecretShape.S3AccessKey]: s3AccessKeySecretSchema,
+};
+
+export type PlatformProbe = (
+  secret: unknown,
+  metadata: unknown,
+  context: Context,
+  observe?: ResourceObserver,
+) => Promise<ResourceStatusValue>;
+export type CredentialPlatform = {
+  secretShape: SecretShape;
+  loginModes: readonly LoginSessionMode[];
+  metadataSchema: z.ZodObject | null;
+  capability: string;
+  probe: PlatformProbe | null;
+};
+export type CredentialPlatforms = Readonly<Record<string, CredentialPlatform>>;
+export const RevisionChange = {
+  Create: "create",
+  Rotate: "rotate",
+  Metadata: "metadata",
+} as const;
+export type RevisionChange =
+  (typeof RevisionChange)[keyof typeof RevisionChange];
+export type MetadataRevision = {
+  name: string;
+  platform: string;
+  change: RevisionChange;
+  current: Record<string, unknown> | null;
+  next: Record<string, unknown> | null;
+};
+export type CredentialPlatformSet = {
+  platforms: CredentialPlatforms;
+  checkMetadata?: (tx: Transaction, revision: MetadataRevision) => void;
+};
+
+export const credentialParamsSchema = z.strictObject({
+  credentialName: z.string().min(1),
+});
+export const credentialRevisionParamsSchema = z.strictObject({
+  credentialName: z.string().min(1),
+  revision: z.coerce.number().int().positive(),
+});
 export const credentialCreateSchema = z.strictObject({
   name: z.string(),
   platform: z.string(),
@@ -205,6 +268,18 @@ export const credentialUpdateMetadataBodySchema = z.strictObject({
   expectedRevision: z.number().int().positive(),
   metadata: z.unknown(),
 });
+export const credentialListQuerySchema = z.strictObject({
+  platform: z.string().optional(),
+  includeArchived: z.enum(["true", "false"]).default("false").optional(),
+  limit: z.coerce.number().int().positive().max(LIST_LIMIT_MAX).optional(),
+  cursor: z.string().min(1).optional(),
+});
+export type CredentialCreate = z.infer<typeof credentialCreateSchema>;
+export type CredentialRotateBody = z.infer<typeof credentialRotateBodySchema>;
+export type CredentialUpdateMetadataBody = z.infer<
+  typeof credentialUpdateMetadataBodySchema
+>;
+export type CredentialListQuery = z.infer<typeof credentialListQuerySchema>;
 
 export const credentialRevisionAnswerSchema = z.strictObject({
   id: z.string(),
@@ -218,288 +293,107 @@ export const credentialAnswerSchema = z.strictObject({
   platform: z.string(),
   revisions: z.array(credentialRevisionAnswerSchema),
 });
+export const credentialListAnswerSchema = z.strictObject({
+  items: z.array(credentialAnswerSchema),
+  nextCursor: z.string().nullable(),
+});
+export const credentialPlatformListAnswerSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      platform: z.string(),
+      secretShape: z.enum(SecretShape),
+      loginModes: z.array(z.enum(LoginSessionMode)),
+      metadataFields: z.array(z.string()),
+      verifiable: z.boolean(),
+    }),
+  ),
+});
 export type CredentialRevisionAnswer = z.infer<
   typeof credentialRevisionAnswerSchema
 >;
 export type CredentialAnswer = z.infer<typeof credentialAnswerSchema>;
+export type CredentialListAnswer = z.infer<typeof credentialListAnswerSchema>;
+export type CredentialPlatformListAnswer = z.infer<
+  typeof credentialPlatformListAnswerSchema
+>;
 
-const credentialListAnswerSchema = z.strictObject({
-  items: z.array(credentialAnswerSchema),
-  nextCursor: z.string().nullable(),
-});
-const loginAnswerSchema = z.strictObject({
-  sessionId: z.string(),
-  address: z.string(),
-  code: z.string().nullable(),
-  expiresAt: z.number().int(),
-});
-const loginCodeAnswerSchema = z.strictObject({ sessionId: z.string() });
-const loginStatusAnswerSchema = z.strictObject({
-  sessionId: z.string(),
-  state: z.string(),
-  lastMessage: z.string().nullable(),
-  failureReason: z.string().nullable(),
-});
+export function credentialPlatformList(
+  platforms: CredentialPlatforms,
+): CredentialPlatformListAnswer {
+  return {
+    items: Object.entries(platforms).map(([platform, entry]) => ({
+      platform,
+      secretShape: entry.secretShape,
+      loginModes: [...entry.loginModes],
+      metadataFields:
+        entry.metadataSchema === null
+          ? []
+          : Object.entries(entry.metadataSchema.shape)
+              .filter(([, field]) => field._zod.def.type === STRING_FIELD_TYPE)
+              .map(([name]) => name),
+      verifiable: entry.probe !== null,
+    })),
+  };
+}
 
-const platformListAnswerSchema = z.strictObject({
-  items: z.array(
-    z.strictObject({
-      kind: z.enum(PlatformKind),
-      platforms: z.array(
-        z.strictObject({
-          platform: z.string(),
-          secretShape: z.enum(SecretShape),
-          loginModes: z.array(z.enum(LoginSessionMode)),
-          metadataFields: z.array(z.string()),
-          verifiable: z.boolean(),
-        }),
-      ),
-    }),
-  ),
-});
-
-export const custodyOperations = {
-  platform_list: {
-    id: "credential.platform_list",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Get,
-    path: "/api/credential/platform",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: false,
-    body: false,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: emptyParams,
-      query: emptyQuery,
-      body: z.null(),
-    }),
-    output: platformListAnswerSchema,
-    description: "List the credential platforms grouped by kind.",
-  },
-  create: {
-    id: "credential.create",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Post,
-    path: "/api/credential",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: true,
-    body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: emptyParams,
-      query: emptyQuery,
-      body: credentialCreateSchema,
-    }),
-    output: credentialAnswerSchema,
-    description: "Create a credential with its first revision.",
-  },
-  list: {
-    id: "credential.list",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Get,
-    path: "/api/credential",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: false,
-    body: false,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: emptyParams,
-      query: z.strictObject({
-        platform: z.string().optional(),
-        includeArchived: z.enum(["true", "false"]).default("false").optional(),
-        limit: z.coerce
-          .number()
-          .int()
-          .positive()
-          .max(LIST_LIMIT_MAX)
-          .optional(),
-        cursor: z.string().min(1).optional(),
-      }),
-      body: z.null(),
-    }),
-    output: credentialListAnswerSchema,
-    description:
-      "List credentials with optional platform filtering and pagination.",
-  },
-  get: {
-    id: "credential.get",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Get,
-    path: "/api/credential/:credentialName",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: false,
-    body: false,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: credentialParams,
-      query: emptyQuery,
-      body: z.null(),
-    }),
-    output: credentialAnswerSchema,
-    description: "Get a credential and all its revisions.",
-  },
-  rotate: {
-    id: "credential.rotate",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Post,
-    path: "/api/credential/:credentialName/revision",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: true,
-    body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: credentialParams,
-      query: emptyQuery,
-      body: credentialRotateBodySchema,
-    }),
-    output: credentialAnswerSchema,
-    description: "Rotate a credential secret into a new revision.",
-  },
-  update_metadata: {
-    id: "credential.update_metadata",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Put,
-    path: "/api/credential/:credentialName/metadata",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: true,
-    body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: credentialParams,
-      query: emptyQuery,
-      body: credentialUpdateMetadataBodySchema,
-    }),
-    output: credentialAnswerSchema,
-    description: "Update credential metadata in a new revision.",
-  },
-  revoke: {
-    id: "credential.revoke",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Post,
-    path: "/api/credential/:credentialName/revision/:revision/revoke",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: true,
-    body: false,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: z.strictObject({
-        credentialName: z.string().min(1),
-        revision: z.coerce.number().int().positive(),
-      }),
-      query: emptyQuery,
-      body: z.null(),
-    }),
-    output: credentialAnswerSchema,
-    description: "End an older credential revision.",
-  },
-  archive: {
-    id: "credential.archive",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Post,
-    path: "/api/credential/:credentialName/archive",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: true,
-    body: false,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: credentialParams,
-      query: emptyQuery,
-      body: z.null(),
-    }),
-    output: credentialAnswerSchema,
-    description: "Archive a credential that no dependent names.",
-  },
-  login: {
-    id: "credential.login",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Post,
-    path: "/api/credential/login",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: true,
-    body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: emptyParams,
-      query: emptyQuery,
-      body: z.strictObject({
-        platform: z.string(),
-        name: z.string(),
-        mode: z.string().optional(),
-      }),
-    }),
-    output: loginAnswerSchema,
-    description: "Start an OAuth credential login session.",
-  },
-  login_code: {
-    id: "credential.login_code",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Post,
-    path: "/api/credential/login/:sessionId/code",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: true,
-    body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: sessionParams,
-      query: emptyQuery,
-      body: z.strictObject({ value: z.string().min(1) }),
-    }),
-    output: loginCodeAnswerSchema,
-    description: "Supply a requested OAuth login code.",
-  },
-  login_status: {
-    id: "credential.login_status",
-    service: CREDENTIAL_OPERATION_SERVICE,
-    method: HttpMethod.Get,
-    path: "/api/credential/login/:sessionId",
-    access: AccessPolicy.Human,
-    store: StoreName.Operational,
-    lifetime: OperationLifetime.Unary,
-    timeoutMs: CREDENTIAL_TIMEOUT_MS,
-    mutation: false,
-    body: false,
-    status: HttpStatus.OK,
-    input: z.strictObject({
-      params: sessionParams,
-      query: emptyQuery,
-      body: z.null(),
-    }),
-    output: loginStatusAnswerSchema,
-    description: "Read the state of an OAuth login session.",
-  },
-} as const satisfies Record<string, Operation>;
+export interface CredentialRecords {
+  create(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    body: CredentialCreate,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer;
+  list(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    query: CredentialListQuery,
+  ): CredentialListAnswer;
+  get(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+  ): CredentialAnswer;
+  rotate(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    body: CredentialRotateBody,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer;
+  updateMetadata(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    body: CredentialUpdateMetadataBody,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer;
+  revoke(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    revision: number,
+  ): CredentialAnswer;
+  archive(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+  ): CredentialAnswer;
+  requireAvailableName(tx: Transaction, name: string): void;
+  createLoginRevision(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    name: string,
+    platform: string,
+    secret: unknown,
+    now: number,
+  ): string;
+  resourceInventory(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+  ): ResourceEntry[];
+  resourceCheck(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+  ): ResourceCheck;
+}

@@ -4,8 +4,6 @@ import pino from "pino";
 import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
-import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
@@ -22,10 +20,9 @@ import { CustodyComponent } from "./service.ts";
 import { CUSTODY_REPORT_INVALID, REVISION_REVOKED } from "./handover.ts";
 import {
   CUSTODY_SERVICE_NAME,
-  custodyOperations,
   handoverPayloadSchema,
   SecretShape,
-  type CredentialAnswer,
+  type CredentialPlatformSet,
   type CustodyExecution,
 } from "./contract.ts";
 
@@ -34,6 +31,18 @@ const FIRST = { type: SecretShape.ApiKey, key: "private-first" };
 const SECOND = { type: SecretShape.ApiKey, key: "private-second" };
 const NOW = 1000;
 const REVISION_COUNT = 1;
+const TEST_PLATFORM = "key-platform";
+const TEST_SET: CredentialPlatformSet = {
+  platforms: {
+    [TEST_PLATFORM]: {
+      secretShape: SecretShape.ApiKey,
+      loginModes: [],
+      metadataSchema: null,
+      capability: "none",
+      probe: null,
+    },
+  },
+};
 
 function fixture(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -79,7 +88,7 @@ function fixture(t: TestContext) {
     bindingsNaming: () => [],
     inboundsNaming: () => [],
     agentProvidersDependentOn: () => [],
-    enablementsDependentOnModel: () => [],
+    platforms: TEST_SET.platforms,
     executions: {
       requireRunning: (tx, executionId, runtimeIdentity) => {
         assert(tx.database.isTransaction);
@@ -109,34 +118,26 @@ function fixture(t: TestContext) {
           );
         return {
           credential: "anthro-1",
-          platform: "anthropic",
-          providerId: "anthropic",
+          platform: TEST_PLATFORM,
+          providerId: TEST_PLATFORM,
           agentProvider: "default",
         };
       },
     },
   });
-  const registry = new OperationRegistry();
-  component.declare(registry);
-  const caller: CallerContext = {
-    identity,
-    context: background,
-    requestId: "request",
-    commit: (fn) => store.transaction(fn),
-  };
-  const created = registry.get(custodyOperations.create.id).handler(
-    {
-      params: {},
-      query: {},
-      body: {
+  const created = store.transaction((tx) =>
+    component.create(
+      tx,
+      TEST_SET,
+      {
         name: "anthro-1",
-        platform: "anthropic",
+        platform: TEST_PLATFORM,
         metadata: null,
         secret: { key: FIRST.key },
       },
-    },
-    caller,
-  ) as CredentialAnswer;
+      undefined,
+    ),
+  );
   const credentialId = created.revisions[0]!.id;
   const keys = deriveHandoverKeys(SECRET);
   const aad = handoverAad(row.executionId, row.runtimeIdentity);
@@ -175,7 +176,7 @@ test("handover and refresh reports preserve a single pinned revision and sanitiz
       items: [
         {
           credentialId: f.credentialId,
-          providerId: "anthropic",
+          providerId: TEST_PLATFORM,
           credential: FIRST,
         },
       ],

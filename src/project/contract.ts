@@ -309,7 +309,12 @@ export type AgentDependentBinding = {
   workerName: string;
   entry: WorkerEntry | null;
 };
-export type BindingRevision = { bindingId: string; projectId: string };
+export type BindingNaming = {
+  bindingId: string;
+  projectId: string;
+  projectName: string;
+  name: string;
+};
 export type BindingChange = {
   kind: (typeof ChangeKind)[keyof typeof ChangeKind];
   bindingId: string;

@@ -2,18 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
+  apiKeySecretSchema,
   EXECUTION_CREDENTIAL_MAX_BYTES,
+  oauthSecretSchema,
   piCredentialSchema,
+  s3AccessKeySecretSchema,
   SecretShape,
   type RefreshReport,
   type HandoverPayload,
 } from "./contract.ts";
 import { executionCredentialStore } from "./client.ts";
-import {
-  apiKeySecretSchema,
-  oauthSecretSchema,
-  s3AccessKeySecretSchema,
-} from "./platforms.ts";
 import { normalizeCredential, secretOfCredential } from "./payload.ts";
 
 const NEXT_BYTE = EXECUTION_CREDENTIAL_MAX_BYTES + 1;

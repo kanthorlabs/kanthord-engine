@@ -13,6 +13,7 @@ import { digest } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   refreshReportSchema,
+  type CredentialPlatforms,
   type CustodyExecution,
   type Material,
 } from "./contract.ts";
@@ -21,7 +22,6 @@ import {
   dropExtraOAuthFields,
   secretOfCredential,
 } from "./payload.ts";
-import { PLATFORM_VALIDATORS, type Platform } from "./platforms.ts";
 import { decrypt, encrypt } from "./envelope.ts";
 
 export const CUSTODY_REPORT_INVALID = "custody.handover.report_invalid";
@@ -40,12 +40,12 @@ export function sealMaterial(
   secret: string,
   execution: CustodyExecution,
   material: Material,
+  platforms: CredentialPlatforms,
 ): HandoverEnvelope {
   const keys = deriveHandoverKeys(secret);
   try {
-    const shape =
-      PLATFORM_VALIDATORS[material.platform as Platform]?.secretShape;
-    assert(shape);
+    assert(Object.hasOwn(platforms, material.platform));
+    const shape = platforms[material.platform]!.secretShape;
     assert(material.credentialId.length);
     const payload = {
       items: [
@@ -100,6 +100,7 @@ export function applyReport(
   tx: Transaction,
   key: Buffer,
   report: ReturnType<typeof openReport>,
+  platforms: CredentialPlatforms,
 ): boolean {
   assert(tx.database.isTransaction);
   const row = tx.database
@@ -109,7 +110,7 @@ export function applyReport(
     .get(report.credentialId) as
     | {
         id: string;
-        platform: Platform;
+        platform: string;
         ended_at: number | null;
         nonce: Buffer;
         ciphertext: Buffer;
@@ -122,8 +123,11 @@ export function applyReport(
       REVISION_REVOKED,
       "The pinned credential revision is revoked.",
     );
-  const shape = PLATFORM_VALIDATORS[row.platform].secretShape;
-  if (shape !== report.credential.type) throw invalidReport();
+  const shape = Object.hasOwn(platforms, row.platform)
+    ? platforms[row.platform]!.secretShape
+    : undefined;
+  if (shape === undefined || shape !== report.credential.type)
+    throw invalidReport();
   const stored = decrypt(key, row.id, row.platform, row.nonce, row.ciphertext);
   if (digest(credentialOfSecret(shape, stored)) !== report.digest) return false;
   const sealed = encrypt(

@@ -165,7 +165,9 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: "e2e-registration-secret" },
   });
-  success(await kanthord(["credential", "create", "--file", credential], H));
+  success(
+    await kanthord(["llm", "credential", "create", "--file", credential], H),
+  );
   const enablement = file(directory, "enablement.json", {
     agentProviders: [
       { name: "default", provider: "anthropic", credential: "anthro-1" },

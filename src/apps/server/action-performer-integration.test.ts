@@ -5,7 +5,7 @@ import type { z } from "zod";
 import { ulid } from "ulid";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { custodyOperations } from "../../custody/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   missionOperations,
@@ -103,7 +103,7 @@ async function setup(
     );
   }
   completed(
-    await call(custodyOperations.create, {
+    await call(repositoryOperations.create, {
       params: {},
       query: {},
       body: {

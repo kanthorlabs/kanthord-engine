@@ -6,7 +6,8 @@ import type { z } from "zod";
 import { ulid } from "ulid";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { custodyOperations } from "../../custody/contract.ts";
+import { llmOperations } from "../../llm/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import {
@@ -108,7 +109,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
     });
   }
   completed(
-    await call(custodyOperations.create, {
+    await call(llmOperations.create, {
       params: {},
       query: {},
       body: {
@@ -120,7 +121,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
     }),
   );
   completed(
-    await call(custodyOperations.create, {
+    await call(repositoryOperations.create, {
       params: {},
       query: {},
       body: {

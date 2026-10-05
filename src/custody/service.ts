@@ -1,28 +1,22 @@
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
-import type { Provider } from "@earendil-works/pi-ai";
-import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import {
   background,
   CancellationContext,
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import { IdentityKind, type MachineIdentity } from "../kernel/caller.ts";
+import type { MachineIdentity } from "../kernel/caller.ts";
 import {
   HealthScope,
   ResourceStatus,
   type HealthRegistry,
   type ResourceCheck,
-  type ResourceObserver,
   type ResourceEntry,
-  type ResourceStatusValue,
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -30,18 +24,27 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
-  credentialCreateSchema,
-  custodyOperations,
   LIST_LIMIT_DEFAULT,
+  RevisionChange,
+  secretSchemas,
+  SecretShape,
   type CredentialAnswer,
+  type CredentialCreate,
+  type CredentialListAnswer,
+  type CredentialListQuery,
   type CredentialMetadata,
+  type CredentialPlatform,
+  type CredentialPlatforms,
+  type CredentialPlatformSet,
+  type CredentialRecords,
+  type CredentialRotateBody,
+  type CredentialUpdateMetadataBody,
   type AgentProviderDependent,
   type BindingRevision,
   type AgentProvidersDependentOnFn,
   type BindingsNamingFn,
   type InboundDependent,
   type InboundsNamingFn,
-  type EnablementsDependentOnModelFn,
   type CustodyExecutions,
   type CustodyAuthorization,
   type CustodyExecution,
@@ -57,61 +60,20 @@ import {
 } from "./handover.ts";
 import type { HandoverEnvelope } from "../kernel/handover.ts";
 import { decrypt, encrypt } from "./envelope.ts";
-import {
-  apiKeySecretSchema,
-  oauthSecretSchema,
-  s3AccessKeySecretSchema,
-  s3MetadataSchema,
-  isPlatform,
-  metadataFieldsForPlatform,
-  metadataSchemaForPlatform,
-  openaiCompatibleMetadataSchema,
-  Platform,
-  PLATFORM_VALIDATORS,
-  PlatformKind,
-  RESERVED_NAME_LOGIN,
-  RESERVED_NAME_PLATFORM,
-  SecretShape,
-  secretSchemaForPlatform,
-  validateNameForm,
-} from "./platforms.ts";
-
-import {
-  CAPABILITY_NONE,
-  PLATFORM_CAPABILITY,
-  TARGET_KIND_CREDENTIAL,
-  probeGitHub,
-  probeGitHubCopilot,
-  LLM_PROVIDER_VALIDATORS,
-  probeS3,
-} from "./resource-healthcheck.ts";
-import {
-  loginMode,
-  loginNotFound,
-  LOGIN_VALUE_NOT_AWAITED,
-  OAuthLogin,
-  type OAuthSecret,
-} from "./login.ts";
-import {
-  LoginSessionStore,
-  LoginSessionState,
-  type LoginSession,
-} from "./sessions.ts";
+import { isReservedName, validateNameForm } from "./names.ts";
 
 export interface Dependencies {
   executions: CustodyExecutions;
   authorization: CustodyAuthorization;
   clientSecret: (clientId: string) => string;
   store: Store;
-  oauthProviders?: () => readonly Provider[];
-  now?: () => number;
+  platforms: CredentialPlatforms;
   envelopeKey: Buffer;
   logger: Logger;
   health?: HealthRegistry;
   agentProvidersDependentOn: AgentProvidersDependentOnFn;
   bindingsNaming: BindingsNamingFn;
   inboundsNaming: InboundsNamingFn;
-  enablementsDependentOnModel: EnablementsDependentOnModelFn;
 }
 
 const CustodyErrorCode = {
@@ -123,8 +85,6 @@ const CustodyErrorCode = {
   NotFound: "credential.credential.not_found",
   PlatformMismatch: "credential.platform.mismatch",
   RevisionConflict: "credential.revision.conflict",
-  BaseUrlFixed: "credential.metadata.base_url_fixed",
-  ModelInUse: "credential.metadata.model_in_use",
   InUse: "credential.credential.in_use",
   Archived: "credential.credential.archived",
   RevisionNotFound: "credential.revision.not_found",
@@ -139,10 +99,10 @@ const QUERY_TRUE = "true";
 const INCLUDE = 1;
 const EXCLUDE = 0;
 const EXTRA_ROW = 1;
-const EMPTY_MODELS = 0;
 const CREDENTIAL_PREFIX = "credential";
 const CUSTODY_HEALTH_NAME = "custody";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
+const TARGET_KIND_CREDENTIAL = "credential";
 
 type CredentialRow = {
   id: string;
@@ -156,54 +116,13 @@ type CredentialRow = {
 
 type LiveRow = CredentialRow & { nonce: Buffer; ciphertext: Buffer };
 
-type PlatformProbe = (
-  secret: unknown,
-  metadata: unknown,
-  context: Context,
-  observe?: ResourceObserver,
-) => Promise<ResourceStatusValue>;
-
-function llmProbe(platform: Platform): PlatformProbe {
-  return (secret, metadata, context, observe) =>
-    LLM_PROVIDER_VALIDATORS[platform]!.probe(
-      secret,
-      metadata,
-      context,
-      observe,
-    );
-}
-
-const platformProbes: Partial<Record<Platform, PlatformProbe>> = {
-  [Platform.GitHub]: (secret, _metadata, context, observe) =>
-    probeGitHub(apiKeySecretSchema.parse(secret).key, context, observe),
-  [Platform.GitHubCopilot]: (secret, _metadata, context, observe) => {
-    const { refresh, expires } = oauthSecretSchema.parse(secret);
-    return probeGitHubCopilot(refresh, expires, context, observe);
-  },
-  [Platform.OpenAICodex]: llmProbe(Platform.OpenAICodex),
-  [Platform.Anthropic]: llmProbe(Platform.Anthropic),
-  [Platform.OpenAICompatible]: llmProbe(Platform.OpenAICompatible),
-  [Platform.OpenRouter]: llmProbe(Platform.OpenRouter),
-  [Platform.OpenAI]: llmProbe(Platform.OpenAI),
-  [Platform.S3]: (secret, metadata, context, observe) => {
-    const { accessKeyId, secretAccessKey } =
-      s3AccessKeySecretSchema.parse(secret);
-    const { endpoint, bucket, region } = s3MetadataSchema.parse(metadata);
-    return probeS3(
-      accessKeyId,
-      secretAccessKey,
-      endpoint,
-      bucket,
-      region,
-      context,
-      undefined,
-      observe,
-    );
-  },
-};
-
-function capturedResourceCheck(row: LiveRow, key: Buffer): ResourceCheck {
+function capturedResourceCheck(
+  row: LiveRow,
+  key: Buffer,
+  entry: CredentialPlatform,
+): ResourceCheck {
   const { id, platform } = row;
+  const { probe } = entry;
   const nonce = Buffer.from(row.nonce);
   const ciphertext = Buffer.from(row.ciphertext);
   const metadata: unknown =
@@ -211,15 +130,9 @@ function capturedResourceCheck(row: LiveRow, key: Buffer): ResourceCheck {
   return async (context, observe) => {
     if (context.err()) return ResourceStatus.Unknown;
     try {
-      if (!PLATFORM_VALIDATORS[platform as Platform].verifiable)
-        return ResourceStatus.Unknown;
+      if (probe === null) return ResourceStatus.Unknown;
       const secret = decrypt(key, id, platform, nonce, ciphertext);
-      return await platformProbes[platform as Platform]!(
-        secret,
-        metadata,
-        context,
-        observe,
-      );
+      return await probe(secret, metadata, context, observe);
     } catch {
       observe?.("probe failed before the remote call");
       return ResourceStatus.Unknown;
@@ -265,10 +178,10 @@ function requireLive(tx: Transaction, name: string, expected: number): LiveRow {
 }
 
 function validatedMetadata(
-  platform: Platform,
+  entry: CredentialPlatform,
   value: unknown,
 ): Record<string, unknown> | null {
-  const schema = metadataSchemaForPlatform(platform);
+  const schema = entry.metadataSchema;
   if (schema === null) {
     if (value !== null) throw invalidInput();
     return null;
@@ -278,29 +191,34 @@ function validatedMetadata(
   return parsed.data as Record<string, unknown>;
 }
 
-function isReservedName(name: string): boolean {
-  return name === RESERVED_NAME_LOGIN || name === RESERVED_NAME_PLATFORM;
+function notFound(): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    CustodyErrorCode.NotFound,
+    "Credential not found.",
+  );
 }
 
-function platformList(): typeof custodyOperations.platform_list.output._output {
-  const platforms = Object.entries(PLATFORM_VALIDATORS) as [
-    Platform,
-    (typeof PLATFORM_VALIDATORS)[Platform],
-  ][];
-  return {
-    items: Object.values(PlatformKind).map((kind) => ({
-      kind,
-      platforms: platforms
-        .filter(([, validator]) => validator.kind === kind)
-        .map(([platform, validator]) => ({
-          platform,
-          secretShape: validator.secretShape,
-          loginModes: [...validator.loginModes],
-          metadataFields: metadataFieldsForPlatform(platform),
-          verifiable: validator.verifiable,
-        })),
-    })),
-  };
+function ownedPlatform(
+  set: CredentialPlatformSet,
+  platform: string,
+): CredentialPlatform | undefined {
+  return Object.hasOwn(set.platforms, platform)
+    ? set.platforms[platform]
+    : undefined;
+}
+
+function refuseForeign(
+  tx: Transaction,
+  set: CredentialPlatformSet,
+  name: string,
+): void {
+  const row = rowsForName(tx, name)[0];
+  if (row && !ownedPlatform(set, row.platform)) throw notFound();
+}
+
+function parsedMetadata(row: CredentialRow): Record<string, unknown> | null {
+  return row.metadata === null ? null : JSON.parse(row.metadata);
 }
 
 function invalidInput(): OperationError {
@@ -355,24 +273,19 @@ function decodeCursor(cursor: string): string {
   return name;
 }
 
-export class CustodyComponent implements Service {
+export class CustodyComponent implements Service, CredentialRecords {
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   private readonly store: Store;
-  private readonly sessions = new LoginSessionStore();
-  private readonly logins = new Map<string, OAuthLogin>();
-  private readonly oauthProviders: () => readonly Provider[];
-  private readonly now: () => number;
-  private acceptingLogins = true;
+  private readonly platforms: CredentialPlatforms;
   private readonly envelopeKey: Buffer;
   private readonly logger: Logger;
   private readonly agentProvidersDependentOn: AgentProvidersDependentOnFn;
   private readonly bindingsNaming: BindingsNamingFn;
   private readonly inboundsNaming: InboundsNamingFn;
-  private readonly enablementsDependentOnModel: EnablementsDependentOnModelFn;
   private readonly executions: CustodyExecutions;
   private readonly authorization: CustodyAuthorization;
   private readonly clientSecret: (clientId: string) => string;
@@ -382,52 +295,14 @@ export class CustodyComponent implements Service {
     this.authorization = dependencies.authorization;
     this.clientSecret = dependencies.clientSecret;
     this.store = dependencies.store;
-    this.oauthProviders =
-      dependencies.oauthProviders ??
-      (() => [githubCopilotProvider(), openaiCodexProvider()]);
-    this.now = dependencies.now ?? Date.now;
+    this.platforms = dependencies.platforms;
     this.envelopeKey = dependencies.envelopeKey;
     this.logger = dependencies.logger;
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.bindingsNaming = dependencies.bindingsNaming;
     this.inboundsNaming = dependencies.inboundsNaming;
-    this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
-    );
-  }
-
-  declare(registry: OperationRegistry): void {
-    registry.register(custodyOperations.create, (input, caller) =>
-      this.create(input, caller),
-    );
-    registry.register(custodyOperations.platform_list, () => platformList());
-    registry.register(custodyOperations.get, (input, caller) =>
-      this.get(input, caller),
-    );
-    registry.register(custodyOperations.list, (input, caller) =>
-      this.list(input, caller),
-    );
-    registry.register(custodyOperations.rotate, (input, caller) =>
-      this.rotate(input, caller),
-    );
-    registry.register(custodyOperations.update_metadata, (input, caller) =>
-      this.updateMetadata(input, caller),
-    );
-    registry.register(custodyOperations.revoke, (input, caller) =>
-      this.revoke(input, caller),
-    );
-    registry.register(custodyOperations.archive, (input, caller) =>
-      this.archive(input, caller),
-    );
-    registry.register(custodyOperations.login, (input, caller) =>
-      this.login(input, caller),
-    );
-    registry.register(custodyOperations.login_code, (input, caller) =>
-      this.loginCode(input, caller),
-    );
-    registry.register(custodyOperations.login_status, (input, caller) =>
-      this.loginStatus(input, caller),
     );
   }
 
@@ -512,6 +387,7 @@ export class CustodyComponent implements Service {
         this.clientSecret(identity.clientId),
         row,
         material,
+        this.platforms,
       );
       this.logger.info(
         {
@@ -545,7 +421,7 @@ export class CustodyComponent implements Service {
       row,
       envelope,
     );
-    const written = applyReport(tx, this.envelopeKey, report);
+    const written = applyReport(tx, this.envelopeKey, report, this.platforms);
     this.logger.info(
       { executionId: row.executionId, credentialId: report.credentialId },
       written ? "credential report" : "credential report stale",
@@ -616,28 +492,37 @@ export class CustodyComponent implements Service {
     };
   }
 
-  resourceInventory(tx: Transaction): ResourceEntry[] {
+  resourceInventory(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+  ): ResourceEntry[] {
     const rows = tx.database
       .prepare(
-        "SELECT id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at FROM credential AS current WHERE ended_at IS NULL AND revision = (SELECT MAX(revision) FROM credential WHERE name = current.name AND ended_at IS NULL) ORDER BY name",
+        "SELECT id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at FROM credential AS current WHERE ended_at IS NULL AND revision = (SELECT MAX(revision) FROM credential WHERE name = current.name AND ended_at IS NULL) AND platform IN (SELECT value FROM json_each(?)) ORDER BY name",
       )
-      .all() as LiveRow[];
-    return rows.map((row) => ({
-      scope: HealthScope.Global,
-      project: null,
-      name: encodeURIComponent(row.name),
-      target: `${TARGET_KIND_CREDENTIAL}:${row.id}`,
-      capability:
-        PLATFORM_CAPABILITY[row.platform as Platform] ?? CAPABILITY_NONE,
-      check: capturedResourceCheck(row, this.envelopeKey),
-    }));
+      .all(JSON.stringify(Object.keys(set.platforms))) as LiveRow[];
+    return rows.map((row) => {
+      const entry = ownedPlatform(set, row.platform)!;
+      return {
+        scope: HealthScope.Global,
+        project: null,
+        name: encodeURIComponent(row.name),
+        target: `${TARGET_KIND_CREDENTIAL}:${row.id}`,
+        capability: entry.capability,
+        check: capturedResourceCheck(row, this.envelopeKey, entry),
+      };
+    });
   }
 
-  modelListCheck(tx: Transaction, credentialName: string): ResourceCheck {
+  resourceCheck(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+  ): ResourceCheck {
     const row = newestLive(tx, credentialName);
-    if (!row || !((row.platform as Platform) in LLM_PROVIDER_VALIDATORS))
-      return async () => ResourceStatus.Unknown;
-    return capturedResourceCheck(row, this.envelopeKey);
+    const entry = row && ownedPlatform(set, row.platform);
+    if (!row || !entry) return async () => ResourceStatus.Unknown;
+    return capturedResourceCheck(row, this.envelopeKey, entry);
   }
 
   credentialDependents(
@@ -650,192 +535,113 @@ export class CustodyComponent implements Service {
   } {
     return {
       agentProviders: this.agentProvidersDependentOn(tx, credentialName),
-      bindings: this.bindingsNaming(tx, credentialName),
+      bindings: this.bindingsNaming(tx, credentialName).map(
+        ({ bindingId, projectId }) => ({ bindingId, projectId }),
+      ),
       inbounds: this.inboundsNaming(tx, credentialName),
     };
   }
 
-  private create(
-    input: typeof custodyOperations.create.input._output,
-    caller: CallerContext,
-  ): CredentialAnswer {
-    return caller.commit((tx) => {
-      const bodyResult = credentialCreateSchema.safeParse(input.body);
-      if (!bodyResult.success) throw invalidInput();
-      const { name, platform, secret, metadata } = bodyResult.data;
-      if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
-      if (!isPlatform(platform))
-        throw new OperationError(
-          HttpStatus.BadRequest,
-          CustodyErrorCode.UnsupportedPlatform,
-          "Unsupported platform.",
-        );
-      const supportedPlatform = platform;
-      if (
-        PLATFORM_VALIDATORS[supportedPlatform].secretShape === SecretShape.OAuth
-      )
-        throw new OperationError(
-          HttpStatus.BadRequest,
-          CustodyErrorCode.UnsupportedEntry,
-          "Unsupported credential entry.",
-        );
-      const existing = rowsForName(tx, name);
-      if (existing.length !== NO_ROWS)
-        throw new OperationError(
-          HttpStatus.Conflict,
-          CustodyErrorCode.Conflict,
-          "Credential name already exists.",
-          { id: existing[0]!.id },
-        );
-      const parsedSecret =
-        secretSchemaForPlatform(supportedPlatform).safeParse(secret);
-      if (!parsedSecret.success) throw invalidInput();
-      const metadataSchema = metadataSchemaForPlatform(supportedPlatform);
-      let parsedMetadata: Record<string, unknown> | null = null;
-      if (metadataSchema !== null) {
-        const result = metadataSchema.safeParse(metadata);
-        if (!result.success) throw invalidInput();
-        parsedMetadata = result.data as Record<string, unknown>;
-        if (
-          supportedPlatform === Platform.OpenAICompatible &&
-          (parsedMetadata.models as unknown[]).length !== EMPTY_MODELS
-        )
-          throw invalidInput();
-      } else if (metadata !== null) throw invalidInput();
-      const id = createIdentity(CREDENTIAL_PREFIX);
-      const { nonce, ciphertext } = encrypt(
-        this.envelopeKey,
-        id,
-        platform,
-        parsedSecret.data,
-      );
-      tx.database
-        .prepare(
-          "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-        )
-        .run(
-          id,
-          name,
-          platform,
-          FIRST_REVISION,
-          nonce,
-          ciphertext,
-          parsedMetadata === null ? null : canonicalJSON(parsedMetadata),
-          Date.now(),
-        );
-      this.logger.info(
-        {
-          credentialId: id,
-          humanIdentity:
-            caller.identity?.kind === IdentityKind.Human
-              ? caller.identity.accountId
-              : undefined,
-        },
-        "credential created",
-      );
-      return answerForName(tx, name)!;
-    });
-  }
-
-  private get(
-    input: typeof custodyOperations.get.input._output,
-    caller: CallerContext,
-  ): CredentialAnswer {
-    return caller.commit((tx) => {
-      this.drainRevisions(tx, input.params.credentialName, Date.now());
-      const answer = answerForName(tx, input.params.credentialName);
-      if (answer === null)
-        throw new OperationError(
-          HttpStatus.NotFound,
-          CustodyErrorCode.NotFound,
-          "Credential not found.",
-        );
-      return answer;
-    });
-  }
-
-  private list(
-    input: typeof custodyOperations.list.input._output,
-    caller: CallerContext,
-  ): { items: CredentialAnswer[]; nextCursor: string | null } {
-    return caller.commit((tx) => {
-      const {
-        platform,
-        includeArchived,
-        limit: requestedLimit,
-        cursor,
-      } = input.query;
-      const after = cursor === undefined ? "" : decodeCursor(cursor);
-      const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
-      const names = tx.database
-        .prepare(
-          "SELECT name FROM credential WHERE name > ? AND (? IS NULL OR platform = ?) GROUP BY name HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC LIMIT ?",
-        )
-        .all(
-          after,
-          platform ?? null,
-          platform ?? null,
-          includeArchived === QUERY_TRUE ? INCLUDE : EXCLUDE,
-          limit + EXTRA_ROW,
-        ) as {
-        name: string;
-      }[];
-      const page = names.slice(NO_ROWS, limit);
-      const now = Date.now();
-      for (const { name } of page) this.drainRevisions(tx, name, now);
-      const items = page.map(({ name }) => answerForName(tx, name)!);
-      const nextCursor =
-        names.length > limit
-          ? Buffer.from(page.at(-1)!.name, "utf8").toString("base64url")
-          : null;
-      return { items, nextCursor };
-    });
-  }
-
-  private refuseRemovedModels(
+  create(
     tx: Transaction,
-    credentialName: string,
-    removedIds: string[],
-  ): void {
-    const models = removedIds
-      .map((model) => ({
-        model,
-        agents: this.enablementsDependentOnModel(tx, credentialName, model).map(
-          ({ agentName }) => agentName,
-        ),
-      }))
-      .filter(({ agents }) => agents.length > NO_ROWS);
-    if (models.length > NO_ROWS)
+    set: CredentialPlatformSet,
+    body: CredentialCreate,
+    humanIdentity: string | undefined,
+  ): CredentialAnswer {
+    const { name, platform, secret, metadata } = body;
+    if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
+    const entry = ownedPlatform(set, platform);
+    if (!entry)
       throw new OperationError(
-        HttpStatus.Conflict,
-        CustodyErrorCode.ModelInUse,
-        "Credential model is in use.",
-        { models },
+        HttpStatus.BadRequest,
+        CustodyErrorCode.UnsupportedPlatform,
+        "Unsupported platform.",
       );
-  }
-
-  private checkModels(
-    tx: Transaction,
-    row: LiveRow,
-    metadata: Record<string, unknown> | null,
-    allowBaseUrlChange: boolean,
-  ): void {
-    if (row.platform !== Platform.OpenAICompatible) return;
-    const current = openaiCompatibleMetadataSchema.parse(
-      JSON.parse(row.metadata!),
+    if (entry.secretShape === SecretShape.OAuth)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.UnsupportedEntry,
+        "Unsupported credential entry.",
+      );
+    this.requireAvailableName(tx, name);
+    const parsedSecret = secretSchemas[entry.secretShape].safeParse(secret);
+    if (!parsedSecret.success) throw invalidInput();
+    const next = validatedMetadata(entry, metadata);
+    set.checkMetadata?.(tx, {
+      name,
+      platform,
+      change: RevisionChange.Create,
+      current: null,
+      next,
+    });
+    const id = createIdentity(CREDENTIAL_PREFIX);
+    const { nonce, ciphertext } = encrypt(
+      this.envelopeKey,
+      id,
+      platform,
+      parsedSecret.data,
     );
-    const next = openaiCompatibleMetadataSchema.parse(metadata);
-    if (!allowBaseUrlChange && current.baseUrl !== next.baseUrl)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        CustodyErrorCode.BaseUrlFixed,
-        "Credential base URL cannot be changed by metadata update.",
+    tx.database
+      .prepare(
+        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+      )
+      .run(
+        id,
+        name,
+        platform,
+        FIRST_REVISION,
+        nonce,
+        ciphertext,
+        next === null ? null : canonicalJSON(next),
+        Date.now(),
       );
-    const nextIds = new Set(next.models.map((model) => model.id));
-    const removedIds = current.models
-      .filter((model) => !nextIds.has(model.id))
-      .map((model) => model.id);
-    this.refuseRemovedModels(tx, row.name, removedIds);
+    this.logger.info({ credentialId: id, humanIdentity }, "credential created");
+    return answerForName(tx, name)!;
+  }
+
+  get(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+  ): CredentialAnswer {
+    refuseForeign(tx, set, credentialName);
+    this.drainRevisions(tx, credentialName, Date.now());
+    const answer = answerForName(tx, credentialName);
+    if (answer === null) throw notFound();
+    return answer;
+  }
+
+  list(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    query: CredentialListQuery,
+  ): CredentialListAnswer {
+    const { platform, includeArchived, limit: requestedLimit, cursor } = query;
+    const after = cursor === undefined ? "" : decodeCursor(cursor);
+    const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
+    const names = tx.database
+      .prepare(
+        "SELECT name FROM credential WHERE name > ? AND (? IS NULL OR platform = ?) AND platform IN (SELECT value FROM json_each(?)) GROUP BY name HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC LIMIT ?",
+      )
+      .all(
+        after,
+        platform ?? null,
+        platform ?? null,
+        JSON.stringify(Object.keys(set.platforms)),
+        includeArchived === QUERY_TRUE ? INCLUDE : EXCLUDE,
+        limit + EXTRA_ROW,
+      ) as {
+      name: string;
+    }[];
+    const page = names.slice(NO_ROWS, limit);
+    const now = Date.now();
+    for (const { name } of page) this.drainRevisions(tx, name, now);
+    const items = page.map(({ name }) => answerForName(tx, name)!);
+    const nextCursor =
+      names.length > limit
+        ? Buffer.from(page.at(-1)!.name, "utf8").toString("base64url")
+        : null;
+    return { items, nextCursor };
   }
 
   private insertRevision(
@@ -879,166 +685,147 @@ export class CustodyComponent implements Service {
     }
   }
 
-  private rotate(
-    input: typeof custodyOperations.rotate.input._output,
-    caller: CallerContext,
+  rotate(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    body: CredentialRotateBody,
+    humanIdentity: string | undefined,
   ): CredentialAnswer {
-    return caller.commit((tx) => {
-      const row = requireLive(
-        tx,
-        input.params.credentialName,
-        input.body.expectedRevision,
-      );
-      const platform = row.platform as Platform;
-      const secret = secretSchemaForPlatform(platform).safeParse(
-        input.body.secret,
-      );
-      if (!secret.success) throw invalidInput();
-      const metadata = validatedMetadata(
-        platform,
-        input.body.metadata === undefined
-          ? row.metadata === null
-            ? null
-            : JSON.parse(row.metadata)
-          : input.body.metadata,
-      );
-      this.checkModels(tx, row, metadata, true);
-      const id = createIdentity(CREDENTIAL_PREFIX);
-      const now = Date.now();
-      this.insertRevision(tx, row, id, secret.data, metadata, now);
-      this.drainRevisions(tx, row.name, now);
-      this.logger.info(
-        {
-          credentialId: id,
-          humanIdentity:
-            caller.identity?.kind === IdentityKind.Human
-              ? caller.identity.accountId
-              : undefined,
-        },
-        "credential rotated",
-      );
-      return answerForName(tx, row.name)!;
+    refuseForeign(tx, set, credentialName);
+    const row = requireLive(tx, credentialName, body.expectedRevision);
+    const entry = ownedPlatform(set, row.platform)!;
+    const secret = secretSchemas[entry.secretShape].safeParse(body.secret);
+    if (!secret.success) throw invalidInput();
+    const current = parsedMetadata(row);
+    const metadata = validatedMetadata(
+      entry,
+      body.metadata === undefined ? current : body.metadata,
+    );
+    set.checkMetadata?.(tx, {
+      name: row.name,
+      platform: row.platform,
+      change: RevisionChange.Rotate,
+      current,
+      next: metadata,
     });
+    const id = createIdentity(CREDENTIAL_PREFIX);
+    const now = Date.now();
+    this.insertRevision(tx, row, id, secret.data, metadata, now);
+    this.drainRevisions(tx, row.name, now);
+    this.logger.info({ credentialId: id, humanIdentity }, "credential rotated");
+    return answerForName(tx, row.name)!;
   }
 
-  private updateMetadata(
-    input: typeof custodyOperations.update_metadata.input._output,
-    caller: CallerContext,
+  updateMetadata(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    body: CredentialUpdateMetadataBody,
+    humanIdentity: string | undefined,
   ): CredentialAnswer {
-    return caller.commit((tx) => {
-      const row = requireLive(
-        tx,
-        input.params.credentialName,
-        input.body.expectedRevision,
-      );
-      const metadata = validatedMetadata(
-        row.platform as Platform,
-        input.body.metadata,
-      );
-      this.checkModels(tx, row, metadata, false);
-      const id = createIdentity(CREDENTIAL_PREFIX);
-      const secret = decrypt(
-        this.envelopeKey,
-        row.id,
-        row.platform,
-        row.nonce,
-        row.ciphertext,
-      );
-      this.insertRevision(tx, row, id, secret, metadata, Date.now());
-      this.logger.info(
-        {
-          credentialId: id,
-          humanIdentity:
-            caller.identity?.kind === IdentityKind.Human
-              ? caller.identity.accountId
-              : undefined,
-        },
-        "credential metadata updated",
-      );
-      return answerForName(tx, row.name)!;
+    refuseForeign(tx, set, credentialName);
+    const row = requireLive(tx, credentialName, body.expectedRevision);
+    const entry = ownedPlatform(set, row.platform)!;
+    const metadata = validatedMetadata(entry, body.metadata);
+    set.checkMetadata?.(tx, {
+      name: row.name,
+      platform: row.platform,
+      change: RevisionChange.Metadata,
+      current: parsedMetadata(row),
+      next: metadata,
     });
+    const id = createIdentity(CREDENTIAL_PREFIX);
+    const secret = decrypt(
+      this.envelopeKey,
+      row.id,
+      row.platform,
+      row.nonce,
+      row.ciphertext,
+    );
+    this.insertRevision(tx, row, id, secret, metadata, Date.now());
+    this.logger.info(
+      { credentialId: id, humanIdentity },
+      "credential metadata updated",
+    );
+    return answerForName(tx, row.name)!;
   }
 
-  private revoke(
-    input: typeof custodyOperations.revoke.input._output,
-    caller: CallerContext,
+  revoke(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+    revision: number,
   ): CredentialAnswer {
-    return caller.commit((tx) => {
-      const { credentialName, revision } = input.params;
-      const now = Date.now();
-      const row = tx.database
-        .prepare(
-          "SELECT id, ended_at FROM credential WHERE name = ? AND revision = ?",
-        )
-        .get(credentialName, revision) as
-        { id: string; ended_at: number | null } | undefined;
-      if (!row)
-        throw new OperationError(
-          HttpStatus.NotFound,
-          CustodyErrorCode.RevisionNotFound,
-          "Credential revision not found.",
-        );
-      if (row.ended_at !== null)
-        throw new OperationError(
-          HttpStatus.Conflict,
-          CustodyErrorCode.RevisionEnded,
-          "Credential revision already ended.",
-        );
-      const later = tx.database
-        .prepare(
-          "SELECT id FROM credential WHERE name = ? AND revision > ? AND ended_at IS NULL LIMIT 1",
-        )
-        .get(credentialName, revision);
-      if (!later)
-        throw new OperationError(
-          HttpStatus.Conflict,
-          CustodyErrorCode.NewestLive,
-          "Cannot revoke the newest live credential revision.",
-        );
-      tx.database
-        .prepare("UPDATE credential SET ended_at = ? WHERE id = ?")
-        .run(now, row.id);
-      this.drainRevisions(tx, credentialName, now);
-      return answerForName(tx, credentialName)!;
-    });
-  }
-
-  private archive(
-    input: typeof custodyOperations.archive.input._output,
-    caller: CallerContext,
-  ): CredentialAnswer {
-    return caller.commit((tx) => {
-      const { credentialName } = input.params;
-      refuseArchived(tx, credentialName);
-      if (rowsForName(tx, credentialName).length === NO_ROWS)
-        throw new OperationError(
-          HttpStatus.NotFound,
-          CustodyErrorCode.NotFound,
-          "Credential not found.",
-        );
-      const dependents = this.credentialDependents(tx, credentialName);
-      if (
-        dependents.agentProviders.length +
-          dependents.bindings.length +
-          dependents.inbounds.length >
-        NO_ROWS
+    refuseForeign(tx, set, credentialName);
+    const now = Date.now();
+    const row = tx.database
+      .prepare(
+        "SELECT id, ended_at FROM credential WHERE name = ? AND revision = ?",
       )
-        throw new OperationError(
-          HttpStatus.Conflict,
-          CustodyErrorCode.InUse,
-          "Credential is in use.",
-          dependents,
-        );
-      tx.database
-        .prepare(
-          "UPDATE credential SET ended_at = ? WHERE name = ? AND ended_at IS NULL",
-        )
-        .run(Date.now(), credentialName);
-      return answerForName(tx, credentialName)!;
-    });
+      .get(credentialName, revision) as
+      { id: string; ended_at: number | null } | undefined;
+    if (!row)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        CustodyErrorCode.RevisionNotFound,
+        "Credential revision not found.",
+      );
+    if (row.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionEnded,
+        "Credential revision already ended.",
+      );
+    const later = tx.database
+      .prepare(
+        "SELECT id FROM credential WHERE name = ? AND revision > ? AND ended_at IS NULL LIMIT 1",
+      )
+      .get(credentialName, revision);
+    if (!later)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.NewestLive,
+        "Cannot revoke the newest live credential revision.",
+      );
+    tx.database
+      .prepare("UPDATE credential SET ended_at = ? WHERE id = ?")
+      .run(now, row.id);
+    this.drainRevisions(tx, credentialName, now);
+    return answerForName(tx, credentialName)!;
   }
 
-  private requireAvailableName(tx: Transaction, name: string): void {
+  archive(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+  ): CredentialAnswer {
+    refuseForeign(tx, set, credentialName);
+    refuseArchived(tx, credentialName);
+    if (rowsForName(tx, credentialName).length === NO_ROWS) throw notFound();
+    const dependents = this.credentialDependents(tx, credentialName);
+    if (
+      dependents.agentProviders.length +
+        dependents.bindings.length +
+        dependents.inbounds.length >
+      NO_ROWS
+    )
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.InUse,
+        "Credential is in use.",
+        dependents,
+      );
+    tx.database
+      .prepare(
+        "UPDATE credential SET ended_at = ? WHERE name = ? AND ended_at IS NULL",
+      )
+      .run(Date.now(), credentialName);
+    return answerForName(tx, credentialName)!;
+  }
+
+  requireAvailableName(tx: Transaction, name: string): void {
+    if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
     const existing = rowsForName(tx, name);
     if (existing.length !== NO_ROWS)
       throw new OperationError(
@@ -1049,152 +836,32 @@ export class CustodyComponent implements Service {
       );
   }
 
-  private completeLogin(
-    session: LoginSession,
-    flow: OAuthLogin,
-    secret: OAuthSecret,
-  ): void {
-    const id = this.store.transaction((tx) => {
-      flow.requirePending();
-      this.requireAvailableName(tx, session.credentialName);
-      const id = createIdentity(CREDENTIAL_PREFIX);
-      const { nonce, ciphertext } = encrypt(
-        this.envelopeKey,
-        id,
-        session.platform,
-        secret,
-      );
-      tx.database
-        .prepare(
-          "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)",
-        )
-        .run(
-          id,
-          session.credentialName,
-          session.platform,
-          FIRST_REVISION,
-          nonce,
-          ciphertext,
-          this.now(),
-        );
-      return id;
-    });
-    this.sessions.complete(session.id);
-    this.logger.info(
-      { credentialId: id, humanIdentity: session.humanIdentity },
-      "credential login completed",
-    );
-  }
-
-  private async login(
-    input: typeof custodyOperations.login.input._output,
-    caller: CallerContext,
-  ): Promise<typeof custodyOperations.login.output._output> {
-    if (!this.acceptingLogins)
-      throw new Diagnostic(
-        CustodyErrorCode.Stopped,
-        "custody: login is stopped.",
-      );
-    const { platform, name, mode: requested } = input.body;
-    if (!isPlatform(platform))
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        CustodyErrorCode.UnsupportedPlatform,
-        "Unsupported platform.",
-      );
-    const supported = platform;
-    if (PLATFORM_VALIDATORS[supported].secretShape !== SecretShape.OAuth)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        CustodyErrorCode.UnsupportedEntry,
-        "Unsupported credential entry.",
-      );
-    if (!validateNameForm(name) || isReservedName(name)) throw invalidInput();
-    const mode = loginMode(supported, requested);
-    this.store.transaction((tx) => this.requireAvailableName(tx, name));
-    if (caller.identity?.kind !== IdentityKind.Human) throw invalidInput();
-    const session = this.sessions.start(
+  createLoginRevision(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    name: string,
+    platform: string,
+    secret: unknown,
+    now: number,
+  ): string {
+    const entry = ownedPlatform(set, platform);
+    assert.equal(entry?.secretShape, SecretShape.OAuth);
+    this.requireAvailableName(tx, name);
+    const parsedSecret = secretSchemas[entry.secretShape].safeParse(secret);
+    if (!parsedSecret.success) throw invalidInput();
+    const id = createIdentity(CREDENTIAL_PREFIX);
+    const { nonce, ciphertext } = encrypt(
+      this.envelopeKey,
+      id,
       platform,
-      mode,
-      caller.identity.accountId,
-      name,
-      this.now(),
+      parsedSecret.data,
     );
-    const flow = new OAuthLogin(session, this.sessions, this.now);
-    this.logins.set(session.id, flow);
-    const unsubscribe = caller.context.onCancel(() => flow.abort());
-    void flow
-      .run(this.oauthProviders, (secret) =>
-        this.completeLogin(session, flow, secret),
+    tx.database
+      .prepare(
+        "INSERT INTO credential (id, name, platform, revision, nonce, ciphertext, metadata, created_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)",
       )
-      .then(() => this.logins.delete(session.id));
-    try {
-      await flow.ready.promise;
-      const cancelled = caller.context.err();
-      if (cancelled) throw cancelled;
-      if (
-        session.state === LoginSessionState.Failed ||
-        session.state === LoginSessionState.Expired ||
-        session.address === null
-      )
-        throw flow.failure;
-      return caller.commit(() => ({
-        sessionId: session.id,
-        address: session.address!,
-        code: session.code,
-        expiresAt: session.expiresAt,
-      }));
-    } finally {
-      unsubscribe();
-    }
-  }
-
-  private loginSession(id: string): LoginSession {
-    const session = this.sessions.get(id);
-    if (!session || session.state === LoginSessionState.Expired)
-      throw loginNotFound();
-    if (session.expiresAt <= this.now()) {
-      this.logins.get(id)?.expire();
-      throw loginNotFound();
-    }
-    return session;
-  }
-
-  private loginCode(
-    input: typeof custodyOperations.login_code.input._output,
-    caller: CallerContext,
-  ): typeof custodyOperations.login_code.output._output {
-    const session = this.loginSession(input.params.sessionId);
-    return caller.commit(() => {
-      const flow = this.logins.get(session.id);
-      if (!flow)
-        throw new OperationError(
-          HttpStatus.Conflict,
-          LOGIN_VALUE_NOT_AWAITED,
-          "No login value is awaited.",
-        );
-      flow.supply(input.body.value);
-      return { sessionId: session.id };
-    });
-  }
-
-  private loginStatus(
-    input: typeof custodyOperations.login_status.input._output,
-    caller: CallerContext,
-  ): typeof custodyOperations.login_status.output._output {
-    const session = this.loginSession(input.params.sessionId);
-    return caller.commit(() => ({
-      sessionId: session.id,
-      state: session.state,
-      lastMessage: session.lastMessage,
-      failureReason: session.failureReason,
-    }));
-  }
-
-  private abortLogins(): void {
-    this.acceptingLogins = false;
-    for (const flow of this.logins.values()) flow.abort();
-    this.logins.clear();
+      .run(id, name, platform, FIRST_REVISION, nonce, ciphertext, now);
+    return id;
   }
 
   start(): Promise<Error | null> {
@@ -1210,11 +877,9 @@ export class CustodyComponent implements Service {
     return this.startTask;
   }
   quiesce(): Promise<Error | null> {
-    this.abortLogins();
     return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
-    this.abortLogins();
     this.shutdown.cancel();
     this.started = false;
     this.stopTask ??= Promise.resolve(null);

@@ -4,20 +4,29 @@ import { test } from "node:test";
 import type { Command } from "commander";
 import { createProgram } from "./index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
-import { custodyOperations } from "../../custody/contract.ts";
+import { llmOperations } from "../../llm/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
+import { storageOperations } from "../../storage/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
 
 const PAGE_INVENTORIES = {
-  credential: "## Command inventory",
+  llm: "## Command inventory",
+  repository: "## Command inventory",
+  storage: "## Command inventory",
   project: "## Proposed command inventory and synopsis",
   mission: "## Target command inventory and synopsis",
   scheduler: "## Command inventory and operation mapping",
   worker: "## Command inventory",
   gateway: "## Complete command table",
   other: "## Command inventory",
+};
+const PAGE_PREFIXES: Partial<Record<string, string>> = {
+  llm: "llm credential",
+  repository: "repository credential",
+  storage: "storage credential",
 };
 const EXEMPT_LEAVES = new Map([
   ["mission evidence upload", "External-harness phase owns the CLI helper"],
@@ -56,18 +65,22 @@ const TOP_LEVEL_NAMES = new Set([
   "worker",
   "tracking",
   "gateway",
-  "credential",
+  "llm",
+  "repository",
+  "storage",
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 113;
+const DOCUMENTED_COUNT = 129;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 107;
-const OPERATION_COUNT = 108;
+const IMPLEMENTED_COUNT = 123;
+const OPERATION_COUNT = 124;
 const PAGE_COUNTS = {
-  credential: 11,
+  llm: 11,
+  repository: 8,
+  storage: 8,
   project: 11,
   mission: 54,
   scheduler: 8,
@@ -94,7 +107,9 @@ function inventory(group: string, heading: string): Documented[] {
     const spans = [...line.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
     const synopsis =
       spans[0]?.replace(
-        new RegExp(`^kanthord ${group === OTHER_PAGE ? "" : `${group} `}`),
+        new RegExp(
+          `^kanthord ${group === OTHER_PAGE ? "" : `${PAGE_PREFIXES[group] ?? group} `}`,
+        ),
         "",
       ) ?? "";
     const tokens = synopsis.split(/\s+/);
@@ -103,9 +118,12 @@ function inventory(group: string, heading: string): Documented[] {
     if (!leaf) return [];
     return [
       {
-        path: group === OTHER_PAGE ? leaf : `${group} ${leaf}`,
+        path:
+          group === OTHER_PAGE
+            ? leaf
+            : `${PAGE_PREFIXES[group] ?? group} ${leaf}`,
         operations: spans.filter((span) =>
-          /^(gateway|credential|worker|scheduler|project|mission)\.[A-Za-z_.]+$/.test(
+          /^(gateway|llm|repository|storage|worker|scheduler|project|mission)\.[A-Za-z_.]+$/.test(
             span,
           ),
         ),
@@ -192,7 +210,9 @@ test("documented ERD2 CLI leaves and API-only operations exactly cover the dispa
   assert.ok(API_ONLY_OPERATIONS.every((id) => !documentedOperations.has(id)));
   const expected = [
     gatewayOperations,
-    custodyOperations,
+    llmOperations,
+    repositoryOperations,
+    storageOperations,
     workerOperations,
     schedulerOperations,
     projectOperations,

@@ -15,11 +15,12 @@ export const unusedHostTools: HostTools = {
   evidenceUpload: () =>
     Promise.reject(new Error("Unexpected evidence upload in fixture")),
 };
+import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import {
-  createModelRuntime,
-  resolveModel,
+  modelConnectorInput,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
+import { loadPi } from "./pi.ts";
 export {
   fauxAssistantMessage,
   fauxToolCall,
@@ -79,9 +80,15 @@ export function scriptedModelRuntime(
   assert.ok(provider.provider);
   assert.ok(provider.calls);
   return async (input) => {
-    const runtime = await createModelRuntime(input);
+    const runtime = await createModelRuntime(
+      await loadPi(),
+      modelConnectorInput(input),
+    );
     runtime.registerNativeProvider(provider.provider);
-    return { runtime, model: resolveModel(runtime, input.setup) };
+    return {
+      runtime,
+      model: resolveModel(runtime, input.setup.effectiveConfiguration),
+    };
   };
 }
 

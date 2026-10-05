@@ -48,7 +48,7 @@ import {
   workerConfigSchema,
   type ProjectBindings,
   type AgentDependentBinding,
-  type BindingRevision,
+  type BindingNaming,
   type BindingRevisionResult,
   type CreateMission,
   type LiveNodesPinning,
@@ -574,7 +574,7 @@ export class ProjectService implements Service, ProjectBindings {
       },
     );
   }
-  bindingsNaming(tx: Transaction, credentialName: string): BindingRevision[] {
+  bindingsNaming(tx: Transaction, credentialName: string): BindingNaming[] {
     assert.ok(tx.database.isTransaction);
     const dependents = readCredentialBindings(tx, credentialName)
       .filter(
@@ -585,6 +585,8 @@ export class ProjectService implements Service, ProjectBindings {
       .map(({ binding }) => ({
         bindingId: binding.id,
         projectId: binding.projectId,
+        projectName: requireProject(tx, binding.projectId).name,
+        name: binding.name,
       }));
     assert.equal(
       new Set(dependents.map(({ bindingId }) => bindingId)).size,

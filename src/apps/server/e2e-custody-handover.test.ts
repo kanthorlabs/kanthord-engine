@@ -163,13 +163,13 @@ function machine(
 }
 
 async function resources(c: ReturnType<typeof cli>) {
-  await c.write(["credential", "create"], {
+  await c.write(["llm", "credential", "create"], {
     name: NAME,
     platform: PROVIDER,
     metadata: null,
     secret: { key: FIRST },
   });
-  await c.write(["credential", "create"], {
+  await c.write(["repository", "credential", "create"], {
     name: "github",
     platform: "github",
     metadata: null,
@@ -293,7 +293,12 @@ async function setup(t: TestContext) {
     );
   const claim = await pull();
   assert.equal(claim.kind, WorkPullKind.Claimed);
-  const stored = await c.read<CredentialAnswer>(["credential", "get", NAME]);
+  const stored = await c.read<CredentialAnswer>([
+    "llm",
+    "credential",
+    "get",
+    NAME,
+  ]);
   assert.ok(stored.revisions[0]);
   const keys = deriveHandoverKeys(general.clientSecret);
   t.after(() => {
@@ -432,11 +437,12 @@ test(
     await t.test(
       "E05.4 rotation retains the pinned older revision",
       async () => {
-        await h.write(["credential", "rotate", NAME], {
+        await h.write(["llm", "credential", "rotate", NAME], {
           expectedRevision: ONE,
           secret: { key: SECOND },
         });
         const stored = await h.read<CredentialAnswer>([
+          "llm",
           "credential",
           "get",
           NAME,
@@ -466,6 +472,7 @@ test(
           credential(NEXT),
         );
         const stored = await h.read<CredentialAnswer>([
+          "llm",
           "credential",
           "get",
           NAME,
@@ -538,8 +545,9 @@ test(
     await t.test(
       "E05.8 revoke refuses both handover and refresh of the pin",
       async () => {
-        await h.read(["credential", "revoke", NAME, String(ONE)]);
+        await h.read(["llm", "credential", "revoke", NAME, String(ONE)]);
         const stored = await h.read<CredentialAnswer>([
+          "llm",
           "credential",
           "get",
           NAME,
@@ -610,11 +618,12 @@ test(
           X2,
         ]);
         assert.deepEqual(execution.credentials, [C2]);
-        await h.write(["credential", "rotate", NAME], {
+        await h.write(["llm", "credential", "rotate", NAME], {
           expectedRevision: TWO,
           secret: { key: THIRD },
         });
         const stored = await h.read<CredentialAnswer>([
+          "llm",
           "credential",
           "get",
           NAME,
@@ -639,6 +648,7 @@ test(
           h.env,
         );
         const stored = await h.read<CredentialAnswer>([
+          "llm",
           "credential",
           "get",
           NAME,

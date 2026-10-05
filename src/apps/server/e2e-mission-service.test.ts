@@ -64,6 +64,7 @@ const INVALID_BINDING_CODE = "cli.mission.node.rebind.invalid_binding_id";
 const APPLY = "apply";
 const BINDING = "binding";
 const CREDENTIAL = "credential";
+const REPOSITORY = "repository";
 const FILE = "--file";
 const ONE = 1;
 const TWO = 2;
@@ -556,7 +557,10 @@ test(
       secret: { key: "test-secret" },
     });
     success(
-      await kanthord([CREDENTIAL, CREATE, FILE, credential], fixture.env),
+      await kanthord(
+        [REPOSITORY, CREDENTIAL, CREATE, FILE, credential],
+        fixture.env,
+      ),
     );
     const bindingFile = jsonFile(fixture, "binding.json", {
       version: ONE,
@@ -852,7 +856,12 @@ async function configureRepository(
     metadata: null,
     secret: { key: "test-secret" },
   });
-  success(await kanthord([CREDENTIAL, CREATE, FILE, credential], fixture.env));
+  success(
+    await kanthord(
+      [REPOSITORY, CREDENTIAL, CREATE, FILE, credential],
+      fixture.env,
+    ),
+  );
   const bindingFile = jsonFile(fixture, "import-binding.json", {
     version: ONE,
     bindings: {

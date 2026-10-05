@@ -39,9 +39,31 @@ engine/
 │   │   ├── yaml.ts             # Bounded YAML mapping parsing
 │   │   ├── files.ts            # Private filesystem validation and publication
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
+│   │   ├── probe.ts            # Remote HTTP probe and failure-reason redaction
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
-│   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot and node-branch transport
-│   ├── custody/                # Custody component: credential envelope, platform validators, OAuth login sessions, and platform probes
+│   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, and repository credentials
+│   │   ├── contract.ts         # Repository credential route group
+│   │   ├── credential-platform.ts # github platform validator and GitHub probe
+│   │   └── credential.ts       # Repository credential routes over custody records and binding dependents
+│   ├── llm/                    # LLM component: LLM platforms, credential routes, OAuth login sessions, and the model connector
+│   │   ├── contract.ts         # LLM credential route group, login operations, and error codes
+│   │   ├── index.ts            # Component and platform table exports
+│   │   ├── platforms.ts        # LLM platform validators, metadata schemas, and model defaults
+│   │   ├── probes.ts           # LLM platform probes
+│   │   ├── sessions.ts         # In-memory OAuth login sessions
+│   │   ├── login.ts            # pi-ai OAuth login flow and interaction adapter
+│   │   ├── model-connector.ts  # Model runtime and model from a released credential
+│   │   └── service.ts          # Credential routes, metadata rules, login lifecycle, and healthchecks
+│   ├── storage/                # Storage component: storage platforms and credential routes
+│   │   ├── contract.ts         # Storage credential route group
+│   │   ├── index.ts            # Component and platform table exports
+│   │   ├── platforms.ts        # s3 platform validator and metadata schema
+│   │   ├── probe.ts            # S3 HeadBucket probe
+│   │   └── service.ts          # Storage credential routes over custody records and binding dependents
+│   ├── custody/                # Custody component: credential store, envelope, revisions, record functions, release, and handover
+│   │   ├── contract.ts         # Secret shapes, record schemas, platform set types, and record functions
+│   │   ├── names.ts            # Credential name form and reserved names
+│   │   ├── service.ts          # Record functions, suitability, release, handover, and inventory
 │   │   ├── payload.ts         # Normalized execution credential and stored secret conversion
 │   │   ├── execution-store.ts # Isolated execution credential view and serialized refresh reports
 │   │   └── client.ts          # Public execution credential store builder, error and type
@@ -117,7 +139,7 @@ engine/
 │   │   ├── tool-table.ts       # Declared tools, host checks and bounded hygienic bash
 │   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
 │   │   ├── prompt-composer.ts  # Layer selection, attribution, digests and work prompts
-│   │   ├── model-runtime.ts    # Execution credentials, model selection and runtime factory
+│   │   ├── model-runtime.ts    # Execution model runtime factory over the LLM model connector
 │   │   ├── test-support.ts     # Scripted offline provider and runtime fixtures
 │   │   ├── agent-session.ts    # Isolated in-memory sessions and setup deadlines
 │   │   ├── pinned-layers.ts    # Context and inference pins across compaction
@@ -153,6 +175,10 @@ engine/
 │       │   ├── jwt.ts          # Local JWT generation, inspection, and claim rendering
 │       │   ├── config-path.ts  # Shared server configuration path and help text
 │       │   ├── constants.ts    # CLI command names and exit codes
+│       │   ├── credential.ts   # Shared credential command group of a component
+│       │   ├── llm.ts          # LLM command group and login commands
+│       │   ├── repository.ts   # Repository command group
+│       │   ├── storage.ts      # Storage command group
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton
 │           ├── api.ts          # Server operation clients and bounded backoff
@@ -162,6 +188,9 @@ engine/
 │   ├── openapi.yaml             # Root contract index and package version
 │   └── openapi/                # Service path items and shared schemas
 │       ├── gateway/            # Gateway operation documents
+│       ├── llm/                # LLM credential operation documents
+│       ├── repository/         # Repository credential operation documents
+│       ├── storage/            # Storage credential operation documents
 │       ├── worker/             # Worker operation documents
 │       └── shared/             # Common OpenAPI components
 ├── scripts/                    # Development and acceptance utilities

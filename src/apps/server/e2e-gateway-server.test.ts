@@ -72,7 +72,7 @@ const SECRET_FIELD = "secret";
 const SECRET_VALUE = "e2e-gateway-secret-never-print";
 const IDEMPOTENCY_KEY = "idempotencyKey";
 const ENABLEMENT_COMMAND = ["worker", "agent", "enablement"];
-const MODEL_IN_USE = "credential.metadata.model_in_use";
+const MODEL_IN_USE = "llm.metadata.model_in_use";
 const LIVENESS_UNHEALTHY = "gateway.liveness.unhealthy";
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
 const INVENTORY_FAILED = "gateway.healthcheck.inventory_failed";
@@ -157,7 +157,16 @@ async function createCredential(
     secret: { key: SECRET_VALUE },
   });
   const answer = success<CredentialAnswer>(
-    await kanthord(["credential", "create", "--file", path], fixture.env),
+    await kanthord(
+      [
+        platform === GITHUB ? "repository" : "llm",
+        "credential",
+        "create",
+        "--file",
+        path,
+      ],
+      fixture.env,
+    ),
   );
   assert.equal(answer.name, name);
   assert.equal(answer.platform, platform);
@@ -331,9 +340,9 @@ test("E07.1 credential create and get return the same secret-free record", async
   assert.equal(created.revisions[0].revision, ONE);
   assert.equal(created.revisions[0].endedAt, null);
   const read = success<CredentialAnswer>(
-    await kanthord(["credential", "get", CREDENTIAL], fixture.env),
+    await kanthord(["llm", "credential", "get", CREDENTIAL], fixture.env),
   );
-  assert.deepEqual(read, created);
+  assert.deepEqual(read, { ...created, agentProviders: [] });
 });
 
 test("E07.2 anthropic credential enables swe@1 at revision one", async (t) => {
@@ -442,7 +451,14 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
   });
   const updated = success<CredentialAnswer>(
     await kanthord(
-      ["credential", "update-metadata", COMPAT_CREDENTIAL, "--file", add],
+      [
+        "llm",
+        "credential",
+        "update-metadata",
+        COMPAT_CREDENTIAL,
+        "--file",
+        add,
+      ],
       fixture.env,
     ),
   );
@@ -465,13 +481,23 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
   });
   refusal(
     await kanthord(
-      ["credential", "update-metadata", COMPAT_CREDENTIAL, "--file", remove],
+      [
+        "llm",
+        "credential",
+        "update-metadata",
+        COMPAT_CREDENTIAL,
+        "--file",
+        remove,
+      ],
       fixture.env,
     ),
     MODEL_IN_USE,
   );
   const read = success<CredentialAnswer>(
-    await kanthord(["credential", "get", COMPAT_CREDENTIAL], fixture.env),
+    await kanthord(
+      ["llm", "credential", "get", COMPAT_CREDENTIAL],
+      fixture.env,
+    ),
   );
   assert.deepEqual(read.revisions[0], updated.revisions[0]);
   assert.ok(read.revisions[1]);
@@ -482,6 +508,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
       ...revision,
       endedAt: read.revisions[index]!.endedAt,
     })),
+    agentProviders: [{ agent: AGENT, name: DEFAULT_PROVIDER }],
   });
 });
 

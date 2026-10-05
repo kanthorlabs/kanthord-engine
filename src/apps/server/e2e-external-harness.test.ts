@@ -47,7 +47,7 @@ test(
       inventoryOverrides: { custody: () => [] },
     });
     const cli = journeyClient(t, fixture.endpoint, fixture.token);
-    await cli.write(["credential", "create"], {
+    await cli.write(["repository", "credential", "create"], {
       name: "github",
       platform: "github",
       metadata: null,
