@@ -8,7 +8,7 @@ import { parseSshIdentity, type SshIdentity } from "./ssh-identity.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 const SSH_RESOLVE_FAILED = "repository.connector.ssh_resolve_failed";
-const EMPTY = "";
+const EMPTY_STRING = "";
 const EXPIRED = 0;
 const execFileAsync = promisify(execFile);
 
@@ -56,7 +56,7 @@ export async function resolveSshIdentity(
   context: Context,
   deadlineMs: number,
 ): Promise<SshIdentity> {
-  assert.ok(host !== EMPTY);
+  assert.ok(host !== EMPTY_STRING);
   assert.ok(!host.startsWith("-"));
   const controller = new AbortController();
   const unsubscribe = context.onCancel(() => controller.abort());
@@ -148,7 +148,7 @@ export async function pushNodeBranch(
   deadlineMs: number,
 ): Promise<void> {
   assert.match(branch, /^kanthord\/node_[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
-  assert.ok(directory !== EMPTY);
+  assert.ok(directory !== EMPTY_STRING);
   await runGit(
     directory,
     ["push", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
