@@ -5,7 +5,7 @@
 ## Scope
 
 This specification covers the `kanthord llm credential` group and the `kanthord llm provider` group, with
-**12 command leaves, all implemented**. The LLM component is a shared component, not a service.
+**13 command leaves, all implemented**. The LLM component is a shared component, not a service.
 It owns the credential routes of its platforms and OAuth login sessions. A credential belongs to no project.
 Custody declares no route and keeps the record functions that these routes call.
 
@@ -36,7 +36,7 @@ prints its key without claiming that the write failed. Replay lasts only for
 the process and configured TTL; the CLI performs no automatic mutation retry.
 
 [`--file`](./common-flags.md#--file) is required where the inventory names it.
-For create and rotate, the secret-file policy requires a regular,
+For create, rotate and check, the secret-file policy requires a regular,
 non-symlink file at mode `0600`, checked before reading, without permission
 repair. The contents go to custody and are never echoed. Metadata update uses
 the ordinary JSON-file rules and accepts no secret.
@@ -59,7 +59,7 @@ non-secret diagnostic. A supplied identity never proves authorization.
 
 ## Command inventory
 
-Each synopsis follows `kanthord llm credential`. All eleven commands have `[R]` and
+Each synopsis follows `kanthord llm credential`. All twelve commands have `[R]` and
 `human` access; seven mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/llm/credential` prefix.
 
@@ -76,8 +76,9 @@ All paths below are implemented routes under the ruled `/api/llm/credential` pre
 | 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/llm/credential/:credentialName/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented |
 | 10  | `archive <credential-name> [M] [R]`                               | `POST /api/llm/credential/:credentialName/archive`                   | `llm.credential.archive`         | `human`; implemented |
 | 11  | `platforms [R]`                                                   | `GET /api/llm/credential/platform`                                   | `llm.credential.platform_list`   | `human`; implemented |
+| 12  | `check --file <path> [R]`                                         | `POST /api/llm/credential/check`                                     | `llm.credential.check`           | `human`; implemented |
 
-The static `/api/llm/credential/login` and `/api/llm/credential/platform` paths take precedence over `/:credentialName`, so custody refuses the names `login` and `platform`.
+The static `/api/llm/credential/login`, `/api/llm/credential/platform` and `/api/llm/credential/check` paths take precedence over `/:credentialName`, so custody refuses the names `login`, `platform` and `check`.
 These routes have no project identity.
 
 The [`provider check`](#provider-check) is a server-wide read under `human` access with the `[R]` flags.
@@ -85,7 +86,7 @@ Its synopsis follows `kanthord llm provider`.
 
 | #   | Synopsis after `kanthord llm provider`     | HTTP route                     | Operation ID         | Access/status |
 | --- | ------------------------------------------ | ------------------------------ | -------------------- | ------------- |
-| 12  | `check --credential <credential-name> [R]` | `POST /api/llm/provider/check` | `llm.provider.check` | `human`       |
+| 13  | `check --credential <credential-name> [R]` | `POST /api/llm/provider/check` | `llm.provider.check` | `human`       |
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
 A `create` with a platform of another component answers `400 credential.platform.unsupported`.
@@ -174,6 +175,28 @@ the platforms of the platform table of this component.
 `loginModes` is `[]` for a
 platform whose secret shape is not `oauth`. `metadataFields` names the required
 string fields of the metadata. `verifiable` is `true` exactly for a platform with an [LLM provider](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-llm-provider). The command answers only the shared error codes.
+
+## `check`
+
+```text
+kanthord llm credential check --file <path> [R]
+```
+
+The [pre-save check](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-pre-save-check) declares `llm.credential.check`, a read under `human` access, at `POST /api/llm/credential/check`.
+It checks a typed secret before a `create` and stores nothing. It takes no mutation key and rejects `--idempotency-key`.
+The required `--file` holds the closed object `{ platform, secret, metadata }`, the `create` body without `name`. The secret-file policy of `create` applies: a regular, non-symlink file at mode `0600`.
+The component validates the body with the secret shape and the metadata schema of the platform, as `create` does.
+The check runs through the LLM provider of the platform, and the connection maps to the status as the healthcheck does: `ok` to `healthy`, `unauthorized` to `unhealthy`, and `unreachable` and `invalid_response` to `unknown`.
+The platform check runs on the typed secret with a 10 s deadline. A check that exceeds its deadline answers `unknown`.
+The component drops the secret after the call and logs no material.
+
+HTTP `200` answers `{ status, capability }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
+
+- `status` is `healthy`, `unhealthy` or `unknown`.
+- `capability` is the capability of the platform check, the same value that the health report shows.
+
+A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
+A platform of another component answers `400 credential.platform.unsupported`.
 
 ## `get <credential-name>`
 
@@ -316,12 +339,13 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.llm.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.                                          | login                                                          |
 | local | `cli.llm.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                      | revoke                                                         |
 | 400   | `credential.entry.unsupported`               | The platform does not support this entry method.                                               | create, login                                                  |
-| 400   | `credential.input.invalid`                   | Secret or metadata validation fails, including the byte budget.                                | create, rotate, update-metadata, login, login-code             |
+| 400   | `credential.input.invalid`                   | Secret or metadata validation fails, including the byte budget, or the name is reserved.       | create, rotate, update-metadata, login, login-code, check      |
 | 409   | `llm.metadata.base_url_fixed`                | The edit changes `baseUrl` outside rotation.                                                   | update-metadata                                                |
 | 409   | `llm.metadata.model_in_use`                  | A removed model has dependent defaults or entries. Details: `{ models: [{ model, agents }] }`. | update-metadata, rotate                                        |
 | 409   | `credential.name.conflict`                   | A credential already has this name; details identify the holder.                               | create, login                                                  |
 | 400   | `credential.platform.mismatch`               | The requested platform differs from the stored platform.                                       | agent enablement put (custody collaboration), worker handover  |
-| 400   | `credential.platform.unsupported`            | The platform is not an LLM platform.                                                           | create, login                                                  |
+| 400   | `credential.platform.unsupported`            | The platform is not an LLM platform.                                                           | create, login, check                                           |
+| 400   | `credential.check.unsupported`               | The platform has `verifiable: false` or the secret shape `oauth`.                              | check                                                          |
 | 409   | `credential.revision.conflict`               | The expected revision is stale.                                                                | rotate, update-metadata                                        |
 | 409   | `credential.revision.ended`                  | The revision is already ended, by a revoke or by a drain.                                      | revoke                                                         |
 | 409   | `credential.revision.newest_live`            | The revoke names the newest live revision.                                                     | revoke                                                         |

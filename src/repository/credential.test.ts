@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import pino from "pino";
+import pino, { type Logger } from "pino";
 import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {
   CUSTODY_SERVICE_NAME,
@@ -38,7 +38,7 @@ const BINDINGS = [
   },
 ];
 
-function fixture(t: TestContext) {
+function fixture(t: TestContext, logger: Logger = pino({ enabled: false })) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
@@ -59,7 +59,7 @@ function fixture(t: TestContext) {
     store,
     platforms: { ...LLM_PLATFORMS, ...REPOSITORY_PLATFORMS },
     envelopeKey: Buffer.alloc(32, 7),
-    logger: pino({ enabled: false }),
+    logger,
     agentProvidersDependentOn: () => [],
     bindingsNaming: () => [],
     inboundsNaming: () => [],
@@ -235,4 +235,149 @@ test("a name of another component answers not found and the inventory holds only
   ]);
   assert.equal(await entries[0]!.check(background), ResourceStatus.Healthy);
   assert.equal(fetch.mock.callCount(), ONE_CALL);
+});
+
+const OTHER_PLATFORM_CODE = "credential.platform.unsupported";
+const INVALID_INPUT_CODE = "credential.input.invalid";
+const NO_ROWS = 0;
+const CHECK_PATH = "/api/repository/credential/check";
+
+function rowCount(f: ReturnType<typeof fixture>): number {
+  return (
+    f.store.database.prepare("SELECT COUNT(*) AS n FROM credential").get() as {
+      n: number;
+    }
+  ).n;
+}
+
+async function rejects(fn: () => unknown, status: number, code: string) {
+  await assert.rejects(
+    async () => fn(),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === status &&
+      error.code === code,
+  );
+}
+
+test("check answers healthy, unhealthy and unknown for github without a row, a log or an answer that holds the token", async (t) => {
+  const lines: string[] = [];
+  const f = fixture(
+    t,
+    pino({ level: "info" }, { write: (line: string) => lines.push(line) }),
+  );
+  const statuses = [
+    [HttpStatus.OK, ResourceStatus.Healthy],
+    [HttpStatus.Unauthorized, ResourceStatus.Unhealthy],
+    [HttpStatus.Forbidden, ResourceStatus.Unknown],
+  ] as const;
+  const requests: unknown[] = [];
+  let next = 0;
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, options?: RequestInit) => {
+      requests.push({ url, headers: options?.headers });
+      return new Response(null, { status: statuses[next++]![0] });
+    },
+  );
+  for (const [, expected] of statuses) {
+    const answer = await f.invoke(repositoryOperations.check, {
+      params: {},
+      query: {},
+      body: { platform: "github", secret: { key: SECRET }, metadata: null },
+    });
+    assert.deepEqual(answer, {
+      status: expected,
+      capability: CAPABILITY_RATE_LIMIT_READ,
+    });
+  }
+  assert.equal(requests.length, statuses.length);
+  assert.deepEqual(requests[0], {
+    url: GITHUB_RATE_LIMIT_URL,
+    headers: { [AUTHORIZATION_HEADER]: `Bearer ${SECRET}` },
+  });
+  assert.equal(rowCount(f), NO_ROWS);
+  assert.ok(lines.length > NO_ROWS);
+  assert.ok(!lines.join("").includes(SECRET));
+});
+
+test("check answers unknown when the request fails", async (t) => {
+  const f = fixture(t);
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error(`failed with ${SECRET}`);
+  });
+  assert.deepEqual(
+    await f.invoke(repositoryOperations.check, {
+      params: {},
+      query: {},
+      body: { platform: "github", secret: { key: SECRET }, metadata: null },
+    }),
+    { status: ResourceStatus.Unknown, capability: CAPABILITY_RATE_LIMIT_READ },
+  );
+});
+
+test("check refuses a platform of another component, invalid input and a body with a name", async (t) => {
+  const f = fixture(t);
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("UNEXPECTED_REQUEST");
+  });
+  for (const platform of ["anthropic", "s3"])
+    await rejects(
+      () =>
+        f.invoke(repositoryOperations.check, {
+          params: {},
+          query: {},
+          body: { platform, secret: { key: SECRET }, metadata: null },
+        }),
+      HttpStatus.BadRequest,
+      OTHER_PLATFORM_CODE,
+    );
+  for (const body of [
+    { platform: "github", secret: { key: "" }, metadata: null },
+    { platform: "github", secret: { key: SECRET, extra: 1 }, metadata: null },
+    { platform: "github", secret: { key: SECRET }, metadata: {} },
+  ])
+    await rejects(
+      () =>
+        f.invoke(repositoryOperations.check, { params: {}, query: {}, body }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+  for (const body of [
+    {
+      name: "github",
+      platform: "github",
+      secret: { key: SECRET },
+      metadata: null,
+    },
+    { platform: "github", metadata: null },
+  ])
+    assert.throws(() =>
+      repositoryOperations.check.input.parse({ params: {}, query: {}, body }),
+    );
+  assert.equal(fetch.mock.callCount(), NO_ROWS);
+  assert.equal(rowCount(f), NO_ROWS);
+});
+
+test("check takes no mutation key and the credential name check is refused", (t) => {
+  const f = fixture(t);
+  assert.equal(repositoryOperations.check.mutation, false);
+  assert.equal(repositoryOperations.check.method, HttpMethod.Post);
+  assert.equal(repositoryOperations.check.path, CHECK_PATH);
+  fails(
+    () =>
+      f.invoke(repositoryOperations.create, {
+        params: {},
+        query: {},
+        body: {
+          name: "check",
+          platform: "github",
+          secret: { key: SECRET },
+          metadata: null,
+        },
+      }),
+    HttpStatus.BadRequest,
+    INVALID_INPUT_CODE,
+  );
 });

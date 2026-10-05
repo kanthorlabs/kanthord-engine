@@ -345,6 +345,11 @@ test("create validates platforms, schema, conflicts and encrypts each first revi
       "credential.input.invalid",
     );
     fails(
+      () => f.create({ ...inputs[0], name: "check" }),
+      HttpStatus.BadRequest,
+      "credential.input.invalid",
+    );
+    fails(
       () => f.create({ ...inputs[0], platform: TestPlatform.OAuth }),
       HttpStatus.BadRequest,
       "credential.entry.unsupported",
@@ -1311,4 +1316,118 @@ test("lifecycle reports health and joins cancellation", async () => {
   } finally {
     f.store.close();
   }
+});
+
+const CHECK_UNSUPPORTED_CODE = "credential.check.unsupported";
+const UNSUPPORTED_PLATFORM_CODE = "credential.platform.unsupported";
+const CHECK_CAPABILITY = "check capability";
+const CHECK_DEADLINE_MS = 10000;
+const DEADLINE_TOLERANCE_MS = 1000;
+const ONE_CALL = 1;
+
+test("check runs the probe of the platform on the parsed secret and metadata and stores nothing", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const calls: {
+    secret: unknown;
+    metadata: unknown;
+    deadline: number | null;
+    context: CancellationContext;
+  }[] = [];
+  const set: CredentialPlatformSet = {
+    platforms: {
+      [TestPlatform.Metadata]: {
+        ...TEST_SET.platforms[TestPlatform.Metadata]!,
+        capability: CHECK_CAPABILITY,
+        probe: async (secret, metadata, context) => {
+          calls.push({
+            secret,
+            metadata,
+            deadline: context.deadline(),
+            context: context as CancellationContext,
+          });
+          return "unhealthy";
+        },
+      },
+      [TestPlatform.OAuth]: {
+        ...TEST_SET.platforms[TestPlatform.OAuth]!,
+        probe: async () => "healthy",
+      },
+      [TestPlatform.Key]: TEST_SET.platforms[TestPlatform.Key]!,
+    },
+  };
+  const body = {
+    platform: TestPlatform.Metadata,
+    secret: apiSecret,
+    metadata: { baseUrl: "https://example.com/v1", models: [] },
+  };
+  const answer = await f.component.check(set, body, new CancellationContext());
+  assert.deepEqual(answer, {
+    status: "unhealthy",
+    capability: CHECK_CAPABILITY,
+  });
+  assert.equal(calls.length, ONE_CALL);
+  assert.deepEqual(calls[0]!.secret, apiSecret);
+  assert.deepEqual(calls[0]!.metadata, body.metadata);
+  const remaining = calls[0]!.deadline! - Date.now();
+  assert.ok(remaining <= CHECK_DEADLINE_MS);
+  assert.ok(remaining > CHECK_DEADLINE_MS - DEADLINE_TOLERANCE_MS);
+  assert.ok(calls[0]!.context.err());
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  noSecret(answer);
+  for (const platform of [TestPlatform.OAuth, TestPlatform.Key])
+    await assert.rejects(
+      f.component.check(set, { ...body, platform }, new CancellationContext()),
+      (error) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.BadRequest &&
+        error.code === CHECK_UNSUPPORTED_CODE,
+    );
+  await assert.rejects(
+    f.component.check(
+      set,
+      { ...body, platform: FOREIGN_PLATFORM },
+      new CancellationContext(),
+    ),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      error.code === UNSUPPORTED_PLATFORM_CODE,
+  );
+  for (const invalid of [
+    { ...body, secret: { key: "" } },
+    { ...body, secret: { accessKeyId: "id", secretAccessKey: "s" } },
+    { ...body, metadata: null },
+    { ...body, metadata: { baseUrl: "https://example.com/v1" } },
+  ])
+    await assert.rejects(
+      f.component.check(set, invalid, new CancellationContext()),
+      (error) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.BadRequest &&
+        error.code === INVALID_INPUT_CODE,
+    );
+  assert.equal(calls.length, ONE_CALL);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+});
+
+test("check answers unknown when the probe throws", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const set: CredentialPlatformSet = {
+    platforms: {
+      [TestPlatform.Key]: {
+        ...TEST_SET.platforms[TestPlatform.Key]!,
+        probe: async () => {
+          throw new Error(secretValue);
+        },
+      },
+    },
+  };
+  const answer = await f.component.check(
+    set,
+    { platform: TestPlatform.Key, secret: apiSecret, metadata: null },
+    new CancellationContext(),
+  );
+  assert.deepEqual(answer, { status: "unknown", capability: NO_CAPABILITY });
 });

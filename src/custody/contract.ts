@@ -3,11 +3,12 @@ import { identitySchema } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { MachineIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
-import type {
-  ResourceCheck,
-  ResourceEntry,
-  ResourceObserver,
-  ResourceStatusValue,
+import {
+  ResourceStatus,
+  type ResourceCheck,
+  type ResourceEntry,
+  type ResourceObserver,
+  type ResourceStatusValue,
 } from "../kernel/health.ts";
 import type { Transaction } from "../kernel/store.ts";
 
@@ -127,6 +128,7 @@ export type Material = {
 
 export const CUSTODY_SERVICE_NAME = "custody";
 export const CREDENTIAL_TIMEOUT_MS = 30000;
+export const CREDENTIAL_CHECK_TIMEOUT_MS = 10000;
 export const CREATE_MAX_BODY_BYTES = 64 * 1024;
 export const METADATA_MAX_BODY_BYTES = 16 * 1024;
 export const REVOKE_MAX_BODY_BYTES = 0;
@@ -264,6 +266,9 @@ export const credentialCreateSchema = z.strictObject({
   metadata: z.unknown(),
   secret: z.unknown(),
 });
+export const credentialCheckBodySchema = credentialCreateSchema.omit({
+  name: true,
+});
 export const credentialRotateBodySchema = z.strictObject({
   expectedRevision: z.number().int().positive(),
   secret: z.unknown(),
@@ -280,6 +285,7 @@ export const credentialListQuerySchema = z.strictObject({
   cursor: z.string().min(1).optional(),
 });
 export type CredentialCreate = z.infer<typeof credentialCreateSchema>;
+export type CredentialCheckBody = z.infer<typeof credentialCheckBodySchema>;
 export type CredentialRotateBody = z.infer<typeof credentialRotateBodySchema>;
 export type CredentialUpdateMetadataBody = z.infer<
   typeof credentialUpdateMetadataBodySchema
@@ -302,6 +308,15 @@ export const credentialListAnswerSchema = z.strictObject({
   items: z.array(credentialAnswerSchema),
   nextCursor: z.string().nullable(),
 });
+export const credentialCheckAnswerSchema = z.strictObject({
+  status: z.enum([
+    ResourceStatus.Healthy,
+    ResourceStatus.Unhealthy,
+    ResourceStatus.Unknown,
+  ]),
+  capability: z.string().min(1),
+});
+export type CredentialCheckAnswer = z.infer<typeof credentialCheckAnswerSchema>;
 export const credentialPlatformListAnswerSchema = z.strictObject({
   items: z.array(
     z.strictObject({
@@ -406,6 +421,11 @@ export interface CredentialRecords {
     set: CredentialPlatformSet,
     credentialName: string,
   ): CheckMaterial | null;
+  check(
+    set: CredentialPlatformSet,
+    body: CredentialCheckBody,
+    context: Context,
+  ): Promise<CredentialCheckAnswer>;
   credentialMetadata(
     tx: Transaction,
     credentialName: string,

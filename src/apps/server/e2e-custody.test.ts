@@ -425,3 +425,76 @@ test("login refuses an invalid mode without a server", async (t) => {
     "cli.llm.credential.login.invalid_mode",
   );
 });
+
+function checkFile(directory: string, platform: string): string {
+  assert.ok(directory.startsWith("/"));
+  const path = join(directory, `check-${platform}.json`);
+  writePrivate(
+    path,
+    JSON.stringify({ platform, metadata: null, secret: SECRET }),
+  );
+  return path;
+}
+
+test("check refuses an unsupported platform and a platform of another component and writes no row", async (t) => {
+  const { directory, env } = await setup(t);
+  refusal(
+    await kanthord(
+      [...LLM, "check", "--file", checkFile(directory, "groq")],
+      env,
+    ),
+    "credential.check.unsupported",
+  );
+  refusal(
+    await kanthord(
+      [...LLM, "check", "--file", checkFile(directory, "github-copilot")],
+      env,
+    ),
+    "credential.check.unsupported",
+  );
+  refusal(
+    await kanthord(
+      [...LLM, "check", "--file", checkFile(directory, GITHUB)],
+      env,
+    ),
+    "credential.platform.unsupported",
+  );
+  refusal(
+    await kanthord(
+      [...REPOSITORY, "check", "--file", checkFile(directory, ANTHROPIC)],
+      env,
+    ),
+    "credential.platform.unsupported",
+  );
+  const listed = success<ListAnswer>(await kanthord([...LLM, "list"], env));
+  assert.deepEqual(listed.items, []);
+});
+
+test("check refuses a file with a name without a server", async (t) => {
+  const env = { ...environment(temporary(t)), KANTHORD_TOKEN: LOCAL_TOKEN };
+  refusal(
+    await kanthord(
+      [...LLM, "check", "--file", createFile(temporary(t), ANTHROPIC)],
+      env,
+    ),
+    "cli.file.schema_invalid",
+  );
+});
+
+test("create refuses the reserved name check", async (t) => {
+  const { directory, env } = await setup(t);
+  const path = join(directory, "reserved.json");
+  writePrivate(
+    path,
+    JSON.stringify({
+      name: "check",
+      platform: ANTHROPIC,
+      metadata: null,
+      secret: SECRET,
+    }),
+  );
+  refusal(
+    await kanthord([...LLM, "create", "--file", path], env),
+    "credential.input.invalid",
+  );
+});

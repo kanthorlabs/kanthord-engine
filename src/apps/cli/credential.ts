@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { Command } from "commander";
 import {
+  credentialCheckBodySchema,
   credentialCreateSchema,
   credentialRotateBodySchema,
   credentialUpdateMetadataBodySchema,
@@ -33,6 +34,7 @@ const ROTATE = "rotate";
 const UPDATE_METADATA = "update-metadata";
 const REVOKE = "revoke";
 const ARCHIVE = "archive";
+const CHECK = "check";
 const QUERY_TRUE = "true";
 const QUERY_FALSE = "false";
 const FILE_OPTION = "--file";
@@ -241,6 +243,21 @@ async function archive(
   process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
+async function check(group: CredentialGroup, command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, credentialCode(group, CHECK, TOKEN_REQUIRED));
+  const body = readJsonFileAs(options.file, credentialCheckBodySchema, true);
+  const result = await httpClient(group.operations, endpoint, token).check({
+    params: {},
+    query: {},
+    body,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, credentialCode(group, CHECK, INDETERMINATE)))}\n`,
+  );
+}
+
 export function addCredentialCommand(
   program: Command,
   group: CredentialGroup,
@@ -361,5 +378,14 @@ export function addCredentialCommand(
     .action((name: string, _options, command: Command) =>
       archive(group, name, command),
     );
+  credential
+    .command(CHECK)
+    .description("Check a typed credential secret before the save as JSON")
+    .requiredOption(
+      "--file <path>",
+      "Private credential JSON file",
+      singleUse(FILE_OPTION),
+    )
+    .action((_options, command: Command) => check(group, command));
   return credential;
 }

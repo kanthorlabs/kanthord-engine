@@ -8,6 +8,7 @@ import {
 } from "./contract.ts";
 import {
   CREDENTIAL_NAME_MAX_LENGTH,
+  RESERVED_NAME_CHECK,
   RESERVED_NAME_LOGIN,
   RESERVED_NAME_PLATFORM,
   validateNameForm,
@@ -78,6 +79,7 @@ test("names must be lower-case, start with a letter and fit in 63 chars", () => 
   assert.equal(validateNameForm("a_b"), false);
   assert.equal(validateNameForm(RESERVED_NAME_LOGIN), true);
   assert.equal(validateNameForm(RESERVED_NAME_PLATFORM), true);
+  assert.equal(validateNameForm(RESERVED_NAME_CHECK), true);
   assert.equal(isNonblank("  "), false);
   assert.equal(isNonblank(" a "), true);
 });

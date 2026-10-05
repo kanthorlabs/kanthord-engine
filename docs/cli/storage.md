@@ -5,7 +5,7 @@
 ## Scope
 
 This specification covers the implemented `kanthord storage credential` group, with
-**8 command leaves**. The Storage component is a shared component, not a service.
+**9 command leaves**. The Storage component is a shared component, not a service.
 It owns the credential routes of its platforms. A credential belongs to no project.
 Custody declares no route and keeps the record functions that these routes call.
 
@@ -36,7 +36,7 @@ prints its key without claiming that the write failed. Replay lasts only for
 the process and configured TTL; the CLI performs no automatic mutation retry.
 
 [`--file`](./common-flags.md#--file) is required where the inventory names it.
-For create and rotate, the secret-file policy requires a regular,
+For create, rotate and check, the secret-file policy requires a regular,
 non-symlink file at mode `0600`, checked before reading, without permission
 repair. The contents go to custody and are never echoed. Metadata update uses
 the ordinary JSON-file rules and accepts no secret.
@@ -57,7 +57,7 @@ non-secret diagnostic. A supplied identity never proves authorization.
 
 ## Command inventory
 
-Each synopsis follows `kanthord storage credential`. All eight commands have `[R]` and
+Each synopsis follows `kanthord storage credential`. All nine commands have `[R]` and
 `human` access; five mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/storage/credential` prefix.
 
@@ -71,8 +71,9 @@ All paths below are implemented routes under the ruled `/api/storage/credential`
 | 6   | `revoke <credential-name> <revision> [M] [R]`             | `POST /api/storage/credential/:credentialName/revision/:revision/revoke` | `storage.credential.revoke`          | `human`; implemented |
 | 7   | `archive <credential-name> [M] [R]`                       | `POST /api/storage/credential/:credentialName/archive`                   | `storage.credential.archive`         | `human`; implemented |
 | 8   | `platforms [R]`                                           | `GET /api/storage/credential/platform`                                   | `storage.credential.platform_list`   | `human`; implemented |
+| 9   | `check --file <path> [R]`                                 | `POST /api/storage/credential/check`                                     | `storage.credential.check`           | `human`; implemented |
 
-The static `/api/storage/credential/platform` path takes precedence over `/:credentialName`, so custody refuses the names `login` and `platform`.
+The static `/api/storage/credential/platform` and `/api/storage/credential/check` paths take precedence over `/:credentialName`, so custody refuses the names `login`, `platform` and `check`.
 These routes have no project identity.
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
@@ -139,6 +140,28 @@ platform whose secret shape is not `oauth`. `metadataFields` names the required
 string fields of the metadata. `verifiable` is `true` when the platform validation
 makes a remote call. The command answers only the shared error codes.
 
+## `check`
+
+```text
+kanthord storage credential check --file <path> [R]
+```
+
+The [pre-save check](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-pre-save-check) declares `storage.credential.check`, a read under `human` access, at `POST /api/storage/credential/check`.
+It checks a typed secret before a `create` and stores nothing. It takes no mutation key and rejects `--idempotency-key`.
+The required `--file` holds the closed object `{ platform, secret, metadata }`, the `create` body without `name`. The secret-file policy of `create` applies: a regular, non-symlink file at mode `0600`.
+The component validates the body with the secret shape and the metadata schema of the platform, as `create` does.
+The `s3` check sends a `HeadBucket` request with the typed key and the metadata.
+The platform check runs on the typed secret with a 10 s deadline. A check that exceeds its deadline answers `unknown`.
+The component drops the secret after the call and logs no material.
+
+HTTP `200` answers `{ status, capability }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
+
+- `status` is `healthy`, `unhealthy` or `unknown`.
+- `capability` is the capability of the platform check, the same value that the health report shows.
+
+A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
+A platform of another component answers `400 credential.platform.unsupported`.
+
 ## `get <credential-name>`
 
 The required `CredentialName` has no default and maps to `params.credentialName`.
@@ -195,10 +218,11 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | ----- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | 404   | `credential.credential.not_found`                | The credential does not exist, or its platform is not a platform of the Storage component.     | get, rotate, update-metadata, revoke, archive, worker handover |
 | local | `cli.storage.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                      | revoke                                                         |
-| 400   | `credential.input.invalid`                       | Secret or metadata validation fails.                                                           | create, rotate, update-metadata                                |
+| 400   | `credential.input.invalid`                       | Secret or metadata validation fails, or the name is reserved.                                  | create, rotate, update-metadata, check                         |
 | 409   | `credential.name.conflict`                       | A credential already has this name; details identify the holder.                               | create                                                         |
 | 400   | `credential.platform.mismatch`                   | The requested platform differs from the stored platform.                                       | binding apply (custody collaboration), worker handover         |
-| 400   | `credential.platform.unsupported`                | The platform is not a platform of the Storage component.                                       | create                                                         |
+| 400   | `credential.platform.unsupported`                | The platform is not a platform of the Storage component.                                       | create, check                                                  |
+| 400   | `credential.check.unsupported`                   | The platform has `verifiable: false` or the secret shape `oauth`.                              | check                                                          |
 | 409   | `credential.revision.conflict`                   | The expected revision is stale.                                                                | rotate, update-metadata                                        |
 | 409   | `credential.revision.ended`                      | The revision is already ended, by a revoke or by a drain.                                      | revoke                                                         |
 | 409   | `credential.revision.newest_live`                | The revoke names the newest live revision.                                                     | revoke                                                         |

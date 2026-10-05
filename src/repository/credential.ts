@@ -5,6 +5,7 @@ import {
   type CredentialRecords,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
+import { throwIfCancelled } from "../kernel/context.ts";
 import type { ResourceEntry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
@@ -93,6 +94,15 @@ export class RepositoryCredentials {
         this.records.archive(tx, PLATFORM_SET, input.params.credentialName),
       ),
     );
+    registry.register(repositoryOperations.check, async (input, caller) => {
+      const answer = await this.records.check(
+        PLATFORM_SET,
+        input.body,
+        caller.context,
+      );
+      throwIfCancelled(caller.context);
+      return caller.commit(() => answer);
+    });
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {

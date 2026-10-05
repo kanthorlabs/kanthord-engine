@@ -40,6 +40,7 @@ const cases = [
       "login-code",
       "login-status",
       "platforms",
+      "check",
     ],
     exact: true,
   },

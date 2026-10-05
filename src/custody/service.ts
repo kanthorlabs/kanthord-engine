@@ -24,12 +24,15 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
+  CREDENTIAL_CHECK_TIMEOUT_MS,
   LIST_LIMIT_DEFAULT,
   RevisionChange,
   secretSchemas,
   SecretShape,
   type CheckMaterial,
   type CredentialAnswer,
+  type CredentialCheckAnswer,
+  type CredentialCheckBody,
   type CredentialCreate,
   type CredentialListAnswer,
   type CredentialListQuery,
@@ -86,6 +89,7 @@ const CustodyErrorCode = {
   NotFound: "credential.credential.not_found",
   PlatformMismatch: "credential.platform.mismatch",
   RevisionConflict: "credential.revision.conflict",
+  CheckUnsupported: "credential.check.unsupported",
   InUse: "credential.credential.in_use",
   Archived: "credential.credential.archived",
   RevisionNotFound: "credential.revision.not_found",
@@ -542,6 +546,53 @@ export class CustodyComponent implements Service, CredentialRecords {
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
       secret: () => decrypt(key, id, platform, nonce, ciphertext),
     };
+  }
+
+  async check(
+    set: CredentialPlatformSet,
+    body: CredentialCheckBody,
+    context: Context,
+  ): Promise<CredentialCheckAnswer> {
+    const { platform, secret, metadata } = body;
+    const entry = ownedPlatform(set, platform);
+    if (!entry)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.UnsupportedPlatform,
+        "Unsupported platform.",
+      );
+    const { probe } = entry;
+    if (probe === null || entry.secretShape === SecretShape.OAuth)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.CheckUnsupported,
+        "Unsupported credential check.",
+      );
+    const parsedSecret = secretSchemas[entry.secretShape].safeParse(secret);
+    if (!parsedSecret.success) throw invalidInput();
+    const parsedMetadata = validatedMetadata(entry, metadata);
+    const deadline = new CancellationContext(
+      context,
+      Date.now() + CREDENTIAL_CHECK_TIMEOUT_MS,
+    );
+    try {
+      const status = await probe(
+        parsedSecret.data,
+        parsedMetadata,
+        deadline,
+        (reason) =>
+          this.logger.info({ platform, reason }, "credential check failed"),
+      ).catch(() => {
+        this.logger.info(
+          { platform, reason: "check failed before the remote call" },
+          "credential check failed",
+        );
+        return ResourceStatus.Unknown;
+      });
+      return { status, capability: entry.capability };
+    } finally {
+      deadline.cancel();
+    }
   }
 
   credentialDependents(

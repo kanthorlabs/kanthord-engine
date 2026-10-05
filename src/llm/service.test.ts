@@ -25,7 +25,7 @@ import {
 import { decrypt } from "../custody/envelope.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { HttpStatus } from "../kernel/http.ts";
+import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import {
@@ -227,6 +227,12 @@ function fixture(
       query: {},
       body,
     })) as typeof llmOperations.provider_check.output._output;
+  const credentialCheck = async (body: unknown) =>
+    (await invoke(llmOperations.check, {
+      params: {},
+      query: {},
+      body,
+    })) as typeof llmOperations.check.output._output;
   return {
     store,
     custody,
@@ -247,6 +253,7 @@ function fixture(
     archive,
     platformList,
     providerCheck,
+    credentialCheck,
   };
 }
 
@@ -970,6 +977,7 @@ test("OAuth validates entry, name, mode and start-time name conflict before star
     },
     { body: { ...LOGIN_BODY, name: "login" }, code: INVALID_INPUT_CODE },
     { body: { ...LOGIN_BODY, name: "platform" }, code: INVALID_INPUT_CODE },
+    { body: { ...LOGIN_BODY, name: "check" }, code: INVALID_INPUT_CODE },
     { body: { ...LOGIN_BODY, name: "Bad Name" }, code: INVALID_INPUT_CODE },
     { body: { ...LOGIN_BODY, mode: "unknown" }, code: INVALID_INPUT_CODE },
   ];
@@ -1829,4 +1837,127 @@ test("approved models answer the openai-compatible metadata models with defaults
     null,
     null,
   ]);
+});
+
+const CHECK_UNSUPPORTED_CODE = "credential.check.unsupported";
+const NO_ROWS = 0;
+
+function rowCount(f: ReturnType<typeof fixture>): number {
+  return (
+    f.store.database.prepare("SELECT COUNT(*) AS n FROM credential").get() as {
+      n: number;
+    }
+  ).n;
+}
+
+test("check answers healthy, unhealthy and unknown through the LLM provider without a row, a log or an answer that holds the key", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const statuses = [
+    [HttpStatus.OK, "healthy"],
+    [HttpStatus.Forbidden, "unhealthy"],
+    [HttpStatus.InternalServerError, "unknown"],
+  ] as const;
+  const requests: unknown[] = [];
+  let next = 0;
+  const statusFetch = t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown) => {
+      requests.push(url);
+      return new Response(null, { status: statuses[next++]![0] });
+    },
+  );
+  for (const [, expected] of statuses) {
+    const answer = await f.credentialCheck({
+      platform: Platform.Anthropic,
+      secret: { key: HEALTH_SECRET },
+      metadata: null,
+    });
+    assert.deepEqual(answer, {
+      status: expected,
+      capability: CAPABILITY_MODEL_LIST_READ,
+    });
+    assert.ok(!JSON.stringify(answer).includes(HEALTH_SECRET));
+  }
+  assert.deepEqual(requests.slice(), [
+    ANTHROPIC_MODELS_URL,
+    ANTHROPIC_MODELS_URL,
+    ANTHROPIC_MODELS_URL,
+  ]);
+  statusFetch.mock.restore();
+  t.mock.method(globalThis, "fetch", async (url: unknown) => {
+    requests.push(url);
+    throw new Error(`failed with ${HEALTH_SECRET}`);
+  });
+  assert.deepEqual(
+    await f.credentialCheck({
+      platform: Platform.OpenAICompatible,
+      secret: { key: HEALTH_SECRET },
+      metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+    }),
+    { status: "unknown", capability: CAPABILITY_MODEL_LIST_READ },
+  );
+  assert.equal(requests.at(-1), `${HEALTH_BASE_URL}/models`);
+  assert.equal(rowCount(f), NO_ROWS);
+  assert.ok(!JSON.stringify(f.logs).includes(HEALTH_SECRET));
+});
+
+test("check refuses an OAuth platform, a platform without a check, a platform of another component and invalid input", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("unexpected request");
+  });
+  const key = { key: HEALTH_SECRET };
+  for (const platform of [Platform.GitHubCopilot, "groq"])
+    await failsAsync(
+      () => f.credentialCheck({ platform, secret: key, metadata: null }),
+      HttpStatus.BadRequest,
+      CHECK_UNSUPPORTED_CODE,
+    );
+  for (const platform of ["github", "s3", "unknown"])
+    await failsAsync(
+      () => f.credentialCheck({ platform, secret: key, metadata: null }),
+      HttpStatus.BadRequest,
+      UNSUPPORTED_PLATFORM_CODE,
+    );
+  for (const body of [
+    { platform: Platform.Anthropic, secret: { key: "" }, metadata: null },
+    { platform: Platform.Anthropic, secret: { key: " " }, metadata: null },
+    { platform: Platform.Anthropic, secret: key, metadata: {} },
+    { platform: Platform.OpenAICompatible, secret: key, metadata: null },
+    {
+      platform: Platform.OpenAICompatible,
+      secret: key,
+      metadata: { baseUrl: HEALTH_BASE_URL, models: "none" },
+    },
+  ])
+    await failsAsync(
+      () => f.credentialCheck(body),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+  assert.throws(() =>
+    llmOperations.check.input.parse({
+      params: {},
+      query: {},
+      body: {
+        name: "anthropic",
+        platform: Platform.Anthropic,
+        secret: key,
+        metadata: null,
+      },
+    }),
+  );
+  assert.equal(fetch.mock.callCount(), NO_FETCH_CALLS);
+  assert.equal(rowCount(f), NO_ROWS);
+});
+
+const CHECK_PATH = "/api/llm/credential/check";
+
+test("check takes no mutation key", () => {
+  assert.equal(llmOperations.check.mutation, false);
+  assert.equal(llmOperations.check.method, HttpMethod.Post);
+  assert.equal(llmOperations.check.path, CHECK_PATH);
 });

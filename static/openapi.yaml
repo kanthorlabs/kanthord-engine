@@ -16,6 +16,8 @@ paths:
     $ref: ./openapi/gateway/verify.yaml#/pathItem
   /api/llm/credential/{credentialName}/archive:
     $ref: ./openapi/llm/credential.archive.yaml#/pathItem
+  /api/llm/credential/check:
+    $ref: ./openapi/llm/credential.check.yaml#/pathItem
   /api/llm/credential:
     $ref: ./openapi/llm/credential.create.yaml#/pathItem
   /api/llm/credential/{credentialName}:
@@ -148,6 +150,8 @@ paths:
     $ref: ./openapi/project/get.yaml#/pathItem
   /api/repository/credential/{credentialName}/archive:
     $ref: ./openapi/repository/credential.archive.yaml#/pathItem
+  /api/repository/credential/check:
+    $ref: ./openapi/repository/credential.check.yaml#/pathItem
   /api/repository/credential:
     $ref: ./openapi/repository/credential.create.yaml#/pathItem
   /api/repository/credential/{credentialName}:
@@ -176,6 +180,8 @@ paths:
     $ref: ./openapi/scheduler/work.pull.yaml#/pathItem
   /api/storage/credential/{credentialName}/archive:
     $ref: ./openapi/storage/credential.archive.yaml#/pathItem
+  /api/storage/credential/check:
+    $ref: ./openapi/storage/credential.check.yaml#/pathItem
   /api/storage/credential:
     $ref: ./openapi/storage/credential.create.yaml#/pathItem
   /api/storage/credential/{credentialName}:
