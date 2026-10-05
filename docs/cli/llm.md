@@ -4,8 +4,8 @@
 
 ## Scope
 
-This specification covers the `kanthord llm credential` group and the proposed `kanthord llm provider` group, with
-**12 command leaves: 11 implemented and 1 proposed**. The LLM component is a shared component, not a service.
+This specification covers the `kanthord llm credential` group and the `kanthord llm provider` group, with
+**12 command leaves, all implemented**. The LLM component is a shared component, not a service.
 It owns the credential routes of its platforms and OAuth login sessions. A credential belongs to no project.
 Custody declares no route and keeps the record functions that these routes call.
 
@@ -80,12 +80,12 @@ All paths below are implemented routes under the ruled `/api/llm/credential` pre
 The static `/api/llm/credential/login` and `/api/llm/credential/platform` paths take precedence over `/:credentialName`, so custody refuses the names `login` and `platform`.
 These routes have no project identity.
 
-The proposed [`provider check`](#provider-check--proposed) is a server-wide read under `human` access with the `[R]` flags.
+The [`provider check`](#provider-check) is a server-wide read under `human` access with the `[R]` flags.
 Its synopsis follows `kanthord llm provider`.
 
-| #   | Synopsis after `kanthord llm provider`     | HTTP route                     | Operation ID         | Access/status     |
-| --- | ------------------------------------------ | ------------------------------ | -------------------- | ----------------- |
-| 12  | `check --credential <credential-name> [R]` | `POST /api/llm/provider/check` | `llm.provider.check` | `human`; proposed |
+| #   | Synopsis after `kanthord llm provider`     | HTTP route                     | Operation ID         | Access/status |
+| --- | ------------------------------------------ | ------------------------------ | -------------------- | ------------- |
+| 12  | `check --credential <credential-name> [R]` | `POST /api/llm/provider/check` | `llm.provider.check` | `human`       |
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
 A `create` with a platform of another component answers `400 credential.platform.unsupported`.
@@ -273,7 +273,7 @@ failureReason }` as JSON. `state` is `pending | completed | failed | expired`.
 Absent message and failure reason values are `null`. This read does
 not poll until completion or change the session. No mutation key is accepted.
 
-## `provider check` — proposed
+## `provider check`
 
 ```text
 kanthord llm provider check --credential <credential-name> [R]
@@ -296,7 +296,7 @@ HTTP `200` answers `{ connection, models }`:
 - `ok`: the remote answers. `unauthorized`: the remote answers 401 or 403.
 - `unreachable`: a network failure or the deadline prevents the answer.
 - `invalid_response`: every other answer.
-- `models` is an array of `{ id, ownedBy, created }` for `openai-compatible` and `openai`, which read the OpenAI list shape of `GET /models`. Every other platform answers `models: null`.
+- `models` is an array of `{ id, ownedBy, created }` for `openai-compatible` and `openai`, which read the OpenAI list shape of `GET /models`. `ownedBy` and `created` are `null` when the remote leaves them out. Every other platform answers `models: null`.
 
 The answer supplies model ids, not limits or reasoning levels, and no key.
 The human saves approved models through a credential metadata revision.
