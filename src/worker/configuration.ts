@@ -7,6 +7,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   WorkerErrorCode,
+  agentProviderKindSchema,
   reasoningEffortSchema,
   type AgentProviderItem,
   type CredentialMetadataFn,
@@ -101,14 +102,10 @@ function modelLevels(
       throw configurationError(agentName, WorkerErrorCode.ModelUnknown);
     return model.reasoningLevels ?? DEFAULT_REASONING_LEVELS;
   }
-  assert.ok(
-    item.provider === AgentProviderKind.Anthropic ||
-      item.provider === AgentProviderKind.GithubCopilot ||
-      item.provider === AgentProviderKind.OpenaiCodex ||
-      item.provider === AgentProviderKind.Openrouter,
-    "Unknown stored agent provider kind.",
-  );
-  const model = getBuiltinModels(item.provider).find(
+  const provider = agentProviderKindSchema
+    .exclude([AgentProviderKind.OpenaiCompatible])
+    .parse(item.provider);
+  const model = getBuiltinModels(provider).find(
     ({ id }) => id === modelIdentifier,
   );
   if (!model) throw configurationError(agentName, WorkerErrorCode.ModelUnknown);

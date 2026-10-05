@@ -14,7 +14,6 @@ import {
   readAgentFile,
   SourceState,
 } from "./prompt-source.ts";
-import { AgentProviderKind } from "./enablements.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 
 const FIRST = 0;
@@ -125,10 +124,7 @@ export async function executionSetup(
       agentName,
       effectiveConfiguration: view.effective,
       credentialId: record.id,
-      metadata:
-        view.effective.provider === AgentProviderKind.OpenaiCompatible
-          ? record.metadata
-          : null,
+      metadata: record.metadata,
       resourceBudget: row.resourceBudget ?? declaration.resourceBudget,
       repositories,
       globalPrompt,

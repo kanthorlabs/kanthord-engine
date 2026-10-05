@@ -6,6 +6,7 @@ import type { Transaction } from "../kernel/store.ts";
 import type {
   AgentProviderDependent,
   AgentProviderItem,
+  AgentProviderKind as AgentProviderKindValue,
   DefaultConfiguration,
 } from "./contract.ts";
 
@@ -22,9 +23,7 @@ export const AgentProviderKind = {
   Anthropic: "anthropic",
   OpenaiCompatible: "openai-compatible",
   Openrouter: "openrouter",
-} as const;
-export type AgentProviderKind =
-  (typeof AgentProviderKind)[keyof typeof AgentProviderKind];
+} as const satisfies Record<string, AgentProviderKindValue>;
 
 export type EnablementRow = {
   id: string;

@@ -6,8 +6,8 @@ import {
 } from "@earendil-works/pi-ai";
 import { AgentProviderKind } from "./enablements.ts";
 import {
-  ADAPTER_ID,
   createModelRuntime,
+  metadataEnv,
   resolveModel,
 } from "./model-runtime.ts";
 import {
@@ -187,7 +187,7 @@ test("openrouter runs with the built-in pi provider and its credential", async (
     signal: new AbortController().signal,
   });
   const model = resolveModel(runtime, openrouter);
-  assert.equal(model.provider, ADAPTER_ID[AgentProviderKind.Openrouter]);
+  assert.equal(model.provider, AgentProviderKind.Openrouter);
   assert.ok(
     JSON.stringify(await runtime.getAuth("openrouter")).includes(
       "test_execution-secret",
@@ -235,10 +235,103 @@ test("openai-codex resolves a built-in model against its OAuth credential", asyn
     signal: new AbortController().signal,
   });
   const model = resolveModel(runtime, codex);
-  assert.equal(model.provider, ADAPTER_ID[AgentProviderKind.OpenaiCodex]);
+  assert.equal(model.provider, AgentProviderKind.OpenaiCodex);
   assert.ok(
     JSON.stringify(await runtime.getAuth("openai-codex")).includes(
       "test_access",
     ),
+  );
+});
+
+const GROQ = "groq";
+const BEDROCK = "amazon-bedrock";
+const BEDROCK_REGION = "eu-west-1";
+const EXECUTION_SECRET = "test_execution-secret";
+
+test("groq runs with the built-in pi provider and no metadata", async (t) => {
+  t.mock.method(globalThis, "fetch", () => {
+    throw new Error("Unexpected network call");
+  });
+  const groq: ExecutionSetup = {
+    ...setup,
+    effectiveConfiguration: {
+      ...setup.effectiveConfiguration,
+      provider: "groq",
+      modelIdentifier: "llama-3.1-8b-instant",
+    },
+  };
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("groq", async () => ({
+    type: "api_key",
+    key: "test_execution-secret",
+  }));
+  const runtime = await createModelRuntime({
+    setup: groq,
+    handoverItem: { ...handoverItem, providerId: "groq" },
+    credentials,
+    signal: new AbortController().signal,
+  });
+  assert.equal(resolveModel(runtime, groq).provider, GROQ);
+  assert.deepEqual(metadataEnv(groq), {});
+});
+
+test("amazon-bedrock receives its metadata region as the credential env", async (t) => {
+  t.mock.method(globalThis, "fetch", () => {
+    throw new Error("Unexpected network call");
+  });
+  const bedrock: ExecutionSetup = {
+    ...setup,
+    effectiveConfiguration: {
+      ...setup.effectiveConfiguration,
+      provider: "amazon-bedrock",
+      modelIdentifier: "amazon.nova-2-lite-v1:0",
+    },
+    metadata: { region: BEDROCK_REGION },
+  };
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("amazon-bedrock", async () => ({
+    type: "api_key",
+    key: "test_execution-secret",
+  }));
+  const runtime = await createModelRuntime({
+    setup: bedrock,
+    handoverItem: { ...handoverItem, providerId: "amazon-bedrock" },
+    credentials,
+    signal: new AbortController().signal,
+  });
+  assert.equal(resolveModel(runtime, bedrock).provider, BEDROCK);
+  const auth = await runtime.getAuth(BEDROCK);
+  assert.equal(auth?.env?.AWS_REGION, BEDROCK_REGION);
+  assert.equal(auth?.auth.apiKey, EXECUTION_SECRET);
+  assert.deepEqual(await credentials.read("amazon-bedrock"), {
+    type: "api_key",
+    key: "test_execution-secret",
+  });
+});
+
+test("metadata env maps every metadata field of the five platforms", () => {
+  const of = (provider: string, metadata: Record<string, string>) =>
+    metadataEnv({
+      ...setup,
+      effectiveConfiguration: {
+        ...setup.effectiveConfiguration,
+        provider:
+          provider as ExecutionSetup["effectiveConfiguration"]["provider"],
+      },
+      metadata,
+    });
+  assert.deepEqual(of("google-vertex", { project: "p", location: "l" }), {
+    GOOGLE_CLOUD_PROJECT: "p",
+    GOOGLE_CLOUD_LOCATION: "l",
+  });
+  assert.deepEqual(of("azure-openai-responses", { resource_name: "r" }), {
+    AZURE_OPENAI_RESOURCE_NAME: "r",
+  });
+  assert.deepEqual(of("cloudflare-workers-ai", { account_id: "a" }), {
+    CLOUDFLARE_ACCOUNT_ID: "a",
+  });
+  assert.deepEqual(
+    of("cloudflare-ai-gateway", { account_id: "a", gateway_id: "g" }),
+    { CLOUDFLARE_ACCOUNT_ID: "a", CLOUDFLARE_GATEWAY_ID: "g" },
   );
 });

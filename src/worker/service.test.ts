@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { test, type TestContext } from "node:test";
 import { WorkerService, type Dependencies } from "./service.ts";
 import { ActionPerformer } from "./action-performer.ts";
@@ -15,6 +16,7 @@ import {
   InstanceActivity,
   WorkerHost,
   WorkerMethod,
+  agentProviderKindSchema,
   type AgentDependentBinding,
   type WorkerEntry,
   type WorkerBindingOf,
@@ -1891,6 +1893,38 @@ test("openrouter uses the built-in catalog and refuses an unknown model", (t) =>
       .modelIdentifier,
     builtin,
   );
+});
+
+test("groq uses the built-in catalog and refuses an unknown model", (t) => {
+  const f = enablementFixture(t, {
+    credentialMetadata: () => {
+      throw new Error("Built-in catalog must not read metadata.");
+    },
+  });
+  const groq = { ...provider, provider: "groq" };
+  const body = (modelIdentifier: string) => ({
+    agentProviders: [groq],
+    defaultConfiguration: { ...defaults, modelIdentifier },
+  });
+  refuses(
+    () => f.invoke("agent.enablement.put", body(MODEL)),
+    WorkerErrorCode.ModelUnknown,
+  );
+  const builtin = "llama-3.1-8b-instant";
+  assert.equal(
+    f.invoke("agent.enablement.put", body(builtin)).defaultConfiguration
+      .modelIdentifier,
+    builtin,
+  );
+});
+
+test("the agent provider set holds openai-compatible and every pi-ai built-in provider", () => {
+  assert.deepEqual(
+    agentProviderKindSchema.options.toSorted(),
+    [AgentProviderKind.OpenaiCompatible, ...getBuiltinProviders()].toSorted(),
+  );
+  assert.equal(agentProviderKindSchema.safeParse("github").success, false);
+  assert.equal(agentProviderKindSchema.safeParse("s3").success, false);
 });
 
 test("openai-compatible metadata establishes models and reasoning levels, including an explicit empty set", (t) => {

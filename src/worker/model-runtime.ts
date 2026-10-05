@@ -12,22 +12,35 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Diagnostic } from "../kernel/errors.ts";
 import {
+  compatibleMetadataSchema,
+  platformMetadataSchema,
   reasoningEffortSchema,
+  type AgentProviderKind as ProviderKind,
   SetupRefusal,
   WorkerErrorCode,
   type ExecutionSetup,
 } from "./contract.ts";
+import { SecretShape } from "../custody/contract.ts";
 import { AgentProviderKind } from "./enablements.ts";
 import { loadPi } from "./pi.ts";
 
-export const ADAPTER_ID: Record<AgentProviderKind, string> = {
-  [AgentProviderKind.Anthropic]: "anthropic",
-  [AgentProviderKind.GithubCopilot]: "github-copilot",
-  [AgentProviderKind.OpenaiCodex]: "openai-codex",
-  [AgentProviderKind.OpenaiCompatible]: "openai-compatible",
-  [AgentProviderKind.Openrouter]: "openrouter",
+export const METADATA_ENV: Readonly<
+  Partial<Record<ProviderKind, Readonly<Record<string, string>>>>
+> = {
+  "amazon-bedrock": { region: "AWS_REGION" },
+  "google-vertex": {
+    project: "GOOGLE_CLOUD_PROJECT",
+    location: "GOOGLE_CLOUD_LOCATION",
+  },
+  "azure-openai-responses": { resource_name: "AZURE_OPENAI_RESOURCE_NAME" },
+  "cloudflare-workers-ai": { account_id: "CLOUDFLARE_ACCOUNT_ID" },
+  "cloudflare-ai-gateway": {
+    account_id: "CLOUDFLARE_ACCOUNT_ID",
+    gateway_id: "CLOUDFLARE_GATEWAY_ID",
+  },
 };
 const OFF = "off";
+const NO_ENV = 0;
 export interface ModelRuntimeInput {
   credentials: CredentialStore;
   handoverItem: { credentialId: string; providerId: string };
@@ -53,8 +66,8 @@ function refuse(
 }
 
 function compatibleProvider(setup: ExecutionSetup) {
-  const { metadata, effectiveConfiguration } = setup;
-  assert.ok(metadata);
+  const { effectiveConfiguration } = setup;
+  const metadata = compatibleMetadataSchema.parse(setup.metadata);
   assert.equal(
     effectiveConfiguration.provider,
     AgentProviderKind.OpenaiCompatible,
@@ -71,7 +84,7 @@ function compatibleProvider(setup: ExecutionSetup) {
       id: item.id,
       name: item.id,
       api: "openai-responses",
-      provider: ADAPTER_ID[AgentProviderKind.OpenaiCompatible],
+      provider: AgentProviderKind.OpenaiCompatible,
       baseUrl: metadata.baseUrl,
       reasoning: levels.some((level) => level !== OFF),
       thinkingLevelMap,
@@ -82,7 +95,7 @@ function compatibleProvider(setup: ExecutionSetup) {
     };
   });
   return createProvider({
-    id: ADAPTER_ID[AgentProviderKind.OpenaiCompatible],
+    id: AgentProviderKind.OpenaiCompatible,
     name: effectiveConfiguration.agentProvider,
     baseUrl: metadata.baseUrl,
     auth: {
@@ -96,23 +109,50 @@ function compatibleProvider(setup: ExecutionSetup) {
   });
 }
 
+export function metadataEnv(setup: ExecutionSetup): Record<string, string> {
+  const names = METADATA_ENV[setup.effectiveConfiguration.provider];
+  if (!names) return {};
+  const metadata = platformMetadataSchema.parse(setup.metadata);
+  return Object.fromEntries(
+    Object.entries(names).map(([field, name]) => {
+      const value = metadata[field];
+      assert.ok(value, `Credential metadata lacks ${field}.`);
+      return [name, value];
+    }),
+  );
+}
+
+function withMetadataEnv(
+  store: CredentialStore,
+  env: Record<string, string>,
+): CredentialStore {
+  if (Object.keys(env).length === NO_ENV) return store;
+  return {
+    read: async (providerId, options) => {
+      const credential = await store.read(providerId, options);
+      if (credential?.type !== SecretShape.ApiKey) return credential;
+      return { ...credential, env: { ...credential.env, ...env } };
+    },
+    list: (options) => store.list(options),
+    modify: (providerId, fn, options) => store.modify(providerId, fn, options),
+    delete: (providerId, options) => store.delete(providerId, options),
+  };
+}
+
 export async function createModelRuntime(
   input: ModelRuntimeInput,
 ): Promise<ModelRuntime> {
   const { credentials, handoverItem, setup, signal } = input;
   assert.ok(credentials);
   assert.ok(signal);
-  if (
-    handoverItem.providerId !==
-    ADAPTER_ID[setup.effectiveConfiguration.provider]
-  )
+  if (handoverItem.providerId !== setup.effectiveConfiguration.provider)
     refuse(SetupRefusal.CredentialAbsent);
   if (handoverItem.credentialId !== setup.credentialId)
     refuse(SetupRefusal.CredentialRevisionMismatch);
   const runtime = await (
     await loadPi()
   ).ModelRuntime.create({
-    credentials,
+    credentials: withMetadataEnv(credentials, metadataEnv(setup)),
     modelsPath: null,
     allowModelNetwork: false,
     refreshOnCreate: false,
@@ -132,10 +172,7 @@ export function resolveModel(
   assert.ok(runtime);
   assert.ok(setup.credentialId);
   const config = setup.effectiveConfiguration;
-  const model = runtime.getModel(
-    ADAPTER_ID[config.provider],
-    config.modelIdentifier,
-  );
+  const model = runtime.getModel(config.provider, config.modelIdentifier);
   if (!model) refuse(SetupRefusal.ModelUnknown);
   if (!getSupportedThinkingLevels(model).includes(config.reasoningEffort))
     refuse(SetupRefusal.ReasoningEffortUnsupported);

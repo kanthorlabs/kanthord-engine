@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { KnownProvider } from "@earendil-works/pi-ai";
+import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { identitySchema } from "../kernel/identity.ts";
 import {
   handoverEnvelopeSchema,
@@ -530,13 +532,13 @@ export type EntriesOfAgent = (
   agentName: string,
 ) => AgentDependentBinding[];
 
+export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible";
+export type AgentProviderKind =
+  KnownProvider | typeof OPENAI_COMPATIBLE_PROVIDER;
 export const agentProviderKindSchema = z.enum([
-  "github-copilot",
-  "openai-codex",
-  "anthropic",
-  "openai-compatible",
-  "openrouter",
-]);
+  OPENAI_COMPATIBLE_PROVIDER,
+  ...getBuiltinProviders(),
+] as [AgentProviderKind, ...AgentProviderKind[]]);
 
 export const reasoningEffortSchema = z.enum([
   "off",
@@ -758,6 +760,18 @@ export const globalPromptSourceSchema = z.discriminatedUnion("state", [
     reason: z.enum(InvalidReason),
   }),
 ]);
+export const compatibleMetadataSchema = z.strictObject({
+  baseUrl: z.string(),
+  models: z.array(
+    z.strictObject({
+      id: z.string().min(1),
+      contextWindow: z.number().int().positive().optional(),
+      maxTokens: z.number().int().positive().optional(),
+      reasoningLevels: z.array(reasoningEffortSchema).optional(),
+    }),
+  ),
+});
+export const platformMetadataSchema = z.record(z.string(), z.string());
 export const executionSetupSchema = z.strictObject({
   executionId: identitySchema("execution"),
   workerName: z.string().min(1),
@@ -765,17 +779,7 @@ export const executionSetupSchema = z.strictObject({
   effectiveConfiguration: effectiveConfigurationSchema,
   credentialId: identitySchema("credential"),
   metadata: z
-    .strictObject({
-      baseUrl: z.string(),
-      models: z.array(
-        z.strictObject({
-          id: z.string().min(1),
-          contextWindow: z.number().int().positive().optional(),
-          maxTokens: z.number().int().positive().optional(),
-          reasoningLevels: z.array(reasoningEffortSchema).optional(),
-        }),
-      ),
-    })
+    .union([compatibleMetadataSchema, platformMetadataSchema])
     .nullable(),
   resourceBudget: resourceBudgetSchema,
   repositories: z.array(

@@ -8,7 +8,11 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 import { gatewayFixture } from "./test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "../../gateway/contract.ts";
 import { custodyOperations } from "../../custody/contract.ts";
-import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
+import {
+  ActionResultKind,
+  agentProviderKindSchema,
+  workerOperations,
+} from "../../worker/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
@@ -330,6 +334,11 @@ const LEGACY_FRAGMENT_EXCEPTIONS = [
   "openapi/mission/import.apply.yaml",
   "openapi/project/bindingSet.get.yaml",
 ];
+const AGENT_PROVIDER_FRAGMENT_EXCEPTION =
+  "openapi/worker/agent.enablement.get.yaml";
+const PROVIDER_PROPERTY = "provider";
+const ENUM_KEYWORD = "enum";
+const AGENT_PROVIDER_ENUM_COUNT = 3;
 const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ...MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS.map(
     ([file]) => `openapi/mission/${file}.yaml`,
@@ -339,6 +348,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ),
   "openapi/mission/execution.objective.list.yaml",
   ...LEGACY_FRAGMENT_EXCEPTIONS,
+  AGENT_PROVIDER_FRAGMENT_EXCEPTION,
 ]);
 const NULL_SCHEMA_TYPE = "null";
 const STRING_SCHEMA_TYPE = "string";
@@ -847,6 +857,28 @@ test("named Mission fragment size exceptions retain the complete blocked context
     }
     assertBlockedNode(schema);
   }
+});
+test("the agent enablement fragment exceeds the soft limit only through the agent provider enum", () => {
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), AGENT_PROVIDER_FRAGMENT_EXCEPTION),
+      "utf8",
+    ),
+  );
+  const enums: unknown[] = [];
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) return value.forEach(collect);
+    if (!isObject(value)) return;
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === PROVIDER_PROPERTY && isObject(entry) && ENUM_KEYWORD in entry)
+        enums.push(entry.enum);
+      collect(entry);
+    }
+  };
+  collect(fragment.components.schemas);
+  assert.equal(enums.length, AGENT_PROVIDER_ENUM_COUNT);
+  for (const values of enums)
+    assert.deepEqual(values, agentProviderKindSchema.options);
 });
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);
