@@ -20,7 +20,7 @@ import {
 } from "./prompt-source.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 
-const FIRST = 0;
+const FIRST_ISSUE_INDEX = 0;
 
 export async function executionSetup(
   dependencies: Pick<
@@ -105,7 +105,7 @@ export async function executionSetup(
     );
     assert.ok(view);
     if (!view.valid) {
-      const issue = view.issues[FIRST];
+      const issue = view.issues[FIRST_ISSUE_INDEX];
       assert.ok(issue);
       throw new OperationError(
         HttpStatus.BadRequest,

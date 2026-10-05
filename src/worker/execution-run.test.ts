@@ -14,7 +14,7 @@ import {
 } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 
-const ONE = 1;
+const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;
 const VALUE = "value";
 const ERROR = "test.operation.failed";
@@ -53,7 +53,7 @@ test("execution calls return data with fresh canonical keys and settle credentia
     assert.equal(value, VALUE);
   }
   await Promise.all([run.settleCredentials(), run.settleCredentials()]);
-  assert.equal(reports, ONE);
+  assert.equal(reports, SETTLE_CALL_COUNT);
   assert.deepEqual(run.context(), {
     executionId: CLAIM.executionId,
     attempt: CLAIM.attempt,
@@ -130,8 +130,8 @@ test("proof refusals and failed calls stop once and prevent every later invocati
       error.code === code;
     await assert.rejects(run.call(invoke), expected);
     await assert.rejects(run.call(invoke), expected);
-    assert.equal(calls, ONE);
-    assert.equal(stops, ONE);
+    assert.equal(calls, SETTLE_CALL_COUNT);
+    assert.equal(stops, SETTLE_CALL_COUNT);
     run.dispose();
   }
 });
@@ -144,7 +144,7 @@ test("credential report rejection ends the execution without a second report", a
   });
   await assert.rejects(run.settleCredentials(), ExecutionStop);
   await assert.rejects(run.settleCredentials(), ExecutionStop);
-  assert.equal(reports, ONE);
+  assert.equal(reports, SETTLE_CALL_COUNT);
 });
 
 test("submissions pin claim fields and settle credentials before an assessment", async (t) => {

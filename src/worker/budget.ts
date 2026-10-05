@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 
-const ZERO = 0;
+const BUDGET_FLOOR = 0;
 export class ExecutionBudget {
   private readonly deadline: number;
   private readonly expiredAt: number;
   private readonly started = performance.now();
   private readonly remaining: number;
   private readonly turns?: number;
-  private endedTurns = ZERO;
+  private endedTurns = BUDGET_FLOOR;
   private readonly agents = new Set<CancellationContext>();
 
   constructor(input: {
@@ -22,37 +22,40 @@ export class ExecutionBudget {
     );
     assert.ok(
       Number.isSafeInteger(input.resourceBudget.wallTimeMs) &&
-        input.resourceBudget.wallTimeMs > ZERO,
+        input.resourceBudget.wallTimeMs > BUDGET_FLOOR,
     );
     assert.ok(
       input.resourceBudget.turns === undefined ||
         (Number.isSafeInteger(input.resourceBudget.turns) &&
-          input.resourceBudget.turns > ZERO),
+          input.resourceBudget.turns > BUDGET_FLOOR),
     );
     this.deadline = Math.min(
       input.createdAt + input.resourceBudget.wallTimeMs,
       input.expiredAt,
     );
     this.expiredAt = input.expiredAt;
-    this.remaining = Math.max(ZERO, this.deadline - Date.now());
+    this.remaining = Math.max(BUDGET_FLOOR, this.deadline - Date.now());
     this.turns = input.resourceBudget.turns;
   }
   wallDeadline(): number {
     return this.deadline;
   }
   remainingMs(): number {
-    return Math.max(ZERO, this.remaining - (performance.now() - this.started));
+    return Math.max(
+      BUDGET_FLOOR,
+      this.remaining - (performance.now() - this.started),
+    );
   }
   turnEnded(): void {
     assert.ok(Number.isSafeInteger(this.endedTurns));
-    assert.ok(this.endedTurns >= ZERO);
+    assert.ok(this.endedTurns >= BUDGET_FLOOR);
     this.endedTurns++;
     if (this.exhausted()) for (const context of this.agents) context.cancel();
   }
   exhausted(): boolean {
     return (
       (this.turns !== undefined && this.endedTurns >= this.turns) ||
-      this.remainingMs() <= ZERO
+      this.remainingMs() <= BUDGET_FLOOR
     );
   }
   agentContext(parent: Context): CancellationContext {

@@ -25,11 +25,13 @@ import {
 } from "./contract.ts";
 import { ActionPerformer } from "./action-performer.ts";
 
-const FIRST = 1;
+const FIRST_ATTEMPT = 1;
+const SINGLE_CALL_COUNT = 1;
 const NO_CALLS = 0;
 const COMMIT = "b".repeat(40);
 const NOT_RUNNING = "scheduler.execution.not_running";
-const SECOND = 2;
+const SECOND_ATTEMPT = 2;
+const DUAL_CALL_COUNT = 2;
 const RESOURCE = "repository:github:owner/repo";
 const PR = {
   kind: PlatformAddressKind.PullRequest,
@@ -61,7 +63,7 @@ function actionable(t: TestContext) {
   h.context.actions.push(entry);
   const evidence = {
     id: createIdentity("evidence"),
-    attempt: FIRST,
+    attempt: FIRST_ATTEMPT,
     requirementKey: entry.action.key,
     assets: [{ address: PR }],
   };
@@ -70,7 +72,7 @@ function actionable(t: TestContext) {
     status: HttpStatus.OK,
     data: evidence,
   });
-  assert.equal(h.context.actions.length, FIRST);
+  assert.equal(h.context.actions.length, SINGLE_CALL_COUNT);
   return { ...h, entry, evidence };
 }
 
@@ -81,8 +83,8 @@ function harness(t: TestContext) {
     executionId: createIdentity("execution"),
     projectId: createIdentity("project"),
     nodeId: createIdentity("node"),
-    attempt: FIRST,
-    pinnedRevision: FIRST,
+    attempt: FIRST_ATTEMPT,
+    pinnedRevision: FIRST_ATTEMPT,
     runtimeIdentity: createIdentity("worker_instance"),
     workerBindingId: createIdentity("binding"),
   };
@@ -92,7 +94,7 @@ function harness(t: TestContext) {
       name: "harness",
       resourceIdentity: "worker:kanthord:harness",
       projectId: claim.projectId,
-      issuedAt: FIRST,
+      issuedAt: FIRST_ATTEMPT,
     },
     "jwt",
     claim.runtimeIdentity,
@@ -215,7 +217,7 @@ test("admission reads one snapshot and no-action context calls no external seam"
     toolName: ACTION_REQUEST_TOOL_NAME,
     items: [],
   });
-  assert.equal(transactions.mock.callCount(), FIRST);
+  assert.equal(transactions.mock.callCount(), SINGLE_CALL_COUNT);
   assert.deepEqual(h.calls, ["claim", "mission"]);
 });
 
@@ -239,13 +241,13 @@ test("dispatch forwards identity, derived operands and the returned address to M
       commit: COMMIT,
       reusedAddress: null,
     },
-    `${h.claim.nodeId}/${FIRST}/${h.entry.action.key}`,
+    `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}`,
   ]);
   const [input, options] = request.mock.calls[0]!.arguments;
   assert.deepEqual(input.body, {
     executionId: h.claim.executionId,
-    attempt: FIRST,
-    nodeRevision: FIRST,
+    attempt: FIRST_ATTEMPT,
+    nodeRevision: FIRST_ATTEMPT,
     requirementKey: h.entry.action.key,
     subject: h.entry.action.key,
     address: PR,
@@ -272,7 +274,7 @@ test("merge push records the address and commit returned by Intake", async (t) =
   ) => {
     assert.equal(
       requestKey,
-      `${h.claim.nodeId}/${FIRST}/${h.entry.action.key}/${COMMIT}`,
+      `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}/${COMMIT}`,
     );
     assert.equal(operands.commit, COMMIT);
     return pushed;
@@ -302,7 +304,7 @@ test("no-effect refusal releases the reservation for a later invocation", async 
     },
   ]);
   await h.perform();
-  assert.equal(perform.mock.callCount(), SECOND);
+  assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
   assert.equal(
     perform.mock.calls[0]!.arguments[3],
     perform.mock.calls[1]!.arguments[3],
@@ -345,10 +347,10 @@ test("refused or thrown recording retains the known address as recording uncerta
 
 function reusable(t: TestContext) {
   const h = actionable(t);
-  h.claim.attempt = SECOND;
+  h.claim.attempt = SECOND_ATTEMPT;
   h.entry.reuseCandidates.push({
     evidenceId: createIdentity("evidence"),
-    attempt: FIRST,
+    attempt: FIRST_ATTEMPT,
     address: PR,
   });
   const body = {
@@ -364,8 +366,8 @@ function reusable(t: TestContext) {
     "perform",
     async () => PR,
   );
-  assert.equal(h.entry.reuseCandidates.length, FIRST);
-  assert.equal(h.claim.attempt, SECOND);
+  assert.equal(h.entry.reuseCandidates.length, SINGLE_CALL_COUNT);
+  assert.equal(h.claim.attempt, SECOND_ATTEMPT);
   return { ...h, body, performSpy: perform };
 }
 
@@ -385,7 +387,7 @@ test("reuse forwards the matching earlier pull request through Intake perform", 
   assert.deepEqual(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, PR);
   assert.equal(
     h.performSpy.mock.calls[0]?.arguments[3],
-    `${h.claim.nodeId}/${SECOND}/${h.entry.action.key}/${PR.number}/${COMMIT}`,
+    `${h.claim.nodeId}/${SECOND_ATTEMPT}/${h.entry.action.key}/${PR.number}/${COMMIT}`,
   );
 });
 
@@ -399,7 +401,7 @@ test("closed pull request dispatches fresh and a later matching candidate is sel
   const second = { ...PR, number: 43 };
   h.entry.reuseCandidates.push({
     evidenceId: createIdentity("evidence"),
-    attempt: FIRST,
+    attempt: FIRST_ATTEMPT,
     address: second,
   });
   h.dependencies.intakeActions.read = async (_call, _method, address) => ({
@@ -476,7 +478,7 @@ test("concurrent calls of one execution take a new snapshot after submission", a
   gate.resolve();
   assert.equal((await first).items[0]?.kind, ActionResultKind.Submitted);
   assert.deepEqual((await second).items, []);
-  assert.equal(perform.mock.callCount(), FIRST);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
 });
 
 test("unknown effect remains reserved across invocations and later executions", async (t) => {
@@ -494,7 +496,7 @@ test("unknown effect remains reserved across invocations and later executions", 
   assert.deepEqual(await h.perform(), first);
   h.claim.executionId = createIdentity("execution");
   assert.deepEqual(await h.perform(), first);
-  assert.equal(perform.mock.callCount(), FIRST);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
 });
 
 test("another execution cannot steal an in-flight reservation or invalidate its settlement", async (t) => {
@@ -519,9 +521,9 @@ test("another execution cannot steal an in-flight reservation or invalidate its 
   assert.equal(contender.uncertainty, Uncertainty.Effect);
   gate.resolve();
   assert.equal((await first).items[0]?.kind, ActionResultKind.Submitted);
-  assert.equal(perform.mock.callCount(), FIRST);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
   await h.perform();
-  assert.equal(perform.mock.callCount(), SECOND);
+  assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
 });
 
 test("unclassified perform error persists but unwired proves no effect", async (t) => {
@@ -535,7 +537,7 @@ test("unclassified perform error persists but unwired proves no effect", async (
   );
   await assert.rejects(h.perform(), /socket/);
   assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Uncertain);
-  assert.equal(perform.mock.callCount(), FIRST);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
   const other = actionable(t);
   const unwired = t.mock.method(
     other.dependencies.intakeActions,
@@ -546,7 +548,7 @@ test("unclassified perform error persists but unwired proves no effect", async (
   );
   await assert.rejects(other.perform(), { code: "system.composition.unwired" });
   await assert.rejects(other.perform(), { code: "system.composition.unwired" });
-  assert.equal(unwired.mock.callCount(), SECOND);
+  assert.equal(unwired.mock.callCount(), DUAL_CALL_COUNT);
 });
 
 test("same-attempt request evidence prunes uncertainty without dispatch", async (t) => {
@@ -565,7 +567,7 @@ test("same-attempt request evidence prunes uncertainty without dispatch", async 
   h.entry.resolution = ActionResolution.Unresolved;
   h.entry.requestEvidenceId = h.evidence.id;
   assert.deepEqual((await h.perform()).items, []);
-  assert.equal(perform.mock.callCount(), FIRST);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
 });
 
 test("read exception clears its reservation and every undispatched owned action", async (t) => {
@@ -585,7 +587,7 @@ test("read exception clears its reservation and every undispatched owned action"
     answer.items.map((item) => item.kind),
     [ActionResultKind.Submitted, ActionResultKind.Submitted],
   );
-  assert.equal(h.performSpy.mock.callCount(), SECOND);
+  assert.equal(h.performSpy.mock.callCount(), DUAL_CALL_COUNT);
 });
 
 test("perform exception retains only the dispatched action and clears later reservations", async (t) => {
@@ -607,7 +609,7 @@ test("perform exception retains only the dispatched action and clears later rese
     answer.items.map((item) => item.kind),
     [ActionResultKind.Uncertain, ActionResultKind.Submitted],
   );
-  assert.equal(perform.mock.callCount(), FIRST);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
 });
 
 test("mixed GitHub display capitalization reuses the earlier request without changing its address", async (t) => {
@@ -623,5 +625,5 @@ test("mixed GitHub display capitalization reuses the earlier request without cha
   assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
   assert.deepEqual(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, PR);
   assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, PR);
-  assert.equal(h.performSpy.mock.callCount(), FIRST);
+  assert.equal(h.performSpy.mock.callCount(), SINGLE_CALL_COUNT);
 });

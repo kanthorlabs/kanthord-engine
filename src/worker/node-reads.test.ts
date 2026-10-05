@@ -14,7 +14,7 @@ import {
 import { NodeKind } from "./native-agent.ts";
 import type { MethodClients } from "./method-clients.ts";
 
-const ONE = 1;
+const INITIAL_ATTEMPT = 1;
 function fixture(attempt = 1) {
   return new ExecutionRun({
     claim: {
@@ -89,8 +89,8 @@ test("node kind, terminal states and cleared outcome follow the pinned attempt",
     } as unknown as MethodClients["mission"];
     assert.equal(
       await readClearedOutcome(run),
-      attempt === ONE ? null : outcome,
+      attempt === INITIAL_ATTEMPT ? null : outcome,
     );
   }
-  assert.equal(calls, ONE);
+  assert.equal(calls, INITIAL_ATTEMPT);
 });

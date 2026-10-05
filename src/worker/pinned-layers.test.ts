@@ -233,8 +233,11 @@ test("inference pin preserves stream arguments and later system updates across w
 
 for (const isSplitTurn of [false, true]) {
   test(`SDK ${isSplitTurn ? "split-prefix" : "history"} compaction retains complete prompts and original requests through SDK retry`, async (t) => {
-    const FIRST = 0;
-    const ONE = 1;
+    const FIRST_REQUEST_INDEX = 0;
+    const INITIAL_ATTEMPT = 1;
+    const SINGLE_RETRY = 1;
+    const SECOND_REQUEST_INDEX = 1;
+    const NEGATIVE_LAST_OFFSET = 1;
     const HISTORY_CALLS = 2;
     const SPLIT_CALLS = 3;
     const SYSTEM = "system";
@@ -261,7 +264,7 @@ for (const isSplitTurn of [false, true]) {
     );
     const work = renderWorkPrompt({
       nodeId: "node",
-      revision: ONE,
+      revision: INITIAL_ATTEMPT,
       content: {
         name: "current work",
         requirement: "retain exact content",
@@ -325,7 +328,11 @@ for (const isSplitTurn of [false, true]) {
         isSplitTurn,
         tokensBefore: 1000,
         messagesToSummarize: [
-          { role: USER, content: "history request", timestamp: ONE },
+          {
+            role: USER,
+            content: "history request",
+            timestamp: INITIAL_ATTEMPT,
+          },
           fauxAssistantMessage("history response"),
         ],
         turnPrefixMessages: isSplitTurn
@@ -333,7 +340,7 @@ for (const isSplitTurn of [false, true]) {
               {
                 role: USER,
                 content: `prefix request quoting ${work.marked}`,
-                timestamp: ONE,
+                timestamp: INITIAL_ATTEMPT,
               },
               fauxAssistantMessage("prefix response"),
             ]
@@ -351,9 +358,9 @@ for (const isSplitTurn of [false, true]) {
       undefined,
       {
         enabled: true,
-        maxRetries: ONE,
-        baseDelayMs: ONE,
-        maxAgentDelayMs: ONE,
+        maxRetries: SINGLE_RETRY,
+        baseDelayMs: SINGLE_RETRY,
+        maxAgentDelayMs: SINGLE_RETRY,
       },
       {
         onRetryScheduled: (attempt, maxAttempts, _delay, message) => {
@@ -368,9 +375,9 @@ for (const isSplitTurn of [false, true]) {
       },
     );
     assert.deepEqual(events, [
-      ["scheduled", ONE, ONE, "terminated"],
+      ["scheduled", INITIAL_ATTEMPT, INITIAL_ATTEMPT, "terminated"],
       ["started"],
-      ["finished", true, ONE],
+      ["finished", true, INITIAL_ATTEMPT],
     ]);
     const expectedCalls = isSplitTurn ? SPLIT_CALLS : HISTORY_CALLS;
     assert.equal(provider.calls.length, expectedCalls);
@@ -378,7 +385,7 @@ for (const isSplitTurn of [false, true]) {
     assert.ok(reads.mock.callCount() >= expectedCalls);
     assert.ok(result.summary.includes(historySummary));
     assert.equal(result.summary.includes(prefixSummary), isSplitTurn);
-    const historyRequest = requests[FIRST]!.messages.filter(
+    const historyRequest = requests[FIRST_REQUEST_INDEX]!.messages.filter(
       (message) => message.role === USER,
     )
       .map((message) => contentText(message.content))
@@ -392,10 +399,13 @@ for (const isSplitTurn of [false, true]) {
       /Additional focus: retain the original summary focus/,
     );
     assert.match(historyRequest, /history request/);
-    assert.deepEqual(requests[FIRST], requests[ONE]);
+    assert.deepEqual(
+      requests[FIRST_REQUEST_INDEX],
+      requests[SECOND_REQUEST_INDEX],
+    );
     if (isSplitTurn) {
       const prefixRequest = requests
-        .at(-ONE)!
+        .at(-NEGATIVE_LAST_OFFSET)!
         .messages.filter((message) => message.role === USER)
         .map((message) => contentText(message.content))
         .join("\n");

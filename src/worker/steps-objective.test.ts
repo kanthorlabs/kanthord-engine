@@ -34,8 +34,8 @@ import {
 const transport = { ...connector, proveSshIdentity: async () => {} };
 
 const SECRET = "test_steps_key";
-const TWO = 2;
-const ZERO = 0;
+const PROVIDER_CALL_COUNT = 2;
+const NO_PROVIDER_CALLS = 0;
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -168,7 +168,7 @@ test("objective pushes the evidenced head before release and retains its workspa
     furtherWork: false,
   });
   assert.deepEqual(order, ["evidence", "release"]);
-  assert.equal(h.provider.calls.length, ZERO);
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   assert.ok(existsSync(h.directory));
 });
 
@@ -233,7 +233,7 @@ test("start check judges passing tasks in order and discards verification change
     (await startCheck(h)).pending.map(({ task }) => task.id),
     [tasks[0]!.id, tasks[2]!.id],
   );
-  assert.equal(h.provider.calls.length, TWO);
+  assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
   assert.equal(existsSync(join(h.directory, "dirty")), false);
   assert.ok(JSON.stringify(h.provider.calls[0]).includes(tasks[1]!.id));
   assert.ok(JSON.stringify(h.provider.calls[1]).includes(tasks[2]!.id));
@@ -332,7 +332,7 @@ test("B1 start-check timeout keeps failed disposition and cleanup runs after the
   assert.equal(checked.budgetEnd?.boundary, TaskBoundary.RunFailed);
   assert.equal(existsSync(join(h.directory, "transient")), false);
   assert.ok(Date.now() >= deadline && Date.now() < h.input.claim.expiredAt);
-  assert.equal(h.provider.calls.length, ZERO);
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   const verification = await verifyTask(h, current);
   assert.equal(verification.results[0]!.timedOut, true);
 });

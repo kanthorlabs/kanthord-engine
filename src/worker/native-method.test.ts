@@ -35,8 +35,8 @@ import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import { WorkerMethod } from "./contract.ts";
 import { renderWorkPrompt } from "./prompt-composer.ts";
 
-const ONE = 1;
-const ZERO = 0;
+const EXPECTED_CALL_COUNT = 1;
+const NO_RELEASES = 0;
 test("S1 refusal aborts an active native session and records its stopped transcript exactly once", async (t) => {
   const setup = anthropicSetup();
   const claim = {
@@ -122,8 +122,8 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     },
   });
   run.dispose();
-  assert.equal(entries.length, ONE);
-  assert.equal(provider.calls.length, ONE);
+  assert.equal(entries.length, EXPECTED_CALL_COUNT);
+  assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
   assert.equal(JSON.stringify(entries).includes(secret), false);
   assert.equal(JSON.stringify(entries).includes("ciphertext"), false);
 });
@@ -221,8 +221,8 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     context: background,
   });
   assert.deepEqual(result, { kind: "closed", outcomeId: "outcome" });
-  assert.equal(assessments, ONE);
-  assert.equal(provider.calls.length, ONE);
+  assert.equal(assessments, EXPECTED_CALL_COUNT);
+  assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
 test("native entry runs an initiative report with the scripted provider", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
@@ -283,7 +283,7 @@ test("native entry runs an initiative report with the scripted provider", async 
     context: background,
   });
   assert.deepEqual(result, { kind: "released", furtherWork: false });
-  assert.equal(provider.calls.length, ONE);
+  assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
 test("refused execution evidence aborts the agent and prevents later server operations", async (t) => {
   for (const [status, code] of [
@@ -341,7 +341,7 @@ test("refused execution evidence aborts the agent and prevents later server oper
       code,
     });
     await assert.rejects(run.release(false));
-    assert.equal(aborts, ONE);
-    assert.equal(releases, ZERO);
+    assert.equal(aborts, EXPECTED_CALL_COUNT);
+    assert.equal(releases, NO_RELEASES);
   }
 });

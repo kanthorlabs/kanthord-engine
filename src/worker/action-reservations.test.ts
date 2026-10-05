@@ -12,11 +12,12 @@ import {
   type ActionContext,
 } from "./contract.ts";
 
-const FIRST = 1;
-const SECOND = 2;
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+const SECOND_MUTEX_RESULT = 2;
 const key: ReservationKey = {
   nodeId: "node",
-  attempt: FIRST,
+  attempt: FIRST_ATTEMPT,
   action: { key: "repo.pull_request", bindingId: "binding" },
 };
 const uncertain = {
@@ -37,21 +38,27 @@ test("mutex serializes one execution and frees it after rejection", async () => 
   const failure = assert.rejects(first, /failed/);
   const second = mutex.run("execution", async () => {
     calls.push("second");
-    return SECOND;
+    return SECOND_MUTEX_RESULT;
   });
   assert.deepEqual(calls, ["first"]);
   gate.resolve();
   await failure;
-  assert.equal(await second, SECOND);
+  assert.equal(await second, SECOND_MUTEX_RESULT);
   assert.deepEqual(calls, ["first", "second"]);
-  assert.equal(await mutex.run("execution", async () => FIRST), FIRST);
+  assert.equal(
+    await mutex.run("execution", async () => FIRST_ATTEMPT),
+    FIRST_ATTEMPT,
+  );
 });
 
 test("mutex permits different executions to overlap", async () => {
   const mutex = new ExecutionMutex();
   const gate = Promise.withResolvers<void>();
   const first = mutex.run("first", () => gate.promise);
-  assert.equal(await mutex.run("second", async () => SECOND), SECOND);
+  assert.equal(
+    await mutex.run("second", async () => SECOND_MUTEX_RESULT),
+    SECOND_MUTEX_RESULT,
+  );
   gate.resolve();
   assert.equal(await first, undefined);
 });
@@ -89,7 +96,7 @@ test("uncertain settlement is retained unchanged across callers", () => {
 test("prune clears only requested actions in the same attempt", () => {
   const reservations = new DispatchReservations();
   reservations.acquire(key);
-  reservations.acquire({ ...key, attempt: SECOND });
+  reservations.acquire({ ...key, attempt: SECOND_ATTEMPT });
   const action = {
     ...key.action,
     action: "pull_request",
@@ -107,11 +114,13 @@ test("prune clears only requested actions in the same attempt", () => {
       reuseCandidates: [],
     },
   ];
-  reservations.prune(key.nodeId, FIRST, entries);
+  reservations.prune(key.nodeId, FIRST_ATTEMPT, entries);
   assert.ok("held" in reservations.acquire(key));
   entries[0]!.resolution = ActionResolution.Unresolved;
   entries[0]!.requestEvidenceId = "evidence";
-  reservations.prune(key.nodeId, FIRST, entries);
+  reservations.prune(key.nodeId, FIRST_ATTEMPT, entries);
   assert.ok("owner" in reservations.acquire(key));
-  assert.ok("held" in reservations.acquire({ ...key, attempt: SECOND }));
+  assert.ok(
+    "held" in reservations.acquire({ ...key, attempt: SECOND_ATTEMPT }),
+  );
 });

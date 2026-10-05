@@ -14,8 +14,8 @@ import type { WorkPrompt } from "./prompt-composer.ts";
 import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { ActionResultKind } from "./contract.ts";
 
-const ZERO = 0;
-const ONE = 1;
+const NO_RELEASES = 0;
+const SINGLE_RELEASE = 1;
 test("reviewer release accepts only settled or prerequisite-waiting action results", async (t) => {
   for (const kinds of [
     [],
@@ -75,7 +75,7 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
         furtherWork: false,
       });
     else await assert.rejects(requestAndRelease(run), ExecutionStop);
-    assert.equal(releases, accepted ? ONE : ZERO);
+    assert.equal(releases, accepted ? SINGLE_RELEASE : NO_RELEASES);
   }
 });
 test("evaluation writes failed-verification assessments without inference and gates malformed judgement", async (t) => {
@@ -172,7 +172,7 @@ test("evaluation writes failed-verification assessments without inference and ga
         "evidence.submit": async (input: {
           body: { verification: { results: unknown[] } };
         }) => {
-          assert.equal(input.body.verification.results.length, ONE);
+          assert.equal(input.body.verification.results.length, SINGLE_RELEASE);
           if (scenario.refused)
             return {
               type: "failure",
@@ -245,7 +245,10 @@ test("evaluation writes failed-verification assessments without inference and ga
     else
       assert.deepEqual(await pending, { kind: "closed", outcomeId: "outcome" });
     assert.equal(opens, scenario.opens);
-    assert.equal(assessments, scenario.result === null ? ZERO : ONE);
+    assert.equal(
+      assessments,
+      scenario.result === null ? NO_RELEASES : SINGLE_RELEASE,
+    );
     assert.equal(existsSync(workspaces.executionKey(claim.executionId)), false);
   }
 });

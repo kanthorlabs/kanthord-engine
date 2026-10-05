@@ -151,9 +151,12 @@ test("B3 review bundle places all supporting assets beside repositories and remo
       }
       const result = await pending;
       assert.deepEqual(result.evidenceIds, ["support"]);
-      const TWO = 2;
-      assert.equal(result.reviewBundle.assets.length, TWO);
-      assert.equal((result.testedInput as unknown[]).length, TWO);
+      const ASSET_REVIEW_COUNT = 2;
+      assert.equal(result.reviewBundle.assets.length, ASSET_REVIEW_COUNT);
+      assert.equal(
+        (result.testedInput as unknown[]).length,
+        ASSET_REVIEW_COUNT,
+      );
       assert.equal(JSON.stringify(result).includes(url), false);
       const OBJECT_REPORT = "object report";
       assert.equal(

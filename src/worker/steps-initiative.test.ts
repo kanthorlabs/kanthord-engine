@@ -15,8 +15,9 @@ import { runStepsInitiative } from "./steps-initiative.ts";
 import { DeadlineExceeded } from "../kernel/context.ts";
 import { setTimeout } from "node:timers/promises";
 
-const FIRST = 1;
-const ZERO = 0;
+const EVIDENCE_UPLOAD_COUNT = 1;
+const EXPECTED_RELEASES = 1;
+const NO_EVIDENCE_UPLOADS = 0;
 test("initiative reports terminal objectives, rechecks graph changes and removes its workspace", async (t) => {
   const scenarios = [
     {
@@ -133,7 +134,10 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
         kind: "released",
         furtherWork: scenario.further,
       });
-    assert.equal(evidence, scenario.evidence ? FIRST : ZERO);
+    assert.equal(
+      evidence,
+      scenario.evidence ? EVIDENCE_UPLOAD_COUNT : NO_EVIDENCE_UPLOADS,
+    );
     assert.equal(opens, scenario.opens);
     assert.equal(existsSync(workspaces.executionKey(claim.executionId)), false);
   }
@@ -195,6 +199,6 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
       ),
       { kind: "released", furtherWork: true },
     );
-    assert.equal(releases, FIRST);
+    assert.equal(releases, EXPECTED_RELEASES);
   }
 });

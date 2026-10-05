@@ -25,8 +25,10 @@ import {
 
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
-const THREE = 3;
-const ONE = 1;
+const PROVIDER_CALL_COUNT = 3;
+const TRANSCRIPT_LENGTH_BEFORE = 3;
+const SINGLE_TURN_BUDGET = 1;
+const SINGLE_CALL_COUNT = 1;
 const CONTENT = "written";
 const OPERATOR_PATH = "operator";
 const TOOL_RESULT = "toolResult";
@@ -104,7 +106,7 @@ test("native software agent writes and runs bounded bash with execution credenti
   await h.agent.prompt(WORK);
   assert.equal(readFileSync(join(h.workspace, "written.txt"), "utf8"), CONTENT);
   assert.ok(existsSync(join(h.workspace, "shell.txt")));
-  assert.equal(h.provider.calls.length, THREE);
+  assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
   assert.ok(h.provider.calls.every(({ apiKey }) => apiKey === SECRET));
   assert.ok(
     h.agent.composition.selected.some(({ path }) => path === OPERATOR_PATH),
@@ -214,10 +216,10 @@ test("native turn budget aborts after the first tool turn", async (t) => {
       tool("write", { path: "two.txt", content: CONTENT }),
       fauxAssistantMessage("done"),
     ],
-    { resourceBudget: { turns: ONE, wallTimeMs: 60000 } },
+    { resourceBudget: { turns: SINGLE_TURN_BUDGET, wallTimeMs: 60000 } },
   );
   await h.agent.prompt(WORK);
-  assert.equal(h.provider.calls.length, ONE);
+  assert.equal(h.provider.calls.length, SINGLE_CALL_COUNT);
   assert.equal(h.agent.budget.exhausted(), true);
   assert.equal(existsSync(join(h.workspace, "two.txt")), false);
 });
@@ -237,7 +239,7 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
   assert.ok(existsSync(join(h.workspace, "started")));
   h.context.cancel();
   await pending;
-  assert.equal(h.provider.calls.length, ONE);
+  assert.equal(h.provider.calls.length, SINGLE_CALL_COUNT);
   h.agent.dispose();
   await assert.rejects(h.agent.prompt(WORK));
   await assert.rejects(h.agent.instruct(WORK, "judge"));
@@ -256,13 +258,13 @@ test("native instructions preserve pinned work and expose copied transcript and 
   const messages = JSON.stringify(call.messages);
   assert.equal(
     messages.split(JSON.stringify(WORK.marked).slice(1, -1)).length - 1,
-    ONE,
+    SINGLE_CALL_COUNT,
   );
   assert.deepEqual(call.messages.at(-1)?.content, [
     { type: "text", text: "judge" },
   ]);
   assert.equal(h.agent.lastText(), JUDGED);
-  assert.equal(before.length, THREE);
+  assert.equal(before.length, TRANSCRIPT_LENGTH_BEFORE);
   assert.equal(h.agent.transcript().length, TRANSCRIPT_MESSAGES);
   assert.deepEqual(
     h.agent.transcript().map((message) => (message as { role: string }).role),

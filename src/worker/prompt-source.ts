@@ -17,7 +17,7 @@ export type SourceRead =
   | { state: typeof SourceState.Present; path: string; text: string }
   | { state: typeof SourceState.Absent; path: string }
   | { state: typeof SourceState.Invalid; path: string; reason: InvalidReason };
-const EMPTY = 0;
+const BUFFER_START_OFFSET = 0;
 const STRING_TYPE = "string";
 const FIRST_PRINTABLE = 32;
 const TAB = 9;
@@ -31,7 +31,7 @@ export function validateText(text: string): InvalidReason | null {
   assert.ok(Number.isSafeInteger(text.length));
   if (Buffer.byteLength(text, "utf8") > PROMPT_SOURCE_MAX_BYTES)
     return InvalidReason.TooLarge;
-  for (let index = EMPTY; index < text.length; index++) {
+  for (let index = BUFFER_START_OFFSET; index < text.length; index++) {
     const code = text.charCodeAt(index);
     if (
       (code < FIRST_PRINTABLE && code !== TAB && code !== NEWLINE) ||
@@ -74,15 +74,20 @@ async function readBounded(
       return invalid(path, InvalidReason.NotRegularFile);
     throwIfCancelled(context);
     const bytes = Buffer.alloc(PROMPT_SOURCE_MAX_BYTES + 1);
-    const { bytesRead } = await file.read(bytes, EMPTY, bytes.length, EMPTY);
-    assert.ok(bytesRead >= EMPTY);
+    const { bytesRead } = await file.read(
+      bytes,
+      BUFFER_START_OFFSET,
+      bytes.length,
+      BUFFER_START_OFFSET,
+    );
+    assert.ok(bytesRead >= BUFFER_START_OFFSET);
     assert.ok(bytesRead <= bytes.length);
     if (bytesRead > PROMPT_SOURCE_MAX_BYTES)
       return invalid(path, InvalidReason.TooLarge);
     let text: string;
     try {
       text = new TextDecoder("utf-8", { fatal: true }).decode(
-        bytes.subarray(EMPTY, bytesRead),
+        bytes.subarray(BUFFER_START_OFFSET, bytesRead),
       );
     } catch {
       return invalid(path, InvalidReason.NotUtf8);
@@ -128,7 +133,7 @@ export function configuredSource(
   | { state: typeof SourceState.Absent }
   | { state: typeof SourceState.Present; text: string } {
   assert.ok(value == null || typeof value === STRING_TYPE);
-  assert.ok(DISABLE_VALUE.length > EMPTY);
+  assert.ok(DISABLE_VALUE.length > BUFFER_START_OFFSET);
   if (value === DISABLE_VALUE) return { state: SourceState.Disabled };
   if (!value) return { state: SourceState.Absent };
   return { state: SourceState.Present, text: value };

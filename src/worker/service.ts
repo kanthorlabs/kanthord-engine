@@ -103,7 +103,7 @@ import {
   readRow,
 } from "./instances.ts";
 
-const NONE = 0;
+const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
 const HEALTH_PAGE_SIZE = 100;
 
@@ -360,13 +360,13 @@ export class WorkerService implements Service {
       registration.projectId,
       registration.resourceIdentity,
     );
-    if (!binding || binding.tombstone || binding.instanceCount === NONE)
+    if (!binding || binding.tombstone || binding.instanceCount === NO_ITEMS)
       return false;
     const declaration = getWorkerDeclaration(binding.workerName);
     assert.ok(declaration);
     if (declaration.host === WorkerHost.ExternalHarness) return true;
     const agents = agentsOfWorker(binding.workerName);
-    assert.ok(agents.length > NONE);
+    assert.ok(agents.length > NO_ITEMS);
     for (let index = 0; index < agents.length; index++) {
       const agent = agents[index]!;
       const entry = binding.entries.find((item) => item.agent === agent);
@@ -400,7 +400,7 @@ export class WorkerService implements Service {
         check: async (context) => {
           throwIfCancelled(context);
           const window = this.dependencies.config.heartbeatWindow;
-          assert.ok(Number.isSafeInteger(window) && window > NONE);
+          assert.ok(Number.isSafeInteger(window) && window > NO_ITEMS);
           assert.ok(runtimeIdentity);
           const age = this.heartbeatClock.ageMs(runtimeIdentity);
           return age !== null && age <= window * MILLISECONDS_PER_SECOND
@@ -442,7 +442,7 @@ export class WorkerService implements Service {
         effectiveConfiguration(defaults, binding.entry),
       ).map(({ code }) => ({ ...bindingIdentity(binding), code })),
     );
-    if (bindings.length > NONE)
+    if (bindings.length > NO_ITEMS)
       throw conflict(agentName, WorkerErrorCode.InvalidatesBindings, {
         bindings,
       });
@@ -457,7 +457,7 @@ export class WorkerService implements Service {
     checkRevision(tx, agentName, body.expectedRevision);
     const current = getEnablement(tx, agentName);
     const { agentProviders, defaultConfiguration } = body;
-    if (agentProviders.length === NONE)
+    if (agentProviders.length === NO_ITEMS)
       throw configurationError(agentName, WorkerErrorCode.ProviderRequired);
     const names = new Set(agentProviders.map(({ name }) => name));
     if (names.size !== agentProviders.length)
@@ -489,7 +489,7 @@ export class WorkerService implements Service {
           omitted.has(entry.agentProvider),
       )
       .map(bindingIdentity);
-    if (bindings.length > NONE)
+    if (bindings.length > NO_ITEMS)
       throw conflict(agentName, WorkerErrorCode.ProviderInUse, { bindings });
     this.validateBindings(
       tx,
@@ -543,7 +543,7 @@ export class WorkerService implements Service {
     const bindings = this.dependencies
       .entriesOfAgent(tx, agentName)
       .map(bindingIdentity);
-    if (bindings.length > NONE)
+    if (bindings.length > NO_ITEMS)
       throw conflict(agentName, WorkerErrorCode.InUse, { bindings });
     insertEnablementRevision(
       tx,
@@ -600,7 +600,7 @@ export class WorkerService implements Service {
         .filter(({ entry }) => entry?.agentProvider === providerName)
         .map(bindingIdentity),
     );
-    if (dependents.length > NONE)
+    if (dependents.length > NO_ITEMS)
       throw conflict(agentName, WorkerErrorCode.ProviderInUse, { dependents });
     const agentProviders = current.agentProviders.filter(
       ({ name }) => name !== providerName,
@@ -626,7 +626,7 @@ export class WorkerService implements Service {
         WorkerErrorCode.InvalidConfiguration,
       );
     const agents = agentsOfWorker(workerName);
-    if (agents.length === NONE && entry !== null)
+    if (agents.length === NO_ITEMS && entry !== null)
       throw configurationError(
         workerName,
         WorkerErrorCode.InvalidConfiguration,
@@ -659,7 +659,7 @@ export class WorkerService implements Service {
     )
       throw configurationError(agentName, WorkerErrorCode.OverrideNotAllowed);
     if (
-      Object.keys(entry).length === NONE ||
+      Object.keys(entry).length === NO_ITEMS ||
       (entry.agentProvider !== undefined &&
         (entry.modelIdentifier === undefined ||
           entry.reasoningEffort === undefined))
@@ -799,7 +799,7 @@ export class WorkerService implements Service {
       current.agentProviders,
       config,
     );
-    if (issues.length > NONE)
+    if (issues.length > NO_ITEMS)
       return { defaults, effective: null, valid: false, issues };
     const item = current.agentProviders.find(
       ({ name }) => name === config.agentProvider,
@@ -919,7 +919,7 @@ export class WorkerService implements Service {
     const declaration = getWorkerDeclaration(workerName) ?? null;
     assert.ok(declaration === null || declaration.name === workerName);
     assert.ok(
-      declaration === null || declaration.resourceBudget.wallTimeMs > NONE,
+      declaration === null || declaration.resourceBudget.wallTimeMs > NO_ITEMS,
     );
     return declaration;
   }

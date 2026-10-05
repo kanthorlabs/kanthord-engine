@@ -18,9 +18,11 @@ import {
 
 const NOW = 1000;
 const ENDED = 2000;
-const ONE = 1;
-const TWO = 2;
-const NONE = 0;
+const ROWS_ENDED = 1;
+const NEXT_TIMESTAMP = 1;
+const REGISTRATION_PAGE_LIMIT = 1;
+const LIVE_REGISTRATION_COUNT = 2;
+const NO_ROWS_AFFECTED = 0;
 const CLIENT = {
   clientId: "client-a",
   name: "Worker A",
@@ -48,10 +50,13 @@ test("registration rows retain attribution, end once, reopen, and roll back atom
   assert.deepEqual(readLiveByClient(store, CLIENT.clientId), registration);
   store.transaction((tx) => {
     assert.deepEqual(readLiveOfClient(tx, CLIENT.clientId), registration);
-    assert.equal(endRegistration(tx, registration.runtimeIdentity, ENDED), ONE);
     assert.equal(
-      endRegistration(tx, registration.runtimeIdentity, ENDED + ONE),
-      NONE,
+      endRegistration(tx, registration.runtimeIdentity, ENDED),
+      ROWS_ENDED,
+    );
+    assert.equal(
+      endRegistration(tx, registration.runtimeIdentity, ENDED + NEXT_TIMESTAMP),
+      NO_ROWS_AFFECTED,
     );
     assert.equal(readRow(tx, registration.runtimeIdentity)!.endedAt, ENDED);
     assert.equal(readLiveOfClient(tx, CLIENT.clientId), undefined);
@@ -96,11 +101,14 @@ test("counts, group endings and descending cursor pages respect both group keys"
       },
       NOW,
     );
-    assert.equal(countLive(tx, CLIENT.projectId, CLIENT.resourceIdentity), TWO);
+    assert.equal(
+      countLive(tx, CLIENT.projectId, CLIENT.resourceIdentity),
+      LIVE_REGISTRATION_COUNT,
+    );
     const filter = {
       projectId: CLIENT.projectId,
       resourceIdentity: CLIENT.resourceIdentity,
-      limit: ONE,
+      limit: REGISTRATION_PAGE_LIMIT,
     };
     const expected = [a.runtimeIdentity, b.runtimeIdentity].sort().reverse();
     const page = listLive(tx, filter);
@@ -112,7 +120,7 @@ test("counts, group endings and descending cursor pages respect both group keys"
       listLive(tx, { ...filter, cursor: expected[0] }).map(
         (entry) => entry.runtimeIdentity,
       ),
-      expected.slice(ONE),
+      expected.slice(REGISTRATION_PAGE_LIMIT),
     );
     assert.deepEqual(
       endGroup(tx, CLIENT.projectId, CLIENT.resourceIdentity, ENDED).sort(),
@@ -120,7 +128,7 @@ test("counts, group endings and descending cursor pages respect both group keys"
     );
     assert.equal(
       countLive(tx, CLIENT.projectId, CLIENT.resourceIdentity),
-      NONE,
+      NO_ROWS_AFFECTED,
     );
     assert.deepEqual(
       readAllLive(tx)
