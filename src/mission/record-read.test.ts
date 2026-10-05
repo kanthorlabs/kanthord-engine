@@ -36,8 +36,8 @@ import { nodeRecord } from "./node-read.ts";
 import { missionHarness } from "./test-support.ts";
 
 const NOW = 100;
-const FIRST = 1;
-const ZERO = 0;
+const FIRST_ATTEMPT = 1;
+const NO_ATTEMPT = 0;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const SHA = "a".repeat(40);
 const SHA256 = "a".repeat(64);
@@ -58,7 +58,7 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
       projectId,
       name: "repo",
       resourceIdentity: "repository:github:owner/repo",
-      revision: FIRST,
+      revision: FIRST_ATTEMPT,
       tombstone: false,
       disabled: false,
     }),
@@ -104,7 +104,7 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
   const evidence = (requirementKey: string | null = null) => ({
     id: createIdentity("evidence"),
     node_id: nodeId,
-    attempt: FIRST,
+    attempt: FIRST_ATTEMPT,
     subject: "Evidence",
     requirement_key: requirementKey,
     end_state: null,
@@ -176,7 +176,7 @@ for (const example of [
   test(`closing event ${example.event} derives from basis and policy after a request delete`, (t) => {
     const h = fixture(t, example.action);
     h.store.transaction((tx) => {
-      const attempt = openAttempt(tx, h.nodeId, FIRST, ACTOR, NOW);
+      const attempt = openAttempt(tx, h.nodeId, FIRST_ATTEMPT, ACTOR, NOW);
       const first = h.evidence();
       const second = h.evidence(REQUEST_KEY);
       insertEvidence(tx, first, []);
@@ -184,7 +184,7 @@ for (const example of [
       const assessment = insertAssessment(tx, {
         id: createIdentity("assessment"),
         node_id: h.nodeId,
-        attempt: FIRST,
+        attempt: FIRST_ATTEMPT,
         result: example.result,
         rationale: "Reviewed",
         evidence_ids: canonicalJSON([first.id]),
@@ -192,7 +192,7 @@ for (const example of [
         tested_input: null,
         execution_id: example.human ? null : createIdentity("execution"),
         actor: example.human ? canonicalJSON(ACTOR) : null,
-        node_revision: FIRST,
+        node_revision: FIRST_ATTEMPT,
         created_at: NOW,
       });
       const outcome = insertOutcome(tx, {
@@ -207,8 +207,8 @@ for (const example of [
       const before = outcomeRecord(tx, h.bindings, outcome);
       assert.equal(before.closingEvent, example.event);
       assert.deepEqual(before.evidenceIds, [first.id, second.id].sort());
-      assert.equal(before.attempt, FIRST);
-      assert.equal(before.nodeRevision, FIRST);
+      assert.equal(before.attempt, FIRST_ATTEMPT);
+      assert.equal(before.nodeRevision, FIRST_ATTEMPT);
       assert.deepEqual(attemptRecord(tx, h.bindings, attempt).outcomeIds, [
         outcome.id,
       ]);
@@ -229,7 +229,7 @@ test("blocked node projection includes its attempt-zero human outcome and no req
     const assessment = insertAssessment(tx, {
       id: createIdentity("assessment"),
       node_id: h.nodeId,
-      attempt: ZERO,
+      attempt: NO_ATTEMPT,
       result: AssessmentResult.Undetermined,
       rationale: "Held",
       evidence_ids: "[]",
@@ -237,7 +237,7 @@ test("blocked node projection includes its attempt-zero human outcome and no req
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(ACTOR),
-      node_revision: FIRST,
+      node_revision: FIRST_ATTEMPT,
       created_at: NOW,
     });
     const outcome = insertOutcome(tx, {
@@ -252,19 +252,22 @@ test("blocked node projection includes its attempt-zero human outcome and no req
     const row = readNode(tx, h.nodeId)!;
     const context = blockedContextOf(tx, h.bindings, row);
     assert.equal(context.outcome.id, outcome.id);
-    assert.equal(context.outcome.attempt, ZERO);
+    assert.equal(context.outcome.attempt, NO_ATTEMPT);
     assert.deepEqual(context.requests, []);
     const node = nodeSchema.parse(nodeRecord(tx, row, h.bindings));
     assert.ok(node.kind !== NodeKind.Task);
     assert.deepEqual(node.blockedContext, context);
-    assert.deepEqual(externalActionRecords(tx, h.bindings, h.nodeId, ZERO), []);
+    assert.deepEqual(
+      externalActionRecords(tx, h.bindings, h.nodeId, NO_ATTEMPT),
+      [],
+    );
   });
 });
 
 test("evidence projects every address kind without exposing inline data or storage-only names", (t) => {
   const h = fixture(t, RepositoryAction.PullRequest);
   h.store.transaction((tx) => {
-    openAttempt(tx, h.nodeId, FIRST, ACTOR, NOW);
+    openAttempt(tx, h.nodeId, FIRST_ATTEMPT, ACTOR, NOW);
     const row = h.evidence(REQUEST_KEY);
     const asset = (kind: AssetKind, content: unknown): AssetRow => ({
       id: createIdentity("evidence_asset"),
@@ -286,13 +289,13 @@ test("evidence projects every address kind without exposing inline data or stora
         objectVersion: VERSION,
         sha256: SHA256,
         storageBindingId: h.bindingId,
-        size: FIRST,
+        size: FIRST_ATTEMPT,
         mediaType: MEDIA,
       }),
       asset(AssetKind.Platform, {
         kind: RepositoryAction.PullRequest,
         resourceIdentity: "repository:github:owner/repo",
-        number: FIRST,
+        number: FIRST_ATTEMPT,
       }),
     ]);
     const evidence = evidenceRecord(tx, readEvidence(tx, row.id)!);
@@ -318,11 +321,12 @@ test("evidence projects every address kind without exposing inline data or stora
       },
     );
     assert.equal(
-      externalActionRecords(tx, h.bindings, h.nodeId, FIRST)[0]?.resolution,
+      externalActionRecords(tx, h.bindings, h.nodeId, FIRST_ATTEMPT)[0]
+        ?.resolution,
       Resolution.Unresolved,
     );
     assert.equal(
-      externalActionRecords(tx, h.bindings, h.nodeId, FIRST)[0]
+      externalActionRecords(tx, h.bindings, h.nodeId, FIRST_ATTEMPT)[0]
         ?.requestEvidenceId,
       row.id,
     );

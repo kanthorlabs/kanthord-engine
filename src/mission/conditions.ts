@@ -7,7 +7,8 @@ import { buildDependencyClosureOf } from "./graph.ts";
 import { readOpenAttempt, readRequests } from "./record-store.ts";
 import { readDependencies, readMissionNodes, type NodeRow } from "./store.ts";
 
-const ZERO = 0;
+const NO_ATTEMPT = 0;
+const NO_PENDING_ITEMS = 0;
 
 export function closureUnsatisfied(tx: Transaction, node: NodeRow): string[] {
   const nodes = readMissionNodes(tx, node.mission_id).filter(
@@ -50,7 +51,8 @@ export function readinessOf(
           .map((child) => child.id)
           .sort()
       : [];
-  const open = node.attempt === ZERO ? null : readOpenAttempt(tx, node.id);
+  const open =
+    node.attempt === NO_ATTEMPT ? null : readOpenAttempt(tx, node.id);
   const unresolvedActions =
     open === null
       ? []
@@ -59,8 +61,8 @@ export function readinessOf(
           .map((row) => row.requirement_key!);
   return {
     holds:
-      objectivesNotTerminal.length === ZERO &&
-      unresolvedActions.length === ZERO,
+      objectivesNotTerminal.length === NO_PENDING_ITEMS &&
+      unresolvedActions.length === NO_PENDING_ITEMS,
     objectivesNotTerminal,
     unresolvedActions,
   };
@@ -73,10 +75,11 @@ export function continuationHolds(
 ): boolean {
   assert.notEqual(node.kind, NodeKind.Task);
   assert.ok(node.attempt !== null);
-  const open = node.attempt === ZERO ? null : readOpenAttempt(tx, node.id);
+  const open =
+    node.attempt === NO_ATTEMPT ? null : readOpenAttempt(tx, node.id);
   return (
     open !== null &&
     eligibleUnrequested(actionStatesOf(tx, bindings, node.id, open.attempt))
-      .length > ZERO
+      .length > NO_PENDING_ITEMS
   );
 }

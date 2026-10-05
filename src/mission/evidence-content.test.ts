@@ -35,8 +35,10 @@ import { executionHarness } from "./test-support.ts";
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const COMMIT = "a".repeat(40);
 const NOW = 200;
-const FIRST = 1;
-const ZERO = 0;
+const FIRST_REVISION = 1;
+const BYTE_OVERFLOW = 1;
+const FAILURE_EXIT_CODE = 1;
+const SUCCESS_EXIT_CODE = 0;
 const CHILD_COUNT = 3;
 const RESOURCE = "repository:github:owner/repository";
 const OTHER_RESOURCE = "repository:github:owner/other";
@@ -72,14 +74,17 @@ test("content checks pinned objective bindings and distinct current initiative r
         : id === otherId
           ? OTHER_RESOURCE
           : RESOURCE,
-    revision: id === laterId ? FIRST + FIRST : FIRST,
+    revision: id === laterId ? FIRST_REVISION + FIRST_REVISION : FIRST_REVISION,
     tombstone: false,
     disabled: false,
   });
   h.store.transaction((tx) => {
-    const revision = getRevision(tx, h.nodeId, FIRST);
+    const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
     const initiative = readNode(tx, h.nodeId)!;
-    assert.deepEqual(h.service.repositoryBindingIdsOf(tx, h.nodeId, FIRST), []);
+    assert.deepEqual(
+      h.service.repositoryBindingIdsOf(tx, h.nodeId, FIRST_REVISION),
+      [],
+    );
     const address = {
       kind: AssetKind.Repository,
       bindingId,
@@ -121,7 +126,12 @@ test("content checks pinned objective bindings and distinct current initiative r
       insertRevision(tx, childRevision);
       setNodeState(tx, nodeId, NodeState.Discarded);
       assert.deepEqual(
-        repositoryBindingIdsOf(tx, h.dependencies.bindings, nodeId, FIRST),
+        repositoryBindingIdsOf(
+          tx,
+          h.dependencies.bindings,
+          nodeId,
+          FIRST_REVISION,
+        ),
         [id],
       );
       const child = readNode(tx, nodeId)!;
@@ -166,10 +176,10 @@ test("content checks pinned objective bindings and distinct current initiative r
         (error) => error instanceof OperationError && error.code === VALIDATION,
       );
     }
-    assert.deepEqual(h.service.repositoryBindingIdsOf(tx, h.nodeId, FIRST), [
-      laterId,
-      otherId,
-    ]);
+    assert.deepEqual(
+      h.service.repositoryBindingIdsOf(tx, h.nodeId, FIRST_REVISION),
+      [laterId, otherId],
+    );
     requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
       address,
       { ...address, bindingId: otherId },
@@ -223,7 +233,7 @@ test("produced bytes have canonical base64, an exact decoded limit and the decod
     () =>
       producedContent({
         mediaType: content.mediaType,
-        data: Buffer.alloc(INLINE_BYTES_MAX + FIRST).toString("base64"),
+        data: Buffer.alloc(INLINE_BYTES_MAX + BYTE_OVERFLOW).toString("base64"),
       }),
     (error) =>
       error instanceof OperationError &&
@@ -255,7 +265,7 @@ test("object locations preserve the pinned prefix and enforce bucket ownership",
     binding.projectId,
     missionId,
     nodeId,
-    FIRST,
+    FIRST_REVISION,
     assetId,
   );
   assert.equal(
@@ -271,7 +281,7 @@ test("object locations preserve the pinned prefix and enforce bucket ownership",
 test("verification coverage compares command multisets including pinned tasks", (t) => {
   const h = executionHarness(t, IDENTITY);
   h.store.transaction((tx) => {
-    const revision = getRevision(tx, h.nodeId, FIRST);
+    const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
     const node = { ...readNode(tx, h.nodeId)!, kind: NodeKind.Objective };
     revision.tasks = [
       {
@@ -282,7 +292,7 @@ test("verification coverage compares command multisets including pinned tasks", 
     ];
     const expected = requiredVerifications(tx, node, revision);
     assert.deepEqual(expected, ["true", "task", "true"]);
-    const result = (command: string, exitCode = ZERO) => ({
+    const result = (command: string, exitCode = SUCCESS_EXIT_CODE) => ({
       command,
       exitCode,
       signal: null,
@@ -296,7 +306,7 @@ test("verification coverage compares command multisets including pinned tasks", 
     for (const results of [
       [result("true")],
       [...verification.results, result("extra")],
-      [result("task"), result("true"), result("true", FIRST)],
+      [result("task"), result("true"), result("true", FAILURE_EXIT_CODE)],
       [result("task"), result("task"), result("true")],
     ])
       assert.equal(

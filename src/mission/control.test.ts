@@ -30,8 +30,8 @@ import { setNodeState } from "./store.ts";
 import { controlHarness } from "./test-support.ts";
 
 const NOW = 100;
-const FIRST = 1;
-const ZERO = 0;
+const FIRST_ATTEMPT = 1;
+const NO_ATTEMPT = 0;
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const KEY = "repo.pull_request";
 
@@ -45,7 +45,7 @@ test("control admission checks retirement, kind and mission before settlement an
             tx,
             h.dependencies,
             h.nodeId,
-            { ...h.body(), expectedMissionVersion: ZERO },
+            { ...h.body(), expectedMissionVersion: NO_ATTEMPT },
             [NodeState.Paused],
             NOW,
           ),
@@ -167,10 +167,10 @@ test("attempt-zero human records produce blocked context and no attempt", (t) =>
       NOW,
     );
     assert.equal(answer.attempt, null);
-    assert.equal(answer.outcome?.attempt, ZERO);
+    assert.equal(answer.outcome?.attempt, NO_ATTEMPT);
     assert.ok(answer.node.kind !== NodeKind.Task);
     assert.equal(answer.node.state, NodeState.Blocked);
-    assert.equal(requireMission(tx, h.missionId).version, FIRST);
+    assert.equal(requireMission(tx, h.missionId).version, FIRST_ATTEMPT);
   });
 });
 
@@ -216,9 +216,9 @@ for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {
     const h = controlHarness(t, IDENTITY);
     const node = h.node();
     h.store.transaction((tx) => {
-      openAttempt(tx, node.id, FIRST, h.actor, NOW);
+      openAttempt(tx, node.id, FIRST_ATTEMPT, h.actor, NOW);
       setNodeState(tx, node.id, state);
-      const current = { ...node, state, attempt: FIRST };
+      const current = { ...node, state, attempt: FIRST_ATTEMPT };
       assert.equal(
         closeExternalAttempt(tx, h.dependencies, current, NOW),
         null,
@@ -226,7 +226,7 @@ for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {
       const assessment = insertAssessment(tx, {
         id: createIdentity("assessment"),
         node_id: node.id,
-        attempt: FIRST,
+        attempt: FIRST_ATTEMPT,
         result: AssessmentResult.Success,
         rationale: "Passed",
         evidence_ids: "[]",
@@ -234,7 +234,7 @@ for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {
         tested_input: null,
         execution_id: createIdentity("execution"),
         actor: null,
-        node_revision: FIRST,
+        node_revision: FIRST_ATTEMPT,
         created_at: NOW,
       });
       const outcome = closeExternalAttempt(tx, h.dependencies, current, NOW);
@@ -245,7 +245,7 @@ for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {
           ? AssessmentResult.Success
           : AssessmentResult.Undetermined,
       );
-      assert.equal(readAttempt(tx, node.id, FIRST)?.closed_at, NOW);
+      assert.equal(readAttempt(tx, node.id, FIRST_ATTEMPT)?.closed_at, NOW);
     });
   });
 }
@@ -255,13 +255,13 @@ test("unresolved action guard reads the open attempt only", (t) => {
   const node = h.node();
   h.store.transaction((tx) => {
     requireNoUnresolvedAction(tx, node);
-    openAttempt(tx, node.id, FIRST, h.actor, NOW);
+    openAttempt(tx, node.id, FIRST_ATTEMPT, h.actor, NOW);
     insertEvidence(
       tx,
       {
         id: createIdentity("evidence"),
         node_id: node.id,
-        attempt: FIRST,
+        attempt: FIRST_ATTEMPT,
         subject: "Request",
         requirement_key: KEY,
         end_state: null,
@@ -272,7 +272,7 @@ test("unresolved action guard reads the open attempt only", (t) => {
       [],
     );
     assert.throws(
-      () => requireNoUnresolvedAction(tx, { ...node, attempt: FIRST }),
+      () => requireNoUnresolvedAction(tx, { ...node, attempt: FIRST_ATTEMPT }),
       (error) => {
         assert.ok(error instanceof OperationError);
         assert.equal(error.code, ControlError.Unresolved);

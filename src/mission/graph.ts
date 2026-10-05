@@ -2,7 +2,7 @@ import { DirectedGraph } from "graphology";
 
 export type DepEdge = { dependent: string; dependsOn: string };
 
-const ZERO = 0;
+const NO_DEPENDENCIES = 0;
 
 export function detectCycle(edges: DepEdge[]): boolean {
   const graph = new DirectedGraph();
@@ -19,7 +19,7 @@ export function detectCycle(edges: DepEdge[]): boolean {
   graph.forEachNode((node) => {
     const degree = graph.inDegree(node);
     inDegrees.set(node, degree);
-    if (degree === ZERO) queue.push(node);
+    if (degree === NO_DEPENDENCIES) queue.push(node);
   });
 
   let processed = 0;
@@ -31,7 +31,7 @@ export function detectCycle(edges: DepEdge[]): boolean {
       if (degree === undefined) throw new Error("Missing node in degree map");
       const remaining = degree - 1;
       inDegrees.set(neighbor, remaining);
-      if (remaining === ZERO) queue.push(neighbor);
+      if (remaining === NO_DEPENDENCIES) queue.push(neighbor);
     }
   }
   return processed < graph.order;

@@ -25,9 +25,9 @@ import { revisionFromRow } from "./revision.ts";
 import { controlHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const FIRST = 1;
+const FIRST_ATTEMPT = 1;
 const NOW = 100;
-const ZERO = 0;
+const NO_ATTEMPT = 0;
 const INSERT = "workQueue.insert";
 const UNMET = "mission.release.obligation_unmet";
 function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
@@ -45,7 +45,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
     bindingId,
     name: "repo",
     resourceIdentity: "repository:github:owner/repo",
-    revision: FIRST,
+    revision: FIRST_ATTEMPT,
     disabled: false,
     tombstone: false,
   });
@@ -82,7 +82,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
     h.store.transaction((tx) =>
       h.service.release(
         tx,
-        { executionId, nodeId: h.nodeId, attempt: FIRST },
+        { executionId, nodeId: h.nodeId, attempt: FIRST_ATTEMPT },
         furtherWork,
         NOW,
       ),
@@ -99,7 +99,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
         {
           id,
           node_id: h.nodeId,
-          attempt: FIRST,
+          attempt: FIRST_ATTEMPT,
           subject: "Work",
           requirement_key: null,
           end_state: null,
@@ -157,8 +157,8 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
   assert.deepEqual(claim, {
     kind: ClaimKind.Steps,
     projectId: h.projectId,
-    attempt: FIRST,
-    nodeRevision: FIRST,
+    attempt: FIRST_ATTEMPT,
+    nodeRevision: FIRST_ATTEMPT,
   });
   assert.deepEqual(
     JSON.parse(
@@ -171,7 +171,7 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
     const prior = revisionFromRow(tx, readCurrentRevision(tx, h.nodeId)!);
     insertRevision(tx, {
       ...prior,
-      revision: FIRST + FIRST,
+      revision: FIRST_ATTEMPT + FIRST_ATTEMPT,
       content: { ...prior.content, name: "Later direction" },
     });
   });
@@ -209,7 +209,7 @@ test("initiative claim refuses nonterminal objectives and task claim is never ad
     }),
   );
   assert.equal(h.claim(), null);
-  assert.equal(h.node().attempt, ZERO);
+  assert.equal(h.node().attempt, NO_ATTEMPT);
   h.store.database
     .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
     .run(NodeKind.Task, h.nodeId);
@@ -280,18 +280,18 @@ test("steps release excludes foreign execution and attempt evidence and requires
                   kind: AssetKind.Object,
                   content: "{}",
                   published_at: null,
-                  expired_at: NOW + FIRST,
+                  expired_at: NOW + FIRST_ATTEMPT,
                 },
               ]
             : []),
         ],
       );
     });
-  add(createIdentity("execution"), FIRST, false);
+  add(createIdentity("execution"), FIRST_ATTEMPT, false);
   h.refuses(ReleaseObligation.Evidence);
-  add(h.executionId, ZERO, false);
+  add(h.executionId, NO_ATTEMPT, false);
   h.refuses(ReleaseObligation.Evidence);
-  add(h.executionId, FIRST, true);
+  add(h.executionId, FIRST_ATTEMPT, true);
   h.refuses(ReleaseObligation.Evidence);
 });
 
@@ -304,8 +304,8 @@ test("reviewer release requires a current success and every eligible request", (
     insertAssessment(tx, {
       id: createIdentity("assessment"),
       node_id: h.nodeId,
-      attempt: FIRST,
-      node_revision: FIRST,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
       result: AssessmentResult.Success,
       rationale: "Passed",
       evidence_ids: "[]",
@@ -323,7 +323,7 @@ test("reviewer release requires a current success and every eligible request", (
       {
         id: createIdentity("evidence"),
         node_id: h.nodeId,
-        attempt: FIRST,
+        attempt: FIRST_ATTEMPT,
         subject: "Request",
         requirement_key: "repo.pull_request",
         end_state: null,
@@ -342,7 +342,7 @@ test("reviewer release requires a current success and every eligible request", (
 test("loss routes below the limit, pauses at the limit and resume permits another claim", async (t) => {
   const h = fixture(t);
   h.claim();
-  h.store.transaction((tx) => h.service.loss(tx, h.nodeId, FIRST, NOW));
+  h.store.transaction((tx) => h.service.loss(tx, h.nodeId, FIRST_ATTEMPT, NOW));
   assert.equal(h.node().state, NodeState.Available);
   h.claim();
   h.store.transaction((tx) =>
@@ -361,12 +361,15 @@ test("loss routes below the limit, pauses at the limit and resume permits anothe
   await h.invoke("node.resume", {
     params: { nodeId: h.nodeId },
     query: {},
-    body: { ...h.body(NodeState.Paused, FIRST), target: NodeState.Available },
+    body: {
+      ...h.body(NodeState.Paused, FIRST_ATTEMPT),
+      target: NodeState.Available,
+    },
   });
   assert.ok(h.claim());
   h.store.transaction((tx) => {
     setNodeState(tx, h.nodeId, NodeState.Evaluating);
-    h.service.loss(tx, h.nodeId, FIRST, NOW);
+    h.service.loss(tx, h.nodeId, FIRST_ATTEMPT, NOW);
   });
   assert.equal(h.node().state, NodeState.Waiting);
 });

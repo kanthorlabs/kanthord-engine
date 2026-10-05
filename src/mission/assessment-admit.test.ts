@@ -24,14 +24,20 @@ import { readNode, insertNode, insertRevision } from "./store.ts";
 import { executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const FIRST = 1;
-const ZERO = 0;
+const FIRST_ATTEMPT = 1;
+const FIRST_REVISION = 1;
+const FAILURE_EXIT_CODE = 1;
+const TEXT_OVERFLOW = 1;
+const SUCCESS_EXIT_CODE = 0;
+const NO_EVIDENCE = 0;
+const NO_ATTEMPT = 0;
+const EXPIRED_TIMESTAMP = 0;
 const NOW = 200;
 const VALIDATION = "gateway.request.validation_failed";
 const INPUT = { kind: AssetKind.Produced, sha256: "a".repeat(64) } as const;
 const RESULT = {
   command: "true",
-  exitCode: ZERO,
+  exitCode: SUCCESS_EXIT_CODE,
   signal: null,
   timedOut: false,
 };
@@ -49,7 +55,7 @@ function fixture(t: TestContext) {
   const seed = (
     verification: Verification | null,
     published = true,
-    attempt = FIRST,
+    attempt = FIRST_ATTEMPT,
     expiredAt: number | null = null,
   ) => {
     const id = createIdentity("evidence");
@@ -89,7 +95,7 @@ function fixture(t: TestContext) {
   const admit = (input = body, objective = false) =>
     h.store.transaction((tx) => {
       const node = readNode(tx, h.nodeId)!;
-      const revision = getRevision(tx, h.nodeId, FIRST);
+      const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
       if (objective) {
         node.kind = NodeKind.Objective;
         revision.tasks = [
@@ -109,8 +115,8 @@ function fixture(t: TestContext) {
         input,
       );
     });
-  assert.equal(body.attempt, FIRST);
-  assert.equal(body.evidenceIds.length, ZERO);
+  assert.equal(body.attempt, FIRST_ATTEMPT);
+  assert.equal(body.evidenceIds.length, NO_EVIDENCE);
   return { ...h, body, seed, admit };
 }
 
@@ -153,7 +159,10 @@ test("assessment success counts only the verification that covers every required
   };
   const failing = {
     ...full,
-    results: [RESULT, { ...RESULT, command: "task", exitCode: FIRST }],
+    results: [
+      RESULT,
+      { ...RESULT, command: "task", exitCode: FAILURE_EXIT_CODE },
+    ],
   };
   const fullId = h.seed(full);
   h.body.evidenceIds = [partial, fullId];
@@ -178,7 +187,10 @@ test("assessment success counts only the verification that covers every required
 test("assessment result order permits criterion-not-met for a failed run but rejects undetermined", (t) => {
   const h = fixture(t);
   h.body.evidenceIds = [
-    h.seed({ testedInput: INPUT, results: [{ ...RESULT, exitCode: FIRST }] }),
+    h.seed({
+      testedInput: INPUT,
+      results: [{ ...RESULT, exitCode: FAILURE_EXIT_CODE }],
+    }),
   ];
   refusal(() => h.admit(), MissionErrorCode.AssessmentVerificationFailed);
   h.admit({ ...h.body, result: AssessmentResult.CriterionNotMet });
@@ -192,14 +204,16 @@ test("assessment result order permits criterion-not-met for a failed run but rej
 test("assessment admission checks rationale and evidence ownership before publication and child sets", (t) => {
   const h = fixture(t);
   const pending = h.seed(null, false);
-  const foreignAttempt = h.seed(null, true, ZERO);
+  const foreignAttempt = h.seed(null, true, NO_ATTEMPT);
   h.body.evidenceIds = [pending, foreignAttempt];
   refusal(() => h.admit(), VALIDATION, "evidenceIds");
   assert.throws(
     () =>
       h.admit({
         ...h.body,
-        rationale: "x".repeat(h.dependencies.config.textMaxBytes + FIRST),
+        rationale: "x".repeat(
+          h.dependencies.config.textMaxBytes + TEXT_OVERFLOW,
+        ),
       }),
     (error) =>
       error instanceof OperationError &&
@@ -209,7 +223,7 @@ test("assessment admission checks rationale and evidence ownership before public
   h.body.evidenceIds = [pending];
   h.body.childOutcomeIds = [createIdentity("outcome")];
   refusal(() => h.admit(), MissionErrorCode.AssessmentEvidenceUnpublished);
-  h.body.evidenceIds = [h.seed(null, false, FIRST, ZERO)];
+  h.body.evidenceIds = [h.seed(null, false, FIRST_ATTEMPT, EXPIRED_TIMESTAMP)];
   refusal(() => h.admit(), MissionErrorCode.AssessmentEvidenceUnpublished);
   h.body.evidenceIds = [h.seed(null)];
   refusal(() => h.admit(), VALIDATION, "childOutcomeIds");
@@ -246,7 +260,7 @@ test("initiative admission tracks replacement child outcomes and excludes retire
   h.body.evidenceIds = [h.seed({ testedInput: INPUT, results: [RESULT] })];
   const childId = createIdentity("node");
   h.store.transaction((tx) => {
-    const base = getRevision(tx, h.nodeId, FIRST);
+    const base = getRevision(tx, h.nodeId, FIRST_REVISION);
     insertNode(tx, {
       id: childId,
       mission_id: h.missionId,
@@ -268,7 +282,7 @@ test("initiative admission tracks replacement child outcomes and excludes retire
       insertAssessment(tx, {
         id,
         node_id: childId,
-        attempt: ZERO,
+        attempt: NO_ATTEMPT,
         result: AssessmentResult.Undetermined,
         rationale: "Blocked",
         evidence_ids: "[]",
@@ -276,7 +290,7 @@ test("initiative admission tracks replacement child outcomes and excludes retire
         tested_input: null,
         actor: canonicalJSON(h.actor),
         execution_id: null,
-        node_revision: FIRST,
+        node_revision: FIRST_REVISION,
         created_at: NOW,
       });
       return insertOutcome(tx, {

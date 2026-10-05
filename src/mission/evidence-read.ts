@@ -7,8 +7,9 @@ import { recordNotFound } from "./record-list.ts";
 import { evidenceRecord } from "./record-read.ts";
 import { listEvidence, readEvidence } from "./record-store.ts";
 
-const ZERO = 0;
-const ONE = 1;
+const SLICE_FROM_START = 0;
+const PAGINATION_LOOKAHEAD = 1;
+const LAST_ITEM_OFFSET = 1;
 
 export function evidenceCursor(cursor?: string): string | null {
   if (cursor === undefined) return null;
@@ -29,12 +30,15 @@ export function evidencePage(
     nodeId,
     query.attempt ?? null,
     evidenceCursor(query.cursor),
-    limit + ONE,
+    limit + PAGINATION_LOOKAHEAD,
   );
-  const items = rows.slice(ZERO, limit).map((row) => evidenceRecord(tx, row));
+  const items = rows
+    .slice(SLICE_FROM_START, limit)
+    .map((row) => evidenceRecord(tx, row));
   return {
     items,
-    nextCursor: rows.length > limit ? encode(items.at(-ONE)!.id) : null,
+    nextCursor:
+      rows.length > limit ? encode(items.at(-LAST_ITEM_OFFSET)!.id) : null,
   };
 }
 

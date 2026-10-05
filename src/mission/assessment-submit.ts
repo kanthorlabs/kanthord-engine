@@ -29,7 +29,7 @@ import {
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 
-const ZERO = 0;
+const NO_REQUIRED_ACTIONS = 0;
 
 export function submitAssessment(
   tx: Transaction,
@@ -73,7 +73,8 @@ export function submitAssessment(
   let outcome: OutcomeRow | null = null;
   if (
     current &&
-    (body.result !== AssessmentResult.Success || actions.length === ZERO)
+    (body.result !== AssessmentResult.Success ||
+      actions.length === NO_REQUIRED_ACTIONS)
   ) {
     if (body.result === AssessmentResult.Success)
       requireNoUnresolvedAction(tx, node);

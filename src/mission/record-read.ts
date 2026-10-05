@@ -43,7 +43,8 @@ import {
 import { readNode, type NodeRow } from "./store.ts";
 import { currencyOf } from "./currency.ts";
 
-const ZERO = 0;
+const NO_REQUIRED_ACTIONS = 0;
+const NO_ATTEMPT = 0;
 const stringSet = z.array(z.string());
 const assetContent = z.record(z.string(), z.unknown());
 
@@ -162,7 +163,7 @@ function closingEvent(
   const attempt = readAttempt(tx, row.node_id, assessment.attempt);
   assert.ok(attempt);
   return requiredActionsOf(tx, bindings, row.node_id, attempt.node_revision)
-    .length === ZERO
+    .length === NO_REQUIRED_ACTIONS
     ? ClosingEvent.AssessmentPassed
     : ClosingEvent.ExternalSuccess;
 }
@@ -199,7 +200,7 @@ export function externalActionRecords(
   nodeId: string,
   attempt: number,
 ): ExternalAction[] {
-  if (attempt === ZERO) return [];
+  if (attempt === NO_ATTEMPT) return [];
   return actionStatesOf(tx, bindings, nodeId, attempt).map(
     ({ action, request, resolution }) => ({
       nodeId,
@@ -224,7 +225,7 @@ export function blockedContextOf(
   return {
     outcome,
     requests:
-      outcome.attempt === ZERO
+      outcome.attempt === NO_ATTEMPT
         ? []
         : readRequests(tx, node.id, outcome.attempt).map((row) =>
             evidenceRecord(tx, row),

@@ -23,7 +23,8 @@ import {
 } from "./control.ts";
 import type { Dependencies } from "./service.ts";
 
-const ZERO = 0;
+const NO_ATTEMPT = 0;
+const NO_UNSATISFIED_IDS = 0;
 const NOT_READY = "mission.node.not_ready";
 
 function requireReady(
@@ -33,7 +34,7 @@ function requireReady(
 ): void {
   const readiness = readinessOf(tx, node);
   const unsatisfiedIds = checkClosure ? closureUnsatisfied(tx, node) : [];
-  if (!readiness.holds || unsatisfiedIds.length > ZERO)
+  if (!readiness.holds || unsatisfiedIds.length > NO_UNSATISFIED_IDS)
     throw new OperationError(
       HttpStatus.Conflict,
       NOT_READY,
@@ -74,7 +75,7 @@ export function readyNode(
     now,
   );
   requireReady(tx, node, false);
-  if (node.attempt === ZERO) openCurrentAttempt(tx, nodeId, actor, now);
+  if (node.attempt === NO_ATTEMPT) openCurrentAttempt(tx, nodeId, actor, now);
   transition(tx, dependencies, mission, node, NodeState.Waiting, now);
   return controlResult(tx, dependencies, nodeId, null, actor, now);
 }
@@ -97,7 +98,7 @@ export function resumeNode(
   );
   assert.ok(node.attempt !== null);
   const actions =
-    node.attempt === ZERO
+    node.attempt === NO_ATTEMPT
       ? []
       : actionStatesOf(tx, dependencies.bindings, nodeId, node.attempt);
   let target: NodeState = body.target;
@@ -111,7 +112,7 @@ export function resumeNode(
       : NodeState.ExternalRequested;
   else if (body.target === ResumeTarget.Waiting) {
     requireReady(tx, node, true);
-    if (node.attempt === ZERO) openCurrentAttempt(tx, nodeId, actor, now);
+    if (node.attempt === NO_ATTEMPT) openCurrentAttempt(tx, nodeId, actor, now);
   }
   transition(tx, dependencies, mission, node, target, now);
   const current = readNode(tx, nodeId);

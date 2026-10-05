@@ -34,7 +34,7 @@ import {
   actRevision,
 } from "./control.ts";
 
-const ZERO = 0;
+const NO_ATTEMPT = 0;
 const OVERRIDE_STATES = [
   NodeState.Pending,
   NodeState.Available,
@@ -125,7 +125,7 @@ export function overrideNode(
   endLiveClaim(tx, dependencies, node, now);
   assert.ok(node.attempt !== null);
   const evidenceIds =
-    node.attempt === ZERO
+    node.attempt === NO_ATTEMPT
       ? []
       : readLandedCommitEvidence(tx, nodeId, node.attempt).map((row) => row.id);
   if (body.landedCommit !== undefined)
@@ -140,7 +140,7 @@ export function overrideNode(
         now,
       ),
     );
-  if (node.attempt > ZERO && node.state !== NodeState.Blocked)
+  if (node.attempt > NO_ATTEMPT && node.state !== NodeState.Blocked)
     closeAttempt(tx, nodeId, node.attempt, now);
   const outcome = writeHumanRecords(
     tx,
@@ -178,10 +178,10 @@ function closeHuman(
 ) {
   assert.ok(node.attempt !== null);
   assert.ok(state === NodeState.Blocked || state === NodeState.Discarded);
-  if (node.attempt > ZERO && node.state !== NodeState.Blocked)
+  if (node.attempt > NO_ATTEMPT && node.state !== NodeState.Blocked)
     closeAttempt(tx, node.id, node.attempt, now);
   const evidenceIds =
-    node.attempt === ZERO
+    node.attempt === NO_ATTEMPT
       ? []
       : readLandedCommitEvidence(tx, node.id, node.attempt).map(
           (row) => row.id,

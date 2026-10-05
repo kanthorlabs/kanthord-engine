@@ -30,8 +30,10 @@ import { getRevision } from "./node-read.ts";
 import { evidenceHarness, executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const ZERO = 0;
-const ONE = 1;
+const SUCCESSFUL_EXIT_CODE = 0;
+const NO_ATTEMPT = 0;
+const NO_CALLS = 0;
+const FIRST_REVISION = 1;
 const NOT_RUNNING = "scheduler.execution.not_running";
 const VALIDATION = "gateway.request.validation_failed";
 const QUEUE_INSERT = "workQueue.insert";
@@ -41,14 +43,14 @@ test("initiative currency follows real child outcomes and only current closure r
   const childId = createIdentity("node");
   const dependentId = createIdentity("node");
   h.store.transaction((tx) => {
-    const base = getRevision(tx, h.nodeId, ONE);
+    const base = getRevision(tx, h.nodeId, FIRST_REVISION);
     insertNode(tx, {
       id: childId,
       mission_id: h.missionId,
       kind: NodeKind.Objective,
       filename: "child.md",
       parent_id: h.nodeId,
-      created_at: ONE,
+      created_at: FIRST_REVISION,
     });
     insertRevision(tx, {
       ...base,
@@ -62,7 +64,7 @@ test("initiative currency follows real child outcomes and only current closure r
       kind: NodeKind.Initiative,
       filename: "dependent.md",
       parent_id: null,
-      created_at: ONE,
+      created_at: FIRST_REVISION,
     });
     insertRevision(tx, {
       ...base,
@@ -92,7 +94,12 @@ test("initiative currency follows real child outcomes and only current closure r
       verification: {
         testedInput: input,
         results: [
-          { command: "true", exitCode: ZERO, signal: null, timedOut: false },
+          {
+            command: "true",
+            exitCode: SUCCESSFUL_EXIT_CODE,
+            signal: null,
+            timedOut: false,
+          },
         ],
       },
     },
@@ -116,7 +123,7 @@ test("initiative currency follows real child outcomes and only current closure r
   assert.equal(first.outcome, null);
   assert.equal(
     h.calls.filter((call) => call.method === QUEUE_INSERT).length,
-    ZERO,
+    NO_CALLS,
   );
   const outcomeId = createIdentity("outcome");
   h.store.transaction((tx) => {
@@ -124,7 +131,7 @@ test("initiative currency follows real child outcomes and only current closure r
     insertAssessment(tx, {
       id,
       node_id: childId,
-      attempt: ZERO,
+      attempt: NO_ATTEMPT,
       result: AssessmentResult.Success,
       rationale: "Override",
       evidence_ids: "[]",
@@ -132,8 +139,8 @@ test("initiative currency follows real child outcomes and only current closure r
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
-      node_revision: ONE,
-      created_at: ONE,
+      node_revision: FIRST_REVISION,
+      created_at: FIRST_REVISION,
     });
     insertOutcome(tx, {
       id: outcomeId,
@@ -141,7 +148,7 @@ test("initiative currency follows real child outcomes and only current closure r
       result: AssessmentResult.Success,
       assessment_id: id,
       evidence_ids: "[]",
-      created_at: ONE,
+      created_at: FIRST_REVISION,
     });
     setNodeState(tx, childId, NodeState.Completed);
   });
@@ -190,13 +197,18 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
       verification: {
         testedInput: address,
         results: [
-          { command: "true", exitCode: ZERO, signal: null, timedOut: false },
+          {
+            command: "true",
+            exitCode: SUCCESSFUL_EXIT_CODE,
+            signal: null,
+            timedOut: false,
+          },
         ],
       },
     },
   });
   h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
-  let revokes = ZERO;
+  let revokes = NO_CALLS;
   h.dependencies.schedulerClaims.revoke = () => {
     revokes++;
     h.dependencies.schedulerClaims.liveExecutionOf = () => null;
@@ -217,7 +229,7 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
       body: input,
     });
   assert.equal(h.node().state, NodeState.Evaluating);
-  assert.equal(body.evidenceIds.length, ONE);
+  assert.equal(body.evidenceIds.length, FIRST_REVISION);
   return { ...h, body, submit, revokes: () => revokes };
 }
 
@@ -232,7 +244,7 @@ test("current passing assessments close attempts and revoke claims without an ex
     h.store.transaction((tx) => readOpenAttempt(tx, h.nodeId)),
     null,
   );
-  assert.equal(h.revokes(), ONE);
+  assert.equal(h.revokes(), FIRST_REVISION);
   await assert.rejects(
     h.submit(),
     (error) => error instanceof OperationError && error.code === NOT_RUNNING,
@@ -252,14 +264,14 @@ test("current nonpassing assessments block and a required-action pass keeps eval
       answer.outcome?.closingEvent,
       ClosingEvent.AssessmentNotPassed,
     );
-    assert.equal(h.revokes(), ONE);
+    assert.equal(h.revokes(), FIRST_REVISION);
   }
   const h = await fixture(t, RepositoryAction.PullRequest);
   const answer = await h.submit();
   assert.ok("state" in answer.node);
   assert.equal(answer.node.state, NodeState.Evaluating);
   assert.equal(answer.outcome, null);
-  assert.equal(h.revokes(), ZERO);
+  assert.equal(h.revokes(), NO_CALLS);
   assert.ok(h.store.transaction((tx) => readOpenAttempt(tx, h.nodeId)));
 });
 
@@ -276,7 +288,7 @@ test("nonpassing assessment closes into Blocked while preserving its unresolved 
       address: {
         kind: PlatformAddressKind.PullRequest,
         resourceIdentity: "repository:github:owner/repo",
-        number: ONE,
+        number: FIRST_REVISION,
       },
     },
   });
@@ -286,7 +298,7 @@ test("nonpassing assessment closes into Blocked while preserving its unresolved 
   });
   assert.ok("state" in answer.node);
   assert.equal(answer.node.state, NodeState.Blocked);
-  assert.equal(h.revokes(), ONE);
+  assert.equal(h.revokes(), FIRST_REVISION);
   h.store.transaction((tx) => {
     assert.equal(readOpenAttempt(tx, h.nodeId), null);
     assert.equal(readEvidence(tx, request.id)?.end_state, null);

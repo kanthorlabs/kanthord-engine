@@ -18,10 +18,10 @@ import {
 import { evidenceHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const ONE = 1;
+const FIRST_ATTEMPT = 1;
 const DATA = "aGk=";
 const KEY = "key";
-const ZERO = 0;
+const FIRST_ASSET_INDEX = 0;
 const VERSION = "v1";
 const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
 const Change = {
@@ -58,7 +58,7 @@ test("initiative content bound includes only evidence of current child outcomes"
     insertAssessment(tx, {
       id: assessmentId,
       node_id: h.nodeId,
-      attempt: ONE,
+      attempt: FIRST_ATTEMPT,
       result: AssessmentResult.Undetermined,
       rationale: "Blocked",
       evidence_ids: canonicalJSON([named.evidence.id]),
@@ -66,8 +66,8 @@ test("initiative content bound includes only evidence of current child outcomes"
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
-      node_revision: ONE,
-      created_at: ONE,
+      node_revision: FIRST_ATTEMPT,
+      created_at: FIRST_ATTEMPT,
     });
     insertOutcome(tx, {
       id: createIdentity("outcome"),
@@ -75,7 +75,7 @@ test("initiative content bound includes only evidence of current child outcomes"
       assessment_id: assessmentId,
       result: AssessmentResult.Undetermined,
       evidence_ids: "[]",
-      created_at: ONE,
+      created_at: FIRST_ATTEMPT,
     });
   });
   h.claim.nodeId = h.node().parent_id!;
@@ -85,11 +85,11 @@ test("initiative content bound includes only evidence of current child outcomes"
       query: {},
       body: null,
     });
-  const included = await read(named.evidence.assets[ZERO]!.id);
+  const included = await read(named.evidence.assets[FIRST_ASSET_INDEX]!.id);
   assert.ok("data" in included);
   assert.equal(included.data, DATA);
   await assert.rejects(
-    read(unreferenced.evidence.assets[ZERO]!.id),
+    read(unreferenced.evidence.assets[FIRST_ASSET_INDEX]!.id),
     (error) =>
       error instanceof OperationError &&
       error.code === MissionErrorCode.RecordNotFound,
@@ -97,10 +97,10 @@ test("initiative content bound includes only evidence of current child outcomes"
   h.store.transaction((tx) =>
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-      .run(ONE, h.nodeId),
+      .run(FIRST_ATTEMPT, h.nodeId),
   );
   await assert.rejects(
-    read(named.evidence.assets[ZERO]!.id),
+    read(named.evidence.assets[FIRST_ASSET_INDEX]!.id),
     (error) =>
       error instanceof OperationError &&
       error.code === MissionErrorCode.RecordNotFound,
@@ -113,7 +113,7 @@ test("content signing repeats after publication and never releases a URL after d
     h.dependencies.intakeStorage.put = async () => ({
       putUrl: "https://example.com/put",
       headers: {},
-      expiresAt: Date.now() + ONE,
+      expiresAt: Date.now() + FIRST_ATTEMPT,
     });
     const submitted = await h.invoke("evidence.submit", {
       params: { nodeId: h.nodeId },
@@ -122,11 +122,15 @@ test("content signing repeats after publication and never releases a URL after d
         ...h.context,
         subject: "Object",
         assets: [
-          { kind: AssetKind.Object, mediaType: "text/plain", size: ONE },
+          {
+            kind: AssetKind.Object,
+            mediaType: "text/plain",
+            size: FIRST_ATTEMPT,
+          },
         ],
       },
     });
-    const assetId = submitted.evidence.assets[ZERO]!.id;
+    const assetId = submitted.evidence.assets[FIRST_ASSET_INDEX]!.id;
     const versions: (string | null)[] = [];
     h.dependencies.intakeStorage.executionGet = async (
       _call,
@@ -141,7 +145,7 @@ test("content signing repeats after publication and never releases a URL after d
             .prepare(
               "UPDATE mission_evidence_asset SET content = json_set(content, '$.objectVersion', ?), published_at = ? WHERE id = ?",
             )
-            .run(VERSION, ONE, assetId),
+            .run(VERSION, FIRST_ATTEMPT, assetId),
         );
       if (change === Change.Delete)
         h.store.transaction((tx) =>
@@ -153,7 +157,7 @@ test("content signing repeats after publication and never releases a URL after d
         h.dependencies.schedulerClaims.liveExecutionOf = () => null;
       return {
         getUrl: `https://example.com/${version ?? "latest"}`,
-        expiresAt: ONE,
+        expiresAt: FIRST_ATTEMPT,
       };
     };
     const read = () =>
@@ -216,13 +220,13 @@ test("content reads return inline bytes or sign only the recorded object version
         {
           id,
           node_id: h.nodeId,
-          attempt: ONE,
+          attempt: FIRST_ATTEMPT,
           subject: "Object",
           requirement_key: null,
           end_state: null,
           verification: null,
           provenance: canonicalJSON(h.executionActor),
-          created_at: ONE,
+          created_at: FIRST_ATTEMPT,
         },
         [
           {
@@ -231,12 +235,12 @@ test("content reads return inline bytes or sign only the recorded object version
             kind: AssetKind.Object,
             content: canonicalJSON({
               location: "s3://bucket/key",
-              size: ONE,
+              size: FIRST_ATTEMPT,
               mediaType: "text/plain",
               storageBindingId: h.storageId,
               ...(objectVersion ? { objectVersion } : {}),
             }),
-            published_at: ONE,
+            published_at: FIRST_ATTEMPT,
             expired_at: null,
           },
         ],
@@ -253,7 +257,10 @@ test("content reads return inline bytes or sign only the recorded object version
         calls.push(method);
         assert.equal(key, KEY);
         assert.equal(version, objectVersion ?? null);
-        return { getUrl: "https://storage.example/get", expiresAt: ONE };
+        return {
+          getUrl: "https://storage.example/get",
+          expiresAt: FIRST_ATTEMPT,
+        };
       };
     await h.invoke("evidence.asset.content.get", {
       params: { assetId: objectId },
@@ -286,7 +293,7 @@ test("external addresses answer typed conflicts only after the execution bound a
       {
         kind: PlatformAddressKind.PullRequest,
         resourceIdentity: "repository:github:owner/repo",
-        number: ONE,
+        number: FIRST_ATTEMPT,
       },
       MissionErrorCode.EvidenceContentPlatform,
     ],
@@ -299,13 +306,13 @@ test("external addresses answer typed conflicts only after the execution bound a
         {
           id: evidenceId,
           node_id: h.nodeId,
-          attempt: ONE,
+          attempt: FIRST_ATTEMPT,
           subject: "Address",
           requirement_key: null,
           end_state: null,
           verification: null,
           provenance: canonicalJSON(h.executionActor),
-          created_at: ONE,
+          created_at: FIRST_ATTEMPT,
         },
         [
           {
@@ -313,7 +320,7 @@ test("external addresses answer typed conflicts only after the execution bound a
             evidence_id: evidenceId,
             kind,
             content: canonicalJSON(content),
-            published_at: ONE,
+            published_at: FIRST_ATTEMPT,
             expired_at: null,
           },
         ],

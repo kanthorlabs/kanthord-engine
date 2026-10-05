@@ -21,26 +21,36 @@ export const TASKS_FIELD = "tasks";
 const Field = ContentField;
 const UTF8 = "utf8";
 const RESOURCE_KIND_SEPARATOR = ":";
-const ZERO = 0;
-const ONE = 1;
+const NO_BINDINGS = 0;
+const EMPTY_LENGTH = 0;
+const LOOP_START = 0;
+const RESOURCE_KIND_SEGMENT = 0;
+const INITIAL_BINDING_COUNT = 0;
+const SINGLE_BINDING = 1;
+const LOOP_STEP = 1;
+const BINDING_COUNT_STEP = 1;
+const SPLIT_FIRST_PART_LIMIT = 1;
 type BindingKind = (typeof MissionBindingKind)[keyof typeof MissionBindingKind];
 type Range = { min: number; max: number };
 
 const bindingRules: Record<NodeKind, Record<BindingKind, Range>> = {
   [NodeKind.Initiative]: {
-    [MissionBindingKind.Repository]: { min: ZERO, max: ZERO },
-    [MissionBindingKind.Worker]: { min: ZERO, max: ZERO },
-    [MissionBindingKind.Storage]: { min: ZERO, max: ONE },
+    [MissionBindingKind.Repository]: { min: NO_BINDINGS, max: NO_BINDINGS },
+    [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
+    [MissionBindingKind.Storage]: { min: NO_BINDINGS, max: SINGLE_BINDING },
   },
   [NodeKind.Objective]: {
-    [MissionBindingKind.Repository]: { min: ONE, max: ONE },
-    [MissionBindingKind.Worker]: { min: ZERO, max: ZERO },
-    [MissionBindingKind.Storage]: { min: ZERO, max: ONE },
+    [MissionBindingKind.Repository]: {
+      min: SINGLE_BINDING,
+      max: SINGLE_BINDING,
+    },
+    [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
+    [MissionBindingKind.Storage]: { min: NO_BINDINGS, max: SINGLE_BINDING },
   },
   [NodeKind.Task]: {
-    [MissionBindingKind.Repository]: { min: ZERO, max: ZERO },
-    [MissionBindingKind.Worker]: { min: ZERO, max: ZERO },
-    [MissionBindingKind.Storage]: { min: ZERO, max: ZERO },
+    [MissionBindingKind.Repository]: { min: NO_BINDINGS, max: NO_BINDINGS },
+    [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
+    [MissionBindingKind.Storage]: { min: NO_BINDINGS, max: NO_BINDINGS },
   },
 };
 
@@ -54,7 +64,8 @@ function invalidContent(field: string): never {
 }
 
 function nonblankText(field: string, value: unknown): string {
-  if (!isString(value) || value.trim().length === ZERO) invalidContent(field);
+  if (!isString(value) || value.trim().length === EMPTY_LENGTH)
+    invalidContent(field);
   return value;
 }
 
@@ -89,7 +100,7 @@ export function validateNodeContent(
   const verifications = input[Field.Verifications];
   if (
     verifications === undefined ||
-    (Array.isArray(verifications) && verifications.length === ZERO)
+    (Array.isArray(verifications) && verifications.length === EMPTY_LENGTH)
   )
     throw new OperationError(
       HttpStatus.BadRequest,
@@ -98,16 +109,20 @@ export function validateNodeContent(
     );
   if (!Array.isArray(verifications)) invalidContent(Field.Verifications);
   for (
-    let index = ZERO, count = verifications.length;
+    let index = LOOP_START, count = verifications.length;
     index < count;
-    index += ONE
+    index += LOOP_STEP
   ) {
     const value = nonblankText(Field.Verifications, verifications[index]);
     validateText(Field.Verifications, value, textMaxBytes);
   }
   const bindings = input[Field.Bindings];
   if (!Array.isArray(bindings)) invalidBindings();
-  for (let index = ZERO, count = bindings.length; index < count; index += ONE) {
+  for (
+    let index = LOOP_START, count = bindings.length;
+    index < count;
+    index += LOOP_STEP
+  ) {
     if (!isString(bindings[index])) invalidBindings();
   }
 }
@@ -126,9 +141,10 @@ function invalidBindings(
 }
 
 export function bindingKind(resolved: ResolvedBinding): BindingKind {
-  const prefix = resolved.resourceIdentity.split(RESOURCE_KIND_SEPARATOR, ONE)[
-    ZERO
-  ];
+  const prefix = resolved.resourceIdentity.split(
+    RESOURCE_KIND_SEPARATOR,
+    SPLIT_FIRST_PART_LIMIT,
+  )[RESOURCE_KIND_SEGMENT];
   if (!Object.values(MissionBindingKind).some((value) => value === prefix))
     invalidBindings();
   return prefix as BindingKind;
@@ -139,14 +155,18 @@ export function checkBindingRuleTable(
   resolved: ResolvedBinding[],
 ): void {
   const counts: Record<BindingKind, number> = {
-    [MissionBindingKind.Repository]: ZERO,
-    [MissionBindingKind.Worker]: ZERO,
-    [MissionBindingKind.Storage]: ZERO,
+    [MissionBindingKind.Repository]: INITIAL_BINDING_COUNT,
+    [MissionBindingKind.Worker]: INITIAL_BINDING_COUNT,
+    [MissionBindingKind.Storage]: INITIAL_BINDING_COUNT,
   };
-  for (let index = ZERO, count = resolved.length; index < count; index += ONE) {
+  for (
+    let index = LOOP_START, count = resolved.length;
+    index < count;
+    index += LOOP_STEP
+  ) {
     const binding = resolved[index];
     if (!binding) invalidBindings();
-    counts[bindingKind(binding)] += ONE;
+    counts[bindingKind(binding)] += BINDING_COUNT_STEP;
   }
   for (const binding of Object.values(MissionBindingKind)) {
     const count = counts[binding];

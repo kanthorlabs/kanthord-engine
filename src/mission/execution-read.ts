@@ -35,7 +35,8 @@ import {
 import type { Dependencies } from "./service.ts";
 
 const FIRST_ATTEMPT = 1;
-const ZERO = 0;
+const SORT_EQUAL = 0;
+const SLICE_FROM_START = 0;
 
 export function currentObjectivesOf(tx: Transaction, initiativeId: string) {
   const initiative = requireNode(tx, initiativeId);
@@ -63,9 +64,9 @@ function identityPage<T extends { id: string }>(
   const rows = items
     .filter((item) => after === undefined || item.id < after)
     .sort((a, b) =>
-      a.id < b.id ? FIRST_ATTEMPT : a.id > b.id ? -FIRST_ATTEMPT : ZERO,
+      a.id < b.id ? FIRST_ATTEMPT : a.id > b.id ? -FIRST_ATTEMPT : SORT_EQUAL,
     );
-  const page = rows.slice(ZERO, limit);
+  const page = rows.slice(SLICE_FROM_START, limit);
   return {
     items: page,
     nextCursor:

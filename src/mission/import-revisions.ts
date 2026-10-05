@@ -15,14 +15,19 @@ import type { ResolvedImport, ResolvedImportEntry } from "./import.ts";
 import { revisionFromRow } from "./revision.ts";
 import { readCurrentRevision } from "./store.ts";
 
-const ZERO = 0;
+const EMPTY_LENGTH = 0;
+const NO_CHANGED_FIELDS = 0;
+const NO_VIOLATIONS = 0;
 const FIRST_REVISION = 1;
 const REVISION_INCREMENT = 1;
 type TaskChanges = NonNullable<RevisionChange["tasks"]>;
 
 export function importContent(item: ResolvedImportEntry): TaskContent {
   const { entry } = item;
-  assert.ok(item.key.length > ZERO, "Resolved content has an identity.");
+  assert.ok(
+    item.key.length > EMPTY_LENGTH,
+    "Resolved content has an identity.",
+  );
   assert.equal(item.bindingIds.length, entry.bindings.length);
   return {
     id: item.key,
@@ -41,8 +46,8 @@ function changedFields(
   next: Pick<TaskContent, "filename" | "content">,
   previous: Pick<TaskContent, "filename" | "content"> | undefined,
 ): string[] {
-  assert.ok(next.filename.length > ZERO);
-  assert.ok(next.content.verifications.length > ZERO);
+  assert.ok(next.filename.length > EMPTY_LENGTH);
+  assert.ok(next.content.verifications.length > EMPTY_LENGTH);
   if (previous === undefined) return [...CONTENT_FIELDS];
   return CONTENT_FIELDS.filter((field) =>
     field === ContentField.Filename
@@ -77,7 +82,7 @@ function taskList(
     const next = importContent(item);
     tasks.push(next);
     const fields = changedFields(next, task);
-    if (fields.length > ZERO)
+    if (fields.length > NO_CHANGED_FIELDS)
       changes.push({
         id: task.id,
         change: TaskChange.Updated,
@@ -120,9 +125,12 @@ function ownerRevision(
   const list = objective
     ? taskList(ownerId, previous?.tasks ?? [], entries)
     : null;
-  if (list !== null && (previous === undefined || list.changes.length > ZERO))
+  if (
+    list !== null &&
+    (previous === undefined || list.changes.length > NO_CHANGED_FIELDS)
+  )
     fields.push(TASKS_FIELD);
-  if (fields.length === ZERO) return null;
+  if (fields.length === NO_CHANGED_FIELDS) return null;
   return {
     nodeId: ownerId,
     filename: next.filename,
@@ -153,7 +161,7 @@ export function importRevisions(
   reason: string,
   now: number,
 ): Revision[] {
-  assert.equal(resolved.violations.length, ZERO);
+  assert.equal(resolved.violations.length, NO_VIOLATIONS);
   assert.equal(entries.length, resolved.resolvedEntries.length);
   const owners = new Map(
     [...resolved.currentNodes.values()]

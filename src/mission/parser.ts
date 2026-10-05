@@ -11,11 +11,16 @@ import {
 } from "./contract.ts";
 
 const DELIMITER = "---";
-const EMPTY = "";
+const BLANK_BODY_LINE = "";
 const STRING_TYPE = "string";
 const OBJECT_TYPE = "object";
-const ZERO = 0;
-const ONE = 1;
+const NO_PARSE_ISSUES = 0;
+const FIRST_LINE_INDEX = 0;
+const DELIMITER_NOT_FOUND = 0;
+const LINE_STEP = 1;
+const HEADING_CAPTURE_GROUP = 1;
+const AFTER_OPENING_DELIMITER = 1;
+const AFTER_CLOSING_DELIMITER_OFFSET = 1;
 const NODE_PREFIX = "node";
 const ALIAS_LIMIT = 100;
 const FIELD = {
@@ -76,7 +81,10 @@ function frontMatter(
     stringKeys: true,
     prettyErrors: false,
   });
-  if (document.errors.length > ZERO || document.warnings.length > ZERO)
+  if (
+    document.errors.length > NO_PARSE_ISSUES ||
+    document.warnings.length > NO_PARSE_ISSUES
+  )
     refuse(filename, REASON.FrontMatterInvalid);
   if (!isMap(document.contents)) refuse(filename, REASON.FrontMatterInvalid);
   for (const pair of document.contents.items) {
@@ -162,18 +170,18 @@ function body(
   let section: string | undefined;
   const sections = new Map<string, string[]>();
   let fenced = false;
-  for (let index = ZERO; index < lines.length; index += ONE) {
+  for (let index = FIRST_LINE_INDEX; index < lines.length; index += LINE_STEP) {
     const line = lines[index]!;
     if (/^\s*```/.test(line)) fenced = !fenced;
     if (!fenced && /^#(?:\s|$)/.test(line) && !/^##/.test(line)) {
       if (name !== undefined) refuse(filename, REASON.HeadingRepeated);
       if (section !== undefined) refuse(filename, REASON.BodyInvalid);
-      name = /^# (.+)$/.exec(line)?.[ONE]?.trim();
+      name = /^# (.+)$/.exec(line)?.[HEADING_CAPTURE_GROUP]?.trim();
       if (!name) refuse(filename, REASON.HeadingMissing);
       continue;
     }
     if (!fenced && /^##(?:\s|$)/.test(line)) {
-      const title = /^## (.+)$/.exec(line)?.[ONE];
+      const title = /^## (.+)$/.exec(line)?.[HEADING_CAPTURE_GROUP];
       if (title !== SECTION.Requirement && title !== SECTION.Criterion)
         refuse(filename, REASON.UnknownSection);
       if (name === undefined) refuse(filename, REASON.HeadingMissing);
@@ -183,7 +191,8 @@ function body(
       continue;
     }
     if (section !== undefined) sections.get(section)!.push(line);
-    else if (line.trim() !== EMPTY) refuse(filename, REASON.BodyInvalid);
+    else if (line.trim() !== BLANK_BODY_LINE)
+      refuse(filename, REASON.BodyInvalid);
   }
   if (name === undefined) refuse(filename, REASON.HeadingMissing);
   if (!sections.has(SECTION.Requirement) || !sections.has(SECTION.Criterion))
@@ -200,12 +209,17 @@ export function parsePlanFile(
   content: string,
 ): ParsedPlanFile {
   const lines = content.split(/\r?\n/);
-  if (lines[ZERO] !== DELIMITER) refuse(filename, REASON.FrontMatterMissing);
-  const end = lines.indexOf(DELIMITER, ONE);
-  if (end < ZERO) refuse(filename, REASON.FrontMatterUnterminated);
-  const mapping = frontMatter(filename, lines.slice(ONE, end).join("\n"));
+  if (lines[FIRST_LINE_INDEX] !== DELIMITER)
+    refuse(filename, REASON.FrontMatterMissing);
+  const end = lines.indexOf(DELIMITER, AFTER_OPENING_DELIMITER);
+  if (end < DELIMITER_NOT_FOUND)
+    refuse(filename, REASON.FrontMatterUnterminated);
+  const mapping = frontMatter(
+    filename,
+    lines.slice(AFTER_OPENING_DELIMITER, end).join("\n"),
+  );
   return {
     ...fields(filename, mapping),
-    ...body(filename, lines.slice(end + ONE)),
+    ...body(filename, lines.slice(end + AFTER_CLOSING_DELIMITER_OFFSET)),
   };
 }

@@ -24,7 +24,7 @@ const objectContentSchema = z.strictObject({
   sha256: z.string().optional(),
   objectVersion: z.string().optional(),
 });
-const ONE = 1;
+const EXPECTED_ROW_CHANGE = 1;
 
 export function prepareComplete(
   tx: Transaction,
@@ -130,7 +130,7 @@ export async function completeEvidence(
         "UPDATE mission_evidence_asset SET published_at = ?, content = ? WHERE id = ? AND published_at IS NULL",
       )
       .run(now, canonicalJSON(updated), assetId);
-    assert.equal(write.changes, ONE);
+    assert.equal(write.changes, EXPECTED_ROW_CHANGE);
     return current.result;
   });
 }

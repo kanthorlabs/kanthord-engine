@@ -77,14 +77,15 @@ export function assessmentPage(
       query.attempt ?? null,
       after,
       after,
-      limit + ONE,
+      limit + PAGINATION_LOOKAHEAD,
     ) as unknown as AssessmentRow[];
   const items = rows
-    .slice(ZERO, limit)
+    .slice(SLICE_FROM_START, limit)
     .map((row) => assessmentRecord(tx, dependencies, row));
   return {
     items,
-    nextCursor: rows.length > limit ? encode(items.at(-ONE)!.id) : null,
+    nextCursor:
+      rows.length > limit ? encode(items.at(-LAST_ITEM_OFFSET)!.id) : null,
   };
 }
 
@@ -107,19 +108,29 @@ export function outcomePage(
       query.attempt ?? null,
       after,
       after,
-      limit + ONE,
+      limit + PAGINATION_LOOKAHEAD,
     ) as unknown as OutcomeRow[];
   const items = rows
-    .slice(ZERO, limit)
+    .slice(SLICE_FROM_START, limit)
     .map((row) => outcomeRecord(tx, dependencies.bindings, row));
   return {
     items,
-    nextCursor: rows.length > limit ? encode(items.at(-ONE)!.id) : null,
+    nextCursor:
+      rows.length > limit ? encode(items.at(-LAST_ITEM_OFFSET)!.id) : null,
   };
 }
 
-const ZERO = 0;
-const ONE = 1;
+const SLICE_FROM_START = 0;
+const ATTEMPT_LOWER_BOUND = 0;
+const NO_ROWS = 0;
+const FIRST_CURSOR_PART = 0;
+const SORT_EQUAL = 0;
+const PAGINATION_LOOKAHEAD = 1;
+const LAST_ITEM_OFFSET = 1;
+const ATTEMPT_STEP = 1;
+const MINIMUM_ATTEMPT = 1;
+const CURSOR_KEY_PART = 1;
+const SORT_AFTER = 1;
 const CURSOR_PARTS = 2;
 const RECORD_NOT_FOUND = "mission.record.not_found";
 const ATTEMPT_BATCH_SIZE = 64;
@@ -130,10 +141,10 @@ function* actionCandidates(
   bound: number,
   filter: number | undefined,
 ): Generator<AttemptRow> {
-  assert.ok(Number.isSafeInteger(bound) && bound >= ZERO);
+  assert.ok(Number.isSafeInteger(bound) && bound >= ATTEMPT_LOWER_BOUND);
   assert.ok(tx.database.isTransaction);
   let upper = bound;
-  for (let pass = ZERO; pass < bound; pass++) {
+  for (let pass = ATTEMPT_LOWER_BOUND; pass < bound; pass++) {
     const rows = tx.database
       .prepare(
         "SELECT * FROM mission_attempt WHERE node_id = ? AND (? IS NULL OR attempt = ?) AND attempt <= ? ORDER BY attempt DESC LIMIT ?",
@@ -145,12 +156,13 @@ function* actionCandidates(
         upper,
         ATTEMPT_BATCH_SIZE,
       ) as unknown as AttemptRow[];
-    if (rows.length === ZERO) return;
+    if (rows.length === NO_ROWS) return;
     yield* rows;
-    const next = rows.at(-ONE)!.attempt - ONE;
+    const next = rows.at(-LAST_ITEM_OFFSET)!.attempt - ATTEMPT_STEP;
     assert.ok(next < upper);
     upper = next;
-    if (rows.length < ATTEMPT_BATCH_SIZE || upper === ZERO) return;
+    if (rows.length < ATTEMPT_BATCH_SIZE || upper === ATTEMPT_LOWER_BOUND)
+      return;
   }
 }
 export function recordNotFound(): never {
@@ -164,7 +176,11 @@ export function recordNotFound(): never {
 function attemptCursor(cursor: string): number {
   const value = decode(cursor);
   const number = Number(value);
-  if (!Number.isSafeInteger(number) || number < ONE || String(number) !== value)
+  if (
+    !Number.isSafeInteger(number) ||
+    number < MINIMUM_ATTEMPT ||
+    String(number) !== value
+  )
     invalidCursor();
   return number;
 }
@@ -181,15 +197,17 @@ export function attemptPage(
     tx,
     nodeId,
     query.cursor === undefined ? null : attemptCursor(query.cursor),
-    limit + ONE,
+    limit + PAGINATION_LOOKAHEAD,
   );
   const items = rows
-    .slice(ZERO, limit)
+    .slice(SLICE_FROM_START, limit)
     .map((row) => attemptRecord(tx, bindings, row));
   return {
     items,
     nextCursor:
-      rows.length > limit ? encode(String(items.at(-ONE)!.attempt)) : null,
+      rows.length > limit
+        ? encode(String(items.at(-LAST_ITEM_OFFSET)!.attempt))
+        : null,
   };
 }
 
@@ -224,10 +242,13 @@ function actionCursor(cursor: string): { attempt: number; key: string } {
   const parts = decode(cursor).split("|");
   if (
     parts.length !== CURSOR_PARTS ||
-    !actionKeySchema.safeParse(parts[ONE]).success
+    !actionKeySchema.safeParse(parts[CURSOR_KEY_PART]).success
   )
     invalidCursor();
-  return { attempt: attemptCursor(encode(parts[ZERO]!)), key: parts[ONE]! };
+  return {
+    attempt: attemptCursor(encode(parts[FIRST_CURSOR_PART]!)),
+    key: parts[CURSOR_KEY_PART]!,
+  };
 }
 
 export function externalActionPage(
@@ -255,10 +276,10 @@ export function externalActionPage(
       attempt.attempt,
     ).sort((a, b) =>
       a.action.key < b.action.key
-        ? ONE
+        ? SORT_AFTER
         : a.action.key > b.action.key
-          ? -ONE
-          : ZERO,
+          ? -SORT_AFTER
+          : SORT_EQUAL,
     );
     records.push(
       ...actions.filter(
@@ -270,8 +291,8 @@ export function externalActionPage(
     );
     if (records.length > limit) break;
   }
-  const items = records.slice(ZERO, limit);
-  const last = items.at(-ONE);
+  const items = records.slice(SLICE_FROM_START, limit);
+  const last = items.at(-LAST_ITEM_OFFSET);
   return {
     items,
     nextCursor:

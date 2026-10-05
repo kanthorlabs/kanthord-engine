@@ -28,8 +28,9 @@ import {
 import type { Dependencies } from "./service.ts";
 import { readMissionNodes, type NodeRow } from "./store.ts";
 
-const ZERO = 0;
-const ONE = 1;
+const FIRST_COVERING_INDEX = 0;
+const NO_REQUIRED_VERIFICATIONS = 0;
+const SINGLE_COVERING_VERIFICATION = 1;
 
 function requireChildren(
   tx: Transaction,
@@ -69,9 +70,9 @@ function requireResult(
     const covering = verifications.filter((candidate) =>
       verificationCovers(candidate, expected),
     );
-    const verification = covering[ZERO];
+    const verification = covering[FIRST_COVERING_INDEX];
     if (
-      covering.length !== ONE ||
+      covering.length !== SINGLE_COVERING_VERIFICATION ||
       !verification ||
       !verificationPasses(verification, expected)
     )
@@ -89,7 +90,7 @@ function requireResult(
   }
   if (
     body.result === AssessmentResult.Undetermined &&
-    (verifications.length === ZERO ||
+    (verifications.length === NO_REQUIRED_VERIFICATIONS ||
       verifications.some(
         (verification) => !verificationPasses(verification, expected),
       ))

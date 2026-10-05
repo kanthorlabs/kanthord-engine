@@ -37,8 +37,11 @@ import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 import { authorizeRequest } from "./authorization.ts";
 
-const ZERO = 0;
-const ONE = 1;
+const NO_LANDED_COMMITS = 0;
+const FIRST_ASSET_INDEX = 0;
+const NO_UNRESOLVED_REQUESTS = 0;
+const SINGLE_ASSET_COUNT = 1;
+const EXPECTED_ROW_CHANGE = 1;
 export const LANDED_COMMIT_SUBJECT = "Landed commit";
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
 const checkAnswerSchema = z
@@ -48,8 +51,8 @@ const checkAnswerSchema = z
   })
   .refine((answer) =>
     answer.endState === CheckEndState.Expected
-      ? answer.landedCommits.length > ZERO
-      : answer.landedCommits.length === ZERO,
+      ? answer.landedCommits.length > NO_LANDED_COMMITS
+      : answer.landedCommits.length === NO_LANDED_COMMITS,
   );
 
 function requestContext(
@@ -70,12 +73,14 @@ function requestContext(
   ).find((action) => action.key === request.requirement_key);
   assert.ok(frozenAction);
   const assets = readAssets(tx, evidenceId);
-  assert.equal(assets.length, ONE);
-  assert.equal(assets[ZERO]!.kind, AssetKind.Platform);
+  assert.equal(assets.length, SINGLE_ASSET_COUNT);
+  assert.equal(assets[FIRST_ASSET_INDEX]!.kind, AssetKind.Platform);
   return {
     request,
     frozenAction,
-    address: platformAddressSchema.parse(JSON.parse(assets[ZERO]!.content)),
+    address: platformAddressSchema.parse(
+      JSON.parse(assets[FIRST_ASSET_INDEX]!.content),
+    ),
   };
 }
 
@@ -102,7 +107,7 @@ export function applyEndState(
       "UPDATE mission_evidence SET end_state = ? WHERE id = ? AND end_state IS NULL",
     )
     .run(answer.endState, evidenceId);
-  assert.equal(write.changes, ONE);
+  assert.equal(write.changes, EXPECTED_ROW_CHANGE);
   if (answer.endState === CheckEndState.Expected) {
     for (const commit of answer.landedCommits) {
       const id = createIdentity("evidence");
@@ -198,7 +203,7 @@ export async function checkNode(
             .filter((row) => row.end_state === null)
             .sort((a, b) => a.id.localeCompare(b.id))
             .map((row) => requestContext(tx, dependencies, row.id));
-    if (requests.length === ZERO)
+    if (requests.length === NO_UNRESOLVED_REQUESTS)
       throw new OperationError(
         HttpStatus.Conflict,
         MissionErrorCode.NoUnresolvedRequest,

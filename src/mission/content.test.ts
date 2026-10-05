@@ -14,8 +14,8 @@ import {
 
 const DEFAULT_MAX = 32768;
 const CONFIGURED_MAX = 8;
-const ONE = 1;
-const ZERO = 0;
+const SINGLE_BINDING = 1;
+const NO_BINDINGS = 0;
 const Field = {
   Name: "name",
   Requirement: "requirement",
@@ -136,7 +136,7 @@ test("each Text field uses its configured UTF-8 byte limit", () => {
       const exact = `${"a".repeat(max - 2)}é`;
       const tooLong = `${exact}a`;
       assert.equal(Buffer.byteLength(exact, "utf8"), max);
-      assert.equal(Buffer.byteLength(tooLong, "utf8"), max + ONE);
+      assert.equal(Buffer.byteLength(tooLong, "utf8"), max + SINGLE_BINDING);
       if (field === Field.Reason) {
         validateText(field, exact, max);
         contentError(() => validateText(field, tooLong, max), field);
@@ -168,63 +168,66 @@ const rules = [
   {
     kind: NodeKind.Initiative,
     binding: MissionBindingKind.Repository,
-    allowed: [ZERO],
-    forbidden: ONE,
+    allowed: [NO_BINDINGS],
+    forbidden: SINGLE_BINDING,
   },
   {
     kind: NodeKind.Initiative,
     binding: MissionBindingKind.Worker,
-    allowed: [ZERO],
-    forbidden: ONE,
+    allowed: [NO_BINDINGS],
+    forbidden: SINGLE_BINDING,
   },
   {
     kind: NodeKind.Initiative,
     binding: MissionBindingKind.Storage,
-    allowed: [ZERO, ONE],
+    allowed: [NO_BINDINGS, SINGLE_BINDING],
     forbidden: 2,
   },
   {
     kind: NodeKind.Objective,
     binding: MissionBindingKind.Repository,
-    allowed: [ONE],
-    forbidden: ZERO,
+    allowed: [SINGLE_BINDING],
+    forbidden: NO_BINDINGS,
     extraForbidden: 2,
   },
   {
     kind: NodeKind.Objective,
     binding: MissionBindingKind.Worker,
-    allowed: [ZERO],
-    forbidden: ONE,
+    allowed: [NO_BINDINGS],
+    forbidden: SINGLE_BINDING,
   },
   {
     kind: NodeKind.Objective,
     binding: MissionBindingKind.Storage,
-    allowed: [ZERO, ONE],
+    allowed: [NO_BINDINGS, SINGLE_BINDING],
     forbidden: 2,
   },
   {
     kind: NodeKind.Task,
     binding: MissionBindingKind.Repository,
-    allowed: [ZERO],
-    forbidden: ONE,
+    allowed: [NO_BINDINGS],
+    forbidden: SINGLE_BINDING,
   },
   {
     kind: NodeKind.Task,
     binding: MissionBindingKind.Worker,
-    allowed: [ZERO],
-    forbidden: ONE,
+    allowed: [NO_BINDINGS],
+    forbidden: SINGLE_BINDING,
   },
   {
     kind: NodeKind.Task,
     binding: MissionBindingKind.Storage,
-    allowed: [ZERO],
-    forbidden: ONE,
+    allowed: [NO_BINDINGS],
+    forbidden: SINGLE_BINDING,
   },
 ] as const;
 
 for (const rule of rules) {
   test(`${rule.kind} ${rule.binding} binding count`, () => {
-    assert.equal(bindingKind(resolved(rule.binding, ZERO)), rule.binding);
+    assert.equal(
+      bindingKind(resolved(rule.binding, NO_BINDINGS)),
+      rule.binding,
+    );
     const make = (count: number) =>
       Array.from({ length: count }, (_, index) =>
         resolved(rule.binding, index),
@@ -232,7 +235,7 @@ for (const rule of rules) {
     const requiredRepository =
       rule.kind === NodeKind.Objective &&
       rule.binding !== MissionBindingKind.Repository
-        ? [resolved(MissionBindingKind.Repository, ZERO)]
+        ? [resolved(MissionBindingKind.Repository, NO_BINDINGS)]
         : [];
     for (const count of rule.allowed) {
       checkBindingRuleTable(rule.kind, [...requiredRepository, ...make(count)]);
@@ -254,8 +257,8 @@ for (const rule of rules) {
 }
 
 test("unknown resource kind is rejected", () => {
-  bindingsError(() => bindingKind(resolved("other", ZERO)));
+  bindingsError(() => bindingKind(resolved("other", NO_BINDINGS)));
   bindingsError(() =>
-    checkBindingRuleTable(NodeKind.Task, [resolved("other", ZERO)]),
+    checkBindingRuleTable(NodeKind.Task, [resolved("other", NO_BINDINGS)]),
   );
 });

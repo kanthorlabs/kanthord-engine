@@ -16,8 +16,8 @@ import { setNodeState, insertNode, insertDependency } from "./store.ts";
 import { controlHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const FIRST = 1;
-const ZERO = 0;
+const FIRST_ATTEMPT = 1;
+const NO_ATTEMPT = 0;
 const NOW = 100;
 const REVOKE = "schedulerClaims.revoke";
 const WAKE = "wakeup.wake";
@@ -31,7 +31,7 @@ test("controls reject blank and oversized UTF-8 reasons without writes, preservi
   const before = h.node();
   for (const reason of [
     "   ",
-    "x".repeat(REASON_LIMIT + FIRST),
+    "x".repeat(REASON_LIMIT + FIRST_ATTEMPT),
     "界".repeat(REASON_LIMIT),
   ]) {
     await assert.rejects(
@@ -71,19 +71,19 @@ for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
     });
     assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Waiting);
-    assert.equal(result.attempt?.nodeRevision, FIRST);
+    assert.equal(result.attempt?.nodeRevision, FIRST_ATTEMPT);
     assert.deepEqual(result.attempt?.openedBy, h.actor);
     assert.ok(h.calls.some((call) => call.method === INSERT));
     await h.invoke("node.pause", {
       params: { nodeId: h.nodeId },
       query: {},
-      body: h.body(NodeState.Waiting, FIRST),
+      body: h.body(NodeState.Waiting, FIRST_ATTEMPT),
     });
     const resumed = await h.invoke("node.resume", {
       params: { nodeId: h.nodeId },
       query: {},
       body: {
-        ...h.body(NodeState.Paused, FIRST),
+        ...h.body(NodeState.Paused, FIRST_ATTEMPT),
         target: ResumeTarget.Waiting,
       },
     });
@@ -112,7 +112,7 @@ test("ready refuses a nonterminal objective child before opening an attempt", as
     }),
     (error) => error instanceof OperationError && error.code === NOT_READY,
   );
-  assert.equal(h.node().attempt, ZERO);
+  assert.equal(h.node().attempt, NO_ATTEMPT);
   assert.equal(h.node().state, NodeState.Available);
   assert.equal(
     h.calls.some((call) => call.method === INSERT),
@@ -134,8 +134,8 @@ test("resume Waiting at attempt 0 opens attempt 1 as ready does; Available opens
   });
   assert.ok(resumed.node.kind !== NodeKind.Task);
   assert.equal(resumed.node.state, NodeState.Waiting);
-  assert.equal(h.node().attempt, FIRST);
-  assert.equal(resumed.attempt?.nodeRevision, FIRST);
+  assert.equal(h.node().attempt, FIRST_ATTEMPT);
+  assert.equal(resumed.attempt?.nodeRevision, FIRST_ATTEMPT);
   assert.deepEqual(resumed.attempt?.openedBy, h.actor);
   assert.ok(h.calls.some((call) => call.method === INSERT));
 });
@@ -150,18 +150,18 @@ test("resume Waiting keeps an open attempt; resume Available at attempt 0 opens 
   await open.invoke("node.pause", {
     params: { nodeId: open.nodeId },
     query: {},
-    body: open.body(NodeState.Waiting, FIRST),
+    body: open.body(NodeState.Waiting, FIRST_ATTEMPT),
   });
   const kept = await open.invoke("node.resume", {
     params: { nodeId: open.nodeId },
     query: {},
     body: {
-      ...open.body(NodeState.Paused, FIRST),
+      ...open.body(NodeState.Paused, FIRST_ATTEMPT),
       target: ResumeTarget.Waiting,
     },
   });
-  assert.equal(open.node().attempt, FIRST);
-  assert.equal(kept.attempt?.nodeRevision, FIRST);
+  assert.equal(open.node().attempt, FIRST_ATTEMPT);
+  assert.equal(kept.attempt?.nodeRevision, FIRST_ATTEMPT);
   const fresh = controlHarness(t, IDENTITY);
   await fresh.invoke("node.pause", {
     params: { nodeId: fresh.nodeId },
@@ -174,7 +174,7 @@ test("resume Waiting keeps an open attempt; resume Available at attempt 0 opens 
     body: { ...fresh.body(NodeState.Paused), target: ResumeTarget.Available },
   });
   assert.equal(result.attempt, null);
-  assert.equal(fresh.node().attempt, ZERO);
+  assert.equal(fresh.node().attempt, NO_ATTEMPT);
 });
 
 test("resume Waiting refuses unsatisfied closure; Available routes to Pending without opening an attempt", async (t) => {
@@ -232,7 +232,7 @@ for (const [end, target] of [
       bindingId,
       name: "repo",
       resourceIdentity: "repository:github:owner/repo",
-      revision: FIRST,
+      revision: FIRST_ATTEMPT,
       disabled: false,
       tombstone: false,
     });
@@ -257,13 +257,13 @@ for (const [end, target] of [
           "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
         )
         .run(JSON.stringify([bindingId]), h.nodeId);
-      openAttempt(tx, h.nodeId, FIRST, h.actor, NOW);
+      openAttempt(tx, h.nodeId, FIRST_ATTEMPT, h.actor, NOW);
       insertEvidence(
         tx,
         {
           id: createIdentity("evidence"),
           node_id: h.nodeId,
-          attempt: FIRST,
+          attempt: FIRST_ATTEMPT,
           subject: "Request",
           requirement_key: "repo.pull_request",
           end_state: end,
@@ -278,7 +278,7 @@ for (const [end, target] of [
       params: { nodeId: h.nodeId },
       query: {},
       body: {
-        ...h.body(NodeState.Paused, FIRST),
+        ...h.body(NodeState.Paused, FIRST_ATTEMPT),
         target: ResumeTarget.Waiting,
       },
     });
@@ -301,21 +301,22 @@ for (const state of [
   test(`pause from ${state} preserves the open attempt and revokes only active claims`, async (t) => {
     const h = controlHarness(t, IDENTITY);
     h.store.transaction((tx) => {
-      openAttempt(tx, h.nodeId, FIRST, h.actor, NOW);
+      openAttempt(tx, h.nodeId, FIRST_ATTEMPT, h.actor, NOW);
       setNodeState(tx, h.nodeId, state);
     });
     const result = await h.invoke("node.pause", {
       params: { nodeId: h.nodeId },
       query: {},
-      body: h.body(state, FIRST),
+      body: h.body(state, FIRST_ATTEMPT),
     });
     assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Paused);
     assert.equal(result.attempt?.closedAt, null);
-    assert.equal(result.attempt?.attempt, FIRST);
+    assert.equal(result.attempt?.attempt, FIRST_ATTEMPT);
     assert.equal(result.outcome, null);
     assert.equal(
-      h.store.transaction((tx) => readAttempt(tx, h.nodeId, FIRST))?.closed_at,
+      h.store.transaction((tx) => readAttempt(tx, h.nodeId, FIRST_ATTEMPT))
+        ?.closed_at,
       null,
     );
     assert.equal(
@@ -332,7 +333,7 @@ for (const state of [
       query: {},
       body: null,
     });
-    assert.equal(mission.version, FIRST);
+    assert.equal(mission.version, FIRST_ATTEMPT);
   });
 }
 

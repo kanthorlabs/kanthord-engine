@@ -16,8 +16,10 @@ import { executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const SIZE = 12;
-const FIRST = 1;
-const ZERO = 0;
+const SINGLE_ITEM = 1;
+const ALREADY_EXPIRED = 0;
+const FIRST_ASSET_INDEX = 0;
+const NO_CALLS = 0;
 const VERSION = "stored-version";
 const KEY = "prefix/key";
 const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
@@ -76,12 +78,14 @@ function fixture(t: TestContext, expired = false) {
             storageBindingId: binding.bindingId,
           }),
           published_at: null,
-          expired_at: expired ? ZERO : Date.now() + UPLOAD_LIFETIME_MS,
+          expired_at: expired
+            ? ALREADY_EXPIRED
+            : Date.now() + UPLOAD_LIFETIME_MS,
         },
       ],
     ),
   );
-  let checks = ZERO;
+  let checks = NO_CALLS;
   h.dependencies.intakeStorage.check = async (
     _call,
     received,
@@ -106,8 +110,8 @@ function fixture(t: TestContext, expired = false) {
     h.store.transaction((tx) =>
       evidenceRecord(tx, readEvidence(tx, evidenceId)!),
     );
-  assert.equal(evidence().assets.length, FIRST);
-  assert.equal(evidence().assets[ZERO]!.publishedAt, null);
+  assert.equal(evidence().assets.length, SINGLE_ITEM);
+  assert.equal(evidence().assets[FIRST_ASSET_INDEX]!.publishedAt, null);
   return {
     ...h,
     complete,
@@ -127,13 +131,13 @@ test("completion publishes a checked version and a repeat skips Intake", async (
     evidenceId: h.evidenceId,
     uri: h.location,
   });
-  const asset = h.evidence().assets[ZERO]!;
+  const asset = h.evidence().assets[FIRST_ASSET_INDEX]!;
   assert.notEqual(asset.publishedAt, null);
   assert.equal(asset.kind, AssetKind.Object);
   if (asset.kind !== AssetKind.Object) assert.fail();
   assert.equal(asset.address.version, VERSION);
   assert.deepEqual(await h.complete(), result);
-  assert.equal(h.checks(), FIRST);
+  assert.equal(h.checks(), SINGLE_ITEM);
 });
 
 test("failed remote checks and claims ending during the check keep uploads pending", async (t) => {
@@ -143,7 +147,7 @@ test("failed remote checks and claims ending during the check keep uploads pendi
     throw failure;
   };
   await assert.rejects(h.complete, (error) => error === failure);
-  assert.equal(h.evidence().assets[ZERO]!.publishedAt, null);
+  assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.publishedAt, null);
   h.dependencies.intakeStorage.check = async () => {
     h.dependencies.schedulerClaims.liveExecutionOf = () => null;
     return { location: h.location, version: null };
@@ -152,7 +156,7 @@ test("failed remote checks and claims ending during the check keep uploads pendi
     h.complete,
     (error) => error instanceof OperationError && error.code === NOT_RUNNING,
   );
-  assert.equal(h.evidence().assets[ZERO]!.publishedAt, null);
+  assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.publishedAt, null);
 });
 
 test("expired uploads fail before Intake and foreign claimed nodes fail context admission", async (t) => {
@@ -163,7 +167,7 @@ test("expired uploads fail before Intake and foreign claimed nodes fail context 
       error instanceof OperationError &&
       error.code === MissionErrorCode.EvidenceUploadExpired,
   );
-  assert.equal(expired.checks(), ZERO);
+  assert.equal(expired.checks(), NO_CALLS);
   const foreign = fixture(t);
   foreign.claim.nodeId = createIdentity("node");
   await assert.rejects(
@@ -174,5 +178,5 @@ test("expired uploads fail before Intake and foreign claimed nodes fail context 
       JSON.stringify(error.details) ===
         JSON.stringify({ reason: "node_mismatch" }),
   );
-  assert.equal(foreign.checks(), ZERO);
+  assert.equal(foreign.checks(), NO_CALLS);
 });

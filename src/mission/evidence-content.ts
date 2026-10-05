@@ -28,8 +28,14 @@ import {
 } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
 
-const ZERO = 0;
-const ONE = 1;
+const RESOURCE_KIND_SEGMENT = 0;
+const FIRST_MATCH_INDEX = 0;
+const NO_REPOSITORY_BINDINGS = 0;
+const MINIMUM_ATTEMPT = 0;
+const NO_OCCURRENCES = 0;
+const SUCCESSFUL_EXIT_CODE = 0;
+const SINGLE_BINDING_MATCH = 1;
+const OCCURRENCE_INCREMENT = 1;
 const SEPARATOR = ":";
 const SHA256 = "sha256";
 const HEX = "hex";
@@ -48,10 +54,12 @@ function bindingOf(
       return binding;
     })
     .filter(
-      (binding) => binding.resourceIdentity.split(SEPARATOR)[ZERO] === kind,
+      (binding) =>
+        binding.resourceIdentity.split(SEPARATOR)[RESOURCE_KIND_SEGMENT] ===
+        kind,
     );
-  assert.ok(matches.length <= ONE);
-  return matches[ZERO] ?? null;
+  assert.ok(matches.length <= SINGLE_BINDING_MATCH);
+  return matches[FIRST_MATCH_INDEX] ?? null;
 }
 
 export function repositoryBindingOf(
@@ -105,7 +113,7 @@ export function requireRepositoryAddress(
   if (
     !binding ||
     binding.projectId !== mission.projectId ||
-    binding.resourceIdentity.split(SEPARATOR)[ZERO] !==
+    binding.resourceIdentity.split(SEPARATOR)[RESOURCE_KIND_SEGMENT] !==
       MissionBindingKind.Repository
   )
     bindingMismatch(address.bindingId);
@@ -172,7 +180,7 @@ export function requireTestedInput(
       },
     ),
   );
-  if (resources.size === ZERO) {
+  if (resources.size === NO_REPOSITORY_BINDINGS) {
     if (Array.isArray(testedInput) || testedInput.kind === AssetKind.Repository)
       invalidExecutionInput("testedInput");
     return;
@@ -219,7 +227,7 @@ export function objectKey(
   assetId: string,
 ): string {
   assert.equal(binding.projectId, projectId);
-  assert.ok(Number.isSafeInteger(attempt) && attempt >= ZERO);
+  assert.ok(Number.isSafeInteger(attempt) && attempt >= MINIMUM_ATTEMPT);
   return [binding.prefix, projectId, missionId, nodeId, attempt, assetId].join(
     "/",
   );
@@ -267,11 +275,14 @@ export function verificationCovers(
   if (verification.results.length !== expected.length) return false;
   const remaining = new Map<string, number>();
   for (const command of expected)
-    remaining.set(command, (remaining.get(command) ?? ZERO) + ONE);
+    remaining.set(
+      command,
+      (remaining.get(command) ?? NO_OCCURRENCES) + OCCURRENCE_INCREMENT,
+    );
   for (const result of verification.results) {
-    const count = remaining.get(result.command) ?? ZERO;
-    if (count === ZERO) return false;
-    remaining.set(result.command, count - ONE);
+    const count = remaining.get(result.command) ?? NO_OCCURRENCES;
+    if (count === NO_OCCURRENCES) return false;
+    remaining.set(result.command, count - OCCURRENCE_INCREMENT);
   }
   return true;
 }
@@ -282,6 +293,8 @@ export function verificationPasses(
 ): boolean {
   return (
     verificationCovers(verification, expected) &&
-    verification.results.every((result) => result.exitCode === ZERO)
+    verification.results.every(
+      (result) => result.exitCode === SUCCESSFUL_EXIT_CODE,
+    )
   );
 }

@@ -27,9 +27,9 @@ import { readMission, setNodeState } from "./store.ts";
 import { evidenceHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const ZERO = 0;
-const ONE = 1;
-const TWO = 2;
+const NO_CALLS = 0;
+const FIRST_ATTEMPT = 1;
+const SECOND_VERSION = 2;
 const VERSION = "version";
 const KEY = "key";
 const DISABLED_FIELD = "disabled";
@@ -55,10 +55,10 @@ test("force never bypasses disabled or removed storage authorization", async (t)
           field === DISABLED_FIELD ? "binding_disabled" : "binding_removed",
       },
     });
-    assert.equal(remote.mock.callCount(), ZERO);
+    assert.equal(remote.mock.callCount(), NO_CALLS);
     assert.equal(
       h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
-      ONE,
+      FIRST_ATTEMPT,
     );
   }
 });
@@ -73,13 +73,13 @@ function fixture(t: TestContext, request = false) {
       {
         id: evidenceId,
         node_id: h.nodeId,
-        attempt: ONE,
+        attempt: FIRST_ATTEMPT,
         subject: "Stored",
         requirement_key: request ? "repo.pull_request" : null,
         end_state: null,
         verification: null,
         provenance: canonicalJSON(h.executionActor),
-        created_at: ONE,
+        created_at: FIRST_ATTEMPT,
       },
       [
         {
@@ -91,23 +91,23 @@ function fixture(t: TestContext, request = false) {
               ? {
                   kind: PlatformAddressKind.PullRequest,
                   resourceIdentity: "repository:github:owner/repo",
-                  number: ONE,
+                  number: FIRST_ATTEMPT,
                 }
               : {
                   location: "s3://bucket/key",
-                  size: ONE,
+                  size: FIRST_ATTEMPT,
                   mediaType: "text/plain",
                   storageBindingId: h.storageId,
                   objectVersion: VERSION,
                 },
           ),
-          published_at: request ? ONE : null,
-          expired_at: ONE,
+          published_at: request ? FIRST_ATTEMPT : null,
+          expired_at: FIRST_ATTEMPT,
         },
       ],
     ),
   );
-  const remove = (force = false, expectedMissionVersion = ONE) =>
+  const remove = (force = false, expectedMissionVersion = FIRST_ATTEMPT) =>
     h.invoke("evidence.asset.delete", {
       params: { assetId },
       query: {},
@@ -117,7 +117,7 @@ function fixture(t: TestContext, request = false) {
         ...(force ? { reason: "Remove" } : {}),
       },
     });
-  assert.equal(h.node().attempt, ONE);
+  assert.equal(h.node().attempt, FIRST_ATTEMPT);
   assert.ok(assetId);
   return { ...h, evidenceId, assetId, remove };
 }
@@ -153,18 +153,18 @@ test("asset deletes require a terminal ancestor chain or force and preserve the 
   h.store.transaction((tx) => setNodeState(tx, parentId, NodeState.Discarded));
   assert.equal(await h.remove(), null);
   h.store.transaction((tx) => {
-    assert.equal(readAssets(tx, h.evidenceId).length, ZERO);
+    assert.equal(readAssets(tx, h.evidenceId).length, NO_CALLS);
     assert.ok(readEvidence(tx, h.evidenceId));
-    assert.equal(readMission(tx, h.missionId)?.version, ONE);
+    assert.equal(readMission(tx, h.missionId)?.version, FIRST_ATTEMPT);
   });
 });
 
 test("failed remote deletion reads back on repeat and requires human request removal to redispatch", async (t) => {
   const h = fixture(t);
-  let calls = ZERO;
+  let calls = NO_CALLS;
   const failure = new Error("delete failed");
   let failedRequest = false;
-  let readBacks = ZERO;
+  let readBacks = NO_CALLS;
   let fail = true;
   h.dependencies.intakeStorage.delete = async (
     _call,
@@ -188,28 +188,28 @@ test("failed remote deletion reads back on repeat and requires human request rem
     }
   };
   await assert.rejects(
-    h.remove(true, TWO),
+    h.remove(true, SECOND_VERSION),
     (error) =>
       error instanceof OperationError &&
       error.code === MissionErrorCode.VersionConflict,
   );
-  assert.equal(calls, ZERO);
+  assert.equal(calls, NO_CALLS);
   await assert.rejects(h.remove(true), (error) => error === failure);
   assert.equal(
     h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
-    ONE,
+    FIRST_ATTEMPT,
   );
   await assert.rejects(h.remove(true), (error) => error === failure);
-  assert.equal(calls, ONE);
-  assert.equal(readBacks, ONE);
+  assert.equal(calls, FIRST_ATTEMPT);
+  assert.equal(readBacks, FIRST_ATTEMPT);
   // The fake models a human deleting the failed Intake outbound request.
   failedRequest = false;
   fail = false;
   await h.remove(true);
-  assert.equal(calls, TWO);
+  assert.equal(calls, SECOND_VERSION);
   assert.equal(
     h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
-    ZERO,
+    NO_CALLS,
   );
 });
 
@@ -223,7 +223,7 @@ test("request platform assets cannot be removed separately even with force", asy
   );
   assert.equal(
     h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
-    ONE,
+    FIRST_ATTEMPT,
   );
 });
 
@@ -236,7 +236,7 @@ test("whole evidence deletion clears assessment and outcome sets without changin
     insertAssessment(tx, {
       id: assessmentId,
       node_id: h.nodeId,
-      attempt: ONE,
+      attempt: FIRST_ATTEMPT,
       result: AssessmentResult.Undetermined,
       rationale: "Human block",
       evidence_ids: canonicalJSON([h.evidenceId]),
@@ -244,8 +244,8 @@ test("whole evidence deletion clears assessment and outcome sets without changin
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
-      node_revision: ONE,
-      created_at: ONE,
+      node_revision: FIRST_ATTEMPT,
+      created_at: FIRST_ATTEMPT,
     });
     insertOutcome(tx, {
       id: outcomeId,
@@ -253,13 +253,17 @@ test("whole evidence deletion clears assessment and outcome sets without changin
       assessment_id: assessmentId,
       result: AssessmentResult.Undetermined,
       evidence_ids: canonicalJSON([h.evidenceId]),
-      created_at: ONE,
+      created_at: FIRST_ATTEMPT,
     });
   });
   await h.invoke("evidence.delete", {
     params: { evidenceId: h.evidenceId },
     query: {},
-    body: { expectedMissionVersion: ONE, force: true, reason: "Remove" },
+    body: {
+      expectedMissionVersion: FIRST_ATTEMPT,
+      force: true,
+      reason: "Remove",
+    },
   });
   h.store.transaction((tx) => {
     assert.equal(readEvidence(tx, h.evidenceId), null);
@@ -290,21 +294,21 @@ test("whole evidence deletion clears assessment and outcome sets without changin
 test("forced request deletion pauses and revokes only the open attempt", async (t) => {
   for (const closed of [false, true]) {
     const h = fixture(t, true);
-    let revokes = ZERO;
+    let revokes = NO_CALLS;
     h.dependencies.schedulerClaims.revoke = () => {
       revokes++;
       return h.claim.executionId;
     };
     if (closed)
       h.store.transaction((tx) => {
-        closeAttempt(tx, h.nodeId, ONE, TWO);
+        closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, SECOND_VERSION);
         setNodeState(tx, h.nodeId, NodeState.Completed);
       });
     await assert.rejects(
       h.invoke("evidence.delete", {
         params: { evidenceId: h.evidenceId },
         query: {},
-        body: { expectedMissionVersion: ONE, force: false },
+        body: { expectedMissionVersion: FIRST_ATTEMPT, force: false },
       }),
       (error) =>
         error instanceof OperationError &&
@@ -314,7 +318,7 @@ test("forced request deletion pauses and revokes only the open attempt", async (
       params: { evidenceId: h.evidenceId },
       query: {},
       body: {
-        expectedMissionVersion: ONE,
+        expectedMissionVersion: FIRST_ATTEMPT,
         force: true,
         reason: "Remove request",
       },
@@ -323,6 +327,6 @@ test("forced request deletion pauses and revokes only the open attempt", async (
       h.node().state,
       closed ? NodeState.Completed : NodeState.Paused,
     );
-    assert.equal(revokes, closed ? ZERO : ONE);
+    assert.equal(revokes, closed ? NO_CALLS : FIRST_ATTEMPT);
   }
 });

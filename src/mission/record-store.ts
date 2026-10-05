@@ -13,8 +13,9 @@ import {
 } from "./contract.ts";
 import { readNode } from "./store.ts";
 
-const ONE = 1;
-const ZERO = 0;
+const ATTEMPT_INCREMENT = 1;
+const EXPECTED_ROW_CHANGE = 1;
+const SEQUENCE_LOWER_BOUND = 0;
 const stringSetSchema = z.array(z.string());
 
 export interface AttemptRow {
@@ -85,11 +86,12 @@ export function openAttempt(
   const node = readNode(tx, nodeId);
   assert.ok(node && node.kind !== NodeKind.Task && node.attempt !== null);
   assert.ok(
-    tx.database.isTransaction && Number.isSafeInteger(node.attempt + ONE),
+    tx.database.isTransaction &&
+      Number.isSafeInteger(node.attempt + ATTEMPT_INCREMENT),
   );
   const row: AttemptRow = {
     node_id: nodeId,
-    attempt: node.attempt + ONE,
+    attempt: node.attempt + ATTEMPT_INCREMENT,
     node_revision: nodeRevision,
     opened_by: canonicalJSON(openedBy),
     opened_at: now,
@@ -103,7 +105,7 @@ export function openAttempt(
   const result = tx.database
     .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
     .run(row.attempt, nodeId);
-  assert.equal(result.changes, ONE);
+  assert.equal(result.changes, EXPECTED_ROW_CHANGE);
   return row;
 }
 
@@ -119,7 +121,7 @@ export function closeAttempt(
       "UPDATE mission_attempt SET closed_at = ? WHERE node_id = ? AND attempt = ? AND closed_at IS NULL",
     )
     .run(now, nodeId, attempt);
-  assert.equal(result.changes, ONE);
+  assert.equal(result.changes, EXPECTED_ROW_CHANGE);
 }
 
 export function readAttempt(
@@ -244,7 +246,7 @@ export function deleteAsset(tx: Transaction, assetId: string): void {
   const write = tx.database
     .prepare("DELETE FROM mission_evidence_asset WHERE id = ?")
     .run(assetId);
-  assert.equal(write.changes, ONE);
+  assert.equal(write.changes, EXPECTED_ROW_CHANGE);
 }
 export function deleteEvidence(tx: Transaction, evidenceId: string): void {
   assert.ok(tx.database.isTransaction);
@@ -271,7 +273,7 @@ export function deleteEvidence(tx: Transaction, evidenceId: string): void {
   const write = tx.database
     .prepare("DELETE FROM mission_evidence WHERE id = ?")
     .run(evidenceId);
-  assert.equal(write.changes, ONE);
+  assert.equal(write.changes, EXPECTED_ROW_CHANGE);
 }
 export function readRequests(
   tx: Transaction,
@@ -331,7 +333,7 @@ export function insertAssessment(
       )
       .get(row.node_id) as { value: number }
   ).value;
-  assert.ok(Number.isSafeInteger(sequence) && sequence > ZERO);
+  assert.ok(Number.isSafeInteger(sequence) && sequence > SEQUENCE_LOWER_BOUND);
   const stored = {
     ...row,
     sequence,
@@ -415,7 +417,7 @@ export function insertOutcome(
       )
       .get(row.node_id) as { value: number }
   ).value;
-  assert.ok(Number.isSafeInteger(sequence) && sequence > ZERO);
+  assert.ok(Number.isSafeInteger(sequence) && sequence > SEQUENCE_LOWER_BOUND);
   const stored = {
     ...row,
     sequence,

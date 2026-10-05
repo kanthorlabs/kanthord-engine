@@ -40,8 +40,10 @@ import {
   type NodeRow,
 } from "./store.ts";
 
-const ZERO = 0;
-const ONE = 1;
+const NO_TASK_BINDINGS = 0;
+const NO_CHANGED_FIELDS = 0;
+const NO_ATTEMPT = 0;
+const REVISION_INCREMENT = 1;
 const REASON = "reason";
 const TEMPORARY_FILENAME_PREFIX = "unblock:";
 
@@ -117,7 +119,7 @@ function tasksOfChange(
     tasks.some(
       (task) =>
         !current.some((child) => child.id === task.id) ||
-        task.content.bindings.length > ZERO,
+        task.content.bindings.length > NO_TASK_BINDINGS,
     )
   )
     invalidTasks();
@@ -165,14 +167,14 @@ function changeRevision(
     assert.ok(old);
     const fields = contentChanges(task.content, old.content);
     if (task.filename !== old.filename) fields.unshift(ContentField.Filename);
-    return fields.length === ZERO
+    return fields.length === NO_CHANGED_FIELDS
       ? []
       : [{ id: task.id, change: TaskChange.Updated, changedFields: fields }];
   });
-  if (taskChanges.length > ZERO) changedFields.push(TASKS_FIELD);
-  if (changedFields.length === ZERO) return previous.revision;
+  if (taskChanges.length > NO_CHANGED_FIELDS) changedFields.push(TASKS_FIELD);
+  if (changedFields.length === NO_CHANGED_FIELDS) return previous.revision;
   renameTasks(tx, node, tasks ?? []);
-  const revision = previous.revision + ONE;
+  const revision = previous.revision + REVISION_INCREMENT;
   assert.ok(Number.isSafeInteger(revision));
   insertRevision(tx, {
     ...previous,
@@ -237,7 +239,7 @@ export function unblockNode(
           actor,
           now,
         );
-  if (node.attempt > ZERO) openAttempt(tx, nodeId, revision, actor, now);
+  if (node.attempt > NO_ATTEMPT) openAttempt(tx, nodeId, revision, actor, now);
   transition(tx, dependencies, mission, node, NodeState.Available, now);
   return controlResult(tx, dependencies, nodeId, null, actor, now);
 }

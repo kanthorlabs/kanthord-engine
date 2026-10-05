@@ -35,7 +35,11 @@ import {
   type NodeRow,
 } from "./store.ts";
 
-const ZERO = 0;
+const EMPTY_FIELD_LENGTH = 0;
+const MINIMUM_BYTES_LIMIT = 0;
+const NO_VIOLATIONS = 0;
+const MINIMUM_MISSION_VERSION = 0;
+const SORT_EQUAL = 0;
 const SORT_BEFORE = -1;
 const SORT_AFTER = 1;
 const REASON_FIELD = "reason";
@@ -88,8 +92,11 @@ function violation(
   details: Violation["details"],
   entry?: Locator,
 ): Violation {
-  assert.ok(code.length > ZERO, "Violations have an error code.");
-  assert.ok(message.length > ZERO, "Violations explain their failure.");
+  assert.ok(code.length > EMPTY_FIELD_LENGTH, "Violations have an error code.");
+  assert.ok(
+    message.length > EMPTY_FIELD_LENGTH,
+    "Violations explain their failure.",
+  );
   return {
     code,
     message,
@@ -160,7 +167,7 @@ export function normalizeImportSnapshot(
   textMaxBytes: number,
 ): NormalizedSnapshot {
   assert.ok(Number.isSafeInteger(textMaxBytes), "Text limit is an integer.");
-  assert.ok(textMaxBytes > ZERO, "Text limit is positive.");
+  assert.ok(textMaxBytes > MINIMUM_BYTES_LIMIT, "Text limit is positive.");
   validateText(REASON_FIELD, snapshot.reason, textMaxBytes);
   const result: NormalizedSnapshot = { entries: [], violations: [] };
   const { entries, violations } = result;
@@ -455,7 +462,7 @@ function classify(
 ): void {
   assert.equal(
     result.violations.length,
-    ZERO,
+    NO_VIOLATIONS,
     "Classification requires a valid resolved graph.",
   );
   const kept = new Set<string>();
@@ -501,7 +508,10 @@ export function resolveImportSet(
     Number.isSafeInteger(mission.version),
     "Mission version is an integer.",
   );
-  assert.ok(mission.version > ZERO, "Mission has a persisted version.");
+  assert.ok(
+    mission.version > MINIMUM_MISSION_VERSION,
+    "Mission has a persisted version.",
+  );
   const currentNodes = new Map(
     readMissionNodes(tx, mission.id)
       .filter((node) => node.retired_at === null)
@@ -542,12 +552,13 @@ export function resolveImportSet(
     });
   }
   resolveGraph(result);
-  if (result.violations.length === ZERO) classify(tx, result, bindings);
+  if (result.violations.length === NO_VIOLATIONS)
+    classify(tx, result, bindings);
   return result;
 }
 
 function modifiedNodes(resolved: ResolvedImport): Set<string> {
-  assert.equal(resolved.violations.length, ZERO);
+  assert.equal(resolved.violations.length, NO_VIOLATIONS);
   const modified = new Set<string>();
   const updates = new Set(resolved.contentUpdates);
   const retiring = new Set(resolved.retirements);
@@ -581,7 +592,7 @@ export function checkImportCondition(
   tx: Transaction,
   resolved: ResolvedImport,
 ): Violation[] {
-  assert.equal(resolved.violations.length, ZERO);
+  assert.equal(resolved.violations.length, NO_VIOLATIONS);
   const violations: Violation[] = [];
   const modified = modifiedNodes(resolved);
   const dependents = resolved.updates.filter(
@@ -640,13 +651,13 @@ export function prepareImport(
     textMaxBytes,
   );
   const resolved =
-    normalized.violations.length === ZERO
+    normalized.violations.length === NO_VIOLATIONS
       ? resolveImportSet(tx, mission, normalized.entries, bindings)
       : null;
   const violations =
     resolved === null
       ? normalized.violations
-      : resolved.violations.length > ZERO
+      : resolved.violations.length > NO_VIOLATIONS
         ? resolved.violations
         : checkImportCondition(tx, resolved);
   const retirements = resolved?.retirements ?? [];
@@ -700,7 +711,7 @@ export function importDigest(
     "Digest version is an integer.",
   );
   assert.ok(
-    missionVersion > ZERO,
+    missionVersion > MINIMUM_MISSION_VERSION,
     "Digest covers a persisted mission version.",
   );
   return digest({
@@ -708,7 +719,7 @@ export function importDigest(
     missionVersion,
     entries: [...entries].sort((a, b) =>
       a.filename === b.filename
-        ? ZERO
+        ? SORT_EQUAL
         : a.filename < b.filename
           ? SORT_BEFORE
           : SORT_AFTER,

@@ -49,8 +49,14 @@ const TEXT_MAX_BYTES = 32768;
 const VERSION = 1;
 const CREATED_AT = 1000;
 const RETIRED_AT = 2000;
-const ZERO = 0;
-const ONE = 1;
+const NO_ATTEMPT = 0;
+const FIRST_ENTRY_INDEX = 0;
+const INITIAL_RESOLUTION_COUNT = 0;
+const SINGLE_ENTRY = 1;
+const TEXT_OVERFLOW = 1;
+const BINDING_COUNT = 1;
+const NEXT_VERSION_INCREMENT = 1;
+const FIRST_ATTEMPT = 1;
 const MISSION_ID = "mission_00000000000000000000000000";
 const PROJECT_ID = "project_00000000000000000000000000";
 const OTHER_MISSION_ID = "mission_00000000000000000000000001";
@@ -349,7 +355,7 @@ test("malformed filename becomes a located content violation", () => {
       },
     ],
   );
-  assert.equal(result.entries.length, ONE);
+  assert.equal(result.entries.length, SINGLE_ENTRY);
 });
 
 test("every repeated filename after the first is a duplicate", () => {
@@ -396,7 +402,7 @@ for (const [label, patch, code] of [
   ],
   [
     "oversized content",
-    { criterion: "x".repeat(TEXT_MAX_BYTES + ONE) },
+    { criterion: "x".repeat(TEXT_MAX_BYTES + TEXT_OVERFLOW) },
     MissionErrorCode.ContentInvalid,
   ],
 ] satisfies Array<[string, Partial<NormalizedEntry>, string]>) {
@@ -473,7 +479,7 @@ test("Markdown task's normalized empty dependencies are not a forbidden input fi
     TEXT_MAX_BYTES,
   );
   assert.deepEqual(result.violations, []);
-  assert.deepEqual(result.entries[ZERO]?.dependsOn, []);
+  assert.deepEqual(result.entries[FIRST_ENTRY_INDEX]?.dependsOn, []);
 });
 
 test("stage one collects violations from every file, including duplicate refused files", () => {
@@ -524,7 +530,7 @@ test("oversized reason is an operation failure, not a violation", () => {
   assert.throws(
     () =>
       normalizeImportSnapshot(
-        { ...snapshot([]), reason: "x".repeat(TEXT_MAX_BYTES + ONE) },
+        { ...snapshot([]), reason: "x".repeat(TEXT_MAX_BYTES + TEXT_OVERFLOW) },
         MISSION_ID,
         TEXT_MAX_BYTES,
       ),
@@ -556,7 +562,7 @@ test("unknown identity is a violation, never a create", (t) => {
 
 test("foreign and retired identities retain exact identity details", (t) => {
   const { store, mission, entries, resolve } = fixture(t);
-  const retired = entries[ZERO]!;
+  const retired = entries[FIRST_ENTRY_INDEX]!;
   const foreign = store.transaction((tx) => {
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
@@ -565,7 +571,7 @@ test("foreign and retired identities retain exact identity details", (t) => {
       ...mission,
       id: insertMission(tx, createIdentity("project"), CREATED_AT),
     };
-    return seed(tx, other, [entry("foreign.md")])[ZERO]!;
+    return seed(tx, other, [entry("foreign.md")])[FIRST_ENTRY_INDEX]!;
   });
   const result = resolve([retired, foreign]);
   assert.deepEqual(
@@ -579,7 +585,7 @@ test("foreign and retired identities retain exact identity details", (t) => {
 
 test("duplicate id and kind changes are collected", (t) => {
   const { entries, resolve } = fixture(t);
-  const existing = entries[ZERO]!;
+  const existing = entries[FIRST_ENTRY_INDEX]!;
   const result = resolve([
     existing,
     {
@@ -688,7 +694,11 @@ test("binding resolution collects every missing name and applies the kind rule t
     [
       { binding: MISSING_BINDING },
       { binding: "also-missing" },
-      { kind: NodeKind.Initiative, bindingKind: "repository", count: ONE },
+      {
+        kind: NodeKind.Initiative,
+        bindingKind: "repository",
+        count: BINDING_COUNT,
+      },
     ],
   );
 });
@@ -769,7 +779,7 @@ test("unchanged hierarchy, including tasks and terminal nodes, is entirely noOps
   const { store, entries, resolve } = fixture(t, hierarchy());
   store.database
     .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
-    .run(NodeState.Completed, entries[ZERO]!.id!);
+    .run(NodeState.Completed, entries[FIRST_ENTRY_INDEX]!.id!);
   const result = resolve();
   assert.deepEqual(result.violations, []);
   assert.deepEqual(result.noOps, entries.map((value) => value.id!).sort());
@@ -873,20 +883,20 @@ test("same filename without identity creates a new node and retires the old node
   const { entries, resolve } = fixture(t);
   const result = resolve([entry()]);
   assert.deepEqual(result.creates, ["a.md"]);
-  assert.deepEqual(result.retirements, [entries[ZERO]!.id]);
+  assert.deepEqual(result.retirements, [entries[FIRST_ENTRY_INDEX]!.id]);
   assert.deepEqual(result.updates, []);
-  assert.equal(result.resolvedEntries[ZERO]?.key, TEMPORARY_A_KEY);
-  assert.equal(result.resolvedEntries[ZERO]?.current, null);
+  assert.equal(result.resolvedEntries[FIRST_ENTRY_INDEX]?.key, TEMPORARY_A_KEY);
+  assert.equal(result.resolvedEntries[FIRST_ENTRY_INDEX]?.current, null);
 });
 
 test("filename replacement does not retire an identity retained under a new filename", (t) => {
   const { entries, resolve } = fixture(t);
   const result = resolve([
     entry(),
-    { ...entries[ZERO]!, filename: "renamed.md" },
+    { ...entries[FIRST_ENTRY_INDEX]!, filename: "renamed.md" },
   ]);
   assert.deepEqual(result.creates, ["a.md"]);
-  assert.deepEqual(result.updates, [entries[ZERO]!.id]);
+  assert.deepEqual(result.updates, [entries[FIRST_ENTRY_INDEX]!.id]);
   assert.deepEqual(result.retirements, []);
 });
 
@@ -992,7 +1002,12 @@ test("digest is canonical, input-order independent, nonmutating and retirement-s
   assert.notEqual(actual, importDigest(MISSION_ID, VERSION, entries, []));
   assert.notEqual(
     actual,
-    importDigest(MISSION_ID, VERSION + ONE, entries, retired),
+    importDigest(
+      MISSION_ID,
+      VERSION + NEXT_VERSION_INCREMENT,
+      entries,
+      retired,
+    ),
   );
   assert.notEqual(
     actual,
@@ -1129,7 +1144,7 @@ for (const scenario of CONDITION_CASES) {
       assert.equal(value.code, MissionErrorCode.ConditionFailed);
       assert.deepEqual(value.details, {
         state: NodeState.Executing,
-        attempt: ZERO,
+        attempt: NO_ATTEMPT,
       });
     }
   });
@@ -1138,7 +1153,7 @@ for (const scenario of CONDITION_CASES) {
 for (const state of [NodeState.Completed, NodeState.Discarded]) {
   test(`import condition permits ${state} noOps but rejects changes and retirement`, (t) => {
     const { store, entries, resolve } = fixture(t);
-    const id = entries[ZERO]!.id!;
+    const id = entries[FIRST_ENTRY_INDEX]!.id!;
     store.database
       .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
       .run(state, id);
@@ -1173,7 +1188,7 @@ for (const state of [NodeState.Completed, NodeState.Discarded]) {
 for (const state of [NodeState.Pending, NodeState.Available]) {
   test(`import condition admits ${state} only at attempt zero`, (t) => {
     const { store, entries, resolve } = fixture(t);
-    const id = entries[ZERO]!.id!;
+    const id = entries[FIRST_ENTRY_INDEX]!.id!;
     const input = change(entries, "a.md", { name: "Changed" });
     store.database
       .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
@@ -1185,19 +1200,25 @@ for (const state of [NodeState.Pending, NodeState.Available]) {
     );
     store.database
       .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
-      .run(ONE, id);
+      .run(FIRST_ATTEMPT, id);
     const invalid = resolve(input);
     const violations = store.transaction((tx) =>
       checkImportCondition(tx, invalid),
     );
-    assert.equal(violations[ZERO]?.code, MissionErrorCode.ConditionFailed);
-    assert.deepEqual(violations[ZERO]?.details, { state, attempt: ONE });
+    assert.equal(
+      violations[FIRST_ENTRY_INDEX]?.code,
+      MissionErrorCode.ConditionFailed,
+    );
+    assert.deepEqual(violations[FIRST_ENTRY_INDEX]?.details, {
+      state,
+      attempt: FIRST_ATTEMPT,
+    });
   });
 }
 
 test("prepared import exposes the resolved state without resolving bindings twice", (t) => {
   const { store, mission, entries } = fixture(t, hierarchy());
-  let resolutions = ZERO;
+  let resolutions = INITIAL_RESOLUTION_COUNT;
   const wireEntries = entries.map((value) =>
     value.kind === NodeKind.Task ? { ...value, dependsOn: undefined } : value,
   );

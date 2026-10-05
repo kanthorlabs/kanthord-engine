@@ -23,8 +23,8 @@ import { openAttempt, insertEvidence } from "./record-store.ts";
 import { insertMission, insertNode } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
 
-const FIRST = 1;
-const SECOND = 2;
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
 const NOW = 100;
 const BASE_BRANCH = "main";
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
@@ -79,7 +79,7 @@ test("required actions preserve pinned policies across later revisions and omit 
       projectId,
       name: "repo",
       resourceIdentity: "repository:github:owner/repo",
-      revision: FIRST,
+      revision: FIRST_ATTEMPT,
       tombstone: false,
       disabled: false,
     }),
@@ -101,15 +101,15 @@ test("required actions preserve pinned policies across later revisions and omit 
     );
     statement.run(
       nodeId,
-      FIRST,
+      FIRST_ATTEMPT,
       canonicalJSON([oldBinding]),
       canonicalJSON(ACTOR),
       NOW,
     );
-    openAttempt(tx, nodeId, FIRST, ACTOR, NOW);
+    openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);
     statement.run(
       nodeId,
-      SECOND,
+      SECOND_ATTEMPT,
       canonicalJSON([newBinding]),
       canonicalJSON(ACTOR),
       NOW,
@@ -122,14 +122,15 @@ test("required actions preserve pinned policies across later revisions and omit 
       follows: null,
       configuration: { baseBranch: BASE_BRANCH },
     };
-    assert.deepEqual(requiredActionsOf(tx, bindings, nodeId, FIRST), [
+    assert.deepEqual(requiredActionsOf(tx, bindings, nodeId, FIRST_ATTEMPT), [
       expected,
     ]);
     assert.equal(
-      requiredActionsOf(tx, bindings, nodeId, SECOND)[0]?.expectedEndState,
+      requiredActionsOf(tx, bindings, nodeId, SECOND_ATTEMPT)[0]
+        ?.expectedEndState,
       ExpectedEndState.BaseBranchPushed,
     );
-    assert.deepEqual(actionStatesOf(tx, bindings, nodeId, FIRST), [
+    assert.deepEqual(actionStatesOf(tx, bindings, nodeId, FIRST_ATTEMPT), [
       { action: expected, request: null, resolution: Resolution.Unrequested },
     ]);
     const requestId = createIdentity("evidence");
@@ -138,7 +139,7 @@ test("required actions preserve pinned policies across later revisions and omit 
       {
         id: requestId,
         node_id: nodeId,
-        attempt: FIRST,
+        attempt: FIRST_ATTEMPT,
         subject: "Request",
         requirement_key: REQUEST_KEY,
         end_state: null,
@@ -148,7 +149,7 @@ test("required actions preserve pinned policies across later revisions and omit 
       },
       [],
     );
-    const unresolved = actionStatesOf(tx, bindings, nodeId, FIRST);
+    const unresolved = actionStatesOf(tx, bindings, nodeId, FIRST_ATTEMPT);
     assert.equal(unresolved[0]?.resolution, Resolution.Unresolved);
     assert.deepEqual(unresolvedKeys(unresolved), [REQUEST_KEY]);
     assert.deepEqual(eligibleUnrequested(unresolved), []);
@@ -156,20 +157,23 @@ test("required actions preserve pinned policies across later revisions and omit 
       .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
       .run(EndState.Expected, requestId);
     assert.equal(
-      actionStatesOf(tx, bindings, nodeId, FIRST)[0]?.resolution,
+      actionStatesOf(tx, bindings, nodeId, FIRST_ATTEMPT)[0]?.resolution,
       Resolution.ExpectedEnd,
     );
     tx.database
       .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
       .run(EndState.Other, requestId);
     assert.equal(
-      actionStatesOf(tx, bindings, nodeId, FIRST)[0]?.resolution,
+      actionStatesOf(tx, bindings, nodeId, FIRST_ATTEMPT)[0]?.resolution,
       Resolution.OtherEnd,
     );
     tx.database
       .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
       .run(NodeKind.Initiative, nodeId);
-    assert.deepEqual(requiredActionsOf(tx, bindings, nodeId, FIRST), []);
+    assert.deepEqual(
+      requiredActionsOf(tx, bindings, nodeId, FIRST_ATTEMPT),
+      [],
+    );
   });
 });
 

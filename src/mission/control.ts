@@ -33,7 +33,8 @@ import { readCurrentRevision, setNodeState, type NodeRow } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 import { validateText } from "./content.ts";
 
-const ZERO = 0;
+const NO_ATTEMPT = 0;
+const NO_REQUIREMENT_KEYS = 0;
 export const ControlError = {
   Task: "mission.node.control_task",
   Refused: "mission.node.control_refused",
@@ -112,12 +113,13 @@ export function requireNoUnresolvedAction(
 ): void {
   assert.ok(node.attempt !== null);
   assert.notEqual(node.kind, NodeKind.Task);
-  const open = node.attempt === ZERO ? null : readOpenAttempt(tx, node.id);
+  const open =
+    node.attempt === NO_ATTEMPT ? null : readOpenAttempt(tx, node.id);
   if (open === null) return;
   const requirementKeys = readRequests(tx, node.id, open.attempt)
     .filter((row) => row.end_state === null)
     .map((row) => row.requirement_key!);
-  if (requirementKeys.length > ZERO)
+  if (requirementKeys.length > NO_REQUIREMENT_KEYS)
     throw new OperationError(
       HttpStatus.Conflict,
       ControlError.Unresolved,
@@ -129,7 +131,7 @@ export function requireNoUnresolvedAction(
 export function actRevision(tx: Transaction, node: NodeRow): number {
   assert.ok(node.attempt !== null);
   const revision =
-    node.attempt === ZERO
+    node.attempt === NO_ATTEMPT
       ? readCurrentRevision(tx, node.id)?.revision
       : readAttempt(tx, node.id, node.attempt)?.node_revision;
   assert.ok(revision);
@@ -219,8 +221,8 @@ export function controlResult(
   const node = requireNode(tx, nodeId);
   assert.ok(node.attempt !== null);
   const attempt =
-    node.attempt === ZERO ? null : readAttempt(tx, nodeId, node.attempt);
-  assert.ok(attempt !== null || node.attempt === ZERO);
+    node.attempt === NO_ATTEMPT ? null : readAttempt(tx, nodeId, node.attempt);
+  assert.ok(attempt !== null || node.attempt === NO_ATTEMPT);
   return {
     node: nodeRecord(tx, node, dependencies.bindings),
     attempt:
@@ -247,7 +249,7 @@ export function closeExternalAttempt(
     node.state !== NodeState.ExternalFailed
   )
     return null;
-  assert.ok(node.attempt !== null && node.attempt > ZERO);
+  assert.ok(node.attempt !== null && node.attempt > NO_ATTEMPT);
   const assessment = currentAssessmentOf(tx, node.id, node.attempt);
   if (assessment?.result !== AssessmentResult.Success) return null;
   assert.ok(readOpenAttempt(tx, node.id));

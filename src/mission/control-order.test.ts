@@ -13,7 +13,7 @@ import { setNodeState } from "./store.ts";
 import { controlHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const FIRST = 1;
+const FIRST_REVISION = 1;
 const STALE_ATTEMPT = 7;
 
 type Control = {
@@ -140,8 +140,8 @@ const unblock = (
     params: { nodeId: h.nodeId },
     query: {},
     body: {
-      expectedMissionVersion: FIRST,
-      expectedRevision: FIRST,
+      expectedMissionVersion: FIRST_REVISION,
+      expectedRevision: FIRST_REVISION,
       blockedAttempt,
     },
   } as never);

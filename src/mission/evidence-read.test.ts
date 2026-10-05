@@ -10,9 +10,13 @@ import { insertNode } from "./store.ts";
 import { evidenceHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const ZERO = 0;
-const ONE = 1;
-const TWO = 2;
+const FIRST_ITEM_INDEX = 0;
+const EMPTY_OBJECT_SIZE = 0;
+const NO_ATTEMPT = 0;
+const SECOND_ITEM_INDEX = 1;
+const CREATED_AT = 1;
+const SINGLE_RESULT = 1;
+const FUTURE_EXPIRY = 2;
 const KEY = "repo.pull_request";
 const CONTROL_TASK = "mission.node.control_task";
 
@@ -28,11 +32,11 @@ test("evidence reads paginate descending identities, include attempt zero and pr
           node_id: h.nodeId,
           attempt: index,
           subject: "Evidence",
-          requirement_key: index === ONE ? KEY : null,
+          requirement_key: index === SECOND_ITEM_INDEX ? KEY : null,
           end_state: null,
           verification: null,
           provenance: canonicalJSON(h.executionActor),
-          created_at: ONE,
+          created_at: CREATED_AT,
         },
         [
           {
@@ -41,12 +45,12 @@ test("evidence reads paginate descending identities, include attempt zero and pr
             kind: AssetKind.Object,
             content: canonicalJSON({
               location: "s3://bucket/key",
-              size: ZERO,
+              size: EMPTY_OBJECT_SIZE,
               mediaType: "text/plain",
               storageBindingId: h.storageId,
             }),
             published_at: null,
-            expired_at: TWO,
+            expired_at: FUTURE_EXPIRY,
           },
         ],
       );
@@ -57,21 +61,27 @@ test("evidence reads paginate descending identities, include attempt zero and pr
       query,
       body: null,
     });
-  const first = await page({ limit: ONE });
-  assert.equal(first.items[ZERO]!.id, ids[ONE]);
-  assert.equal(first.items[ZERO]!.requirementKey, KEY);
-  assert.equal(first.items[ZERO]!.endState, undefined);
-  assert.equal(first.items[ZERO]!.assets[ZERO]!.publishedAt, null);
+  const first = await page({ limit: SINGLE_RESULT });
+  assert.equal(first.items[FIRST_ITEM_INDEX]!.id, ids[SECOND_ITEM_INDEX]);
+  assert.equal(first.items[FIRST_ITEM_INDEX]!.requirementKey, KEY);
+  assert.equal(first.items[FIRST_ITEM_INDEX]!.endState, undefined);
+  assert.equal(
+    first.items[FIRST_ITEM_INDEX]!.assets[FIRST_ITEM_INDEX]!.publishedAt,
+    null,
+  );
   const second = await page({ cursor: first.nextCursor });
-  assert.equal(second.items[ZERO]!.id, ids[ZERO]);
+  assert.equal(second.items[FIRST_ITEM_INDEX]!.id, ids[FIRST_ITEM_INDEX]);
   assert.equal(second.nextCursor, null);
-  assert.equal((await page({ attempt: ZERO })).items.length, ONE);
+  assert.equal(
+    (await page({ attempt: NO_ATTEMPT })).items.length,
+    SINGLE_RESULT,
+  );
   const read = await h.invoke("evidence.get", {
-    params: { evidenceId: ids[ONE] },
+    params: { evidenceId: ids[SECOND_ITEM_INDEX] },
     query: {},
     body: null,
   });
-  assert.deepEqual(read, first.items[ZERO]);
+  assert.deepEqual(read, first.items[FIRST_ITEM_INDEX]);
   await assert.rejects(
     page({ cursor: "invalid" }),
     (error) =>
@@ -90,7 +100,7 @@ test("evidence reads refuse tasks and absent nodes or records", async (t) => {
       kind: NodeKind.Task,
       filename: "task.md",
       parent_id: h.nodeId,
-      created_at: ONE,
+      created_at: CREATED_AT,
     }),
   );
   for (const [nodeId, code] of [

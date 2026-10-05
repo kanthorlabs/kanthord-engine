@@ -15,9 +15,9 @@ import { evidenceHarness, executionHarness } from "./test-support.ts";
 
 const NOW = 100;
 const NO_CALLS = 0;
-const FIRST = 1;
-const SECOND = 2;
-const THIRD = 3;
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+const THIRD_ATTEMPT = 3;
 const KEY = "repo.pull_request";
 const RESOURCE = "repository:github:owner/repo";
 const PR: PlatformAddress = {
@@ -34,7 +34,7 @@ function harness(t: TestContext) {
     name: "repo",
     resourceIdentity:
       bindingId === h.repositoryId ? RESOURCE : "storage:s3:bucket",
-    revision: FIRST,
+    revision: FIRST_ATTEMPT,
     tombstone: false,
     disabled: false,
   });
@@ -50,7 +50,7 @@ function harness(t: TestContext) {
     action: RepositoryAction.PullRequest,
     projectPrompt: null,
   });
-  const read = (attempt = FIRST) =>
+  const read = (attempt = FIRST_ATTEMPT) =>
     h.store.transaction((tx) =>
       h.service.actionContextOf(tx, h.nodeId, attempt),
     );
@@ -87,9 +87,9 @@ function harness(t: TestContext) {
   const next = (attempt: number) =>
     h.store.transaction((tx) => {
       closeAttempt(tx, h.nodeId, attempt - 1, NOW);
-      openAttempt(tx, h.nodeId, FIRST, h.executionActor, NOW);
+      openAttempt(tx, h.nodeId, FIRST_ATTEMPT, h.executionActor, NOW);
     });
-  assert.equal(read().actions.length, FIRST);
+  assert.equal(read().actions.length, FIRST_ATTEMPT);
   assert.equal(read().actions[0]?.resourceIdentity, RESOURCE);
   return { ...h, read, request, next };
 }
@@ -97,7 +97,7 @@ function harness(t: TestContext) {
 test("initiative context has no actions or assessment", (t) => {
   const h = executionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
   const context = h.store.transaction((tx) =>
-    h.service.actionContextOf(tx, h.nodeId, FIRST),
+    h.service.actionContextOf(tx, h.nodeId, FIRST_ATTEMPT),
   );
   assert.deepEqual(context.actions, []);
   assert.equal(context.currentAssessment, null);
@@ -107,7 +107,7 @@ test("unrequested action is eligible and the current request removes eligibility
   const h = harness(t);
   assert.equal(h.read().actions[0]?.eligible, true);
   assert.equal(h.read().currentAssessment, null);
-  const id = h.request(FIRST);
+  const id = h.request(FIRST_ATTEMPT);
   assert.equal(h.read().actions[0]?.resolution, Resolution.Unresolved);
   assert.equal(h.read().actions[0]?.requestEvidenceId, id);
   assert.equal(h.read().actions[0]?.eligible, false);
@@ -116,41 +116,44 @@ test("unrequested action is eligible and the current request removes eligibility
 
 test("earlier request becomes a candidate only in later attempts", (t) => {
   const h = harness(t);
-  const id = h.request(FIRST);
-  h.next(SECOND);
+  const id = h.request(FIRST_ATTEMPT);
+  h.next(SECOND_ATTEMPT);
   assert.deepEqual(h.read().actions[0]?.reuseCandidates, []);
-  assert.deepEqual(h.read(SECOND).actions[0]?.reuseCandidates, [
-    { evidenceId: id, attempt: FIRST, address: PR },
+  assert.deepEqual(h.read(SECOND_ATTEMPT).actions[0]?.reuseCandidates, [
+    { evidenceId: id, attempt: FIRST_ATTEMPT, address: PR },
   ]);
 });
 
 test("canonical duplicate addresses retain the newest earlier request", (t) => {
   const h = harness(t);
-  h.request(FIRST);
-  h.next(SECOND);
-  const id = h.request(SECOND, {
+  h.request(FIRST_ATTEMPT);
+  h.next(SECOND_ATTEMPT);
+  const id = h.request(SECOND_ATTEMPT, {
     number: 42,
     resourceIdentity: RESOURCE,
     kind: PlatformAddressKind.PullRequest,
   });
-  h.next(THIRD);
-  assert.equal(h.read(THIRD).actions[0]?.reuseCandidates.length, FIRST);
-  assert.deepEqual(h.read(THIRD).actions[0]?.reuseCandidates, [
-    { evidenceId: id, attempt: SECOND, address: PR },
+  h.next(THIRD_ATTEMPT);
+  assert.equal(
+    h.read(THIRD_ATTEMPT).actions[0]?.reuseCandidates.length,
+    FIRST_ATTEMPT,
+  );
+  assert.deepEqual(h.read(THIRD_ATTEMPT).actions[0]?.reuseCandidates, [
+    { evidenceId: id, attempt: SECOND_ATTEMPT, address: PR },
   ]);
 });
 
 test("branch pushes are not reuse candidates", (t) => {
   const h = harness(t);
-  h.request(FIRST, {
+  h.request(FIRST_ATTEMPT, {
     kind: PlatformAddressKind.BranchPush,
     resourceIdentity: RESOURCE,
     branch: "main",
     commit: "b".repeat(40),
   });
-  h.next(SECOND);
-  assert.deepEqual(h.read(SECOND).actions[0]?.reuseCandidates, []);
-  assert.equal(h.read(SECOND).actions[0]?.eligible, true);
+  h.next(SECOND_ATTEMPT);
+  assert.deepEqual(h.read(SECOND_ATTEMPT).actions[0]?.reuseCandidates, []);
+  assert.equal(h.read(SECOND_ATTEMPT).actions[0]?.eligible, true);
 });
 
 test("action context uses only the caller transaction", (t) => {
@@ -159,7 +162,7 @@ test("action context uses only the caller transaction", (t) => {
     const spy = t.mock.method(h.store, "transaction", () =>
       assert.fail("nested transaction"),
     );
-    const context = h.service.actionContextOf(tx, h.nodeId, FIRST);
+    const context = h.service.actionContextOf(tx, h.nodeId, FIRST_ATTEMPT);
     assert.equal(context.actions[0]?.eligible, true);
     assert.equal(spy.mock.callCount(), NO_CALLS);
     spy.mock.restore();

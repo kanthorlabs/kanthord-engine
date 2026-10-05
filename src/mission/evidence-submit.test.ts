@@ -14,8 +14,10 @@ import { evidenceHarness, executionHarness } from "./test-support.ts";
 import { setNodeState } from "./store.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const ZERO = 0;
-const ONE = 1;
+const SUCCESSFUL_EXIT_CODE = 0;
+const FIRST_ASSET_INDEX = 0;
+const NO_ITEMS = 0;
+const SINGLE_ITEM = 1;
 const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
 const VALIDATION = "gateway.request.validation_failed";
 const Field = {
@@ -39,7 +41,7 @@ test("submission rejects blank and oversized nested Text before signing or inser
         {
           command: field === Field.Command ? long : "true",
           signal: field === Field.Signal ? long : null,
-          exitCode: ZERO,
+          exitCode: SUCCESSFUL_EXIT_CODE,
           timedOut: false,
         },
       ],
@@ -53,7 +55,11 @@ test("submission rejects blank and oversized nested Text before signing or inser
           subject,
           verification,
           assets: [
-            { kind: AssetKind.Object, size: ONE, mediaType: "text/plain" },
+            {
+              kind: AssetKind.Object,
+              size: SINGLE_ITEM,
+              mediaType: "text/plain",
+            },
           ],
         },
       }),
@@ -67,7 +73,7 @@ test("submission rejects blank and oversized nested Text before signing or inser
           .prepare("SELECT count(*) AS count FROM mission_evidence")
           .get() as { count: number }
       ).count,
-      ZERO,
+      NO_ITEMS,
     );
     assert.equal(
       (
@@ -75,7 +81,7 @@ test("submission rejects blank and oversized nested Text before signing or inser
           .prepare("SELECT count(*) AS count FROM mission_evidence_asset")
           .get() as { count: number }
       ).count,
-      ZERO,
+      NO_ITEMS,
     );
   });
 });
@@ -107,7 +113,7 @@ test("repository and produced submissions publish atomically and repeated submis
       body,
     });
   const first = await submit();
-  assert.equal(first.uploads.length, ZERO);
+  assert.equal(first.uploads.length, NO_ITEMS);
   assert.ok(first.evidence.assets.every((asset) => asset.publishedAt !== null));
   assert.deepEqual(first.evidence.provenance, h.executionActor);
   const produced = first.evidence.assets.find(
@@ -137,7 +143,7 @@ test("object submissions sign pinned keys and commit pending assets after PUT pr
         `prefix/${h.projectId}/${h.missionId}/${h.nodeId}/1/evidence_asset_`,
       ),
     );
-    assert.equal(size, ONE);
+    assert.equal(size, SINGLE_ITEM);
     assert.equal(checksum, sha256);
     return {
       putUrl: "https://storage.example/put",
@@ -152,18 +158,23 @@ test("object submissions sign pinned keys and commit pending assets after PUT pr
       ...h.context,
       subject: "Object",
       assets: [
-        { kind: AssetKind.Object, size: ONE, mediaType: "text/plain", sha256 },
+        {
+          kind: AssetKind.Object,
+          size: SINGLE_ITEM,
+          mediaType: "text/plain",
+          sha256,
+        },
       ],
     },
   });
-  assert.equal(result.uploads.length, ONE);
-  const asset = result.evidence.assets[ZERO]!;
+  assert.equal(result.uploads.length, SINGLE_ITEM);
+  const asset = result.evidence.assets[FIRST_ASSET_INDEX]!;
   assert.equal(asset.publishedAt, null);
   assert.equal(
     asset.expiredAt! - result.evidence.createdAt,
     UPLOAD_LIFETIME_MS,
   );
-  assert.equal(result.uploads[ZERO]!.assetId, asset.id);
+  assert.equal(result.uploads[FIRST_ASSET_INDEX]!.assetId, asset.id);
 });
 
 test("storage absence, failed signing and revoked claims write no evidence", async (t) => {
@@ -171,7 +182,9 @@ test("storage absence, failed signing and revoked claims write no evidence", asy
   const body = {
     ...empty.context,
     subject: "Object",
-    assets: [{ kind: AssetKind.Object, size: ONE, mediaType: "text/plain" }],
+    assets: [
+      { kind: AssetKind.Object, size: SINGLE_ITEM, mediaType: "text/plain" },
+    ],
   };
   await assert.rejects(
     empty.invoke("evidence.submit", {
@@ -213,5 +226,5 @@ test("storage absence, failed signing and revoked claims write no evidence", asy
         .prepare("SELECT COUNT(*) AS count FROM mission_evidence")
         .get() as { count: number },
   );
-  assert.equal(count.count, ZERO);
+  assert.equal(count.count, NO_ITEMS);
 });

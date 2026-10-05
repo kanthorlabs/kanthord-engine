@@ -23,8 +23,8 @@ import { executionHarness } from "./test-support.ts";
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const RESOURCE = "repository:github:owner/repo";
 const KEY = "repo.pull_request";
-const FIRST = 1;
-const ZERO = 0;
+const FIRST_ATTEMPT = 1;
+const FIRST_INDEX = 0;
 const NOW = 200;
 
 function fixture(t: TestContext) {
@@ -36,7 +36,7 @@ function fixture(t: TestContext) {
     projectId: h.projectId,
     name: "repo",
     resourceIdentity: RESOURCE,
-    revision: FIRST,
+    revision: FIRST_ATTEMPT,
     disabled: false,
     tombstone: false,
   });
@@ -61,7 +61,7 @@ function fixture(t: TestContext) {
       parent_id: h.nodeId,
       created_at: NOW,
     });
-    const revision = getRevision(tx, h.nodeId, FIRST);
+    const revision = getRevision(tx, h.nodeId, FIRST_ATTEMPT);
     insertRevision(tx, {
       ...revision,
       nodeId,
@@ -69,7 +69,7 @@ function fixture(t: TestContext) {
       content: { ...revision.content, bindings: [bindingId] },
       tasks: [],
     });
-    openAttempt(tx, nodeId, FIRST, h.executionActor, NOW);
+    openAttempt(tx, nodeId, FIRST_ATTEMPT, h.executionActor, NOW);
     setNodeState(tx, nodeId, NodeState.Evaluating);
   });
   h.claim.nodeId = nodeId;
@@ -80,7 +80,7 @@ function fixture(t: TestContext) {
     address: {
       kind: PlatformAddressKind.PullRequest,
       resourceIdentity: RESOURCE,
-      number: FIRST,
+      number: FIRST_ATTEMPT,
     },
   };
   const request = (input = body) =>
@@ -90,7 +90,7 @@ function fixture(t: TestContext) {
       body: input,
     });
   assert.equal(h.claim.nodeId, nodeId);
-  assert.equal(body.attempt, FIRST);
+  assert.equal(body.attempt, FIRST_ATTEMPT);
   return { ...h, nodeId, body, request };
 }
 
@@ -100,15 +100,15 @@ test("an evaluation request records one published platform asset and leaves its 
   assert.equal(evidence.requirementKey, KEY);
   assert.equal(evidence.endState, undefined);
   assert.deepEqual(evidence.provenance, h.executionActor);
-  assert.equal(evidence.assets.length, FIRST);
-  assert.equal(evidence.assets[ZERO]!.kind, AssetKind.Platform);
-  assert.notEqual(evidence.assets[ZERO]!.publishedAt, null);
-  assert.deepEqual(evidence.assets[ZERO]!.address, h.body.address);
+  assert.equal(evidence.assets.length, FIRST_ATTEMPT);
+  assert.equal(evidence.assets[FIRST_INDEX]!.kind, AssetKind.Platform);
+  assert.notEqual(evidence.assets[FIRST_INDEX]!.publishedAt, null);
+  assert.deepEqual(evidence.assets[FIRST_INDEX]!.address, h.body.address);
   const states = h.store.transaction((tx) =>
-    actionStatesOf(tx, h.dependencies.bindings, h.nodeId, FIRST),
+    actionStatesOf(tx, h.dependencies.bindings, h.nodeId, FIRST_ATTEMPT),
   );
-  assert.equal(states[ZERO]!.resolution, Resolution.Unresolved);
-  assert.equal(states[ZERO]!.request?.id, evidence.id);
+  assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unresolved);
+  assert.equal(states[FIRST_INDEX]!.request?.id, evidence.id);
   await assert.rejects(
     h.request(),
     (error) =>
@@ -123,7 +123,7 @@ test("an evaluation request records one published platform asset and leaves its 
           {
             id: createIdentity("evidence"),
             node_id: h.nodeId,
-            attempt: FIRST,
+            attempt: FIRST_ATTEMPT,
             subject: "Duplicate",
             requirement_key: KEY,
             end_state: null,
@@ -164,7 +164,7 @@ test("request admission rejects a steps claim, unknown action and mismatched pla
     {
       kind: PlatformAddressKind.PullRequest,
       resourceIdentity: "repository:github:foreign/repo",
-      number: FIRST,
+      number: FIRST_ATTEMPT,
     },
   ];
   for (const address of addresses)
@@ -175,7 +175,7 @@ test("request admission rejects a steps claim, unknown action and mismatched pla
       return true;
     });
   const states = h.store.transaction((tx) =>
-    actionStatesOf(tx, h.dependencies.bindings, h.nodeId, FIRST),
+    actionStatesOf(tx, h.dependencies.bindings, h.nodeId, FIRST_ATTEMPT),
   );
-  assert.equal(states[ZERO]!.resolution, Resolution.Unrequested);
+  assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unrequested);
 });

@@ -39,9 +39,9 @@ import {
   type AssetRow,
 } from "./record-store.ts";
 
-const FIRST = 1;
-const SECOND = 2;
-const THIRD = 3;
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+const THIRD_ATTEMPT = 3;
 const NOW = 100;
 const LATER = 200;
 const PAGE_SIZE = 10;
@@ -68,7 +68,9 @@ function fixture(t: TestContext) {
     });
     return id;
   });
-  const assessment = (attempt = FIRST): Omit<AssessmentRow, "sequence"> => ({
+  const assessment = (
+    attempt = FIRST_ATTEMPT,
+  ): Omit<AssessmentRow, "sequence"> => ({
     id: createIdentity("assessment"),
     node_id: nodeId,
     attempt,
@@ -79,7 +81,7 @@ function fixture(t: TestContext) {
     tested_input: null,
     execution_id: null,
     actor: canonicalJSON(ACTOR),
-    node_revision: FIRST,
+    node_revision: FIRST_ATTEMPT,
     created_at: NOW,
   });
   return { ...h, nodeId, projectId, missionId, assessment };
@@ -89,41 +91,46 @@ test("attempts stay contiguous across rollback and never reopen a closed attempt
   const h = fixture(t);
   h.store.transaction((tx) => {
     assert.equal(readOpenAttempt(tx, h.nodeId), null);
-    assert.equal(openAttempt(tx, h.nodeId, FIRST, ACTOR, NOW).attempt, FIRST);
+    assert.equal(
+      openAttempt(tx, h.nodeId, FIRST_ATTEMPT, ACTOR, NOW).attempt,
+      FIRST_ATTEMPT,
+    );
     assert.throws(
-      () => openAttempt(tx, h.nodeId, SECOND, ACTOR, NOW),
+      () => openAttempt(tx, h.nodeId, SECOND_ATTEMPT, ACTOR, NOW),
       /UNIQUE constraint failed/,
     );
-    assert.equal(readNode(tx, h.nodeId)?.attempt, FIRST);
-    closeAttempt(tx, h.nodeId, FIRST, LATER);
-    assert.equal(readAttempt(tx, h.nodeId, FIRST)?.closed_at, LATER);
+    assert.equal(readNode(tx, h.nodeId)?.attempt, FIRST_ATTEMPT);
+    closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, LATER);
+    assert.equal(readAttempt(tx, h.nodeId, FIRST_ATTEMPT)?.closed_at, LATER);
     assert.equal(readOpenAttempt(tx, h.nodeId), null);
-    assert.throws(() => closeAttempt(tx, h.nodeId, FIRST, LATER));
+    assert.throws(() => closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, LATER));
   });
   assert.throws(
     () =>
       h.store.transaction((tx) => {
-        openAttempt(tx, h.nodeId, SECOND, ACTOR, LATER);
+        openAttempt(tx, h.nodeId, SECOND_ATTEMPT, ACTOR, LATER);
         throw ROLLBACK;
       }),
     (error) => error === ROLLBACK,
   );
   h.store.transaction((tx) => {
-    const second = openAttempt(tx, h.nodeId, SECOND, ACTOR, LATER);
-    assert.equal(second.attempt, SECOND);
+    const second = openAttempt(tx, h.nodeId, SECOND_ATTEMPT, ACTOR, LATER);
+    assert.equal(second.attempt, SECOND_ATTEMPT);
     assert.deepEqual(
       listAttempts(tx, h.nodeId, null, PAGE_SIZE).map((row) => row.attempt),
-      [SECOND, FIRST],
+      [SECOND_ATTEMPT, FIRST_ATTEMPT],
     );
     assert.deepEqual(
-      listAttempts(tx, h.nodeId, SECOND, PAGE_SIZE).map((row) => row.attempt),
-      [FIRST],
+      listAttempts(tx, h.nodeId, SECOND_ATTEMPT, PAGE_SIZE).map(
+        (row) => row.attempt,
+      ),
+      [FIRST_ATTEMPT],
     );
     assert.deepEqual(
       readAttemptPins(tx, h.nodeId).map((row) => ({ ...row })),
       [
-        { attempt: FIRST, node_revision: FIRST },
-        { attempt: SECOND, node_revision: SECOND },
+        { attempt: FIRST_ATTEMPT, node_revision: FIRST_ATTEMPT },
+        { attempt: SECOND_ATTEMPT, node_revision: SECOND_ATTEMPT },
       ],
     );
   });
@@ -133,9 +140,9 @@ test("assessment and outcome sequences and pagination use node-local acceptance 
   const h = fixture(t);
   h.store.transaction((tx) => {
     const first = insertAssessment(tx, h.assessment());
-    const second = insertAssessment(tx, h.assessment(SECOND));
-    assert.equal(first.sequence, FIRST);
-    assert.equal(second.sequence, SECOND);
+    const second = insertAssessment(tx, h.assessment(SECOND_ATTEMPT));
+    assert.equal(first.sequence, FIRST_ATTEMPT);
+    assert.equal(second.sequence, SECOND_ATTEMPT);
     const outcome = insertOutcome(tx, {
       id: createIdentity("outcome"),
       node_id: h.nodeId,
@@ -149,28 +156,34 @@ test("assessment and outcome sequences and pagination use node-local acceptance 
       id: createIdentity("outcome"),
       assessment_id: second.id,
     });
-    assert.equal(later.sequence, SECOND);
+    assert.equal(later.sequence, SECOND_ATTEMPT);
     assert.deepEqual({ ...readCurrentOutcome(tx, h.nodeId) }, later);
     assert.deepEqual({ ...readOutcome(tx, outcome.id) }, outcome);
     assert.deepEqual({ ...readAssessment(tx, first.id) }, first);
     assert.deepEqual(
-      listAssessments(tx, h.nodeId, null, SECOND, PAGE_SIZE).map((row) => ({
-        ...row,
-      })),
+      listAssessments(tx, h.nodeId, null, SECOND_ATTEMPT, PAGE_SIZE).map(
+        (row) => ({
+          ...row,
+        }),
+      ),
       [first],
     );
     assert.deepEqual(
-      readAssessmentsOfAttempt(tx, h.nodeId, SECOND).map((row) => ({ ...row })),
+      readAssessmentsOfAttempt(tx, h.nodeId, SECOND_ATTEMPT).map((row) => ({
+        ...row,
+      })),
       [second],
     );
     assert.deepEqual(
-      listOutcomes(tx, h.nodeId, FIRST, null, PAGE_SIZE).map((row) => ({
+      listOutcomes(tx, h.nodeId, FIRST_ATTEMPT, null, PAGE_SIZE).map((row) => ({
         ...row,
       })),
       [outcome],
     );
     assert.deepEqual(
-      readOutcomesOfAttempt(tx, h.nodeId, SECOND).map((row) => ({ ...row })),
+      readOutcomesOfAttempt(tx, h.nodeId, SECOND_ATTEMPT).map((row) => ({
+        ...row,
+      })),
       [later],
     );
   });
@@ -181,7 +194,7 @@ test("assessment and outcome sequences and pagination use node-local acceptance 
     }),
   );
   h.store.transaction((tx) =>
-    assert.equal(insertAssessment(tx, h.assessment()).sequence, THIRD),
+    assert.equal(insertAssessment(tx, h.assessment()).sequence, THIRD_ATTEMPT),
   );
 });
 
@@ -198,7 +211,7 @@ test("JSON sets canonicalize order, reject duplicates and preserve sequence on r
         child_outcome_ids: '["a","a"]',
       }),
     );
-    assert.equal(insertAssessment(tx, h.assessment()).sequence, SECOND);
+    assert.equal(insertAssessment(tx, h.assessment()).sequence, SECOND_ATTEMPT);
     const outcome = insertOutcome(tx, {
       id: createIdentity("outcome"),
       node_id: h.nodeId,
@@ -217,7 +230,7 @@ test("evidence writes all assets atomically and scopes requests, release and lan
   const row: EvidenceRow = {
     id: createIdentity("evidence"),
     node_id: h.nodeId,
-    attempt: FIRST,
+    attempt: FIRST_ATTEMPT,
     subject: RATIONALE,
     requirement_key: "repo.pull_request",
     end_state: null,
@@ -246,17 +259,19 @@ test("evidence writes all assets atomically and scopes requests, release and lan
     assert.deepEqual(readAssets(tx, row.id), []);
     insertEvidence(tx, row, [asset]);
     assert.deepEqual(
-      readRequests(tx, h.nodeId, FIRST).map((row) => ({ ...row })),
+      readRequests(tx, h.nodeId, FIRST_ATTEMPT).map((row) => ({ ...row })),
       [row],
     );
     assert.deepEqual(
-      readReleaseEvidence(tx, h.nodeId, FIRST, executionId).map((row) => ({
-        ...row,
-      })),
+      readReleaseEvidence(tx, h.nodeId, FIRST_ATTEMPT, executionId).map(
+        (row) => ({
+          ...row,
+        }),
+      ),
       [row],
     );
     assert.deepEqual(
-      readReleaseEvidence(tx, h.nodeId, SECOND, executionId),
+      readReleaseEvidence(tx, h.nodeId, SECOND_ATTEMPT, executionId),
       [],
     );
     assert.equal(readAssets(tx, row.id)[0]?.content, CANONICAL_ASSET);
@@ -271,7 +286,9 @@ test("evidence writes all assets atomically and scopes requests, release and lan
     };
     insertEvidence(tx, landed, []);
     assert.deepEqual(
-      readLandedCommitEvidence(tx, h.nodeId, FIRST).map((row) => ({ ...row })),
+      readLandedCommitEvidence(tx, h.nodeId, FIRST_ATTEMPT).map((row) => ({
+        ...row,
+      })),
       [landed],
     );
   });
@@ -285,7 +302,7 @@ test("mission harness parses operation contracts and records the one caller tran
     body: null,
   });
   assert.equal(result.id, h.missionId);
-  assert.equal(h.commits(), FIRST);
+  assert.equal(h.commits(), FIRST_ATTEMPT);
   await assert.rejects(
     h.invoke("get", {
       params: { projectId: h.projectId },
@@ -294,5 +311,5 @@ test("mission harness parses operation contracts and records the one caller tran
       actor: ACTOR,
     }),
   );
-  assert.equal(h.commits(), FIRST);
+  assert.equal(h.commits(), FIRST_ATTEMPT);
 });

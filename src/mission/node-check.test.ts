@@ -24,9 +24,16 @@ import { readMission, setNodeState } from "./store.ts";
 import { evidenceHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const ZERO = 0;
-const ONE = 1;
-const TWO = 2;
+const NO_REMOTE_CALLS = 0;
+const NO_RESULTS = 0;
+const SUCCESS_EXIT_CODE = 0;
+const FIRST_RESULT_INDEX = 0;
+const NO_LANDED_COMMITS = 0;
+const SINGLE_FAILURE = 1;
+const PULL_REQUEST_NUMBER = 1;
+const FIRST_MISSION_VERSION = 1;
+const FIRST_ATTEMPT = 1;
+const LANDED_COMMIT_COUNT = 2;
 const COMMIT = "a".repeat(40);
 const RESOURCE = "repository:github:owner/repo";
 
@@ -43,8 +50,8 @@ test("node check reports Mission authorization refusal without calling Intake", 
     async () => ({ endState: CheckEndState.None, landedCommits: [] }),
   );
   const result = await h.check();
-  assert.equal(remote.mock.callCount(), ZERO);
-  assert.equal(result.failures.length, ONE);
+  assert.equal(remote.mock.callCount(), NO_REMOTE_CALLS);
+  assert.equal(result.failures.length, SINGLE_FAILURE);
   assert.equal(
     result.failures[0]!.error.error.code,
     MissionErrorCode.AuthorizationRefused,
@@ -63,8 +70,8 @@ test("invalid Intake answers leave requests unresolved and stale mission version
   ]) {
     h.dependencies.intakeCheck.check = async () => answer;
     const result = await h.check();
-    assert.equal(result.failures.length, ONE);
-    assert.equal(result.results.length, ZERO);
+    assert.equal(result.failures.length, SINGLE_FAILURE);
+    assert.equal(result.results.length, NO_RESULTS);
     assert.equal(
       h.store.transaction((tx) => readEvidence(tx, h.request.id)?.end_state),
       null,
@@ -122,7 +129,12 @@ async function fixture(t: TestContext) {
       verification: {
         testedInput: address,
         results: [
-          { command: "true", exitCode: ZERO, signal: null, timedOut: false },
+          {
+            command: "true",
+            exitCode: SUCCESS_EXIT_CODE,
+            signal: null,
+            timedOut: false,
+          },
         ],
       },
     },
@@ -150,7 +162,7 @@ async function fixture(t: TestContext) {
       address: {
         kind: PlatformAddressKind.PullRequest,
         resourceIdentity: RESOURCE,
-        number: ONE,
+        number: PULL_REQUEST_NUMBER,
       },
     },
   });
@@ -163,7 +175,7 @@ async function fixture(t: TestContext) {
     h.invoke("node.check", {
       params: { nodeId: h.nodeId },
       query: {},
-      body: { expectedMissionVersion: ONE },
+      body: { expectedMissionVersion: FIRST_MISSION_VERSION },
     });
   assert.equal(h.node().state, NodeState.ExternalRequested);
   assert.ok(request.requirementKey);
@@ -177,11 +189,21 @@ test("expected checks write every landed commit and close successful external at
     landedCommits: [COMMIT, "b".repeat(40)],
   });
   const answer = await h.check();
-  assert.equal(answer.results[ZERO]!.resolution, Resolution.ExpectedEnd);
+  assert.equal(
+    answer.results[FIRST_RESULT_INDEX]!.resolution,
+    Resolution.ExpectedEnd,
+  );
   assert.equal(h.node().state, NodeState.Completed);
   h.store.transaction((tx) => {
-    assert.equal(readLandedCommitEvidence(tx, h.nodeId, ONE).length, TWO);
-    for (const evidence of readLandedCommitEvidence(tx, h.nodeId, ONE))
+    assert.equal(
+      readLandedCommitEvidence(tx, h.nodeId, FIRST_ATTEMPT).length,
+      LANDED_COMMIT_COUNT,
+    );
+    for (const evidence of readLandedCommitEvidence(
+      tx,
+      h.nodeId,
+      FIRST_ATTEMPT,
+    ))
       assert.deepEqual(JSON.parse(evidence.provenance), {
         kind: "service",
         service: "mission",
@@ -190,7 +212,7 @@ test("expected checks write every landed commit and close successful external at
       readCurrentOutcome(tx, h.nodeId)?.result,
       AssessmentResult.Success,
     );
-    assert.equal(readMission(tx, h.missionId)?.version, ONE);
+    assert.equal(readMission(tx, h.missionId)?.version, FIRST_MISSION_VERSION);
   });
   await assert.rejects(
     h.check(),
@@ -209,7 +231,7 @@ test("expected checks write every landed commit and close successful external at
     params: { evidenceId: h.request.id },
     query: {},
     body: {
-      expectedMissionVersion: ONE,
+      expectedMissionVersion: FIRST_MISSION_VERSION,
       force: true,
       reason: "Remove request",
     },
@@ -232,7 +254,7 @@ test("other checks block while none stays unresolved and failed checks retain fa
     landedCommits: [],
   });
   assert.equal(
-    (await h.check()).results[ZERO]!.resolution,
+    (await h.check()).results[FIRST_RESULT_INDEX]!.resolution,
     Resolution.Unresolved,
   );
   assert.equal(h.node().state, NodeState.ExternalRequested);
@@ -240,9 +262,12 @@ test("other checks block while none stays unresolved and failed checks retain fa
     throw new Error("private remote failure");
   };
   const failed = await h.check();
-  assert.equal(failed.results.length, ZERO);
-  assert.equal(failed.failures.length, ONE);
-  assert.equal(failed.failures[ZERO]!.error.requestId, h.caller.requestId);
+  assert.equal(failed.results.length, NO_RESULTS);
+  assert.equal(failed.failures.length, SINGLE_FAILURE);
+  assert.equal(
+    failed.failures[FIRST_RESULT_INDEX]!.error.requestId,
+    h.caller.requestId,
+  );
   h.dependencies.intakeCheck.check = async () => ({
     endState: CheckEndState.Other,
     landedCommits: [],
@@ -260,23 +285,29 @@ test("a live claim refuses a conclusive result and keeps a none result unresolve
     landedCommits: [],
   });
   const none = await h.check();
-  assert.equal(none.results[ZERO]!.resolution, Resolution.Unresolved);
-  assert.equal(none.failures.length, ZERO);
+  assert.equal(
+    none.results[FIRST_RESULT_INDEX]!.resolution,
+    Resolution.Unresolved,
+  );
+  assert.equal(none.failures.length, NO_RESULTS);
   h.dependencies.intakeCheck.check = async () => ({
     endState: CheckEndState.Expected,
     landedCommits: [COMMIT],
   });
   const refused = await h.check();
-  assert.equal(refused.results.length, ZERO);
-  assert.equal(refused.failures.length, ONE);
+  assert.equal(refused.results.length, NO_RESULTS);
+  assert.equal(refused.failures.length, SINGLE_FAILURE);
   assert.equal(
-    refused.failures[ZERO]!.error.error.code,
+    refused.failures[FIRST_RESULT_INDEX]!.error.error.code,
     MissionErrorCode.ClaimLive,
   );
   assert.equal(h.node().state, NodeState.Evaluating);
   h.store.transaction((tx) => {
     assert.equal(readEvidence(tx, h.request.id)?.end_state, null);
-    assert.equal(readLandedCommitEvidence(tx, h.nodeId, ONE).length, ZERO);
+    assert.equal(
+      readLandedCommitEvidence(tx, h.nodeId, FIRST_ATTEMPT).length,
+      NO_LANDED_COMMITS,
+    );
   });
 });
 
@@ -296,13 +327,19 @@ test("paused nodes keep their state and a concurrent conclusive end state wins",
     return { endState: CheckEndState.Expected, landedCommits: [COMMIT] };
   };
   const answer = await h.check();
-  assert.equal(answer.results[ZERO]!.resolution, Resolution.OtherEnd);
+  assert.equal(
+    answer.results[FIRST_RESULT_INDEX]!.resolution,
+    Resolution.OtherEnd,
+  );
   assert.equal(h.node().state, NodeState.Paused);
   h.store.transaction((tx) => {
     assert.equal(
       readEvidence(tx, h.request.id)?.end_state,
       CheckEndState.Other,
     );
-    assert.equal(readLandedCommitEvidence(tx, h.nodeId, ONE).length, ZERO);
+    assert.equal(
+      readLandedCommitEvidence(tx, h.nodeId, FIRST_ATTEMPT).length,
+      NO_LANDED_COMMITS,
+    );
   });
 });

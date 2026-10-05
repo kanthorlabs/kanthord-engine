@@ -35,7 +35,10 @@ import { transition } from "./control.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 
-const ZERO = 0;
+const NO_ATTEMPT = 0;
+const RESOURCE_KIND_SEGMENT = 0;
+const NO_ELIGIBLE_ACTIONS = 0;
+const NO_CONSECUTIVE_LOSSES = 0;
 const RELEASE_UNMET = "mission.release.obligation_unmet";
 
 export function claim(
@@ -61,7 +64,7 @@ export function claim(
   const revision = readCurrentRevision(tx, nodeId);
   assert.ok(revision);
   const attempt =
-    node.attempt === ZERO
+    node.attempt === NO_ATTEMPT
       ? openAttempt(tx, nodeId, revision.revision, opener, now)
       : readOpenAttempt(tx, nodeId);
   assert.ok(attempt);
@@ -107,7 +110,8 @@ function hasEvidence(
       (id) =>
         dependencies.bindings
           .getBindingRevision(tx, id)
-          ?.resourceIdentity.split(":")[ZERO] === MissionBindingKind.Repository,
+          ?.resourceIdentity.split(":")[RESOURCE_KIND_SEGMENT] ===
+        MissionBindingKind.Repository,
     );
   return readReleaseEvidence(tx, node.id, attempt.attempt, executionId).some(
     (row) => {
@@ -155,7 +159,7 @@ export function release(
     if (
       eligibleUnrequested(
         actionStatesOf(tx, dependencies.bindings, node.id, execution.attempt),
-      ).length > ZERO
+      ).length > NO_ELIGIBLE_ACTIONS
     )
       refuse(ReleaseObligation.Request);
   }
@@ -187,7 +191,8 @@ export function loss(
     node.state === NodeState.Executing || node.state === NodeState.Evaluating,
   );
   assert.ok(
-    Number.isSafeInteger(consecutiveLosses) && consecutiveLosses > ZERO,
+    Number.isSafeInteger(consecutiveLosses) &&
+      consecutiveLosses > NO_CONSECUTIVE_LOSSES,
   );
   const state =
     consecutiveLosses >= dependencies.config.consecutiveLossLimit

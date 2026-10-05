@@ -22,8 +22,8 @@ import {
 import { insertMission, insertNode, setNodeState } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
 
-const FIRST = 1;
-const SECOND = 2;
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
 const NOW = 100;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const WORKER = "general@1";
@@ -45,7 +45,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
       parent_id: null,
       created_at: NOW,
     });
-    openAttempt(tx, nodeId, FIRST, ACTOR, NOW);
+    openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);
     return missionId;
   });
   const assessment = (
@@ -55,7 +55,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
       insertAssessment(tx, {
         id: createIdentity("assessment"),
         node_id: nodeId,
-        attempt: FIRST,
+        attempt: FIRST_ATTEMPT,
         result: AssessmentResult.Success,
         rationale: "Reviewed",
         evidence_ids: "[]",
@@ -63,7 +63,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
         tested_input: null,
         execution_id: createIdentity("execution"),
         actor: null,
-        node_revision: FIRST,
+        node_revision: FIRST_ATTEMPT,
         created_at: NOW,
         ...overrides,
       }),
@@ -86,13 +86,13 @@ test("a later human revision and unrelated evidence preserve the pinned assessme
       .prepare(
         "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', '{}', 'reason', ?, ?)",
       )
-      .run(h.nodeId, SECOND, canonicalJSON(ACTOR), NOW);
+      .run(h.nodeId, SECOND_ATTEMPT, canonicalJSON(ACTOR), NOW);
     insertEvidence(
       tx,
       {
         id: createIdentity("evidence"),
         node_id: h.nodeId,
-        attempt: FIRST,
+        attempt: FIRST_ATTEMPT,
         subject: "Unselected evidence",
         requirement_key: null,
         end_state: null,
@@ -129,7 +129,9 @@ test("a later human block assessment defeats authority in its own attempt", (t) 
     CurrencyReason.Order,
   ]);
   assert.equal(
-    h.store.transaction((tx) => currentAssessmentOf(tx, h.nodeId, FIRST)),
+    h.store.transaction((tx) =>
+      currentAssessmentOf(tx, h.nodeId, FIRST_ATTEMPT),
+    ),
     null,
   );
 });
@@ -137,12 +139,12 @@ test("a later human block assessment defeats authority in its own attempt", (t) 
 test("a human act of the next attempt leaves the prior attempt admitted", (t) => {
   const h = fixture(t);
   h.store.transaction((tx) => {
-    closeAttempt(tx, h.nodeId, FIRST, NOW);
-    openAttempt(tx, h.nodeId, SECOND, ACTOR, NOW);
+    closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, NOW);
+    openAttempt(tx, h.nodeId, SECOND_ATTEMPT, ACTOR, NOW);
   });
   h.assessment({
-    attempt: SECOND,
-    node_revision: SECOND,
+    attempt: SECOND_ATTEMPT,
+    node_revision: SECOND_ATTEMPT,
     execution_id: null,
     actor: canonicalJSON(ACTOR),
     result: AssessmentResult.Undetermined,
@@ -162,7 +164,7 @@ test("closure whose outcome names the assessment preserves its currency", (t) =>
       evidence_ids: "[]",
       created_at: NOW,
     });
-    closeAttempt(tx, h.nodeId, FIRST, NOW);
+    closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, NOW);
     setNodeState(tx, h.nodeId, NodeState.Completed);
   });
   assert.equal(h.currency().current, true);
@@ -213,7 +215,9 @@ test("a changed child outcome invalidates the initiative's selected context with
     false,
   );
   assert.equal(
-    h.store.transaction((tx) => currentAssessmentOf(tx, h.nodeId, FIRST)),
+    h.store.transaction((tx) =>
+      currentAssessmentOf(tx, h.nodeId, FIRST_ATTEMPT),
+    ),
     null,
   );
 });
@@ -221,11 +225,13 @@ test("a changed child outcome invalidates the initiative's selected context with
 test("order selects the latest admitted execution and rejects a newer mismatched pin", (t) => {
   const h = fixture(t);
   const later = h.assessment();
-  h.assessment({ node_revision: SECOND });
+  h.assessment({ node_revision: SECOND_ATTEMPT });
   assert.equal(h.currency().orderSelected, false);
   assert.deepEqual(h.currency().reasons, [CurrencyReason.Order]);
   assert.equal(
-    h.store.transaction((tx) => currentAssessmentOf(tx, h.nodeId, FIRST))?.id,
+    h.store.transaction((tx) =>
+      currentAssessmentOf(tx, h.nodeId, FIRST_ATTEMPT),
+    )?.id,
     later.id,
   );
 });

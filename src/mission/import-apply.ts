@@ -36,8 +36,11 @@ import {
 import { requireMission } from "./write.ts";
 import { requireNoLiveSubtree } from "./dependency.ts";
 
-const ZERO = 0;
-const ONE = 1;
+const NO_VIOLATIONS = 0;
+const MINIMUM_MISSION_VERSION = 0;
+const NO_IMPORT_CHANGES = 0;
+const EXPECTED_ROW_CHANGE = 1;
+const VERSION_INCREMENT = 1;
 const FIRST_VIOLATION = 0;
 const TEMPORARY_FILENAME_PREFIX = "import:";
 const INSERT_ORDER = [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task];
@@ -72,7 +75,7 @@ function confirmImport(preview: ImportPreview, body: ImportApply): void {
       MissionErrorCode.RetirementMismatch,
       "Import preview or confirmed retirements changed.",
     );
-  assert.equal(preview.violations.length, ZERO);
+  assert.equal(preview.violations.length, NO_VIOLATIONS);
   assert.equal(preview.expectedMissionVersion, body.missionVersion);
 }
 
@@ -131,7 +134,7 @@ function addedEdges(
     }
   }
   assert.equal(entries.length, resolved.resolvedEntries.length);
-  assert.equal(resolved.violations.length, ZERO);
+  assert.equal(resolved.violations.length, NO_VIOLATIONS);
   containment.sort(
     (a, b) =>
       a.parentId.localeCompare(b.parentId) ||
@@ -151,13 +154,13 @@ function updateRows(
   entries: ResolvedImportEntry[],
   now: number,
 ): void {
-  assert.equal(resolved.violations.length, ZERO);
+  assert.equal(resolved.violations.length, NO_VIOLATIONS);
   assert.equal(entries.length, resolved.resolvedEntries.length);
   for (const id of resolved.retirements) {
     const result = tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(now, id);
-    assert.equal(result.changes, ONE);
+    assert.equal(result.changes, EXPECTED_ROW_CHANGE);
   }
   const updates = new Set(resolved.updates);
   const changed = entries.filter((item) => updates.has(item.key));
@@ -173,7 +176,7 @@ function updateRows(
         "UPDATE mission_node SET filename = ?, parent_id = ? WHERE id = ?",
       )
       .run(item.entry.filename, item.parentId, item.key);
-    assert.equal(result.changes, ONE);
+    assert.equal(result.changes, EXPECTED_ROW_CHANGE);
   }
 }
 
@@ -183,7 +186,7 @@ function writeDependencies(
   resolved: ResolvedImport,
   entries: ResolvedImportEntry[],
 ): void {
-  assert.equal(resolved.violations.length, ZERO);
+  assert.equal(resolved.violations.length, NO_VIOLATIONS);
   assert.ok(entries.length <= resolved.resolvedEntries.length);
   const previous = new Map<string, Set<string>>();
   for (const edge of resolved.currentDependencies) {
@@ -213,7 +216,7 @@ function writeNodes(
   entries: ResolvedImportEntry[],
   now: number,
 ): void {
-  assert.equal(resolved.violations.length, ZERO);
+  assert.equal(resolved.violations.length, NO_VIOLATIONS);
   assert.equal(entries.length, resolved.resolvedEntries.length);
   tx.database.exec("PRAGMA defer_foreign_keys = ON");
   updateRows(tx, resolved, entries, now);
@@ -244,7 +247,7 @@ function initialResult(
   actor: HumanActor,
   acceptedAt: number,
 ): ImportResult {
-  assert.ok(mission.version > ZERO);
+  assert.ok(mission.version > MINIMUM_MISSION_VERSION);
   assert.equal(new Set(entries.map((item) => item.key)).size, entries.length);
   return {
     missionId: mission.id,
@@ -303,7 +306,7 @@ export function applyImport(
     resolved.creates.length +
       resolved.updates.length +
       resolved.retirements.length ===
-    ZERO
+    NO_IMPORT_CHANGES
   )
     return result;
   const before = claimableMap(tx, missionId, bindings);
@@ -327,7 +330,7 @@ export function applyImport(
     bindings,
   );
   const missionVersion = incrementMissionVersion(tx, missionId);
-  assert.equal(missionVersion, mission.version + ONE);
+  assert.equal(missionVersion, mission.version + VERSION_INCREMENT);
   return {
     ...result,
     missionVersion,

@@ -15,7 +15,8 @@ import { readRequests, readAssets } from "./record-store.ts";
 import { readNode } from "./store.ts";
 
 type Candidate = ActionContext["actions"][number]["reuseCandidates"][number];
-const ZERO = 0;
+const MINIMUM_ATTEMPT = 0;
+const EMPTY_KEY_LENGTH = 0;
 const FIRST_ATTEMPT = 1;
 
 function candidatesOf(
@@ -24,8 +25,8 @@ function candidatesOf(
   attempt: number,
   key: string,
 ): Candidate[] {
-  assert.ok(Number.isSafeInteger(attempt) && attempt > ZERO);
-  assert.ok(key.length > ZERO);
+  assert.ok(Number.isSafeInteger(attempt) && attempt > MINIMUM_ATTEMPT);
+  assert.ok(key.length > EMPTY_KEY_LENGTH);
   const candidates = new Map<string, Candidate>();
   for (let earlier = attempt - 1; earlier >= FIRST_ATTEMPT; earlier--) {
     const requests = readRequests(tx, nodeId, earlier).filter(
@@ -57,7 +58,7 @@ export function actionContextOf(
 ): ActionContext {
   const node = readNode(tx, nodeId);
   assert.ok(node && node.state !== null);
-  assert.ok(Number.isSafeInteger(attempt) && attempt > ZERO);
+  assert.ok(Number.isSafeInteger(attempt) && attempt > MINIMUM_ATTEMPT);
   const assessment = currentAssessmentOf(tx, nodeId, attempt);
   assert.ok(assessment === null || assessment.tested_input !== null);
   const states = actionStatesOf(tx, dependencies.bindings, nodeId, attempt);

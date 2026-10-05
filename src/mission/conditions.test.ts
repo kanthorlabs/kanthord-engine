@@ -27,7 +27,7 @@ import {
 import { missionHarness } from "./test-support.ts";
 
 const NOW = 100;
-const FIRST = 1;
+const FIRST_ATTEMPT = 1;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const REQUEST_KEY = "repo.pull_request";
 
@@ -131,7 +131,7 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
       projectId: h.projectId,
       name: "repo",
       resourceIdentity: "repository:github:owner/repo",
-      revision: FIRST,
+      revision: FIRST_ATTEMPT,
       disabled: false,
       tombstone: false,
     }),
@@ -154,7 +154,7 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
         "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '{}', 'reason', ?, ?)",
       )
       .run(nodeId, canonicalJSON([bindingId]), canonicalJSON(ACTOR), NOW);
-    openAttempt(tx, nodeId, FIRST, ACTOR, NOW);
+    openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);
     const node = readNode(tx, nodeId)!;
     assert.equal(continuationHolds(tx, bindings, node), true);
     setNodeState(tx, nodeId, NodeState.ExternalRequested);
@@ -165,7 +165,7 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
       {
         id,
         node_id: nodeId,
-        attempt: FIRST,
+        attempt: FIRST_ATTEMPT,
         subject: "Request",
         requirement_key: REQUEST_KEY,
         end_state: null,
@@ -186,7 +186,7 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
       .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
       .run(EndState.Expected, id);
     assert.equal(readinessOf(tx, node).holds, true);
-    closeAttempt(tx, nodeId, FIRST, NOW);
+    closeAttempt(tx, nodeId, FIRST_ATTEMPT, NOW);
     assert.equal(continuationHolds(tx, bindings, node), false);
   });
 });
