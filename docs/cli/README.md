@@ -17,7 +17,9 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | Command group                  | Owning document                                   | Scope                                                                                                   |
 | ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `project`                      | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and worker binding entries.                            |
-| `credential`                   | [Custody](credential.md)                          | Server-wide credential records, metadata revisions and OAuth login sessions.                            |
+| `llm`                          | [LLM](llm.md)                                     | LLM credential records, metadata revisions and OAuth login sessions.                                    |
+| `repository`                   | [Repository](repository.md)                       | Repository credential records and metadata revisions.                                                   |
+| `storage`                      | [Storage](storage.md)                             | Storage credential records and metadata revisions.                                                      |
 | `mission`                      | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                          |
 | `scheduler`                    | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                    |
 | `intake`                       | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.    |
@@ -26,9 +28,9 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
-The Project inventory has 11 proposed leaves. The Credential inventory has 8
-proposed leaves. The Worker inventory has 20 leaves: 1 implemented and 19 proposed.
-These three groups contain 39 leaves in total.
+The Project inventory has 11 proposed leaves. The LLM inventory has 11 leaves.
+The Repository and Storage inventories have 8 leaves each. The Worker inventory
+has 20 leaves: 1 implemented and 19 proposed. These five groups contain 58 leaves in total.
 
 Start with [common flags](common-flags.md) and
 [shared conventions](other.md), then read the owning group page.
@@ -64,8 +66,8 @@ and [Worker contract](../../src/worker/contract.ts); dispatch is in the
 
 ## Ownership rules
 
-- Keep the three global command names, seven service groups and one shared
-  component group listed above, as the [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface) declares.
+- Keep the three global command names, seven service groups and three shared
+  component groups listed above, as the [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface) declares.
   Application names are operands of `serve`, not additional top-level commands.
 - A remote command calls the operation of the service or shared component that
   owns its effect. Gateway authenticates and routes the request; it does not

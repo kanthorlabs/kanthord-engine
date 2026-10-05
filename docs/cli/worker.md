@@ -10,7 +10,7 @@ See the [CLI index](./README.md) for shared conventions and
 `jwt generate` issuance. Worker binding edits, instance counts, availability, agent
 entries and effective configuration inspection belong to [Project](./project.md).
 The Worker Service owns agent enablement and effective configuration resolution.
-[Credential](./credential.md) covers credential management.
+[LLM](./llm.md) covers credential management of LLM platforms.
 Work pull, claims, execution records and release belong to
 [Scheduler](./scheduler.md).
 
@@ -337,13 +337,13 @@ The [configuration schema](https://github.com/kanthorlabs/kanthord/blob/main/doc
 is emitted by `z.toJSONSchema` of `zod` at 4.4.3 from the effective-configuration
 schema. Its root is an object with `additionalProperties: false` and five required properties:
 
-| Property          | Schema                                                                                 |
-| ----------------- | -------------------------------------------------------------------------------------- |
-| `agentProvider`   | `string`; name of an agent provider in the enablement                                  |
-| `provider`        | `string`, enum of every `llm` platform of the [platform list](credential.md#platforms) |
-| `credential`      | `string`; a credential name                                                            |
-| `modelIdentifier` | `string`                                                                               |
-| `reasoningEffort` | enum `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`                         |
+| Property          | Schema                                                                    |
+| ----------------- | ------------------------------------------------------------------------- |
+| `agentProvider`   | `string`; name of an agent provider in the enablement                     |
+| `provider`        | `string`, enum of every platform of the [platform list](llm.md#platforms) |
+| `credential`      | `string`; a credential name                                               |
+| `modelIdentifier` | `string`                                                                  |
+| `reasoningEffort` | enum `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`            |
 
 No property carries a `default`; the schema holds no `options`.
 Its `description` requires model membership in `getBuiltinModels(provider)` of
@@ -373,13 +373,13 @@ own these implemented records and command spellings.
 An enablement is global to the server, belongs to no project and is keyed by
 `agentName: AgentName`. It holds:
 
-| Field                  | Type and meaning                                                                                                                                                                                                                                                                                                                 |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agentName`            | Exact catalog key; no separate enablement identity.                                                                                                                                                                                                                                                                              |
-| `state`                | `enabled` or `disabled`. An absent record also denies use.                                                                                                                                                                                                                                                                       |
-| `agentProviders`       | Nonempty array of `{ name, provider, credential }`. Each name is nonblank and unique inside this enablement. `provider` is a platform of kind `llm` in the [platform list](credential.md#platforms). `credential` is a credential name in custody; its platform must equal the provider. No model list or secret is stored here. |
-| `defaultConfiguration` | Required `{ agentProvider, modelIdentifier, reasoningEffort }`. The human supplies all three; no catalog default applies. The name selects an agent provider of this enablement.                                                                                                                                                 |
-| `revision`             | Positive safe integer; every change creates a revision.                                                                                                                                                                                                                                                                          |
+| Field                  | Type and meaning                                                                                                                                                                                                                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agentName`            | Exact catalog key; no separate enablement identity.                                                                                                                                                                                                                                                         |
+| `state`                | `enabled` or `disabled`. An absent record also denies use.                                                                                                                                                                                                                                                  |
+| `agentProviders`       | Nonempty array of `{ name, provider, credential }`. Each name is nonblank and unique inside this enablement. `provider` is a platform in the [platform list](llm.md#platforms). `credential` is a credential name in custody; its platform must equal the provider. No model list or secret is stored here. |
+| `defaultConfiguration` | Required `{ agentProvider, modelIdentifier, reasoningEffort }`. The human supplies all three; no catalog default applies. The name selects an agent provider of this enablement.                                                                                                                            |
+| `revision`             | Positive safe integer; every change creates a revision.                                                                                                                                                                                                                                                     |
 
 `modelIdentifier` is a nonblank string. The reasoning-effort enum is the one in
 `configurationSchema`. All request objects are closed. An agent provider's
@@ -483,7 +483,7 @@ The [provider check contract](https://github.com/kanthorlabs/kanthord/blob/main/
 declares `worker.provider.check`, a server-wide read under `human` access, at
 `POST /api/worker/provider/check`. It has no project or binding.
 `--credential` is required, with no default, and uses the credential name form
-in [Credential](./credential.md#names-and-identities). The body is exactly
+in [LLM](./llm.md#names-and-identities). The body is exactly
 `{ credential }`; params and query are empty. No raw key or base URL reaches
 this operation. It accepts only an `openai-compatible` credential and reads
 `baseUrl` through custody. The Worker Service performs the call with the material that custody releases, caches nothing and drops the material after the call.

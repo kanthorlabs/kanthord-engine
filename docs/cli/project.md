@@ -5,7 +5,7 @@
 This contributor specification covers the future `kanthord project` group:
 project identity, resource bindings, repository policy and worker binding
 entries. [Worker](./worker.md) owns agent enablement and
-effective configuration resolution. [Credential](./credential.md) covers custody.
+effective configuration resolution. [LLM](./llm.md), [Repository](./repository.md) and [Storage](./storage.md) cover credentials.
 It is self-contained in an engine checkout.
 
 **Status: no Project operation command is implemented.**
@@ -42,7 +42,7 @@ results, and effects without repeating the command syntax.
 The proposal preserves the existing group spelling and `--endpoint` option.
 All commands on this page belong under `project`. The [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface)
 declares three global commands, seven service groups and the shared component
-group `credential`.
+groups `llm`, `repository` and `storage`.
 
 ## Common proposed calling convention
 
@@ -171,7 +171,7 @@ Blocked commands link their items in [HANDOFF Project Service](https://github.co
 | 11  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:projectId/binding/:bindingId/agent/:agentName` | `project.agentConfiguration.get`                       | `human`; proposed |
 
 - Rows 5 and 6 keep their marks under HANDOFF Project Service, not for the storage credential record type.
-- Server-wide credential routes belong to `/api/credential`; provider check belongs to `/api/worker/provider/check`. Neither route is under `/api/project`.
+- Server-wide credential routes belong to `/api/llm/credential`, `/api/repository/credential` and `/api/storage/credential`; provider check belongs to `/api/worker/provider/check`. Neither route is under `/api/project`.
 - There are 11 distinct route operations for the 11 CLI leaves.
 
 ## Project resource

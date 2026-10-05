@@ -156,7 +156,7 @@ client file therefore cannot block this local generator.
 ### Input and local filesystem effects
 
 The command writes OpenAPI files for every operation that the CLI imports from
-the Gateway, Custody, Worker, Scheduler, Project and Mission contracts, under
+the Gateway, LLM, Repository, Storage, Worker, Scheduler, Project and Mission contracts, under
 the [operation registry ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-operation-registry).
 It emits OpenAPI `3.1.0` YAML from their schemas, access policies, timeouts,
 mutation flags, responses and parameter definitions. It starts no server,
@@ -257,7 +257,7 @@ logout, and rotation commands are not part of this specification.
 | Help completeness          | The target requires help to state every default and validation rule. Current `--endpoint` help says only “Server endpoint”; this page specifies behavior that help still needs to expose. The inherited unused endpoint option also appears in local `openapi` help.                                                                                                              |
 | Credential validation      | The server verification checks above are implemented. Local validation of option/environment token values is weaker than the client-file schema. The [JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract. Global issuance syntax stays in [other commands](./other.md). |
 | User management            | The system holds no user management, and no user, session-list or revoke command exists. The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key) revokes every JWT through `gateway.tokenVersion`.                                                                                            |
-| Future services in OpenAPI | The CLI assembles the Gateway, Custody, Worker, Scheduler, Project and Mission contracts explicitly. A future declared service must be added to the emission set and to server routing; the generator does not scan source directories.                                                                                                                                           |
+| Future services in OpenAPI | The CLI assembles the Gateway, LLM, Repository, Storage, Worker, Scheduler, Project and Mission contracts explicitly. A future declared service must be added to the emission set and to server routing; the generator does not scan source directories.                                                                                                                          |
 
 ## Error codes
 
