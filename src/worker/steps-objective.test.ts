@@ -8,7 +8,7 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import * as transport from "../repository/connector.ts";
+import * as connector from "../repository/connector.ts";
 import type { Revision, TaskContent } from "../mission/contract.ts";
 import { WorkerMethod } from "./contract.ts";
 import { NodeKind, openNativeAgent } from "./native-agent.ts";
@@ -30,6 +30,8 @@ import {
   runStepsObjective,
   verifyTask,
 } from "./steps-objective.ts";
+
+const transport = { ...connector, proveSshIdentity: async () => {} };
 
 const SECRET = "test_steps_key";
 const TWO = 2;
@@ -71,6 +73,12 @@ async function fixture(
       bindingId: createIdentity("binding"),
       name: "repo",
       address: bare,
+      sshIdentity: {
+        host: "github.com",
+        hostname: "github.com",
+        port: 22,
+        identity_file: "~/.ssh/id_test",
+      },
       strategy: { baseBranch: "main" },
       projectPrompt: null,
     },

@@ -343,6 +343,7 @@ test(
     }
     const connector = new RepositoryComponent();
     const transport: RepositoryTransport = {
+      proveSshIdentity: async () => {},
       clone: async (address, ...args) => {
         await connector.clone(barePaths.get(address)!, ...args);
         await simpleGit(args[0]).addConfig("user.name", "Methods Test");

@@ -48,6 +48,12 @@ test("B3 review bundle places all supporting assets beside repositories and remo
       bindingId: createIdentity("binding"),
       name: "repo",
       address: "git@github.com:owner/repo.git",
+      sshIdentity: {
+        host: "github.com",
+        hostname: "github.com",
+        port: 22,
+        identity_file: "~/.ssh/id_test",
+      },
       strategy: { baseBranch: "main" },
       projectPrompt: null,
     };
@@ -125,6 +131,7 @@ test("B3 review bundle places all supporting assets beside repositories and remo
     });
     const workspaces = WorkspaceRoot.open(temporary(t));
     const transport = {
+      proveSshIdentity: async () => {},
       cloneSnapshot: async () => "a".repeat(40),
     } as unknown as RepositoryTransport;
     try {

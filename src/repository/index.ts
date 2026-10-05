@@ -11,7 +11,8 @@ import {
   fetchAndCheckout,
   pushNodeBranch,
 } from "./connector.ts";
-import type { SshIdentity } from "./ssh-identity.ts";
+import type { SshIdentity, SshPin } from "./ssh-identity.ts";
+import { proveSshPin } from "./credential-platform.ts";
 export {
   RepositoryCredentials,
   type CredentialDependencies,
@@ -47,6 +48,14 @@ export class RepositoryComponent {
     deadlineMs: number,
   ): Promise<string> {
     return resolveSshHostname(host, context, deadlineMs);
+  }
+
+  proveSshIdentity(
+    pin: SshPin,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<void> {
+    return proveSshPin(pin, context, deadlineMs);
   }
 
   resolveSshIdentity(

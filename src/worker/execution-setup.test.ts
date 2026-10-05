@@ -15,6 +15,8 @@ import { PROMPT_SOURCE_MAX_BYTES } from "./prompt-source.ts";
 import { anthropicSetup } from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
 
+const SSH_CREDENTIAL = "kanthorlabs-ssh";
+
 test("setup resolves configured global files before its single snapshot and supports a pinned entry", async (t) => {
   const dataDirectory = temporary(t);
   const store = new Store(":memory:");
@@ -68,6 +70,7 @@ test("setup resolves configured global files before its single snapshot and supp
     }),
     repositoryBindingIdsOf: () => [],
     repositoryPolicyOf: () => null,
+    credentialMetadata: () => null,
   };
   const worker = {
     declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
@@ -147,4 +150,32 @@ test("setup resolves configured global files before its single snapshot and supp
       error instanceof OperationError &&
       error.code === WorkerErrorCode.ExecutionNoNativeAgent,
   );
+  const bindingId = createIdentity("binding");
+  const sshIdentity = {
+    host: "kanthorlabs.github.com",
+    hostname: "ssh.github.com",
+    port: 443,
+    identity_file: "~/.ssh/id_kanthorlabs",
+  };
+  const pinned = await executionSetup(
+    {
+      ...dependencies,
+      repositoryBindingIdsOf: () => [bindingId],
+      repositoryPolicyOf: () => ({
+        bindingId,
+        name: "repo",
+        address: "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
+        sshCredential: SSH_CREDENTIAL,
+        baseBranch: "main",
+        projectPrompt: null,
+      }),
+      credentialMetadata: (_tx, name) =>
+        name === SSH_CREDENTIAL
+          ? { platform: "ssh", metadata: sshIdentity }
+          : null,
+    },
+    worker,
+    caller,
+  );
+  assert.deepEqual(pinned.repositories[0]?.sshIdentity, sshIdentity);
 });

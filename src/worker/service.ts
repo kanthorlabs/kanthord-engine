@@ -38,6 +38,7 @@ import {
   type RepositoryPolicyOf,
   type RepositoryBindingIdsOf,
   type PinnedCredentialMetadataFn,
+  type CredentialMetadataOf,
   type SchedulerClaims,
   type CustodyHandover,
   type MissionActions,
@@ -204,6 +205,7 @@ export interface Dependencies {
   repositoryPolicyOf: RepositoryPolicyOf;
   repositoryBindingIdsOf: RepositoryBindingIdsOf;
   pinnedCredentialMetadata: PinnedCredentialMetadataFn;
+  credentialMetadata: CredentialMetadataOf;
   dataDirectory: string;
   monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;

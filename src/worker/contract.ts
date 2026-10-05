@@ -354,6 +354,7 @@ export type RepositoryPolicyOf = (
   bindingId: string;
   name: string;
   address: string;
+  sshCredential: string;
   baseBranch: string;
   projectPrompt: string | null;
 } | null;
@@ -703,6 +704,11 @@ export const SetupRefusal = {
   CredentialRevisionMismatch: "credential_revision_mismatch",
 } as const;
 export interface RepositoryTransport {
+  proveSshIdentity(
+    pin: SshIdentityPin,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<void>;
   clone(
     address: string,
     directory: string,
@@ -769,6 +775,17 @@ export const globalPromptSourceSchema = z.discriminatedUnion("state", [
     reason: z.enum(InvalidReason),
   }),
 ]);
+export const sshIdentitySchema = z.strictObject({
+  host: z.string().min(1),
+  hostname: z.string().min(1),
+  port: z.number().int().positive(),
+  identity_file: z.string().min(1),
+});
+export type SshIdentityPin = z.infer<typeof sshIdentitySchema>;
+export type CredentialMetadataOf = (
+  tx: Transaction,
+  credentialName: string,
+) => { platform: string; metadata: Record<string, unknown> | null } | null;
 export const executionSetupSchema = z.strictObject({
   executionId: identitySchema("execution"),
   workerName: z.string().min(1),
@@ -782,6 +799,7 @@ export const executionSetupSchema = z.strictObject({
       bindingId: identitySchema("binding"),
       name: z.string(),
       address: z.string(),
+      sshIdentity: sshIdentitySchema,
       strategy: z.strictObject({ baseBranch: z.string() }),
       projectPrompt: z.string().nullable(),
     }),

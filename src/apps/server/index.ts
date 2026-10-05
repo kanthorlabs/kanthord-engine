@@ -245,6 +245,7 @@ export function composeServices(options: {
       mission.repositoryBindingIdsOf(tx, nodeId, revision),
     pinnedCredentialMetadata: (tx, execution, name, now) =>
       custody.pinnedCredentialMetadata(tx, execution, name, now),
+    credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
     dataDirectory: directories(process.env).data,
     schedulerClaims: {
       requireRunning: (...args) => scheduler.requireRunning(...args),

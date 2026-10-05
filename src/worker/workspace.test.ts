@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../kernel/context.ts";
-import * as transport from "../repository/connector.ts";
+import * as connector from "../repository/connector.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
@@ -20,6 +20,8 @@ import {
   WorkspaceRoot,
   WORKSPACE_RETENTION_MS,
 } from "./workspace.ts";
+
+const transport = { ...connector, proveSshIdentity: async () => {} };
 
 test("workspace root audits private mode and keys refuse foreign identities", (t) => {
   const expectedBranch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -95,6 +97,12 @@ test("workspace preparation refreshes objective branches and creates disposable 
   const repository = {
     bindingId: createIdentity("binding"),
     address: origin,
+    sshIdentity: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_test",
+    },
     strategy: { baseBranch: "main" },
   };
   const common = { transport, context: background, deadlineMs: 10000 };
@@ -172,4 +180,62 @@ test("workspace preparation refreshes objective branches and creates disposable 
   });
   assert.equal(retried.head, base);
   workspace.release(workspace.objectiveKey(failedId), WorkspaceKind.Objective);
+});
+
+test("a drifted SSH identity stops every workspace preparation before its git operation", async (t) => {
+  const workspace = WorkspaceRoot.open(temporary(t));
+  const drift = new Error("repository.credential.ssh_drift");
+  const proved: string[] = [];
+  const refusing = {
+    ...connector,
+    proveSshIdentity: async (pin: { host: string }) => {
+      proved.push(pin.host);
+      throw drift;
+    },
+    clone: async () => assert.fail("The clone must not run."),
+    cloneSnapshot: async () => assert.fail("The clone must not run."),
+    fetchAndCheckout: async () => assert.fail("The fetch must not run."),
+  };
+  const repository = {
+    bindingId: createIdentity("binding"),
+    address: "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
+    sshIdentity: {
+      host: "kanthorlabs.github.com",
+      hostname: "ssh.github.com",
+      port: 443,
+      identity_file: "~/.ssh/id_kanthorlabs",
+    },
+    strategy: { baseBranch: "main" },
+  };
+  const common = {
+    transport: refusing,
+    context: background,
+    deadlineMs: 10000,
+  };
+  await assert.rejects(
+    workspace.prepareObjective({
+      ...common,
+      objectiveId: createIdentity("node"),
+      repository,
+    }),
+    (error) => error === drift,
+  );
+  await assert.rejects(
+    workspace.prepareSnapshot({
+      ...common,
+      executionId: createIdentity("execution"),
+      repository,
+      commit: "head",
+    }),
+    (error) => error === drift,
+  );
+  await assert.rejects(
+    workspace.prepareInitiative({
+      ...common,
+      executionId: createIdentity("execution"),
+      repositories: [repository],
+    }),
+    (error) => error === drift,
+  );
+  assert.deepEqual(proved, Array(3).fill(repository.sshIdentity.host));
 });

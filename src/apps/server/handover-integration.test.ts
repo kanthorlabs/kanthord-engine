@@ -43,7 +43,11 @@ import {
   HANDOVER_NONCE_BYTES,
   HANDOVER_TAG_BYTES,
 } from "../../kernel/handover.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_CREDENTIAL_BODY,
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+} from "./test-support.ts";
 
 const SECRET = "test_handover-integration-secret-one";
 const REFRESHED = "test_handover-integration-secret-two";
@@ -131,6 +135,7 @@ for (const adapter of ["direct", "http"] as const) {
       bindingId: answer.repositories[0]!.bindingId,
       name: "repo",
       address: "git@github.com:owner/repo.git",
+      sshIdentity: FAKE_SSH_CREDENTIAL_BODY.metadata,
       strategy: { baseBranch: "main" },
       projectPrompt: "Follow repository conventions.",
     });

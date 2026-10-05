@@ -730,6 +730,7 @@ function mappedTransport(
     return addresses[address]!;
   }
   return {
+    proveSshIdentity: async () => {},
     clone: (address, ...args) => connector.clone(mapped(address), ...args),
     cloneSnapshot: (address, ...args) =>
       connector.cloneSnapshot(mapped(address), ...args),

@@ -63,6 +63,9 @@ const fakeCollaborations = {
   pinnedCredentialMetadata: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
+  credentialMetadata: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   missionActions: {
     authorizeRequest: () => {
       throw new Error("UNEXPECTED_COLLABORATION");

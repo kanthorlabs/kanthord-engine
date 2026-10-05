@@ -57,7 +57,11 @@ import {
   scriptedProvider,
 } from "../../worker/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_CREDENTIAL_BODY,
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+} from "./test-support.ts";
 
 const ZERO = 0;
 const ONE = 1;
@@ -283,6 +287,7 @@ test(
     await git.clone(seed, bare, ["--bare"]);
     const connector = new RepositoryComponent();
     const transport: RepositoryTransport = {
+      proveSshIdentity: async () => {},
       clone: (_address, ...args) => connector.clone(bare, ...args),
       cloneSnapshot: (_address, ...args) =>
         connector.cloneSnapshot(bare, ...args),
@@ -409,6 +414,7 @@ test(
         bindingId: repository.bindingId,
         name: "repo",
         address: ADDRESS,
+        sshIdentity: FAKE_SSH_CREDENTIAL_BODY.metadata,
         strategy: { baseBranch: "main" },
         projectPrompt: PROJECT,
       });

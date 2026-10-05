@@ -48,6 +48,11 @@ async function finishObjective(
         remaining(),
       );
     }
+    await state.input.transport.proveSshIdentity(
+      state.input.setup.repositories[0]!.sshIdentity,
+      cleanup,
+      remaining(),
+    );
     await state.input.transport.pushNodeBranch(
       state.directory,
       state.nodeBranch,

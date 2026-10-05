@@ -7,6 +7,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { approvedModels } from "../llm/platforms.ts";
 import {
   executionSetupSchema,
+  sshIdentitySchema,
   WorkerErrorCode,
   type ApprovedModelsFn,
   type CredentialMetadataRecord,
@@ -28,6 +29,7 @@ export async function executionSetup(
     | "dataDirectory"
     | "workerBindingRowOf"
     | "pinnedCredentialMetadata"
+    | "credentialMetadata"
     | "repositoryBindingIdsOf"
     | "repositoryPolicyOf"
   >,
@@ -123,6 +125,10 @@ export async function executionSetup(
           bindingId: repository.bindingId,
           name: repository.name,
           address: repository.address,
+          sshIdentity: sshIdentitySchema.parse(
+            dependencies.credentialMetadata(tx, repository.sshCredential)
+              ?.metadata,
+          ),
           strategy: { baseBranch: repository.baseBranch },
           projectPrompt: repository.projectPrompt,
         };
