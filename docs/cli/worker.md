@@ -1,8 +1,8 @@
 # Worker CLI specification
 
-This specification for `kanthord worker` contains **20 command leaves: 17 implemented commands and 3 proposed commands**.
-The inventory distinguishes shipped syntax and operations from `agent list`,
-`agent get` and `provider check`, which remain proposed. Requirements marked
+This specification for `kanthord worker` contains **19 command leaves: 17 implemented commands and 2 proposed commands**.
+The inventory distinguishes shipped syntax and operations from `agent list` and
+`agent get`, which remain proposed. Requirements marked
 **target design** describe later runtime behavior and do not establish implementation.
 
 See the [CLI index](./README.md) for shared conventions and
@@ -121,8 +121,7 @@ and deregistration require no live registration.
 | I      | `instance deregister <runtime-identity>`      | `DELETE /api/worker/instance/:runtimeIdentity`      | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
 | I      | `instance resume <runtime-identity>`          | `POST /api/worker/instance/:runtimeIdentity/resume` | `worker.instance.resume`     | `human`; mutation                                                                 |
 
-The inventory also includes eight implemented enablement commands and the proposed
-provider check. `[R]`, `[M]` and
+The inventory also includes eight implemented enablement commands. `[R]`, `[M]` and
 `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
 
 | Status | Command after `kanthord worker`                                                                        | Route                                                                   | Operation ID                              | Access / registration |
@@ -135,7 +134,6 @@ provider check. `[R]`, `[M]` and
 | I      | `agent enablement remove <agent-name> --expected-revision <revision> [M] [R]`                          | `DELETE /api/worker/agent/enablement/:agentName`                        | `worker.agent.enablement.remove`          | `human`               |
 | I      | `agent enablement provider add <agent-name> --file <path> [M] [R]`                                     | `POST /api/worker/agent/enablement/:agentName/provider`                 | `worker.agent.enablement.provider.add`    | `human`               |
 | I      | `agent enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]` | `DELETE /api/worker/agent/enablement/:agentName/provider/:providerName` | `worker.agent.enablement.provider.remove` | `human`               |
-| P      | `provider check --credential <credential-name> [R]`                                                    | `POST /api/worker/provider/check`                                       | `worker.provider.check`                   | `human`; proposed     |
 
 The static `/api/worker/agent/enablement` path takes precedence over `/:agentName`.
 
@@ -471,43 +469,14 @@ Removal fails while a default configuration or binding entry names it, and the
 refusal lists those dependents. The check and removal are atomic. An enablement
 must still hold at least one agent provider.
 
-## `provider check` — proposed
+## Agent provider healthcheck
 
-```text
-kanthord worker provider check --credential <credential-name> [R]
-```
-
-No ERD 1 or ERD 2 plan builds this command. It waits for the phase after the external harness, and the dispatcher completeness check exempts it by name until then.
-
-The [provider check contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-provider-check)
-declares `worker.provider.check`, a server-wide read under `human` access, at
-`POST /api/worker/provider/check`. It has no project or binding.
-`--credential` is required, with no default, and uses the credential name form
-in [LLM](./llm.md#names-and-identities). The body is exactly
-`{ credential }`; params and query are empty. No raw key or base URL reaches
-this operation. It accepts only an `openai-compatible` credential and reads
-`baseUrl` through custody. The Worker Service performs the call with the material that custody releases, caches nothing and drops the material after the call.
-The call `GET <baseUrl>/models` has a 10 s deadline. No mutation key is accepted.
-
-HTTP `200` answers `connection`:
-
-- `ok`: the remote answers the OpenAI list shape.
-- `unauthorized`: the remote answers 401 or 403.
-- `unreachable`: a network failure or deadline prevents the answer.
-- `invalid_response`: the answer lacks the OpenAI list shape.
-
-Only `ok` holds `models`, an array of `{ id, ownedBy, created }`.
-The answer supplies model ids, not approved limits or reasoning levels, and no
-key. The human saves approved models through a credential metadata revision.
-HTTP 400 answers invalid input or an unsuitable credential; HTTP 404 answers an
-unknown credential. Proposed codes are `worker.provider.invalid_input`,
-`worker.provider.credential_unsuitable` and `worker.provider.credential_not_found`.
-
-Each agent provider also has a report-only [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#agent-provider-healthcheck).
-The health report groups probes by provider endpoint and credential and attributes
-each result. `GET /models` proves model-list access only. This check belongs to
-neither the liveness answer nor the claim path and changes no instance healthcheck.
+Each agent provider has a report-only [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#agent-provider-healthcheck).
+The check calls the [LLM provider check](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-llm-provider) of its credential, groups calls by credential and attributes each result.
+A credential whose platform has no LLM provider reports `unknown`.
+This check belongs to neither the liveness answer nor the claim path and changes no instance healthcheck.
 No check refreshes OAuth; an expired access token reports `unknown`.
+The human [provider check](./llm.md#provider-check--proposed) belongs to the LLM component.
 
 ## Instance inspection and lifecycle
 
@@ -798,7 +767,6 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `worker.instance.no_live_execution`                            | The registration is the claimant of no live execution.                                                                                                                                                                            | instance resume                                                                                                                   |
 | 409   | `worker.instance.client_live`                                  | The client identity holds another live registration.                                                                                                                                                                              | instance resume                                                                                                                   |
 | 409   | `worker.instance.slot_unavailable`                             | The binding has no free slot or is unavailable.                                                                                                                                                                                   | register, instance resume                                                                                                         |
-| 400   | `worker.provider.invalid_input`                                | Proposed. The provider check input fails validation.                                                                                                                                                                              | provider check                                                                                                                    |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 

@@ -171,7 +171,7 @@ Blocked commands link their items in [HANDOFF Project Service](https://github.co
 | 11  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:projectId/binding/:bindingId/agent/:agentName` | `project.agentConfiguration.get`                       | `human`; proposed |
 
 - Rows 5 and 6 keep their marks under HANDOFF Project Service, not for the storage credential record type.
-- Server-wide credential routes belong to `/api/llm/credential`, `/api/repository/credential` and `/api/storage/credential`; provider check belongs to `/api/worker/provider/check`. Neither route is under `/api/project`.
+- Server-wide credential routes belong to `/api/llm/credential`, `/api/repository/credential` and `/api/storage/credential`; provider check belongs to `/api/llm/provider/check`. Neither route is under `/api/project`.
 - There are 11 distinct route operations for the 11 CLI leaves.
 
 ## Project resource
@@ -524,7 +524,7 @@ no healthcheck command.
   one-use grants, `release(grant)`, and credential-reference validation are
   runtime mechanisms. This page creates no `resolve`, `authorize`, `grant`,
   `release`, or generic execute-with-credential command from them.
-- The holder of released material derives the remote destination from the authorized entity. The human provider check belongs to Worker and accepts only a credential reference.
+- The holder of released material derives the remote destination from the authorized entity. The human provider check belongs to the LLM component and accepts only a credential reference.
 - Git operations, platform actions and inference stay in their execution protocols. A local commit, branch and merge are not authenticated capabilities.
 - A machine execution must satisfy binding and live-claim checks on each use.
   An external harness also needs the matching authenticated client, live

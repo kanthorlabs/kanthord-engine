@@ -4,8 +4,8 @@
 
 ## Scope
 
-This specification covers the implemented `kanthord llm credential` group, with
-**11 command leaves**. The LLM component is a shared component, not a service.
+This specification covers the `kanthord llm credential` group and the proposed `kanthord llm provider` group, with
+**12 command leaves: 11 implemented and 1 proposed**. The LLM component is a shared component, not a service.
 It owns the credential routes of its platforms and OAuth login sessions. A credential belongs to no project.
 Custody declares no route and keeps the record functions that these routes call.
 
@@ -78,8 +78,14 @@ All paths below are implemented routes under the ruled `/api/llm/credential` pre
 | 11  | `platforms [R]`                                                   | `GET /api/llm/credential/platform`                                   | `llm.credential.platform_list`   | `human`; implemented |
 
 The static `/api/llm/credential/login` and `/api/llm/credential/platform` paths take precedence over `/:credentialName`, so custody refuses the names `login` and `platform`.
-These routes have no project identity. The proposed provider check is in
-[Worker](./worker.md#provider-check--proposed), not this group.
+These routes have no project identity.
+
+The proposed [`provider check`](#provider-check--proposed) is a server-wide read under `human` access with the `[R]` flags.
+Its synopsis follows `kanthord llm provider`.
+
+| #   | Synopsis after `kanthord llm provider`     | HTTP route                     | Operation ID         | Access/status     |
+| --- | ------------------------------------------ | ------------------------------ | -------------------- | ----------------- |
+| 12  | `check --credential <credential-name> [R]` | `POST /api/llm/provider/check` | `llm.provider.check` | `human`; proposed |
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
 A `create` with a platform of another component answers `400 credential.platform.unsupported`.
@@ -117,7 +123,7 @@ For `openai-compatible`:
 - `baseUrl` is required, uses `https` or `http`, and has no query, no fragment and no trailing slash.
   It is fixed for the life of the revision. A rotation can set a different endpoint; a metadata edit cannot.
 - `models` is required and starts as `[]` at creation. A human adds approved
-  models through a metadata revision after `worker provider check`.
+  models through a metadata revision after `llm provider check`.
 - Each model has a required `id` and optional `contextWindow`, `maxTokens` and
   `reasoningLevels`. `id` is a nonblank string, unique inside `models`. An omitted value takes the pi 0.86.0
   default: `contextWindow` `128000`, `maxTokens` `16384`, `reasoningLevels` `["off"]`.
@@ -167,8 +173,7 @@ No positional arguments, no body and no pagination. HTTP `200` returns
 the platforms of the platform table of this component.
 `loginModes` is `[]` for a
 platform whose secret shape is not `oauth`. `metadataFields` names the required
-string fields of the metadata. `verifiable` is `true` when the platform validation
-makes a remote call. The command answers only the shared error codes.
+string fields of the metadata. `verifiable` is `true` exactly for a platform with an [LLM provider](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-llm-provider). The command answers only the shared error codes.
 
 ## `get <credential-name>`
 
@@ -268,6 +273,35 @@ failureReason }` as JSON. `state` is `pending | completed | failed | expired`.
 Absent message and failure reason values are `null`. This read does
 not poll until completion or change the session. No mutation key is accepted.
 
+## `provider check` — proposed
+
+```text
+kanthord llm provider check --credential <credential-name> [R]
+```
+
+The [provider check contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-provider-check) declares `llm.provider.check`, a server-wide read under `human` access, at `POST /api/llm/provider/check`.
+It has no project or binding.
+`--credential` is required, with no default, and uses the `CredentialName` form of [Names and identities](#names-and-identities).
+The body is exactly `{ credential }`; params and query are empty.
+No raw key or base URL reaches this operation. No mutation key is accepted.
+
+The operation accepts a credential of every platform with an LLM provider: `github-copilot`, `openai-codex`, `anthropic`, `openai-compatible`, `openrouter`, `openai` and `opencode-go`.
+A credential of another LLM platform answers 400 `llm.provider.check_unsupported`.
+The component calls the check with the material that custody releases, caches nothing and drops the material after the call.
+Each call has a 10 s deadline.
+
+HTTP `200` answers `{ connection, models }`:
+
+- `connection` is `ok`, `unauthorized`, `unreachable` or `invalid_response`.
+- `ok`: the remote answers. `unauthorized`: the remote answers 401 or 403.
+- `unreachable`: a network failure or the deadline prevents the answer.
+- `invalid_response`: every other answer.
+- `models` is an array of `{ id, ownedBy, created }` for `openai-compatible` and `openai`, which read the OpenAI list shape of `GET /models`. Every other platform answers `models: null`.
+
+The answer supplies model ids, not limits or reasoning levels, and no key.
+The human saves approved models through a credential metadata revision.
+The `openai-codex` check and the `opencode-go` check make a model call; the `opencode-go` check calls `deepseek-v4-flash`.
+
 ## Error codes
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
@@ -295,6 +329,9 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.credential.archived`             | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive                               |
 | 404   | `credential.revision.not_found`              | The revision does not exist.                                                                   | revoke                                                         |
 | local | `llm.lifecycle.stopped`                      | The LLM component cannot accept a login or restart after shutdown.                             | login, serve server                                            |
+| 400   | `llm.provider.invalid_input`                 | The provider check input fails validation.                                                     | provider check                                                 |
+| 400   | `llm.provider.check_unsupported`             | The platform of the credential has no LLM provider.                                            | provider check                                                 |
+| 404   | `llm.provider.credential_not_found`          | The credential does not exist, or its platform belongs to another component.                   | provider check                                                 |
 | 409   | `credential.revision.revoked`                | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                  |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
@@ -303,7 +340,9 @@ Errors contain no secret. Dependency refusals list dependents in `error.details`
 
 The [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-resource-healthcheck)
 validates a record on demand through the health report. Create and rotate make
-no remote call. No check refreshes OAuth; expired access reports `unknown`.
+no remote call. The platforms with an LLM provider are exactly the `verifiable` platforms.
+The `opencode-go` check makes one model call to `deepseek-v4-flash`.
+No check refreshes OAuth; expired access reports `unknown`.
 
 No command here exports a credential, refreshes
 OAuth or rotates the master key. Dependents, including agent providers, prevent
