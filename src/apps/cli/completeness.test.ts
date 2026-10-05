@@ -66,15 +66,15 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 136;
+const DOCUMENTED_COUNT = 137;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 131;
-const OPERATION_COUNT = 132;
+const IMPLEMENTED_COUNT = 132;
+const OPERATION_COUNT = 133;
 const PAGE_COUNTS = {
   llm: 14,
-  repository: 10,
+  repository: 11,
   storage: 10,
   project: 12,
   mission: 54,

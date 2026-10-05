@@ -39,7 +39,7 @@ import { BindingKind, projectOperations } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import type { AgentEnablement } from "../../worker/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 1;
@@ -93,7 +93,7 @@ const RESOURCE_TARGET = "credential:e2e-target";
 const CAPABILITY = "model-inference";
 const FAKE_REPOSITORY = {
   gitLsRemote: async () => {},
-  resolveSshHostname: async () => "github.com",
+  resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
 };
 
 type Result = Awaited<ReturnType<typeof kanthord>>;
@@ -377,6 +377,23 @@ test("E07.4 github repository binding advances the binding set to version two", 
   const fixture = await setup(t);
   const project = await createProject(fixture);
   await createCredential(fixture, GITHUB, GITHUB);
+  const sshPath = file(fixture.directory, "github-ssh.json", {
+    name: "github-ssh",
+    platform: "ssh",
+    metadata: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_rsa",
+    },
+    secret: {},
+  });
+  success<CredentialAnswer>(
+    await kanthord(
+      ["repository", "credential", "create", "--file", sshPath],
+      fixture.env,
+    ),
+  );
   const path = file(fixture.directory, "bindings.json", {
     version: project.bindingSetVersion,
     bindings: {
@@ -386,6 +403,7 @@ test("E07.4 github repository binding advances the binding set to version two", 
           available: true,
           platform: GITHUB,
           address: "git@github.com:owner/repo.git",
+          sshCredential: "github-ssh",
           strategy: { baseBranch: "main" },
           credential: GITHUB,
         },

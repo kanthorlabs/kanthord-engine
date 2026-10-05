@@ -20,6 +20,7 @@ test("Mission proves live claim, node, open attempt and binding before granting 
     name: "repo",
     address: "git@github.com:owner/repo.git",
     platform: "github",
+    sshCredential: "github-ssh",
     credential: "github",
     baseBranch: "main",
     action: RepositoryAction.PullRequest,

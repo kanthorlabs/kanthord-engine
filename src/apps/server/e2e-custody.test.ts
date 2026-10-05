@@ -328,7 +328,7 @@ test("E01.15 platforms answers the platform list of each group ahead of the cred
   const llm = await platforms(LLM);
   assert.ok(llm.includes(ANTHROPIC));
   assert.ok(!llm.includes(GITHUB));
-  assert.deepEqual(await platforms(REPOSITORY), [GITHUB]);
+  assert.deepEqual(await platforms(REPOSITORY), [GITHUB, "ssh"]);
   assert.deepEqual(await platforms(["storage", "credential"]), ["s3"]);
 });
 

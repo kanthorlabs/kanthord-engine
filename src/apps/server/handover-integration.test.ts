@@ -43,7 +43,7 @@ import {
   HANDOVER_NONCE_BYTES,
   HANDOVER_TAG_BYTES,
 } from "../../kernel/handover.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SECRET = "test_handover-integration-secret-one";
 const REFRESHED = "test_handover-integration-secret-two";
@@ -348,7 +348,7 @@ async function setup(
   const f = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
   });
@@ -425,6 +425,23 @@ async function setup(
     }),
   );
   completed(
+    await call(repositoryOperations.create, {
+      params: {},
+      query: {},
+      body: {
+        name: "github-ssh",
+        platform: "ssh",
+        metadata: {
+          host: "github.com",
+          hostname: "github.com",
+          port: 22,
+          identity_file: "~/.ssh/id_rsa",
+        },
+        secret: {},
+      },
+    }),
+  );
+  completed(
     await call(workerOperations["agent.enablement.put"], {
       params: { agentName: "swe@1" },
       query: {},
@@ -456,6 +473,7 @@ async function setup(
               available: true,
               platform: "github",
               address: "git@github.com:owner/repo.git",
+              sshCredential: "github-ssh",
               strategy: { baseBranch: "main" },
               credential: "github",
               projectPrompt: "Follow repository conventions.",

@@ -33,7 +33,7 @@ import {
 } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -175,6 +175,17 @@ async function resources(c: ReturnType<typeof cli>) {
     metadata: null,
     secret: { key: "test-secret" },
   });
+  await c.write(["repository", "credential", "create"], {
+    name: "github-ssh",
+    platform: "ssh",
+    metadata: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_rsa",
+    },
+    secret: {},
+  });
   const enabled = await c.write<{ revision: number }>(
     ["worker", "agent", "enablement", "put", "swe@1"],
     {
@@ -203,6 +214,7 @@ async function resources(c: ReturnType<typeof cli>) {
           available: true,
           platform: "github",
           address: "git@github.com:owner/repo.git",
+          sshCredential: "github-ssh",
           strategy: { baseBranch: "main" },
           credential: "github",
         },
@@ -257,7 +269,7 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const directory = temporary(t);

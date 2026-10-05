@@ -42,6 +42,28 @@ export type RepositoryCredentialAnswer = z.infer<
   typeof repositoryCredentialAnswerSchema
 >;
 
+export const SshDiscoverState = {
+  Ready: "ready",
+  Refused: "refused",
+  Present: "present",
+} as const;
+export type SshDiscoverState =
+  (typeof SshDiscoverState)[keyof typeof SshDiscoverState];
+
+export const sshDiscoverAnswerSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      host: z.string(),
+      hostname: z.string(),
+      port: z.number().int(),
+      identity_file: z.string().nullable(),
+      state: z.enum(SshDiscoverState),
+      reason: z.string().nullable(),
+    }),
+  ),
+});
+export type SshDiscoverAnswer = z.infer<typeof sshDiscoverAnswerSchema>;
+
 export const repositoryOperations = {
   platform_list: {
     id: "repository.credential.platform_list",
@@ -249,5 +271,26 @@ export const repositoryOperations = {
     }),
     output: credentialCheckAnswerSchema,
     description: "Verify one stored repository credential record.",
+  },
+  ssh_discover: {
+    id: "repository.credential.ssh_discover",
+    service: REPOSITORY_COMPONENT_NAME,
+    method: HttpMethod.Get,
+    path: "/api/repository/credential/ssh/discover",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyParams,
+      query: emptyQuery,
+      body: z.null(),
+    }),
+    output: sshDiscoverAnswerSchema,
+    description:
+      "List the SSH aliases of ~/.ssh/config that resolve to a git platform host.",
   },
 } as const satisfies Record<string, Operation>;

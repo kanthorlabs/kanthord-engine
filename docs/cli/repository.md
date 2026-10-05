@@ -98,7 +98,7 @@ fix the secret shape and the metadata of each platform:
 | `ssh`    | `none`       | `{ host, hostname, port, identity_file }`; every key required. `port` is an integer. |
 
 An `ssh` record pins the SSH identity of a repository binding. `host` is an alias of `~/.ssh/config`. `hostname`, `port` and `identity_file` equal the `hostname`, `port` and the one `identityfile` that `ssh -G -- <host>` resolves.
-Create, rotate, update-metadata and verify of an `ssh` record run `ssh -G` and compare the result with the metadata:
+Create, rotate and update-metadata of an `ssh` record run `ssh -G` and compare the result with the metadata. `verify` runs the same comparison and answers `unhealthy` for a refusal:
 
 - A resolution with `identitiesonly` other than `yes`, or with a number of `identityfile` lines other than 1, answers `400 repository.credential.ssh_identity_ambiguous`.
 - A resolved value that differs from the metadata answers `400 repository.credential.ssh_drift`. `details` names each differing key.
@@ -272,8 +272,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.credential.archived`                    | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive, verify                               |
 | 404   | `credential.revision.not_found`                     | The revision does not exist.                                                                   | revoke                                                                 |
 | 409   | `credential.revision.revoked`                       | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                          |
-| 400   | `repository.credential.ssh_identity_ambiguous`      | The SSH host resolves without `identitiesonly yes` or without exactly one `identityfile`.      | create, rotate, update-metadata, verify, ssh-discover (as `reason`)    |
-| 400   | `repository.credential.ssh_drift`                   | `ssh -G` resolves values that differ from the metadata; details name each differing key.       | create, rotate, update-metadata, verify                                |
+| 400   | `repository.credential.ssh_identity_ambiguous`      | The SSH host resolves without `identitiesonly yes` or without exactly one `identityfile`.      | create, rotate, update-metadata, binding apply, ssh-discover (reason)  |
+| 400   | `repository.credential.ssh_drift`                   | `ssh -G` resolves values that differ from the metadata; details name each differing key.       | create, rotate, update-metadata, binding apply                         |
 | 422   | `repository.credential.ssh_config_unreadable`       | The server cannot read `~/.ssh/config`.                                                        | ssh-discover                                                           |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.

@@ -19,7 +19,11 @@ import { Store } from "../../kernel/store.ts";
 import { isString } from "../../kernel/values.ts";
 import { GATEWAY_STARTED_MESSAGE } from "../../gateway/index.ts";
 import { ulid } from "ulid";
-import { domainHealth, gatewayFixture } from "./test-support.ts";
+import {
+  domainHealth,
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+} from "./test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
@@ -84,7 +88,7 @@ test("injected repository connector skips the tool gate and probe", async (t) =>
   const health = new HealthRegistry();
   const repositoryConnector = {
     gitLsRemote: async () => {},
-    resolveSshHostname: async () => "github.com",
+    resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
   };
   const fixture = await gatewayFixture(t, { health, repositoryConnector });
   const checks = await health.check();

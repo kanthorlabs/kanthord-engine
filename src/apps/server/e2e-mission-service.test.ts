@@ -32,7 +32,7 @@ import {
 import { BindingKind, REPOSITORY_PLATFORM } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -197,6 +197,7 @@ const REPOSITORY_CONFIGURATION = {
   available: true,
   platform: REPOSITORY_PLATFORM,
   address: REPOSITORY_ADDRESS,
+  sshCredential: "github-ssh",
   strategy: { baseBranch: MAIN_BRANCH },
   credential: REPOSITORY_PLATFORM,
 };
@@ -300,7 +301,7 @@ async function setup(t: TestContext): Promise<Fixture> {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const { directory, env } = isolated(t);
@@ -562,6 +563,28 @@ test(
         fixture.env,
       ),
     );
+    success(
+      await kanthord(
+        [
+          REPOSITORY,
+          CREDENTIAL,
+          CREATE,
+          FILE,
+          jsonFile(fixture, "ssh-credential.json", {
+            name: "github-ssh",
+            platform: "ssh",
+            metadata: {
+              host: "github.com",
+              hostname: "github.com",
+              port: 22,
+              identity_file: "~/.ssh/id_rsa",
+            },
+            secret: {},
+          }),
+        ],
+        fixture.env,
+      ),
+    );
     const bindingFile = jsonFile(fixture, "binding.json", {
       version: ONE,
       bindings: {
@@ -571,6 +594,7 @@ test(
             available: true,
             platform: REPOSITORY_PLATFORM,
             address: REPOSITORY_ADDRESS,
+            sshCredential: "github-ssh",
             strategy: { baseBranch: "main" },
             credential: REPOSITORY_PLATFORM,
           },
@@ -862,6 +886,28 @@ async function configureRepository(
       fixture.env,
     ),
   );
+  success(
+    await kanthord(
+      [
+        REPOSITORY,
+        CREDENTIAL,
+        CREATE,
+        FILE,
+        jsonFile(fixture, "import-ssh-credential.json", {
+          name: "github-ssh",
+          platform: "ssh",
+          metadata: {
+            host: "github.com",
+            hostname: "github.com",
+            port: 22,
+            identity_file: "~/.ssh/id_rsa",
+          },
+          secret: {},
+        }),
+      ],
+      fixture.env,
+    ),
+  );
   const bindingFile = jsonFile(fixture, "import-binding.json", {
     version: ONE,
     bindings: {
@@ -871,6 +917,7 @@ async function configureRepository(
           available: true,
           platform: REPOSITORY_PLATFORM,
           address: REPOSITORY_ADDRESS,
+          sshCredential: "github-ssh",
           strategy: { baseBranch: "main" },
           credential: REPOSITORY_PLATFORM,
         },

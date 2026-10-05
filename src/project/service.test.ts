@@ -38,6 +38,9 @@ import {
   LS_REMOTE_TIMEOUT_MS,
   PROJECT_PROMPT_MAX_BYTES,
   REPOSITORY_PLATFORM,
+  SSH_CREDENTIAL_PLATFORM,
+  RepositoryPlatform,
+  repositoryConfigSchema,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
@@ -51,6 +54,7 @@ import {
   projectOperations,
 } from "./contract.ts";
 import { projectMigrations } from "./migrations.ts";
+import { SshErrorCode, type SshIdentity } from "../repository/ssh-identity.ts";
 import {
   insertProject,
   readCurrentBindingSet,
@@ -127,9 +131,10 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     custodySuitability: unexpected,
     repositoryConnector: {
       gitLsRemote: unexpected,
-      resolveSshHostname: unexpected,
+      resolveSshIdentity: unexpected,
     },
     verifyRepositoryCredential: unexpected,
+    credentialMetadata: (_tx, name) => sshPinMetadata(name),
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,
     endRegistrations: (tx, projectId, resourceIdentity, now) => {
@@ -746,6 +751,38 @@ const ALIAS_HOST = "kanthorlabs.github.com";
 const ALIAS_ADDRESS = `git@${ALIAS_HOST}:owner/repo.git`;
 const SECOND_REPOSITORY_ADDRESS = "git@github.com:owner/other.git";
 const REPOSITORY_CREDENTIAL = "github-key";
+const SSH_CREDENTIAL_PREFIX = "ssh-";
+const IDENTITY_FILE = "~/.ssh/id_test";
+const SSH_PORT = 22;
+const PIN_HOSTNAMES: Readonly<Record<string, string>> = {
+  [ALIAS_HOST]: "ssh.github.com",
+};
+
+function sshIdentity(hostname: string): SshIdentity {
+  return {
+    hostname,
+    port: SSH_PORT,
+    identityFiles: [IDENTITY_FILE],
+    identitiesOnly: true,
+  };
+}
+
+function sshCredentialOf(address: string): string {
+  return `${SSH_CREDENTIAL_PREFIX}${/^git@([^:]+):/.exec(address)?.[1] ?? ""}`;
+}
+
+function sshPinMetadata(credentialName: string) {
+  const host = credentialName.slice(SSH_CREDENTIAL_PREFIX.length);
+  return {
+    platform: SSH_CREDENTIAL_PLATFORM,
+    metadata: {
+      host,
+      hostname: PIN_HOSTNAMES[host] ?? host,
+      port: SSH_PORT,
+      identity_file: IDENTITY_FILE,
+    },
+  };
+}
 const STORAGE_CREDENTIAL = "s3-key";
 const SSH_FAILURE_STATUS = 422;
 const VERSION_INCREMENT = 1;
@@ -771,6 +808,7 @@ function repositoryBinding(
       platform: REPOSITORY_PLATFORM,
       address,
       strategy: { baseBranch: "main" },
+      sshCredential: sshCredentialOf(address),
       credential: REPOSITORY_CREDENTIAL,
     },
   };
@@ -811,8 +849,8 @@ function writeFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   const f = fixture(t, {
     createMission: allowMission,
     repositoryConnector: {
-      async resolveSshHostname(host) {
-        return host;
+      async resolveSshIdentity(host) {
+        return sshIdentity(host);
       },
       async gitLsRemote(address, context, timeout) {
         ssh.push({
@@ -1009,9 +1047,21 @@ test("binding write probes every repository outside and before commit, validates
       commits: before,
     })),
   );
+  const sshSuitability = {
+    credential: sshCredentialOf(REPOSITORY_ADDRESS),
+    platform: SSH_CREDENTIAL_PLATFORM,
+  };
+  const keySuitability = {
+    credential: REPOSITORY_CREDENTIAL,
+    platform: REPOSITORY_PLATFORM,
+  };
   assert.deepEqual(f.custody, [
-    { credential: REPOSITORY_CREDENTIAL, platform: REPOSITORY_PLATFORM },
-    { credential: REPOSITORY_CREDENTIAL, platform: REPOSITORY_PLATFORM },
+    sshSuitability,
+    sshSuitability,
+    sshSuitability,
+    keySuitability,
+    sshSuitability,
+    keySuitability,
     { credential: STORAGE_CREDENTIAL, platform: STORAGE_PLATFORM },
   ]);
   assert.deepEqual(f.workers, [NATIVE_WORKER]);
@@ -1097,8 +1147,8 @@ test("concurrent writes probe before committing and only one expected version wi
   let calls = NO_CALLS;
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
-        return "github.com";
+      async resolveSshIdentity() {
+        return sshIdentity("github.com");
       },
       async gitLsRemote() {
         calls++;
@@ -1165,12 +1215,12 @@ test("an SSH alias that resolves to a GitHub SSH host is accepted and probed wit
   const hosts: string[] = [];
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshHostname(host, context, deadlineMs) {
+      async resolveSshIdentity(host, context, deadlineMs) {
         hosts.push(host);
         assert.equal(f.store.database.isTransaction, false);
         assert.equal(context, f.caller.context);
         assert.ok(deadlineMs <= LS_REMOTE_TIMEOUT_MS);
-        return "ssh.github.com";
+        return sshIdentity("ssh.github.com");
       },
       async gitLsRemote(address, _context, remaining) {
         f.ssh.push({
@@ -1198,12 +1248,19 @@ test("an SSH alias that resolves to a GitHub SSH host is accepted and probed wit
 test("an alias that resolves outside the GitHub SSH host set is refused before the read and the commit", async (t) => {
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
-        return "gitlab.com";
+      async resolveSshIdentity() {
+        return sshIdentity("gitlab.com");
       },
       async gitLsRemote() {
         assert.fail("The read must not run.");
       },
+    },
+    credentialMetadata: (_tx, name) => {
+      const record = sshPinMetadata(name);
+      return {
+        ...record,
+        metadata: { ...record.metadata, hostname: "gitlab.com" },
+      };
     },
   });
   const before = f.snapshot();
@@ -1220,7 +1277,7 @@ test("an alias that resolves outside the GitHub SSH host set is refused before t
 test("a failed host resolution is refused with address_invalid before the read and the commit", async (t) => {
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
+      async resolveSshIdentity() {
         throw new Error("ssh -G failed");
       },
       async gitLsRemote() {
@@ -1242,7 +1299,7 @@ test("a failed host resolution is refused with address_invalid before the read a
 test("a host that starts with a hyphen is refused without a resolution", async (t) => {
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
+      async resolveSshIdentity() {
         assert.fail("The resolution must not run.");
       },
       async gitLsRemote() {
@@ -1259,11 +1316,157 @@ test("a host that starts with a hyphen is refused without a resolution", async (
   );
 });
 
+test("an SSH credential whose resolution drifts from its pin is refused before the read and the commit", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async resolveSshIdentity() {
+        return {
+          ...sshIdentity("github.com"),
+          identityFiles: ["~/.ssh/id_other"],
+        };
+      },
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
+    HttpStatus.BadRequest,
+    SshErrorCode.Drift,
+    { host: "github.com", keys: ["identity_file"] },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("an SSH credential of another host is refused with ssh_host_mismatch before the resolution", async (t) => {
+  const f = writeFixture(t, {
+    repositoryConnector: {
+      async resolveSshIdentity() {
+        assert.fail("The resolution must not run.");
+      },
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  const binding = repositoryBinding();
+  await rejectsWrite(
+    f.write({
+      [REPOSITORY_NAME]: {
+        ...binding,
+        config: {
+          ...binding.config,
+          sshCredential: sshCredentialOf(ALIAS_ADDRESS),
+        },
+      },
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositorySshHostMismatch,
+  );
+});
+
+const GITLAB_IDENTITY = "repository:gitlab:acme/api";
+
+function withoutCredential<T extends { credential?: string }>(
+  config: T,
+): Omit<T, "credential"> {
+  const copy: Partial<T> = { ...config };
+  delete copy.credential;
+  return copy as Omit<T, "credential">;
+}
+
+test("the credential is optional and pull_request requires it", async (t) => {
+  const f = writeFixture(t);
+  const config = withoutCredential(repositoryBinding().config);
+  const pullRequest = {
+    name: GitHubAction.PullRequest,
+    follows: { type: FollowsType.AssessmentPassed },
+  };
+  await rejectsWrite(
+    f.write({
+      [REPOSITORY_NAME]: {
+        kind: BindingKind.Repository,
+        config: {
+          ...config,
+          strategy: { ...config.strategy, action: pullRequest },
+        },
+      },
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositoryCredentialRequired,
+  );
+  assert.deepEqual(f.ssh, []);
+  const result = await f.write({
+    [REPOSITORY_NAME]: { kind: BindingKind.Repository, config },
+  });
+  assert.ok(
+    !Object.hasOwn(
+      repositoryConfigSchema.parse(result.bindings[REPOSITORY_NAME]?.config),
+      "credential",
+    ),
+  );
+  assert.ok(
+    !f.custody.some(({ platform }) => platform === REPOSITORY_PLATFORM),
+  );
+});
+
+test("a git-only platform accepts merge_push and refuses a credential or pull_request", async (t) => {
+  const address = "git@gitlab.com:acme/api.git";
+  const f = writeFixture(t);
+  const config = withoutCredential(repositoryBinding(address).config);
+  const gitlab = { ...config, platform: RepositoryPlatform.GitLab };
+  for (const refused of [
+    { ...gitlab, credential: REPOSITORY_CREDENTIAL },
+    {
+      ...gitlab,
+      strategy: {
+        ...gitlab.strategy,
+        action: {
+          name: GitHubAction.PullRequest,
+          follows: { type: FollowsType.AssessmentPassed },
+        },
+      },
+    },
+  ])
+    await rejectsWrite(
+      f.write({
+        [REPOSITORY_NAME]: { kind: BindingKind.Repository, config: refused },
+      }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.RepositoryActionUnsupported,
+    );
+  const result = await f.write({
+    [REPOSITORY_NAME]: {
+      kind: BindingKind.Repository,
+      config: {
+        ...gitlab,
+        strategy: {
+          ...gitlab.strategy,
+          action: {
+            name: GitHubAction.MergePush,
+            follows: { type: FollowsType.AssessmentPassed },
+          },
+        },
+      },
+    },
+  });
+  assert.equal(
+    result.bindings[REPOSITORY_NAME]?.resourceIdentity,
+    GITLAB_IDENTITY,
+  );
+  assert.deepEqual(
+    f.ssh.map((call) => call.address),
+    [address],
+  );
+});
+
 test("the resource check reports an unresolved host as unhealthy and skips the read", async (t) => {
   const reasons: string[] = [];
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
+      async resolveSshIdentity() {
         throw new Error("ssh -G failed");
       },
       async gitLsRemote() {
@@ -1295,8 +1498,8 @@ test("SSH failure leaves all rows and the version unchanged without entering com
   const addresses: string[] = [];
   const f = writeFixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
-        return "github.com";
+      async resolveSshIdentity() {
+        return sshIdentity("github.com");
       },
       async gitLsRemote(address, context, timeout) {
         addresses.push(address);
@@ -1333,8 +1536,8 @@ test("cancellation during gitLsRemote propagates the context error, whether the 
     let calls = NO_CALLS;
     const f = writeFixture(t, {
       repositoryConnector: {
-        async resolveSshHostname() {
-          return "github.com";
+        async resolveSshIdentity() {
+          return sshIdentity("github.com");
         },
         async gitLsRemote(_address, received) {
           calls++;
@@ -1403,7 +1606,13 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
     ProjectErrorCode.RepositoryPromptTooLarge,
   );
   assert.deepEqual(f.snapshot(), before);
-  assert.deepEqual(f.custody, []);
+  assert.deepEqual(
+    f.custody,
+    Array.from({ length: TWO_CALLS }, () => ({
+      credential: sshCredentialOf(REPOSITORY_ADDRESS),
+      platform: SSH_CREDENTIAL_PLATFORM,
+    })),
+  );
   assert.deepEqual(f.entries, []);
   for (const instanceCount of [INSTANCE_COUNT_MIN, INSTANCE_COUNT_MAX]) {
     const version = f.invoke("bindingSet.get", null, f.params).version;
@@ -2028,8 +2237,8 @@ test("resource inventory reads current repository revisions and excludes removed
   let calls = NO_CALLS;
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
-        return "github.com";
+      async resolveSshIdentity() {
+        return sshIdentity("github.com");
       },
       async gitLsRemote() {
         calls++;
@@ -2093,8 +2302,8 @@ test("resource checks pass the caller deadline and distinguish success, failure 
   let failure: Error | null = null;
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
-        return "github.com";
+      async resolveSshIdentity() {
+        return sshIdentity("github.com");
       },
       async gitLsRemote(address, context, remaining) {
         calls++;
@@ -2141,8 +2350,8 @@ test("resource inventory keeps separate checks for the same repository address a
   let calls = NO_CALLS;
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshHostname() {
-        return "github.com";
+      async resolveSshIdentity() {
+        return sshIdentity("github.com");
       },
       async gitLsRemote(address, context, remaining) {
         calls++;
@@ -2665,6 +2874,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       name: REPOSITORY_NAME,
       address: original.config.address,
       platform: original.config.platform,
+      sshCredential: original.config.sshCredential,
       credential: original.config.credential,
       baseBranch: original.config.strategy.baseBranch,
       action: GitHubAction.PullRequest,
@@ -2864,8 +3074,8 @@ function verifyFixture(
   const credentialAnswer: BindingCheckEntry = CREDENTIAL_HEALTHY;
   const f = fixture(t, {
     repositoryConnector: {
-      async resolveSshHostname(host: string) {
-        return host;
+      async resolveSshIdentity(host: string) {
+        return sshIdentity(host);
       },
       async gitLsRemote(address: string, context: Context, timeout: number) {
         sshCalls.push({ address, timeout });
@@ -2915,6 +3125,7 @@ test("binding.verify returns healthy for a valid repository binding", async (t) 
     status: ResourceStatus.Healthy,
     capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   });
+  assert.deepEqual(result.sshCredential, credentialAnswer);
   assert.deepEqual(result.credential, credentialAnswer);
   assert.equal(sshCalls.length, ONE_CALL);
   assert.equal(sshCalls[0]?.address, REPOSITORY_ADDRESS);
@@ -2922,7 +3133,10 @@ test("binding.verify returns healthy for a valid repository binding", async (t) 
     (sshCalls[0]?.timeout ?? 0) > NO_CALLS &&
       (sshCalls[0]?.timeout ?? 0) <= BINDING_VERIFY_TIMEOUT,
   );
-  assert.deepEqual(credentialCalls, [REPOSITORY_CREDENTIAL]);
+  assert.deepEqual(credentialCalls, [
+    sshCredentialOf(REPOSITORY_ADDRESS),
+    REPOSITORY_CREDENTIAL,
+  ]);
 });
 
 test("binding.verify returns unhealthy for address when SSH read fails", async (t) => {
@@ -2948,7 +3162,10 @@ test("binding.verify returns unhealthy for address when SSH read fails", async (
   assert.equal(result.address.status, ResourceStatus.Unhealthy);
   assert.equal(result.address.capability, RESOURCE_CAPABILITY_NETWORK_GIT_READ);
   assert.equal(sshCalls.length, ONE_CALL);
-  assert.deepEqual(credentialCalls, [REPOSITORY_CREDENTIAL]);
+  assert.deepEqual(credentialCalls, [
+    sshCredentialOf(REPOSITORY_ADDRESS),
+    REPOSITORY_CREDENTIAL,
+  ]);
 });
 
 test("binding.verify returns unknown for address when the SSH read exceeds its deadline", async (t) => {
@@ -2979,7 +3196,10 @@ test("binding.verify returns unknown for address when the SSH read exceeds its d
     status: ResourceStatus.Unknown,
     capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   });
-  assert.deepEqual(credentialCalls, [REPOSITORY_CREDENTIAL]);
+  assert.deepEqual(credentialCalls, [
+    sshCredentialOf(REPOSITORY_ADDRESS),
+    REPOSITORY_CREDENTIAL,
+  ]);
 });
 
 test("binding.verify propagates a credential record-verify refusal unchanged", async (t) => {

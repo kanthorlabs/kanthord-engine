@@ -46,7 +46,11 @@ import {
   scriptedProvider,
 } from "../../worker/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { gatewayFixture, scriptedActions } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  scriptedActions,
+} from "./test-support.ts";
 
 const ZERO = 0;
 const ONE = 1;
@@ -97,7 +101,7 @@ test(
     const f = await gatewayFixture(t, {
       repositoryConnector: {
         gitLsRemote: async () => {},
-        resolveSshHostname: async () => "github.com",
+        resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
       },
       standIns: { intakeActions: actions.seam },
     });
@@ -132,6 +136,17 @@ test(
       metadata: null,
       secret: { key: "test_methods_github" },
     });
+    await write(["repository", "credential", "create"], {
+      name: "github-ssh",
+      platform: "ssh",
+      metadata: {
+        host: "github.com",
+        hostname: "github.com",
+        port: 22,
+        identity_file: "~/.ssh/id_rsa",
+      },
+      secret: {},
+    });
     for (const agent of ["swe@1", "re@1"])
       await write(["worker", "agent", "enablement", "put", agent], {
         agentProviders: [
@@ -154,6 +169,7 @@ test(
       available: true,
       platform: "github",
       address: `git@github.com:owner/${name}.git`,
+      sshCredential: "github-ssh",
       strategy: { baseBranch: "main" },
       credential: "github",
     });

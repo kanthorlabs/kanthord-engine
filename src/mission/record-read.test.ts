@@ -68,6 +68,7 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
       name: "repo",
       address: "git@github.com:owner/repo.git",
       platform: "github",
+      sshCredential: "github-ssh",
       credential: "github",
       baseBranch: "main",
       action,

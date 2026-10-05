@@ -21,7 +21,7 @@ import {
   WorkerErrorCode,
 } from "../../worker/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -71,6 +71,7 @@ const REPOSITORY: BindingSet["bindings"][string] = {
     available: true,
     platform: REPOSITORY_PLATFORM,
     address: ADDRESS,
+    sshCredential: "github-ssh",
     strategy: { baseBranch: BASE_BRANCH },
     credential: REPOSITORY_PLATFORM,
   },
@@ -93,6 +94,7 @@ test("binding apply refuses action-end-state follows through CLI validation", as
       available: true,
       platform: "github",
       address: ADDRESS,
+      sshCredential: "github-ssh",
       credential: "github",
       strategy: {
         baseBranch: BASE_BRANCH,
@@ -150,7 +152,7 @@ async function setup(t: TestContext): Promise<Fixture> {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const directory = temporary(t);
@@ -262,6 +264,23 @@ async function bindRepository(
   key = ulid(),
 ): Promise<Applied> {
   await createCredential(fixture, REPOSITORY_PLATFORM, REPOSITORY_PLATFORM);
+  const sshPath = file(fixture.directory, "github-ssh-cred.json", {
+    name: "github-ssh",
+    platform: "ssh",
+    metadata: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_rsa",
+    },
+    secret: {},
+  });
+  success<CredentialAnswer>(
+    await kanthord(
+      ["repository", "credential", "create", "--file", sshPath],
+      fixture.env,
+    ),
+  );
   const answer = await apply(
     fixture,
     projectId,

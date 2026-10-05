@@ -53,6 +53,7 @@ test("objective override validates its attempt repository pin after the current 
     name: "repo",
     address: "git@github.com:owner/repo.git",
     platform: "github",
+    sshCredential: "github-ssh",
     credential: "github",
     baseBranch: "main",
     action: null,

@@ -35,6 +35,7 @@ const FIRST_ROW = 0;
 const LAST_ROW_OFFSET = 1;
 const RESOURCE_SEPARATOR = ":";
 const CREDENTIAL_KEY = "credential";
+const SSH_CREDENTIAL_KEY = "sshCredential";
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const REPOSITORY_ADDRESS_PATTERN =
@@ -229,7 +230,11 @@ export function deriveResourceIdentity(
         "Repository address must have the form git@<host>:<owner>/<repository>.git.",
       );
     const { owner, repository } = parsed;
-    return `${BindingKind.Repository}:${REPOSITORY_PLATFORM}:${owner}/${repository}`;
+    const platform =
+      isObject(config) && "platform" in config && isString(config.platform)
+        ? config.platform
+        : REPOSITORY_PLATFORM;
+    return `${BindingKind.Repository}:${platform}:${owner}/${repository}`;
   }
   if (kind !== BindingKind.Storage)
     throw new Error(`Unknown binding kind: ${kind}`);
@@ -300,9 +305,12 @@ export function readCurrentBindings(tx: Transaction): StoredBinding[] {
   return rows.map(toBinding);
 }
 
-export function readCurrentRepositories(
-  tx: Transaction,
-): Array<{ projectName: string; name: string; address: string }> {
+export function readCurrentRepositories(tx: Transaction): Array<{
+  projectName: string;
+  name: string;
+  address: string;
+  platform: string;
+}> {
   const rows = tx.database
     .prepare(
       `SELECT b.*, p.name AS project_name FROM project_binding b
@@ -315,11 +323,15 @@ export function readCurrentRepositories(
   >;
   assert.ok(tx.database.isTransaction);
   assert.ok(rows.every((row) => row.removed_at === null));
-  return rows.map((row) => ({
-    projectName: row.project_name,
-    name: row.name,
-    address: repositoryConfigSchema.parse(JSON.parse(row.config)).address,
-  }));
+  return rows.map((row) => {
+    const config = repositoryConfigSchema.parse(JSON.parse(row.config));
+    return {
+      projectName: row.project_name,
+      name: row.name,
+      address: config.address,
+      platform: config.platform,
+    };
+  });
 }
 
 export function readCurrentBindingByName(
@@ -348,10 +360,10 @@ export function readCredentialBindings(
         AND NOT EXISTS (${followingTombstoneQuery})
         AND EXISTS (
           SELECT 1 FROM json_tree(b.config) reference
-          WHERE reference.key = ? AND reference.atom = ?
+          WHERE reference.key IN (?, ?) AND reference.atom = ?
         )`,
     )
-    .all(CREDENTIAL_KEY, credentialName) as Array<
+    .all(CREDENTIAL_KEY, SSH_CREDENTIAL_KEY, credentialName) as Array<
     BindingRow & { latest_revision: number }
   >;
   return rows.map((row) => {

@@ -23,7 +23,12 @@ export async function workerAcceptance(t: TestContext, host = false) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => ({
+        hostname: "github.com",
+        port: 22,
+        identityFiles: ["~/.ssh/id_acceptance"],
+        identitiesOnly: true,
+      }),
     },
     ...(sink ? { standIns: { intakeStorage: sinkStorage(sink) } } : {}),
   });
@@ -56,6 +61,17 @@ export async function workerAcceptance(t: TestContext, host = false) {
       metadata: null,
       secret: { key },
     });
+  await write(["repository", "credential", "create"], {
+    name: "github-ssh",
+    platform: "ssh",
+    metadata: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_acceptance",
+    },
+    secret: {},
+  });
   await write(["worker", "agent", "enablement", "put", "swe@1"], {
     agentProviders: [
       { name: "default", provider: "anthropic", credential: "anthro-1" },
@@ -108,6 +124,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
           platform: "github",
           address: "git@github.com:owner/repo.git",
           strategy: { baseBranch: "main" },
+          sshCredential: "github-ssh",
           credential: "github",
         },
       },

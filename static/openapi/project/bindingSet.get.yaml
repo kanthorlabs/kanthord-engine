@@ -150,7 +150,10 @@ components:
                         type: boolean
                       platform:
                         type: string
-                        const: github
+                        enum:
+                          - github
+                          - gitlab
+                          - bitbucket
                       address:
                         type: string
                         minLength: 1
@@ -199,6 +202,9 @@ components:
                         required:
                           - baseBranch
                         additionalProperties: false
+                      sshCredential:
+                        type: string
+                        minLength: 1
                       credential:
                         type: string
                         minLength: 1
@@ -209,7 +215,7 @@ components:
                       - platform
                       - address
                       - strategy
-                      - credential
+                      - sshCredential
                     additionalProperties: false
                 required:
                   - kind
@@ -354,7 +360,10 @@ components:
                             type: boolean
                           platform:
                             type: string
-                            const: github
+                            enum:
+                              - github
+                              - gitlab
+                              - bitbucket
                           address:
                             type: string
                             minLength: 1
@@ -403,6 +412,9 @@ components:
                             required:
                               - baseBranch
                             additionalProperties: false
+                          sshCredential:
+                            type: string
+                            minLength: 1
                           credential:
                             type: string
                             minLength: 1
@@ -413,7 +425,7 @@ components:
                           - platform
                           - address
                           - strategy
-                          - credential
+                          - sshCredential
                         additionalProperties: false
                     required:
                       - kind

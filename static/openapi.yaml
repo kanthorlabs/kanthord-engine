@@ -166,6 +166,8 @@ paths:
     $ref: ./openapi/repository/credential.revoke.yaml#/pathItem
   /api/repository/credential/{credentialName}/revision:
     $ref: ./openapi/repository/credential.rotate.yaml#/pathItem
+  /api/repository/credential/ssh/discover:
+    $ref: ./openapi/repository/credential.ssh_discover.yaml#/pathItem
   /api/repository/credential/{credentialName}/metadata:
     $ref: ./openapi/repository/credential.update_metadata.yaml#/pathItem
   /api/repository/credential/{credentialName}/verify:

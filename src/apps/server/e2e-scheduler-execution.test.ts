@@ -15,7 +15,7 @@ import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
 const SUCCESS = 0;
@@ -102,7 +102,7 @@ async function setup(t: TestContext, short = false) {
     scheduler: short ? { releaseReserve: 1 } : {},
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   const directory = temporary(t);
@@ -143,6 +143,17 @@ async function setup(t: TestContext, short = false) {
     metadata: null,
     secret: { key: "test-secret" },
   });
+  await write(["repository", "credential", "create"], {
+    name: "github-ssh",
+    platform: "ssh",
+    metadata: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_rsa",
+    },
+    secret: {},
+  });
   for (const agent of short ? ["swe@1"] : ["swe@1", "re@1"]) {
     const result = await write<{ revision: number }>(
       ["worker", "agent", "enablement", "put", agent],
@@ -168,6 +179,7 @@ async function setup(t: TestContext, short = false) {
         available: true,
         platform: "github",
         address: "git@github.com:owner/repo.git",
+        sshCredential: "github-ssh",
         strategy: { baseBranch: "main" },
         credential: "github",
       },

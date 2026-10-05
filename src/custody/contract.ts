@@ -16,6 +16,7 @@ export const SecretShape = {
   ApiKey: "api_key",
   OAuth: "oauth",
   S3AccessKey: "s3_access_key",
+  None: "none",
 } as const;
 export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
 export const LoginSessionMode = {
@@ -209,10 +210,12 @@ export const s3AccessKeySecretSchema = z.strictObject({
   accessKeyId: z.string().min(1).refine(isNonblank),
   secretAccessKey: z.string().min(1).refine(isNonblank),
 });
+export const noneSecretSchema = z.strictObject({});
 export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
   [SecretShape.ApiKey]: apiKeySecretSchema,
   [SecretShape.OAuth]: oauthSecretSchema,
   [SecretShape.S3AccessKey]: s3AccessKeySecretSchema,
+  [SecretShape.None]: noneSecretSchema,
 };
 
 export type PlatformProbe = (

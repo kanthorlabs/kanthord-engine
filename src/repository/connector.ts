@@ -4,12 +4,12 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
+import { parseSshIdentity, type SshIdentity } from "./ssh-identity.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 const SSH_RESOLVE_FAILED = "repository.connector.ssh_resolve_failed";
 const EMPTY = "";
 const EXPIRED = 0;
-const HOSTNAME_PREFIX = "hostname ";
 const execFileAsync = promisify(execFile);
 
 async function runGit(
@@ -48,6 +48,14 @@ export async function resolveSshHostname(
   context: Context,
   deadlineMs: number,
 ): Promise<string> {
+  return (await resolveSshIdentity(host, context, deadlineMs)).hostname;
+}
+
+export async function resolveSshIdentity(
+  host: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<SshIdentity> {
   assert.ok(host !== EMPTY);
   assert.ok(!host.startsWith("-"));
   const controller = new AbortController();
@@ -62,13 +70,7 @@ export async function resolveSshHostname(
     const { stdout } = await execFileAsync("ssh", ["-G", "--", host], {
       signal: controller.signal,
     });
-    const line = stdout
-      .split("\n")
-      .find((candidate) => candidate.startsWith(HOSTNAME_PREFIX));
-    assert.ok(line);
-    const hostname = line.slice(HOSTNAME_PREFIX.length).trim();
-    assert.ok(hostname !== EMPTY);
-    return hostname;
+    return parseSshIdentity(stdout);
   } catch {
     throw new Diagnostic(SSH_RESOLVE_FAILED, "ssh -G: resolution failed.");
   } finally {

@@ -34,6 +34,7 @@ import {
   ActionReadMethod,
 } from "../../worker/contract.ts";
 import {
+  FAKE_SSH_IDENTITY,
   gatewayFixture,
   scriptedActions,
   scriptedCheck,
@@ -87,7 +88,7 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     standIns: {
       intakeActions: actions.seam,
@@ -130,12 +131,24 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: "test-secret" },
   });
+  await write(["repository", "credential", "create"], {
+    name: "github-ssh",
+    platform: "ssh",
+    metadata: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_rsa",
+    },
+    secret: {},
+  });
   const repository = (name: string, action: string) => ({
     kind: "repository",
     config: {
       available: true,
       platform: "github",
       address: `git@github.com:owner/${name}.git`,
+      sshCredential: "github-ssh",
       credential: "github",
       strategy: {
         baseBranch: "main",

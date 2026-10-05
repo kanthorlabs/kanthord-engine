@@ -28,7 +28,11 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { gatewayFixture, scriptedActions } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  scriptedActions,
+} from "./test-support.ts";
 
 const HTTP = "http";
 const DIRECT = "direct";
@@ -78,7 +82,7 @@ async function setup(
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     standIns: wired ? { intakeActions: actions.seam } : {},
   });
@@ -114,6 +118,23 @@ async function setup(
       },
     }),
   );
+  completed(
+    await call(repositoryOperations.create, {
+      params: {},
+      query: {},
+      body: {
+        name: "github-ssh",
+        platform: "ssh",
+        metadata: {
+          host: "github.com",
+          hostname: "github.com",
+          port: 22,
+          identity_file: "~/.ssh/id_rsa",
+        },
+        secret: {},
+      },
+    }),
+  );
   const projectId = completed(
     await call(projectOperations.create, {
       params: {},
@@ -134,6 +155,7 @@ async function setup(
               available: true,
               platform: "github",
               address: "git@github.com:owner/repo.git",
+              sshCredential: "github-ssh",
               credential: "github",
               strategy: {
                 baseBranch: "main",

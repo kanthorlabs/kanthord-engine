@@ -37,7 +37,8 @@ export interface MissionBindings {
     name: string;
     address: string;
     platform: string;
-    credential: string;
+    sshCredential: string;
+    credential: string | null;
     baseBranch: string;
     action: "pull_request" | "merge_push" | null;
     projectPrompt: string | null;

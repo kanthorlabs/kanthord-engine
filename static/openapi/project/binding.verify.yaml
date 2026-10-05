@@ -99,7 +99,7 @@ components:
             - status
             - capability
           additionalProperties: false
-        credential:
+        sshCredential:
           type: object
           properties:
             status:
@@ -115,7 +115,26 @@ components:
             - status
             - capability
           additionalProperties: false
+        credential:
+          anyOf:
+            - type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - healthy
+                    - unhealthy
+                    - unknown
+                capability:
+                  type: string
+                  minLength: 1
+              required:
+                - status
+                - capability
+              additionalProperties: false
+            - type: "null"
       required:
         - address
+        - sshCredential
         - credential
       additionalProperties: false

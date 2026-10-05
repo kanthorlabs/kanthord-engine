@@ -21,6 +21,7 @@ import { generateMachineToken } from "./cli-support.ts";
 import {
   gatewayFixture,
   objectSink,
+  FAKE_SSH_IDENTITY,
   sinkStorage,
   scriptedCheck,
   scriptedActions,
@@ -117,7 +118,7 @@ async function setupInternal(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     standIns: {
       intakeStorage: sinkStorage(sink),
@@ -136,6 +137,17 @@ async function setupInternal(t: TestContext) {
       metadata: null,
       secret: { key },
     });
+  await cli.write(["repository", "credential", "create"], {
+    name: "github-ssh",
+    platform: "ssh",
+    metadata: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_rsa",
+    },
+    secret: {},
+  });
   const storage = {
     endpoint: "https://s3.example.com",
     bucket: "evidence",
@@ -170,6 +182,7 @@ async function setupInternal(t: TestContext) {
       available: true,
       platform: "github",
       address,
+      sshCredential: "github-ssh",
       credential: "github",
       strategy: {
         baseBranch: "main",

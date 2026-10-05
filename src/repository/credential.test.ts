@@ -19,14 +19,26 @@ import {
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { LLM_PLATFORMS } from "../llm/index.ts";
-import { repositoryOperations } from "./contract.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  repositoryOperations,
+  SshDiscoverState,
+  type SshDiscoverAnswer,
+} from "./contract.ts";
+import { SshErrorCode } from "./ssh-identity.ts";
 import {
   CAPABILITY_RATE_LIMIT_READ,
   GITHUB_RATE_LIMIT_URL,
+  Platform,
   probeGitHub,
   REPOSITORY_PLATFORMS,
 } from "./credential-platform.ts";
-import { RepositoryCredentials } from "./credential.ts";
+import {
+  RepositoryCredentials,
+  type CredentialDependencies,
+} from "./credential.ts";
 
 const SECRET = "test_private-github-token";
 const FIRST_REVISION = 1;
@@ -42,7 +54,14 @@ const BINDINGS = [
   },
 ];
 
-function fixture(t: TestContext, logger: Logger = pino({ enabled: false })) {
+function fixture(
+  t: TestContext,
+  logger: Logger = pino({ enabled: false }),
+  ssh: Pick<
+    CredentialDependencies,
+    "resolveSshIdentity" | "sshConfigPath"
+  > = {},
+) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
@@ -69,12 +88,14 @@ function fixture(t: TestContext, logger: Logger = pino({ enabled: false })) {
     inboundsNaming: () => [],
   });
   const component = new RepositoryCredentials({
+    store,
     records: custody,
     bindingsNaming: (tx, name) => {
       assert.ok(tx.database.isTransaction);
       namings.push(name);
       return BINDINGS;
     },
+    ...ssh,
   });
   const registry = new OperationRegistry();
   component.declare(registry);
@@ -121,7 +142,7 @@ test("the GitHub probe reads the rate limit with the stored token", async (t) =>
   assert.equal(fetch.mock.callCount(), ONE_CALL);
 });
 
-test("platform list answers github alone", (t) => {
+test("platform list answers github and ssh", (t) => {
   const f = fixture(t);
   assert.deepEqual(
     f.invoke(repositoryOperations.platform_list, {
@@ -136,6 +157,13 @@ test("platform list answers github alone", (t) => {
           secretShape: SecretShape.ApiKey,
           loginModes: [],
           metadataFields: [],
+          verifiable: true,
+        },
+        {
+          platform: "ssh",
+          secretShape: SecretShape.None,
+          loginModes: [],
+          metadataFields: ["host", "hostname", "identity_file"],
           verifiable: true,
         },
       ],
@@ -525,5 +553,216 @@ test("verify takes no body and no mutation key", () => {
       query: {},
       body: {},
     }),
+  );
+});
+
+const ALIAS = "kanthorlabs.github.com";
+const PIN = {
+  host: ALIAS,
+  hostname: "ssh.github.com",
+  port: 443,
+  identity_file: "~/.ssh/id_kanthorlabs",
+};
+const PINNED_IDENTITY = {
+  hostname: PIN.hostname,
+  port: PIN.port,
+  identityFiles: [PIN.identity_file],
+  identitiesOnly: true,
+};
+
+function sshCreate(name: string, metadata: unknown = PIN) {
+  return {
+    params: {},
+    query: {},
+    body: { name, platform: "ssh", metadata, secret: {} },
+  };
+}
+
+async function rejectsWith(
+  promise: unknown,
+  status: number,
+  code: string,
+  details?: unknown,
+) {
+  await assert.rejects(Promise.resolve(promise), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, status);
+    assert.equal(error.code, code);
+    if (details !== undefined) assert.deepEqual(error.details, details);
+    return true;
+  });
+}
+
+test("an ssh record pins the resolved identity and refuses an ambiguous or drifted resolution", async (t) => {
+  let identity = PINNED_IDENTITY;
+  const hosts: string[] = [];
+  const f = fixture(t, undefined, {
+    resolveSshIdentity: async (host) => {
+      hosts.push(host);
+      return identity;
+    },
+  });
+  const created = (await f.invoke(
+    repositoryOperations.create,
+    sshCreate("kanthorlabs-ssh"),
+  )) as CredentialAnswer;
+  assert.equal(created.platform, Platform.Ssh);
+  assert.deepEqual(created.revisions[0]?.metadata, PIN);
+  assert.deepEqual(hosts, [ALIAS]);
+  identity = { ...PINNED_IDENTITY, identitiesOnly: false };
+  await rejectsWith(
+    f.invoke(repositoryOperations.create, sshCreate("ambiguous")),
+    HttpStatus.BadRequest,
+    SshErrorCode.IdentityAmbiguous,
+    { host: ALIAS, key: "identitiesonly" },
+  );
+  identity = {
+    ...PINNED_IDENTITY,
+    identityFiles: [PIN.identity_file, "~/.ssh/id_rsa"],
+  };
+  await rejectsWith(
+    f.invoke(repositoryOperations.create, sshCreate("ambiguous")),
+    HttpStatus.BadRequest,
+    SshErrorCode.IdentityAmbiguous,
+    { host: ALIAS, key: "identityfile" },
+  );
+  identity = { ...PINNED_IDENTITY, port: 22, hostname: "github.com" };
+  await rejectsWith(
+    f.invoke(repositoryOperations.create, sshCreate("drifted")),
+    HttpStatus.BadRequest,
+    SshErrorCode.Drift,
+    { host: ALIAS, keys: ["hostname", "port"] },
+  );
+  const repinned = (await f.invoke(repositoryOperations.update_metadata, {
+    params: { credentialName: "kanthorlabs-ssh" },
+    query: {},
+    body: {
+      expectedRevision: FIRST_REVISION,
+      metadata: { ...PIN, hostname: "github.com", port: 22 },
+    },
+  })) as CredentialAnswer;
+  assert.equal(repinned.revisions[0]?.revision, FIRST_REVISION + ONE_CALL);
+  await rejectsWith(
+    f.invoke(repositoryOperations.rotate, {
+      params: { credentialName: "kanthorlabs-ssh" },
+      query: {},
+      body: {
+        expectedRevision: FIRST_REVISION + ONE_CALL,
+        secret: {},
+        metadata: PIN,
+      },
+    }),
+    HttpStatus.BadRequest,
+    SshErrorCode.Drift,
+  );
+});
+
+test("an ssh record takes an empty secret and the name ssh is reserved", async (t) => {
+  const f = fixture(t, undefined, {
+    resolveSshIdentity: async () => PINNED_IDENTITY,
+  });
+  for (const input of [
+    {
+      ...sshCreate("secret"),
+      body: { ...sshCreate("secret").body, secret: { key: SECRET } },
+    },
+    sshCreate("ssh"),
+  ])
+    await rejectsWith(
+      f.invoke(repositoryOperations.create, input),
+      HttpStatus.BadRequest,
+      "credential.input.invalid",
+    );
+});
+
+test("ssh discover lists the concrete aliases of a git platform with their state", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "kanthord-ssh-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const sshConfigPath = join(directory, "config");
+  writeFileSync(
+    sshConfigPath,
+    [
+      "Host *",
+      "  ServerAliveInterval 30",
+      "Host github.com",
+      "  IdentityFile ~/.ssh/id_ed25519",
+      `Host ${ALIAS} pinned.github.com # work`,
+      "Host acme.gitlab.com",
+      "Host internal !skip",
+      "Host broken.github.com",
+    ].join("\n"),
+  );
+  const identities: Record<string, typeof PINNED_IDENTITY> = {
+    "github.com": {
+      hostname: "github.com",
+      port: 22,
+      identityFiles: ["~/.ssh/id_ed25519"],
+      identitiesOnly: false,
+    },
+    [ALIAS]: PINNED_IDENTITY,
+    "pinned.github.com": PINNED_IDENTITY,
+    "acme.gitlab.com": { ...PINNED_IDENTITY, hostname: "gitlab.com", port: 22 },
+    internal: { ...PINNED_IDENTITY, hostname: "10.0.0.1" },
+  };
+  const f = fixture(t, undefined, {
+    sshConfigPath,
+    resolveSshIdentity: async (host) => {
+      const identity = identities[host];
+      if (!identity) throw new Error("ssh -G failed");
+      return identity;
+    },
+  });
+  await f.invoke(repositoryOperations.create, {
+    ...sshCreate("pinned"),
+    body: {
+      ...sshCreate("pinned").body,
+      metadata: { ...PIN, host: "pinned.github.com" },
+    },
+  });
+  const answer = (await f.invoke(repositoryOperations.ssh_discover, {
+    params: {},
+    query: {},
+    body: null,
+  })) as SshDiscoverAnswer;
+  assert.deepEqual(answer.items, [
+    {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: null,
+      state: SshDiscoverState.Refused,
+      reason: SshErrorCode.IdentityAmbiguous,
+    },
+    { ...PIN, state: SshDiscoverState.Ready, reason: null },
+    {
+      ...PIN,
+      host: "pinned.github.com",
+      state: SshDiscoverState.Present,
+      reason: null,
+    },
+    {
+      host: "acme.gitlab.com",
+      hostname: "gitlab.com",
+      port: 22,
+      identity_file: PIN.identity_file,
+      state: SshDiscoverState.Ready,
+      reason: null,
+    },
+  ]);
+});
+
+test("ssh discover refuses an unreadable configuration", async (t) => {
+  const f = fixture(t, undefined, {
+    sshConfigPath: join(tmpdir(), "kanthord-absent-ssh-config"),
+    resolveSshIdentity: async () => PINNED_IDENTITY,
+  });
+  await rejectsWith(
+    f.invoke(repositoryOperations.ssh_discover, {
+      params: {},
+      query: {},
+      body: null,
+    }),
+    422,
+    SshErrorCode.ConfigUnreadable,
   );
 });

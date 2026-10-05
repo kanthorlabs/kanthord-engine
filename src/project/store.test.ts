@@ -32,6 +32,7 @@ test("action follows accepts assessment and refuses action dependencies before r
       available: true,
       platform: "github",
       address: "git@github.com:owner/repo.git",
+      sshCredential: "github-ssh",
       credential: "github",
       strategy: {
         baseBranch: "main",

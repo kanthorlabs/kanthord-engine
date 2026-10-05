@@ -207,8 +207,11 @@ export function composeServices(options: {
       worker.enablementsDependentOnModel(tx, name, model),
   });
   const repositoryCredentials = new RepositoryCredentials({
+    store: options.store,
     records: custody,
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
+    resolveSshIdentity: (host, context, deadlineMs) =>
+      repoConnector.resolveSshIdentity(host, context, deadlineMs),
   });
   const storage = new StorageComponent({
     records: custody,
@@ -303,6 +306,7 @@ export function composeServices(options: {
     repositoryConnector: repoConnector,
     verifyRepositoryCredential: (name, context) =>
       repositoryCredentials.verifyCredential(name, context),
+    credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
     workerAgentsOf: (name) => worker.workerAgentsOf(name),
     workerAgentView: (tx, w, a, entry) =>
       worker.workerAgentView(tx, w, a, entry),

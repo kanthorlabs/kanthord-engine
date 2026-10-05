@@ -34,6 +34,7 @@ import {
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
+  FAKE_SSH_IDENTITY,
   gatewayFixture,
   objectSink,
   sinkStorage,
@@ -87,7 +88,7 @@ async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     standIns: {
       intakeStorage: sinkStorage(sink),
@@ -136,6 +137,17 @@ async function setup(t: TestContext) {
     metadata: null,
     secret: { key: "test-secret" },
   });
+  await write(["repository", "credential", "create"], {
+    name: "github-ssh",
+    platform: "ssh",
+    metadata: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_rsa",
+    },
+    secret: {},
+  });
   await write(["storage", "credential", "create"], {
     name: "store",
     platform: "s3",
@@ -152,6 +164,7 @@ async function setup(t: TestContext) {
       available: true,
       platform: "github",
       address: `git@github.com:owner/${name}.git`,
+      sshCredential: "github-ssh",
       strategy: {
         baseBranch: "main",
         ...(gated

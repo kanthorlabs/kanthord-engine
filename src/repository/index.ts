@@ -5,11 +5,13 @@ import { checkRepositoryTools, probeRepositoryTools } from "./check.ts";
 import {
   gitLsRemote,
   resolveSshHostname,
+  resolveSshIdentity,
   clone,
   cloneSnapshot,
   fetchAndCheckout,
   pushNodeBranch,
 } from "./connector.ts";
+import type { SshIdentity } from "./ssh-identity.ts";
 export {
   RepositoryCredentials,
   type CredentialDependencies,
@@ -45,6 +47,14 @@ export class RepositoryComponent {
     deadlineMs: number,
   ): Promise<string> {
     return resolveSshHostname(host, context, deadlineMs);
+  }
+
+  resolveSshIdentity(
+    host: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<SshIdentity> {
+    return resolveSshIdentity(host, context, deadlineMs);
   }
 
   gitLsRemote(

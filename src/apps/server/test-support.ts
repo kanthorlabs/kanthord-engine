@@ -127,6 +127,23 @@ export async function inProcessWorker(
 
 export const TEST_WORKER_BINDING = "binding";
 export const TEST_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+export const FAKE_SSH_IDENTITY = {
+  hostname: "github.com",
+  port: 22,
+  identityFiles: ["~/.ssh/id_rsa"],
+  identitiesOnly: true,
+};
+export const FAKE_SSH_CREDENTIAL_BODY = {
+  name: "github-ssh",
+  platform: "ssh" as const,
+  metadata: {
+    host: "github.com",
+    hostname: "github.com",
+    port: 22,
+    identity_file: "~/.ssh/id_rsa",
+  },
+  secret: {},
+};
 const SINGLE_INSTANCE = 1;
 const NO_INSTANCES = 0;
 const OBJECT_GRANT_LIFETIME_MS = 3600000;

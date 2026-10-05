@@ -55,6 +55,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
     name: "repo",
     address: "git@github.com:owner/repo.git",
     platform: "github",
+    sshCredential: "github-ssh",
     credential: "github",
     baseBranch: "main",
     action: RepositoryAction.PullRequest,

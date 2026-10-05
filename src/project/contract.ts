@@ -34,6 +34,20 @@ export const INSTANCE_COUNT_MIN = 0;
 export const INSTANCE_COUNT_MAX = 64;
 export const STORAGE_PLATFORM = "s3";
 export const REPOSITORY_PLATFORM = "github";
+export const SSH_CREDENTIAL_PLATFORM = "ssh";
+export const RepositoryPlatform = {
+  GitHub: "github",
+  GitLab: "gitlab",
+  Bitbucket: "bitbucket",
+} as const;
+export type RepositoryPlatform =
+  (typeof RepositoryPlatform)[keyof typeof RepositoryPlatform];
+export type SshIdentity = {
+  hostname: string;
+  port: number;
+  identityFiles: string[];
+  identitiesOnly: boolean;
+};
 export const RESOURCE_CAPABILITY_NETWORK_GIT_READ = "network git read";
 export const RESOURCE_TARGET_KIND_REPOSITORY = "repository";
 export const WORKER_PLATFORM = "kanthord";
@@ -81,6 +95,10 @@ export const ProjectErrorCode = {
   RepositoryPromptTooLarge:
     "project.bindings.repository.project_prompt_too_large",
   RepositorySshUnreachable: "project.bindings.repository.ssh_unreachable",
+  RepositorySshHostMismatch: "project.bindings.repository.ssh_host_mismatch",
+  RepositoryCredentialRequired:
+    "project.bindings.repository.credential_required",
+  RepositoryActionUnsupported: "project.bindings.repository.action_unsupported",
   WorkerAgentUnknown: "project.bindings.worker.agent_unknown",
   WorkerFieldForbidden: "project.bindings.worker.field_forbidden",
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
@@ -109,7 +127,7 @@ export function isNonblank(s: string): boolean {
 
 export const repositoryConfigSchema = z.strictObject({
   available: z.boolean(),
-  platform: z.literal(REPOSITORY_PLATFORM),
+  platform: z.enum(RepositoryPlatform),
   address: z.string().min(1).refine(isNonblank),
   strategy: z.strictObject({
     baseBranch: z.string().min(1).refine(isNonblank),
@@ -126,7 +144,8 @@ export const repositoryConfigSchema = z.strictObject({
       })
       .optional(),
   }),
-  credential: z.string().min(1),
+  sshCredential: z.string().min(1),
+  credential: z.string().min(1).optional(),
   projectPrompt: z.string().optional(),
 });
 export const workerConfigSchema = z.strictObject({
@@ -281,6 +300,10 @@ export type CustodySuitability = (
   tx: Transaction,
   req: { credential: string; platform: string },
 ) => void;
+export type CredentialMetadataOf = (
+  tx: Transaction,
+  credentialName: string,
+) => { platform: string; metadata: Record<string, unknown> | null } | null;
 export type ValidateEntry = (
   tx: Transaction,
   workerName: string,
@@ -293,11 +316,11 @@ export type CreateMission = (
 ) => void;
 export type LiveNodesPinning = (tx: Transaction, bindingId: string) => string[];
 export type RepositoryConnector = {
-  resolveSshHostname(
+  resolveSshIdentity(
     host: string,
     context: Context,
     deadlineMs: number,
-  ): Promise<string>;
+  ): Promise<SshIdentity>;
   gitLsRemote(
     sshUrl: string,
     context: Context,
@@ -363,7 +386,8 @@ export type RepositoryPolicy = {
   name: string;
   address: string;
   platform: string;
-  credential: string;
+  sshCredential: string;
+  credential: string | null;
   baseBranch: string;
   action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
   projectPrompt: string | null;
@@ -593,7 +617,8 @@ export const projectOperations = {
     input: readInput(bindingParams, emptyFields),
     output: z.strictObject({
       address: bindingVerifyAnswerEntrySchema,
-      credential: bindingVerifyAnswerEntrySchema,
+      sshCredential: bindingVerifyAnswerEntrySchema,
+      credential: bindingVerifyAnswerEntrySchema.nullable(),
     }),
     description: "Verify one repository binding address and credential.",
   },

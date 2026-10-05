@@ -34,7 +34,7 @@ import { CancellationContext } from "../../kernel/context.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const ONE = 1;
 const TWO = 2;
@@ -86,7 +86,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
     path,
     repositoryConnector: {
       gitLsRemote: async () => {},
-      resolveSshHostname: async () => "github.com",
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
   });
   async function call<T extends Operation>(
@@ -132,6 +132,23 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       },
     }),
   );
+  completed(
+    await call(repositoryOperations.create, {
+      params: {},
+      query: {},
+      body: {
+        name: "github-ssh",
+        platform: "ssh",
+        metadata: {
+          host: "github.com",
+          hostname: "github.com",
+          port: 22,
+          identity_file: "~/.ssh/id_rsa",
+        },
+        secret: {},
+      },
+    }),
+  );
   for (const agentName of ["swe@1", "re@1"])
     completed(
       await call(workerOperations["agent.enablement.put"], {
@@ -165,6 +182,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
               available: true,
               platform: "github",
               address: "git@github.com:owner/repo.git",
+              sshCredential: "github-ssh",
               strategy: { baseBranch: "main" },
               credential: "github",
             },
