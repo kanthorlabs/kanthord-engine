@@ -333,6 +333,8 @@ HTTP integration tests compare the generated files with the published assets.
 ## Working rules
 
 - Keep no backward compatibility. The project has no deployment yet.
+- Name a constant for its domain role, never for the English word of its value,
+  for example `PROBE_CALLS_PER_CHECK`, not `ONE_CALL`.
 - Edit `.agents/plan/*` only in a main session or by hand. `scripts/lane-check.sh`
   denies it to every lane role.
 - Never plan a story whose change edits a plan document. No lane role can

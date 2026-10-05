@@ -11,6 +11,10 @@ const applicationEntry = (type) =>
 
 const comparisonLiteral =
   ':matches(Literal[value=type(string)], Literal[value=type(number)], TemplateLiteral[expressions.length=0], UnaryExpression[operator="-"][argument.type="Literal"][argument.value=type(number)])';
+const valueNamePattern =
+  "/^(ZERO|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|FIRST|SECOND|THIRD|FOURTH|EMPTY|NONE)$/";
+const valueNameMessage =
+  "Name a constant for its domain role, not for the English word of its value.";
 const comparisonMessage =
   "Use a meaningfully named enum member or constant instead of a string or numeric literal in a comparison.";
 
@@ -255,6 +259,10 @@ export default tseslint.config(
           selector: `CallExpression[callee.object.name="assert"][callee.property.name=/^(equal|notEqual|strictEqual|notStrictEqual|deepEqual|notDeepEqual|deepStrictEqual|notDeepStrictEqual)$/] > ${comparisonLiteral}.arguments:nth-child(${position})`,
           message: comparisonMessage,
         })),
+        {
+          selector: `VariableDeclarator[id.name=${valueNamePattern}][init.type="Literal"]`,
+          message: valueNameMessage,
+        },
       ],
     },
     languageOptions: { ecmaVersion: "latest", sourceType: "module" },
