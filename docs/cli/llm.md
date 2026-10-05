@@ -294,7 +294,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.credential.in_use`               | A dependent names the credential; `details` holds `agentProviders`, `bindings` and `inbounds`. | archive                                                        |
 | 409   | `credential.credential.archived`             | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive                               |
 | 404   | `credential.revision.not_found`              | The revision does not exist.                                                                   | revoke                                                         |
-| local | `custody.lifecycle.stopped`                  | Custody cannot accept a login or restart after shutdown.                                       | login, serve server                                            |
+| local | `llm.lifecycle.stopped`                      | The LLM component cannot accept a login or restart after shutdown.                             | login, serve server                                            |
 | 409   | `credential.revision.revoked`                | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                  |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
