@@ -93,9 +93,13 @@ const CORE_OPERATIONS = [
   "project.agentConfiguration.list",
   "project.agentConfiguration.get",
   "project.binding.verify",
+  "project.binding.check",
 ];
 const CURSOR_ENCODING = "base64url";
-type OperationKey = Exclude<keyof typeof projectOperations, "bindingSet.write">;
+type OperationKey = Exclude<
+  keyof typeof projectOperations,
+  "bindingSet.write" | "binding.check"
+>;
 type AsyncOperationKey = "binding.verify";
 
 function unexpected(): never {
@@ -3067,6 +3071,7 @@ function verifyFixture(
   addressBehavior:
     "healthy" | typeof ADDRESS_SSH_FAIL | typeof ADDRESS_SSH_HANG,
   credentialBehavior: "healthy" | typeof CREDENTIAL_REFUSAL,
+  overrides: Partial<Dependencies> = {},
 ) {
   const sshCalls: Array<{ address: string; timeout: number }> = [];
   const sshStarted = Promise.withResolvers<void>();
@@ -3097,6 +3102,7 @@ function verifyFixture(
         );
       return credentialAnswer;
     },
+    ...overrides,
   });
   return { f, sshCalls, sshStarted, credentialCalls, credentialAnswer };
 }
@@ -3305,4 +3311,102 @@ test("binding.verify returns 404 for a non-repository binding", async (t) => {
       return true;
     },
   );
+});
+
+async function checkBinding(
+  f: ReturnType<typeof fixture>,
+  projectId: string,
+  config: unknown,
+) {
+  const operation = projectOperations["binding.check"];
+  const input = operation.input.parse({
+    params: { projectId },
+    query: EMPTY_QUERY,
+    body: { kind: BindingKind.Repository, config },
+  });
+  return operation.output.parse(
+    await f.registry.get(operation.id).handler(input, f.caller),
+  );
+}
+
+test("binding.check answers the verify badges of an unsaved configuration and writes nothing", async (t) => {
+  const suitability: Array<{ credential: string; platform: string }> = [];
+  const { f, sshCalls, credentialCalls, credentialAnswer } = verifyFixture(
+    t,
+    "healthy",
+    "healthy",
+    { custodySuitability: (_tx, request) => void suitability.push(request) },
+  );
+  const project = f.store.transaction((tx) => insertProject(tx, PROJECT_NAME));
+  const commits = f.commits();
+  const result = await checkBinding(f, project.id, repositoryBinding().config);
+  assert.deepEqual(result, {
+    address: {
+      status: ResourceStatus.Healthy,
+      capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+    },
+    sshCredential: credentialAnswer,
+    credential: credentialAnswer,
+  });
+  assert.deepEqual(
+    sshCalls.map(({ address }) => address),
+    [REPOSITORY_ADDRESS],
+  );
+  assert.deepEqual(credentialCalls, [
+    sshCredentialOf(REPOSITORY_ADDRESS),
+    REPOSITORY_CREDENTIAL,
+  ]);
+  assert.deepEqual(suitability, [
+    { credential: REPOSITORY_CREDENTIAL, platform: REPOSITORY_PLATFORM },
+    {
+      credential: sshCredentialOf(REPOSITORY_ADDRESS),
+      platform: SSH_CREDENTIAL_PLATFORM,
+    },
+  ]);
+  assert.equal(f.commits(), commits + ONE_CALL);
+  assert.equal(
+    f.store.database.prepare("SELECT id FROM project_binding").all().length,
+    NO_ITEMS,
+  );
+});
+
+test("binding.check refuses a static violation with the write code before any SSH call", async (t) => {
+  const { f, sshCalls, credentialCalls } = verifyFixture(
+    t,
+    "healthy",
+    "healthy",
+    { custodySuitability: () => {} },
+  );
+  const project = f.store.transaction((tx) => insertProject(tx, PROJECT_NAME));
+  const config = withoutCredential(repositoryBinding().config);
+  await rejectsWrite(
+    checkBinding(f, project.id, {
+      ...config,
+      strategy: {
+        ...config.strategy,
+        action: {
+          name: GitHubAction.PullRequest,
+          follows: { type: FollowsType.AssessmentPassed },
+        },
+      },
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositoryCredentialRequired,
+  );
+  await rejectsWrite(
+    checkBinding(f, project.id, {
+      ...config,
+      sshCredential: sshCredentialOf(ALIAS_ADDRESS),
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositorySshHostMismatch,
+  );
+  await assert.rejects(
+    checkBinding(f, "project_01ARZ3NDEKTSV4RRFFQ69G5FAV", config),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === ProjectErrorCode.ProjectNotFound,
+  );
+  assert.deepEqual(sshCalls, []);
+  assert.deepEqual(credentialCalls, []);
 });

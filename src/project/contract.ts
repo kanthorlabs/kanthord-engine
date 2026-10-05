@@ -622,6 +622,29 @@ export const projectOperations = {
     }),
     description: "Verify one repository binding address and credential.",
   },
+  "binding.check": {
+    ...readOperation,
+    id: "project.binding.check",
+    method: HttpMethod.Post,
+    path: "/api/project/:projectId/binding/check",
+    timeoutMs: BINDING_VERIFY_TIMEOUT_MS,
+    body: true,
+    input: z.strictObject({
+      params: projectParams,
+      query: emptyFields,
+      body: z.strictObject({
+        kind: z.literal(BindingKind.Repository),
+        config: repositoryConfigSchema,
+      }),
+    }),
+    output: z.strictObject({
+      address: bindingVerifyAnswerEntrySchema,
+      sshCredential: bindingVerifyAnswerEntrySchema,
+      credential: bindingVerifyAnswerEntrySchema.nullable(),
+    }),
+    description:
+      "Check an unsaved repository binding configuration without a write.",
+  },
 } as const satisfies Record<string, Operation>;
 
 export interface SchedulerWakeup {

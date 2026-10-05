@@ -97,6 +97,11 @@ const BINDING_VERIFY_TOKEN_REQUIRED =
   "cli.project.binding.verify.token_required";
 const BINDING_VERIFY_INDETERMINATE = "cli.project.binding.verify.indeterminate";
 const VERIFY = "verify";
+const CHECK = "check";
+const BINDING_CHECK_INVALID_PROJECT_ID =
+  "cli.project.binding.check.invalid_project_id";
+const BINDING_CHECK_TOKEN_REQUIRED = "cli.project.binding.check.token_required";
+const BINDING_CHECK_INDETERMINATE = "cli.project.binding.check.indeterminate";
 
 function validateName(name: string, code: string): void {
   if (!projectNameSchema.safeParse(name).success)
@@ -376,6 +381,27 @@ async function bindingVerify(
   );
 }
 
+async function bindingCheck(
+  projectId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, BINDING_CHECK_INVALID_PROJECT_ID);
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, BINDING_CHECK_TOKEN_REQUIRED);
+  const body = readJsonFileAs(
+    options.file,
+    projectOperations["binding.check"].input.shape.body,
+  );
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "binding.check"
+  ]({ params: { projectId }, query: {}, body });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, BINDING_CHECK_INDETERMINATE))}
+`,
+  );
+}
+
 export function addProjectCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -546,5 +572,17 @@ function addBindingCommands(project: Command): void {
     .action(
       (projectId: string, bindingId: string, _options, command: Command) =>
         bindingVerify(projectId, bindingId, command),
+    );
+  binding
+    .command(CHECK)
+    .description("Check an unsaved repository binding as JSON")
+    .argument("<project-id>", "Project ID")
+    .requiredOption(
+      "--file <path>",
+      "Repository binding JSON file",
+      singleUse("--file"),
+    )
+    .action((projectId: string, _options, command: Command) =>
+      bindingCheck(projectId, command),
     );
 }

@@ -138,6 +138,8 @@ paths:
     $ref: ./openapi/project/agentConfiguration.get.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}/agent:
     $ref: ./openapi/project/agentConfiguration.list.yaml#/pathItem
+  /api/project/{projectId}/binding/check:
+    $ref: ./openapi/project/binding.check.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}:
     $ref: ./openapi/project/binding.get.yaml#/pathItem
   /api/project/{projectId}/binding:

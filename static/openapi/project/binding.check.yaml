@@ -1,0 +1,218 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: project.binding.check
+    tags:
+      - project
+    description: Check an unsaved repository binding configuration without a write.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.check.Input/properties/params/prope\
+            rties/projectId"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/project.binding.check.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.binding.check.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.binding.check.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            projectId:
+              type: string
+              minLength: 1
+          required:
+            - projectId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            kind:
+              type: string
+              const: repository
+            config:
+              type: object
+              properties:
+                available:
+                  type: boolean
+                platform:
+                  type: string
+                  enum:
+                    - github
+                    - gitlab
+                    - bitbucket
+                address:
+                  type: string
+                  minLength: 1
+                strategy:
+                  type: object
+                  properties:
+                    baseBranch:
+                      type: string
+                      minLength: 1
+                    action:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          enum:
+                            - pull_request
+                            - merge_push
+                        follows:
+                          oneOf:
+                            - type: object
+                              properties:
+                                type:
+                                  type: string
+                                  const: assessment_passed
+                              required:
+                                - type
+                              additionalProperties: false
+                            - type: object
+                              properties:
+                                type:
+                                  type: string
+                                  const: action_end_state
+                                binding:
+                                  type: string
+                                  minLength: 1
+                                  maxLength: 63
+                                  pattern: ^[a-z][a-z0-9-]*$
+                              required:
+                                - type
+                                - binding
+                              additionalProperties: false
+                      required:
+                        - name
+                        - follows
+                      additionalProperties: false
+                  required:
+                    - baseBranch
+                  additionalProperties: false
+                sshCredential:
+                  type: string
+                  minLength: 1
+                credential:
+                  type: string
+                  minLength: 1
+                projectPrompt:
+                  type: string
+              required:
+                - available
+                - platform
+                - address
+                - strategy
+                - sshCredential
+              additionalProperties: false
+          required:
+            - kind
+            - config
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.binding.check.Output:
+      type: object
+      properties:
+        address:
+          type: object
+          properties:
+            status:
+              type: string
+              enum:
+                - healthy
+                - unhealthy
+                - unknown
+            capability:
+              type: string
+              minLength: 1
+          required:
+            - status
+            - capability
+          additionalProperties: false
+        sshCredential:
+          type: object
+          properties:
+            status:
+              type: string
+              enum:
+                - healthy
+                - unhealthy
+                - unknown
+            capability:
+              type: string
+              minLength: 1
+          required:
+            - status
+            - capability
+          additionalProperties: false
+        credential:
+          anyOf:
+            - type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - healthy
+                    - unhealthy
+                    - unknown
+                capability:
+                  type: string
+                  minLength: 1
+              required:
+                - status
+                - capability
+              additionalProperties: false
+            - type: "null"
+      required:
+        - address
+        - sshCredential
+        - credential
+      additionalProperties: false

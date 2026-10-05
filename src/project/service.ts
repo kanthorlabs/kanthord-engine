@@ -104,6 +104,22 @@ import {
 
 const SSH_UNREACHABLE_STATUS = 422;
 
+function refuseSshHost(address: string, pin: SshPin): void {
+  const parsed = parseRepositoryAddress(address);
+  if (!parsed)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.RepositoryAddressInvalid,
+      "Repository address must have the form git@<host>:<owner>/<repository>.git.",
+    );
+  if (parsed.host !== pin.host)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.RepositorySshHostMismatch,
+      "The repository address host differs from the host of the SSH credential.",
+    );
+}
+
 function refuseRepositoryAction(
   config: typeof repositoryConfigSchema._output,
 ): void {
@@ -332,6 +348,11 @@ export class ProjectService implements Service, ProjectBindings {
       projectOperations["binding.verify"],
       ({ params }, caller) => this.verifyBinding(params, caller),
     );
+    registry.register(
+      projectOperations["binding.check"],
+      ({ params, body }, caller) =>
+        this.checkBinding(params, body.config, caller),
+    );
   }
   private async verifyBinding(
     params: { projectId: string; bindingId: string },
@@ -354,28 +375,52 @@ export class ProjectService implements Service, ProjectBindings {
       return repositoryConfigSchema.parse(binding.config);
     });
     throwIfCancelled(caller.context);
+    const health = await this.bindingHealth(config, caller.context);
+    return caller.commit(() => health);
+  }
+  private async checkBinding(
+    params: { projectId: string },
+    config: typeof repositoryConfigSchema._output,
+    caller: CallerContext,
+  ) {
+    refuseRepositoryAction(config);
+    const pin = this.operationalStore.transaction((tx) => {
+      requireProject(tx, params.projectId);
+      if (config.credential !== undefined)
+        this.custodySuitability(tx, {
+          credential: config.credential,
+          platform: REPOSITORY_PLATFORM,
+        });
+      return this.sshPinOf(tx, config.sshCredential);
+    });
+    refuseSshHost(config.address, pin);
+    throwIfCancelled(caller.context);
+    const health = await this.bindingHealth(config, caller.context);
+    return caller.commit(() => health);
+  }
+  private async bindingHealth(
+    config: typeof repositoryConfigSchema._output,
+    context: Context,
+  ) {
     const addressEntry = await this.checkBindingAddress(
       config.platform,
       config.address,
-      caller.context,
+      context,
     );
     const sshCredentialEntry = await this.verifyRepositoryCredential(
       config.sshCredential,
-      caller.context,
+      context,
     );
     const credentialEntry =
       config.credential === undefined
         ? null
-        : await this.verifyRepositoryCredential(
-            config.credential,
-            caller.context,
-          );
-    throwIfCancelled(caller.context);
-    return caller.commit(() => ({
+        : await this.verifyRepositoryCredential(config.credential, context);
+    throwIfCancelled(context);
+    return {
       address: addressEntry,
       sshCredential: sshCredentialEntry,
       credential: credentialEntry,
-    }));
+    };
   }
   private async checkBindingAddress(
     platform: string,
@@ -604,19 +649,7 @@ export class ProjectService implements Service, ProjectBindings {
   ): Promise<void> {
     throwIfCancelled(context);
     const { address, platform } = config;
-    const parsed = parseRepositoryAddress(address);
-    if (!parsed)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.RepositoryAddressInvalid,
-        "Repository address must have the form git@<host>:<owner>/<repository>.git.",
-      );
-    if (parsed.host !== pin.host)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.RepositorySshHostMismatch,
-        "The repository address host differs from the host of the SSH credential.",
-      );
+    refuseSshHost(address, pin);
     const end = Date.now() + LS_REMOTE_TIMEOUT_MS;
     await this.proveSshPin(pin, context, LS_REMOTE_TIMEOUT_MS);
     if (!isPlatformSshHost(platform, pin.hostname))
