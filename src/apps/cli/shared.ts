@@ -28,21 +28,22 @@ const ARRAY_END = "]";
 const COMMA = ",";
 const QUOTE = '"';
 const ESCAPE = "\\";
-const EMPTY = 0;
-const ONE = 1;
-const TWO = 2;
+const STRING_START_INDEX = 0;
+const POSITIVE_INT_FLOOR = 0;
+const SCAN_STEP = 1;
+const ESCAPE_SEQUENCE_LENGTH = 2;
 const DECIMAL_DIGITS = /^[0-9]+$/;
 
 type Frame = { keys: Set<string>; expectKey: boolean } | null;
 
 function scanString(text: string, start: number): number {
-  let end = start + ONE;
+  let end = start + SCAN_STEP;
   while (end < text.length) {
     if (text[end] === ESCAPE) {
-      end += TWO;
+      end += ESCAPE_SEQUENCE_LENGTH;
       continue;
     }
-    if (text[end] === QUOTE) return end + ONE;
+    if (text[end] === QUOTE) return end + SCAN_STEP;
     end++;
   }
   throw new Diagnostic(NOT_JSON, "invalid JSON string");
@@ -57,24 +58,24 @@ export function detectDuplicateKeys(text: string): void {
     throw error;
   }
   const stack: Frame[] = [];
-  for (let index = EMPTY; index < text.length; index++) {
+  for (let index = STRING_START_INDEX; index < text.length; index++) {
     const char = text[index];
     if (char === OBJECT_START) stack.push({ keys: new Set(), expectKey: true });
     else if (char === ARRAY_START) stack.push(null);
     else if (char === OBJECT_END || char === ARRAY_END) stack.pop();
     else if (char === COMMA) {
-      const frame = stack.at(-ONE);
+      const frame = stack.at(-SCAN_STEP);
       if (frame) frame.expectKey = true;
     } else if (char === QUOTE) {
       const end = scanString(text, index);
-      const frame = stack.at(-ONE);
+      const frame = stack.at(-SCAN_STEP);
       if (frame?.expectKey) {
         const key: string = JSON.parse(text.slice(index, end));
         if (frame.keys.has(key)) throw new Diagnostic(DUPLICATE_KEY, key);
         frame.keys.add(key);
         frame.expectKey = false;
       }
-      index = end - ONE;
+      index = end - SCAN_STEP;
     }
   }
 }
@@ -178,7 +179,7 @@ export function parsePositiveInt(value: string, code: string): number {
   if (
     !DECIMAL_DIGITS.test(value) ||
     !Number.isSafeInteger(number) ||
-    number <= EMPTY
+    number <= POSITIVE_INT_FLOOR
   )
     throw new Diagnostic(code, "not a positive integer");
   return number;

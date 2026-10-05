@@ -89,7 +89,7 @@ const EDGE_LIST = "edge.list";
 const RETIRE_PREVIEW = "node.retire.preview";
 const TRUE = "true";
 const FALSE = "false";
-const EMPTY = 0;
+const NO_FILES = 0;
 const GET_INVALID_PROJECT_ID = "cli.mission.get.invalid_project_id";
 const NODE_LIST_INVALID_MISSION_ID = "cli.mission.node.list.invalid_mission_id";
 const NODE_LIST_INVALID_NODE_ID = "cli.mission.node.list.invalid_node_id";
@@ -409,13 +409,13 @@ function importFileSchema<S extends z.ZodTypeAny>(
         missionId:
           manifest.missionId === undefined ? missionId : manifest.missionId,
       };
-      if (manifest.format === ImportFormat.Json && paths.length > EMPTY)
+      if (manifest.format === ImportFormat.Json && paths.length > NO_FILES)
         throw new Diagnostic(
           `cli.mission.${name}.positionals_not_accepted`,
           "JSON imports do not accept plan-file positionals",
         );
       if (manifest.format !== ImportFormat.Markdown) return body;
-      if (paths.length > EMPTY && Object.hasOwn(manifest, "files"))
+      if (paths.length > NO_FILES && Object.hasOwn(manifest, "files"))
         throw new Diagnostic(
           `cli.mission.${name}.files_conflict`,
           "supply plan-file positionals or files, not both",
@@ -423,7 +423,7 @@ function importFileSchema<S extends z.ZodTypeAny>(
       return {
         ...body,
         files:
-          paths.length > EMPTY
+          paths.length > NO_FILES
             ? paths.map(readPlanFile)
             : manifest.files === undefined
               ? []
@@ -478,7 +478,7 @@ async function importApply(
 
 function validateExportDirectory(path: string): void {
   const stat = lstatSync(path, { throwIfNoEntry: false });
-  if (stat && (!stat.isDirectory() || readdirSync(path).length !== EMPTY))
+  if (stat && (!stat.isDirectory() || readdirSync(path).length !== NO_FILES))
     throw new Diagnostic(
       EXPORT_OUT_NOT_EMPTY,
       "output must be an absent or empty directory",

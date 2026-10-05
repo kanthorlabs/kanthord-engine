@@ -17,7 +17,7 @@ import {
   handleMutationResult,
 } from "./shared.ts";
 
-const ZERO = 0;
+const MIN_ATTEMPT_VALUE = 0;
 
 function addDeleteOptions(command: Command): Command {
   return command
@@ -177,7 +177,7 @@ function addEvidenceReads(evidence: Command): void {
     if (
       attempt !== undefined &&
       (!Number.isSafeInteger(attempt) ||
-        attempt < ZERO ||
+        attempt < MIN_ATTEMPT_VALUE ||
         String(attempt) !== options.attempt)
     )
       throw new Diagnostic(

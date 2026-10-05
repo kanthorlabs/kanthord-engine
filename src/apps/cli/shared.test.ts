@@ -38,7 +38,7 @@ const FAILURE_CODE = "cli.test.failure";
 const INDETERMINATE_CODE = "cli.test.indeterminate";
 const TOKEN_CODE = "cli.test.token";
 const KEY = "01ARZ3NDEKTSV4RRFFQ69G5FAA";
-const ONE = 1;
+const EXPECTED_DATA_VALUE = 1;
 const FIRST_VALUE = "a";
 const TOKEN = "jwt";
 const PRIVATE_MODE = 0o600;
@@ -122,7 +122,7 @@ test("idempotency key resolution", () => {
 
 test("positive integer parser accepts decimal safe integers only", () => {
   assert.throws(() => parsePositiveInt("0", BAD_INT), diagnosticCode(BAD_INT));
-  assert.equal(parsePositiveInt("1", BAD_INT), ONE);
+  assert.equal(parsePositiveInt("1", BAD_INT), EXPECTED_DATA_VALUE);
   for (const value of [
     "1.5",
     "1e2",
@@ -164,7 +164,10 @@ test("mutation results return data or include the retry key", () => {
   const indeterminate: OperationResult<number> = {
     type: OperationResultType.Indeterminate,
   };
-  assert.equal(handleMutationResult(completed, INDETERMINATE_CODE, KEY), ONE);
+  assert.equal(
+    handleMutationResult(completed, INDETERMINATE_CODE, KEY),
+    EXPECTED_DATA_VALUE,
+  );
   assert.throws(
     () => handleMutationResult(failure, INDETERMINATE_CODE, KEY),
     (error) =>
@@ -198,7 +201,10 @@ test("read results return data, preserve server failures, and signal uncertainty
   const indeterminate: OperationResult<number> = {
     type: OperationResultType.Indeterminate,
   };
-  assert.equal(handleReadResult(completed, INDETERMINATE_CODE), ONE);
+  assert.equal(
+    handleReadResult(completed, INDETERMINATE_CODE),
+    EXPECTED_DATA_VALUE,
+  );
   assert.throws(
     () => handleReadResult(failure, INDETERMINATE_CODE),
     diagnosticCode(FAILURE_CODE),

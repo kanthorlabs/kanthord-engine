@@ -15,8 +15,8 @@ import {
   mutate,
 } from "./mission-support.ts";
 
-const ZERO = 0;
-const ONE = 1;
+const MIN_ATTEMPT_FILTER = 0;
+const MIN_ATTEMPT_NUMBER = 1;
 function validateNode(nodeId: string, code: string): void {
   if (!identitySchema("node").safeParse(nodeId).success)
     throw new Diagnostic(code, "invalid node ID");
@@ -58,7 +58,7 @@ export function addRecordCommands(mission: Command): void {
         const attempt = numberArgument(
           value,
           "cli.mission.attempt.get.invalid_attempt",
-          ONE,
+          MIN_ATTEMPT_NUMBER,
         );
         printResult(
           await client(command, "attempt.get")["attempt.get"]({
@@ -79,7 +79,7 @@ function recordListQuery(command: Command, code: string) {
     ...pagination(options),
     ...(options.attempt === undefined
       ? {}
-      : { attempt: numberArgument(options.attempt, code, ZERO) }),
+      : { attempt: numberArgument(options.attempt, code, MIN_ATTEMPT_FILTER) }),
   };
 }
 
@@ -196,7 +196,7 @@ function addExternalCommands(mission: Command): void {
         : numberArgument(
             options.attempt,
             "cli.mission.external_action.list.invalid_attempt",
-            ZERO,
+            MIN_ATTEMPT_FILTER,
           );
     printResult(
       await client(command, "externalAction.list")["externalAction.list"]({
@@ -224,7 +224,7 @@ function addExternalCommands(mission: Command): void {
         const attempt = numberArgument(
           value,
           "cli.mission.external_action.get.invalid_attempt",
-          ONE,
+          MIN_ATTEMPT_NUMBER,
         );
         if (!actionKeySchema.safeParse(actionKey).success)
           throw new Diagnostic(
