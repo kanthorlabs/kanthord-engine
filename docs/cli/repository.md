@@ -242,7 +242,7 @@ at its next use of the credential. A revoke of the newest live revision answers
 
 The command takes no params, no query and no body.
 It reads the `Host` lines of the top-level `~/.ssh/config` of the server host and follows no `Include`. It skips each pattern that holds `*`, `?` or `!`.
-It runs `ssh -G -- <host>` for each alias and keeps an alias whose resolved `hostname` contains `github` or `gitlab`.
+It runs `ssh -G -- <host>` for each alias and keeps an alias whose resolved `hostname` contains `github`, `gitlab` or `bitbucket`.
 HTTP `200` answers `{ items }`. Each item holds `host`, `hostname`, `port`, `identity_file`, `state` and `reason`:
 
 - `state` is `ready`, `refused` or `present`.
