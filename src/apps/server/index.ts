@@ -252,8 +252,8 @@ export function composeServices(options: {
     health: options.health,
     registrations: options.registrations,
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
-    credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
-    modelListCheck: (tx, name) => llm.modelListCheck(tx, name),
+    approvedModels: (tx, name) => llm.approvedModels(tx, name),
+    providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
   });
   const mission: MissionService = new MissionService({

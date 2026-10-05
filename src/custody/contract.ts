@@ -227,6 +227,11 @@ export type CredentialPlatform = {
   probe: PlatformProbe | null;
 };
 export type CredentialPlatforms = Readonly<Record<string, CredentialPlatform>>;
+export type CheckMaterial = {
+  platform: string;
+  metadata: unknown;
+  secret: () => unknown;
+};
 export const RevisionChange = {
   Create: "create",
   Rotate: "rotate",
@@ -396,4 +401,13 @@ export interface CredentialRecords {
     set: CredentialPlatformSet,
     credentialName: string,
   ): ResourceCheck;
+  checkMaterial(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+  ): CheckMaterial | null;
+  credentialMetadata(
+    tx: Transaction,
+    credentialName: string,
+  ): CredentialMetadata | null;
 }

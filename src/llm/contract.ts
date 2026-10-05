@@ -28,7 +28,12 @@ export const LlmErrorCode = {
   Stopped: "llm.lifecycle.stopped",
   BaseUrlFixed: "llm.metadata.base_url_fixed",
   ModelInUse: "llm.metadata.model_in_use",
+  ProviderInvalidInput: "llm.provider.invalid_input",
+  ProviderCheckUnsupported: "llm.provider.check_unsupported",
+  ProviderCredentialNotFound: "llm.provider.credential_not_found",
 } as const;
+
+export const PROVIDER_CHECK_TIMEOUT_MS = 10000;
 
 export type AgentEnablement = { agentName: string };
 export type EnablementsDependentOnModelFn = (
@@ -53,6 +58,29 @@ const loginAnswerSchema = z.strictObject({
   code: z.string().nullable(),
   expiresAt: z.number().int(),
 });
+export const providerCheckBodySchema = z.strictObject({
+  credential: z.string().min(1),
+});
+export const Connection = {
+  Ok: "ok",
+  Unauthorized: "unauthorized",
+  Unreachable: "unreachable",
+  InvalidResponse: "invalid_response",
+} as const;
+export type Connection = (typeof Connection)[keyof typeof Connection];
+export const providerCheckAnswerSchema = z.strictObject({
+  connection: z.enum(Connection),
+  models: z
+    .array(
+      z.strictObject({
+        id: z.string(),
+        ownedBy: z.string().nullable(),
+        created: z.number().int().nullable(),
+      }),
+    )
+    .nullable(),
+});
+export type ProviderCheckAnswer = z.infer<typeof providerCheckAnswerSchema>;
 const loginCodeAnswerSchema = z.strictObject({ sessionId: z.string() });
 const loginStatusAnswerSchema = z.strictObject({
   sessionId: z.string(),
@@ -292,5 +320,27 @@ export const llmOperations = {
     }),
     output: loginStatusAnswerSchema,
     description: "Read the state of an OAuth login session.",
+  },
+  provider_check: {
+    id: "llm.provider.check",
+    service: LLM_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/llm/provider/check",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: false,
+    body: true,
+    maxBodyBytes: METADATA_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyParams,
+      query: emptyQuery,
+      body: z.unknown(),
+    }),
+    output: providerCheckAnswerSchema,
+    description:
+      "Check the connection of an LLM credential through its LLM provider and read its model list when the check reads one.",
   },
 } as const satisfies Record<string, Operation>;

@@ -45,6 +45,7 @@ import {
   OAUTH_PROVIDER_IDS,
 } from "./login.ts";
 import { LLM_PLATFORMS, Platform } from "./platforms.ts";
+import { ANTHROPIC_MODELS_URL, GITHUB_COPILOT_TOKEN_URL } from "./probes.ts";
 import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
 import { LlmComponent } from "./service.ts";
 
@@ -215,6 +216,12 @@ function fixture(
       query: {},
       body: null,
     }) as typeof llmOperations.login_status.output._output;
+  const providerCheck = async (body: unknown) =>
+    (await invoke(llmOperations.provider_check, {
+      params: {},
+      query: {},
+      body,
+    })) as typeof llmOperations.provider_check.output._output;
   return {
     store,
     custody,
@@ -234,6 +241,7 @@ function fixture(
     revoke,
     archive,
     platformList,
+    providerCheck,
   };
 }
 
@@ -1557,7 +1565,7 @@ test("inventory lists only LLM records with their capability and dispatches each
   const urls: unknown[] = [];
   t.mock.method(globalThis, "fetch", async (url: unknown) => {
     urls.push(url);
-    return new Response(null, { status: HttpStatus.OK });
+    return Response.json({ object: "list", data: [] });
   });
   const entries = f.store.transaction((tx) =>
     f.component.resourceInventory(tx),
@@ -1589,7 +1597,7 @@ test("inventory lists only LLM records with their capability and dispatches each
   assert.ok(!JSON.stringify(entries).includes(HEALTH_SECRET));
 });
 
-test("model-list checks probe only a model provider platform", async (t) => {
+test("provider healthchecks call the LLM provider check of every LLM platform with a check", async (t) => {
   const f = fixture();
   t.after(() => f.store.close());
   f.create({
@@ -1604,7 +1612,18 @@ test("model-list checks probe only a model provider platform", async (t) => {
     secret: { key: HEALTH_SECRET },
     metadata: null,
   });
-  f.store.transaction((tx) =>
+  f.store.transaction((tx) => {
+    f.custody.create(
+      tx,
+      { platforms: REPOSITORY_PLATFORMS },
+      {
+        name: "github",
+        platform: "github",
+        secret: { key: HEALTH_SECRET },
+        metadata: null,
+      },
+      undefined,
+    );
     f.custody.createLoginRevision(
       tx,
       { platforms: LLM_PLATFORMS },
@@ -1616,19 +1635,176 @@ test("model-list checks probe only a model provider platform", async (t) => {
         expires: Date.now() + SESSION_EXPIRY_MS,
       },
       CLOCK_START,
-    ),
-  );
+    );
+  });
   const urls: unknown[] = [];
   t.mock.method(globalThis, "fetch", async (url: unknown) => {
     urls.push(url);
-    return new Response(null, { status: HttpStatus.OK });
+    return new Response(null, {
+      status:
+        url === ANTHROPIC_MODELS_URL ? HttpStatus.Forbidden : HttpStatus.OK,
+    });
   });
   const checks = f.store.transaction((tx) =>
-    ["anthropic", "groq", "copilot", "missing"].map((name) =>
-      f.component.modelListCheck(tx, name),
+    ["anthropic", "groq", "copilot", "github", "missing"].map((name) =>
+      f.component.providerHealthCheck(tx, name),
     ),
   );
   const results = await Promise.all(checks.map((check) => check(background)));
-  assert.deepEqual(results, ["healthy", "unknown", "unknown", "unknown"]);
-  assert.deepEqual(urls, ["https://api.anthropic.com/v1/models"]);
+  assert.deepEqual(results, [
+    "unhealthy",
+    "unknown",
+    "healthy",
+    "unknown",
+    "unknown",
+  ]);
+  assert.deepEqual(urls, [ANTHROPIC_MODELS_URL, GITHUB_COPILOT_TOKEN_URL]);
+});
+
+const NO_FETCH_CALLS = 0;
+const PROVIDER_INVALID_INPUT_CODE = "llm.provider.invalid_input";
+const PROVIDER_CHECK_UNSUPPORTED_CODE = "llm.provider.check_unsupported";
+const PROVIDER_CREDENTIAL_NOT_FOUND_CODE = "llm.provider.credential_not_found";
+
+async function failsAsync(
+  fn: () => Promise<unknown>,
+  status: number,
+  code: string,
+) {
+  await assert.rejects(
+    fn,
+    (error) =>
+      error instanceof OperationError &&
+      error.status === status &&
+      error.code === code,
+  );
+}
+
+test("provider check answers the connection and model list of an LLM credential without its key", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  f.create({
+    name: "compatible",
+    platform: Platform.OpenAICompatible,
+    secret: { key: HEALTH_SECRET },
+    metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+  });
+  const requests: { url: unknown; signal: unknown }[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, options?: RequestInit) => {
+      requests.push({ url, signal: options?.signal });
+      return Response.json({
+        object: "list",
+        data: [{ id: "alpha", owned_by: "lab", created: 1 }],
+      });
+    },
+  );
+  const answer = await f.providerCheck({ credential: "compatible" });
+  assert.deepEqual(answer, {
+    connection: "ok",
+    models: [{ id: "alpha", ownedBy: "lab", created: 1 }],
+  });
+  assert.deepEqual(
+    requests.map(({ url }) => url),
+    [`${HEALTH_BASE_URL}/models`],
+  );
+  assert.ok(requests[0]!.signal instanceof AbortSignal);
+  assert.ok(!JSON.stringify(answer).includes(HEALTH_SECRET));
+});
+
+test("provider check refuses invalid input, an unknown or foreign credential and a platform without a check", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("unexpected request");
+  });
+  f.create({
+    name: "groq",
+    platform: "groq",
+    secret: { key: HEALTH_SECRET },
+    metadata: null,
+  });
+  f.store.transaction((tx) =>
+    f.custody.create(
+      tx,
+      { platforms: REPOSITORY_PLATFORMS },
+      {
+        name: "github",
+        platform: "github",
+        secret: { key: HEALTH_SECRET },
+        metadata: null,
+      },
+      undefined,
+    ),
+  );
+  for (const body of [
+    null,
+    {},
+    { credential: "" },
+    { credential: 1 },
+    {
+      credential: "groq",
+      extra: true,
+    },
+  ])
+    await failsAsync(
+      () => f.providerCheck(body),
+      HttpStatus.BadRequest,
+      PROVIDER_INVALID_INPUT_CODE,
+    );
+  for (const credential of ["missing", "github"])
+    await failsAsync(
+      () => f.providerCheck({ credential }),
+      HttpStatus.NotFound,
+      PROVIDER_CREDENTIAL_NOT_FOUND_CODE,
+    );
+  await failsAsync(
+    () => f.providerCheck({ credential: "groq" }),
+    HttpStatus.BadRequest,
+    PROVIDER_CHECK_UNSUPPORTED_CODE,
+  );
+  assert.equal(fetch.mock.callCount(), NO_FETCH_CALLS);
+});
+
+test("approved models answer the openai-compatible metadata models with defaults and nothing for another credential", (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  f.create({
+    name: "compatible",
+    platform: Platform.OpenAICompatible,
+    secret: { key: HEALTH_SECRET },
+    metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+  });
+  f.updateMetadata("compatible", {
+    expectedRevision: FIRST_REVISION,
+    metadata: {
+      baseUrl: HEALTH_BASE_URL,
+      models: [{ id: KEPT_MODEL, reasoningLevels: ["high"] }],
+    },
+  });
+  f.create({
+    name: "anthropic",
+    platform: Platform.Anthropic,
+    secret: { key: HEALTH_SECRET },
+    metadata: null,
+  });
+  const answers = f.store.transaction((tx) =>
+    ["compatible", "anthropic", "missing"].map((name) =>
+      f.component.approvedModels(tx, name),
+    ),
+  );
+  assert.deepEqual(answers, [
+    [
+      {
+        id: KEPT_MODEL,
+        contextWindow: 128000,
+        maxTokens: 16384,
+        reasoningLevels: ["high"],
+      },
+    ],
+    null,
+    null,
+  ]);
 });

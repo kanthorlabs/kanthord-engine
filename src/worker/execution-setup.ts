@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import type { CallerContext } from "../kernel/operation.ts";
+import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { approvedModels } from "../llm/platforms.ts";
 import {
   executionSetupSchema,
   WorkerErrorCode,
-  type CredentialMetadataFn,
+  type ApprovedModelsFn,
+  type CredentialMetadataRecord,
   type ExecutionSetup,
 } from "./contract.ts";
 import {
@@ -58,7 +61,10 @@ export async function executionSetup(
         WorkerErrorCode.ExecutionNoNativeAgent,
         "Execution has no native agent.",
       );
-    const pinned: CredentialMetadataFn = (transaction, name) => {
+    const pinned = (
+      transaction: Transaction,
+      name: string,
+    ): CredentialMetadataRecord => {
       const record = dependencies.pinnedCredentialMetadata(
         transaction,
         claim,
@@ -73,6 +79,10 @@ export async function executionSetup(
           { credential: name },
         );
       return record;
+    };
+    const pinnedModels: ApprovedModelsFn = (transaction, name) => {
+      const record = pinned(transaction, name);
+      return approvedModels(record.platform, record.metadata);
     };
     const configuredEntry = row.entries.find(
       ({ agent }) => agent === agentName,
@@ -89,7 +99,7 @@ export async function executionSetup(
       row.workerName,
       agentName,
       entry,
-      pinned,
+      pinnedModels,
     );
     assert.ok(view);
     if (!view.valid) {
@@ -104,7 +114,6 @@ export async function executionSetup(
     }
     assert.ok(view.effective);
     const record = pinned(tx, view.effective.credential);
-    assert.ok(record);
     const repositories = dependencies
       .repositoryBindingIdsOf(tx, claim.nodeId, claim.pinnedRevision)
       .map((id) => {

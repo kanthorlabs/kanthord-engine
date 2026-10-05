@@ -34,6 +34,8 @@ paths:
     $ref: ./openapi/llm/credential.rotate.yaml#/pathItem
   /api/llm/credential/{credentialName}/metadata:
     $ref: ./openapi/llm/credential.update_metadata.yaml#/pathItem
+  /api/llm/provider/check:
+    $ref: ./openapi/llm/provider.check.yaml#/pathItem
   /api/mission/assessment/{assessmentId}:
     $ref: ./openapi/mission/assessment.get.yaml#/pathItem
   /api/mission/node/{nodeId}/assessment:

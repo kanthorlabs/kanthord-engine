@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { Command } from "commander";
 import { llmOperations } from "../../llm/contract.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
@@ -29,6 +30,9 @@ const NAME_OPTION = "--name";
 const MODE_OPTION = "--mode";
 const LOGIN_MODE_BROWSER = "browser";
 const LOGIN_MODE_DEVICE = "device";
+const PROVIDER = "provider";
+const CHECK = "check";
+const CREDENTIAL_OPTION = "--credential";
 
 const LLM_GROUP: CredentialGroup = {
   name: CommandName.Llm,
@@ -109,8 +113,45 @@ async function loginCode(
   process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
+function providerCheckCode(reason: string): string {
+  return `cli.${CommandName.Llm}.${PROVIDER}.${CHECK}.${reason}`;
+}
+
+async function providerCheck(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, providerCheckCode(TOKEN_REQUIRED));
+  const result = await httpClient(
+    llmOperations,
+    endpoint,
+    token,
+  ).provider_check({
+    params: {},
+    query: {},
+    body: { credential: options.credential },
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, providerCheckCode(INDETERMINATE)))}\n`,
+  );
+}
+
 export function addLlmCommand(program: Command): void {
   const credential = addCredentialCommand(program, LLM_GROUP);
+  const component = credential.parent;
+  assert.ok(component);
+  const provider = component
+    .command(PROVIDER)
+    .description("LLM provider commands");
+  provider.action(() => provider.help());
+  provider
+    .command(CHECK)
+    .description("Check an LLM credential through its LLM provider as JSON")
+    .requiredOption(
+      "--credential <credential-name>",
+      "Credential name",
+      singleUse(CREDENTIAL_OPTION),
+    )
+    .action((_options, command: Command) => providerCheck(command));
   credential
     .command(LOGIN_STATUS)
     .description("Get a login session status as JSON")

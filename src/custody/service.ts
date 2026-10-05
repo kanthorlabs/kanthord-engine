@@ -28,6 +28,7 @@ import {
   RevisionChange,
   secretSchemas,
   SecretShape,
+  type CheckMaterial,
   type CredentialAnswer,
   type CredentialCreate,
   type CredentialListAnswer,
@@ -523,6 +524,24 @@ export class CustodyComponent implements Service, CredentialRecords {
     const entry = row && ownedPlatform(set, row.platform);
     if (!row || !entry) return async () => ResourceStatus.Unknown;
     return capturedResourceCheck(row, this.envelopeKey, entry);
+  }
+
+  checkMaterial(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    credentialName: string,
+  ): CheckMaterial | null {
+    const row = newestLive(tx, credentialName);
+    if (!row || !ownedPlatform(set, row.platform)) return null;
+    const { id, platform } = row;
+    const key = this.envelopeKey;
+    const nonce = Buffer.from(row.nonce);
+    const ciphertext = Buffer.from(row.ciphertext);
+    return {
+      platform,
+      metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+      secret: () => decrypt(key, id, platform, nonce, ciphertext),
+    };
   }
 
   credentialDependents(

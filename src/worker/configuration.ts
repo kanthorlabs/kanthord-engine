@@ -1,5 +1,3 @@
-import assert from "node:assert/strict";
-import { z } from "zod";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { OperationError } from "../kernel/errors.ts";
@@ -10,7 +8,7 @@ import {
   agentProviderKindSchema,
   reasoningEffortSchema,
   type AgentProviderItem,
-  type CredentialMetadataFn,
+  type ApprovedModelsFn,
   type CustodySuitability,
   type DefaultConfiguration,
   type WorkerAgentView,
@@ -18,15 +16,6 @@ import {
 } from "./contract.ts";
 import { AgentProviderKind } from "./enablements.ts";
 
-const metadataModelsSchema = z.looseObject({
-  models: z.array(
-    z.looseObject({
-      id: z.string(),
-      reasoningLevels: z.array(z.string()).optional(),
-    }),
-  ),
-});
-const DEFAULT_REASONING_LEVELS = ["off"];
 const issueFields: Readonly<Record<string, string>> = {
   [WorkerErrorCode.ProviderNotFound]: "agentProvider",
   [WorkerErrorCode.CredentialUnsuitable]: "agentProvider",
@@ -36,7 +25,7 @@ const issueFields: Readonly<Record<string, string>> = {
 
 export type ConfigurationDependencies = {
   custodySuitability: CustodySuitability;
-  credentialMetadata: CredentialMetadataFn;
+  approvedModels: ApprovedModelsFn;
 };
 
 export function configurationError(
@@ -91,16 +80,12 @@ function modelLevels(
   modelIdentifier: string,
 ): readonly string[] {
   if (item.provider === AgentProviderKind.OpenaiCompatible) {
-    const record = dependencies.credentialMetadata(tx, item.credential);
-    const metadata = record?.metadata;
-    if (metadata == null)
-      throw configurationError(agentName, WorkerErrorCode.ModelUnknown);
-    const parsed = metadataModelsSchema.safeParse(metadata);
-    assert.ok(parsed.success, "Custody returned malformed model metadata.");
-    const model = parsed.data.models.find(({ id }) => id === modelIdentifier);
+    const model = dependencies
+      .approvedModels(tx, item.credential)
+      ?.find(({ id }) => id === modelIdentifier);
     if (!model)
       throw configurationError(agentName, WorkerErrorCode.ModelUnknown);
-    return model.reasoningLevels ?? DEFAULT_REASONING_LEVELS;
+    return model.reasoningLevels;
   }
   const provider = agentProviderKindSchema
     .exclude([AgentProviderKind.OpenaiCompatible])

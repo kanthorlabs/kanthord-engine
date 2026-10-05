@@ -46,10 +46,11 @@ engine/
 │   │   ├── credential-platform.ts # github platform validator and GitHub probe
 │   │   └── credential.ts       # Repository credential routes over custody records and binding dependents
 │   ├── llm/                    # LLM component: LLM platforms, credential routes, OAuth login sessions, and the model connector
-│   │   ├── contract.ts         # LLM credential route group, login operations, and error codes
+│   │   ├── contract.ts         # LLM credential route group, login and provider check operations, and error codes
 │   │   ├── index.ts            # Component and platform table exports
 │   │   ├── platforms.ts        # LLM platform validators, metadata schemas, and model defaults
-│   │   ├── probes.ts           # LLM platform probes
+│   │   ├── provider.ts         # LLM provider interface and healthcheck status of a connection
+│   │   ├── probes.ts           # LLM provider checks and check model constants
 │   │   ├── sessions.ts         # In-memory OAuth login sessions
 │   │   ├── login.ts            # pi-ai OAuth login flow and interaction adapter
 │   │   ├── model-connector.ts  # Model runtime and model from a released credential

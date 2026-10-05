@@ -505,10 +505,15 @@ export type CredentialMetadataRecord = {
   metadata: Record<string, unknown> | null;
 };
 
-export type CredentialMetadataFn = (
+export type ApprovedModel = {
+  id: string;
+  reasoningLevels: readonly string[];
+};
+
+export type ApprovedModelsFn = (
   tx: Transaction,
   credentialName: string,
-) => CredentialMetadataRecord | null;
+) => readonly ApprovedModel[] | null;
 
 export type PinnedCredentialMetadataFn = (
   tx: Transaction,
@@ -522,7 +527,7 @@ export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
 export const REGISTRATION_CAPABILITY = "liveness of a registration";
 export const REGISTRATION_TARGET_KIND = "registration";
 
-export type ModelListCheckFn = (
+export type ProviderHealthCheckFn = (
   tx: Transaction,
   credentialName: string,
 ) => ResourceCheck;
@@ -760,27 +765,13 @@ export const globalPromptSourceSchema = z.discriminatedUnion("state", [
     reason: z.enum(InvalidReason),
   }),
 ]);
-export const compatibleMetadataSchema = z.strictObject({
-  baseUrl: z.string(),
-  models: z.array(
-    z.strictObject({
-      id: z.string().min(1),
-      contextWindow: z.number().int().positive().optional(),
-      maxTokens: z.number().int().positive().optional(),
-      reasoningLevels: z.array(reasoningEffortSchema).optional(),
-    }),
-  ),
-});
-export const platformMetadataSchema = z.record(z.string(), z.string());
 export const executionSetupSchema = z.strictObject({
   executionId: identitySchema("execution"),
   workerName: z.string().min(1),
   agentName: z.string().min(1),
   effectiveConfiguration: effectiveConfigurationSchema,
   credentialId: identitySchema("credential"),
-  metadata: z
-    .union([compatibleMetadataSchema, platformMetadataSchema])
-    .nullable(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
   resourceBudget: resourceBudgetSchema,
   repositories: z.array(
     z.strictObject({

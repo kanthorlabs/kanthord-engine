@@ -23,16 +23,11 @@ const PAGE_INVENTORIES = {
   gateway: "## Complete command table",
   other: "## Command inventory",
 };
-const PAGE_PREFIXES: Partial<Record<string, string>> = {
-  llm: "llm credential",
-  repository: "repository credential",
-  storage: "storage credential",
-};
+const SYNOPSIS_PREFIX = /Synopsis after `kanthord ([^`]+)`/;
 const EXEMPT_LEAVES = new Map([
   ["mission evidence upload", "External-harness phase owns the CLI helper"],
   ["mission graph get", "No ERD1 or ERD2 implementation plan"],
   ["mission criterion list", "No ERD1 or ERD2 implementation plan"],
-  ["worker provider check", "Deferred beyond external-harness setup"],
   [
     "worker agent list",
     "Documented future read with no ERD2 implementation plan",
@@ -75,16 +70,16 @@ const DOCUMENTED_COUNT = 129;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 123;
-const OPERATION_COUNT = 124;
+const IMPLEMENTED_COUNT = 124;
+const OPERATION_COUNT = 125;
 const PAGE_COUNTS = {
-  llm: 11,
+  llm: 12,
   repository: 8,
   storage: 8,
   project: 11,
   mission: 54,
   scheduler: 8,
-  worker: 20,
+  worker: 19,
   gateway: 2,
   other: 7,
 };
@@ -100,16 +95,17 @@ function inventory(group: string, heading: string): Documented[] {
   const end = text.indexOf("\n## ", start + heading.length);
   const lines = text.slice(start, end < NO_ITEMS ? undefined : end).split("\n");
   assert.ok(lines.length);
+  let prefix = group;
   return lines.flatMap((line, index) => {
+    if (lines[index + 1]?.startsWith("| -"))
+      prefix = SYNOPSIS_PREFIX.exec(line)?.[1] ?? group;
     if (line.startsWith("| -") || lines[index + 1]?.startsWith("| -"))
       return [];
     if (!line.startsWith("|") && !/^\d+\. `kanthord /.test(line)) return [];
     const spans = [...line.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
     const synopsis =
       spans[0]?.replace(
-        new RegExp(
-          `^kanthord ${group === OTHER_PAGE ? "" : `${PAGE_PREFIXES[group] ?? group} `}`,
-        ),
+        new RegExp(`^kanthord ${group === OTHER_PAGE ? "" : `${prefix} `}`),
         "",
       ) ?? "";
     const tokens = synopsis.split(/\s+/);
@@ -118,10 +114,7 @@ function inventory(group: string, heading: string): Documented[] {
     if (!leaf) return [];
     return [
       {
-        path:
-          group === OTHER_PAGE
-            ? leaf
-            : `${PAGE_PREFIXES[group] ?? group} ${leaf}`,
+        path: group === OTHER_PAGE ? leaf : `${prefix} ${leaf}`,
         operations: spans.filter((span) =>
           /^(gateway|llm|repository|storage|worker|scheduler|project|mission)\.[A-Za-z_.]+$/.test(
             span,

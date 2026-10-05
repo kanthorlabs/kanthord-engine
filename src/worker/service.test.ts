@@ -48,6 +48,7 @@ import {
   reopenRegistration,
 } from "./instances.ts";
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
+import { approvedModels } from "../llm/platforms.ts";
 
 const fakeCollaborations = {
   dataDirectory: "/unused",
@@ -114,11 +115,12 @@ const fakeCollaborations = {
     activityOf: () => ({ activity: InstanceActivity.Idle, executionId: null }),
   },
   custodySuitability: () => {},
-  credentialMetadata: () => null,
+  approvedModels: () => null,
   entriesOfAgent: () => [],
-  modelListCheck: () => async () => ResourceStatus.Unknown,
+  providerHealthCheck: () => async () => ResourceStatus.Unknown,
 };
 const WORKER_CONFIG = { heartbeatWindow: 300, globalPrompt: "" };
+const BASE_URL = "https://models.example/v1";
 
 test("action handler forwards only the proved claim and caller before its commit", async (t) => {
   const f = enablementFixture(t);
@@ -856,9 +858,8 @@ test("external instance health reads current binding availability without config
       return binding;
     },
     custodySuitability: () => assert.fail("External health resolves no agent"),
-    credentialMetadata: () =>
-      assert.fail("External health reads no credential"),
-    modelListCheck: () =>
+    approvedModels: () => assert.fail("External health reads no credential"),
+    providerHealthCheck: () =>
       assert.fail("Instance health performs no provider check"),
   });
   const row = f.store.transaction((tx) =>
@@ -900,7 +901,7 @@ test("native instance health resolves the latest agent entry and enablement in t
       assert.ok(tx.database.isTransaction);
       if (failure) throw failure;
     },
-    modelListCheck: () =>
+    providerHealthCheck: () =>
       assert.fail("Instance health performs no provider check"),
   });
   const row = f.store.transaction((tx) =>
@@ -1372,11 +1373,11 @@ test("registration inventory fails closed when its binding is missing or removed
 
 test("resource inventory includes every live provider across pages without writes", async (t) => {
   const calls: Array<{
-    tx: Parameters<Dependencies["modelListCheck"]>[0];
+    tx: Parameters<Dependencies["providerHealthCheck"]>[0];
     credential: string;
   }> = [];
   const f = enablementFixture(t, {
-    modelListCheck: (tx, credential) => {
+    providerHealthCheck: (tx, credential) => {
       calls.push({ tx, credential });
       return async () => ResourceStatus.Unhealthy;
     },
@@ -1830,7 +1831,7 @@ test("put collects binding validation failures and validates its defaults first"
 
 test("anthropic uses the built-in catalog, not absent credential metadata", (t) => {
   const f = enablementFixture(t, {
-    credentialMetadata: () => {
+    approvedModels: () => {
       throw new Error("Built-in catalog must not read metadata.");
     },
   });
@@ -1851,7 +1852,7 @@ test("anthropic uses the built-in catalog, not absent credential metadata", (t) 
 
 test("openai-codex uses the built-in catalog and refuses an unknown model", (t) => {
   const f = enablementFixture(t, {
-    credentialMetadata: () => {
+    approvedModels: () => {
       throw new Error("Built-in catalog must not read metadata.");
     },
   });
@@ -1874,7 +1875,7 @@ test("openai-codex uses the built-in catalog and refuses an unknown model", (t) 
 
 test("openrouter uses the built-in catalog and refuses an unknown model", (t) => {
   const f = enablementFixture(t, {
-    credentialMetadata: () => {
+    approvedModels: () => {
       throw new Error("Built-in catalog must not read metadata.");
     },
   });
@@ -1897,7 +1898,7 @@ test("openrouter uses the built-in catalog and refuses an unknown model", (t) =>
 
 test("groq uses the built-in catalog and refuses an unknown model", (t) => {
   const f = enablementFixture(t, {
-    credentialMetadata: () => {
+    approvedModels: () => {
       throw new Error("Built-in catalog must not read metadata.");
     },
   });
@@ -1929,15 +1930,12 @@ test("the agent provider set holds openai-compatible and every pi-ai built-in pr
 
 test("openai-compatible metadata establishes models and reasoning levels, including an explicit empty set", (t) => {
   let metadata: Record<string, unknown> | null = {
-    models: [{ id: MODEL, extra: true }],
+    baseUrl: BASE_URL,
+    models: [{ id: MODEL }],
   };
   const f = enablementFixture(t, {
-    credentialMetadata: () => ({
-      id: "credential",
-      name: "custom",
-      platform: AgentProviderKind.OpenaiCompatible,
-      metadata,
-    }),
+    approvedModels: () =>
+      approvedModels(AgentProviderKind.OpenaiCompatible, metadata),
   });
   const customBody = {
     ...putBody,
@@ -1953,24 +1951,30 @@ test("openai-compatible metadata establishes models and reasoning levels, includ
       }),
     WorkerErrorCode.ReasoningUnsupported,
   );
-  metadata = { models: [{ id: MODEL, reasoningLevels: [] }] };
+  metadata = {
+    baseUrl: BASE_URL,
+    models: [{ id: MODEL, reasoningLevels: [] }],
+  };
   refuses(
     () => f.invoke("agent.enablement.put", customBody),
     WorkerErrorCode.ReasoningUnsupported,
   );
-  for (const value of [{ models: [] }, null]) {
+  for (const value of [{ baseUrl: BASE_URL, models: [] }, null]) {
     metadata = value;
     refuses(
       () => f.invoke("agent.enablement.put", customBody),
       WorkerErrorCode.ModelUnknown,
     );
   }
-  metadata = { models: [{ id: MODEL }] };
+  metadata = { baseUrl: BASE_URL, models: [{ id: MODEL }] };
   assert.equal(
     f.invoke("agent.enablement.put", customBody).revision,
     FIRST_REVISION,
   );
-  metadata = { models: [{ id: MODEL, reasoningLevels: ["high"] }] };
+  metadata = {
+    baseUrl: BASE_URL,
+    models: [{ id: MODEL, reasoningLevels: ["high"] }],
+  };
   assert.equal(
     f.invoke("agent.enablement.put", {
       ...customBody,
@@ -1982,18 +1986,16 @@ test("openai-compatible metadata establishes models and reasoning levels, includ
 });
 
 test("null credential records permit no model; malformed metadata propagates in writes and views", (t) => {
-  let metadata: Record<string, unknown> = { models: [{ id: MODEL }] };
+  let metadata: Record<string, unknown> = {
+    baseUrl: BASE_URL,
+    models: [{ id: MODEL }],
+  };
   let absent = true;
   const f = enablementFixture(t, {
-    credentialMetadata: () =>
+    approvedModels: () =>
       absent
         ? null
-        : {
-            id: "credential",
-            name: "custom",
-            platform: AgentProviderKind.OpenaiCompatible,
-            metadata,
-          },
+        : approvedModels(AgentProviderKind.OpenaiCompatible, metadata),
   });
   const customBody = {
     ...putBody,
@@ -2007,7 +2009,7 @@ test("null credential records permit no model; malformed metadata propagates in 
   );
   absent = false;
   f.invoke("agent.enablement.put", customBody);
-  metadata = { models: "broken" };
+  metadata = { baseUrl: BASE_URL, models: "broken" };
   for (const action of [
     () =>
       f.invoke("agent.enablement.put", { ...customBody, expectedRevision: 1 }),

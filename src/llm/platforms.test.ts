@@ -18,8 +18,11 @@ import {
   cloudflareWorkersAIMetadataSchema,
   googleVertexMetadataSchema,
   isLlmPlatform,
+  approvedModels,
   LLM_PLATFORMS,
+  LLM_PROVIDERS,
   MODEL_DEFAULT_CONTEXT_WINDOW,
+  MODEL_DEFAULT_MAX_TOKENS,
   MODEL_DEFAULT_REASONING_LEVELS,
   openaiCompatibleMetadataSchema,
   Platform,
@@ -78,6 +81,7 @@ const VERIFIABLE_PLATFORMS: Platform[] = [
   Platform.OpenAICompatible,
   Platform.OpenRouter,
   Platform.OpenAI,
+  Platform.OpencodeGo,
 ];
 const METADATA_FIELDS: Partial<Record<Platform, string[]>> = {
   [Platform.OpenAICompatible]: ["baseUrl"],
@@ -138,7 +142,16 @@ test("the platform list fixes secret shape, login modes, metadata fields and ver
       VERIFIABLE_PLATFORMS.includes(platform),
       platform,
     );
+    assert.equal(
+      item.verifiable,
+      Object.hasOwn(LLM_PROVIDERS, platform),
+      platform,
+    );
   }
+  assert.deepEqual(
+    Object.keys(LLM_PROVIDERS).toSorted(),
+    VERIFIABLE_PLATFORMS.toSorted(),
+  );
 });
 
 test("secret schema is selected for every platform", () => {
@@ -294,4 +307,40 @@ test("llm metadata requires every field as a nonblank string and refuses unknown
       assert.equal(schema.safeParse(missing).success, false);
     }
   }
+});
+
+test("approved models answer openai-compatible metadata models with the defaults applied", () => {
+  const CONTEXT_WINDOW = 64000;
+  const MAX_TOKENS = 4096;
+  const metadata = {
+    baseUrl: "https://models.example/v1",
+    models: [
+      { id: "plain" },
+      {
+        id: "tuned",
+        contextWindow: CONTEXT_WINDOW,
+        maxTokens: MAX_TOKENS,
+        reasoningLevels: [ReasoningLevel.High],
+      },
+    ],
+  };
+  assert.deepEqual(approvedModels(Platform.OpenAICompatible, metadata), [
+    {
+      id: "plain",
+      contextWindow: MODEL_DEFAULT_CONTEXT_WINDOW,
+      maxTokens: MODEL_DEFAULT_MAX_TOKENS,
+      reasoningLevels: MODEL_DEFAULT_REASONING_LEVELS,
+    },
+    {
+      id: "tuned",
+      contextWindow: CONTEXT_WINDOW,
+      maxTokens: MAX_TOKENS,
+      reasoningLevels: [ReasoningLevel.High],
+    },
+  ]);
+  assert.equal(approvedModels(Platform.OpenAICompatible, null), null);
+  assert.equal(approvedModels(Platform.Anthropic, metadata), null);
+  assert.throws(() =>
+    approvedModels(Platform.OpenAICompatible, { models: "broken" }),
+  );
 });

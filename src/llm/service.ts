@@ -15,6 +15,7 @@ import { IdentityKind } from "../kernel/caller.ts";
 import {
   background,
   CancellationContext,
+  throwIfCancelled,
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
@@ -30,8 +31,11 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import {
   LlmErrorCode,
   llmOperations,
+  PROVIDER_CHECK_TIMEOUT_MS,
+  providerCheckBodySchema,
   type EnablementsDependentOnModelFn,
   type LlmCredentialAnswer,
+  type ProviderCheckAnswer,
 } from "./contract.ts";
 import {
   loginMode,
@@ -41,11 +45,13 @@ import {
   type OAuthSecret,
 } from "./login.ts";
 import {
+  approvedModels,
   isLlmPlatform,
   LLM_PLATFORMS,
-  MODEL_PROVIDER_PROBES,
+  LLM_PROVIDERS,
   openaiCompatibleMetadataSchema,
   Platform,
+  type ApprovedModel,
 } from "./platforms.ts";
 import {
   LoginSessionStore,
@@ -69,15 +75,6 @@ const CredentialErrorCode = {
   UnsupportedEntry: "credential.entry.unsupported",
 } as const;
 const NO_ROWS = 0;
-
-const MODEL_PROVIDER_SET: CredentialPlatformSet = {
-  platforms: Object.fromEntries(
-    Object.keys(MODEL_PROVIDER_PROBES).map((platform) => [
-      platform,
-      LLM_PLATFORMS[platform as Platform],
-    ]),
-  ),
-};
 
 function invalidInput(): OperationError {
   return new OperationError(
@@ -195,14 +192,74 @@ export class LlmComponent implements Service {
     registry.register(llmOperations.login_status, (input, caller) =>
       this.loginStatus(input, caller),
     );
+    registry.register(llmOperations.provider_check, (input, caller) =>
+      this.providerCheck(input, caller),
+    );
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {
     return this.records.resourceInventory(tx, this.platformSet);
   }
 
-  modelListCheck(tx: Transaction, credentialName: string): ResourceCheck {
-    return this.records.resourceCheck(tx, MODEL_PROVIDER_SET, credentialName);
+  providerHealthCheck(tx: Transaction, credentialName: string): ResourceCheck {
+    return this.records.resourceCheck(tx, this.platformSet, credentialName);
+  }
+
+  approvedModels(
+    tx: Transaction,
+    credentialName: string,
+  ): ApprovedModel[] | null {
+    const record = this.records.credentialMetadata(tx, credentialName);
+    return record && approvedModels(record.platform, record.metadata);
+  }
+
+  private async providerCheck(
+    input: typeof llmOperations.provider_check.input._output,
+    caller: CallerContext,
+  ): Promise<ProviderCheckAnswer> {
+    const body = providerCheckBodySchema.safeParse(input.body);
+    if (!body.success)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        LlmErrorCode.ProviderInvalidInput,
+        "Invalid input.",
+      );
+    const material = this.store.transaction((tx) =>
+      this.records.checkMaterial(tx, this.platformSet, body.data.credential),
+    );
+    if (!material)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        LlmErrorCode.ProviderCredentialNotFound,
+        "Credential not found.",
+      );
+    const provider = LLM_PROVIDERS[material.platform as Platform];
+    if (!provider)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        LlmErrorCode.ProviderCheckUnsupported,
+        "The platform of the credential has no LLM provider.",
+      );
+    const context = new CancellationContext(
+      caller.context,
+      Date.now() + PROVIDER_CHECK_TIMEOUT_MS,
+    );
+    try {
+      const answer = await provider.check(
+        material.secret(),
+        material.metadata,
+        context,
+        (reason) =>
+          this.logger.info(
+            { credential: body.data.credential, reason },
+            "provider check failed",
+          ),
+      );
+      throwIfCancelled(caller.context);
+      return caller.commit(() => answer);
+    } finally {
+      context.cancel();
+    }
   }
 
   private get(tx: Transaction, credentialName: string): LlmCredentialAnswer {

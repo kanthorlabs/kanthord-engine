@@ -51,9 +51,9 @@ import {
   type WorkerEntry,
   type WorkerAgentView,
   type CustodySuitability,
-  type CredentialMetadataFn,
+  type ApprovedModelsFn,
   type EntriesOfAgent,
-  type ModelListCheckFn,
+  type ProviderHealthCheckFn,
   WorkerErrorCode,
   LIST_LIMIT_DEFAULT,
   agentEnablementSchema,
@@ -208,9 +208,9 @@ export interface Dependencies {
   monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;
   custodySuitability: CustodySuitability;
-  credentialMetadata: CredentialMetadataFn;
+  approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
-  modelListCheck: ModelListCheckFn;
+  providerHealthCheck: ProviderHealthCheckFn;
   health?: HealthRegistry;
   registrations?: WorkerRegistrations;
 }
@@ -677,7 +677,7 @@ export class WorkerService implements Service {
             name: `${encodeURIComponent(row.agentName)}/${encodeURIComponent(item.name)}`,
             target: `${AGENT_PROVIDER_TARGET_KIND}:${item.credential}`,
             capability: AGENT_PROVIDER_CAPABILITY,
-            check: this.dependencies.modelListCheck(tx, item.credential),
+            check: this.dependencies.providerHealthCheck(tx, item.credential),
           })),
         );
       }
@@ -765,8 +765,7 @@ export class WorkerService implements Service {
     workerName: string,
     agentName: string,
     entry: WorkerEntry | null,
-    credentialMetadata: CredentialMetadataFn = this.dependencies
-      .credentialMetadata,
+    approvedModels: ApprovedModelsFn = this.dependencies.approvedModels,
   ): WorkerAgentView | null {
     if (
       !getWorkerDeclaration(workerName) ||
@@ -787,7 +786,7 @@ export class WorkerService implements Service {
     const issues = configurationIssues(
       {
         custodySuitability: this.dependencies.custodySuitability,
-        credentialMetadata,
+        approvedModels,
       },
       tx,
       agentName,
