@@ -17,7 +17,7 @@ import {
 import { ClaimState } from "./contract.ts";
 import { EXECUTION_NOT_RUNNING } from "./settlement.ts";
 
-const ONE = 1;
+const WAKE_CALL_COUNT = 1;
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
   const row = executionFixture();
@@ -56,7 +56,7 @@ test("release routes once, ends at the transaction reading and wakes after commi
     endedAt: FIXTURE_NOW,
   });
   await assert.rejects(h.release(), { code: EXECUTION_NOT_RUNNING });
-  assert.equal(h.calls.length, ONE);
+  assert.equal(h.calls.length, WAKE_CALL_COUNT);
   assert.deepEqual(h.calls[0]!.arguments.slice(1), [
     {
       executionId: h.row.executionId,
@@ -102,7 +102,7 @@ test("expiry equality, loss and revocation refuse release without routing", asyn
   );
   await assert.rejects(revoked.release(), { code: EXECUTION_NOT_RUNNING });
   assert.deepEqual(revoked.calls, []);
-  assert.equal(h.calls.length, ONE);
+  assert.equal(h.calls.length, WAKE_CALL_COUNT);
 });
 
 test("a release begun before expiry remains finished when commit ends after expiry", async (t) => {

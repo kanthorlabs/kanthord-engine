@@ -14,8 +14,8 @@ import { ClaimState } from "./contract.ts";
 
 const NOT_OWNER = "scheduler.execution.not_owner";
 const NOT_FOUND = "scheduler.execution.not_found";
-const ONE = 1;
-const TWO = 2;
+const SINGLE_ITEM_COUNT = 1;
+const TOTAL_ITEM_COUNT = 2;
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
@@ -84,9 +84,9 @@ test("human execution reads paginate all states and isolate project, node and at
     all.items.map((item) => item.executionId),
     [ended.executionId, h.row.executionId].sort().reverse(),
   );
-  assert.equal(all.items.length, TWO);
+  assert.equal(all.items.length, TOTAL_ITEM_COUNT);
   const first = await list({ limit: 1 });
-  assert.equal(first.items.length, ONE);
+  assert.equal(first.items.length, SINGLE_ITEM_COUNT);
   const second = await list({ limit: 1, cursor: first.nextCursor });
   assert.deepEqual([...first.items, ...second.items], all.items);
   assert.equal(second.nextCursor, null);
