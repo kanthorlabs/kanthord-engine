@@ -254,6 +254,7 @@ export function composeServices(options: {
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     approvedModels: (tx, name) => llm.approvedModels(tx, name),
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
+    providerCapability: (tx, name) => llm.providerCapability(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
   });
   const mission: MissionService = new MissionService({
@@ -325,13 +326,15 @@ export function composeServices(options: {
     () =>
       options.store.transaction((tx) =>
         collectInventories(tx, {
-          custody:
-            options.inventoryOverrides?.custody ??
-            ((tx) => [
-              ...llm.resourceInventory(tx),
-              ...repositoryCredentials.resourceInventory(tx),
-              ...storage.resourceInventory(tx),
-            ]),
+          llm:
+            options.inventoryOverrides?.llm ??
+            ((tx) => llm.resourceInventory(tx)),
+          repository:
+            options.inventoryOverrides?.repository ??
+            ((tx) => repositoryCredentials.resourceInventory(tx)),
+          storage:
+            options.inventoryOverrides?.storage ??
+            ((tx) => storage.resourceInventory(tx)),
           worker:
             options.inventoryOverrides?.worker ??
             ((tx) => worker.resourceInventory(tx)),

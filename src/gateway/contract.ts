@@ -22,14 +22,22 @@ export const HEALTHCHECK_OK = "ok" as const;
 export const MAX_CONCURRENT_CHECKS = 32;
 export const RESOURCE_CHECK_DEADLINE_MS = 10000;
 export const REPORT_MARGIN_MS = 5000;
-export const OWNER_CUSTODY = "custody";
+export const OWNER_LLM = "llm";
+export const OWNER_REPOSITORY = "repository";
+export const OWNER_STORAGE = "storage";
 export const OWNER_WORKER = "worker";
 export const OWNER_PROJECT = "project";
 
 export type InventoryOwner =
-  typeof OWNER_CUSTODY | typeof OWNER_WORKER | typeof OWNER_PROJECT;
+  | typeof OWNER_LLM
+  | typeof OWNER_REPOSITORY
+  | typeof OWNER_STORAGE
+  | typeof OWNER_WORKER
+  | typeof OWNER_PROJECT;
 export interface ResourceInventories {
-  custody: (tx: Transaction) => ResourceEntry[];
+  llm: (tx: Transaction) => ResourceEntry[];
+  repository: (tx: Transaction) => ResourceEntry[];
+  storage: (tx: Transaction) => ResourceEntry[];
   worker: (tx: Transaction) => ResourceEntry[];
   project: (tx: Transaction) => ResourceEntry[];
 }
@@ -92,7 +100,11 @@ export const gatewayOperations = {
         intake: ownerSchema,
         worker: ownerSchema,
       }),
-      shared: z.strictObject({ custody: ownerSchema }),
+      shared: z.strictObject({
+        llm: ownerSchema,
+        repository: ownerSchema,
+        storage: ownerSchema,
+      }),
     }),
     description:
       "Check resource health on demand, grouped by owner and scope. Returns every inventory entry with status and capability, including unknown for unfinished checks. A missing inventory returns 503 with missingInventories in error.details.",

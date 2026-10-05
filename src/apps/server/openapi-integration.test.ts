@@ -1021,7 +1021,11 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     "project",
     "worker",
   ]);
-  assert.deepEqual(Object.keys(shared.properties), ["custody"]);
+  assert.deepEqual(Object.keys(shared.properties), [
+    "llm",
+    "repository",
+    "storage",
+  ]);
   for (const owner of [
     ...Object.values(services.properties),
     ...Object.values(shared.properties),

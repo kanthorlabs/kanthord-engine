@@ -522,7 +522,6 @@ export type PinnedCredentialMetadataFn = (
   now: number,
 ) => CredentialMetadataRecord | null;
 
-export const AGENT_PROVIDER_CAPABILITY = "model-list read";
 export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
 export const REGISTRATION_CAPABILITY = "liveness of a registration";
 export const REGISTRATION_TARGET_KIND = "registration";
@@ -531,6 +530,11 @@ export type ProviderHealthCheckFn = (
   tx: Transaction,
   credentialName: string,
 ) => ResourceCheck;
+
+export type ProviderCapabilityFn = (
+  tx: Transaction,
+  credentialName: string,
+) => string;
 
 export type EntriesOfAgent = (
   tx: Transaction,

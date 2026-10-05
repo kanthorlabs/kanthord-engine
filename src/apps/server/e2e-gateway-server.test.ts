@@ -586,7 +586,11 @@ test("E07.9 human healthcheck returns exactly four empty owners", async (t) => {
       intake: EMPTY_OWNER,
       worker: EMPTY_OWNER,
     },
-    shared: { custody: EMPTY_OWNER },
+    shared: {
+      llm: EMPTY_OWNER,
+      repository: EMPTY_OWNER,
+      storage: EMPTY_OWNER,
+    },
   });
 });
 
@@ -609,7 +613,7 @@ test("E07.11 healthcheck deduplicates targets but reports both resource names", 
   const fixture = await gatewayFixture(t, {
     repositoryConnector: FAKE_REPOSITORY,
     inventoryOverrides: {
-      custody: () => [
+      llm: () => [
         resource(FIRST_RESOURCE, check),
         resource(SECOND_RESOURCE, check),
       ],
@@ -624,7 +628,7 @@ test("E07.11 healthcheck deduplicates targets but reports both resource names", 
   );
   assert.equal(checks, ONE);
   const expected = { status: ResourceStatus.Healthy, capability: CAPABILITY };
-  assert.deepEqual(body.shared.custody.global, {
+  assert.deepEqual(body.shared.llm.global, {
     [FIRST_RESOURCE]: expected,
     [SECOND_RESOURCE]: expected,
   });
@@ -664,7 +668,7 @@ test("E07.13 a resource check past its deadline reports unknown", async (t) => {
     });
   const fixture = await gatewayFixture(t, {
     repositoryConnector: FAKE_REPOSITORY,
-    inventoryOverrides: { custody: () => [resource(FIRST_RESOURCE, check)] },
+    inventoryOverrides: { llm: () => [resource(FIRST_RESOURCE, check)] },
   });
   const response = await fixture.request(gatewayOperations.healthcheck.path, {
     headers: { Authorization: `Bearer ${fixture.token}` },
@@ -673,7 +677,7 @@ test("E07.13 a resource check past its deadline reports unknown", async (t) => {
   const body = gatewayOperations.healthcheck.output.parse(
     await response.json(),
   );
-  assert.deepEqual(body.shared.custody.global[FIRST_RESOURCE], {
+  assert.deepEqual(body.shared.llm.global[FIRST_RESOURCE], {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
   });
@@ -683,7 +687,7 @@ test("E07.14 a throwing resource check reports unknown", async (t) => {
   const fixture = await gatewayFixture(t, {
     repositoryConnector: FAKE_REPOSITORY,
     inventoryOverrides: {
-      custody: () => [
+      llm: () => [
         resource(FIRST_RESOURCE, () => {
           throw new Error("resource probe failed");
         }),
@@ -697,7 +701,7 @@ test("E07.14 a throwing resource check reports unknown", async (t) => {
   const body = gatewayOperations.healthcheck.output.parse(
     await response.json(),
   );
-  assert.deepEqual(body.shared.custody.global[FIRST_RESOURCE], {
+  assert.deepEqual(body.shared.llm.global[FIRST_RESOURCE], {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
   });

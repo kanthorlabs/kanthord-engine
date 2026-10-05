@@ -44,7 +44,12 @@ import {
   COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
   OAUTH_PROVIDER_IDS,
 } from "./login.ts";
-import { LLM_PLATFORMS, Platform } from "./platforms.ts";
+import {
+  CAPABILITY_MODEL_LIST_READ,
+  CAPABILITY_NONE,
+  LLM_PLATFORMS,
+  Platform,
+} from "./platforms.ts";
 import { ANTHROPIC_MODELS_URL, GITHUB_COPILOT_TOKEN_URL } from "./probes.ts";
 import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
 import { LlmComponent } from "./service.ts";
@@ -1595,6 +1600,23 @@ test("inventory lists only LLM records with their capability and dispatches each
     healthCredentials.flatMap(({ url }) => (url === null ? [] : [url])),
   );
   assert.ok(!JSON.stringify(entries).includes(HEALTH_SECRET));
+});
+
+test("provider capability answers the capability of the LLM provider of a credential", (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  for (const credential of healthCredentials)
+    f.create({
+      name: credential.name,
+      platform: credential.platform,
+      secret: { key: HEALTH_SECRET },
+      metadata: credential.metadata,
+    });
+  const capability = (name: string) =>
+    f.store.transaction((tx) => f.component.providerCapability(tx, name));
+  assert.equal(capability("anthropic"), CAPABILITY_MODEL_LIST_READ);
+  assert.equal(capability("groq"), CAPABILITY_NONE);
+  assert.equal(capability("missing"), CAPABILITY_NONE);
 });
 
 test("provider healthchecks call the LLM provider check of every LLM platform with a check", async (t) => {

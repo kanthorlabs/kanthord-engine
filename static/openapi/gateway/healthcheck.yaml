@@ -85,11 +85,19 @@ components:
         shared:
           type: object
           properties:
-            custody:
+            llm:
+              $ref: "#/components/schemas/gateway.healthcheck.Output/$defs/ResourceHealthOwne\
+                r"
+            repository:
+              $ref: "#/components/schemas/gateway.healthcheck.Output/$defs/ResourceHealthOwne\
+                r"
+            storage:
               $ref: "#/components/schemas/gateway.healthcheck.Output/$defs/ResourceHealthOwne\
                 r"
           required:
-            - custody
+            - llm
+            - repository
+            - storage
           additionalProperties: false
       required:
         - services

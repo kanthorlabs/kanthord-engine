@@ -128,7 +128,11 @@ test("resource healthcheck requires a human and returns four empty owners", asyn
         intake: { global: {}, projects: {} },
         worker: { global: {}, projects: {} },
       },
-      shared: { custody: { global: {}, projects: {} } },
+      shared: {
+        llm: { global: {}, projects: {} },
+        repository: { global: {}, projects: {} },
+        storage: { global: {}, projects: {} },
+      },
     },
   );
 });

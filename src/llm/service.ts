@@ -46,6 +46,7 @@ import {
 } from "./login.ts";
 import {
   approvedModels,
+  CAPABILITY_NONE,
   isLlmPlatform,
   LLM_PLATFORMS,
   LLM_PROVIDERS,
@@ -203,6 +204,12 @@ export class LlmComponent implements Service {
 
   providerHealthCheck(tx: Transaction, credentialName: string): ResourceCheck {
     return this.records.resourceCheck(tx, this.platformSet, credentialName);
+  }
+
+  providerCapability(tx: Transaction, credentialName: string): string {
+    const record = this.records.credentialMetadata(tx, credentialName);
+    if (!record || !isLlmPlatform(record.platform)) return CAPABILITY_NONE;
+    return LLM_PLATFORMS[record.platform].capability;
   }
 
   approvedModels(

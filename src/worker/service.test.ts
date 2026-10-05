@@ -9,7 +9,6 @@ import {
   WorkerErrorCode,
   WORKER_SERVICE_NAME,
   LIST_LIMIT_DEFAULT,
-  AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
@@ -118,7 +117,9 @@ const fakeCollaborations = {
   approvedModels: () => null,
   entriesOfAgent: () => [],
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
+  providerCapability: () => PROVIDER_CAPABILITY,
 };
+const PROVIDER_CAPABILITY = "model-list read";
 const WORKER_CONFIG = { heartbeatWindow: 300, globalPrompt: "" };
 const BASE_URL = "https://models.example/v1";
 
@@ -861,6 +862,8 @@ test("external instance health reads current binding availability without config
     approvedModels: () => assert.fail("External health reads no credential"),
     providerHealthCheck: () =>
       assert.fail("Instance health performs no provider check"),
+    providerCapability: () =>
+      assert.fail("Instance health reads no provider capability"),
   });
   const row = f.store.transaction((tx) =>
     f.worker.registrations.register(tx, client, Date.now()),
@@ -903,6 +906,8 @@ test("native instance health resolves the latest agent entry and enablement in t
     },
     providerHealthCheck: () =>
       assert.fail("Instance health performs no provider check"),
+    providerCapability: () =>
+      assert.fail("Instance health reads no provider capability"),
   });
   const row = f.store.transaction((tx) =>
     f.worker.registrations.register(tx, client, Date.now()),
@@ -1381,6 +1386,7 @@ test("resource inventory includes every live provider across pages without write
       calls.push({ tx, credential });
       return async () => ResourceStatus.Unhealthy;
     },
+    providerCapability: (_tx, credential) => `capability of ${credential}`,
   });
   const PAGE_SIZE = 100;
   const EXTRA_AGENT = 1;
@@ -1483,7 +1489,10 @@ test("resource inventory includes every live provider across pages without write
     special.target,
     `${AGENT_PROVIDER_TARGET_KIND}:${SPECIAL_PROVIDER.credential}`,
   );
-  assert.equal(special.capability, AGENT_PROVIDER_CAPABILITY);
+  assert.equal(
+    special.capability,
+    `capability of ${SPECIAL_PROVIDER.credential}`,
+  );
   assert.equal(await special.check(background), ResourceStatus.Unhealthy);
   assert.equal(countRows(), before);
 });

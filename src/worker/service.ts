@@ -28,7 +28,6 @@ import { HttpStatus } from "../kernel/http.ts";
 import {
   workerOperations,
   WORKER_SERVICE_NAME,
-  AGENT_PROVIDER_CAPABILITY,
   AGENT_PROVIDER_TARGET_KIND,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
@@ -53,6 +52,7 @@ import {
   type CustodySuitability,
   type ApprovedModelsFn,
   type EntriesOfAgent,
+  type ProviderCapabilityFn,
   type ProviderHealthCheckFn,
   WorkerErrorCode,
   LIST_LIMIT_DEFAULT,
@@ -211,6 +211,7 @@ export interface Dependencies {
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
   providerHealthCheck: ProviderHealthCheckFn;
+  providerCapability: ProviderCapabilityFn;
   health?: HealthRegistry;
   registrations?: WorkerRegistrations;
 }
@@ -676,7 +677,10 @@ export class WorkerService implements Service {
             project: null,
             name: `${encodeURIComponent(row.agentName)}/${encodeURIComponent(item.name)}`,
             target: `${AGENT_PROVIDER_TARGET_KIND}:${item.credential}`,
-            capability: AGENT_PROVIDER_CAPABILITY,
+            capability: this.dependencies.providerCapability(
+              tx,
+              item.credential,
+            ),
             check: this.dependencies.providerHealthCheck(tx, item.credential),
           })),
         );

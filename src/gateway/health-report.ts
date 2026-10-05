@@ -21,7 +21,9 @@ import {
   MAX_CONCURRENT_CHECKS,
   RESOURCE_CHECK_DEADLINE_MS,
   REPORT_MARGIN_MS,
-  OWNER_CUSTODY,
+  OWNER_LLM,
+  OWNER_REPOSITORY,
+  OWNER_STORAGE,
   OWNER_WORKER,
   OWNER_PROJECT,
   type InventoryCollector,
@@ -33,7 +35,13 @@ import { GatewayError } from "./errors.ts";
 const EMPTY_COUNT = 0;
 const MIN_LIMIT = 1;
 const INTAKE_EMPTY_OWNER = { global: {}, projects: {} } as const;
-const INVENTORY_OWNERS = [OWNER_CUSTODY, OWNER_WORKER, OWNER_PROJECT] as const;
+const INVENTORY_OWNERS = [
+  OWNER_LLM,
+  OWNER_REPOSITORY,
+  OWNER_STORAGE,
+  OWNER_WORKER,
+  OWNER_PROJECT,
+] as const;
 const DEFAULT_LIMITS = {
   maxConcurrent: MAX_CONCURRENT_CHECKS,
   checkDeadlineMs: RESOURCE_CHECK_DEADLINE_MS,
@@ -45,7 +53,7 @@ interface ReportLimits {
   reportBudgetMs: number;
 }
 type Report = z.output<typeof gatewayOperations.healthcheck.output>;
-type OwnerReport = Report["shared"]["custody"];
+type OwnerReport = Report["shared"]["llm"];
 type InventoryEntry = InventorySnapshot["entries"][number];
 
 export function collectInventories(
@@ -218,7 +226,9 @@ function assembleReport(
   statuses: Map<string, ResourceStatusValue>,
 ): Report {
   const owners = {
-    [OWNER_CUSTODY]: emptyOwner(),
+    [OWNER_LLM]: emptyOwner(),
+    [OWNER_REPOSITORY]: emptyOwner(),
+    [OWNER_STORAGE]: emptyOwner(),
     [OWNER_WORKER]: emptyOwner(),
     [OWNER_PROJECT]: emptyOwner(),
   };
@@ -251,6 +261,10 @@ function assembleReport(
       intake: emptyOwner(),
       worker: owners.worker,
     },
-    shared: { custody: owners.custody },
+    shared: {
+      llm: owners.llm,
+      repository: owners.repository,
+      storage: owners.storage,
+    },
   };
 }

@@ -17,7 +17,9 @@ import type { CallerContext } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import {
   gatewayOperations,
-  OWNER_CUSTODY,
+  OWNER_LLM,
+  OWNER_REPOSITORY,
+  OWNER_STORAGE,
   OWNER_WORKER,
   OWNER_PROJECT,
   type InventorySnapshot,
@@ -39,7 +41,14 @@ const FINE_TARGET = "fine";
 const LOG_MESSAGE = "resource.health.check";
 const CAPABILITY = "reachability";
 const CHECK_ERROR = new Error("secret credential or private endpoint");
-const OWNERS = [OWNER_CUSTODY, OWNER_WORKER, OWNER_PROJECT] as const;
+const STATUSES = Object.values(ResourceStatus);
+const OWNERS = [
+  OWNER_LLM,
+  OWNER_REPOSITORY,
+  OWNER_STORAGE,
+  OWNER_WORKER,
+  OWNER_PROJECT,
+] as const;
 
 function entry(
   name: string,
@@ -101,17 +110,27 @@ function fixture(t: TestContext, entries: InventorySnapshot["entries"] = []) {
   };
 }
 
-test("collectInventories isolates failing owners in custody, worker, project order", (t) => {
+test("collectInventories isolates failing owners in llm, repository, storage, worker, project order", (t) => {
   const f = fixture(t);
   const calls: string[] = [];
-  const custody = entry("credential");
+  const llm = entry("credential");
   const project = entry("binding");
   const snapshot = f.store.transaction((tx) =>
     collectInventories(tx, {
-      custody: (received) => {
+      llm: (received) => {
         assert.equal(received, tx);
-        calls.push(OWNER_CUSTODY);
-        return [custody];
+        calls.push(OWNER_LLM);
+        return [llm];
+      },
+      repository: (received) => {
+        assert.equal(received, tx);
+        calls.push(OWNER_REPOSITORY);
+        return [];
+      },
+      storage: (received) => {
+        assert.equal(received, tx);
+        calls.push(OWNER_STORAGE);
+        return [];
       },
       worker: (received) => {
         assert.equal(received, tx);
@@ -128,7 +147,7 @@ test("collectInventories isolates failing owners in custody, worker, project ord
   assert.deepEqual(calls, OWNERS);
   assert.deepEqual(snapshot, {
     entries: [
-      { owner: OWNER_CUSTODY, entry: custody },
+      { owner: OWNER_LLM, entry: llm },
       { owner: OWNER_PROJECT, entry: project },
     ],
     missingInventories: [OWNER_WORKER],
@@ -140,7 +159,7 @@ test("report places every owner and scope with exact capabilities, encoded names
     {
       owner,
       entry: entry(`${owner}%2Fglobal%25`, {
-        check: async () => Object.values(ResourceStatus)[index]!,
+        check: async () => STATUSES[index % STATUSES.length]!,
       }),
     },
     {
@@ -155,7 +174,9 @@ test("report places every owner and scope with exact capabilities, encoded names
   const report = await f.report();
   assert.deepEqual(gatewayOperations.healthcheck.output.parse(report), report);
   const owners = {
-    custody: report.shared.custody,
+    llm: report.shared.llm,
+    repository: report.shared.repository,
+    storage: report.shared.storage,
     worker: report.services.worker,
     project: report.services.project,
   };
@@ -163,7 +184,7 @@ test("report places every owner and scope with exact capabilities, encoded names
     assert.deepEqual(owners[owner], {
       global: {
         [`${owner}%2Fglobal%25`]: {
-          status: Object.values(ResourceStatus)[index],
+          status: STATUSES[index % STATUSES.length],
           capability: CAPABILITY,
         },
       },
@@ -209,13 +230,13 @@ test("shared targets use the first check once across owners and projects and log
     },
   });
   const f = fixture(t, [
-    { owner: OWNER_CUSTODY, entry: first },
+    { owner: OWNER_LLM, entry: first },
     { owner: OWNER_PROJECT, entry: second },
   ]);
   const report = await f.report();
   const expected = { status: ResourceStatus.Unhealthy, capability: CAPABILITY };
   assert.equal(checks, SINGLE_CHECK);
-  assert.deepEqual(report.shared.custody.projects.one?.first, expected);
+  assert.deepEqual(report.shared.llm.projects.one?.first, expected);
   assert.deepEqual(report.services.project.projects.two?.second, expected);
   assert.deepEqual(report.services.worker, { global: {}, projects: {} });
   assert.equal(f.logs.length, SINGLE_CHECK);
@@ -224,7 +245,7 @@ test("shared targets use the first check once across owners and projects and log
     { caller, owner, target, status, msg },
     {
       caller: ACCOUNT,
-      owner: OWNER_CUSTODY,
+      owner: OWNER_LLM,
       target: first.target,
       status: ResourceStatus.Unhealthy,
       msg: LOG_MESSAGE,
@@ -236,7 +257,7 @@ test("shared targets use the first check once across owners and projects and log
 test("a non-healthy check logs its observed reason and a healthy check logs none", async (t) => {
   const f = fixture(t, [
     {
-      owner: OWNER_CUSTODY,
+      owner: OWNER_LLM,
       entry: entry(SICK_TARGET, {
         check: async (_context, observe) => {
           observe?.(SICK_REASON);
@@ -271,7 +292,7 @@ test("a never-settling check expires, releases its slot and retains its unknown 
   const contexts: Context[] = [];
   const f = fixture(t, [
     {
-      owner: OWNER_CUSTODY,
+      owner: OWNER_LLM,
       entry: entry("hung", {
         check: (context) => {
           contexts.push(context);
@@ -286,7 +307,7 @@ test("a never-settling check expires, releases its slot and retains its unknown 
     maxConcurrent: SINGLE_CHECK,
     checkDeadlineMs: CHECK_DEADLINE_MS,
   });
-  assert.deepEqual(report.shared.custody.global.hung, {
+  assert.deepEqual(report.shared.llm.global.hung, {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
   });
@@ -300,7 +321,7 @@ test("a never-settling check expires, releases its slot and retains its unknown 
 test("synchronous throws, rejections and invalid statuses become unknown without losing entries", async (t) => {
   const f = fixture(t, [
     {
-      owner: OWNER_CUSTODY,
+      owner: OWNER_LLM,
       entry: entry("throws", {
         check: () => {
           throw CHECK_ERROR;
@@ -308,7 +329,7 @@ test("synchronous throws, rejections and invalid statuses become unknown without
       }),
     },
     {
-      owner: OWNER_CUSTODY,
+      owner: OWNER_LLM,
       entry: entry("rejects", {
         check: async () => {
           throw CHECK_ERROR;
@@ -316,19 +337,19 @@ test("synchronous throws, rejections and invalid statuses become unknown without
       }),
     },
     {
-      owner: OWNER_CUSTODY,
+      owner: OWNER_LLM,
       entry: entry("invalid", {
         check: async () => "invalid" as ResourceStatusValue,
       }),
     },
   ]);
   const report = await f.report();
-  assert.deepEqual(Object.keys(report.shared.custody.global), [
+  assert.deepEqual(Object.keys(report.shared.llm.global), [
     "throws",
     "rejects",
     "invalid",
   ]);
-  for (const value of Object.values(report.shared.custody.global))
+  for (const value of Object.values(report.shared.llm.global))
     assert.deepEqual(value, {
       status: ResourceStatus.Unknown,
       capability: CAPABILITY,
@@ -370,7 +391,7 @@ test("report budget abandons active and unstarted targets, cancels contexts and 
   const f = fixture(
     t,
     Array.from({ length: TARGET_COUNT }, (_, index) => ({
-      owner: OWNER_CUSTODY,
+      owner: OWNER_LLM,
       entry: entry(`target-${index}`, {
         check: (context) => {
           contexts.push(context);
@@ -396,9 +417,9 @@ test("report budget abandons active and unstarted targets, cancels contexts and 
   const report = await pending;
   assert.equal(contexts.length, EXPECTED_MAX);
   assert.ok(contexts.every((context) => context.err()));
-  assert.equal(Object.keys(report.shared.custody.global).length, TARGET_COUNT);
+  assert.equal(Object.keys(report.shared.llm.global).length, TARGET_COUNT);
   assert.ok(
-    Object.values(report.shared.custody.global).every(
+    Object.values(report.shared.llm.global).every(
       ({ status }) => status === ResourceStatus.Unknown,
     ),
   );
@@ -422,7 +443,7 @@ test("report budget includes inventory collection time and never starts expired 
       return {
         entries: [
           {
-            owner: OWNER_CUSTODY,
+            owner: OWNER_LLM,
             entry: entry("queued", {
               check: async () => {
                 checks++;
@@ -438,10 +459,7 @@ test("report budget includes inventory collection time and never starts expired 
     { ...LIMITS, reportBudgetMs: REPORT_BUDGET_MS },
   );
   assert.equal(checks, EMPTY_COUNT);
-  assert.equal(
-    report.shared.custody.global.queued?.status,
-    ResourceStatus.Unknown,
-  );
+  assert.equal(report.shared.llm.global.queued?.status, ResourceStatus.Unknown);
   assert.equal(f.commits(), SINGLE_CHECK);
 });
 
@@ -452,7 +470,7 @@ test("checks scheduled before the report moment do not start after it", async (t
   const f = fixture(
     t,
     Array.from({ length: TARGET_COUNT }, (_, index) => ({
-      owner: OWNER_CUSTODY,
+      owner: OWNER_LLM,
       entry: entry(`target-${index}`, {
         check: async () => {
           checks++;
@@ -468,7 +486,7 @@ test("checks scheduled before the report moment do not start after it", async (t
   });
   assert.equal(checks, SINGLE_CHECK);
   assert.ok(
-    Object.values(report.shared.custody.global).every(
+    Object.values(report.shared.llm.global).every(
       ({ status }) => status === ResourceStatus.Unknown,
     ),
   );

@@ -44,7 +44,7 @@ test(
         gitLsRemote: async () => {},
         resolveSshHostname: async () => "github.com",
       },
-      inventoryOverrides: { custody: () => [] },
+      inventoryOverrides: { llm: () => [] },
     });
     const cli = journeyClient(t, fixture.endpoint, fixture.token);
     await cli.write(["repository", "credential", "create"], {
