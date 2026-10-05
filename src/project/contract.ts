@@ -10,6 +10,19 @@ import {
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
+import { ResourceStatus } from "../kernel/health.ts";
+
+export const BINDING_CHECK_TIMEOUT_MS = 10000;
+export const BINDING_VERIFY_TIMEOUT_MS = 30000;
+export const bindingVerifyAnswerEntrySchema = z.strictObject({
+  status: z.enum([
+    ResourceStatus.Healthy,
+    ResourceStatus.Unhealthy,
+    ResourceStatus.Unknown,
+  ]),
+  capability: z.string().min(1),
+});
+export type BindingCheckEntry = z.infer<typeof bindingVerifyAnswerEntrySchema>;
 
 export const PROJECT_SERVICE_NAME = "project";
 export const PROJECT_ID_PREFIX = "project";
@@ -571,6 +584,19 @@ export const projectOperations = {
     output: agentConfigItem,
     description: "Get an effective agent configuration view.",
   },
+  "binding.verify": {
+    ...readOperation,
+    id: "project.binding.verify",
+    method: HttpMethod.Post,
+    path: "/api/project/:projectId/binding/:bindingId/verify",
+    timeoutMs: BINDING_VERIFY_TIMEOUT_MS,
+    input: readInput(bindingParams, emptyFields),
+    output: z.strictObject({
+      address: bindingVerifyAnswerEntrySchema,
+      credential: bindingVerifyAnswerEntrySchema,
+    }),
+    description: "Verify one repository binding address and credential.",
+  },
 } as const satisfies Record<string, Operation>;
 
 export interface SchedulerWakeup {
@@ -615,3 +641,8 @@ export interface WorkerBindingRow {
   entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;
   tombstone: boolean;
 }
+
+export type VerifyRepositoryCredential = (
+  credentialName: string,
+  context: Context,
+) => Promise<BindingCheckEntry>;

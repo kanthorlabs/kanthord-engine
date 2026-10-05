@@ -301,6 +301,8 @@ export function composeServices(options: {
     validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     repositoryConnector: repoConnector,
+    verifyRepositoryCredential: (name, context) =>
+      repositoryCredentials.verifyCredential(name, context),
     workerAgentsOf: (name) => worker.workerAgentsOf(name),
     workerAgentView: (tx, w, a, entry) =>
       worker.workerAgentView(tx, w, a, entry),

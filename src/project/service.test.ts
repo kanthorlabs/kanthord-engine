@@ -26,6 +26,7 @@ import {
   BindingKind,
   BindingState,
   ChangeKind,
+  BINDING_CHECK_TIMEOUT_MS,
   FollowsType,
   GitHubAction,
   INSTANCE_COUNT_MIN,
@@ -38,6 +39,7 @@ import {
   STORAGE_PLATFORM,
   WorkerField,
   bindingSetWriteInputSchema,
+  type BindingCheckEntry,
   type WorkerEntry,
   PROJECT_ID_PREFIX,
   PROJECT_SERVICE_NAME,
@@ -82,9 +84,11 @@ const CORE_OPERATIONS = [
   "project.bindingRevision.list",
   "project.agentConfiguration.list",
   "project.agentConfiguration.get",
+  "project.binding.verify",
 ];
 const CURSOR_ENCODING = "base64url";
 type OperationKey = Exclude<keyof typeof projectOperations, "bindingSet.write">;
+type AsyncOperationKey = "binding.verify";
 
 function unexpected(): never {
   throw new Error("Unexpected peer collaboration call.");
@@ -121,6 +125,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       gitLsRemote: unexpected,
       resolveSshHostname: unexpected,
     },
+    verifyRepositoryCredential: unexpected,
     workerAgentsOf: unexpected,
     workerAgentView: unexpected,
     endRegistrations: (tx, projectId, resourceIdentity, now) => {
@@ -155,6 +160,17 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       registry.get(operation.id).handler(input, caller),
     ) as (typeof projectOperations)[K]["output"]["_output"];
   }
+  async function invokeAsync<K extends AsyncOperationKey>(
+    key: K,
+    params: Record<string, string> = {},
+  ): Promise<(typeof projectOperations)[K]["output"]["_output"]> {
+    const operation = projectOperations[key];
+    const input = operation.input.parse({ params, query: {}, body: null });
+    const result = await registry.get(operation.id).handler(input, caller);
+    return operation.output.parse(
+      result,
+    ) as (typeof projectOperations)[K]["output"]["_output"];
+  }
   return {
     store,
     project,
@@ -162,6 +178,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     registry,
     caller,
     invoke,
+    invokeAsync,
     commits: () => commits,
     registrationEnds,
     wakes,
@@ -2824,4 +2841,211 @@ test("collaborations read uncommitted rows without opening or committing a trans
   );
   assert.deepEqual(f.invoke("list").items, []);
   assert.equal(f.store.database.isTransaction, false);
+});
+
+const BINDING_VERIFY_TIMEOUT = BINDING_CHECK_TIMEOUT_MS;
+const CREDENTIAL_NOT_FOUND = "credential.credential.not_found";
+const PLATFORM_ACTION_CAPABILITY = "platform action";
+const ADDRESS_SSH_FAIL = "ssh_fail";
+const CREDENTIAL_REFUSAL = "refusal";
+const CREDENTIAL_HEALTHY: BindingCheckEntry = {
+  status: ResourceStatus.Healthy,
+  capability: PLATFORM_ACTION_CAPABILITY,
+};
+
+function verifyFixture(
+  t: TestContext,
+  addressBehavior: "healthy" | typeof ADDRESS_SSH_FAIL,
+  credentialBehavior: "healthy" | typeof CREDENTIAL_REFUSAL,
+) {
+  const sshCalls: Array<{ address: string; timeout: number }> = [];
+  const credentialCalls: string[] = [];
+  const credentialAnswer: BindingCheckEntry = CREDENTIAL_HEALTHY;
+  const f = fixture(t, {
+    repositoryConnector: {
+      async resolveSshHostname(host: string) {
+        return host;
+      },
+      async gitLsRemote(address: string, _context: unknown, timeout: number) {
+        sshCalls.push({ address, timeout });
+        if (addressBehavior === ADDRESS_SSH_FAIL) throw new Error("SSH failed");
+      },
+    },
+    verifyRepositoryCredential: async (name: string) => {
+      credentialCalls.push(name);
+      if (credentialBehavior === CREDENTIAL_REFUSAL)
+        throw new OperationError(
+          HttpStatus.NotFound,
+          CREDENTIAL_NOT_FOUND,
+          "Not found.",
+        );
+      return credentialAnswer;
+    },
+  });
+  return { f, sshCalls, credentialCalls, credentialAnswer };
+}
+
+test("binding.verify returns healthy for a valid repository binding", async (t) => {
+  const { f, sshCalls, credentialCalls, credentialAnswer } = verifyFixture(
+    t,
+    "healthy",
+    "healthy",
+  );
+  const project = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return p;
+  });
+  const bindings = f.store.transaction((tx) =>
+    Array.from(readCurrentBindingSet(tx, project.id).values()),
+  );
+  const binding = bindings[NO_ITEMS];
+  assert.ok(binding);
+  const result = await f.invokeAsync("binding.verify", {
+    projectId: project.id,
+    bindingId: binding.id,
+  });
+  assert.deepEqual(result.address, {
+    status: ResourceStatus.Healthy,
+    capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+  });
+  assert.deepEqual(result.credential, credentialAnswer);
+  assert.equal(sshCalls.length, ONE_CALL);
+  assert.equal(sshCalls[0]?.address, REPOSITORY_ADDRESS);
+  assert.ok(
+    (sshCalls[0]?.timeout ?? 0) > NO_CALLS &&
+      (sshCalls[0]?.timeout ?? 0) <= BINDING_VERIFY_TIMEOUT,
+  );
+  assert.deepEqual(credentialCalls, [REPOSITORY_CREDENTIAL]);
+});
+
+test("binding.verify returns unhealthy for address when SSH read fails", async (t) => {
+  const { f, sshCalls, credentialCalls } = verifyFixture(
+    t,
+    "ssh_fail",
+    "healthy",
+  );
+  const project = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return p;
+  });
+  const bindings = f.store.transaction((tx) =>
+    Array.from(readCurrentBindingSet(tx, project.id).values()),
+  );
+  const binding = bindings[NO_ITEMS];
+  assert.ok(binding);
+  const result = await f.invokeAsync("binding.verify", {
+    projectId: project.id,
+    bindingId: binding.id,
+  });
+  assert.equal(result.address.status, ResourceStatus.Unhealthy);
+  assert.equal(result.address.capability, RESOURCE_CAPABILITY_NETWORK_GIT_READ);
+  assert.equal(sshCalls.length, ONE_CALL);
+  assert.deepEqual(credentialCalls, [REPOSITORY_CREDENTIAL]);
+});
+
+test("binding.verify propagates a credential record-verify refusal unchanged", async (t) => {
+  const { f } = verifyFixture(t, "healthy", "refusal");
+  const project = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return p;
+  });
+  const bindings = f.store.transaction((tx) =>
+    Array.from(readCurrentBindingSet(tx, project.id).values()),
+  );
+  const binding = bindings[NO_ITEMS];
+  assert.ok(binding);
+  await assert.rejects(
+    f.invokeAsync("binding.verify", {
+      projectId: project.id,
+      bindingId: binding.id,
+    }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.NotFound);
+      assert.equal(error.code, CREDENTIAL_NOT_FOUND);
+      return true;
+    },
+  );
+});
+
+test("binding.verify returns 404 for an absent binding", async (t) => {
+  const { f } = verifyFixture(t, "healthy", "healthy");
+  const project = f.store.transaction((tx) => insertProject(tx, PROJECT_NAME));
+  await assert.rejects(
+    f.invokeAsync("binding.verify", {
+      projectId: project.id,
+      bindingId: `${BINDING_ID_PREFIX}_01ARZ3NDEKTSV4RRFFQ69G5FAV`,
+    }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.NotFound);
+      assert.equal(error.code, ProjectErrorCode.BindingNotFound);
+      return true;
+    },
+  );
+});
+
+test("binding.verify returns 404 for a removed binding", async (t) => {
+  const { f } = verifyFixture(t, "healthy", "healthy");
+  const project = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    const result = writeBindingSet(
+      tx,
+      p.id,
+      p.bindingSetVersion,
+      new Map([[REPOSITORY_NAME, repositoryBinding()]]),
+    );
+    const bindingId = result.changes[NO_ITEMS]?.bindingId;
+    assert.ok(bindingId);
+    writeBindingSet(
+      tx,
+      p.id,
+      p.bindingSetVersion + VERSION_INCREMENT,
+      new Map(),
+    );
+    return { projectId: p.id, bindingId };
+  });
+  await assert.rejects(
+    f.invokeAsync("binding.verify", {
+      projectId: project.projectId,
+      bindingId: project.bindingId,
+    }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.NotFound);
+      assert.equal(error.code, ProjectErrorCode.BindingNotFound);
+      return true;
+    },
+  );
+});
+
+test("binding.verify returns 404 for a non-repository binding", async (t) => {
+  const { f } = verifyFixture(t, "healthy", "healthy");
+  const project = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    const result = writeBindingSet(
+      tx,
+      p.id,
+      p.bindingSetVersion,
+      new Map([[WORKER_NAME, workerBinding()]]),
+    );
+    const bindingId = result.changes[NO_ITEMS]?.bindingId;
+    assert.ok(bindingId);
+    return { projectId: p.id, bindingId };
+  });
+  await assert.rejects(
+    f.invokeAsync("binding.verify", {
+      projectId: project.projectId,
+      bindingId: project.bindingId,
+    }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.NotFound);
+      assert.equal(error.code, ProjectErrorCode.BindingNotFound);
+      return true;
+    },
+  );
 });

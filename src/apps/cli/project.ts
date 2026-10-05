@@ -89,6 +89,14 @@ const AGENT_GET_INVALID_PROJECT_ID = "cli.project.agent.get.invalid_project_id";
 const AGENT_GET_INVALID_BINDING_ID = "cli.project.agent.get.invalid_binding_id";
 const AGENT_GET_TOKEN_REQUIRED = "cli.project.agent.get.token_required";
 const AGENT_GET_INDETERMINATE = "cli.project.agent.get.indeterminate";
+const BINDING_VERIFY_INVALID_PROJECT_ID =
+  "cli.project.binding.verify.invalid_project_id";
+const BINDING_VERIFY_INVALID_BINDING_ID =
+  "cli.project.binding.verify.invalid_binding_id";
+const BINDING_VERIFY_TOKEN_REQUIRED =
+  "cli.project.binding.verify.token_required";
+const BINDING_VERIFY_INDETERMINATE = "cli.project.binding.verify.indeterminate";
+const VERIFY = "verify";
 
 function validateName(name: string, code: string): void {
   if (!projectNameSchema.safeParse(name).success)
@@ -347,6 +355,27 @@ async function agentGet(
   );
 }
 
+async function bindingVerify(
+  projectId: string,
+  bindingId: string,
+  command: Command,
+): Promise<void> {
+  validateProjectId(projectId, BINDING_VERIFY_INVALID_PROJECT_ID);
+  validateBindingId(bindingId, BINDING_VERIFY_INVALID_BINDING_ID);
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, BINDING_VERIFY_TOKEN_REQUIRED);
+  const result = await httpClient(projectOperations, endpoint, token)[
+    "binding.verify"
+  ]({
+    params: { projectId, bindingId },
+    query: {},
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, BINDING_VERIFY_INDETERMINATE))}\n`,
+  );
+}
+
 export function addProjectCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -508,5 +537,14 @@ function addBindingCommands(project: Command): void {
     .action(
       (projectId: string, bindingId: string, _options, command: Command) =>
         bindingRevisionList(projectId, bindingId, command),
+    );
+  binding
+    .command(VERIFY)
+    .description("Verify a repository binding address and credential as JSON")
+    .argument("<project-id>", "Project ID")
+    .argument("<binding-id>", "Binding ID")
+    .action(
+      (projectId: string, bindingId: string, _options, command: Command) =>
+        bindingVerify(projectId, bindingId, command),
     );
 }

@@ -1,0 +1,121 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: project.binding.verify
+    tags:
+      - project
+    description: Verify one repository binding address and credential.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.verify.Input/properties/params/prop\
+            erties/projectId"
+      - name: bindingId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.verify.Input/properties/params/prop\
+            erties/bindingId"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.binding.verify.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.binding.verify.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            projectId:
+              type: string
+              minLength: 1
+            bindingId:
+              type: string
+              minLength: 1
+          required:
+            - projectId
+            - bindingId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.binding.verify.Output:
+      type: object
+      properties:
+        address:
+          type: object
+          properties:
+            status:
+              type: string
+              enum:
+                - healthy
+                - unhealthy
+                - unknown
+            capability:
+              type: string
+              minLength: 1
+          required:
+            - status
+            - capability
+          additionalProperties: false
+        credential:
+          type: object
+          properties:
+            status:
+              type: string
+              enum:
+                - healthy
+                - unhealthy
+                - unknown
+            capability:
+              type: string
+              minLength: 1
+          required:
+            - status
+            - capability
+          additionalProperties: false
+      required:
+        - address
+        - credential
+      additionalProperties: false

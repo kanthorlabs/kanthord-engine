@@ -19,6 +19,7 @@ import {
   type HealthRegistry,
   type ResourceCheck,
   type ResourceEntry,
+  type ResourceStatusValue,
 } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { throwIfCancelled } from "../kernel/context.ts";
@@ -28,6 +29,7 @@ import {
   BindingKind,
   BindingState,
   ChangeKind,
+  BINDING_CHECK_TIMEOUT_MS,
   EMPTY_LENGTH,
   LIST_LIMIT_MAX,
   INSTANCE_COUNT_MIN,
@@ -64,6 +66,7 @@ import {
   type EndRegistrations,
   type BindingChange,
   type SchedulerWakeup,
+  type VerifyRepositoryCredential,
 } from "./contract.ts";
 import {
   insertProject,
@@ -169,6 +172,7 @@ export interface Dependencies {
   validateEntry: ValidateEntry;
   custodySuitability: CustodySuitability;
   repositoryConnector: RepositoryConnector;
+  verifyRepositoryCredential: VerifyRepositoryCredential;
   workerAgentsOf: WorkerAgentsOfFn;
   workerAgentView: WorkerAgentViewFn;
   endRegistrations: EndRegistrations;
@@ -184,6 +188,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly validateEntry: ValidateEntry;
   private readonly custodySuitability: CustodySuitability;
   private readonly repositoryConnector: RepositoryConnector;
+  private readonly verifyRepositoryCredential: VerifyRepositoryCredential;
   private readonly workerAgentsOf: WorkerAgentsOfFn;
   private readonly workerAgentView: WorkerAgentViewFn;
   private readonly endRegistrations: EndRegistrations;
@@ -196,6 +201,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.validateEntry = dependencies.validateEntry;
     this.custodySuitability = dependencies.custodySuitability;
     this.repositoryConnector = dependencies.repositoryConnector;
+    this.verifyRepositoryCredential = dependencies.verifyRepositoryCredential;
     this.workerAgentsOf = dependencies.workerAgentsOf;
     this.workerAgentView = dependencies.workerAgentView;
     this.endRegistrations = dependencies.endRegistrations;
@@ -287,6 +293,76 @@ export class ProjectService implements Service, ProjectBindings {
           return { ...page, items: page.items.map(bindingRecord) };
         }),
     );
+    registry.register(
+      projectOperations["binding.verify"],
+      ({ params }, caller) => this.verifyBinding(params, caller),
+    );
+  }
+  private async verifyBinding(
+    params: { projectId: string; bindingId: string },
+    caller: CallerContext,
+  ) {
+    const { address, credential } = caller.commit((tx) => {
+      requireProject(tx, params.projectId);
+      const binding = readBindingRevision(tx, params.bindingId);
+      if (
+        !binding ||
+        binding.projectId !== params.projectId ||
+        hasBindingTombstone(tx, binding) ||
+        kindOf(binding.resourceIdentity) !== BindingKind.Repository
+      )
+        throw new OperationError(
+          HttpStatus.NotFound,
+          ProjectErrorCode.BindingNotFound,
+          "Binding not found.",
+        );
+      const config = repositoryConfigSchema.parse(binding.config);
+      return { address: config.address, credential: config.credential };
+    });
+    throwIfCancelled(caller.context);
+    const addressEntry = await this.checkBindingAddress(
+      address,
+      caller.context,
+    );
+    const credentialEntry = await this.verifyRepositoryCredential(
+      credential,
+      caller.context,
+    );
+    throwIfCancelled(caller.context);
+    return caller.commit(() => ({
+      address: addressEntry,
+      credential: credentialEntry,
+    }));
+  }
+  private async checkBindingAddress(address: string, context: Context) {
+    const deadline = new CancellationContext(
+      context,
+      Date.now() + BINDING_CHECK_TIMEOUT_MS,
+    );
+    const entry = (status: ResourceStatusValue) => ({
+      status,
+      capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+    });
+    try {
+      const end = Date.now() + BINDING_CHECK_TIMEOUT_MS;
+      await this.proveRepositoryHost(
+        address,
+        deadline,
+        BINDING_CHECK_TIMEOUT_MS,
+      );
+      await this.repositoryConnector.gitLsRemote(
+        address,
+        deadline,
+        end - Date.now(),
+      );
+      return entry(ResourceStatus.Healthy);
+    } catch {
+      return entry(
+        deadline.err() ? ResourceStatus.Unknown : ResourceStatus.Unhealthy,
+      );
+    } finally {
+      deadline.cancel();
+    }
   }
   private agentItem(
     tx: Transaction,

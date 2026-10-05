@@ -142,6 +142,8 @@ paths:
     $ref: ./openapi/project/binding.get.yaml#/pathItem
   /api/project/{projectId}/binding:
     $ref: ./openapi/project/binding.list.yaml#/pathItem
+  /api/project/{projectId}/binding/{bindingId}/verify:
+    $ref: ./openapi/project/binding.verify.yaml#/pathItem
   /api/project/{projectId}/binding/{bindingId}/revision:
     $ref: ./openapi/project/bindingRevision.list.yaml#/pathItem
   /api/project/{projectId}/binding-set:

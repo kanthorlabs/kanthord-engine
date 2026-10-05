@@ -1,11 +1,12 @@
 import {
   credentialPlatformList,
   type BindingsNamingFn,
+  type CredentialCheckAnswer,
   type CredentialPlatformSet,
   type CredentialRecords,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { throwIfCancelled } from "../kernel/context.ts";
+import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import type { ResourceEntry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
@@ -116,6 +117,13 @@ export class RepositoryCredentials {
 
   resourceInventory(tx: Transaction): ResourceEntry[] {
     return this.records.resourceInventory(tx, PLATFORM_SET);
+  }
+
+  verifyCredential(
+    credentialName: string,
+    context: Context,
+  ): Promise<CredentialCheckAnswer> {
+    return this.records.verify(PLATFORM_SET, credentialName, context);
   }
 
   private get(
