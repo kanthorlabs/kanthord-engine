@@ -41,6 +41,7 @@ const cases = [
       "login-status",
       "platforms",
       "check",
+      "verify",
     ],
     exact: true,
   },

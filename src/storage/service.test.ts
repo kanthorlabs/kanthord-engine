@@ -12,7 +12,11 @@ import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HealthScope, ResourceStatus } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  OperationRegistry,
+  type CallerContext,
+} from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { storageOperations } from "./contract.ts";
@@ -346,5 +350,145 @@ test("check takes no mutation key and the credential name check is refused", (t)
       }),
     HttpStatus.BadRequest,
     INVALID_INPUT_CODE,
+  );
+});
+
+const VERIFY_PATH = "/api/storage/credential/:credentialName/verify";
+const ARCHIVED_CODE = "credential.credential.archived";
+
+function verifyInput(credentialName: string) {
+  return { params: { credentialName }, query: {}, body: null };
+}
+
+function credentialRows(f: ReturnType<typeof fixture>): string {
+  return JSON.stringify(
+    f.store.database.prepare("SELECT * FROM credential ORDER BY id").all(),
+  );
+}
+
+test("verify answers healthy, unhealthy and unknown like the health report without a write, a log or an answer that holds the secret", async (t) => {
+  const lines: string[] = [];
+  const f = fixture(
+    t,
+    pino({ level: "info" }, { write: (line: string) => lines.push(line) }),
+  );
+  f.invoke(storageOperations.create, {
+    params: {},
+    query: {},
+    body: S3_BODY,
+  });
+  const statuses = [
+    [HttpStatus.OK, ResourceStatus.Healthy],
+    [HttpStatus.NotFound, ResourceStatus.Unhealthy],
+    [HttpStatus.InternalServerError, ResourceStatus.Unknown],
+  ] as const;
+  let next = 0;
+  const send = t.mock.method(
+    S3Client.prototype,
+    "send",
+    async (command: HeadBucketCommand) => {
+      assert.deepEqual(command.input, { Bucket: METADATA.bucket });
+      return {
+        $metadata: { httpStatusCode: statuses[Math.floor(next++ / 2)]![0] },
+      };
+    },
+  );
+  t.mock.method(S3Client.prototype, "destroy", () => {});
+  const before = credentialRows(f);
+  for (const [, expected] of statuses) {
+    const answer = await f.invoke(
+      storageOperations.verify,
+      verifyInput(S3_BODY.name),
+    );
+    const [entry] = f.store.transaction((tx) =>
+      f.component.resourceInventory(tx),
+    );
+    assert.deepEqual(answer, {
+      status: expected,
+      capability: CAPABILITY_BUCKET_HEAD,
+    });
+    assert.equal(await entry!.check(background), expected);
+    assert.ok(!JSON.stringify(answer).includes(SECRET));
+  }
+  assert.equal(send.mock.callCount(), statuses.length * 2);
+  assert.equal(credentialRows(f), before);
+  assert.ok(lines.length > NO_ROWS);
+  assert.ok(!lines.join("").includes(SECRET));
+});
+
+test("verify answers unknown when the request throws and logs no secret", async (t) => {
+  const lines: string[] = [];
+  const f = fixture(
+    t,
+    pino({ level: "info" }, { write: (line: string) => lines.push(line) }),
+  );
+  f.invoke(storageOperations.create, {
+    params: {},
+    query: {},
+    body: S3_BODY,
+  });
+  t.mock.method(S3Client.prototype, "send", async () => {
+    throw new Error(`failed with ${SECRET}`);
+  });
+  t.mock.method(S3Client.prototype, "destroy", () => {});
+  assert.deepEqual(
+    await f.invoke(storageOperations.verify, verifyInput(S3_BODY.name)),
+    { status: ResourceStatus.Unknown, capability: CAPABILITY_BUCKET_HEAD },
+  );
+  assert.ok(!lines.join("").includes(SECRET));
+});
+
+test("verify refuses an archived record, an unknown name and a name of another component", async (t) => {
+  const f = fixture(t);
+  const send = t.mock.method(S3Client.prototype, "send", async () => {
+    throw new Error("UNEXPECTED_REQUEST");
+  });
+  f.invoke(storageOperations.create, {
+    params: {},
+    query: {},
+    body: S3_BODY,
+  });
+  f.store.transaction((tx) =>
+    f.custody.create(
+      tx,
+      { platforms: REPOSITORY_PLATFORMS },
+      {
+        name: "github",
+        platform: "github",
+        secret: { key: SECRET },
+        metadata: null,
+      },
+      undefined,
+    ),
+  );
+  f.store.transaction((tx) =>
+    f.custody.archive(tx, { platforms: REPOSITORY_PLATFORMS }, "github"),
+  );
+  for (const name of ["github", "missing"])
+    await rejects(
+      () => f.invoke(storageOperations.verify, verifyInput(name)),
+      HttpStatus.NotFound,
+      NOT_FOUND_CODE,
+    );
+  f.invoke(storageOperations.archive, verifyInput(S3_BODY.name));
+  await rejects(
+    () => f.invoke(storageOperations.verify, verifyInput(S3_BODY.name)),
+    HttpStatus.Conflict,
+    ARCHIVED_CODE,
+  );
+  assert.equal(send.mock.callCount(), NO_ROWS);
+});
+
+test("verify takes no body and no mutation key", () => {
+  assert.equal(storageOperations.verify.mutation, false);
+  assert.equal(storageOperations.verify.method, HttpMethod.Post);
+  assert.equal(storageOperations.verify.path, VERIFY_PATH);
+  assert.equal(storageOperations.verify.access, AccessPolicy.Human);
+  assert.throws(() =>
+    storageOperations.verify.input.parse({
+      params: { credentialName: S3_BODY.name },
+      query: {},
+      body: {},
+    }),
   );
 });

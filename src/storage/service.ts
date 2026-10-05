@@ -91,6 +91,15 @@ export class StorageComponent {
         this.records.archive(tx, PLATFORM_SET, input.params.credentialName),
       ),
     );
+    registry.register(storageOperations.verify, async (input, caller) => {
+      const answer = await this.records.verify(
+        PLATFORM_SET,
+        input.params.credentialName,
+        caller.context,
+      );
+      throwIfCancelled(caller.context);
+      return caller.commit(() => answer);
+    });
     registry.register(storageOperations.check, async (input, caller) => {
       const answer = await this.records.check(
         PLATFORM_SET,

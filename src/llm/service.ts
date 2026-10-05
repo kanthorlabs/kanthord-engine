@@ -184,6 +184,15 @@ export class LlmComponent implements Service {
         this.records.archive(tx, this.platformSet, input.params.credentialName),
       ),
     );
+    registry.register(llmOperations.verify, async (input, caller) => {
+      const answer = await this.records.verify(
+        this.platformSet,
+        input.params.credentialName,
+        caller.context,
+      );
+      throwIfCancelled(caller.context);
+      return caller.commit(() => answer);
+    });
     registry.register(llmOperations.check, async (input, caller) => {
       const answer = await this.records.check(
         this.platformSet,

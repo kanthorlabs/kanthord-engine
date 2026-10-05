@@ -3,7 +3,9 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { z } from "zod";
 import { background, CancellationContext } from "../kernel/context.ts";
+import { OperationError } from "../kernel/errors.ts";
 import { HealthScope, ResourceStatus } from "../kernel/health.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   CUSTODY_SERVICE_NAME,
@@ -229,4 +231,105 @@ test("a resource check captures the newest live revision and its metadata", asyn
   context.cancel();
   assert.equal(await check(context), ResourceStatus.Unknown);
   assert.equal(calls.length, ONE_CALL);
+});
+
+const VERIFY_DEADLINE_MS = 10000;
+const NOT_FOUND_CODE = "credential.credential.not_found";
+const ARCHIVED_CODE = "credential.credential.archived";
+const CHECK_UNSUPPORTED_CODE = "credential.check.unsupported";
+
+function operationError(status: number, code: string) {
+  return (error: unknown) =>
+    error instanceof OperationError &&
+    error.status === status &&
+    error.code === code;
+}
+
+function rowsSnapshot(store: Store): string {
+  return JSON.stringify(
+    store.database.prepare("SELECT * FROM credential ORDER BY id").all(),
+  );
+}
+
+test("verify probes the newest live revision, writes no row and agrees with the resource check", async (t) => {
+  const { store, component, calls, set } = fixture(t);
+  insert(store, PROBED_PLATFORM, "probed", FIRST_REVISION);
+  insert(store, PROBED_PLATFORM, "probed", SECOND_REVISION, null, {
+    key: "newest",
+  });
+  const before = rowsSnapshot(store);
+  const answer = await component.verify(set, "probed", background);
+  const check = store.transaction((tx) =>
+    component.resourceCheck(tx, set, "probed"),
+  );
+  assert.deepEqual(answer, {
+    status: ResourceStatus.Healthy,
+    capability: PROBED_CAPABILITY,
+  });
+  assert.equal(await check(background), answer.status);
+  assert.deepEqual(calls, [
+    { secret: { key: "newest" }, metadata: METADATA },
+    { secret: { key: "newest" }, metadata: METADATA },
+  ]);
+  assert.equal(rowsSnapshot(store), before);
+});
+
+test("verify refuses an archived record, a platform without a probe, a foreign name and an unknown name before any probe call", async (t) => {
+  const { store, component, calls, set } = fixture(t);
+  insert(store, PROBED_PLATFORM, "ended", FIRST_REVISION, Date.now());
+  insert(store, UNPROBED_PLATFORM, "plain");
+  insert(store, FOREIGN_PLATFORM, "foreign");
+  insert(store, FOREIGN_PLATFORM, "foreign-ended", FIRST_REVISION, Date.now());
+  const refusals = [
+    ["ended", HttpStatus.Conflict, ARCHIVED_CODE],
+    ["plain", HttpStatus.BadRequest, CHECK_UNSUPPORTED_CODE],
+    ["foreign", HttpStatus.NotFound, NOT_FOUND_CODE],
+    ["foreign-ended", HttpStatus.NotFound, NOT_FOUND_CODE],
+    ["missing", HttpStatus.NotFound, NOT_FOUND_CODE],
+  ] as const;
+  for (const [name, status, code] of refusals)
+    await assert.rejects(
+      component.verify(set, name, background),
+      operationError(status, code),
+    );
+  assert.equal(calls.length, NO_CALLS);
+});
+
+test("verify answers unknown on corrupted ciphertext and on a cancelled caller without a probe call", async (t) => {
+  const { store, component, calls, set } = fixture(t);
+  insert(store, PROBED_PLATFORM, "probed");
+  const cancelled = new CancellationContext();
+  cancelled.cancel();
+  assert.deepEqual(await component.verify(set, "probed", cancelled), {
+    status: ResourceStatus.Unknown,
+    capability: PROBED_CAPABILITY,
+  });
+  store.database
+    .prepare("UPDATE credential SET ciphertext = ?")
+    .run(Buffer.from(SECRET));
+  assert.deepEqual(await component.verify(set, "probed", background), {
+    status: ResourceStatus.Unknown,
+    capability: PROBED_CAPABILITY,
+  });
+  assert.equal(calls.length, NO_CALLS);
+});
+
+test("verify answers unknown when the probe exceeds the 10 s deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const { store, component, set } = fixture(t);
+  insert(store, PROBED_PLATFORM, "probed");
+  const hanging: CredentialPlatformSet = {
+    platforms: {
+      [PROBED_PLATFORM]: {
+        ...set.platforms[PROBED_PLATFORM]!,
+        probe: () => new Promise(() => {}),
+      },
+    },
+  };
+  const pending = component.verify(hanging, "probed", background);
+  t.mock.timers.tick(VERIFY_DEADLINE_MS);
+  assert.deepEqual(await pending, {
+    status: ResourceStatus.Unknown,
+    capability: PROBED_CAPABILITY,
+  });
 });

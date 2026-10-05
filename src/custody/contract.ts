@@ -426,6 +426,11 @@ export interface CredentialRecords {
     body: CredentialCheckBody,
     context: Context,
   ): Promise<CredentialCheckAnswer>;
+  verify(
+    set: CredentialPlatformSet,
+    credentialName: string,
+    context: Context,
+  ): Promise<CredentialCheckAnswer>;
   credentialMetadata(
     tx: Transaction,
     credentialName: string,

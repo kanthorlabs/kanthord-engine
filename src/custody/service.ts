@@ -548,6 +548,52 @@ export class CustodyComponent implements Service, CredentialRecords {
     };
   }
 
+  async verify(
+    set: CredentialPlatformSet,
+    credentialName: string,
+    context: Context,
+  ): Promise<CredentialCheckAnswer> {
+    const { row, entry } = this.store.transaction((tx) => {
+      refuseForeign(tx, set, credentialName);
+      refuseArchived(tx, credentialName);
+      const live = newestLive(tx, credentialName);
+      if (!live) throw notFound();
+      const owned = ownedPlatform(set, live.platform)!;
+      if (owned.probe === null)
+        throw new OperationError(
+          HttpStatus.BadRequest,
+          CustodyErrorCode.CheckUnsupported,
+          "Unsupported credential check.",
+        );
+      return { row: live, entry: owned };
+    });
+    const deadline = new CancellationContext(
+      context,
+      Date.now() + CREDENTIAL_CHECK_TIMEOUT_MS,
+    );
+    try {
+      const status = await Promise.race([
+        capturedResourceCheck(
+          row,
+          this.envelopeKey,
+          entry,
+        )(deadline, (reason) =>
+          this.logger.info(
+            { credential: credentialName, platform: row.platform, reason },
+            "credential verify failed",
+          ),
+        ),
+        deadline.done().then(() => ResourceStatus.Unknown),
+      ]);
+      return {
+        status: deadline.err() ? ResourceStatus.Unknown : status,
+        capability: entry.capability,
+      };
+    } finally {
+      deadline.cancel();
+    }
+  }
+
   async check(
     set: CredentialPlatformSet,
     body: CredentialCheckBody,

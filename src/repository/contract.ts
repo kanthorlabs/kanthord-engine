@@ -230,4 +230,24 @@ export const repositoryOperations = {
     description:
       "Check a typed repository credential secret before it is saved.",
   },
+  verify: {
+    id: "repository.credential.verify",
+    service: REPOSITORY_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/repository/credential/:credentialName/verify",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: CREDENTIAL_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: credentialParamsSchema,
+      query: emptyQuery,
+      body: z.null(),
+    }),
+    output: credentialCheckAnswerSchema,
+    description: "Verify one stored repository credential record.",
+  },
 } as const satisfies Record<string, Operation>;

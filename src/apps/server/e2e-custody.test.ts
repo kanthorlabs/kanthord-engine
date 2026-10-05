@@ -498,3 +498,55 @@ test("create refuses the reserved name check", async (t) => {
     "credential.input.invalid",
   );
 });
+
+test("verify refuses an archived record, a record without a check, an unknown name and a name of another component", async (t) => {
+  const { directory, env } = await setup(t);
+  const groq = join(directory, "groq.json");
+  writePrivate(
+    groq,
+    JSON.stringify({
+      name: "plain",
+      platform: "groq",
+      metadata: null,
+      secret: SECRET,
+    }),
+  );
+  success(await kanthord([...LLM, "create", "--file", groq], env));
+  success(
+    await kanthord(
+      [...REPOSITORY, "create", "--file", createFile(directory, GITHUB)],
+      env,
+    ),
+  );
+  success(await kanthord([...REPOSITORY, "archive", NAME], env));
+  refusal(
+    await kanthord([...LLM, "verify", "plain"], env),
+    "credential.check.unsupported",
+  );
+  refusal(
+    await kanthord([...REPOSITORY, "verify", NAME], env),
+    "credential.credential.archived",
+  );
+  refusal(
+    await kanthord([...REPOSITORY, "verify", "plain"], env),
+    "credential.credential.not_found",
+  );
+  refusal(
+    await kanthord([...LLM, "verify", "missing"], env),
+    "credential.credential.not_found",
+  );
+});
+
+test("verify requires a token and rejects a mutation key without a server", async (t) => {
+  const env = environment(temporary(t));
+  refusal(
+    await kanthord([...LLM, "verify", NAME], env),
+    "cli.llm.credential.verify.token_required",
+  );
+  const result = await kanthord(
+    [...LLM, "verify", NAME, "--idempotency-key", ulid()],
+    { ...env, KANTHORD_TOKEN: LOCAL_TOKEN },
+  );
+  assert.equal(result.code, ExitCode.Failure, result.stderr);
+  assert.equal(result.stdout, EMPTY_OUTPUT);
+});

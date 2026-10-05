@@ -35,6 +35,7 @@ const UPDATE_METADATA = "update-metadata";
 const REVOKE = "revoke";
 const ARCHIVE = "archive";
 const CHECK = "check";
+const VERIFY = "verify";
 const QUERY_TRUE = "true";
 const QUERY_FALSE = "false";
 const FILE_OPTION = "--file";
@@ -104,6 +105,23 @@ async function get(
   });
   process.stdout.write(
     `${JSON.stringify(handleReadResult<unknown>(result, credentialCode(group, GET, INDETERMINATE)))}\n`,
+  );
+}
+
+async function verify(
+  group: CredentialGroup,
+  credentialName: string,
+  command: Command,
+): Promise<void> {
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, credentialCode(group, VERIFY, TOKEN_REQUIRED));
+  const result = await httpClient(group.operations, endpoint, token).verify({
+    params: { credentialName },
+    query: {},
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult<unknown>(result, credentialCode(group, VERIFY, INDETERMINATE)))}\n`,
   );
 }
 
@@ -300,6 +318,13 @@ export function addCredentialCommand(
     .argument("<credential-name>", "Credential name")
     .action((name: string, _options, command: Command) =>
       get(group, name, command),
+    );
+  credential
+    .command(VERIFY)
+    .description("Verify a stored credential as JSON")
+    .argument("<credential-name>", "Credential name")
+    .action((name: string, _options, command: Command) =>
+      verify(group, name, command),
     );
   credential
     .command(PLATFORMS)

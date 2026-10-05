@@ -36,6 +36,8 @@ paths:
     $ref: ./openapi/llm/credential.rotate.yaml#/pathItem
   /api/llm/credential/{credentialName}/metadata:
     $ref: ./openapi/llm/credential.update_metadata.yaml#/pathItem
+  /api/llm/credential/{credentialName}/verify:
+    $ref: ./openapi/llm/credential.verify.yaml#/pathItem
   /api/llm/provider/check:
     $ref: ./openapi/llm/provider.check.yaml#/pathItem
   /api/mission/assessment/{assessmentId}:
@@ -164,6 +166,8 @@ paths:
     $ref: ./openapi/repository/credential.rotate.yaml#/pathItem
   /api/repository/credential/{credentialName}/metadata:
     $ref: ./openapi/repository/credential.update_metadata.yaml#/pathItem
+  /api/repository/credential/{credentialName}/verify:
+    $ref: ./openapi/repository/credential.verify.yaml#/pathItem
   /api/scheduler/claim/{executionId}:
     $ref: ./openapi/scheduler/claim.get.yaml#/pathItem
   /api/scheduler/execution/{executionId}:
@@ -194,6 +198,8 @@ paths:
     $ref: ./openapi/storage/credential.rotate.yaml#/pathItem
   /api/storage/credential/{credentialName}/metadata:
     $ref: ./openapi/storage/credential.update_metadata.yaml#/pathItem
+  /api/storage/credential/{credentialName}/verify:
+    $ref: ./openapi/storage/credential.verify.yaml#/pathItem
   /api/worker/execution/{executionId}/action/request:
     $ref: ./openapi/worker/action.request.yaml#/pathItem
   /api/worker/agent/enablement/{agentName}/disable:

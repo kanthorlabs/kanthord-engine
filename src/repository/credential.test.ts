@@ -11,7 +11,11 @@ import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HealthScope, ResourceStatus } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  OperationRegistry,
+  type CallerContext,
+} from "../kernel/operation.ts";
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { LLM_PLATFORMS } from "../llm/index.ts";
@@ -379,5 +383,147 @@ test("check takes no mutation key and the credential name check is refused", (t)
       }),
     HttpStatus.BadRequest,
     INVALID_INPUT_CODE,
+  );
+});
+
+const VERIFY_PATH = "/api/repository/credential/:credentialName/verify";
+const ARCHIVED_CODE = "credential.credential.archived";
+const REPOSITORY_NAME = "repo";
+
+function verifyInput(credentialName: string) {
+  return { params: { credentialName }, query: {}, body: null };
+}
+
+function credentialRows(f: ReturnType<typeof fixture>): string {
+  return JSON.stringify(
+    f.store.database.prepare("SELECT * FROM credential ORDER BY id").all(),
+  );
+}
+
+function createGithub(f: ReturnType<typeof fixture>) {
+  f.invoke(repositoryOperations.create, {
+    params: {},
+    query: {},
+    body: {
+      name: REPOSITORY_NAME,
+      platform: "github",
+      secret: { key: SECRET },
+      metadata: null,
+    },
+  });
+}
+
+test("verify answers healthy, unhealthy and unknown like the health report without a write, a log or an answer that holds the token", async (t) => {
+  const lines: string[] = [];
+  const f = fixture(
+    t,
+    pino({ level: "info" }, { write: (line: string) => lines.push(line) }),
+  );
+  createGithub(f);
+  const statuses = [
+    [HttpStatus.OK, ResourceStatus.Healthy],
+    [HttpStatus.Unauthorized, ResourceStatus.Unhealthy],
+    [HttpStatus.Forbidden, ResourceStatus.Unknown],
+  ] as const;
+  const requests: unknown[] = [];
+  let next = 0;
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, options?: RequestInit) => {
+      requests.push({ url, headers: options?.headers });
+      return new Response(null, {
+        status: statuses[Math.floor(next++ / 2)]![0],
+      });
+    },
+  );
+  const before = credentialRows(f);
+  for (const [, expected] of statuses) {
+    const answer = await f.invoke(
+      repositoryOperations.verify,
+      verifyInput(REPOSITORY_NAME),
+    );
+    const [entry] = f.store.transaction((tx) =>
+      f.component.resourceInventory(tx),
+    );
+    assert.deepEqual(answer, {
+      status: expected,
+      capability: CAPABILITY_RATE_LIMIT_READ,
+    });
+    assert.equal(await entry!.check(background), expected);
+    assert.ok(!JSON.stringify(answer).includes(SECRET));
+  }
+  assert.equal(requests.length, statuses.length * 2);
+  assert.deepEqual(requests[0], {
+    url: GITHUB_RATE_LIMIT_URL,
+    headers: { [AUTHORIZATION_HEADER]: `Bearer ${SECRET}` },
+  });
+  assert.equal(credentialRows(f), before);
+  assert.ok(lines.length > NO_ROWS);
+  assert.ok(!lines.join("").includes(SECRET));
+});
+
+test("verify answers unknown when the request fails and logs no token", async (t) => {
+  const lines: string[] = [];
+  const f = fixture(
+    t,
+    pino({ level: "info" }, { write: (line: string) => lines.push(line) }),
+  );
+  createGithub(f);
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error(`failed with Bearer ${SECRET}`);
+  });
+  assert.deepEqual(
+    await f.invoke(repositoryOperations.verify, verifyInput(REPOSITORY_NAME)),
+    { status: ResourceStatus.Unknown, capability: CAPABILITY_RATE_LIMIT_READ },
+  );
+  assert.ok(!lines.join("").includes(SECRET));
+});
+
+test("verify refuses an archived record, an unknown name and a name of another component", async (t) => {
+  const f = fixture(t);
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("UNEXPECTED_REQUEST");
+  });
+  f.store.transaction((tx) =>
+    f.custody.create(
+      tx,
+      { platforms: LLM_PLATFORMS },
+      {
+        name: "anthropic",
+        platform: "anthropic",
+        secret: { key: SECRET },
+        metadata: null,
+      },
+      undefined,
+    ),
+  );
+  for (const name of ["anthropic", "missing"])
+    await rejects(
+      () => f.invoke(repositoryOperations.verify, verifyInput(name)),
+      HttpStatus.NotFound,
+      NOT_FOUND_CODE,
+    );
+  createGithub(f);
+  f.invoke(repositoryOperations.archive, verifyInput(REPOSITORY_NAME));
+  await rejects(
+    () => f.invoke(repositoryOperations.verify, verifyInput(REPOSITORY_NAME)),
+    HttpStatus.Conflict,
+    ARCHIVED_CODE,
+  );
+  assert.equal(fetch.mock.callCount(), NO_ROWS);
+});
+
+test("verify takes no body and no mutation key", () => {
+  assert.equal(repositoryOperations.verify.mutation, false);
+  assert.equal(repositoryOperations.verify.method, HttpMethod.Post);
+  assert.equal(repositoryOperations.verify.path, VERIFY_PATH);
+  assert.equal(repositoryOperations.verify.access, AccessPolicy.Human);
+  assert.throws(() =>
+    repositoryOperations.verify.input.parse({
+      params: { credentialName: REPOSITORY_NAME },
+      query: {},
+      body: {},
+    }),
   );
 });

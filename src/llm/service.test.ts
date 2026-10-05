@@ -27,7 +27,11 @@ import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  OperationRegistry,
+  type CallerContext,
+} from "../kernel/operation.ts";
 import {
   IN_MEMORY_DATABASE,
   Store,
@@ -238,6 +242,7 @@ function fixture(
     custody,
     component,
     caller,
+    invoke,
     login,
     loginCode,
     loginStatus,
@@ -1960,4 +1965,144 @@ test("check takes no mutation key", () => {
   assert.equal(llmOperations.check.mutation, false);
   assert.equal(llmOperations.check.method, HttpMethod.Post);
   assert.equal(llmOperations.check.path, CHECK_PATH);
+});
+
+const VERIFY_PATH = "/api/llm/credential/:credentialName/verify";
+const ARCHIVED_CODE = "credential.credential.archived";
+
+const credentialVerify = (f: ReturnType<typeof fixture>, name: string) =>
+  f.invoke(llmOperations.verify, {
+    params: { credentialName: name },
+    query: {},
+    body: null,
+  }) as Promise<typeof llmOperations.verify.output._output>;
+
+function credentialRows(f: ReturnType<typeof fixture>): string {
+  return JSON.stringify(
+    f.store.database.prepare("SELECT * FROM credential ORDER BY id").all(),
+  );
+}
+
+test("verify answers healthy, unhealthy and unknown like the health report without a write, a log or an answer that holds the key", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  f.create({
+    name: "anthropic",
+    platform: Platform.Anthropic,
+    secret: { key: HEALTH_SECRET },
+    metadata: null,
+  });
+  const statuses = [
+    [HttpStatus.OK, "healthy"],
+    [HttpStatus.Forbidden, "unhealthy"],
+    [HttpStatus.InternalServerError, "unknown"],
+  ] as const;
+  const requests: unknown[] = [];
+  let next = 0;
+  t.mock.method(globalThis, "fetch", async (url: unknown) => {
+    requests.push(url);
+    return new Response(null, {
+      status: statuses[Math.floor(next++ / 2)]![0],
+    });
+  });
+  const before = credentialRows(f);
+  for (const [, expected] of statuses) {
+    const answer = await credentialVerify(f, "anthropic");
+    const [entry] = f.store.transaction((tx) =>
+      f.component.resourceInventory(tx),
+    );
+    assert.deepEqual(answer, {
+      status: expected,
+      capability: CAPABILITY_MODEL_LIST_READ,
+    });
+    assert.equal(await entry!.check(background), expected);
+    assert.ok(!JSON.stringify(answer).includes(HEALTH_SECRET));
+  }
+  assert.equal(requests.length, statuses.length * 2);
+  assert.equal(credentialRows(f), before);
+  assert.ok(!JSON.stringify(f.logs).includes(HEALTH_SECRET));
+});
+
+test("verify answers unknown when the request throws", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  f.create({
+    name: "compatible",
+    platform: Platform.OpenAICompatible,
+    secret: { key: HEALTH_SECRET },
+    metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+  });
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new Error(`failed with ${HEALTH_SECRET}`);
+  });
+  assert.deepEqual(await credentialVerify(f, "compatible"), {
+    status: "unknown",
+    capability: CAPABILITY_MODEL_LIST_READ,
+  });
+  assert.ok(!JSON.stringify(f.logs).includes(HEALTH_SECRET));
+});
+
+test("verify refuses an archived record, a platform without a check, an unknown name and a name of another component", async (t) => {
+  const f = fixture();
+  t.after(() => f.store.close());
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("unexpected request");
+  });
+  f.create({
+    name: GROQ,
+    platform: GROQ,
+    secret: { key: HEALTH_SECRET },
+    metadata: null,
+  });
+  f.create({
+    name: "anthropic",
+    platform: Platform.Anthropic,
+    secret: { key: HEALTH_SECRET },
+    metadata: null,
+  });
+  f.store.transaction((tx) =>
+    f.custody.create(
+      tx,
+      { platforms: REPOSITORY_PLATFORMS },
+      {
+        name: "github",
+        platform: "github",
+        secret: { key: HEALTH_SECRET },
+        metadata: null,
+      },
+      undefined,
+    ),
+  );
+  await failsAsync(
+    () => credentialVerify(f, GROQ),
+    HttpStatus.BadRequest,
+    CHECK_UNSUPPORTED_CODE,
+  );
+  for (const name of ["github", "missing"])
+    await failsAsync(
+      () => credentialVerify(f, name),
+      HttpStatus.NotFound,
+      CREDENTIAL_NOT_FOUND_CODE,
+    );
+  f.archive("anthropic");
+  await failsAsync(
+    () => credentialVerify(f, "anthropic"),
+    HttpStatus.Conflict,
+    ARCHIVED_CODE,
+  );
+  assert.equal(fetch.mock.callCount(), NO_FETCH_CALLS);
+});
+
+test("verify takes no body and no mutation key", () => {
+  assert.equal(llmOperations.verify.mutation, false);
+  assert.equal(llmOperations.verify.method, HttpMethod.Post);
+  assert.equal(llmOperations.verify.path, VERIFY_PATH);
+  assert.equal(llmOperations.verify.access, AccessPolicy.Human);
+  assert.throws(() =>
+    llmOperations.verify.input.parse({
+      params: { credentialName: "anthropic" },
+      query: {},
+      body: {},
+    }),
+  );
 });

@@ -5,7 +5,7 @@
 ## Scope
 
 This specification covers the implemented `kanthord repository credential` group, with
-**9 command leaves**. The Repository component is a shared component, not a service.
+**10 command leaves**. The Repository component is a shared component, not a service.
 It owns the credential routes of its platforms. A credential belongs to no project.
 Custody declares no route and keeps the record functions that these routes call.
 
@@ -57,7 +57,7 @@ non-secret diagnostic. A supplied identity never proves authorization.
 
 ## Command inventory
 
-Each synopsis follows `kanthord repository credential`. All nine commands have `[R]` and
+Each synopsis follows `kanthord repository credential`. All ten commands have `[R]` and
 `human` access; five mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/repository/credential` prefix.
 
@@ -72,6 +72,7 @@ All paths below are implemented routes under the ruled `/api/repository/credenti
 | 7   | `archive <credential-name> [M] [R]`                       | `POST /api/repository/credential/:credentialName/archive`                   | `repository.credential.archive`         | `human`; implemented |
 | 8   | `platforms [R]`                                           | `GET /api/repository/credential/platform`                                   | `repository.credential.platform_list`   | `human`; implemented |
 | 9   | `check --file <path> [R]`                                 | `POST /api/repository/credential/check`                                     | `repository.credential.check`           | `human`; implemented |
+| 10  | `verify <credential-name> [R]`                            | `POST /api/repository/credential/:credentialName/verify`                    | `repository.credential.verify`          | `human`; implemented |
 
 The static `/api/repository/credential/platform` and `/api/repository/credential/check` paths take precedence over `/:credentialName`, so custody refuses the names `login`, `platform` and `check`.
 These routes have no project identity.
@@ -159,6 +160,28 @@ HTTP `200` answers `{ status, capability }`, the health entry of the [health rep
 A platform with `verifiable: false` or with the secret shape `oauth` answers `400 credential.check.unsupported`.
 A platform of another component answers `400 credential.platform.unsupported`.
 
+## `verify <credential-name>`
+
+```text
+kanthord repository credential verify <credential-name> [R]
+```
+
+The [record verify](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-record-verify) declares `repository.credential.verify`, a read under `human` access, at `POST /api/repository/credential/:credentialName/verify`.
+The required `CredentialName` maps to `params.credentialName`. Query is empty and body absent. The command takes no mutation key and rejects `--idempotency-key`.
+It checks one stored record and stores no result.
+The `github` check reads the rate limit with the stored token.
+The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown`.
+The release outside an execution pins no revision, drains no revision and writes no row.
+
+HTTP `200` answers `{ status, capability }`, the health entry of the [health report](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-resource-healthcheck-report):
+
+- `status` is `healthy`, `unhealthy` or `unknown`.
+- `capability` is the capability of the platform check, the same value that the health report shows.
+
+An archived record answers `409 credential.credential.archived`.
+A platform with `verifiable: false` answers `400 credential.check.unsupported`.
+An unknown name, or a name of another component, answers `404 credential.credential.not_found`.
+
 ## `get <credential-name>`
 
 The required `CredentialName` has no default and maps to `params.credentialName`.
@@ -211,22 +234,22 @@ at its next use of the credential. A revoke of the newest live revision answers
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                                | Condition                                                                                      | Commands                                                       |
-| ----- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| 404   | `credential.credential.not_found`                   | The credential does not exist, or its platform is not a platform of the Repository component.  | get, rotate, update-metadata, revoke, archive, worker handover |
-| local | `cli.repository.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                      | revoke                                                         |
-| 400   | `credential.input.invalid`                          | Secret or metadata validation fails, including the byte budget, or the name is reserved.       | create, rotate, update-metadata, check                         |
-| 409   | `credential.name.conflict`                          | A credential already has this name; details identify the holder.                               | create                                                         |
-| 400   | `credential.platform.mismatch`                      | The requested platform differs from the stored platform.                                       | binding apply (custody collaboration), worker handover         |
-| 400   | `credential.platform.unsupported`                   | The platform is not a platform of the Repository component.                                    | create, check                                                  |
-| 400   | `credential.check.unsupported`                      | The platform has `verifiable: false` or the secret shape `oauth`.                              | check                                                          |
-| 409   | `credential.revision.conflict`                      | The expected revision is stale.                                                                | rotate, update-metadata                                        |
-| 409   | `credential.revision.ended`                         | The revision is already ended, by a revoke or by a drain.                                      | revoke                                                         |
-| 409   | `credential.revision.newest_live`                   | The revoke names the newest live revision.                                                     | revoke                                                         |
-| 409   | `credential.credential.in_use`                      | A dependent names the credential; `details` holds `agentProviders`, `bindings` and `inbounds`. | archive                                                        |
-| 409   | `credential.credential.archived`                    | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive                               |
-| 404   | `credential.revision.not_found`                     | The revision does not exist.                                                                   | revoke                                                         |
-| 409   | `credential.revision.revoked`                       | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                  |
+| HTTP  | Code                                                | Condition                                                                                      | Commands                                                               |
+| ----- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 404   | `credential.credential.not_found`                   | The credential does not exist, or its platform is not a platform of the Repository component.  | get, rotate, update-metadata, revoke, archive, verify, worker handover |
+| local | `cli.repository.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                      | revoke                                                                 |
+| 400   | `credential.input.invalid`                          | Secret or metadata validation fails, including the byte budget, or the name is reserved.       | create, rotate, update-metadata, check                                 |
+| 409   | `credential.name.conflict`                          | A credential already has this name; details identify the holder.                               | create                                                                 |
+| 400   | `credential.platform.mismatch`                      | The requested platform differs from the stored platform.                                       | binding apply (custody collaboration), worker handover                 |
+| 400   | `credential.platform.unsupported`                   | The platform is not a platform of the Repository component.                                    | create, check                                                          |
+| 400   | `credential.check.unsupported`                      | The platform has `verifiable: false` or the secret shape `oauth`.                              | check, verify                                                          |
+| 409   | `credential.revision.conflict`                      | The expected revision is stale.                                                                | rotate, update-metadata                                                |
+| 409   | `credential.revision.ended`                         | The revision is already ended, by a revoke or by a drain.                                      | revoke                                                                 |
+| 409   | `credential.revision.newest_live`                   | The revoke names the newest live revision.                                                     | revoke                                                                 |
+| 409   | `credential.credential.in_use`                      | A dependent names the credential; `details` holds `agentProviders`, `bindings` and `inbounds`. | archive                                                                |
+| 409   | `credential.credential.archived`                    | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive, verify                               |
+| 404   | `credential.revision.not_found`                     | The revision does not exist.                                                                   | revoke                                                                 |
+| 409   | `credential.revision.revoked`                       | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                          |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 
