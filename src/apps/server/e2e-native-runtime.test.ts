@@ -63,12 +63,18 @@ import {
   gatewayFixture,
 } from "./test-support.ts";
 
-const ZERO = 0;
-const ONE = 1;
-const TWO = 2;
-const THREE = 3;
+const SUCCESSFUL_EXIT = 0;
+const ZERO_BYTE = 0;
+const FIRST_REVISION = 1;
+const SINGLE_INSTANCE = 1;
+const SINGLE_TURN = 1;
+const FAILURE_EXIT = 1;
+const BRACKET_TRIM_OFFSET = 1;
+const SINGLE_CALL = 1;
+const MISSION_VERSION_BASE = 2;
+const THREE_CALLS = 3;
 const PRIVATE_MODE = 0o700;
-const EMPTY = "";
+const NO_OUTPUT = "";
 const SECRET = "test_e2e-runtime-secret";
 const GLOBAL = "Every answer is short.";
 const PROJECT = "The work product is TypeScript.";
@@ -117,8 +123,8 @@ test(
     let sequence = 0;
     async function read<T>(args: string[], env = human): Promise<T> {
       const result = await kanthord(args, env);
-      assert.equal(result.code, ZERO, result.stderr);
-      assert.equal(result.stderr, EMPTY);
+      assert.equal(result.code, SUCCESSFUL_EXIT, result.stderr);
+      assert.equal(result.stderr, NO_OUTPUT);
       assert.equal(result.stdout.includes(SECRET), false);
       return JSON.parse(result.stdout) as T;
     }
@@ -165,13 +171,13 @@ test(
     ]);
     const worker = {
       worker: "general@1",
-      instanceCount: ONE,
+      instanceCount: SINGLE_INSTANCE,
       entries: [{ agent: "swe@1", ...DEFAULTS }],
     };
     const bindingSet = await write<{
       bindings: Record<string, { id: string }>;
     }>(["project", "binding", "apply", project.id], {
-      version: ONE,
+      version: FIRST_REVISION,
       bindings: {
         repo: {
           kind: "repository",
@@ -190,7 +196,7 @@ test(
           kind: "worker",
           config: {
             ...worker,
-            resourceBudget: { turns: ONE, wallTimeMs: 600000 },
+            resourceBudget: { turns: SINGLE_TURN, wallTimeMs: 600000 },
           },
         },
       },
@@ -203,7 +209,7 @@ test(
         kind: "initiative",
         content: { ...CONTENT, bindings: [] },
         reason: "runtime acceptance",
-        expectedMissionVersion: ONE,
+        expectedMissionVersion: FIRST_REVISION,
       },
     );
     for (const [index, name] of ["a", "b"].entries())
@@ -212,9 +218,9 @@ test(
         kind: "objective",
         content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
         reason: "runtime acceptance",
-        expectedMissionVersion: index + TWO,
+        expectedMissionVersion: index + MISSION_VERSION_BASE,
         parentId: initiative.revisions[0]!.nodeId,
-        expectedParentRevision: ONE,
+        expectedParentRevision: FIRST_REVISION,
       });
     writePrivate(
       join(directory, "server.yaml"),
@@ -245,7 +251,7 @@ test(
         ],
         { env: human, encoding: "utf8", timeout: 10000 },
       );
-      assert.equal(result.status, ZERO, result.stderr);
+      assert.equal(result.status, SUCCESSFUL_EXIT, result.stderr);
       return parse(result.stdout) as { token: string; clientSecret: string };
     }
     async function claim(binding: string) {
@@ -310,8 +316,8 @@ test(
           envelope,
         ),
       );
-      keys.handover.fill(ZERO);
-      keys.report.fill(ZERO);
+      keys.handover.fill(ZERO_BYTE);
+      keys.report.fill(ZERO_BYTE);
       const credentials = executionCredentialStore(payload, async () => {
         throw new Error("Unexpected refresh");
       });
@@ -381,7 +387,7 @@ test(
         "modelIdentifier",
         "reasoningEffort",
       ]);
-      assert.equal(declaration.enablement?.revision, ONE);
+      assert.equal(declaration.enablement?.revision, FIRST_REVISION);
     });
     await t.test("E07.2 reviewer and unknown agent", async () => {
       const declaration = await read<
@@ -395,7 +401,7 @@ test(
         ["worker", "agent", "get", "nope@1"],
         human,
       );
-      assert.equal(unknown.code, ONE);
+      assert.equal(unknown.code, FAILURE_EXIT);
       assert.ok(unknown.stderr.startsWith("worker.agent.not_found:"));
     });
     const repository = runtimeX.setup.repositories[0]!;
@@ -474,8 +480,8 @@ test(
         const turns = t.mock.method(agent.budget, "turnEnded");
         await agent.prompt(work);
         assert.ok(existsSync(join(prepared.directory, "hello.txt")));
-        assert.equal(provider.calls.length, THREE);
-        assert.equal(turns.mock.callCount(), THREE);
+        assert.equal(provider.calls.length, THREE_CALLS);
+        assert.equal(turns.mock.callCount(), THREE_CALLS);
         for (const call of provider.calls) {
           assert.equal(call.apiKey, SECRET);
           assert.ok(
@@ -501,10 +507,20 @@ test(
           assert.ok(text.indexOf(GLOBAL) < text.indexOf(PROJECT));
           assert.ok(
             text.indexOf(PROJECT) <
-              text.indexOf(JSON.stringify(work.marked).slice(ONE, -ONE)),
+              text.indexOf(
+                JSON.stringify(work.marked).slice(
+                  BRACKET_TRIM_OFFSET,
+                  -BRACKET_TRIM_OFFSET,
+                ),
+              ),
           );
           assert.ok(
-            text.includes(JSON.stringify(work.marked).slice(ONE, -ONE)),
+            text.includes(
+              JSON.stringify(work.marked).slice(
+                BRACKET_TRIM_OFFSET,
+                -BRACKET_TRIM_OFFSET,
+              ),
+            ),
           );
           assert.equal(text.includes(HOSTILE), false);
         }
@@ -546,8 +562,18 @@ test(
         context: background,
       });
       assert.deepEqual(verification.results, [
-        { command: commands[0], exitCode: ZERO, signal: null, timedOut: false },
-        { command: commands[1], exitCode: ONE, signal: null, timedOut: false },
+        {
+          command: commands[0],
+          exitCode: SUCCESSFUL_EXIT,
+          signal: null,
+          timedOut: false,
+        },
+        {
+          command: commands[1],
+          exitCode: FAILURE_EXIT,
+          signal: null,
+          timedOut: false,
+        },
       ]);
       assert.equal(verificationPassed(verification, commands), false);
       writeFileSync(join(prepared.directory, "verification-junk"), "discard");
@@ -578,7 +604,7 @@ test(
     });
     await t.test("E07.8 lab budget stops after one turn", async () => {
       assert.deepEqual(runtimeY.setup.resourceBudget, {
-        turns: ONE,
+        turns: SINGLE_TURN,
         wallTimeMs: 600000,
       });
       const lab = await root.prepareObjective({
@@ -610,8 +636,8 @@ test(
         const turns = t.mock.method(labAgent.budget, "turnEnded");
         await labAgent.prompt(renderWorkPrompt(runtimeY.revision));
         assert.equal(labAgent.budget.exhausted(), true);
-        assert.equal(fake.calls.length, ONE);
-        assert.equal(turns.mock.callCount(), ONE);
+        assert.equal(fake.calls.length, SINGLE_CALL);
+        assert.equal(turns.mock.callCount(), SINGLE_TURN);
       } finally {
         labAgent.dispose();
         root.release(

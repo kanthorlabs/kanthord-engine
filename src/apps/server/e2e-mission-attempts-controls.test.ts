@@ -26,13 +26,18 @@ import { kanthord, environment } from "./cli-support.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
-const EMPTY = "";
+const NO_OUTPUT = "";
 const FAILURE = 1;
-const ZERO = 0;
-const ONE = 1;
-const TWO = 2;
-const THREE = 3;
-const FOUR = 4;
+const INITIAL_FILE_NUMBER = 0;
+const FIRST_INDEX = 0;
+const INITIAL_ATTEMPT = 0;
+const FIRST_REVISION = 1;
+const FIRST_ATTEMPT = 1;
+const SINGLE_ITEM = 1;
+const SECOND_REVISION = 2;
+const SECOND_ATTEMPT = 2;
+const THIRD_MISSION_VERSION = 3;
+const FOURTH_MISSION_VERSION = 4;
 const VERSION = 5;
 const NUMBER_TYPE = "number";
 const JOURNEY_TIMEOUT_MS = 300000;
@@ -62,7 +67,7 @@ async function setup(t: TestContext) {
     KANTHORD_ENDPOINT: fixture.endpoint,
     KANTHORD_TOKEN: fixture.token,
   };
-  let fileNumber = ZERO;
+  let fileNumber = INITIAL_FILE_NUMBER;
   const file = (body: unknown) => {
     const path = join(directory, `${++fileNumber}.json`);
     writePrivate(path, JSON.stringify(body));
@@ -71,7 +76,7 @@ async function setup(t: TestContext) {
   const read = async <T>(args: string[]): Promise<T> => {
     const result = await kanthord(args, env);
     assert.equal(result.code, SUCCESS, result.stderr);
-    assert.equal(result.stderr, EMPTY);
+    assert.equal(result.stderr, NO_OUTPUT);
     return JSON.parse(result.stdout) as T;
   };
   const write = <T>(args: string[], body: unknown) =>
@@ -88,7 +93,7 @@ async function setup(t: TestContext) {
     "controls",
   ]);
   const mission = await read<Mission>(["mission", "get", project.id]);
-  assert.equal(mission.version, ONE);
+  assert.equal(mission.version, FIRST_REVISION);
   await write(["repository", "credential", "create"], {
     name: "github",
     platform: "github",
@@ -110,7 +115,7 @@ async function setup(t: TestContext) {
     bindingSetVersion: number;
     bindings: Record<string, { id: string }>;
   }>(["project", "binding", "apply", project.id], {
-    version: ONE,
+    version: FIRST_REVISION,
     bindings: {
       repo: {
         kind: "repository",
@@ -131,7 +136,7 @@ async function setup(t: TestContext) {
       },
     },
   });
-  assert.equal(binding.bindingSetVersion, TWO);
+  assert.equal(binding.bindingSetVersion, SECOND_REVISION);
   const create = (body: unknown) =>
     write<NodeChange>(["mission", "node", "create", mission.id], body);
   const initiative = await create({
@@ -139,28 +144,28 @@ async function setup(t: TestContext) {
     kind: NodeKind.Initiative,
     content: CONTENT,
     reason: "plan",
-    expectedMissionVersion: ONE,
+    expectedMissionVersion: FIRST_REVISION,
   });
-  const initiativeId = initiative.revisions[ZERO]!.nodeId;
+  const initiativeId = initiative.revisions[FIRST_INDEX]!.nodeId;
   const objectiveBody = {
     filename: "objective-1.md",
     kind: NodeKind.Objective,
     content: { ...CONTENT, bindings: [binding.bindings.repo!.id] },
     reason: "plan",
     parentId: initiativeId,
-    expectedParentRevision: ONE,
-    expectedMissionVersion: TWO,
+    expectedParentRevision: FIRST_REVISION,
+    expectedMissionVersion: SECOND_REVISION,
   };
   const objective = await create(objectiveBody);
-  const objectiveId = objective.revisions[ZERO]!.nodeId;
+  const objectiveId = objective.revisions[FIRST_INDEX]!.nodeId;
   const task = await create({
     filename: "task-1.md",
     kind: NodeKind.Task,
     content: CONTENT,
     reason: "plan",
     parentId: objectiveId,
-    expectedParentRevision: ONE,
-    expectedMissionVersion: THREE,
+    expectedParentRevision: FIRST_REVISION,
+    expectedMissionVersion: THIRD_MISSION_VERSION,
   });
   const taskId = task.addedEdges.find(
     (edge) => edge.kind === EdgeKind.Containment,
@@ -168,7 +173,7 @@ async function setup(t: TestContext) {
   const secondObjective = await create({
     ...objectiveBody,
     filename: "objective-2.md",
-    expectedMissionVersion: FOUR,
+    expectedMissionVersion: FOURTH_MISSION_VERSION,
   });
   const node = await read<Node>(["mission", "node", "get", objectiveId]);
   return {
@@ -181,8 +186,8 @@ async function setup(t: TestContext) {
     initiativeId,
     objectiveId,
     taskId,
-    secondObjectiveId: secondObjective.revisions[ZERO]!.nodeId,
-    bindingId: node.content.bindings[ZERO]!,
+    secondObjectiveId: secondObjective.revisions[FIRST_INDEX]!.nodeId,
+    bindingId: node.content.bindings[FIRST_INDEX]!,
     revision: node.visibleRevision,
   };
 }
@@ -234,7 +239,7 @@ test(
         await refuse(
           "ready",
           h.initiativeId,
-          act(NodeState.Available, ZERO),
+          act(NodeState.Available, INITIAL_ATTEMPT),
           "mission.node.not_ready",
         );
       },
@@ -245,12 +250,12 @@ test(
         const answer = await control(
           "ready",
           h.objectiveId,
-          act(NodeState.Available, ZERO),
+          act(NodeState.Available, INITIAL_ATTEMPT),
         );
         state(answer, NodeState.Waiting);
         assert.ok(answer.node.kind !== NodeKind.Task);
-        assert.equal(answer.node.attempt, ONE);
-        assert.equal(answer.attempt?.attempt, ONE);
+        assert.equal(answer.node.attempt, FIRST_ATTEMPT);
+        assert.equal(answer.attempt?.attempt, FIRST_ATTEMPT);
         assert.equal(answer.attempt?.nodeRevision, h.revision);
         assert.equal(answer.attempt?.openedBy.kind, ActorKind.Human);
         assert.equal(answer.outcome, null);
@@ -269,7 +274,7 @@ test(
         const answer = await control(
           "pause",
           h.objectiveId,
-          act(NodeState.Waiting, ONE),
+          act(NodeState.Waiting, FIRST_ATTEMPT),
         );
         state(answer, NodeState.Paused);
         assert.equal(answer.attempt?.closedAt, null);
@@ -281,7 +286,7 @@ test(
     await scenario("E01.4 resume requeues Waiting", async () => {
       state(
         await control("resume", h.objectiveId, {
-          ...act(NodeState.Paused, ONE),
+          ...act(NodeState.Paused, FIRST_ATTEMPT),
           target: NodeState.Waiting,
         }),
         NodeState.Waiting,
@@ -293,16 +298,20 @@ test(
     await scenario(
       "E01.5 block closes and exposes blocked context",
       async () => {
-        await control("pause", h.objectiveId, act(NodeState.Waiting, ONE));
+        await control(
+          "pause",
+          h.objectiveId,
+          act(NodeState.Waiting, FIRST_ATTEMPT),
+        );
         const answer = await control(
           "block",
           h.objectiveId,
-          act(NodeState.Paused, ONE),
+          act(NodeState.Paused, FIRST_ATTEMPT),
         );
         state(answer, NodeState.Blocked);
         assert.equal(answer.outcome?.result, AssessmentResult.Undetermined);
         assert.equal(answer.outcome?.closingEvent, ClosingEvent.HumanBlock);
-        assert.equal(answer.outcome?.attempt, ONE);
+        assert.equal(answer.outcome?.attempt, FIRST_ATTEMPT);
         assert.equal(typeof answer.attempt?.closedAt, NUMBER_TYPE);
         blockedOutcome = answer.outcome!.id;
         const node = await h.read<Node>([
@@ -318,12 +327,12 @@ test(
     );
     await scenario("E01.6 unblock opens exactly the next attempt", async () => {
       const answer = await control("unblock", h.objectiveId, {
-        blockedAttempt: ONE,
+        blockedAttempt: FIRST_ATTEMPT,
         expectedRevision: h.revision,
         expectedMissionVersion: VERSION,
       });
       state(answer, NodeState.Available);
-      assert.equal(answer.attempt?.attempt, TWO);
+      assert.equal(answer.attempt?.attempt, SECOND_ATTEMPT);
       assert.equal(answer.attempt?.openedBy.kind, ActorKind.Human);
       assert.equal(answer.outcome, null);
     });
@@ -336,7 +345,7 @@ test(
       ]);
       assert.deepEqual(
         list.items.map((item) => item.attempt),
-        [TWO, ONE],
+        [SECOND_ATTEMPT, FIRST_ATTEMPT],
       );
       assert.equal(list.nextCursor, null);
       const closed = await h.read<Attempt>([
@@ -344,7 +353,7 @@ test(
         "attempt",
         "get",
         h.objectiveId,
-        String(ONE),
+        String(FIRST_ATTEMPT),
       ]);
       assert.equal(typeof closed.closedAt, NUMBER_TYPE);
       assert.deepEqual(closed.outcomeIds, [blockedOutcome]);
@@ -357,7 +366,7 @@ test(
           "attempt",
           "get",
           h.objectiveId,
-          String(TWO),
+          String(SECOND_ATTEMPT),
         ]);
         assert.deepEqual(attempt.requiredExternalActions, [
           {
@@ -379,18 +388,18 @@ test(
         "list",
         h.objectiveId,
         "--attempt",
-        String(TWO),
+        String(SECOND_ATTEMPT),
       ]);
-      assert.equal(page.items.length, ONE);
-      assert.equal(page.items[ZERO]!.resolution, Resolution.Unrequested);
-      assert.equal(page.items[ZERO]!.requested, false);
-      assert.equal(page.items[ZERO]!.requestEvidenceId, null);
+      assert.equal(page.items.length, SINGLE_ITEM);
+      assert.equal(page.items[FIRST_INDEX]!.resolution, Resolution.Unrequested);
+      assert.equal(page.items[FIRST_INDEX]!.requested, false);
+      assert.equal(page.items[FIRST_INDEX]!.requestEvidenceId, null);
       const action = await h.read<ExternalAction>([
         "mission",
         "external-action",
         "get",
         h.objectiveId,
-        String(TWO),
+        String(SECOND_ATTEMPT),
         ACTION_KEY,
       ]);
       assert.equal(action.action.key, ACTION_KEY);
@@ -404,8 +413,8 @@ test(
           "list",
           h.objectiveId,
         ]);
-        assert.equal(page.items.length, ONE);
-        const assessment = page.items[ZERO]!;
+        assert.equal(page.items.length, SINGLE_ITEM);
+        const assessment = page.items[FIRST_INDEX]!;
         assessmentId = assessment.id;
         assert.equal(assessment.actor.kind, ActorKind.Human);
         assert.equal(assessment.result, AssessmentResult.Undetermined);
@@ -413,7 +422,7 @@ test(
         assert.equal(assessment.testedInput, null);
         assert.equal(assessment.currency, null);
         assert.equal(assessment.workerVersion, null);
-        assert.equal(assessment.attempt, ONE);
+        assert.equal(assessment.attempt, FIRST_ATTEMPT);
         assert.equal(
           (
             await h.read<Assessment>([
@@ -434,16 +443,16 @@ test(
         "list",
         h.objectiveId,
         "--attempt",
-        String(ONE),
+        String(FIRST_ATTEMPT),
       ]);
-      assert.equal(page.items.length, ONE);
+      assert.equal(page.items.length, SINGLE_ITEM);
       assert.equal(
         (
           await h.read<Outcome>([
             "mission",
             "outcome",
             "get",
-            page.items[ZERO]!.id,
+            page.items[FIRST_INDEX]!.id,
           ])
         ).assessmentId,
         assessmentId,
@@ -456,7 +465,7 @@ test(
           "override",
           h.objectiveId,
           {
-            ...act(NodeState.Available, TWO),
+            ...act(NodeState.Available, SECOND_ATTEMPT),
             landedCommit: {
               kind: "repository",
               bindingId: h.bindingId,
@@ -471,7 +480,7 @@ test(
           answer.outcome?.closingEvent,
           ClosingEvent.SuccessOverride,
         );
-        assert.equal(answer.outcome?.evidenceIds.length, ONE);
+        assert.equal(answer.outcome?.evidenceIds.length, SINGLE_ITEM);
         assert.equal(typeof answer.attempt?.closedAt, NUMBER_TYPE);
       },
     );
@@ -479,11 +488,11 @@ test(
       const answer = await control(
         "discard",
         h.secondObjectiveId,
-        act(NodeState.Available, ZERO),
+        act(NodeState.Available, INITIAL_ATTEMPT),
       );
       state(answer, NodeState.Discarded);
       assert.equal(answer.attempt, null);
-      assert.equal(answer.outcome?.attempt, ZERO);
+      assert.equal(answer.outcome?.attempt, INITIAL_ATTEMPT);
       assert.equal(answer.outcome?.closingEvent, ClosingEvent.HumanDiscard);
     });
     await scenario(
@@ -495,17 +504,17 @@ test(
         const answer = await control(
           "ready",
           h.initiativeId,
-          act(NodeState.Available, ZERO),
+          act(NodeState.Available, INITIAL_ATTEMPT),
         );
         state(answer, NodeState.Waiting);
-        assert.equal(answer.attempt?.attempt, ONE);
+        assert.equal(answer.attempt?.attempt, FIRST_ATTEMPT);
       },
     );
     await scenario("E01.15 block requires pause", async () => {
       await refuse(
         "block",
         h.initiativeId,
-        act(NodeState.Waiting, ONE),
+        act(NodeState.Waiting, FIRST_ATTEMPT),
         "mission.node.control_refused",
       );
     });
@@ -513,7 +522,7 @@ test(
       await refuse(
         "pause",
         h.taskId,
-        act(NodeState.Waiting, ONE),
+        act(NodeState.Waiting, FIRST_ATTEMPT),
         "mission.node.control_task",
       );
     });
@@ -521,7 +530,7 @@ test(
       await refuse(
         "pause",
         h.objectiveId,
-        act(NodeState.Completed, TWO),
+        act(NodeState.Completed, SECOND_ATTEMPT),
         "mission.node.terminal",
       );
     });
@@ -529,7 +538,7 @@ test(
       await refuse(
         "pause",
         h.initiativeId,
-        act(NodeState.Waiting, ZERO),
+        act(NodeState.Waiting, INITIAL_ATTEMPT),
         "mission.node.state_conflict",
       );
     });
@@ -539,7 +548,10 @@ test(
         await refuse(
           "pause",
           h.initiativeId,
-          { ...act(NodeState.Waiting, ONE), expectedMissionVersion: FOUR },
+          {
+            ...act(NodeState.Waiting, FIRST_ATTEMPT),
+            expectedMissionVersion: FOURTH_MISSION_VERSION,
+          },
           "mission.version.conflict",
         );
       },
@@ -551,7 +563,7 @@ test(
           "override",
           h.initiativeId,
           {
-            ...act(NodeState.Waiting, ONE),
+            ...act(NodeState.Waiting, FIRST_ATTEMPT),
             landedCommit: {
               kind: "repository",
               bindingId: BINDING_ID,
@@ -569,20 +581,20 @@ test(
         await refuse(
           "pause",
           "invalid",
-          act(NodeState.Waiting, ONE),
+          act(NodeState.Waiting, FIRST_ATTEMPT),
           "cli.mission.node.pause.invalid_node_id",
         );
         await refuse(
           "override",
           h.initiativeId,
-          act(NodeState.Waiting, ONE),
+          act(NodeState.Waiting, FIRST_ATTEMPT),
           "cli.mission.node.override.invalid_result",
           ["--result", "failure"],
         );
         await refuse(
           "override",
           h.initiativeId,
-          { ...act(NodeState.Waiting, ONE), result: "success" },
+          { ...act(NodeState.Waiting, FIRST_ATTEMPT), result: "success" },
           "cli.file.schema_invalid",
           ["--result", "success"],
         );
@@ -597,11 +609,17 @@ test(
       "E01.22 record CLI validates attempt and action key",
       async () => {
         await readRefusal(
-          ["attempt", "get", h.objectiveId, String(ZERO)],
+          ["attempt", "get", h.objectiveId, String(INITIAL_ATTEMPT)],
           "cli.mission.attempt.get.invalid_attempt",
         );
         await readRefusal(
-          ["external-action", "get", h.objectiveId, String(TWO), "repo.push"],
+          [
+            "external-action",
+            "get",
+            h.objectiveId,
+            String(SECOND_ATTEMPT),
+            "repo.push",
+          ],
           "cli.mission.external_action.get.invalid_action_key",
         );
       },

@@ -36,9 +36,14 @@ import {
 
 const HTTP = "http";
 const DIRECT = "direct";
-const FIRST = 1;
-const TWO = 2;
-const ZERO = 0;
+const FIRST_REVISION = 1;
+const FIRST_ATTEMPT = 1;
+const SINGLE_CALL = 1;
+const TWO_INSTANCES = 2;
+const SECOND_REVISION = 2;
+const SUCCESSFUL_EXIT = 0;
+const INITIAL_POLL_COUNT = 0;
+const NO_CALLS = 0;
 const POLLS = 100;
 const REDIRECTION = 300;
 const COMMIT = "b".repeat(40);
@@ -147,7 +152,7 @@ async function setup(
       params: { projectId },
       query: {},
       body: {
-        version: FIRST,
+        version: FIRST_REVISION,
         bindings: {
           repo: {
             kind: "repository",
@@ -168,7 +173,7 @@ async function setup(
           },
           harness: {
             kind: "worker",
-            config: { worker: "claude@1", instanceCount: TWO },
+            config: { worker: "claude@1", instanceCount: TWO_INSTANCES },
           },
         },
       },
@@ -200,7 +205,7 @@ async function setup(
         kind: NodeKind.Initiative,
         content: CONTENT,
         reason: "plan",
-        expectedMissionVersion: FIRST,
+        expectedMissionVersion: FIRST_REVISION,
       },
     }),
   );
@@ -213,9 +218,9 @@ async function setup(
         kind: NodeKind.Objective,
         content: { ...CONTENT, bindings: [binding.id] },
         reason: "plan",
-        expectedMissionVersion: TWO,
+        expectedMissionVersion: SECOND_REVISION,
         parentId: initiative.revisions[0]!.nodeId,
-        expectedParentRevision: FIRST,
+        expectedParentRevision: FIRST_REVISION,
       },
     }),
   );
@@ -257,8 +262,8 @@ async function setup(
         query: {},
         body: {
           executionId: steps.executionId,
-          attempt: FIRST,
-          nodeRevision: FIRST,
+          attempt: FIRST_ATTEMPT,
+          nodeRevision: FIRST_REVISION,
           subject: "work",
           assets: [{ kind: AssetKind.Repository, address: snapshot }],
         },
@@ -280,8 +285,8 @@ async function setup(
   const execution = await pull();
   const context = {
     executionId: execution.executionId,
-    attempt: FIRST,
-    nodeRevision: FIRST,
+    attempt: FIRST_ATTEMPT,
+    nodeRevision: FIRST_REVISION,
   };
   const run = completed(
     await call(
@@ -307,7 +312,7 @@ async function setup(
             results: [
               {
                 command: "true",
-                exitCode: ZERO,
+                exitCode: SUCCESSFUL_EXIT,
                 signal: null,
                 timedOut: false,
               },
@@ -360,19 +365,19 @@ test("both adapters serialize one execution and replay the completed request", a
   const key = ulid();
   const first = h.request(HTTP, key);
   for (
-    let poll = ZERO;
-    poll < POLLS && h.actions.performCalls.length === ZERO;
+    let poll = INITIAL_POLL_COUNT;
+    poll < POLLS && h.actions.performCalls.length === NO_CALLS;
     poll++
   )
     await setImmediate();
-  assert.equal(h.actions.performCalls.length, FIRST);
+  assert.equal(h.actions.performCalls.length, SINGLE_CALL);
   const second = h.request(DIRECT);
   release();
   const [one, two] = await Promise.all([first, second]);
   const items = [...completed(one).items, ...completed(two).items];
-  assert.equal(items.length, FIRST);
+  assert.equal(items.length, SINGLE_CALL);
   assert.equal(items[0]?.kind, ActionResultKind.Submitted);
-  assert.equal(h.actions.performCalls.length, FIRST);
+  assert.equal(h.actions.performCalls.length, SINGLE_CALL);
   const evidence = completed(
     await h.call(missionOperations["evidence.list"], {
       params: { nodeId: h.nodeId },
@@ -382,10 +387,10 @@ test("both adapters serialize one execution and replay the completed request", a
   );
   assert.equal(
     evidence.items.filter((item) => item.requirementKey).length,
-    FIRST,
+    SINGLE_CALL,
   );
   assert.deepEqual(completed(await h.request(DIRECT, key)), completed(one));
-  assert.equal(h.actions.performCalls.length, FIRST);
+  assert.equal(h.actions.performCalls.length, SINGLE_CALL);
 });
 
 test("another registration fails the execution proof through both adapters", async (t) => {
@@ -398,14 +403,14 @@ test("another registration fails the execution proof through both adapters", asy
       HttpStatus.Forbidden,
       PROOF_FAILED,
     );
-  assert.equal(h.actions.performCalls.length, ZERO);
+  assert.equal(h.actions.performCalls.length, NO_CALLS);
 });
 
 test("unwired production Intake answers the shared internal-error envelope on every call", async (t) => {
   const h = await setup(t, HTTP, false);
   refused(await h.request(), HttpStatus.InternalServerError, UNKNOWN);
   refused(await h.request(), HttpStatus.InternalServerError, UNKNOWN);
-  assert.equal(h.actions.performCalls.length, ZERO);
+  assert.equal(h.actions.performCalls.length, NO_CALLS);
 });
 
 test("action operation keeps the long unary execution-scoped contract", () => {

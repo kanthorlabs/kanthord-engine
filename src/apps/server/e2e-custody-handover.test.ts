@@ -37,14 +37,17 @@ import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
-const ONE = 1;
-const TWO = 2;
-const THREE = 3;
+const FIRST_REVISION = 1;
+const SINGLE_INSTANCE = 1;
+const SECOND_REVISION = 2;
+const FULL_BINDING_SET_VERSION = 3;
+const THIRD_CREDENTIAL_REVISION = 3;
 const INVALID_REPORT_COUNT = 4;
 const STRING_TYPE = "string";
 const NUMBER_TYPE = "number";
 const HANDOVER_LOG_MESSAGE = "credential handover";
-const EMPTY = "";
+const NO_OUTPUT = "";
+const MISSING_TOKEN = "";
 const SPAWN_TIMEOUT = 10000;
 const JOURNEY_TIMEOUT = 180000;
 const UNKNOWN_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -103,7 +106,7 @@ function cli(directory: string, env: NodeJS.ProcessEnv) {
   const read = async <T>(args: string[], caller = env): Promise<T> => {
     const result = await kanthord(args, caller);
     assert.equal(result.code, SUCCESS, result.stderr);
-    assert.equal(result.stderr, EMPTY);
+    assert.equal(result.stderr, NO_OUTPUT);
     noSecrets(result.stdout);
     return JSON.parse(result.stdout) as T;
   };
@@ -118,7 +121,7 @@ function cli(directory: string, env: NodeJS.ProcessEnv) {
     const result = await kanthord(args, caller);
     assert.equal(result.code, FAILURE, result.stderr);
     assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
-    assert.equal(result.stdout, EMPTY);
+    assert.equal(result.stdout, NO_OUTPUT);
     noSecrets(result.stderr);
   };
   return { read, write, refuses };
@@ -153,7 +156,7 @@ function machine(
     { env, encoding: "utf8", timeout: SPAWN_TIMEOUT },
   );
   assert.equal(result.status, SUCCESS, result.stderr);
-  assert.equal(result.stderr, EMPTY);
+  assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
     clientSecret: string;
@@ -195,7 +198,7 @@ async function resources(c: ReturnType<typeof cli>) {
       defaultConfiguration: CONFIGURATION,
     },
   );
-  assert.equal(enabled.revision, ONE);
+  assert.equal(enabled.revision, FIRST_REVISION);
   const project = await c.read<{ id: string }>([
     "project",
     "create",
@@ -206,7 +209,7 @@ async function resources(c: ReturnType<typeof cli>) {
     bindingSetVersion: number;
     bindings: Record<string, { id: string }>;
   }>(["project", "binding", "apply", project.id], {
-    version: ONE,
+    version: FIRST_REVISION,
     bindings: {
       repo: {
         kind: "repository",
@@ -223,13 +226,13 @@ async function resources(c: ReturnType<typeof cli>) {
         kind: "worker",
         config: {
           worker: "general@1",
-          instanceCount: ONE,
+          instanceCount: SINGLE_INSTANCE,
           entries: [{ agent: "swe@1", ...CONFIGURATION }],
         },
       },
     },
   });
-  assert.equal(applied.bindingSetVersion, THREE);
+  assert.equal(applied.bindingSetVersion, FULL_BINDING_SET_VERSION);
   return { projectId: project.id, bindingId: applied.bindings.repo!.id };
 }
 
@@ -246,7 +249,7 @@ async function graph(
       kind: "initiative",
       content: CONTENT,
       reason: "plan",
-      expectedMissionVersion: ONE,
+      expectedMissionVersion: FIRST_REVISION,
     },
   );
   assert.ok(initiative.revisions[0]);
@@ -258,8 +261,8 @@ async function graph(
       content: { ...CONTENT, bindings: [bindingId] },
       reason: "plan",
       parentId: initiative.revisions[0].nodeId,
-      expectedParentRevision: ONE,
-      expectedMissionVersion: TWO,
+      expectedParentRevision: FIRST_REVISION,
+      expectedMissionVersion: SECOND_REVISION,
     },
   );
   assert.ok(objective.revisions[0]);
@@ -450,7 +453,7 @@ test(
       "E05.4 rotation retains the pinned older revision",
       async () => {
         await h.write(["llm", "credential", "rotate", NAME], {
-          expectedRevision: ONE,
+          expectedRevision: FIRST_REVISION,
           secret: { key: SECOND },
         });
         const stored = await h.read<CredentialAnswer>([
@@ -462,8 +465,8 @@ test(
         assert.deepEqual(
           stored.revisions.map((row) => [row.revision, row.endedAt]),
           [
-            [TWO, null],
-            [ONE, null],
+            [SECOND_REVISION, null],
+            [FIRST_REVISION, null],
           ],
         );
         C2 = stored.revisions[0]!.id;
@@ -491,7 +494,7 @@ test(
         ]);
         assert.deepEqual(
           stored.revisions.map((row) => row.revision),
-          [TWO, ONE],
+          [SECOND_REVISION, FIRST_REVISION],
         );
       },
     );
@@ -508,7 +511,7 @@ test(
               type: "oauth",
               refresh: "r",
               access: "a",
-              expires: ONE,
+              expires: FIRST_REVISION,
             },
           }),
         ];
@@ -550,14 +553,20 @@ test(
         await h.refuses(
           ["worker", "handover", X],
           "cli.worker.handover.token_required",
-          { ...h.env, KANTHORD_TOKEN: EMPTY },
+          { ...h.env, KANTHORD_TOKEN: MISSING_TOKEN },
         );
       },
     );
     await t.test(
       "E05.8 revoke refuses both handover and refresh of the pin",
       async () => {
-        await h.read(["llm", "credential", "revoke", NAME, String(ONE)]);
+        await h.read([
+          "llm",
+          "credential",
+          "revoke",
+          NAME,
+          String(FIRST_REVISION),
+        ]);
         const stored = await h.read<CredentialAnswer>([
           "llm",
           "credential",
@@ -631,7 +640,7 @@ test(
         ]);
         assert.deepEqual(execution.credentials, [C2]);
         await h.write(["llm", "credential", "rotate", NAME], {
-          expectedRevision: TWO,
+          expectedRevision: SECOND_REVISION,
           secret: { key: THIRD },
         });
         const stored = await h.read<CredentialAnswer>([
@@ -642,11 +651,11 @@ test(
         ]);
         assert.deepEqual(
           stored.revisions
-            .slice(0, TWO)
+            .slice(0, SECOND_REVISION)
             .map((row) => [row.revision, row.endedAt]),
           [
-            [THREE, null],
-            [TWO, null],
+            [THIRD_CREDENTIAL_REVISION, null],
+            [SECOND_REVISION, null],
           ],
         );
       },
@@ -665,7 +674,7 @@ test(
           "get",
           NAME,
         ]);
-        assert.equal(stored.revisions[0]?.revision, THREE);
+        assert.equal(stored.revisions[0]?.revision, THIRD_CREDENTIAL_REVISION);
         assert.equal(stored.revisions[0]?.endedAt, null);
         assert.equal(typeof stored.revisions[1]?.endedAt, NUMBER_TYPE);
       },
@@ -682,7 +691,7 @@ test(
           "disable",
           "swe@1",
           "--expected-revision",
-          String(ONE),
+          String(FIRST_REVISION),
         ]);
         await h.refuses(
           ["worker", "handover", claim.execution.executionId],

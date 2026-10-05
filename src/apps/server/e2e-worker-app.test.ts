@@ -37,9 +37,11 @@ const GET = "GET";
 const STARTED = "Worker application ready";
 const READY = "Worker application ready";
 const EXIT_TIMEOUT = "Worker exit timed out";
-const EMPTY = "";
+const INITIAL_BUFFER = "";
+const NO_OUTPUT = "";
 const NEWLINE = "\n";
-const ONE = 1;
+const NEWLINE_LEN = 1;
+const SINGLE_RECORD = 1;
 const WORKER_ARGS = ["serve", "worker"];
 const GENERAL_RESOURCE = "worker:kanthord:general";
 const GENERAL_WORKER = "general@1";
@@ -97,8 +99,8 @@ function spawnWorker(args: string[], env: NodeJS.ProcessEnv): WorkerProcess {
     ],
     { env, stdio: "pipe" },
   );
-  let stdout = EMPTY;
-  let partial = EMPTY;
+  let stdout = INITIAL_BUFFER;
+  let partial = INITIAL_BUFFER;
   let spawnError: Error | undefined;
   let exitSeen = false;
   let settled = false;
@@ -128,15 +130,15 @@ function spawnWorker(args: string[], env: NodeJS.ProcessEnv): WorkerProcess {
   child.stderr.on("data", (chunk: string) => {
     partial += chunk;
     let index = partial.indexOf(NEWLINE);
-    while (index !== -ONE) {
+    while (index !== -NEWLINE_LEN) {
       addLine(partial.slice(0, index));
-      partial = partial.slice(index + ONE);
+      partial = partial.slice(index + NEWLINE_LEN);
       index = partial.indexOf(NEWLINE);
     }
   });
   child.stderr.once("end", () => {
     if (partial) addLine(partial);
-    partial = EMPTY;
+    partial = INITIAL_BUFFER;
   });
   child.once("exit", () => {
     exitSeen = true;
@@ -317,7 +319,7 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
     { env, encoding: "utf8", timeout: SPAWN_LINE_TIMEOUT_MS },
   );
   assert.equal(generated.status, EXIT_SUCCESS, generated.stderr);
-  assert.equal(generated.stderr, EMPTY);
+  assert.equal(generated.stderr, NO_OUTPUT);
   writePrivate(
     join(directories(env).config, "cli.yaml"),
     `endpoint: ${fixture.endpoint}\n${generated.stdout}`,
@@ -331,7 +333,7 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
     proc.kill("SIGTERM");
     const result = await within(proc.exited, CLEANUP_WAIT_MS);
     assert.equal(result.code, EXIT_SUCCESS);
-    assert.equal(result.stdout, EMPTY);
+    assert.equal(result.stdout, NO_OUTPUT);
     assert.ok(!result.stderr.join(NEWLINE).includes(token));
     assert.ok(!result.stderr.join(NEWLINE).includes(clientSecret));
   } finally {
@@ -400,10 +402,10 @@ test("worker startup emits one ready record without secrets", async (t) => {
       .map((entry) => JSON.parse(entry));
     assert.equal(
       records.filter((record) => record.msg === STARTED).length,
-      ONE,
+      SINGLE_RECORD,
     );
     assert.ok(records.every((record) => record.msg === READY));
-    assert.equal(result.stdout, EMPTY);
+    assert.equal(result.stdout, NO_OUTPUT);
     assert.ok(result.stderr.every((entry) => !entry.includes(token)));
     assert.equal(result.signal, null);
     assert.equal(result.code, EXIT_SUCCESS);
@@ -493,7 +495,7 @@ test(
       const result = await within(first.exited, CLEANUP_WAIT_MS);
       assert.equal(result.code, EXIT_SUCCESS);
       assert.equal(result.signal, null);
-      assert.equal(result.stdout, EMPTY);
+      assert.equal(result.stdout, NO_OUTPUT);
       for (const line of result.stderr.filter(Boolean)) {
         JSON.parse(line);
         assert.ok(!line.includes(auth.token));

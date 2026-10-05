@@ -41,12 +41,25 @@ import {
 } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
-const ZERO = 0;
-const ONE = 1;
-const TWO = 2;
-const THREE = 3;
-const FOUR = 4;
-const EMPTY = "";
+const INITIAL_SEQUENCE = 0;
+const SUCCESSFUL_EXIT = 0;
+const FIRST_INDEX = 0;
+const NO_CALLS = 0;
+const FIRST_REVISION = 1;
+const SINGLE_INSTANCE = 1;
+const FIRST_ATTEMPT = 1;
+const SINGLE_CALL = 1;
+const SINGLE_ITEM = 1;
+const FAILURE_EXIT = 1;
+const SECOND_REVISION = 2;
+const PUSHED_PRIORITY = 2;
+const TWO_CALLS = 2;
+const SECOND_ATTEMPT = 2;
+const THIRD_MISSION_VERSION = 3;
+const GATED_PRIORITY = 3;
+const FOURTH_MISSION_VERSION = 4;
+const FOUR_CALLS = 4;
+const NO_OUTPUT = "";
 const TIMEOUT = 180000;
 const GATED = "gated";
 const PUSHED = "pushed";
@@ -104,7 +117,7 @@ async function setup(t: TestContext) {
     KANTHORD_ENDPOINT: fixture.endpoint,
     KANTHORD_TOKEN: fixture.token,
   };
-  let sequence = ZERO;
+  let sequence = INITIAL_SEQUENCE;
   const file = (body: unknown) => {
     const path = join(directory, `${++sequence}.json`);
     writePrivate(path, JSON.stringify(body));
@@ -112,8 +125,8 @@ async function setup(t: TestContext) {
   };
   const read = async <T>(args: string[], env = H): Promise<T> => {
     const result = await kanthord(args, env);
-    assert.equal(result.code, ZERO, result.stderr);
-    assert.equal(result.stderr, EMPTY);
+    assert.equal(result.code, SUCCESSFUL_EXIT, result.stderr);
+    assert.equal(result.stderr, NO_OUTPUT);
     return JSON.parse(result.stdout) as T;
   };
   const write = <T>(args: string[], body: unknown, env = H) =>
@@ -157,13 +170,13 @@ async function setup(t: TestContext) {
     },
   });
   await write(["project", "binding", "apply", project.id], {
-    version: ONE,
+    version: FIRST_REVISION,
     bindings: {
       gated: repository(GATED, "pull_request"),
       pushed: repository(PUSHED, "merge_push"),
       harness: {
         kind: "worker",
-        config: { worker: "claude@1", instanceCount: ONE },
+        config: { worker: "claude@1", instanceCount: SINGLE_INSTANCE },
       },
     },
   });
@@ -192,33 +205,40 @@ async function setup(t: TestContext) {
         },
         reason: "plan",
         expectedMissionVersion: version,
-        ...(parentId ? { parentId, expectedParentRevision: ONE } : {}),
+        ...(parentId
+          ? { parentId, expectedParentRevision: FIRST_REVISION }
+          : {}),
       },
     );
-    return result.revisions[ZERO]!.nodeId;
+    return result.revisions[FIRST_INDEX]!.nodeId;
   };
-  const initiative = await create("initiative-1.md", "initiative", [], ONE);
+  const initiative = await create(
+    "initiative-1.md",
+    "initiative",
+    [],
+    FIRST_REVISION,
+  );
   const G = await create(
     "objective-g.md",
     "objective",
     [GATED],
-    TWO,
+    SECOND_REVISION,
     initiative,
   );
   const P = await create(
     "objective-p.md",
     "objective",
     [PUSHED],
-    THREE,
+    THIRD_MISSION_VERSION,
     initiative,
   );
   await write(["mission", "node", "priority", "set", G], {
-    value: THREE,
-    expectedMissionVersion: FOUR,
+    value: GATED_PRIORITY,
+    expectedMissionVersion: FOURTH_MISSION_VERSION,
   });
   await write(["mission", "node", "priority", "set", P], {
-    value: TWO,
-    expectedMissionVersion: FOUR,
+    value: PUSHED_PRIORITY,
+    expectedMissionVersion: FOURTH_MISSION_VERSION,
   });
   const M = (await read<{ version: number }>(["mission", "get", project.id]))
     .version;
@@ -288,7 +308,12 @@ async function setup(t: TestContext) {
         verification: {
           testedInput: snapshot(bindingId, commit),
           results: [
-            { command: "true", exitCode: ZERO, signal: null, timedOut: false },
+            {
+              command: "true",
+              exitCode: SUCCESSFUL_EXIT,
+              signal: null,
+              timedOut: false,
+            },
           ],
         },
       },
@@ -356,7 +381,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   };
 
   await t.test("E06.1 steps claim selects G attempt 1", async () => {
-    e1 = await h.pull(h.G, ONE);
+    e1 = await h.pull(h.G, FIRST_ATTEMPT);
   });
   await t.test("E06.2 steps claim cannot request actions", async () => {
     refused(
@@ -364,7 +389,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       HttpStatus.Conflict,
       WorkerErrorCode.ClaimNotEvaluation,
     );
-    assert.equal(h.actions.performCalls.length, ZERO);
+    assert.equal(h.actions.performCalls.length, NO_CALLS);
   });
   await t.test(
     "E06.3 steps publishes the repository snapshot and releases",
@@ -376,7 +401,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   await t.test(
     "E06.4 evaluation without assessment cannot request actions",
     async () => {
-      e2 = await h.pull(h.G, ONE);
+      e2 = await h.pull(h.G, FIRST_ATTEMPT);
       refused(
         await h.request(e2),
         HttpStatus.Conflict,
@@ -420,14 +445,14 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   await t.test(
     "E06.7 human removes the failed fake outbound request before a successful write",
     async () => {
-      const requestKey = `${h.G}/${ONE}/${GATED_KEY}`;
+      const requestKey = `${h.G}/${FIRST_ATTEMPT}/${GATED_KEY}`;
       assert.equal(h.actions.performCalls[0]?.requestKey, requestKey);
       assert.equal(
         completed(await h.request(e2)).items[0]?.kind,
         ActionResultKind.FailedBeforeEffect,
       );
       assert.deepEqual(h.actions.readBackCalls, [requestKey]);
-      assert.equal(h.actions.performCalls.length, ONE);
+      assert.equal(h.actions.performCalls.length, SINGLE_CALL);
       // Intake is a stand-in: model the human removal of its failed request.
       assert.equal(
         h.actions.requests.delete(`pull_request/${requestKey}`),
@@ -438,16 +463,16 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       assert.ok(item?.kind === ActionResultKind.Submitted);
       request1 = item.evidence as Evidence;
       assert.equal(request1.requirementKey, GATED_KEY);
-      assert.equal(request1.attempt, ONE);
+      assert.equal(request1.attempt, FIRST_ATTEMPT);
       assert.deepEqual(request1.assets[0]?.address, pr42);
-      assert.equal(h.actions.performCalls.length, TWO);
+      assert.equal(h.actions.performCalls.length, TWO_CALLS);
     },
   );
   await t.test(
     "E06.8 repeat dispatches nothing and reviewer releases externally",
     async () => {
       assert.deepEqual(completed(await h.request(e2)).items, []);
-      assert.equal(h.actions.performCalls.length, TWO);
+      assert.equal(h.actions.performCalls.length, TWO_CALLS);
       await h.release(e2);
       assert.equal((await h.node(h.G)).state, NodeState.ExternalRequested);
     },
@@ -477,13 +502,13 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
         node: { state: string };
         attempt: { attempt: number };
       }>(["mission", "node", "unblock", h.G], {
-        blockedAttempt: ONE,
-        expectedRevision: ONE,
+        blockedAttempt: FIRST_ATTEMPT,
+        expectedRevision: FIRST_REVISION,
         expectedMissionVersion: h.M,
       });
       assert.equal(unblock.node.state, NodeState.Available);
-      assert.equal(unblock.attempt.attempt, TWO);
-      e3 = await h.pull(h.G, TWO);
+      assert.equal(unblock.attempt.attempt, SECOND_ATTEMPT);
+      e3 = await h.pull(h.G, SECOND_ATTEMPT);
       gWork2 = (await h.work(e3, h.gated.id, D)).evidence;
       await h.release(e3);
     },
@@ -491,7 +516,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   await t.test(
     "E06.11 attempt 2 publishes its own passing assessment",
     async () => {
-      e4 = await h.pull(h.G, TWO);
+      e4 = await h.pull(h.G, SECOND_ATTEMPT);
       const run = (await h.run(e4, h.gated.id, D)).evidence;
       assert.equal(
         (await h.pass(e4, [run.id, gWork2.id], h.gated.id, D)).node.state,
@@ -513,7 +538,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       const item = completed(await h.request(e4)).items[0];
       assert.ok(item?.kind === ActionResultKind.Submitted);
       const evidence = item.evidence as Evidence;
-      assert.equal(evidence.attempt, TWO);
+      assert.equal(evidence.attempt, SECOND_ATTEMPT);
       assert.deepEqual(evidence.assets[0]?.address, pr42);
       assert.equal(
         h.actions.readCalls[0]?.method,
@@ -537,14 +562,14 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     const requests = evidence.items.filter(
       (item) => item.requirementKey === GATED_KEY,
     );
-    assert.equal(requests.length, ONE);
+    assert.equal(requests.length, SINGLE_ITEM);
     assert.deepEqual(requests[0]?.assets[0]?.address, pr42);
   });
   await t.test("E06.14 P reaches a passing evaluation claim", async () => {
-    const e5 = await h.pull(h.P, ONE);
+    const e5 = await h.pull(h.P, FIRST_ATTEMPT);
     const work = (await h.work(e5, h.pushed.id, E)).evidence;
     await h.release(e5);
-    e6 = await h.pull(h.P, ONE);
+    e6 = await h.pull(h.P, FIRST_ATTEMPT);
     const run = (await h.run(e6, h.pushed.id, E)).evidence;
     assert.equal(
       (await h.pass(e6, [run.id, work.id], h.pushed.id, E)).node.state,
@@ -564,7 +589,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     };
     assert.deepEqual(completed(await h.request(e6)).items, [expected]);
     assert.deepEqual(completed(await h.request(e6)).items, [expected]);
-    assert.equal(h.actions.performCalls.length, FOUR);
+    assert.equal(h.actions.performCalls.length, FOUR_CALLS);
   });
   await t.test(
     "E06.16 uncertain action cannot satisfy reviewer release",
@@ -580,12 +605,12 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
         ],
         h.W,
       );
-      assert.equal(result.code, ONE);
+      assert.equal(result.code, FAILURE_EXIT);
       assert.ok(
         result.stderr.startsWith("mission.release.obligation_unmet:"),
         result.stderr,
       );
-      assert.equal(result.stdout, EMPTY);
+      assert.equal(result.stdout, NO_OUTPUT);
     },
   );
   await t.test(
@@ -595,7 +620,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
         reason: "hold",
         expectedMissionVersion: h.M,
         expectedState: NodeState.Evaluating,
-        expectedAttempt: ONE,
+        expectedAttempt: FIRST_ATTEMPT,
       };
       await h.write(["mission", "node", "pause", h.P], act);
       await h.write(["mission", "node", "resume", h.P], {
@@ -603,11 +628,11 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
         expectedState: NodeState.Paused,
         target: NodeState.Waiting,
       });
-      const e7 = await h.pull(h.P, ONE);
+      const e7 = await h.pull(h.P, FIRST_ATTEMPT);
       const item = completed(await h.request(e7)).items[0];
       assert.ok(item?.kind === ActionResultKind.Uncertain);
       assert.equal(item.uncertainty, Uncertainty.Effect);
-      assert.equal(h.actions.performCalls.length, FOUR);
+      assert.equal(h.actions.performCalls.length, FOUR_CALLS);
       refused(
         await h.request(e1),
         HttpStatus.Forbidden,

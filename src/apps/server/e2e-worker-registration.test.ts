@@ -23,13 +23,17 @@ import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
-const EMPTY = "";
-const ONE = 1;
-const TWO = 2;
-const THREE = 3;
-const FOUR = 4;
-const FIVE = 5;
-const SIX = 6;
+const NO_OUTPUT = "";
+const FIRST_REVISION = 1;
+const NATIVE_WORKER_INDEX = 1;
+const SINGLE_ITEM = 1;
+const SINGLE_INSTANCE = 1;
+const SECOND_BINDING_VERSION = 2;
+const THIRD_BINDING_VERSION = 3;
+const REVIEWER_WORKER_INDEX = 3;
+const FOURTH_BINDING_VERSION = 4;
+const FIFTH_BINDING_VERSION = 5;
+const SIXTH_BINDING_VERSION = 6;
 const STRING_TYPE = "string";
 const NATIVE = "general@1";
 const EXTERNAL = "claude@1";
@@ -70,14 +74,14 @@ type Fixture = Awaited<ReturnType<typeof setup>>;
 
 function success<T>(result: Result): T {
   assert.equal(result.code, SUCCESS, result.stderr);
-  assert.equal(result.stderr, EMPTY);
+  assert.equal(result.stderr, NO_OUTPUT);
   return JSON.parse(result.stdout) as T;
 }
 
 function refusal(result: Result, code: string): void {
   assert.equal(result.code, FAILURE, result.stderr);
   assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
-  assert.equal(result.stdout, EMPTY);
+  assert.equal(result.stdout, NO_OUTPUT);
 }
 
 function file(directory: string, name: string, value: unknown): string {
@@ -119,7 +123,7 @@ function machineToken(
     { env, encoding: "utf8", timeout: SPAWN_TIMEOUT },
   );
   assert.equal(result.status, SUCCESS, result.stderr);
-  assert.equal(result.stderr, EMPTY);
+  assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
     clientSecret: string;
@@ -180,10 +184,10 @@ async function setup(t: TestContext) {
       H,
     ),
   );
-  assert.equal(enabled.revision, ONE);
+  assert.equal(enabled.revision, FIRST_REVISION);
   const initial = file(directory, "v1.json", {
-    version: ONE,
-    bindings: bindings(ONE),
+    version: FIRST_REVISION,
+    bindings: bindings(SINGLE_INSTANCE),
   });
   const applied = success<{ bindingSetVersion: number }>(
     await kanthord(
@@ -191,7 +195,7 @@ async function setup(t: TestContext) {
       H,
     ),
   );
-  assert.equal(applied.bindingSetVersion, TWO);
+  assert.equal(applied.bindingSetVersion, SECOND_BINDING_VERSION);
   writePrivate(
     join(directory, "issuance.yaml"),
     stringify(
@@ -215,7 +219,7 @@ async function apply(
   instanceCount: number | null,
 ): Promise<number> {
   assert.ok(f.projectId);
-  assert.ok(version >= ONE);
+  assert.ok(version >= FIRST_REVISION);
   const path = file(f.directory, `v${version}.json`, {
     version,
     bindings: instanceCount === null ? {} : bindings(instanceCount),
@@ -247,13 +251,15 @@ test(
         [EXTERNAL, NATIVE, "opencode@1", "reviewer@1"],
       );
       assert.equal(page.nextCursor, null);
-      assert.equal(page.items[ONE]!.host, HOST);
-      assert.deepEqual(page.items[ONE]!.declaredNodeStates, ["Available"]);
-      assert.deepEqual(page.items[THREE]!.declaredNodeStates, [
+      assert.equal(page.items[NATIVE_WORKER_INDEX]!.host, HOST);
+      assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.declaredNodeStates, [
+        "Available",
+      ]);
+      assert.deepEqual(page.items[REVIEWER_WORKER_INDEX]!.declaredNodeStates, [
         "Waiting",
         "External.Requested",
       ]);
-      assert.deepEqual(page.items[ONE]!.requiredNodeFormat, [
+      assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.requiredNodeFormat, [
         "name",
         "requirement",
         "criterion",
@@ -336,7 +342,7 @@ test(
       const page = success<{ items: Instance[]; nextCursor: string | null }>(
         await kanthord([...list, "--binding", BINDING], f.H),
       );
-      assert.equal(page.items.length, ONE);
+      assert.equal(page.items.length, SINGLE_ITEM);
       assert.equal(page.nextCursor, null);
       record = page.items[0]!;
       assert.ok(
@@ -433,7 +439,10 @@ test(
       refusal(await kanthord(["worker", "register"], f.A), ErrorCode.Slot);
     });
     await t.test("E02.19 disabling binding ends registration", async () => {
-      assert.equal(await apply(f, TWO, SUCCESS), THREE);
+      assert.equal(
+        await apply(f, SECOND_BINDING_VERSION, SUCCESS),
+        THIRD_BINDING_VERSION,
+      );
       assert.deepEqual(success(await kanthord(list, f.H)), {
         items: [],
         nextCursor: null,
@@ -444,7 +453,10 @@ test(
       );
     });
     await t.test("E02.20 reenable admits a new identity", async () => {
-      assert.equal(await apply(f, THREE, ONE), FOUR);
+      assert.equal(
+        await apply(f, THIRD_BINDING_VERSION, SINGLE_INSTANCE),
+        FOURTH_BINDING_VERSION,
+      );
       ridB2 = success<Registration>(
         await kanthord(["worker", "register"], f.B),
       ).runtimeIdentity;
@@ -521,8 +533,14 @@ test(
       },
     );
     await t.test("E02.23 tombstone refuses old JWT after rebind", async () => {
-      assert.equal(await apply(f, FOUR, null), FIVE);
-      assert.equal(await apply(f, FIVE, ONE), SIX);
+      assert.equal(
+        await apply(f, FOURTH_BINDING_VERSION, null),
+        FIFTH_BINDING_VERSION,
+      );
+      assert.equal(
+        await apply(f, FIFTH_BINDING_VERSION, SINGLE_INSTANCE),
+        SIXTH_BINDING_VERSION,
+      );
       refusal(
         await kanthord(["worker", "heartbeat"], f.B),
         ErrorCode.Unauthorized,
