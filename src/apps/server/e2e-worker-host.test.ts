@@ -18,9 +18,11 @@ import {
 import { inProcessWorker } from "./test-support.ts";
 import { workerAcceptance, WORKER_TEST_KEY } from "./worker-acceptance.ts";
 
-const ONE = 1;
-const TWO = 2;
-const THREE = 3;
+const FIRST_REVISION = 1;
+const SINGLE_ITEM = 1;
+const SECOND_REVISION = 2;
+const TWO_RESULTS = 2;
+const THIRD_REVISION = 3;
 const FIRST_INDEX = 0;
 const POLL_LIMIT = 30;
 const FILE_NAME = "hello.txt";
@@ -60,7 +62,7 @@ async function fixture(t: TestContext) {
       kind: "initiative",
       content: { ...content, verifications: ["true"] },
       reason: "plan",
-      expectedMissionVersion: ONE,
+      expectedMissionVersion: FIRST_REVISION,
     },
   );
   const objective = await setup.write<{ revisions: { nodeId: string }[] }>(
@@ -69,13 +71,13 @@ async function fixture(t: TestContext) {
       filename: "objective-a.md",
       kind: "objective",
       parentId: initiative.revisions[0]!.nodeId,
-      expectedParentRevision: ONE,
+      expectedParentRevision: FIRST_REVISION,
       content: {
         ...content,
         bindings: [setup.bindings.repo!.id, setup.bindings.store!.id],
       },
       reason: "plan",
-      expectedMissionVersion: TWO,
+      expectedMissionVersion: SECOND_REVISION,
     },
   );
   const nodeId = objective.revisions[0]!.nodeId;
@@ -83,10 +85,10 @@ async function fixture(t: TestContext) {
     filename: "task-a.md",
     kind: "task",
     parentId: nodeId,
-    expectedParentRevision: ONE,
+    expectedParentRevision: FIRST_REVISION,
     content,
     reason: "plan",
-    expectedMissionVersion: THREE,
+    expectedMissionVersion: THIRD_REVISION,
   });
   const seed = join(setup.directory, "seed");
   const bare = join(setup.directory, "bare.git");
@@ -128,8 +130,8 @@ async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
       (item) => item.claimState === ClaimState.Finished,
     );
     if (record) {
-      assert.equal(page.items.length, ONE);
-      assert.equal(record.credentials.length, ONE);
+      assert.equal(page.items.length, SINGLE_ITEM);
+      assert.equal(record.credentials.length, SINGLE_ITEM);
       return record;
     }
     await delay(100);
@@ -192,9 +194,9 @@ test(
         const uploaded = page.items.filter(
           (item) => item.subject === FILE_NAME,
         );
-        assert.equal(uploaded.length, ONE);
+        assert.equal(uploaded.length, SINGLE_ITEM);
         const assets = uploaded[0]!.assets;
-        assert.equal(assets.length, ONE);
+        assert.equal(assets.length, SINGLE_ITEM);
         const asset = assets[0]!;
         assert.equal(asset.kind, AssetKind.Object);
         assert.ok(asset.kind === AssetKind.Object);
@@ -218,7 +220,7 @@ test(
           (message) =>
             message.role === TOOL_RESULT && message.toolName === UPLOAD,
         );
-        assert.equal(results.length, TWO);
+        assert.equal(results.length, TWO_RESULTS);
         const success = results[0]!;
         const refused = results[1]!;
         assert.ok(success.role === TOOL_RESULT && !success.isError);
@@ -320,7 +322,7 @@ async function assertLive(
     "--node",
     setup.nodeId,
   ]);
-  assert.equal(executions.items.length, ONE);
+  assert.equal(executions.items.length, SINGLE_ITEM);
   const claim = await setup.read<ExecutionRecord>(
     ["scheduler", "claim", "get", executions.items[0]!.executionId],
     { ...setup.human, KANTHORD_TOKEN: setup.auth.token },

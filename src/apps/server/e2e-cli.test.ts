@@ -6,7 +6,7 @@ import { environment, kanthord } from "./cli-support.ts";
 
 const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;
-const NONE = 0;
+const NO_COMMANDS = 0;
 const HELP = "--help";
 const COMMANDS_HEADER = "Commands:";
 const COMMAND_ROW = /^  (\S+)(?:\s|$)/gm;
@@ -116,7 +116,7 @@ function commandNames(stdout: string): string[] {
     assert.ok(name !== undefined, stdout);
     names.push(name);
   }
-  assert.ok(names.length > NONE, stdout);
+  assert.ok(names.length > NO_COMMANDS, stdout);
   return names;
 }
 

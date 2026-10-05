@@ -23,8 +23,9 @@ const NOT_FOUND = "mission.record.not_found";
 const NODE_NOT_FOUND = "mission.node.not_found";
 const TASK = "mission.node.control_task";
 const CURSOR = "system.pagination.cursor_invalid";
-const FIRST = 1;
-const ZERO = 0;
+const FIRST_ATTEMPT = 1;
+const INITIAL_ATTEMPT = 0;
+const INITIAL_PRIORITY = 0;
 const NOW = 100;
 const ASSESSMENT_GET = "assessment.get";
 const OUTCOME_GET = "outcome.get";
@@ -51,7 +52,7 @@ test("all record reads enforce human access with valid parameters and return pre
     nodeId: createIdentity("node"),
     assessmentId: createIdentity("assessment"),
     outcomeId: createIdentity("outcome"),
-    attempt: String(FIRST),
+    attempt: String(FIRST_ATTEMPT),
     actionKey: "repo.pull_request",
   };
   const machine = await h.machineToken(TEST_PROJECT_ID, TEST_WORKER_BINDING);
@@ -108,8 +109,8 @@ test("all record reads enforce human access with valid parameters and return pre
         NodeKind.Objective,
         "objective.md",
         NodeState.Available,
-        ZERO,
-        ZERO,
+        INITIAL_ATTEMPT,
+        INITIAL_PRIORITY,
         NOW,
       );
     const taskId = createIdentity("node");
@@ -133,7 +134,13 @@ test("all record reads enforce human access with valid parameters and return pre
     .prepare(
       "UPDATE mission_node SET kind = ?, state = ?, attempt = ?, priority = ? WHERE id = ?",
     )
-    .run(NodeKind.Initiative, NodeState.Available, ZERO, ZERO, params.nodeId);
+    .run(
+      NodeKind.Initiative,
+      NodeState.Available,
+      INITIAL_ATTEMPT,
+      INITIAL_PRIORITY,
+      params.nodeId,
+    );
   for (const name of [
     "attempt.list",
     "externalAction.list",

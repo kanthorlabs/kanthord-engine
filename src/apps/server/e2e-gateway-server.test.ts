@@ -43,10 +43,14 @@ import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 1;
-const EMPTY = "";
-const NONE = 0;
-const ONE = 1;
-const TWO = 2;
+const NO_OUTPUT = "";
+const INITIAL_STRING = "";
+const UNSET_PORT = 0;
+const NO_HEALTH_CHECKS = 0;
+const FIRST_REVISION = 1;
+const SINGLE_HEALTH_CHECK = 1;
+const DOUBLE_TIMEOUT = 2;
+const SECOND_REVISION = 2;
 const MODE_MASK = 0o777;
 const STARTUP_TIMEOUT_MS = 10000;
 const SHUTDOWN_TIMEOUT_MS = 5000;
@@ -129,7 +133,7 @@ function file(directory: string, name: string, value: unknown): string {
 
 function success<T>(result: Result): T {
   assert.equal(result.code, EXIT_SUCCESS, result.stderr);
-  assert.equal(result.stderr, EMPTY);
+  assert.equal(result.stderr, NO_OUTPUT);
   assert.ok(!result.stdout.includes(SECRET_VALUE), "stdout leaked the secret");
   return JSON.parse(result.stdout, (key, value: unknown) => {
     assert.notEqual(key, SECRET_FIELD, "JSON contains a secret field");
@@ -141,7 +145,7 @@ function success<T>(result: Result): T {
 function refusal(result: Result, code: string): void {
   assert.equal(result.code, EXIT_FAILURE, result.stderr);
   assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
-  assert.equal(result.stdout, EMPTY);
+  assert.equal(result.stdout, NO_OUTPUT);
 }
 
 async function createCredential(
@@ -196,7 +200,7 @@ async function createProject(fixture: Fixture): Promise<Project> {
     await kanthord(["project", "create", "--name", PROJECT_NAME], fixture.env),
   );
   assert.ok(project.id.startsWith(PROJECT_PREFIX));
-  assert.equal(project.bindingSetVersion, ONE);
+  assert.equal(project.bindingSetVersion, FIRST_REVISION);
   return project;
 }
 
@@ -222,7 +226,7 @@ function serveEnvironment(directory: string): NodeJS.ProcessEnv {
     gateway: { port: 0, allowedHosts: ["localhost"] },
   }).getProperties();
   writePrivate(env.KANTHORD_CONFIG, stringify(config));
-  assert.equal(config.gateway.port, NONE);
+  assert.equal(config.gateway.port, UNSET_PORT);
   assert.notEqual(env.XDG_DATA_HOME, env.XDG_STATE_HOME);
   return env;
 }
@@ -236,7 +240,7 @@ async function stopServe(child: ChildProcessWithoutNullStreams): Promise<void> {
     );
     const deadline = setTimeout(() => {
       reject(new Error("serve did not exit after SIGTERM and SIGKILL"));
-    }, SHUTDOWN_TIMEOUT_MS * TWO);
+    }, SHUTDOWN_TIMEOUT_MS * DOUBLE_TIMEOUT);
     child.once("close", () => {
       clearTimeout(killTimer);
       clearTimeout(deadline);
@@ -252,7 +256,7 @@ async function servePort(
   child: ChildProcessWithoutNullStreams,
 ): Promise<number> {
   const lines = createInterface({ input: child.stderr });
-  let diagnostics = EMPTY;
+  let diagnostics = INITIAL_STRING;
   let timer: NodeJS.Timeout | undefined;
   let onExit: () => void;
   let onError: (error: Error) => void;
@@ -274,7 +278,7 @@ async function servePort(
           const record = JSON.parse(line);
           if (record.msg !== GATEWAY_STARTED_MESSAGE) return;
           assert.ok(Number.isSafeInteger(record.port));
-          assert.ok(record.port > NONE);
+          assert.ok(record.port > UNSET_PORT);
           resolve(record.port);
         } catch (error) {
           reject(error);
@@ -294,13 +298,13 @@ function serveLiveness(
   port: number,
 ): Promise<{ status: number; body: string }> {
   assert.ok(Number.isSafeInteger(port));
-  assert.ok(port > NONE);
+  assert.ok(port > UNSET_PORT);
   return new Promise((resolve, reject) => {
     const call = request(
       `http://127.0.0.1:${port}${gatewayOperations.liveness.path}`,
       { headers: { Host: "localhost" } },
       (response) => {
-        let body = EMPTY;
+        let body = INITIAL_STRING;
         response.setEncoding("utf8");
         response.on("data", (chunk) => {
           body += chunk;
@@ -337,7 +341,7 @@ test("E07.1 credential create and get return the same secret-free record", async
   const created = await createCredential(fixture);
   assert.ok(created.revisions[0]);
   assert.ok(created.revisions[0].id.startsWith(CREDENTIAL_PREFIX));
-  assert.equal(created.revisions[0].revision, ONE);
+  assert.equal(created.revisions[0].revision, FIRST_REVISION);
   assert.equal(created.revisions[0].endedAt, null);
   const read = success<CredentialAnswer>(
     await kanthord(["llm", "credential", "get", CREDENTIAL], fixture.env),
@@ -356,7 +360,7 @@ test("E07.2 anthropic credential enables swe@1 at revision one", async (t) => {
     ),
   );
   assert.equal(put.state, ENABLED);
-  assert.equal(put.revision, ONE);
+  assert.equal(put.revision, FIRST_REVISION);
   const read = success<AgentEnablement>(
     await kanthord([...ENABLEMENT_COMMAND, "get", AGENT], fixture.env),
   );
@@ -416,12 +420,12 @@ test("E07.4 github repository binding advances the binding set to version two", 
       fixture.env,
     ),
   );
-  assert.equal(applied.bindingSetVersion, TWO);
+  assert.equal(applied.bindingSetVersion, SECOND_REVISION);
   assert.equal(applied.projectId, project.id);
   const read = success<Project>(
     await kanthord(["project", "get", project.id], fixture.env),
   );
-  assert.equal(read.bindingSetVersion, TWO);
+  assert.equal(read.bindingSetVersion, SECOND_REVISION);
 });
 
 test("E07.5 mission initiative creation queues the created node", async (t) => {
@@ -441,7 +445,7 @@ test("E07.5 mission initiative creation queues the created node", async (t) => {
       bindings: [],
     },
     reason: "planning edit",
-    expectedMissionVersion: ONE,
+    expectedMissionVersion: FIRST_REVISION,
   });
   const created = success<NodeChange>(
     await kanthord(
@@ -464,7 +468,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
     models: [],
   });
   const add = file(fixture.directory, "add-model.json", {
-    expectedRevision: ONE,
+    expectedRevision: FIRST_REVISION,
     metadata: { baseUrl: BASE_URL, models: [{ id: GPT }] },
   });
   const updated = success<CredentialAnswer>(
@@ -494,7 +498,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
   );
   assert.equal(put.defaultConfiguration.modelIdentifier, GPT);
   const remove = file(fixture.directory, "remove-model.json", {
-    expectedRevision: TWO,
+    expectedRevision: SECOND_REVISION,
     metadata: { baseUrl: BASE_URL, models: [] },
   });
   refusal(
@@ -556,7 +560,7 @@ test("E07.7 real serve liveness exposes all eight maps (requires local git and s
   for (const name of SERVER_SERVICE_NAMES) {
     const checks = body.services[name];
     assert.ok(checks);
-    assert.ok(Object.keys(checks).length > NONE, name);
+    assert.ok(Object.keys(checks).length > NO_HEALTH_CHECKS, name);
   }
 });
 
@@ -623,9 +627,9 @@ test("E07.10 healthcheck refuses an unauthenticated request", async (t) => {
 });
 
 test("E07.11 healthcheck deduplicates targets but reports both resource names", async (t) => {
-  let checks = NONE;
+  let checks = NO_HEALTH_CHECKS;
   const check: ResourceCheck = async () => {
-    checks += ONE;
+    checks += SINGLE_HEALTH_CHECK;
     return ResourceStatus.Healthy;
   };
   const fixture = await gatewayFixture(t, {
@@ -644,7 +648,7 @@ test("E07.11 healthcheck deduplicates targets but reports both resource names", 
   const body = gatewayOperations.healthcheck.output.parse(
     await response.json(),
   );
-  assert.equal(checks, ONE);
+  assert.equal(checks, SINGLE_HEALTH_CHECK);
   const expected = { status: ResourceStatus.Healthy, capability: CAPABILITY };
   assert.deepEqual(body.shared.llm.global, {
     [FIRST_RESOURCE]: expected,

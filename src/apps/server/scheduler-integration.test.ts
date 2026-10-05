@@ -36,8 +36,10 @@ import { temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
-const ONE = 1;
-const TWO = 2;
+const FIRST_ATTEMPT = 1;
+const FIRST_CONCURRENT_RELEASE = 1;
+const SECOND_CONCURRENT_RELEASE = 2;
+const EXPECTED_PAIR_COUNT = 2;
 const NO_INPUT = { params: {}, query: {}, body: null };
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const NOT_RUNNING = "scheduler.execution.not_running";
@@ -372,7 +374,7 @@ for (const adapter of ["direct", "http"] as const) {
     const next = completed(await h.pull());
     assert.ok(next.kind === WorkPullKind.Claimed);
     assert.notEqual(next.execution.executionId, first.execution.executionId);
-    assert.equal(next.execution.attempt, ONE);
+    assert.equal(next.execution.attempt, FIRST_ATTEMPT);
     const list = completed(
       await h.call(schedulerOperations.executionList, {
         params: { projectId: h.projectId },
@@ -380,7 +382,7 @@ for (const adapter of ["direct", "http"] as const) {
         body: null,
       }),
     );
-    assert.equal(list.items.length, TWO);
+    assert.equal(list.items.length, EXPECTED_PAIR_COUNT);
     refused(
       await h.call(schedulerOperations.executionList, {
         params: { projectId: h.projectId },
@@ -408,8 +410,8 @@ test("two proved releases race at the transaction, for equal and different paylo
     let admitted = 0;
     registered.handler = async (input, caller) => {
       admitted++;
-      if (admitted === ONE) firstAdmitted.resolve();
-      if (admitted === TWO) gate.resolve();
+      if (admitted === FIRST_CONCURRENT_RELEASE) firstAdmitted.resolve();
+      if (admitted === SECOND_CONCURRENT_RELEASE) gate.resolve();
       await gate.promise;
       return original(input, caller);
     };
@@ -426,7 +428,7 @@ test("two proved releases race at the transaction, for equal and different paylo
       registered.handler = original;
     }
   }
-  assert.equal(routing.mock.calls.length, TWO);
+  assert.equal(routing.mock.calls.length, EXPECTED_PAIR_COUNT);
   const node = await h.node();
   assert.ok(node.kind !== NodeKind.Task);
   assert.equal(node.state, NodeState.Available);

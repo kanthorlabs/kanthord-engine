@@ -10,7 +10,7 @@ import { environment, generateMachineToken, kanthord } from "./cli-support.ts";
 
 const KEY_BYTES = 32;
 const SUCCESS = 0;
-const EMPTY = "";
+const NO_STDERR = "";
 const CLIENT_KIND = "client";
 const PRIVATE_MODE = 0o600;
 const MODE_MASK = 0o777;
@@ -35,7 +35,7 @@ test("machine issuance helper preserves group claims and independently derives p
   );
   const inspected = await kanthord(["jwt", "inspect", first.token], env);
   assert.equal(inspected.code, SUCCESS);
-  assert.equal(inspected.stderr, EMPTY);
+  assert.equal(inspected.stderr, NO_STDERR);
   const documents = parseAllDocuments(inspected.stdout);
   assert.ok(documents.every((document) => !document.errors.length));
   const claims = documents[0]!.toJSON();

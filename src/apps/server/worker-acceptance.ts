@@ -10,7 +10,7 @@ import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture, objectSink, sinkStorage } from "./test-support.ts";
 
 const SUCCESS = 0;
-const EMPTY = "";
+const NO_STDERR = "";
 export const WORKER_TEST_KEY = "test_worker_provider_key";
 export const WORKER_DEFAULTS = {
   agentProvider: "default",
@@ -42,7 +42,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
   async function read<T>(args: string[], env = human): Promise<T> {
     const result = await kanthord(args, env);
     assert.equal(result.code, SUCCESS, result.stderr);
-    assert.equal(result.stderr, EMPTY);
+    assert.equal(result.stderr, NO_STDERR);
     assert.ok(!result.stdout.includes(WORKER_TEST_KEY));
     return JSON.parse(result.stdout) as T;
   }
@@ -169,7 +169,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
       { env: human, encoding: "utf8", timeout: 15000 },
     );
     assert.equal(result.status, SUCCESS, result.stderr);
-    assert.equal(result.stderr, EMPTY);
+    assert.equal(result.stderr, NO_STDERR);
     return parse(result.stdout) as { token: string; clientSecret: string };
   }
   if (!host)

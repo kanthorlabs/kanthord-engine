@@ -52,10 +52,15 @@ import {
   scriptedActions,
 } from "./test-support.ts";
 
-const ZERO = 0;
-const ONE = 1;
-const TWO = 2;
-const EMPTY = "";
+const SUCCESSFUL_EXIT = 0;
+const ZERO_BYTE = 0;
+const SINGLE_INSTANCE = 1;
+const INITIAL_BINDING_VERSION = 1;
+const SINGLE_TURN = 1;
+const FIRST_REVISION = 1;
+const SINGLE_ITEM = 1;
+const GATED_BINDING_INDEX = 2;
+const NO_OUTPUT = "";
 const REPOSITORY = "repository";
 const GATED_REQUIREMENT = "gated.pull_request";
 const SECRET = "test_e2e_methods_secret";
@@ -114,8 +119,8 @@ test(
     let sequence = 0;
     async function read<T>(args: string[], env = human): Promise<T> {
       const result = await kanthord(args, env);
-      assert.equal(result.code, ZERO, result.stderr);
-      assert.equal(result.stderr, EMPTY);
+      assert.equal(result.code, SUCCESSFUL_EXIT, result.stderr);
+      assert.equal(result.stderr, NO_OUTPUT);
       assert.equal(result.stdout.includes(SECRET), false);
       return JSON.parse(result.stdout) as T;
     }
@@ -162,7 +167,7 @@ test(
     ]);
     const worker = {
       worker: "general@1",
-      instanceCount: ONE,
+      instanceCount: SINGLE_INSTANCE,
       entries: [{ agent: "swe@1", ...DEFAULTS }],
     };
     const repository = (name: string) => ({
@@ -176,7 +181,7 @@ test(
     const bindingSet = await write<{
       bindings: Record<string, { id: string }>;
     }>(["project", "binding", "apply", project.id], {
-      version: ONE,
+      version: INITIAL_BINDING_VERSION,
       bindings: {
         repo: { kind: "repository", config: repository("repo") },
         gated: {
@@ -197,14 +202,14 @@ test(
           kind: "worker",
           config: {
             ...worker,
-            resourceBudget: { turns: ONE, wallTimeMs: 600000 },
+            resourceBudget: { turns: SINGLE_TURN, wallTimeMs: 600000 },
           },
         },
         review: {
           kind: "worker",
           config: {
             worker: "reviewer@1",
-            instanceCount: ONE,
+            instanceCount: SINGLE_INSTANCE,
             entries: [{ agent: "re@1", ...DEFAULTS }],
           },
         },
@@ -240,12 +245,14 @@ test(
     const nodes: string[] = [];
     const tasks: string[] = [];
     for (const [index, name] of ["a", "b", "c"].entries()) {
-      const binding = bindingSet.bindings[index === TWO ? "gated" : "repo"]!.id;
+      const binding =
+        bindingSet.bindings[index === GATED_BINDING_INDEX ? "gated" : "repo"]!
+          .id;
       const node = await create({
         filename: `${name}.md`,
         kind: "objective",
         parentId: initiative,
-        expectedParentRevision: ONE,
+        expectedParentRevision: FIRST_REVISION,
         content: { ...CONTENT, bindings: [binding] },
       });
       nodes.push(node);
@@ -254,7 +261,7 @@ test(
           filename: `task-${name}.md`,
           kind: "task",
           parentId: node,
-          expectedParentRevision: ONE,
+          expectedParentRevision: FIRST_REVISION,
           content: {
             ...CONTENT,
             criterion: "hello.txt holds hello",
@@ -308,7 +315,7 @@ test(
         ],
         { env: human, encoding: "utf8", timeout: 10000 },
       );
-      assert.equal(result.status, ZERO, result.stderr);
+      assert.equal(result.status, SUCCESSFUL_EXIT, result.stderr);
       return parse(result.stdout) as { token: string; clientSecret: string };
     }
     async function register(binding: string) {
@@ -437,8 +444,8 @@ test(
         return { result, execution, provider, setup };
       } finally {
         credentials.discard();
-        keys.handover.fill(ZERO);
-        keys.report.fill(ZERO);
+        keys.handover.fill(ZERO_BYTE);
+        keys.report.fill(ZERO_BYTE);
       }
     }
     const evidence = (node: string) =>
@@ -464,7 +471,7 @@ test(
         ).revparse([`refs/heads/kanthord/${A}`])
       ).trim();
       const items = (await evidence(A)).items;
-      assert.equal(items.length, ONE);
+      assert.equal(items.length, SINGLE_ITEM);
       assert.deepEqual(items[0]!.assets[0]!.address, {
         kind: "repository",
         bindingId: answer.setup.repositories[0]!.bindingId,
@@ -507,7 +514,7 @@ test(
           kind: "released",
           furtherWork: true,
         });
-        assert.equal(answer.provider.calls.length, ONE);
+        assert.equal(answer.provider.calls.length, SINGLE_ITEM);
         assert.deepEqual((await evidence(B)).items, []);
         const git = simpleGit(barePaths.get("git@github.com:owner/repo.git")!);
         assert.match(
@@ -554,7 +561,7 @@ test(
         });
         assert.deepEqual(
           verified.verification!.results.map((result) => result.exitCode),
-          [ZERO, ZERO],
+          [SUCCESSFUL_EXIT, SUCCESSFUL_EXIT],
         );
         assert.deepEqual(
           verified.verification!.results.map((result) => result.command),

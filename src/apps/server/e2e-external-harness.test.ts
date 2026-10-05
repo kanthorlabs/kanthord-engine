@@ -19,8 +19,10 @@ import {
   REPOSITORY_ADDRESS,
 } from "./journey-support.ts";
 
-const ONE = 1;
-const FOUR = 4;
+const INITIAL_BINDING_VERSION = 1;
+const SINGLE_INSTANCE = 1;
+const FIRST_ATTEMPT = 1;
+const EXPECTED_EXECUTION_COUNT = 4;
 const WORKER = "claude@1";
 const CLAIMED = "claimed";
 const HEALTHY = "healthy";
@@ -73,7 +75,7 @@ test(
     const bindings = await cli.write<{
       bindings: Record<string, { id: string; resourceIdentity: string }>;
     }>(["project", "binding", "apply", project.id], {
-      version: ONE,
+      version: INITIAL_BINDING_VERSION,
       bindings: {
         repo: {
           kind: "repository",
@@ -88,7 +90,7 @@ test(
         },
         harness: {
           kind: "worker",
-          config: { worker: WORKER, instanceCount: ONE },
+          config: { worker: WORKER, instanceCount: SINGLE_INSTANCE },
         },
       },
     });
@@ -196,7 +198,7 @@ test(
     await t.test("EX10.3 steps claim and instance activity", async () => {
       assert.equal(first.kind, CLAIMED);
       assert.equal(first.execution.nodeId, objective);
-      assert.equal(first.execution.attempt, ONE);
+      assert.equal(first.execution.attempt, FIRST_ATTEMPT);
       assert.equal(first.execution.claimant.runtimeIdentity, runtime);
       const instance = await cli.read<{
         activity: string;
@@ -262,7 +264,7 @@ test(
     const second = await pull();
     await t.test("EX10.6 evaluation claim", async () => {
       assert.equal(second.execution.nodeId, objective);
-      assert.equal(second.execution.attempt, ONE);
+      assert.equal(second.execution.attempt, FIRST_ATTEMPT);
       const claim = await cli.read<{ claimState: string }>(
         ["scheduler", "claim", "get", second.execution.executionId],
         auth.token,
@@ -441,7 +443,7 @@ test(
           "list",
           project.id,
         ]);
-        assert.equal(executions.items.length, FOUR);
+        assert.equal(executions.items.length, EXPECTED_EXECUTION_COUNT);
         assert.ok(
           executions.items.every(
             (item) =>

@@ -20,9 +20,15 @@ import { environment, kanthord } from "./cli-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
-const EMPTY = "";
-const ONE = 1;
-const THREE = 3;
+const NO_OUTPUT = "";
+const NO_REVIEWER = "";
+const UNSET_EXECUTION_ID = "";
+const INITIAL_ENABLEMENT_REVISION = 1;
+const INITIAL_BINDING_VERSION = 1;
+const FIRST_ATTEMPT = 1;
+const SINGLE_EXECUTION = 1;
+const FIRST_PRIORITY = 1;
+const THIRD_MISSION_VERSION = 3;
 const DEADLINE_DELTA = 7800000;
 const SHORT_DEADLINE_DELTA = 1001;
 const SPAWN_TIMEOUT = 10000;
@@ -88,7 +94,7 @@ function machineToken(
     { env, encoding: "utf8", timeout: SPAWN_TIMEOUT },
   );
   assert.equal(result.status, SUCCESS, result.stderr);
-  assert.equal(result.stderr, EMPTY);
+  assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
     clientSecret: string;
@@ -120,7 +126,7 @@ async function setup(t: TestContext, short = false) {
   const read = async <T>(args: string[], env = H): Promise<T> => {
     const result = await kanthord(args, env);
     assert.equal(result.code, SUCCESS, result.stderr);
-    assert.equal(result.stderr, EMPTY);
+    assert.equal(result.stderr, NO_OUTPUT);
     return JSON.parse(result.stdout) as T;
   };
   const write = <T>(args: string[], body: unknown, env = H) =>
@@ -129,7 +135,7 @@ async function setup(t: TestContext, short = false) {
     const result = await kanthord(args, env);
     assert.equal(result.code, FAILURE, result.stderr);
     assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
-    assert.equal(result.stdout, EMPTY);
+    assert.equal(result.stdout, NO_OUTPUT);
   };
   await write(["llm", "credential", "create"], {
     name: "anthro-1",
@@ -164,7 +170,7 @@ async function setup(t: TestContext, short = false) {
         defaultConfiguration: CONFIGURATION,
       },
     );
-    assert.equal(result.revision, ONE);
+    assert.equal(result.revision, INITIAL_ENABLEMENT_REVISION);
   }
   const project = await read<{ id: string }>([
     "project",
@@ -210,7 +216,10 @@ async function setup(t: TestContext, short = false) {
     bindingSetVersion: number;
     bindings: Record<string, { id: string }>;
   }>(["project", "binding", "apply", project.id], { version: 1, bindings });
-  assert.equal(applied.bindingSetVersion, ONE + Object.keys(bindings).length);
+  assert.equal(
+    applied.bindingSetVersion,
+    INITIAL_BINDING_VERSION + Object.keys(bindings).length,
+  );
   const mission = await read<{ id: string }>(["mission", "get", project.id]);
   const initiative = await write<Change>(
     ["mission", "node", "create", mission.id],
@@ -281,7 +290,7 @@ async function setup(t: TestContext, short = false) {
     await read<{ runtimeIdentity: string }>(["worker", "register"], G)
   ).runtimeIdentity;
   const reviewer = short
-    ? EMPTY
+    ? NO_REVIEWER
     : (await read<{ runtimeIdentity: string }>(["worker", "register"], R))
         .runtimeIdentity;
   const generalPull = {
@@ -303,9 +312,9 @@ async function setup(t: TestContext, short = false) {
     read<Page<{ nodeId: string }>>(["scheduler", "queue", "list", project.id]);
   const act = (state: string) => ({
     reason: "hold",
-    expectedMissionVersion: THREE,
+    expectedMissionVersion: THIRD_MISSION_VERSION,
     expectedState: state,
-    expectedAttempt: ONE,
+    expectedAttempt: FIRST_ATTEMPT,
   });
   return {
     fixture,
@@ -339,8 +348,8 @@ test(
   { timeout: JOURNEY_TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    let X = EMPTY;
-    let E = EMPTY;
+    let X = UNSET_EXECUTION_ID;
+    let E = UNSET_EXECUTION_ID;
     const further = h.file({ furtherWork: true });
     const release = h.file({ furtherWork: false });
     await t.test(
@@ -351,7 +360,7 @@ test(
         const execution = result.execution;
         X = execution.executionId;
         assert.equal(execution.nodeId, h.objectiveId);
-        assert.equal(execution.attempt, ONE);
+        assert.equal(execution.attempt, FIRST_ATTEMPT);
         assert.equal(execution.pinnedRevision, h.revision);
         assert.equal(execution.claimState, ClaimState.Running);
         assert.deepEqual(execution.credentials, []);
@@ -367,7 +376,7 @@ test(
         assert.match(execution.rootSpanId, /^[0-9a-f]{16}$/);
         const node = await h.node();
         assert.equal(node.state, NodeState.Executing);
-        assert.equal(node.attempt, ONE);
+        assert.equal(node.attempt, FIRST_ATTEMPT);
         assert.equal(
           (await h.queue()).items.some((job) => job.nodeId === h.objectiveId),
           false,
@@ -401,7 +410,7 @@ test(
               h.projectId,
             ])
           ).items.length,
-          ONE,
+          SINGLE_EXECUTION,
         );
       },
     );
@@ -441,7 +450,10 @@ test(
           "set",
           h.objectiveId,
           "--file",
-          h.file({ value: ONE, expectedMissionVersion: THREE }),
+          h.file({
+            value: FIRST_PRIORITY,
+            expectedMissionVersion: THIRD_MISSION_VERSION,
+          }),
         ],
         "mission.node.claim_live",
       );
@@ -473,7 +485,7 @@ test(
         assert.equal((await h.claim(X)).claimState, ClaimState.Finished);
         const node = await h.node();
         assert.equal(node.state, NodeState.Available);
-        assert.equal(node.attempt, ONE);
+        assert.equal(node.attempt, FIRST_ATTEMPT);
         assert.equal(
           (await h.queue()).items.some((job) => job.nodeId === h.objectiveId),
           true,
@@ -505,7 +517,7 @@ test(
       assert.equal(result.kind, WorkPullKind.Claimed);
       E = result.execution.executionId;
       assert.equal(result.execution.nodeId, h.objectiveId);
-      assert.equal(result.execution.attempt, ONE);
+      assert.equal(result.execution.attempt, FIRST_ATTEMPT);
       assert.equal(result.execution.pinnedRevision, h.revision);
       assert.equal(result.execution.claimant.runtimeIdentity, h.reviewer);
       assert.equal((await h.node()).state, NodeState.Evaluating);
@@ -654,7 +666,7 @@ test(
   { timeout: JOURNEY_TIMEOUT },
   async (t) => {
     const h = await setup(t, true);
-    let X = EMPTY;
+    let X = UNSET_EXECUTION_ID;
     await t.test(
       "E03.17 binding wall time and reserve fix the deadline",
       async () => {
@@ -694,7 +706,7 @@ test(
         const result = await h.pull();
         assert.equal(result.kind, WorkPullKind.Claimed);
         assert.notEqual(result.execution.executionId, X);
-        assert.equal(result.execution.attempt, ONE);
+        assert.equal(result.execution.attempt, FIRST_ATTEMPT);
         const old = await h.get(X);
         assert.equal(old.claimState, ClaimState.Lost);
         assert.ok(old.endedAt !== null && old.endedAt >= old.expiredAt);
@@ -706,7 +718,7 @@ test(
         ]);
         assert.deepEqual(
           attempts.items.map((attempt) => attempt.attempt),
-          [ONE],
+          [FIRST_ATTEMPT],
         );
         assert.equal(attempts.items[0]!.closedAt, null);
       },

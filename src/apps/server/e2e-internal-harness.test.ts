@@ -51,10 +51,13 @@ import {
 const GIT_TIMEOUT_MS = 10000;
 const MAIN_REF = "refs/heads/main";
 const TEST_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
-const ONE = 1;
-const TWO = 2;
-const THREE = 3;
-const EIGHT = 8;
+const SINGLE_INSTANCE = 1;
+const INITIAL_BINDING_VERSION = 1;
+const SINGLE_ITEM = 1;
+const TWO_ITEMS = 2;
+const EXPECTED_EVIDENCE_COUNT = 3;
+const EXPECTED_REVIEW_CALLS = 3;
+const EXPECTED_GENERAL_CALLS = 8;
 const FILE_SIZE = 5;
 const POLL_MS = 250;
 const POLL_DEADLINE_MS = 60000;
@@ -201,14 +204,14 @@ async function setupInternal(t: TestContext) {
     kind: "worker",
     config: {
       worker: name,
-      instanceCount: ONE,
+      instanceCount: SINGLE_INSTANCE,
       entries: [{ agent, ...DEFAULTS }],
     },
   });
   const bindingSet = await cli.write<{
     bindings: Record<string, { id: string; resourceIdentity: string }>;
   }>(["project", "binding", "apply", project.id], {
-    version: ONE,
+    version: INITIAL_BINDING_VERSION,
     bindings: {
       repo: repository(REPOSITORY_ADDRESS),
       gated: repository(GATED_ADDRESS, true),
@@ -312,7 +315,7 @@ async function finishedExecutions(
     "--node",
     nodeId,
   ]);
-  assert.equal(page.items.length, TWO);
+  assert.equal(page.items.length, TWO_ITEMS);
   assert.ok(
     page.items.every((item) => item.claimState === ClaimState.Finished),
   );
@@ -409,7 +412,7 @@ test(
           "--attempt",
           "1",
         ]);
-        assert.equal(evidence.items.length, THREE);
+        assert.equal(evidence.items.length, EXPECTED_EVIDENCE_COUNT);
         const uploaded = evidence.items.find(
           (item) => item.subject === FILE_NAME,
         )!;
@@ -455,7 +458,7 @@ test(
           "list",
           f.objective,
         ]);
-        assert.equal(assessments.items.length, ONE);
+        assert.equal(assessments.items.length, SINGLE_ITEM);
         assert.equal(assessments.items[0]!.result, AssessmentResult.Success);
         assert.equal(assessments.items[0]!.workerVersion, REVIEWER);
         assert.deepEqual(
@@ -468,7 +471,7 @@ test(
           "list",
           f.objective,
         ]);
-        assert.equal(outcomes.items.length, ONE);
+        assert.equal(outcomes.items.length, SINGLE_ITEM);
         assert.equal(outcomes.items[0]!.result, AssessmentResult.Success);
         assert.equal(
           outcomes.items[0]!.closingEvent,
@@ -495,7 +498,7 @@ test(
           "--attempt",
           "1",
         ]);
-        assert.equal(evidence.items.length, THREE);
+        assert.equal(evidence.items.length, EXPECTED_EVIDENCE_COUNT);
         const work = evidence.items
           .flatMap((item) => item.assets)
           .find((asset) => asset.kind === AssetKind.Repository)!;
@@ -521,7 +524,7 @@ test(
           "1",
         ]);
         assert.equal(actions.items[0]!.resolution, UNRESOLVED);
-        assert.equal(f.actions.performCalls.length, ONE);
+        assert.equal(f.actions.performCalls.length, SINGLE_ITEM);
         assert.deepEqual(f.actions.performCalls[0]!.operands, {
           nodeBranch: `kanthord/${f.gated}`,
           baseBranch: "main",
@@ -556,7 +559,7 @@ test(
           ClosingEvent.ExternalSuccess,
         );
         outcomeC = outcomes.items[0]!.id;
-        assert.equal(f.check.calls.length, ONE);
+        assert.equal(f.check.calls.length, SINGLE_ITEM);
       },
     );
     await t.test(
@@ -572,7 +575,7 @@ test(
           "--attempt",
           "1",
         ]);
-        assert.equal(evidence.items.length, TWO);
+        assert.equal(evidence.items.length, TWO_ITEMS);
         const report = evidence.items.find((item) => !item.verification)!;
         const asset = report.assets[0]!;
         assert.ok(asset.kind === AssetKind.Produced);
@@ -620,7 +623,7 @@ test(
           "list",
           f.initiative,
         ]);
-        assert.equal(assessments.items.length, ONE);
+        assert.equal(assessments.items.length, SINGLE_ITEM);
         assert.equal(assessments.items[0]!.result, AssessmentResult.Success);
         assert.deepEqual(
           [...assessments.items[0]!.childOutcomeIds].sort(),
@@ -631,8 +634,8 @@ test(
     await t.test(
       "EI10.6 scripted inference sees credentials but messages and logs expose no secrets",
       () => {
-        assert.equal(generalProvider.calls.length, EIGHT);
-        assert.equal(reviewProvider.calls.length, THREE);
+        assert.equal(generalProvider.calls.length, EXPECTED_GENERAL_CALLS);
+        assert.equal(reviewProvider.calls.length, EXPECTED_REVIEW_CALLS);
         const calls = [...generalProvider.calls, ...reviewProvider.calls];
         assert.ok(calls.every((call) => call.apiKey === PROVIDER_KEY));
         const messages = calls.flatMap((call) => call.messages);

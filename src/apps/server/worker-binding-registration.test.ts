@@ -8,9 +8,10 @@ import { workerOperations } from "../../worker/contract.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 
-const ONE = 1;
-const TWO = 2;
-const NONE = 0;
+const INITIAL_BINDING_VERSION = 1;
+const SINGLE_INSTANCE = 1;
+const TWO_INSTANCES = 2;
+const NO_INSTANCES = 0;
 const INPUT = { params: {}, query: {}, body: null };
 
 test("binding availability changes end real registrations atomically and count recovery admits a fresh runtime identity", async (t) => {
@@ -23,7 +24,7 @@ test("binding availability changes end real registrations atomically and count r
   });
   assert.ok(created.type === OperationResultType.Completed);
   const projectId = created.data.id;
-  let version = ONE;
+  let version = INITIAL_BINDING_VERSION;
   const write = (count: number | null) =>
     project["bindingSet.write"]({
       params: { projectId },
@@ -41,7 +42,7 @@ test("binding availability changes end real registrations atomically and count r
               },
       },
     });
-  const initial = await write(TWO);
+  const initial = await write(TWO_INSTANCES);
   assert.ok(initial.type === OperationResultType.Completed);
   version = initial.data.bindingSetVersion;
   const tokenA = await f.machineToken(projectId, "main");
@@ -53,7 +54,7 @@ test("binding availability changes end real registrations atomically and count r
   assert.ok((await b.register(INPUT)).type === OperationResultType.Completed);
   const clientA = String(decode(tokenA).payload.sub);
   const clientB = String(decode(tokenB).payload.sub);
-  const lowered = await write(ONE);
+  const lowered = await write(SINGLE_INSTANCE);
   assert.ok(lowered.type === OperationResultType.Completed);
   version = lowered.data.bindingSetVersion;
   assert.ok(f.worker.registrations.findByClient(clientA));
@@ -67,18 +68,18 @@ test("binding availability changes end real registrations atomically and count r
       throw new Error("rollback after group end");
     },
   );
-  const failed = await write(NONE);
+  const failed = await write(NO_INSTANCES);
   assert.ok(failed.type === OperationResultType.Failure);
   assert.equal(failed.status, HttpStatus.InternalServerError);
   assert.ok(f.worker.registrations.findByClient(clientA));
   assert.ok(f.worker.registrations.findByClient(clientB));
   fail.mock.restore();
-  const disabled = await write(NONE);
+  const disabled = await write(NO_INSTANCES);
   assert.ok(disabled.type === OperationResultType.Completed);
   version = disabled.data.bindingSetVersion;
   assert.equal(f.worker.registrations.findByClient(clientA), undefined);
   assert.equal(f.worker.registrations.findByClient(clientB), undefined);
-  const enabled = await write(ONE);
+  const enabled = await write(SINGLE_INSTANCE);
   assert.ok(enabled.type === OperationResultType.Completed);
   version = enabled.data.bindingSetVersion;
   const next = await a.register(INPUT);

@@ -8,7 +8,7 @@ import { NodeKind } from "../../mission/contract.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
-const EMPTY = "";
+const NO_OUTPUT = "";
 export const JOURNEY_TIMEOUT_MS = 120000;
 export const GITHUB_KEY = "test_journey_github_key";
 export const PROVIDER_KEY = "test_journey_provider_key";
@@ -42,7 +42,7 @@ export function journeyClient(t: TestContext, endpoint: string, token: string) {
       KANTHORD_TOKEN: machine ?? token,
     });
     assert.equal(result.code, SUCCESS, result.stderr);
-    assert.equal(result.stderr, EMPTY);
+    assert.equal(result.stderr, NO_OUTPUT);
     assert.ok(secrets.every((secret) => !result.stdout.includes(secret)));
     assert.ok(!result.stdout.includes('"putUrl"'));
     return JSON.parse(result.stdout) as T;
@@ -54,7 +54,7 @@ export function journeyClient(t: TestContext, endpoint: string, token: string) {
     const result = await kanthord(args, { ...human, KANTHORD_TOKEN: machine });
     assert.equal(result.code, FAILURE);
     assert.ok(result.stderr.startsWith(`${code}:`));
-    assert.equal(result.stdout, EMPTY);
+    assert.equal(result.stdout, NO_OUTPUT);
     assert.ok(secrets.every((secret) => !result.stderr.includes(secret)));
   }
   return { directory, human, secrets, file, read, write, refuses };
