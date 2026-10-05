@@ -23,4 +23,11 @@ const createProjectTables: Migration = (database) => {
   `);
 };
 
-export const projectMigrations: readonly Migration[] = [createProjectTables];
+const dropBindingSetVersion: Migration = (database) => {
+  database.exec("ALTER TABLE project_project DROP COLUMN binding_set_version;");
+};
+
+export const projectMigrations: readonly Migration[] = [
+  createProjectTables,
+  dropBindingSetVersion,
+];

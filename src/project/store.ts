@@ -26,7 +26,9 @@ import {
 const INITIAL_REVISION = 1;
 const NO_REVISION = 0;
 const REVISION_INCREMENT = 1;
-const VERSION_INCREMENT = 1;
+const BINDING_SET_VERSION = `(SELECT COUNT(*) FROM project_binding counted
+    WHERE counted.project_id = project_project.id) + ${BINDING_SET_INITIAL_VERSION}`;
+const PROJECT_COLUMNS = `id, name, created_at, ${BINDING_SET_VERSION} AS binding_set_version`;
 const MINIMUM_LIMIT = 1;
 const EXTRA_ROW = 1;
 const FIRST_ROW = 0;
@@ -101,15 +103,15 @@ export function insertProject(tx: Transaction, name: string): StoredProject {
   };
   tx.database
     .prepare(
-      "INSERT INTO project_project (id, name, binding_set_version, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
     )
-    .run(row.id, row.name, row.binding_set_version, row.created_at);
+    .run(row.id, row.name, row.created_at);
   return toProject(row);
 }
 
 export function requireProject(tx: Transaction, id: string): StoredProject {
   const row = tx.database
-    .prepare("SELECT * FROM project_project WHERE id = ?")
+    .prepare(`SELECT ${PROJECT_COLUMNS} FROM project_project WHERE id = ?`)
     .get(id) as ProjectRow | undefined;
   if (!row)
     throw new OperationError(
@@ -146,7 +148,7 @@ export function listProjects(
         );
   const rows = tx.database
     .prepare(
-      "SELECT * FROM project_project WHERE (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?",
+      `SELECT ${PROJECT_COLUMNS} FROM project_project WHERE (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?`,
     )
     .all(cursor, cursor, filter.limit + EXTRA_ROW) as ProjectRow[];
   return page(rows, filter.limit, (row) => row.id, toProject);
@@ -524,7 +526,9 @@ export function writeBindingSet(
   submission: Submission,
 ): { newVersion: number; changes: BindingChange[] } {
   const project = tx.database
-    .prepare("SELECT binding_set_version FROM project_project WHERE id = ?")
+    .prepare(
+      `SELECT ${BINDING_SET_VERSION} AS binding_set_version FROM project_project WHERE id = ?`,
+    )
     .get(projectId);
   if (!project)
     throw new OperationError(
@@ -560,12 +564,10 @@ export function writeBindingSet(
     );
     return { kind: outcome.kind, bindingId };
   });
-  tx.database
-    .prepare(
-      "UPDATE project_project SET binding_set_version = binding_set_version + ? WHERE id = ?",
-    )
-    .run(VERSION_INCREMENT, projectId);
-  return { newVersion: submittedVersion + VERSION_INCREMENT, changes };
+  return {
+    newVersion: requireProject(tx, projectId).bindingSetVersion,
+    changes,
+  };
 }
 
 export function readBindingRevision(

@@ -22,7 +22,6 @@ const SUCCESS = 0;
 const FAILURE = 1;
 const EMPTY = "";
 const ONE = 1;
-const TWO = 2;
 const THREE = 3;
 const DEADLINE_DELTA = 7800000;
 const SHORT_DEADLINE_DELTA = 1001;
@@ -199,7 +198,7 @@ async function setup(t: TestContext, short = false) {
     bindingSetVersion: number;
     bindings: Record<string, { id: string }>;
   }>(["project", "binding", "apply", project.id], { version: 1, bindings });
-  assert.equal(applied.bindingSetVersion, TWO);
+  assert.equal(applied.bindingSetVersion, ONE + Object.keys(bindings).length);
   const mission = await read<{ id: string }>(["mission", "get", project.id]);
   const initiative = await write<Change>(
     ["mission", "node", "create", mission.id],

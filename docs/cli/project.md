@@ -93,8 +93,9 @@ commands without `[L]` reject pagination options.
 - `CredentialName`: the name of a custody credential, under the [custody record contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-store-record). A binding names a credential and never a revision.
 - A `BindingId` names one revision of a binding, and a record pins it. The latest revision of a binding states its current configuration.
 - Binding-set `version`: positive JSON safe integer that the service returns; the caller copies it without arithmetic.
+  The binding-set version is 1 plus the number of binding rows of the project, under the [binding store ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-binding-store).
   A new project starts at binding-set version `1`.
-  Its first write names version `1` and commits version `2`.
+  A write raises the version by the number of rows that it inserts.
   `1` is the lower bound of every version.
 - Binding `revision`: positive JSON safe integer. A new binding starts at revision `1`, and each revision of the binding increments it.
   A supplied version identifies a value from the server.
@@ -455,9 +456,9 @@ transaction. The target rules are:
   A human removes the old binding and adds a binding with another name in the
   same edit.
 - Removal keeps the binding rows and every revision for the life of the project. No sweep deletes them.
-- Every committed write increments the binding-set version, even when the
-  submitted set is identical. Empty and no-change submissions are still
-  mutations, not read or validation commands.
+- A write equal to the stored set inserts no row and keeps the binding-set
+  version. Empty and no-change submissions are still mutations, not read or
+  validation commands.
 
 `binding apply` returns the committed `BindingSet` at its new version, and
 `binding export` returns the current `BindingSet`, under the

@@ -217,7 +217,7 @@ async function resources(c: ReturnType<typeof cli>) {
       },
     },
   });
-  assert.equal(applied.bindingSetVersion, TWO);
+  assert.equal(applied.bindingSetVersion, THREE);
   return { projectId: project.id, bindingId: applied.bindings.repo!.id };
 }
 

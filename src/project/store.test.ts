@@ -148,8 +148,8 @@ function fixture(t: TestContext) {
   const projectId = createIdentity(PROJECT_ID_PREFIX);
   store.transaction(({ database }) =>
     database
-      .prepare("INSERT INTO project_project VALUES (?, ?, ?, ?)")
-      .run(projectId, PROJECT_NAME, BINDING_SET_INITIAL_VERSION, Date.now()),
+      .prepare("INSERT INTO project_project VALUES (?, ?, ?)")
+      .run(projectId, PROJECT_NAME, Date.now()),
   );
   const write = (version: number, entries: Map<string, Entry>) =>
     store.transaction((tx) => writeBindingSet(tx, projectId, version, entries));
@@ -162,9 +162,13 @@ function fixture(t: TestContext) {
       )
       .all(projectId);
   const version = () =>
-    store.database
-      .prepare("SELECT binding_set_version FROM project_project WHERE id = ?")
-      .get(projectId)!.binding_set_version;
+    Number(
+      store.database
+        .prepare(
+          "SELECT COUNT(*) + ? AS version FROM project_binding WHERE project_id = ?",
+        )
+        .get(BINDING_SET_INITIAL_VERSION, projectId)!.version,
+    );
   return { store, projectId, write, current, rows, version };
 }
 
@@ -292,15 +296,15 @@ test("new names create revision one with canonical JSON and a new version", (t) 
   assert.equal(f.rows()[FIRST]!.created_at, binding.createdAt);
 });
 
-test("unchanged configuration retains its row and still advances the version", (t) => {
+test("unchanged configuration retains its row and keeps the version", (t) => {
   const f = fixture(t);
   const entries = submission([MAIN, repository()]);
   f.write(ONE, entries);
   const before = f.current().get(MAIN)!;
   const result = f.write(TWO, entries);
   assertChange(result, ChangeKind.Unchanged, before.id);
-  assert.equal(result.newVersion, THREE);
-  assert.equal(f.version(), THREE);
+  assert.equal(result.newVersion, TWO);
+  assert.equal(f.version(), TWO);
   assert.equal(f.rows().length, ONE);
   assert.deepEqual(f.current().get(MAIN), before);
 });
@@ -334,7 +338,7 @@ test("reordered nested JSON is canonical-equal and creates no revision", (t) => 
     id,
   );
   assert.equal(f.rows().length, ONE);
-  assert.equal(f.version(), THREE);
+  assert.equal(f.version(), TWO);
 });
 
 test("same-resource changes append a revision and retain the pinned configuration", (t) => {
@@ -395,8 +399,11 @@ test("resource swaps insert every tombstone before any new revision", (t) => {
   const f = fixture(t);
   const first = repository();
   const second = repository("git@github.com:owner/second.git");
-  f.write(ONE, submission([MAIN, first], [OTHER, second]));
-  const result = f.write(TWO, submission([MAIN, second], [OTHER, first]));
+  const firstResult = f.write(ONE, submission([MAIN, first], [OTHER, second]));
+  const result = f.write(
+    firstResult.newVersion,
+    submission([MAIN, second], [OTHER, first]),
+  );
   const rows = f.rows();
   assert.equal(rows.length, SIX);
   assert.deepEqual(
@@ -422,7 +429,7 @@ test("resource swaps insert every tombstone before any new revision", (t) => {
       .map((binding) => ({ kind: ChangeKind.Created, bindingId: binding.id })),
   );
   assert.equal(f.current().size, TWO);
-  assert.equal(f.version(), THREE);
+  assert.equal(f.version(), result.newVersion);
 });
 
 test("omission retains all rows and returns the newly inserted tombstone identity", (t) => {
@@ -482,7 +489,10 @@ test("renaming an allocated resource tombstones its old name before rebinding", 
 
 test("worker resource change refuses the entire diff before any write", (t) => {
   const f = fixture(t);
-  f.write(ONE, submission([MAIN, repository()], [AGENT, worker()]));
+  const firstResult = f.write(
+    ONE,
+    submission([MAIN, repository()], [AGENT, worker()]),
+  );
   const before = f.rows();
   f.store.transaction((tx) => {
     assert.throws(
@@ -490,7 +500,7 @@ test("worker resource change refuses the entire diff before any write", (t) => {
         writeBindingSet(
           tx,
           f.projectId,
-          TWO,
+          firstResult.newVersion,
           submission(
             [MAIN, repository("git@github.com:owner/second.git")],
             [AGENT, worker("different")],
@@ -499,7 +509,7 @@ test("worker resource change refuses the entire diff before any write", (t) => {
       errorIs(HttpStatus.Conflict, ProjectErrorCode.WorkerResourceChanged),
     );
     assert.deepEqual(f.rows(), before);
-    assert.equal(f.version(), TWO);
+    assert.equal(f.version(), firstResult.newVersion);
   });
   assert.deepEqual(f.rows(), before);
 });
@@ -594,10 +604,11 @@ test("missing project and binding reads have explicit absent behavior", (t) => {
   assert.equal(f.version(), ONE);
 });
 
-test("equal multi-binding and empty submissions advance versions without new rows", (t) => {
+test("equal and empty submissions on an equal or empty set keep the version", (t) => {
   const f = fixture(t);
-  assert.deepEqual(f.write(ONE, submission()), {
-    newVersion: TWO,
+  const emptyResult = f.write(ONE, submission());
+  assert.deepEqual(emptyResult, {
+    newVersion: ONE,
     changes: [],
   });
   const entries = submission(
@@ -605,9 +616,9 @@ test("equal multi-binding and empty submissions advance versions without new row
     [AGENT, worker()],
     [EVIDENCE, storage()],
   );
-  f.write(TWO, entries);
+  const firstResult = f.write(emptyResult.newVersion, entries);
   const before = f.rows();
-  const result = f.write(THREE, entries);
+  const result = f.write(firstResult.newVersion, entries);
   assert.deepEqual(
     result.changes,
     Array.from(entries.keys(), (name) => ({
@@ -615,8 +626,19 @@ test("equal multi-binding and empty submissions advance versions without new row
       bindingId: f.current().get(name)!.id,
     })),
   );
-  assert.equal(result.newVersion, FOUR);
+  assert.equal(result.newVersion, firstResult.newVersion);
   assert.deepEqual(f.rows(), before);
+});
+
+test("a write that inserts two rows raises the version by two", (t) => {
+  const f = fixture(t);
+  const result = f.write(
+    ONE,
+    submission([MAIN, repository()], [AGENT, worker()]),
+  );
+  assert.equal(result.newVersion, ONE + TWO);
+  assert.equal(f.version(), result.newVersion);
+  assert.equal(f.rows().length, TWO);
 });
 
 test("caller owns the transaction and may roll back binding rows and version together", (t) => {
@@ -637,11 +659,14 @@ test("caller owns the transaction and may roll back binding rows and version tog
 
 test("binding lists select latest rows before filtering state and exact kinds", (t) => {
   const f = fixture(t);
-  f.write(
+  const firstResult = f.write(
     ONE,
     submission([MAIN, repository()], [AGENT, worker()], [EVIDENCE, storage()]),
   );
-  f.write(TWO, submission([AGENT, worker()], [EVIDENCE, storage()]));
+  f.write(
+    firstResult.newVersion,
+    submission([AGENT, worker()], [EVIDENCE, storage()]),
+  );
   f.store.transaction((tx) => {
     const list = (filter: { kind?: string[]; state?: string } = {}) =>
       listBindings(tx, f.projectId, { limit: LIST_LIMIT_DEFAULT, ...filter });
@@ -726,13 +751,16 @@ test("binding lists paginate by descending identity and emit no terminal cursor"
 
 test("revision lists paginate descending within the pinned row's group, including tombstones", (t) => {
   const f = fixture(t);
-  f.write(ONE, submission([MAIN, repository()], [AGENT, worker()]));
+  const firstResult = f.write(
+    ONE,
+    submission([MAIN, repository()], [AGENT, worker()]),
+  );
   const pinned = f.current().get(MAIN)!;
-  f.write(
-    TWO,
+  const secondResult = f.write(
+    firstResult.newVersion,
     submission([MAIN, repository(undefined, false)], [AGENT, worker()]),
   );
-  f.write(THREE, submission([AGENT, worker()]));
+  f.write(secondResult.newVersion, submission([AGENT, worker()]));
   f.store.transaction((tx) => {
     const first = listRevisions(tx, pinned.id, { limit: PAGE_LIMIT });
     assert.deepEqual(
@@ -779,8 +807,8 @@ test("project boundaries isolate current sets, allocation, and both lists", (t) 
   f.store.transaction((tx) => {
     const projectId = createIdentity(PROJECT_ID_PREFIX);
     tx.database
-      .prepare("INSERT INTO project_project VALUES (?, ?, ?, ?)")
-      .run(projectId, OTHER_PROJECT_NAME, ONE, Date.now());
+      .prepare("INSERT INTO project_project VALUES (?, ?, ?)")
+      .run(projectId, OTHER_PROJECT_NAME, Date.now());
     const result = writeBindingSet(
       tx,
       projectId,

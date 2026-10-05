@@ -996,7 +996,7 @@ test("binding write probes every repository outside and before commit, validates
   assert.equal(result.projectId, f.params.projectId);
   assert.equal(
     result.bindingSetVersion,
-    BINDING_SET_INITIAL_VERSION + VERSION_INCREMENT,
+    BINDING_SET_INITIAL_VERSION + Object.keys(bindings).length,
   );
   assert.equal(f.commits(), before + ONE_CALL);
   assert.deepEqual(
@@ -1037,17 +1037,14 @@ test("binding write probes every repository outside and before commit, validates
   const repeated = await f.write(exported.bindings, exported.version);
   assert.equal(f.ssh.length, TWO_CALLS + TWO_CALLS);
   assert.deepEqual(repeated.bindings, result.bindings);
-  assert.equal(
-    repeated.bindingSetVersion,
-    result.bindingSetVersion + VERSION_INCREMENT,
-  );
+  assert.equal(repeated.bindingSetVersion, result.bindingSetVersion);
   assert.ok(
     repeated.changes.every(({ kind }) => kind === ChangeKind.Unchanged),
   );
   assertCurrent(f, repeated);
 });
 
-test("equal and reordered configurations increment the version without inserting revisions", async (t) => {
+test("equal and reordered configurations keep the version without inserting revisions", async (t) => {
   const f = writeFixture(t);
   const original = workerBinding();
   const first = await f.write({ [WORKER_NAME]: original });
@@ -1059,7 +1056,7 @@ test("equal and reordered configurations increment the version without inserting
   for (const binding of [reordered, original]) {
     const version = f.invoke("bindingSet.get", null, f.params).version;
     const result = await f.write({ [WORKER_NAME]: binding }, version);
-    assert.equal(result.bindingSetVersion, version + VERSION_INCREMENT);
+    assert.equal(result.bindingSetVersion, version);
     assert.deepEqual(result.bindings, first.bindings);
     assert.deepEqual(result.changes, [
       {
@@ -2020,10 +2017,7 @@ function persistBindings(
     project.bindingSetVersion,
     new Map(Object.entries(bindings)),
   );
-  assert.equal(
-    result.newVersion,
-    project.bindingSetVersion + VERSION_INCREMENT,
-  );
+  assert.ok(result.newVersion >= project.bindingSetVersion);
   return {
     ...result,
     bindings: Object.fromEntries(readCurrentBindingSet(tx, projectId)),
