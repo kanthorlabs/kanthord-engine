@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { ProjectService, type Dependencies } from "./service.ts";
-import { background, CancellationContext } from "../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  type Context,
+} from "../kernel/context.ts";
 import {
   HealthRegistry,
   HealthScope,
@@ -2848,6 +2852,7 @@ const CREDENTIAL_NOT_FOUND = "credential.credential.not_found";
 const PLATFORM_ACTION_CAPABILITY = "platform action";
 const ADDRESS_SSH_FAIL = "ssh_fail";
 const CREDENTIAL_REFUSAL = "refusal";
+const ADDRESS_SSH_HANG = "ssh_hang";
 const CREDENTIAL_HEALTHY: BindingCheckEntry = {
   status: ResourceStatus.Healthy,
   capability: PLATFORM_ACTION_CAPABILITY,
@@ -2855,10 +2860,12 @@ const CREDENTIAL_HEALTHY: BindingCheckEntry = {
 
 function verifyFixture(
   t: TestContext,
-  addressBehavior: "healthy" | typeof ADDRESS_SSH_FAIL,
+  addressBehavior:
+    "healthy" | typeof ADDRESS_SSH_FAIL | typeof ADDRESS_SSH_HANG,
   credentialBehavior: "healthy" | typeof CREDENTIAL_REFUSAL,
 ) {
   const sshCalls: Array<{ address: string; timeout: number }> = [];
+  const sshStarted = Promise.withResolvers<void>();
   const credentialCalls: string[] = [];
   const credentialAnswer: BindingCheckEntry = CREDENTIAL_HEALTHY;
   const f = fixture(t, {
@@ -2866,9 +2873,14 @@ function verifyFixture(
       async resolveSshHostname(host: string) {
         return host;
       },
-      async gitLsRemote(address: string, _context: unknown, timeout: number) {
+      async gitLsRemote(address: string, context: Context, timeout: number) {
         sshCalls.push({ address, timeout });
+        sshStarted.resolve();
         if (addressBehavior === ADDRESS_SSH_FAIL) throw new Error("SSH failed");
+        if (addressBehavior === ADDRESS_SSH_HANG) {
+          await context.done();
+          throw context.err();
+        }
       },
     },
     verifyRepositoryCredential: async (name: string) => {
@@ -2882,7 +2894,7 @@ function verifyFixture(
       return credentialAnswer;
     },
   });
-  return { f, sshCalls, credentialCalls, credentialAnswer };
+  return { f, sshCalls, sshStarted, credentialCalls, credentialAnswer };
 }
 
 test("binding.verify returns healthy for a valid repository binding", async (t) => {
@@ -2942,6 +2954,37 @@ test("binding.verify returns unhealthy for address when SSH read fails", async (
   assert.equal(result.address.status, ResourceStatus.Unhealthy);
   assert.equal(result.address.capability, RESOURCE_CAPABILITY_NETWORK_GIT_READ);
   assert.equal(sshCalls.length, ONE_CALL);
+  assert.deepEqual(credentialCalls, [REPOSITORY_CREDENTIAL]);
+});
+
+test("binding.verify returns unknown for address when the SSH read exceeds its deadline", async (t) => {
+  const { f, sshStarted, credentialCalls } = verifyFixture(
+    t,
+    ADDRESS_SSH_HANG,
+    "healthy",
+  );
+  const project = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
+    return p;
+  });
+  const bindings = f.store.transaction((tx) =>
+    Array.from(readCurrentBindingSet(tx, project.id).values()),
+  );
+  const binding = bindings[NO_ITEMS];
+  assert.ok(binding);
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const pending = f.invokeAsync("binding.verify", {
+    projectId: project.id,
+    bindingId: binding.id,
+  });
+  await sshStarted.promise;
+  t.mock.timers.tick(BINDING_CHECK_TIMEOUT_MS);
+  const result = await pending;
+  assert.deepEqual(result.address, {
+    status: ResourceStatus.Unknown,
+    capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
+  });
   assert.deepEqual(credentialCalls, [REPOSITORY_CREDENTIAL]);
 });
 
