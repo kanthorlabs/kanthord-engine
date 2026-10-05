@@ -42,7 +42,7 @@ export const gatewayConfigSchema = {
   allowedOrigins: {
     doc: "Allowed CORS origins.",
     format: strings,
-    default: [],
+    default: ["http://127.0.0.1:27182", "http://localhost:27182"],
   },
   tokenLifetime: {
     doc: "Token lifetime in seconds.",

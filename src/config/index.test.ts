@@ -75,6 +75,10 @@ test("service fragments preserve the existing YAML field set", () => {
     "port",
     "tokenLifetime",
   ]);
+  assert.deepEqual(config.gateway.allowedOrigins, [
+    "http://127.0.0.1:27182",
+    "http://localhost:27182",
+  ]);
 });
 
 test("worker configuration defaults, path strings and strict validation", () => {
