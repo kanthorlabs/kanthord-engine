@@ -5,7 +5,7 @@
 ## Scope
 
 This specification covers the implemented `kanthord repository credential` group, with
-**10 command leaves**. The Repository component is a shared component, not a service.
+**11 command leaves**. The Repository component is a shared component, not a service.
 It owns the credential routes of its platforms. A credential belongs to no project.
 Custody declares no route and keeps the record functions that these routes call.
 
@@ -57,7 +57,7 @@ non-secret diagnostic. A supplied identity never proves authorization.
 
 ## Command inventory
 
-Each synopsis follows `kanthord repository credential`. All ten commands have `[R]` and
+Each synopsis follows `kanthord repository credential`. All eleven commands have `[R]` and
 `human` access; five mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/repository/credential` prefix.
 
@@ -73,8 +73,9 @@ All paths below are implemented routes under the ruled `/api/repository/credenti
 | 8   | `platforms [R]`                                           | `GET /api/repository/credential/platform`                                   | `repository.credential.platform_list`   | `human`; implemented |
 | 9   | `check --file <path> [R]`                                 | `POST /api/repository/credential/check`                                     | `repository.credential.check`           | `human`; implemented |
 | 10  | `verify <credential-name> [R]`                            | `POST /api/repository/credential/:credentialName/verify`                    | `repository.credential.verify`          | `human`; implemented |
+| 11  | `ssh-discover [R]`                                        | `GET /api/repository/credential/ssh/discover`                               | `repository.credential.ssh_discover`    | `human`; proposed    |
 
-The static `/api/repository/credential/platform` and `/api/repository/credential/check` paths take precedence over `/:credentialName`, so custody refuses the names `login`, `platform` and `check`.
+The static `/api/repository/credential/platform`, `/api/repository/credential/check` and `/api/repository/credential/ssh/discover` paths take precedence over `/:credentialName`, so custody refuses the names `login`, `platform`, `check` and `ssh`.
 These routes have no project identity.
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
@@ -85,15 +86,22 @@ A `create` with a platform of another component answers `400 credential.platform
 A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
 A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `createdAt: Timestamp`
 and `endedAt: Timestamp | null`. No answer holds `secret`.
-`platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.impl.md#platform-validators): `github`. [`platforms`](#platforms) answers the set.
-Each platform holds exactly one secret shape from `api_key`.
+`platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.impl.md#platform-validators): `github` and `ssh`. [`platforms`](#platforms) answers the set.
+Each platform holds exactly one secret shape from `api_key` and `none`.
 The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) bounds `api_key` to 48,915 UTF-8 bytes of normalized canonical pi-ai credential JSON, including type, structure and escaping. Creation and rotation reject an oversized value with HTTP 400 `credential.input.invalid` before writing.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/repository.impl.md#platform-validators)
 fix the secret shape and the metadata of each platform:
 
-| Platform | Secret shape | Metadata                 |
-| -------- | ------------ | ------------------------ |
-| `github` | `api_key`    | None; wire value `null`. |
+| Platform | Secret shape | Metadata                                                                             |
+| -------- | ------------ | ------------------------------------------------------------------------------------ |
+| `github` | `api_key`    | None; wire value `null`.                                                             |
+| `ssh`    | `none`       | `{ host, hostname, port, identity_file }`; every key required. `port` is an integer. |
+
+An `ssh` record pins the SSH identity of a repository binding. `host` is an alias of `~/.ssh/config`. `hostname`, `port` and `identity_file` equal the `hostname`, `port` and the one `identityfile` that `ssh -G -- <host>` resolves.
+Create, rotate, update-metadata and verify of an `ssh` record run `ssh -G` and compare the result with the metadata:
+
+- A resolution with `identitiesonly` other than `yes`, or with a number of `identityfile` lines other than 1, answers `400 repository.credential.ssh_identity_ambiguous`.
+- A resolved value that differs from the metadata answers `400 repository.credential.ssh_drift`. `details` names each differing key.
 
 `get` adds `bindings` to the credential answer: the list of `{ projectId, projectName, bindingId, name }` of every binding revision that names the credential and that is a dependent. The Project Service answers that read.
 
@@ -107,10 +115,10 @@ The required file supplies the body; params and query are empty. Required
 fields have no default:
 
 - `name`: `CredentialName`.
-- `platform`: a platform of the Repository component, `github`.
+- `platform`: a platform of the Repository component, `github` or `ssh`.
 - `metadata`: the platform schema above, with explicit `null` for no metadata.
 - `secret`: a closed object of the secret shape of the platform. For `api_key`, `{ key }`, with a required nonempty
-  string whose exact value is preserved.
+  string whose exact value is preserved. For `none`, `{}`.
 
 Custody validates the local schema and makes no remote call. HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
@@ -230,6 +238,20 @@ at its next use of the credential. A revoke of the newest live revision answers
 `409 credential.revision.newest_live`. A revoke of an ended revision answers
 `409 credential.revision.ended`. HTTP `200` returns the credential answer after draining other unpinned older live revisions in the same transaction.
 
+## `ssh-discover`
+
+The command takes no params, no query and no body.
+It reads the `Host` lines of the top-level `~/.ssh/config` of the server host and follows no `Include`. It skips each pattern that holds `*`, `?` or `!`.
+It runs `ssh -G -- <host>` for each alias and keeps an alias whose resolved `hostname` contains `github` or `gitlab`.
+HTTP `200` answers `{ items }`. Each item holds `host`, `hostname`, `port`, `identity_file`, `state` and `reason`:
+
+- `state` is `ready`, `refused` or `present`.
+- `present` means that a live `ssh` record holds the host.
+- `reason` holds the refusal code of a `refused` alias, and null otherwise.
+
+The command writes nothing. A human creates each record with `create`.
+An unreadable `~/.ssh/config` answers `422 repository.credential.ssh_config_unreadable`.
+
 ## Error codes
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
@@ -250,6 +272,9 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.credential.archived`                    | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive, verify                               |
 | 404   | `credential.revision.not_found`                     | The revision does not exist.                                                                   | revoke                                                                 |
 | 409   | `credential.revision.revoked`                       | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                          |
+| 400   | `repository.credential.ssh_identity_ambiguous`      | The SSH host resolves without `identitiesonly yes` or without exactly one `identityfile`.      | create, rotate, update-metadata, verify, ssh-discover (as `reason`)    |
+| 400   | `repository.credential.ssh_drift`                   | `ssh -G` resolves values that differ from the metadata; details name each differing key.       | create, rotate, update-metadata, verify                                |
+| 422   | `repository.credential.ssh_config_unreadable`       | The server cannot read `~/.ssh/config`.                                                        | ssh-discover                                                           |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 

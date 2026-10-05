@@ -282,7 +282,7 @@ This example uses the proposed kind-specific fields below:
       "config": {
         "available": true,
         "platform": "github",
-        "address": "git@github.com:kanthorlabs/kanthord.git",
+        "address": "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
         "strategy": {
           "baseBranch": "main",
           "action": {
@@ -290,6 +290,7 @@ This example uses the proposed kind-specific fields below:
             "follows": { "type": "assessment_passed" }
           }
         },
+        "sshCredential": "kanthorlabs-github",
         "credential": "github-kanthorlabs"
       }
     },
@@ -306,7 +307,7 @@ This example uses the proposed kind-specific fields below:
 }
 ```
 
-The repository credential in this example is an `api_key` of GitHub.
+The repository credential in this example is an `api_key` of GitHub. The SSH credential is an `ssh` record of the alias `kanthorlabs.github.com`.
 
 Common to every `config`:
 
@@ -322,7 +323,8 @@ Common to every `config`:
 - `address`: **required**, SSH repository address `git@<host>:<owner>/<repository>.git`; no default. An HTTPS address fails. The host can be an SSH alias of `~/.ssh/config`, for example `git@kanthorlabs.github.com:kanthorlabs/kanthord.git`. `ssh -G` must resolve the host to an SSH host of the platform, `github.com` or `ssh.github.com` for `github`.
 - Unsupported addresses and contradictory platform/address combinations fail.
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
-- `credential`: **required**, one `CredentialName` of platform `github`; no default. It serves every platform action of the Intake Service and the check of a request evidence. Git uses the SSH configuration of the host.
+- `sshCredential`: **required**, one `CredentialName` of platform `ssh`; no default. Its `host` equals the host of `address`, else the write fails with `project.bindings.repository.ssh_host_mismatch`. It pins the identity that git uses through the SSH configuration of the host.
+- `credential`: **optional**, one `CredentialName` of platform `github`; absent by default. It serves every platform action of the Intake Service and the check of a request evidence. The action `pull_request` requires it, else the write fails with `project.bindings.repository.credential_required`.
 - `projectPrompt`: **optional**, string, absent by default. Absence or an empty string contributes no binding-provided prompt to Worker prompt composition. The exact value `-` disables the project prompt layer, and the composer reads no agent file of the workspace.
 - The project prompt holds at most 32768 UTF-8 bytes. A larger value refuses the write with `project.bindings.repository.project_prompt_too_large`.
 - The JSON file holds the prompt text, not a client-side path.
@@ -353,9 +355,8 @@ The key of the action is `<binding name>.<name>`, which the Mission Service free
 
 Coverage and suitability follow [Repository configuration and policy](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.md#repository-configuration-and-policy).
 
-- Every repository binding requires one platform API key, even for a repository that permits a public read.
-- No public-read input exists, and an absent credential refuses the write.
-- Git operations use the SSH configuration of the host and require no credential reference.
+- Every repository binding requires one `ssh` record. A binding without `credential` permits no platform action.
+- Git operations use the SSH configuration of the host, pinned by the `ssh` record.
 - Custody checks that the credential has platform `github`, under [suitability](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#suitability).
 - These checks read no secret material and assert no narrower upstream scope.
 
@@ -442,7 +443,8 @@ transaction. The target rules are:
 
 - One binding per repository and per storage bucket; any number per worker.
 - Resource identity derives from configuration. A repository identity derives from the platform and from the owner and the repository of its SSH address, never from the host. A worker identity derives from its binding name, and a storage identity derives from its endpoint host and its bucket.
-- Every repository binding write performs one `git ls-remote` with a 30 s deadline before the transaction.
+- Every repository binding write runs the `ssh` validation of its `sshCredential` and performs one `git ls-remote` with a 30 s deadline before the transaction.
+- A drift of the `ssh` record refuses the write with `repository.credential.ssh_drift`.
 - A failed or timed-out read refuses the write with `project.bindings.repository.ssh_unreachable`.
 - A strategy with more than one action refuses the write.
 - The write refuses a reference to an absent, removed, wrong-kind, or other-project
@@ -482,13 +484,13 @@ The required `ProjectId` and `BindingId` map to `params.projectId` and `params.b
 It checks one repository binding and stores no result.
 
 - It runs the host resolution and the SSH read of the address of the named revision with the deadline of the resource healthcheck.
-- Then it calls the record verify of the credential of that revision.
+- Then it calls the record verify of the `sshCredential` and of the `credential` of that revision.
 
-HTTP `200` answers `{ address, credential }`. Each value is the health entry `{ status, capability }`:
+HTTP `200` answers `{ address, sshCredential, credential }`. `credential` is null for a binding without a credential. Each value is the health entry `{ status, capability }`:
 
 - `status` is `healthy`, `unhealthy` or `unknown`.
 - The `address` entry has the capability `network git read`. A failed resolution or a failed read answers `unhealthy`. A check that exceeds its deadline answers `unknown`.
-- The `credential` entry is the answer of the record verify.
+- The `sshCredential` and `credential` entries are the answers of the record verify.
 
 A refusal of the record verify refuses the request with its own code.
 A binding that is absent, belongs to another project, is removed or is no repository binding answers `404 project.binding.not_found`.
@@ -593,6 +595,9 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `project.binding_set.version_conflict`                 | The submitted binding-set version differs from the current version.                                                                                                                                | binding apply                                                                                |
 | 400   | `project.bindings.duplicate_resource`                  | Two bindings use the same resource.                                                                                                                                                                | binding apply                                                                                |
 | 400   | `project.bindings.repository.address_invalid`          | The repository address is invalid, or `ssh -G` resolves its host outside the SSH host set of the platform.                                                                                         | binding apply                                                                                |
+| 400   | `project.bindings.repository.credential_required`      | The action `pull_request` names no `credential`.                                                                                                                                                   | binding apply                                                                                |
+| 400   | `project.bindings.repository.ssh_host_mismatch`        | The host of the address differs from the `host` of the `sshCredential`.                                                                                                                            | binding apply                                                                                |
+| 400   | `repository.credential.ssh_drift`                      | `ssh -G` resolves the host of the `sshCredential` to values that differ from its metadata; details name each differing key.                                                                        | binding apply, binding verify                                                                |
 | 400   | `project.bindings.repository.project_prompt_too_large` | The repository project prompt exceeds the limit.                                                                                                                                                   | binding apply                                                                                |
 | 422   | `project.bindings.repository.ssh_unreachable`          | The repository SSH read fails.                                                                                                                                                                     | binding apply                                                                                |
 | 400   | `project.bindings.worker.agent_unknown`                | An entry names an agent the worker does not declare.                                                                                                                                               | binding apply                                                                                |
