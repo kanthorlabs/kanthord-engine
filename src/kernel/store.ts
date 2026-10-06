@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { audit } from "./files.ts";
 import { Diagnostic } from "./errors.ts";
-import { isObject } from "./values.ts";
+import { isObject, isString } from "./values.ts";
 
 export const IN_MEMORY_DATABASE = ":memory:";
 const DATABASE_PROBE_OK = 1;
@@ -16,6 +16,11 @@ export type Migrations = ReadonlyArray<{
 }>;
 
 /** One connection and transaction owner for the operational database. */
+function sqliteReason(error: unknown): string {
+  const reason = (error as { errstr?: unknown } | null)?.errstr;
+  return isString(reason) ? reason : "unknown SQLite failure";
+}
+
 export class Store {
   readonly database: DatabaseSync;
   readonly path: string;
@@ -47,11 +52,13 @@ export class Store {
         "PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL; PRAGMA journal_size_limit=67108864;",
       );
       this.transaction(() => {});
-    } catch {
+    } catch (error) {
       this.database.close();
+      if (error instanceof Diagnostic) throw error;
       throw new Diagnostic(
         "system.database.initialization_failed",
-        `${path}: cannot acquire exclusive database lock or validate database files.`,
+        `${path}: cannot initialize database: ${sqliteReason(error)}.`,
+        { cause: error },
       );
     }
   }

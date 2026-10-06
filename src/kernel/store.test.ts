@@ -8,6 +8,7 @@ import { Store } from "./store.ts";
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const WAL_JOURNAL_MODE = "wal";
+const LOCKED_REASON = "cannot initialize database: database is locked.";
 const FULL_SYNCHRONOUS_MODE = 2;
 const PRESERVED_VALUE = "preserved";
 const COMMITTED_PREFIX_LENGTH = 1;
@@ -37,6 +38,7 @@ test("exclusive WAL ownership refuses a second process and releases after close"
   const blocked = attempt();
   assert.notEqual(blocked.status, ExitCode.Success);
   assert.ok(blocked.stderr.includes(path));
+  assert.ok(blocked.stderr.includes(LOCKED_REASON), blocked.stderr);
   store.close();
   assert.equal(attempt().status, ExitCode.Success);
 });
