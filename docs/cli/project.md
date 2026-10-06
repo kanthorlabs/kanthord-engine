@@ -192,7 +192,8 @@ Inputs:
 
 `create` and `rename` each send exactly `{ "name": <string> }`; there are no
 other request fields. Read commands have no body. Proposed project metadata is
-`id`, `name`, `bindingSetVersion`, and `createdAt`, with the scalar types above.
+`id`, `name`, `bindingSetVersion`, `createdAt` and `workspaceDirectory`, with the scalar types above.
+`workspaceDirectory` is the absolute path of the [workspace directory](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-workspace-directory) of the project.
 `list.items` holds that metadata; `get` returns one project.
 
 Creation allocates a project identity and an empty binding set at version `1`.
