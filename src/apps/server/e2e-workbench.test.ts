@@ -435,6 +435,14 @@ test("a stored session resumes from the last entry of each kind and lists throug
   );
   assert.equal(listed.items.length, SINGLE);
   assert.equal(listed.items[0]!.id, id);
+  assert.equal(listed.items[0]!.agentName, AGENT);
+  const everyAgent = completed(
+    await fixture.workbench["session.list"](
+      { params: {}, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.deepEqual(everyAgent.items, listed.items);
   assert.equal(listed.items[0]!.firstMessage, FIRST_MESSAGE);
   assert.ok(Number.isSafeInteger(listed.items[0]!.created));
   const read = completed(

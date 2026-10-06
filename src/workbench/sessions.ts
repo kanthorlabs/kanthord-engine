@@ -48,7 +48,7 @@ export function sessionPlace(
   return place;
 }
 
-export async function listSessions(place: SessionPlace) {
+export async function listSessions(place: SessionPlace, agentName: string) {
   const pi = await loadPi();
   const sessions: SessionInfo[] = await pi.SessionManager.list(
     place.cwd,
@@ -56,6 +56,7 @@ export async function listSessions(place: SessionPlace) {
   );
   return sessions.map((session) => ({
     id: session.id,
+    agentName,
     name: session.name ?? null,
     created: session.created.getTime(),
     modified: session.modified.getTime(),

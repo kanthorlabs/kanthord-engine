@@ -27,7 +27,7 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { getAgentDeclaration } from "../agent/catalog.ts";
+import { AGENT_DECLARATIONS, getAgentDeclaration } from "../agent/catalog.ts";
 import {
   AgentErrorCode,
   type AgentEntry,
@@ -642,13 +642,19 @@ export class WorkbenchService implements Service {
     return { sessionId, runActive: false };
   }
 
-  async list(agentName: string) {
-    requireAgent(agentName);
-    return {
-      items: await listSessions(
-        sessionPlace(this.dependencies.stateDirectory, agentName),
-      ),
-    };
+  async list(agentName: string | undefined) {
+    if (agentName !== undefined) requireAgent(agentName);
+    const agentNames =
+      agentName === undefined ? Object.keys(AGENT_DECLARATIONS) : [agentName];
+    const items = [];
+    for (const name of agentNames)
+      items.push(
+        ...(await listSessions(
+          sessionPlace(this.dependencies.stateDirectory, name),
+          name,
+        )),
+      );
+    return { items };
   }
 
   async create(

@@ -52,6 +52,7 @@ export type SessionEntry = z.infer<typeof sessionEntrySchema>;
 
 export const sessionListItemSchema = z.strictObject({
   id: z.string(),
+  agentName: z.string(),
   name: z.string().nullable(),
   created: timestampSchema,
   modified: timestampSchema,
@@ -122,11 +123,11 @@ export const workbenchOperations = {
     body: false,
     input: z.strictObject({
       params: emptyFields,
-      query: z.strictObject({ agentName: z.string().min(1) }),
+      query: z.strictObject({ agentName: z.string().min(1).optional() }),
       body: z.null(),
     }),
     output: z.strictObject({ items: z.array(sessionListItemSchema) }),
-    description: "List the workbench sessions of an agent.",
+    description: "List the workbench sessions of every agent, or of one agent.",
   },
   "session.create": {
     ...workbenchMutation,

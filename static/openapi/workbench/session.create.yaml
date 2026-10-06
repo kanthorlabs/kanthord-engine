@@ -50,7 +50,7 @@ pathItem:
     operationId: workbench.session.list
     tags:
       - workbench
-    description: List the workbench sessions of an agent.
+    description: List the workbench sessions of every agent, or of one agent.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -60,7 +60,7 @@ pathItem:
     parameters:
       - name: agentName
         in: query
-        required: true
+        required: false
         schema:
           $ref: "#/components/schemas/workbench.session.list.Input/properties/query/prope\
             rties/agentName"
@@ -216,8 +216,6 @@ components:
             agentName:
               type: string
               minLength: 1
-          required:
-            - agentName
           additionalProperties: false
         body:
           type: "null"
@@ -235,6 +233,8 @@ components:
             type: object
             properties:
               id:
+                type: string
+              agentName:
                 type: string
               name:
                 anyOf:
@@ -258,6 +258,7 @@ components:
                 type: string
             required:
               - id
+              - agentName
               - name
               - created
               - modified
