@@ -51,7 +51,7 @@ const provider = {
   provider: AgentProviderKind.Anthropic,
   credential: "anthropic",
 };
-const spare = { ...provider, name: "spare" };
+const spare = { ...provider, name: "spare", credential: "anthropic-spare" };
 const defaults = {
   agentProvider: provider.name,
   modelIdentifier: MODEL,
@@ -526,6 +526,21 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
     HttpStatus.Conflict,
   );
   refuses(
+    () =>
+      f.invoke("enablement.provider.add", {
+        ...spare,
+        name: "second",
+        expectedRevision: 2,
+      }),
+    AgentErrorCode.ProviderCredentialConflict,
+    HttpStatus.Conflict,
+    {
+      agentName: AGENT,
+      credential: spare.credential,
+      agentProvider: spare.name,
+    },
+  );
+  refuses(
     () => remove(provider.name, 2),
     AgentErrorCode.ProviderInUse,
     HttpStatus.Conflict,
@@ -545,7 +560,7 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
   assert.deepEqual(remove(spare.name, 2).agentProviders, [provider]);
 });
 
-test("put rejects duplicate names, absent defaults, provider-kind changes, and omitted explicit providers", (t) => {
+test("put rejects duplicate names, duplicate credentials, absent defaults, provider-kind changes, and omitted explicit providers", (t) => {
   let entries: AgentDependentBinding[] = [];
   const f = enablementFixture(t, { entriesOfAgent: () => entries });
   refuses(
@@ -555,6 +570,18 @@ test("put rejects duplicate names, absent defaults, provider-kind changes, and o
         agentProviders: [provider, provider],
       }),
     AgentErrorCode.ProviderNameConflict,
+    HttpStatus.Conflict,
+  );
+  refuses(
+    () =>
+      f.invoke("enablement.put", {
+        ...putBody,
+        agentProviders: [
+          provider,
+          { ...spare, credential: provider.credential },
+        ],
+      }),
+    AgentErrorCode.ProviderCredentialConflict,
     HttpStatus.Conflict,
   );
   refuses(

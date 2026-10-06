@@ -26,6 +26,7 @@ const OPENAI_AGENT = "re@1";
 const ANTHROPIC = "anthropic";
 const OPENAI = "openai-compatible";
 const CREDENTIAL = "anthro-1";
+const BACKUP_CREDENTIAL = "anthro-2";
 const OPENAI_CREDENTIAL = "oai-1";
 const DEFAULT = "default";
 const BACKUP = "backup";
@@ -102,9 +103,12 @@ function enablementFile(fixture: Fixture, expectedRevision?: number): string {
   return path;
 }
 
-async function createCredential(fixture: Fixture): Promise<void> {
-  const credential = file(fixture.directory, "anthropic-cred.json", {
-    name: CREDENTIAL,
+async function createCredential(
+  fixture: Fixture,
+  name = CREDENTIAL,
+): Promise<void> {
+  const credential = file(fixture.directory, `${name}.json`, {
+    name,
     platform: ANTHROPIC,
     metadata: null,
     secret: SECRET,
@@ -115,7 +119,7 @@ async function createCredential(fixture: Fixture): Promise<void> {
       fixture.env,
     ),
   );
-  assert.equal(answer.name, CREDENTIAL);
+  assert.equal(answer.name, name);
   assert.equal(answer.platform, ANTHROPIC);
 }
 
@@ -156,11 +160,12 @@ async function enabled(fixture: Fixture): Promise<void> {
 
 async function added(fixture: Fixture): Promise<void> {
   await enabled(fixture);
+  await createCredential(fixture, BACKUP_CREDENTIAL);
   const path = file(fixture.directory, "provider-add.json", {
     expectedRevision: THIRD_REVISION,
     name: BACKUP,
     provider: ANTHROPIC,
-    credential: CREDENTIAL,
+    credential: BACKUP_CREDENTIAL,
   });
   const answer = success(
     await kanthord(
@@ -276,6 +281,24 @@ test("E03.7 add backup provider", async (t) => {
   );
   assert.equal(answer.revision, FOURTH_REVISION);
   assert.equal(answer.agentProviders.length, TWO_PROVIDERS);
+});
+
+test("E03.7a provider add refuses a credential that another agent provider names", async (t) => {
+  const fixture = await setup(t);
+  await enabled(fixture);
+  const path = file(fixture.directory, "provider-taken.json", {
+    expectedRevision: THIRD_REVISION,
+    name: BACKUP,
+    provider: ANTHROPIC,
+    credential: CREDENTIAL,
+  });
+  refusal(
+    await kanthord(
+      [...COMMAND, "provider", "add", AGENT, "--file", path],
+      fixture.env,
+    ),
+    "agent.enablement.provider.credential_conflict",
+  );
 });
 
 test("E03.8 remove backup provider", async (t) => {

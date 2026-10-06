@@ -49,8 +49,10 @@ const OFF = "off" as const;
 const LOW = "low" as const;
 const PRIMARY_CREDENTIAL = "anthro-1";
 const BACKUP_CREDENTIAL = "anthro-2";
+const SPARE_CREDENTIAL = "anthro-3";
 const PRIMARY_KEY = "primary-scripted-key";
 const BACKUP_KEY = "backup-scripted-key";
+const SPARE_KEY = "spare-scripted-key";
 const CustomType = "custom";
 const ModelChange = "model_change";
 const ThinkingChange = "thinking_level_change";
@@ -128,6 +130,7 @@ async function workbenchFixture(
   for (const [name, key] of [
     [PRIMARY_CREDENTIAL, PRIMARY_KEY],
     [BACKUP_CREDENTIAL, BACKUP_KEY],
+    [SPARE_CREDENTIAL, SPARE_KEY],
   ] as const)
     completed(
       await llm.create(
@@ -796,7 +799,7 @@ const addSpare = {
     expectedRevision: 1,
     name: SPARE,
     provider: ANTHROPIC,
-    credential: BACKUP_CREDENTIAL,
+    credential: SPARE_CREDENTIAL,
   },
 };
 

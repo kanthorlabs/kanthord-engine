@@ -204,6 +204,11 @@ export class AgentComponent {
     const names = new Set(agentProviders.map(({ name }) => name));
     if (names.size !== agentProviders.length)
       throw conflict(agentName, AgentErrorCode.ProviderNameConflict);
+    const credentials = new Set(
+      agentProviders.map(({ credential }) => credential),
+    );
+    if (credentials.size !== agentProviders.length)
+      throw conflict(agentName, AgentErrorCode.ProviderCredentialConflict);
     this.validateEffectiveConfig(
       tx,
       agentName,
@@ -307,6 +312,14 @@ export class AgentComponent {
     const { name, provider, credential } = body;
     if (current.agentProviders.some((item) => item.name === name))
       throw conflict(agentName, AgentErrorCode.ProviderNameConflict);
+    const holder = current.agentProviders.find(
+      (item) => item.credential === credential,
+    );
+    if (holder)
+      throw conflict(agentName, AgentErrorCode.ProviderCredentialConflict, {
+        credential,
+        agentProvider: holder.name,
+      });
     const item = { name, provider, credential };
     validateProvider(this.dependencies, tx, agentName, item);
     const agentProviders = [...current.agentProviders, item];

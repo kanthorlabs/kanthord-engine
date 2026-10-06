@@ -26,6 +26,7 @@ export const AgentErrorCode = {
   InvalidatesBindings: "agent.enablement.invalidates_bindings",
   InUse: "agent.enablement.in_use",
   ProviderNameConflict: "agent.enablement.provider.name_conflict",
+  ProviderCredentialConflict: "agent.enablement.provider.credential_conflict",
   ProviderNotFound: "agent.enablement.provider.not_found",
   ProviderFixed: "agent.enablement.provider.fixed",
   ProviderInUse: "agent.enablement.provider.in_use",
