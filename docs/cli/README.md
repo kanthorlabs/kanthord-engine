@@ -25,6 +25,7 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `intake`                       | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.    |
 | `agent`                        | [Agent](agent.md)                                 | Agent catalog, agent enablement and agent providers.                                                    |
 | `worker`                       | [Worker Service](worker.md)                       | Workers, instance registration, and execution hosting.                                                  |
+| `workbench`                    | [Workbench Service](workbench.md)                 | Human-driven agent sessions; API only.                                                                  |
 | `tracking`                     | [Tracking Service](tracking.md)                   | Telemetry ingestion and trace inspection.                                                               |
 | `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
