@@ -342,6 +342,26 @@ test("create, get and list answer the workspace directory and create answers aft
     );
 });
 
+test("create, get and list write the home directory of the workspace directory as ~", (t) => {
+  const state = temporary(t);
+  const f = fixture(t, {
+    createMission: allowMission,
+    stateDirectory: join(state, "kanthord"),
+    hostHome: state,
+  });
+  const record = f.invoke("create", { name: PROJECT_NAME });
+  const expected = join("~", "kanthord", "projects", record.id);
+  assert.equal(record.workspaceDirectory, expected);
+  assert.ok(
+    statSync(join(state, "kanthord", "projects", record.id)).isDirectory(),
+  );
+  assert.equal(
+    f.invoke("get", null, { projectId: record.id }).workspaceDirectory,
+    expected,
+  );
+  assert.equal(f.invoke("list").items[0]!.workspaceDirectory, expected);
+});
+
 test("create answers the committed project when its workspace directory cannot be created", (t) => {
   const f = fixture(t, { createMission: allowMission });
   writeFileSync(join(f.stateDirectory, "projects"), "");

@@ -17,6 +17,9 @@ import {
   PROMPT_SOURCE_MAX_BYTES,
 } from "./prompt-source.ts";
 
+const HOST_SOURCE = "agent file of the host: ~/.agents/AGENTS.md";
+const WORKSPACE_SOURCE = "agent file of the workspace: ~/workspace/AGENTS.md";
+
 test("composition observes source order, disabled layers, rejection and evaluator isolation", async (t) => {
   const hostFirst = "host first";
   const projectFirst = "project first";
@@ -52,6 +55,8 @@ test("composition observes source order, disabled layers, rejection and evaluato
   const first = await compose();
   assert.equal(first.layers.global?.text, hostFirst);
   assert.equal(first.layers.project?.text, projectFirst);
+  assert.equal(first.layers.global?.source, HOST_SOURCE);
+  assert.equal(first.layers.project?.source, WORKSPACE_SOURCE);
   const configured = await compose({
     globalPrompt: {
       state: SourceState.Present,

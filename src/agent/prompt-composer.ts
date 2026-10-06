@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import type { Context } from "../kernel/context.ts";
+import { homeRelative } from "../kernel/xdg.ts";
 import type { AgentDeclaration } from "./catalog.ts";
 import { WorkerMethod } from "../worker/contract.ts";
 import {
@@ -185,7 +186,7 @@ export async function globalLayer(
       record,
       PromptLayer.Global,
       "operator of the server",
-      `configuration of the server: ${"path" in configured ? configured.path : "worker.globalPrompt"}`,
+      `configuration of the server: ${"path" in configured ? homeRelative(configured.path, input.hostHome) : "worker.globalPrompt"}`,
       "path" in configured ? configured.path : null,
       configured,
     );
@@ -201,7 +202,7 @@ export async function globalLayer(
     record,
     PromptLayer.Global,
     "operator of the server",
-    `agent file of the host: ${value.path}`,
+    `agent file of the host: ${homeRelative(value.path, input.hostHome)}`,
     value.path,
     value,
   );
@@ -238,7 +239,7 @@ async function projectLayer(
     record,
     PromptLayer.Project,
     owner,
-    `agent file of the workspace: ${value.path}`,
+    `agent file of the workspace: ${homeRelative(value.path, input.hostHome)}`,
     value.path,
     value,
   );

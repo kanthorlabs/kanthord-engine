@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 
 export function directories(
   env: NodeJS.ProcessEnv = process.env,
@@ -20,3 +20,8 @@ export function directories(
   };
 }
 export type Directories = ReturnType<typeof directories>;
+
+export function homeRelative(path: string, home = homedir()): string {
+  if (path === home) return "~";
+  return path.startsWith(home + sep) ? `~${path.slice(home.length)}` : path;
+}

@@ -10,6 +10,7 @@ import {
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ensureDirectory } from "../kernel/files.ts";
+import { homeRelative } from "../kernel/xdg.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -220,6 +221,7 @@ export interface Dependencies {
   config: Record<string, never>;
   operationalStore: Store;
   stateDirectory: string;
+  hostHome?: string;
   createMission: CreateMission;
   liveNodesPinning: LiveNodesPinning;
   validateEntry: ValidateEntry;
@@ -238,6 +240,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly bindings?: ProjectBindings;
   private readonly operationalStore: Store;
   private readonly stateDirectory: string;
+  private readonly hostHome?: string;
   private readonly createMission: CreateMission;
   private readonly liveNodesPinning: LiveNodesPinning;
   private readonly validateEntry: ValidateEntry;
@@ -253,6 +256,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.bindings = dependencies.bindings;
     this.operationalStore = dependencies.operationalStore;
     this.stateDirectory = dependencies.stateDirectory;
+    this.hostHome = dependencies.hostHome;
     this.createMission = dependencies.createMission;
     this.liveNodesPinning = dependencies.liveNodesPinning;
     this.validateEntry = dependencies.validateEntry;
@@ -287,7 +291,7 @@ export class ProjectService implements Service, ProjectBindings {
         return this.projectRecord(project);
       });
       try {
-        ensureDirectory(record.workspaceDirectory);
+        ensureDirectory(this.workspaceDirectoryOf(record.id));
       } catch (error) {
         if (!(error instanceof Diagnostic)) throw error;
       }
@@ -486,7 +490,10 @@ export class ProjectService implements Service, ProjectBindings {
   private projectRecord(project: StoredProject) {
     return {
       ...project,
-      workspaceDirectory: this.workspaceDirectoryOf(project.id),
+      workspaceDirectory: homeRelative(
+        this.workspaceDirectoryOf(project.id),
+        this.hostHome,
+      ),
     };
   }
   private agentItem(
