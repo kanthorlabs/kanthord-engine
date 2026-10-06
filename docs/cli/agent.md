@@ -103,7 +103,7 @@ Worker Service, which resolves that configuration through the Agent component. A
 use, including a complete entry; no fallback selects another credential.
 
 An external worker declares no agent and needs no enablement. An unknown agent
-name returns `404 agent.not_found`. Catalog prompt changes require a
+name returns `404 agent.catalog.not_found`. Catalog prompt changes require a
 new worker version. An enablement default change creates a revision.
 This command neither composes the prompt of an execution nor
 reads a local `AGENTS.md`/`CLAUDE.md`. The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration) declares `worker.globalPrompt`.
@@ -252,7 +252,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `agent.enablement.provider.required`                    | The write leaves no agent provider.                                | agent enablement put, agent enablement provider remove                                                                            |
 | 409   | `agent.enablement.revision_conflict`                    | The expected enablement revision is stale.                         | agent enablement mutations                                                                                                        |
 | 400   | `agent.enablement.unavailable`                          | The agent lacks a live enabled configuration.                      | binding apply, agent configuration reads, handover, worker.execution.setup.get (API only)                                         |
-| 404   | `agent.not_found`                                       | The agent name is absent from the worker catalog.                  | agent enablement get, agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove, agent get |
+| 404   | `agent.catalog.not_found`                               | The agent name is absent from the agent catalog.                   | agent enablement get, agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove, agent get |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 
