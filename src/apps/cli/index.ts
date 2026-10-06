@@ -1,4 +1,5 @@
 import { workerOperations } from "../../worker/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
@@ -20,6 +21,7 @@ import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
+import { addAgentCommand } from "./agent.ts";
 import { addJWTCommand } from "./jwt.ts";
 import { configHelp, effectivePath } from "./config-path.ts";
 import { addLlmCommand } from "./llm.ts";
@@ -160,6 +162,7 @@ export function createProgram(
   addLlmCommand(program);
   addRepositoryCommand(program);
   addStorageCommand(program);
+  addAgentCommand(program);
   addProjectCommand(program);
   addSchedulerCommand(program);
   addMissionCommand(program);
@@ -244,6 +247,7 @@ const apiOperations = [
   ...Object.values(llmOperations),
   ...Object.values(repositoryOperations),
   ...Object.values(storageOperations),
+  ...Object.values(agentOperations),
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
   ...Object.values(projectOperations),

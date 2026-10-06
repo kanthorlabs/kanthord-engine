@@ -37,7 +37,7 @@ import {
 } from "../../mission/contract.ts";
 import { BindingKind, projectOperations } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
-import type { AgentEnablement } from "../../worker/contract.ts";
+import type { AgentEnablement } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
@@ -75,7 +75,7 @@ const REASONING_OFF = "off";
 const SECRET_FIELD = "secret";
 const SECRET_VALUE = "e2e-gateway-secret-never-print";
 const IDEMPOTENCY_KEY = "idempotencyKey";
-const ENABLEMENT_COMMAND = ["worker", "agent", "enablement"];
+const ENABLEMENT_COMMAND = ["agent", "enablement"];
 const MODEL_IN_USE = "llm.metadata.model_in_use";
 const LIVENESS_UNHEALTHY = "gateway.liveness.unhealthy";
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
@@ -612,6 +612,7 @@ test("E07.9 human healthcheck returns exactly four empty owners", async (t) => {
       llm: EMPTY_OWNER,
       repository: EMPTY_OWNER,
       storage: EMPTY_OWNER,
+      agent: EMPTY_OWNER,
     },
   });
 });

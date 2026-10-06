@@ -132,6 +132,7 @@ test("resource healthcheck requires a human and returns four empty owners", asyn
         llm: { global: {}, projects: {} },
         repository: { global: {}, projects: {} },
         storage: { global: {}, projects: {} },
+        agent: { global: {}, projects: {} },
       },
     },
   );

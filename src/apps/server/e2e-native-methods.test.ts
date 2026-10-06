@@ -153,7 +153,7 @@ test(
       secret: {},
     });
     for (const agent of ["swe@1", "re@1"])
-      await write(["worker", "agent", "enablement", "put", agent], {
+      await write(["agent", "enablement", "put", agent], {
         agentProviders: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],

@@ -10,6 +10,7 @@ import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
 import {
   missionOperations,
   NodeState,
@@ -153,7 +154,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
   );
   for (const agentName of ["swe@1", "re@1"])
     completed(
-      await call(workerOperations["agent.enablement.put"], {
+      await call(agentOperations["enablement.put"], {
         params: { agentName },
         query: {},
         body: {

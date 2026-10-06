@@ -366,7 +366,7 @@ test("worker handover validates locally and prints receipt metadata without the 
   assert.doesNotMatch(result.stdout, /nonce|ciphertext/);
 });
 
-test("worker agent enablement commands expose offline help and validate inputs before I/O", (t) => {
+test("agent enablement commands expose offline help and validate inputs before I/O", (t) => {
   const env = environment(temporary(t));
   for (const [path, fileRequired] of [
     [["list"], false],
@@ -378,10 +378,7 @@ test("worker agent enablement commands expose offline help and validate inputs b
     [["provider", "add"], true],
     [["provider", "remove"], false],
   ] as const) {
-    const help = invocation(
-      ["worker", "agent", "enablement", ...path, "--help"],
-      env,
-    );
+    const help = invocation(["agent", "enablement", ...path, "--help"], env);
     assert.equal(help.status, ExitCode.Success, help.stderr);
     if (fileRequired) assert.match(help.stdout, /--file <path>/);
   }
@@ -391,7 +388,6 @@ test("worker agent enablement commands expose offline help and validate inputs b
   );
   const invalid = invocation(
     [
-      "worker",
       "agent",
       "enablement",
       "enable",
@@ -408,11 +404,10 @@ test("worker agent enablement commands expose offline help and validate inputs b
   assert.equal(invalid.status, ExitCode.Failure);
   assert.match(
     invalid.stderr,
-    /^cli\.worker\.agent\.enablement\.enable\.invalid_revision:/,
+    /^cli\.agent\.enablement\.enable\.invalid_revision:/,
   );
   const missingToken = invocation(
     [
-      "worker",
       "agent",
       "enablement",
       "put",
@@ -427,7 +422,7 @@ test("worker agent enablement commands expose offline help and validate inputs b
   assert.equal(missingToken.status, ExitCode.Failure);
   assert.match(
     missingToken.stderr,
-    /^cli\.worker\.agent\.enablement\.put\.token_required:/,
+    /^cli\.agent\.enablement\.put\.token_required:/,
   );
 });
 

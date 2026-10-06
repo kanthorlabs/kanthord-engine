@@ -72,7 +72,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
     },
     secret: {},
   });
-  await write(["worker", "agent", "enablement", "put", "swe@1"], {
+  await write(["agent", "enablement", "put", "swe@1"], {
     agentProviders: [
       { name: "default", provider: "anthropic", credential: "anthro-1" },
     ],
@@ -174,7 +174,6 @@ export async function workerAcceptance(t: TestContext, host = false) {
   }
   if (!host)
     await read([
-      "worker",
       "agent",
       "enablement",
       "disable",

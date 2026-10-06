@@ -55,6 +55,15 @@ engine/
 │   │   ├── login.ts            # pi-ai OAuth login flow and interaction adapter
 │   │   ├── model-connector.ts  # Model runtime and model from a released credential
 │   │   └── service.ts          # Credential routes, metadata rules, login lifecycle, and healthchecks
+│   ├── agent/                  # Agent component: agent catalog, enablements, effective configuration, and provider healthchecks
+│   │   ├── contract.ts         # Agent routes, enablement and configuration schemas, and error codes
+│   │   ├── index.ts            # Component and migration exports
+│   │   ├── migrations.ts       # agent_enablement table
+│   │   ├── catalog.ts          # Static agent declarations
+│   │   ├── prompt-assets.ts    # Byte-exact packaged base and agent prompts
+│   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
+│   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
+│   │   └── service.ts          # Enablement routes, entry validation, agent views, and provider healthchecks
 │   ├── storage/                # Storage component: storage platforms and credential routes
 │   │   ├── contract.ts         # Storage credential route group
 │   │   ├── index.ts            # Component and platform table exports
@@ -117,25 +126,22 @@ engine/
 │   │   ├── execution-read.ts   # Claim ownership and paginated execution history
 │   │   ├── settlement.ts       # Loss, revocation, credential pins, and retained attribution
 │   │   └── service.ts          # Lifecycle, loss sweep, queue handlers, and collaboration entrypoints
-│   ├── worker/                 # Worker registrations, agent enablement lifecycle, and configuration collaborations
+│   ├── worker/                 # Worker registrations, native executions, and configuration collaborations
 │   │   ├── contract.ts         # Worker operations, schemas, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
-│   │   ├── migrations.ts       # Agent enablement revisions and durable worker_instance rows
+│   │   ├── migrations.ts       # Durable worker_instance rows
 │   │   ├── instances.ts        # Transaction-owned registration rows, retained attribution, and live reads
 │   │   ├── registrations.ts    # Capacity admission, live-registration lookup, and client attribution
 │   │   ├── heartbeat.ts        # Monotonic readings, renewal, and expiry selection
 │   │   ├── instance-record.ts  # Live runtime projection, activity, filters, and pagination
 │   │   ├── config.ts           # Heartbeat window and global prompt configuration fragment
-│   │   ├── catalog.ts          # Static worker and agent declarations
-│   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
-│   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
+│   │   ├── catalog.ts          # Static worker declarations
 │   │   ├── action-performer.ts # Claim admission, dispatch, reuse and request evidence
 │   │   ├── action-reservations.ts # Execution mutex and owner-held uncertain dispatches
 │   │   ├── action-operands.ts  # Pinned assessment snapshot and action operands
 │   │   ├── action-reuse.ts     # Open pull-request repository and branch checks
 │   │   ├── action-classify.ts  # No-effect, unknown-effect and recording outcomes
 │   │   ├── node-branch.ts      # Shared deterministic node branch name
-│   │   ├── prompt-assets.ts    # Byte-exact packaged base and agent prompts
 │   │   ├── pi.ts               # Cached offline SDK loader and isolated agent directory
 │   │   ├── tool-table.ts       # Declared tools, host checks and bounded hygienic bash
 │   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
@@ -160,7 +166,7 @@ engine/
 │   │   ├── evaluation.ts       # Verification evidence, assessment and action requests
 │   │   ├── transcript.ts       # Execution transcript sink and no-op implementation
 │   │   ├── native-method.ts    # Injected native method dispatch and resource lifetime
-│   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and agent configuration
+│   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and entry validation
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations
@@ -180,6 +186,7 @@ engine/
 │       │   ├── llm.ts          # LLM command group and login commands
 │       │   ├── repository.ts   # Repository command group
 │       │   ├── storage.ts      # Storage command group
+│       │   ├── agent.ts        # Agent command group
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton
 │           ├── api.ts          # Server operation clients and bounded backoff
@@ -192,6 +199,7 @@ engine/
 │       ├── llm/                # LLM credential operation documents
 │       ├── repository/         # Repository credential operation documents
 │       ├── storage/            # Storage credential operation documents
+│       ├── agent/              # Agent operation documents
 │       ├── worker/             # Worker operation documents
 │       └── shared/             # Common OpenAPI components
 ├── scripts/                    # Development and acceptance utilities

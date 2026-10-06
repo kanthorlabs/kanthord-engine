@@ -62,7 +62,13 @@ import {
   collectInventories,
 } from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
-import { WorkerService, workerMigrations } from "../../worker/index.ts";
+import {
+  WorkerService,
+  workerMigrations,
+  toolDeclarations,
+} from "../../worker/index.ts";
+import { AgentComponent, agentMigrations } from "../../agent/index.ts";
+import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import {
   RepositoryComponent,
   RepositoryCredentials,
@@ -193,7 +199,7 @@ export function composeServices(options: {
     logger: options.logger,
     health: options.health,
     agentProvidersDependentOn: (tx, name) =>
-      worker.agentProvidersDependentOn(tx, name),
+      agent.agentProvidersDependentOn(tx, name),
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
     inboundsNaming: options.standIns?.inboundsNaming ?? (() => []),
   });
@@ -203,9 +209,17 @@ export function composeServices(options: {
     logger: options.logger,
     oauthProviders: options.oauthProviders,
     agentProvidersDependentOn: (tx, name) =>
-      worker.agentProvidersDependentOn(tx, name),
+      agent.agentProvidersDependentOn(tx, name),
     enablementsDependentOnModel: (tx, name, model) =>
-      worker.enablementsDependentOnModel(tx, name, model),
+      agent.enablementsDependentOnModel(tx, name, model),
+  });
+  const agent: AgentComponent = new AgentComponent({
+    custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
+    approvedModels: (tx, name) => llm.approvedModels(tx, name),
+    providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
+    providerCapability: (tx, name) => llm.providerCapability(tx, name),
+    entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
+    toolDeclarations: (name) => toolDeclarations(name),
   });
   const repositoryCredentials = new RepositoryCredentials({
     store: options.store,
@@ -256,11 +270,11 @@ export function composeServices(options: {
     },
     health: options.health,
     registrations: options.registrations,
-    custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
-    approvedModels: (tx, name) => llm.approvedModels(tx, name),
-    providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
-    providerCapability: (tx, name) => llm.providerCapability(tx, name),
-    entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
+    agentConfiguration: {
+      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
+      agentView: (tx, name, entry, models) =>
+        agent.agentView(tx, name, entry, models),
+    },
   });
   const mission: MissionService = new MissionService({
     store: options.store,
@@ -318,6 +332,7 @@ export function composeServices(options: {
   });
   scheduler.declare(registry);
   llm.declare(registry);
+  agent.declare(registry);
   repositoryCredentials.declare(registry);
   storage.declare(registry);
   worker.declare(registry);
@@ -338,6 +353,9 @@ export function composeServices(options: {
           llm:
             options.inventoryOverrides?.llm ??
             ((tx) => llm.resourceInventory(tx)),
+          agent:
+            options.inventoryOverrides?.agent ??
+            ((tx) => agent.resourceInventory(tx)),
           repository:
             options.inventoryOverrides?.repository ??
             ((tx) => repositoryCredentials.resourceInventory(tx)),
@@ -360,6 +378,7 @@ export function composeServices(options: {
     workQueue,
     custody,
     llm,
+    agent,
     repositoryCredentials,
     storage,
     mission,
@@ -430,6 +449,7 @@ export class Server implements Service {
         { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
         { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
         { service: "gateway", migrations: gatewayMigrations },
+        { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
         { service: "worker", migrations: workerMigrations },
         { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
         { service: "project", migrations: projectMigrations },

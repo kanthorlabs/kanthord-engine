@@ -1,10 +1,10 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
-  delete:
-    operationId: worker.agent.enablement.provider.remove
+  post:
+    operationId: agent.enablement.enable
     tags:
-      - worker
-    description: Remove an unused named provider, retaining at least one provider.
+      - agent
+    description: Validate and enable an existing agent enablement.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -16,29 +16,22 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/worker.agent.enablement.provider.remove.Input/prope\
-            rties/params/properties/agentName"
-      - name: providerName
-        in: path
-        required: true
-        schema:
-          $ref: "#/components/schemas/worker.agent.enablement.provider.remove.Input/prope\
-            rties/params/properties/providerName"
+          $ref: "#/components/schemas/agent.enablement.enable.Input/properties/params/pro\
+            perties/agentName"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/worker.agent.enablement.provider.remove.Input/prope\
-              rties/body"
+            $ref: "#/components/schemas/agent.enablement.enable.Input/properties/body"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.agent.enablement.provider.remove.Output"
+              $ref: "#/components/schemas/agent.enablement.enable.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -61,7 +54,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    worker.agent.enablement.provider.remove.Input:
+    agent.enablement.enable.Input:
       type: object
       properties:
         params:
@@ -70,12 +63,8 @@ components:
             agentName:
               type: string
               minLength: 1
-            providerName:
-              type: string
-              minLength: 1
           required:
             - agentName
-            - providerName
           additionalProperties: false
         query:
           type: object
@@ -96,7 +85,7 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.agent.enablement.provider.remove.Output:
+    agent.enablement.enable.Output:
       type: object
       properties:
         agentName:

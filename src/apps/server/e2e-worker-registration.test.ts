@@ -180,7 +180,7 @@ async function setup(t: TestContext) {
   });
   const enabled = success<{ revision: number }>(
     await kanthord(
-      ["worker", "agent", "enablement", "put", AGENT, "--file", enablement],
+      ["agent", "enablement", "put", AGENT, "--file", enablement],
       H,
     ),
   );

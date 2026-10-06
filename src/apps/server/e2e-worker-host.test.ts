@@ -155,7 +155,6 @@ test(
           fauxAssistantMessage("done"),
           async () => {
             await setup.read([
-              "worker",
               "agent",
               "enablement",
               "disable",

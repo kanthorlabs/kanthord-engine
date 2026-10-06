@@ -29,7 +29,7 @@ export default tseslint.config(
         { type: "kernel", pattern: "src/kernel" },
         {
           type: "component",
-          pattern: "src/(repository|llm|storage)",
+          pattern: "src/(repository|llm|storage|agent)",
           capture: ["name"],
         },
         {
@@ -220,7 +220,11 @@ export default tseslint.config(
                   }),
                 },
                 { to: file({ anyOf: ["config-global", "config", "main"] }) },
-                { to: element("component") },
+                {
+                  to: element("component", {
+                    fileInternalPath: "!contract.ts",
+                  }),
+                },
               ],
             },
             {

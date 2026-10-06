@@ -24,6 +24,7 @@ import {
   OWNER_LLM,
   OWNER_REPOSITORY,
   OWNER_STORAGE,
+  OWNER_AGENT,
   OWNER_WORKER,
   OWNER_PROJECT,
   type InventoryCollector,
@@ -39,6 +40,7 @@ const INVENTORY_OWNERS = [
   OWNER_LLM,
   OWNER_REPOSITORY,
   OWNER_STORAGE,
+  OWNER_AGENT,
   OWNER_WORKER,
   OWNER_PROJECT,
 ] as const;
@@ -229,6 +231,7 @@ function assembleReport(
     [OWNER_LLM]: emptyOwner(),
     [OWNER_REPOSITORY]: emptyOwner(),
     [OWNER_STORAGE]: emptyOwner(),
+    [OWNER_AGENT]: emptyOwner(),
     [OWNER_WORKER]: emptyOwner(),
     [OWNER_PROJECT]: emptyOwner(),
   };
@@ -265,6 +268,7 @@ function assembleReport(
       llm: owners.llm,
       repository: owners.repository,
       storage: owners.storage,
+      agent: owners.agent,
     },
   };
 }

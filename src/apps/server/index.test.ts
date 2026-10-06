@@ -25,7 +25,7 @@ import {
   gatewayFixture,
 } from "./test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
@@ -136,12 +136,9 @@ test("composed Custody and Worker share credential and enablement collaborations
   );
   assert.equal(updated.status, HttpStatus.OK, await updated.text());
   const put = await fixture.request(
-    workerOperations["agent.enablement.put"].path.replace(
-      ":agentName",
-      AGENT_NAME,
-    ),
+    agentOperations["enablement.put"].path.replace(":agentName", AGENT_NAME),
     {
-      method: workerOperations["agent.enablement.put"].method,
+      method: agentOperations["enablement.put"].method,
       headers: { ...headers, "Idempotency-Key": ulid() },
       body: JSON.stringify({
         agentProviders: [

@@ -1,0 +1,607 @@
+import assert from "node:assert/strict";
+import { z } from "zod";
+import { OperationError } from "../kernel/errors.ts";
+import { HealthScope, type ResourceEntry } from "../kernel/health.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import type { OperationRegistry } from "../kernel/operation.ts";
+import type { Transaction } from "../kernel/store.ts";
+import { getAgentDeclaration } from "./catalog.ts";
+import {
+  configurationError,
+  configurationIssues,
+  effectiveConfiguration,
+  validateEffectiveConfig,
+  validateProvider,
+} from "./configuration.ts";
+import {
+  agentOperations,
+  agentEnablementSchema,
+  effectiveConfigurationSchema,
+  AgentErrorCode,
+  AGENT_PROVIDER_TARGET_KIND,
+  LIST_LIMIT_DEFAULT,
+  type AgentDependentBinding,
+  type AgentEnablement,
+  type AgentEntry,
+  type AgentProviderItem,
+  type AgentView,
+  type ApprovedModelsFn,
+  type CustodySuitability,
+  type DefaultConfiguration,
+  type EntriesOfAgent,
+  type ProviderCapabilityFn,
+  type ProviderHealthCheckFn,
+  type ToolDeclarationsFn,
+} from "./contract.ts";
+import {
+  EnablementState,
+  getEnablement,
+  getLatestRevision,
+  insertEnablementRevision,
+  listEnablements,
+  agentProvidersDependentOn,
+  enablementsByModel,
+  type EnablementRow,
+} from "./enablements.ts";
+
+const NO_ITEMS = 0;
+const LAST_PROVIDER = 1;
+const HEALTH_PAGE_SIZE = 100;
+
+function wireRecord(row: EnablementRow) {
+  return agentEnablementSchema.parse({
+    agentName: row.agentName,
+    state: row.state,
+    agentProviders: row.agentProviders,
+    defaultConfiguration: row.defaultConfiguration,
+    revision: row.revision,
+  });
+}
+
+function requireAgent(agentName: string): void {
+  if (!getAgentDeclaration(agentName))
+    throw new OperationError(
+      HttpStatus.NotFound,
+      AgentErrorCode.AgentNotFound,
+      "Agent not found.",
+      { agentName },
+    );
+}
+
+function requireEnablement(tx: Transaction, agentName: string): EnablementRow {
+  const row = getEnablement(tx, agentName);
+  if (!row)
+    throw new OperationError(
+      HttpStatus.NotFound,
+      AgentErrorCode.NotFound,
+      "Agent enablement not found.",
+      { agentName },
+    );
+  return row;
+}
+
+function checkRevision(
+  tx: Transaction,
+  agentName: string,
+  expectedRevision: number | undefined,
+): void {
+  const latest = getLatestRevision(tx, agentName);
+  if (expectedRevision !== latest?.revision)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      AgentErrorCode.RevisionConflict,
+      "Agent enablement revision conflict.",
+      { agentName, revision: latest?.revision ?? null },
+    );
+}
+
+function currentRevision(
+  tx: Transaction,
+  agentName: string,
+  expectedRevision: number,
+): EnablementRow {
+  requireAgent(agentName);
+  const current = requireEnablement(tx, agentName);
+  checkRevision(tx, agentName, expectedRevision);
+  return current;
+}
+
+function bindingIdentity({ bindingId, workerName }: AgentDependentBinding) {
+  return { bindingId, workerName };
+}
+
+function conflict(
+  agentName: string,
+  code: string,
+  details: Record<string, NonNullable<OperationError["details"]>> = {},
+): OperationError {
+  return new OperationError(
+    HttpStatus.Conflict,
+    code,
+    "Agent enablement change refused.",
+    { agentName, ...details },
+  );
+}
+
+function saveRevision(tx: Transaction, current: EnablementRow) {
+  return wireRecord(
+    insertEnablementRevision(
+      tx,
+      current.agentName,
+      current.state,
+      current.agentProviders,
+      current.defaultConfiguration,
+    ),
+  );
+}
+
+export interface Dependencies {
+  custodySuitability: CustodySuitability;
+  approvedModels: ApprovedModelsFn;
+  entriesOfAgent: EntriesOfAgent;
+  providerHealthCheck: ProviderHealthCheckFn;
+  providerCapability: ProviderCapabilityFn;
+  toolDeclarations: ToolDeclarationsFn;
+}
+
+export class AgentComponent {
+  private readonly dependencies: Dependencies;
+
+  constructor(dependencies: Dependencies) {
+    this.dependencies = dependencies;
+  }
+
+  private validateEffectiveConfig(
+    tx: Transaction,
+    agentName: string,
+    agentProviders: AgentProviderItem[],
+    config: DefaultConfiguration,
+  ): void {
+    validateEffectiveConfig(
+      this.dependencies,
+      tx,
+      agentName,
+      agentProviders,
+      config,
+    );
+  }
+
+  private validateBindings(
+    tx: Transaction,
+    agentName: string,
+    agentProviders: AgentProviderItem[],
+    defaults: DefaultConfiguration,
+    entries: AgentDependentBinding[],
+  ): void {
+    const bindings = entries.flatMap((binding) =>
+      configurationIssues(
+        this.dependencies,
+        tx,
+        agentName,
+        agentProviders,
+        effectiveConfiguration(defaults, binding.entry),
+      ).map(({ code }) => ({ ...bindingIdentity(binding), code })),
+    );
+    if (bindings.length > NO_ITEMS)
+      throw conflict(agentName, AgentErrorCode.InvalidatesBindings, {
+        bindings,
+      });
+  }
+
+  private putEnablement(
+    tx: Transaction,
+    agentName: string,
+    body: (typeof agentOperations)["enablement.put"]["input"]["_output"]["body"],
+  ) {
+    requireAgent(agentName);
+    checkRevision(tx, agentName, body.expectedRevision);
+    const current = getEnablement(tx, agentName);
+    const { agentProviders, defaultConfiguration } = body;
+    if (agentProviders.length === NO_ITEMS)
+      throw configurationError(agentName, AgentErrorCode.ProviderRequired);
+    const names = new Set(agentProviders.map(({ name }) => name));
+    if (names.size !== agentProviders.length)
+      throw conflict(agentName, AgentErrorCode.ProviderNameConflict);
+    this.validateEffectiveConfig(
+      tx,
+      agentName,
+      agentProviders,
+      defaultConfiguration,
+    );
+    if (
+      current?.agentProviders.some((old) =>
+        agentProviders.some(
+          (item) => item.name === old.name && item.provider !== old.provider,
+        ),
+      )
+    )
+      throw conflict(agentName, AgentErrorCode.ProviderFixed);
+    const entries = this.dependencies.entriesOfAgent(tx, agentName);
+    const omitted = new Set(
+      current?.agentProviders
+        .filter(({ name }) => !names.has(name))
+        .map(({ name }) => name),
+    );
+    const bindings = entries
+      .filter(
+        ({ entry }) =>
+          entry?.agentProvider !== undefined &&
+          omitted.has(entry.agentProvider),
+      )
+      .map(bindingIdentity);
+    if (bindings.length > NO_ITEMS)
+      throw conflict(agentName, AgentErrorCode.ProviderInUse, { bindings });
+    this.validateBindings(
+      tx,
+      agentName,
+      agentProviders,
+      defaultConfiguration,
+      entries,
+    );
+    return wireRecord(
+      insertEnablementRevision(
+        tx,
+        agentName,
+        current?.state ?? EnablementState.Enabled,
+        agentProviders,
+        defaultConfiguration,
+      ),
+    );
+  }
+
+  private setEnablementState(
+    tx: Transaction,
+    agentName: string,
+    expectedRevision: number,
+    state: EnablementState,
+  ) {
+    const current = currentRevision(tx, agentName, expectedRevision);
+    if (state === EnablementState.Enabled) {
+      this.validateEffectiveConfig(
+        tx,
+        agentName,
+        current.agentProviders,
+        current.defaultConfiguration,
+      );
+      this.validateBindings(
+        tx,
+        agentName,
+        current.agentProviders,
+        current.defaultConfiguration,
+        this.dependencies.entriesOfAgent(tx, agentName),
+      );
+    }
+    return saveRevision(tx, { ...current, state });
+  }
+
+  private removeEnablement(
+    tx: Transaction,
+    agentName: string,
+    expectedRevision: number,
+  ): { agentName: string; removed: true } {
+    const current = currentRevision(tx, agentName, expectedRevision);
+    const bindings = this.dependencies
+      .entriesOfAgent(tx, agentName)
+      .map(bindingIdentity);
+    if (bindings.length > NO_ITEMS)
+      throw conflict(agentName, AgentErrorCode.InUse, { bindings });
+    insertEnablementRevision(
+      tx,
+      agentName,
+      current.state,
+      current.agentProviders,
+      current.defaultConfiguration,
+      Date.now(),
+    );
+    return { agentName, removed: true };
+  }
+
+  private addProvider(
+    tx: Transaction,
+    agentName: string,
+    body: (typeof agentOperations)["enablement.provider.add"]["input"]["_output"]["body"],
+  ) {
+    const current = currentRevision(tx, agentName, body.expectedRevision);
+    const { name, provider, credential } = body;
+    if (current.agentProviders.some((item) => item.name === name))
+      throw conflict(agentName, AgentErrorCode.ProviderNameConflict);
+    const item = { name, provider, credential };
+    validateProvider(this.dependencies, tx, agentName, item);
+    const agentProviders = [...current.agentProviders, item];
+    this.validateBindings(
+      tx,
+      agentName,
+      agentProviders,
+      current.defaultConfiguration,
+      this.dependencies.entriesOfAgent(tx, agentName),
+    );
+    return saveRevision(tx, { ...current, agentProviders });
+  }
+
+  private removeProvider(
+    tx: Transaction,
+    agentName: string,
+    providerName: string,
+    expectedRevision: number,
+  ) {
+    const current = currentRevision(tx, agentName, expectedRevision);
+    if (!current.agentProviders.some(({ name }) => name === providerName))
+      throw configurationError(agentName, AgentErrorCode.ProviderNotFound);
+    if (current.agentProviders.length === LAST_PROVIDER)
+      throw configurationError(agentName, AgentErrorCode.ProviderRequired);
+    const entries = this.dependencies.entriesOfAgent(tx, agentName);
+    const dependents: Array<
+      { kind: string } | ReturnType<typeof bindingIdentity>
+    > = [];
+    if (current.defaultConfiguration.agentProvider === providerName)
+      dependents.push({ kind: "defaultConfiguration" });
+    dependents.push(
+      ...entries
+        .filter(({ entry }) => entry?.agentProvider === providerName)
+        .map(bindingIdentity),
+    );
+    if (dependents.length > NO_ITEMS)
+      throw conflict(agentName, AgentErrorCode.ProviderInUse, { dependents });
+    const agentProviders = current.agentProviders.filter(
+      ({ name }) => name !== providerName,
+    );
+    this.validateBindings(
+      tx,
+      agentName,
+      agentProviders,
+      current.defaultConfiguration,
+      entries,
+    );
+    return saveRevision(tx, { ...current, agentProviders });
+  }
+
+  validateEntry(
+    tx: Transaction,
+    agentName: string,
+    entry: AgentEntry | null,
+  ): void {
+    const current = getEnablement(tx, agentName);
+    if (!current || current.state === EnablementState.Disabled)
+      throw configurationError(agentName, AgentErrorCode.Unavailable);
+    this.validateEntryForm(agentName, entry);
+    this.validateEffectiveConfig(
+      tx,
+      agentName,
+      current.agentProviders,
+      effectiveConfiguration(current.defaultConfiguration, entry),
+    );
+  }
+
+  private validateEntryForm(agentName: string, entry: AgentEntry | null): void {
+    if (entry === null) return;
+    const declaration = getAgentDeclaration(agentName);
+    assert.ok(declaration);
+    if (
+      Object.keys(entry).some(
+        (key) => !declaration.overridableFields.includes(key),
+      )
+    )
+      throw configurationError(agentName, AgentErrorCode.OverrideNotAllowed);
+    if (
+      Object.keys(entry).length === NO_ITEMS ||
+      (entry.agentProvider !== undefined &&
+        (entry.modelIdentifier === undefined ||
+          entry.reasoningEffort === undefined))
+    )
+      throw configurationError(agentName, AgentErrorCode.InvalidConfiguration);
+  }
+
+  agentView(
+    tx: Transaction,
+    agentName: string,
+    entry: AgentEntry | null,
+    approvedModels: ApprovedModelsFn = this.dependencies.approvedModels,
+  ): AgentView | null {
+    if (!getAgentDeclaration(agentName)) return null;
+    const current = getEnablement(tx, agentName);
+    if (!current || current.state === EnablementState.Disabled)
+      return {
+        defaults: null,
+        effective: null,
+        valid: false,
+        issues: [{ path: [], code: AgentErrorCode.Unavailable }],
+      };
+    const defaults = current.defaultConfiguration;
+    const config = effectiveConfiguration(defaults, entry);
+    const issues = configurationIssues(
+      {
+        custodySuitability: this.dependencies.custodySuitability,
+        approvedModels,
+      },
+      tx,
+      agentName,
+      current.agentProviders,
+      config,
+    );
+    if (issues.length > NO_ITEMS)
+      return { defaults, effective: null, valid: false, issues };
+    const item = current.agentProviders.find(
+      ({ name }) => name === config.agentProvider,
+    );
+    assert.ok(item, "Validated configuration must resolve a provider.");
+    return {
+      defaults,
+      effective: {
+        ...config,
+        provider: item.provider,
+        credential: item.credential,
+      },
+      valid: true,
+      issues,
+    };
+  }
+
+  resourceInventory(tx: Transaction): ResourceEntry[] {
+    const entries: ResourceEntry[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = listEnablements(tx, HEALTH_PAGE_SIZE, cursor);
+      for (const row of page.items) {
+        entries.push(
+          ...row.agentProviders.map((item) => ({
+            scope: HealthScope.Global,
+            project: null,
+            name: `${encodeURIComponent(row.agentName)}/${encodeURIComponent(item.name)}`,
+            target: `${AGENT_PROVIDER_TARGET_KIND}:${item.credential}`,
+            capability: this.dependencies.providerCapability(
+              tx,
+              item.credential,
+            ),
+            check: this.dependencies.providerHealthCheck(tx, item.credential),
+          })),
+        );
+      }
+      assert.notEqual(
+        page.nextCursor,
+        cursor === null ? undefined : cursor,
+        "Enablement pagination must advance.",
+      );
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+    return entries;
+  }
+
+  agentProvidersDependentOn(tx: Transaction, credentialName: string) {
+    return agentProvidersDependentOn(tx, credentialName);
+  }
+
+  enablementsDependentOnModel(
+    tx: Transaction,
+    credentialName: string,
+    modelId: string,
+  ): AgentEnablement[] {
+    const matches = new Map(
+      enablementsByModel(tx, credentialName, modelId).map((row) => [
+        row.agentName,
+        wireRecord(row),
+      ]),
+    );
+    let cursor: string | null = null;
+    do {
+      const page = listEnablements(tx, LIST_LIMIT_DEFAULT, cursor);
+      for (const row of page.items) {
+        const dependent = this.dependencies
+          .entriesOfAgent(tx, row.agentName)
+          .some(({ entry }) => {
+            if (entry === null) return false;
+            const effective = effectiveConfiguration(
+              row.defaultConfiguration,
+              entry,
+            );
+            return (
+              effective.modelIdentifier === modelId &&
+              row.agentProviders.some(
+                (item) =>
+                  item.name === effective.agentProvider &&
+                  item.credential === credentialName,
+              )
+            );
+          });
+        if (dependent) matches.set(row.agentName, wireRecord(row));
+      }
+      assert.notEqual(
+        page.nextCursor,
+        cursor === null ? undefined : cursor,
+        "Enablement pagination must advance.",
+      );
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+    return [...matches.values()];
+  }
+
+  declare(registry: OperationRegistry): void {
+    registry.register(agentOperations["enablement.list"], ({ query }, caller) =>
+      caller.commit((tx) => {
+        const page = listEnablements(tx, query.limit, query.cursor ?? null);
+        return {
+          items: page.items.map(wireRecord),
+          nextCursor: page.nextCursor,
+        };
+      }),
+    );
+    registry.register(agentOperations.get, async ({ params }, caller) => {
+      requireAgent(params.agentName);
+      const declaration = getAgentDeclaration(params.agentName);
+      assert.ok(declaration);
+      const tools = await this.dependencies.toolDeclarations(params.agentName);
+      assert.equal(declaration.agentName, params.agentName);
+      return caller.commit((tx) => {
+        const row = getEnablement(tx, params.agentName);
+        return {
+          agentName: declaration.agentName,
+          configurationSchema: z.toJSONSchema(effectiveConfigurationSchema),
+          overridableFields: [...declaration.overridableFields],
+          ...(declaration.basePrompt === undefined
+            ? {}
+            : { basePrompt: declaration.basePrompt }),
+          agentPrompt: declaration.agentPrompt,
+          tools,
+          enablement: row ? wireRecord(row) : null,
+        };
+      });
+    });
+    registry.register(agentOperations["enablement.get"], ({ params }, caller) =>
+      caller.commit((tx) =>
+        wireRecord(requireEnablement(tx, params.agentName)),
+      ),
+    );
+    registry.register(
+      agentOperations["enablement.put"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) => this.putEnablement(tx, params.agentName, body)),
+    );
+    registry.register(
+      agentOperations["enablement.enable"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          this.setEnablementState(
+            tx,
+            params.agentName,
+            body.expectedRevision,
+            EnablementState.Enabled,
+          ),
+        ),
+    );
+    registry.register(
+      agentOperations["enablement.disable"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          this.setEnablementState(
+            tx,
+            params.agentName,
+            body.expectedRevision,
+            EnablementState.Disabled,
+          ),
+        ),
+    );
+    registry.register(
+      agentOperations["enablement.remove"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          this.removeEnablement(tx, params.agentName, body.expectedRevision),
+        ),
+    );
+    registry.register(
+      agentOperations["enablement.provider.add"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) => this.addProvider(tx, params.agentName, body)),
+    );
+    registry.register(
+      agentOperations["enablement.provider.remove"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) =>
+          this.removeProvider(
+            tx,
+            params.agentName,
+            params.providerName,
+            body.expectedRevision,
+          ),
+        ),
+    );
+  }
+}

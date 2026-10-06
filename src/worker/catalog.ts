@@ -2,12 +2,7 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 
-import { HostTool, WorkerHost, WorkerMethod } from "./contract.ts";
-import {
-  BASE_PROMPT,
-  RE_AGENT_PROMPT,
-  SWE_AGENT_PROMPT,
-} from "./prompt-assets.ts";
+import { WorkerHost, WorkerMethod } from "./contract.ts";
 export { WorkerHost, WorkerMethod } from "./contract.ts";
 
 export const REQUIRED_NODE_FORMAT: readonly string[] = [
@@ -17,26 +12,6 @@ export const REQUIRED_NODE_FORMAT: readonly string[] = [
   "verifications",
   "bindings",
 ];
-
-export interface AgentDeclaration {
-  agentName: string;
-  overridableFields: readonly string[];
-  basePrompt?: string;
-  agentPrompt: string;
-  tools: readonly BuiltinTool[];
-  hostTools: readonly HostTool[];
-}
-
-export const BuiltinTool = {
-  Read: "read",
-  Edit: "edit",
-  Write: "write",
-  Grep: "grep",
-  Find: "find",
-  Ls: "ls",
-  Bash: "bash",
-} as const;
-export type BuiltinTool = (typeof BuiltinTool)[keyof typeof BuiltinTool];
 
 export interface WorkerDeclaration {
   name: string;
@@ -55,38 +30,6 @@ const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
 const FIRST_ITEM = 0;
-
-export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
-  "swe@1": {
-    agentName: "swe@1",
-    basePrompt: BASE_PROMPT,
-    agentPrompt: SWE_AGENT_PROMPT,
-    hostTools: [HostTool.EvidenceUpload],
-    tools: [
-      BuiltinTool.Read,
-      BuiltinTool.Edit,
-      BuiltinTool.Write,
-      BuiltinTool.Grep,
-      BuiltinTool.Find,
-      BuiltinTool.Ls,
-      BuiltinTool.Bash,
-    ],
-    overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
-  },
-  "re@1": {
-    agentName: "re@1",
-    basePrompt: BASE_PROMPT,
-    agentPrompt: RE_AGENT_PROMPT,
-    hostTools: [],
-    tools: [
-      BuiltinTool.Read,
-      BuiltinTool.Grep,
-      BuiltinTool.Find,
-      BuiltinTool.Ls,
-    ],
-    overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
-  },
-};
 
 export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
   "general@1": {
@@ -124,13 +67,6 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     requiredNodeFormat: REQUIRED_NODE_FORMAT,
   },
 };
-
-export function getAgentDeclaration(
-  agentName: string,
-): AgentDeclaration | undefined {
-  if (!Object.hasOwn(AGENT_DECLARATIONS, agentName)) return undefined;
-  return AGENT_DECLARATIONS[agentName];
-}
 
 export function getWorkerDeclaration(
   workerName: string,

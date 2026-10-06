@@ -16,10 +16,7 @@ import {
   projectOperations,
   REPOSITORY_PLATFORM,
 } from "../../project/contract.ts";
-import {
-  type AgentEnablement,
-  WorkerErrorCode,
-} from "../../worker/contract.ts";
+import { type AgentEnablement, AgentErrorCode } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
@@ -59,7 +56,7 @@ const WORKER_NAME = "general";
 const ADDRESS = "git@github.com:owner/repo.git";
 const RESOURCE_IDENTITY = `${BindingKind.Repository}:${REPOSITORY_PLATFORM}:owner/repo`;
 const BASE_BRANCH = "main";
-const ENABLEMENT_COMMAND = ["worker", "agent", "enablement"];
+const ENABLEMENT_COMMAND = ["agent", "enablement"];
 const CONFIGURATION = {
   agentProvider: DEFAULT,
   modelIdentifier: SONNET,
@@ -561,7 +558,7 @@ test("E05.16 tuning entry without an enablement is refused", async (t) => {
       ["project", "binding", "apply", project.id, "--file", path],
       fixture.env,
     ),
-    WorkerErrorCode.Unavailable,
+    AgentErrorCode.Unavailable,
   );
   const exported = bindingSetWriteInputSchema.parse(
     success<unknown>(
@@ -586,7 +583,7 @@ test("E05.17 removing an enablement used by a binding is refused", async (t) => 
       ],
       fixture.env,
     ),
-    WorkerErrorCode.InUse,
+    AgentErrorCode.InUse,
   );
   const read = success<AgentEnablement>(
     await kanthord([...ENABLEMENT_COMMAND, "get", AGENT], fixture.env),
@@ -611,7 +608,7 @@ test("E05.18 replacing a referenced provider is refused atomically", async (t) =
       [...ENABLEMENT_COMMAND, "put", AGENT, "--file", path],
       fixture.env,
     ),
-    WorkerErrorCode.ProviderInUse,
+    AgentErrorCode.ProviderInUse,
   );
   const read = success<AgentEnablement>(
     await kanthord([...ENABLEMENT_COMMAND, "get", AGENT], fixture.env),
@@ -659,7 +656,7 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
       [...ENABLEMENT_COMMAND, "put", AGENT, "--file", path],
       fixture.env,
     ),
-    WorkerErrorCode.InvalidatesBindings,
+    AgentErrorCode.InvalidatesBindings,
   );
   const read = success<AgentEnablement>(
     await kanthord([...ENABLEMENT_COMMAND, "get", AGENT], fixture.env),

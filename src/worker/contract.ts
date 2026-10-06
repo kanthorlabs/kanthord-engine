@@ -1,6 +1,4 @@
 import { z } from "zod";
-import type { KnownProvider } from "@earendil-works/pi-ai";
-import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { identitySchema } from "../kernel/identity.ts";
 import {
   handoverEnvelopeSchema,
@@ -18,8 +16,12 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import type { ResourceCheck } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import {
+  effectiveConfigurationSchema,
+  type AgentView,
+  type ApprovedModelsFn,
+} from "../agent/contract.ts";
 export const SourceState = {
   Present: "present",
   Absent: "absent",
@@ -457,47 +459,11 @@ export interface SchedulerClaims {
   ): { activity: InstanceActivity; executionId: string | null };
 }
 
-export type AgentProviderItem = {
-  name: string;
-  provider: string;
-  credential: string;
-};
-
-export type DefaultConfiguration = {
-  agentProvider: string;
-  modelIdentifier: string;
-  reasoningEffort: string;
-};
-
 export type WorkerEntry = {
   agentProvider?: string;
   modelIdentifier?: string;
   reasoningEffort?: string;
 };
-
-export type AgentEnablement = {
-  agentName: string;
-  state: string;
-  agentProviders: AgentProviderItem[];
-  defaultConfiguration: DefaultConfiguration;
-  revision: number;
-};
-
-export type AgentProviderDependent = {
-  agentName: string;
-  providerName: string;
-};
-
-export type AgentDependentBinding = {
-  bindingId: string;
-  workerName: string;
-  entry: WorkerEntry | null;
-};
-
-export type CustodySuitability = (
-  tx: Transaction,
-  req: { credential: string; platform: string },
-) => void;
 
 export type CredentialMetadataRecord = {
   id: string;
@@ -506,16 +472,6 @@ export type CredentialMetadataRecord = {
   metadata: Record<string, unknown> | null;
 };
 
-export type ApprovedModel = {
-  id: string;
-  reasoningLevels: readonly string[];
-};
-
-export type ApprovedModelsFn = (
-  tx: Transaction,
-  credentialName: string,
-) => readonly ApprovedModel[] | null;
-
 export type PinnedCredentialMetadataFn = (
   tx: Transaction,
   execution: { executionId: string; runtimeIdentity: string },
@@ -523,80 +479,24 @@ export type PinnedCredentialMetadataFn = (
   now: number,
 ) => CredentialMetadataRecord | null;
 
-export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
 export const REGISTRATION_CAPABILITY = "liveness of a registration";
 export const REGISTRATION_TARGET_KIND = "registration";
 
-export type ProviderHealthCheckFn = (
-  tx: Transaction,
-  credentialName: string,
-) => ResourceCheck;
+export type WorkerAgentView = AgentView;
 
-export type ProviderCapabilityFn = (
-  tx: Transaction,
-  credentialName: string,
-) => string;
-
-export type EntriesOfAgent = (
-  tx: Transaction,
-  agentName: string,
-) => AgentDependentBinding[];
-
-export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible";
-export type AgentProviderKind =
-  KnownProvider | typeof OPENAI_COMPATIBLE_PROVIDER;
-export const agentProviderKindSchema = z.enum([
-  OPENAI_COMPATIBLE_PROVIDER,
-  ...getBuiltinProviders(),
-] as [AgentProviderKind, ...AgentProviderKind[]]);
-
-export const reasoningEffortSchema = z.enum([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
-
-export const agentProviderItemSchema = z.strictObject({
-  name: z.string().min(1),
-  provider: agentProviderKindSchema,
-  credential: z.string().min(1),
-});
-
-export const defaultConfigurationSchema = z.strictObject({
-  agentProvider: z.string().min(1),
-  modelIdentifier: z.string().min(1),
-  reasoningEffort: reasoningEffortSchema,
-});
-
-export type WorkerAgentView = {
-  defaults: {
-    agentProvider: string;
-    modelIdentifier: string;
-    reasoningEffort: string;
-  } | null;
-  effective: {
-    agentProvider: string;
-    provider: string;
-    credential: string;
-    modelIdentifier: string;
-    reasoningEffort: string;
-  } | null;
-  valid: boolean;
-  issues: Array<{ path: string[]; code: string }>;
-};
-
-export type WorkerAgentsOfFn = (workerName: string) => string[];
-
-export type WorkerAgentViewFn = (
-  tx: Transaction,
-  workerName: string,
-  agentName: string,
-  entry: WorkerEntry | null,
-) => WorkerAgentView | null;
+export interface AgentConfiguration {
+  validateEntry(
+    tx: Transaction,
+    agentName: string,
+    entry: WorkerEntry | null,
+  ): void;
+  agentView(
+    tx: Transaction,
+    agentName: string,
+    entry: WorkerEntry | null,
+    approvedModels?: ApprovedModelsFn,
+  ): WorkerAgentView | null;
+}
 
 export interface WorkerRegistrations {
   deregister(tx: Transaction, runtimeIdentity: string, now: number): void;
@@ -618,8 +518,7 @@ export interface WorkerRegistrations {
 }
 
 export const WORKER_SERVICE_NAME = "worker";
-export const ENABLEMENT_MAX_BODY_BYTES = 64 * 1024;
-export const ENABLEMENT_TIMEOUT_MS = 30000;
+export const HUMAN_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
@@ -638,39 +537,7 @@ export const WorkerErrorCode = {
   BindingUnknown: "worker.instance.binding_unknown",
   SlotUnavailable: "worker.instance.slot_unavailable",
   CatalogNotFound: "worker.catalog.not_found",
-  AgentNotFound: "worker.agent.not_found",
-  NotFound: "worker.agent.enablement.not_found",
-  RevisionConflict: "worker.agent.enablement.revision_conflict",
-  Unavailable: "worker.agent.enablement.unavailable",
-  InvalidatesBindings: "worker.agent.enablement.invalidates_bindings",
-  InUse: "worker.agent.enablement.in_use",
-  ProviderNameConflict: "worker.agent.enablement.provider.name_conflict",
-  ProviderNotFound: "worker.agent.enablement.provider.not_found",
-  ProviderFixed: "worker.agent.enablement.provider.fixed",
-  ProviderInUse: "worker.agent.enablement.provider.in_use",
-  ProviderRequired: "worker.agent.enablement.provider.required",
-  OverrideNotAllowed: "worker.agent.configuration.override_not_allowed",
-  InvalidConfiguration: "worker.agent.configuration.invalid",
-  ModelUnknown: "worker.agent.configuration.model_unknown",
-  ReasoningUnsupported:
-    "worker.agent.configuration.reasoning_effort_unsupported",
-  CredentialUnsuitable: "worker.agent.configuration.credential_unsuitable",
 } as const;
-
-export const agentEnablementSchema = z.strictObject({
-  agentName: z.string(),
-  state: z.enum(["enabled", "disabled"]),
-  agentProviders: z.array(agentProviderItemSchema),
-  defaultConfiguration: defaultConfigurationSchema,
-  revision: z.number().int().positive(),
-});
-const agentParams = z.strictObject({ agentName: z.string().min(1) });
-export const ToolSource = {
-  Host: "host",
-  Builtin: "builtin",
-  KanthordMcp: "kanthord-mcp",
-} as const;
-export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
 
 export const HostTool = { EvidenceUpload: "evidence-upload" } as const;
 export type HostTool = (typeof HostTool)[keyof typeof HostTool];
@@ -686,17 +553,6 @@ export interface HostTools {
     signal: AbortSignal | undefined,
   ): Promise<UploadResult>;
 }
-export const CONFIGURATION_DESCRIPTION =
-  "The Worker Service validates the whole configuration. `modelIdentifier` belongs to `getBuiltinModels(provider)` of pi-ai 0.86.0 or to the `models` metadata of the `openai-compatible` credential. `reasoningEffort` belongs to the supported reasoning levels of that model. JSON Schema validates neither lookup.";
-export const effectiveConfigurationSchema = z
-  .strictObject({
-    agentProvider: z.string().min(1),
-    provider: agentProviderKindSchema,
-    credential: z.string().min(1),
-    modelIdentifier: z.string().min(1),
-    reasoningEffort: reasoningEffortSchema,
-  })
-  .describe(CONFIGURATION_DESCRIPTION);
 export const SetupRefusal = {
   ModelUnknown: "model_unknown",
   ReasoningEffortUnsupported: "reasoning_effort_unsupported",
@@ -737,20 +593,6 @@ export interface RepositoryTransport {
   ): Promise<string>;
 }
 export type ExecutionSetup = z.infer<typeof executionSetupSchema>;
-export const toolDeclarationSchema = z.strictObject({
-  name: z.string().min(1),
-  source: z.enum(ToolSource),
-  inputSchema: z.record(z.string(), z.unknown()),
-});
-export const agentDeclarationSchema = z.strictObject({
-  agentName: z.string().min(1),
-  configurationSchema: z.record(z.string(), z.unknown()),
-  overridableFields: z.array(z.string()),
-  basePrompt: z.string().optional(),
-  agentPrompt: z.string(),
-  tools: z.array(toolDeclarationSchema),
-  enablement: agentEnablementSchema.nullable(),
-});
 export const catalogItemSchema = z.strictObject({
   name: z.string().min(1),
   host: z.enum(WorkerHost),
@@ -824,30 +666,14 @@ const emptyFields = z.strictObject({});
 const runtimeIdentityParams = z.strictObject({
   runtimeIdentity: identitySchema("worker_instance"),
 });
-const revisionBody = z.strictObject({
-  expectedRevision: z.number().int().positive(),
-});
-const enablementOperation = {
+const humanOperation = {
   service: WORKER_SERVICE_NAME,
   store: StoreName.Operational,
   lifetime: OperationLifetime.Unary,
   access: AccessPolicy.Human,
-  timeoutMs: ENABLEMENT_TIMEOUT_MS,
+  timeoutMs: HUMAN_TIMEOUT_MS,
   status: HttpStatus.OK,
-  output: agentEnablementSchema,
 } as const;
-const enablementMutation = {
-  ...enablementOperation,
-  mutation: true,
-  body: true,
-  maxBodyBytes: ENABLEMENT_MAX_BODY_BYTES,
-  input: z.strictObject({
-    params: agentParams,
-    query: emptyFields,
-    body: revisionBody,
-  }),
-} as const;
-
 export const workerOperations = {
   "execution.setup.get": {
     service: WORKER_SERVICE_NAME,
@@ -942,7 +768,7 @@ export const workerOperations = {
       "Apply an authenticated refresh report to the live execution's pinned revision when the replaced credential digest still matches.",
   },
   "instance.list": {
-    ...enablementOperation,
+    ...humanOperation,
     id: "worker.instance.list",
     method: HttpMethod.Get,
     path: "/api/worker/instance",
@@ -980,7 +806,7 @@ export const workerOperations = {
       "Page live registrations in descending runtime identity order without changing runtime state.",
   },
   "instance.get": {
-    ...enablementOperation,
+    ...humanOperation,
     id: "worker.instance.get",
     method: HttpMethod.Get,
     path: "/api/worker/instance/:runtimeIdentity",
@@ -995,7 +821,7 @@ export const workerOperations = {
       "Read a live instance record. Unknown and ended instances answer not found.",
   },
   "catalog.list": {
-    ...enablementOperation,
+    ...humanOperation,
     id: "worker.catalog.list",
     method: HttpMethod.Get,
     path: "/api/worker/catalog",
@@ -1021,7 +847,7 @@ export const workerOperations = {
     description: "List supplied workers in ascending worker-name order.",
   },
   "catalog.get": {
-    ...enablementOperation,
+    ...humanOperation,
     id: "worker.catalog.get",
     method: HttpMethod.Get,
     path: "/api/worker/catalog/:workerName",
@@ -1034,134 +860,6 @@ export const workerOperations = {
     }),
     output: catalogEntrySchema,
     description: "Get a supplied worker declaration.",
-  },
-  "agent.enablement.list": {
-    ...enablementOperation,
-    id: "worker.agent.enablement.list",
-    method: HttpMethod.Get,
-    path: "/api/worker/agent/enablement",
-    mutation: false,
-    body: false,
-    input: z.strictObject({
-      params: emptyFields,
-      query: z.strictObject({
-        limit: z.coerce
-          .number()
-          .int()
-          .min(1)
-          .max(LIST_LIMIT_MAX)
-          .default(LIST_LIMIT_DEFAULT),
-        cursor: z.string().min(1).optional(),
-      }),
-      body: z.null(),
-    }),
-    output: z.strictObject({
-      items: z.array(agentEnablementSchema),
-      nextCursor: z.string().nullable(),
-    }),
-    description: "List agent enablements in ascending agent-name order.",
-  },
-  "agent.get": {
-    ...enablementOperation,
-    id: "worker.agent.get",
-    method: HttpMethod.Get,
-    path: "/api/worker/agent/:agentName",
-    mutation: false,
-    body: false,
-    input: z.strictObject({
-      params: agentParams,
-      query: emptyFields,
-      body: z.null(),
-    }),
-    output: agentDeclarationSchema,
-    description: "Get an agent declaration and its current enablement.",
-  },
-  "agent.enablement.get": {
-    ...enablementOperation,
-    id: "worker.agent.enablement.get",
-    method: HttpMethod.Get,
-    path: "/api/worker/agent/enablement/:agentName",
-    mutation: false,
-    body: false,
-    input: z.strictObject({
-      params: agentParams,
-      query: emptyFields,
-      body: z.null(),
-    }),
-    description: "Get a live agent enablement.",
-  },
-  "agent.enablement.put": {
-    ...enablementMutation,
-    id: "worker.agent.enablement.put",
-    method: HttpMethod.Put,
-    path: "/api/worker/agent/enablement/:agentName",
-    input: z.strictObject({
-      params: agentParams,
-      query: emptyFields,
-      body: z.strictObject({
-        expectedRevision: z.number().int().positive().optional(),
-        agentProviders: z.array(agentProviderItemSchema).min(1),
-        defaultConfiguration: defaultConfigurationSchema,
-      }),
-    }),
-    description:
-      "Create or replace an agent enablement at its expected revision.",
-  },
-  "agent.enablement.enable": {
-    ...enablementMutation,
-    id: "worker.agent.enablement.enable",
-    method: HttpMethod.Post,
-    path: "/api/worker/agent/enablement/:agentName/enable",
-    description: "Validate and enable an existing agent enablement.",
-  },
-  "agent.enablement.disable": {
-    ...enablementMutation,
-    id: "worker.agent.enablement.disable",
-    method: HttpMethod.Post,
-    path: "/api/worker/agent/enablement/:agentName/disable",
-    description:
-      "Disable an agent enablement without validating dependent bindings.",
-  },
-  "agent.enablement.remove": {
-    ...enablementMutation,
-    id: "worker.agent.enablement.remove",
-    method: HttpMethod.Delete,
-    path: "/api/worker/agent/enablement/:agentName",
-    output: z.strictObject({ agentName: z.string(), removed: z.literal(true) }),
-    description: "Remove an agent enablement with no dependent bindings.",
-  },
-  "agent.enablement.provider.add": {
-    ...enablementMutation,
-    id: "worker.agent.enablement.provider.add",
-    method: HttpMethod.Post,
-    path: "/api/worker/agent/enablement/:agentName/provider",
-    input: z.strictObject({
-      params: agentParams,
-      query: emptyFields,
-      body: z.strictObject({
-        expectedRevision: z.number().int().positive(),
-        name: z.string().min(1),
-        provider: agentProviderKindSchema,
-        credential: z.string().min(1),
-      }),
-    }),
-    description: "Append a named provider to an agent enablement.",
-  },
-  "agent.enablement.provider.remove": {
-    ...enablementMutation,
-    id: "worker.agent.enablement.provider.remove",
-    method: HttpMethod.Delete,
-    path: "/api/worker/agent/enablement/:agentName/provider/:providerName",
-    input: z.strictObject({
-      params: z.strictObject({
-        agentName: z.string().min(1),
-        providerName: z.string().min(1),
-      }),
-      query: emptyFields,
-      body: revisionBody,
-    }),
-    description:
-      "Remove an unused named provider, retaining at least one provider.",
   },
   heartbeat: {
     service: WORKER_SERVICE_NAME,

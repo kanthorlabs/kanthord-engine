@@ -31,7 +31,12 @@ const createInstanceTable: Migration = (database) => {
   `);
 };
 
+const dropAgentEnablementTable: Migration = (database) => {
+  database.exec("DROP TABLE IF EXISTS worker_agent_enablement");
+};
+
 export const workerMigrations: readonly Migration[] = [
   createAgentEnablementTable,
   createInstanceTable,
+  dropAgentEnablementTable,
 ];

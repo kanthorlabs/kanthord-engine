@@ -4,23 +4,23 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  WorkerErrorCode,
+  AgentErrorCode,
   agentProviderKindSchema,
   reasoningEffortSchema,
   type AgentProviderItem,
   type ApprovedModelsFn,
   type CustodySuitability,
   type DefaultConfiguration,
-  type WorkerAgentView,
-  type WorkerEntry,
+  type AgentView,
+  type AgentEntry,
 } from "./contract.ts";
 import { AgentProviderKind } from "./enablements.ts";
 
 const issueFields: Readonly<Record<string, string>> = {
-  [WorkerErrorCode.ProviderNotFound]: "agentProvider",
-  [WorkerErrorCode.CredentialUnsuitable]: "agentProvider",
-  [WorkerErrorCode.ModelUnknown]: "modelIdentifier",
-  [WorkerErrorCode.ReasoningUnsupported]: "reasoningEffort",
+  [AgentErrorCode.ProviderNotFound]: "agentProvider",
+  [AgentErrorCode.CredentialUnsuitable]: "agentProvider",
+  [AgentErrorCode.ModelUnknown]: "modelIdentifier",
+  [AgentErrorCode.ReasoningUnsupported]: "reasoningEffort",
 };
 
 export type ConfigurationDependencies = {
@@ -33,7 +33,7 @@ export function configurationError(
   code: string,
 ): OperationError {
   const status =
-    code === WorkerErrorCode.ProviderNotFound
+    code === AgentErrorCode.ProviderNotFound
       ? HttpStatus.NotFound
       : HttpStatus.BadRequest;
   return new OperationError(
@@ -46,7 +46,7 @@ export function configurationError(
 
 export function effectiveConfiguration(
   defaults: DefaultConfiguration,
-  entry: WorkerEntry | null,
+  entry: AgentEntry | null,
 ): DefaultConfiguration {
   return {
     agentProvider: entry?.agentProvider ?? defaults.agentProvider,
@@ -68,7 +68,7 @@ export function validateProvider(
     });
   } catch (error) {
     if (!(error instanceof OperationError)) throw error;
-    throw configurationError(agentName, WorkerErrorCode.CredentialUnsuitable);
+    throw configurationError(agentName, AgentErrorCode.CredentialUnsuitable);
   }
 }
 
@@ -84,7 +84,7 @@ function modelLevels(
       .approvedModels(tx, item.credential)
       ?.find(({ id }) => id === modelIdentifier);
     if (!model)
-      throw configurationError(agentName, WorkerErrorCode.ModelUnknown);
+      throw configurationError(agentName, AgentErrorCode.ModelUnknown);
     return model.reasoningLevels;
   }
   const provider = agentProviderKindSchema
@@ -93,7 +93,7 @@ function modelLevels(
   const model = getBuiltinModels(provider).find(
     ({ id }) => id === modelIdentifier,
   );
-  if (!model) throw configurationError(agentName, WorkerErrorCode.ModelUnknown);
+  if (!model) throw configurationError(agentName, AgentErrorCode.ModelUnknown);
   return getSupportedThinkingLevels(model);
 }
 
@@ -106,7 +106,7 @@ export function validateEffectiveConfig(
 ): void {
   const item = agentProviders.find(({ name }) => name === config.agentProvider);
   if (!item)
-    throw configurationError(agentName, WorkerErrorCode.ProviderNotFound);
+    throw configurationError(agentName, AgentErrorCode.ProviderNotFound);
   validateProvider(dependencies, tx, agentName, item);
   const levels = modelLevels(
     dependencies,
@@ -119,7 +119,7 @@ export function validateEffectiveConfig(
     !reasoningEffortSchema.safeParse(config.reasoningEffort).success ||
     !levels.includes(config.reasoningEffort)
   )
-    throw configurationError(agentName, WorkerErrorCode.ReasoningUnsupported);
+    throw configurationError(agentName, AgentErrorCode.ReasoningUnsupported);
 }
 
 export function configurationIssues(
@@ -128,7 +128,7 @@ export function configurationIssues(
   agentName: string,
   agentProviders: AgentProviderItem[],
   config: DefaultConfiguration,
-): WorkerAgentView["issues"] {
+): AgentView["issues"] {
   try {
     validateEffectiveConfig(
       dependencies,

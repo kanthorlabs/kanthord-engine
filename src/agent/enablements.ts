@@ -94,9 +94,9 @@ function liveEnablements(
   const rows = tx.database
     .prepare(
       `SELECT e.id, e.agent_name, e.revision, e.state, e.agent_providers, e.default_configuration, e.created_at, e.removed_at
-       FROM worker_agent_enablement AS e
+       FROM agent_enablement AS e
        WHERE NOT EXISTS (
-         SELECT 1 FROM worker_agent_enablement AS newer
+         SELECT 1 FROM agent_enablement AS newer
          WHERE newer.agent_name = e.agent_name AND newer.revision > e.revision
        ) AND e.removed_at IS NULL AND (? IS NULL OR e.agent_name > ?)
        ORDER BY e.agent_name ASC LIMIT ?`,
@@ -129,7 +129,7 @@ export function getEnablement(
   const row = tx.database
     .prepare(
       `SELECT id, agent_name, revision, state, agent_providers, default_configuration, created_at, removed_at
-       FROM worker_agent_enablement WHERE agent_name = ? ORDER BY revision DESC LIMIT 1`,
+       FROM agent_enablement WHERE agent_name = ? ORDER BY revision DESC LIMIT 1`,
     )
     .get(agentName) as DatabaseRow | undefined;
   return row && row.removed_at === null ? toEnablement(row) : null;
@@ -141,7 +141,7 @@ export function getLatestRevision(
 ): { revision: number } | null {
   const row = tx.database
     .prepare(
-      "SELECT revision FROM worker_agent_enablement WHERE agent_name = ? ORDER BY revision DESC LIMIT 1",
+      "SELECT revision FROM agent_enablement WHERE agent_name = ? ORDER BY revision DESC LIMIT 1",
     )
     .get(agentName) as { revision: number } | undefined;
   return row ? { revision: row.revision } : null;
@@ -158,7 +158,7 @@ export function insertEnablementRevision(
   const id = createIdentity(AGENT_ENABLEMENT_PREFIX);
   const { revision } = tx.database
     .prepare(
-      "SELECT COALESCE(MAX(revision), ?) + 1 AS revision FROM worker_agent_enablement WHERE agent_name = ?",
+      "SELECT COALESCE(MAX(revision), ?) + 1 AS revision FROM agent_enablement WHERE agent_name = ?",
     )
     .get(INITIAL_REVISION, agentName) as { revision: number };
   const createdAt = Date.now();
@@ -174,7 +174,7 @@ export function insertEnablementRevision(
   };
   tx.database
     .prepare(
-      `INSERT INTO worker_agent_enablement
+      `INSERT INTO agent_enablement
        (id, agent_name, revision, state, agent_providers, default_configuration, created_at, removed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )

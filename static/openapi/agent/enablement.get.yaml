@@ -1,9 +1,9 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   get:
-    operationId: worker.agent.enablement.get
+    operationId: agent.enablement.get
     tags:
-      - worker
+      - agent
     description: Get a live agent enablement.
     x-access-policy: human
     x-timeout-ms: 30000
@@ -16,15 +16,15 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/worker.agent.enablement.get.Input/properties/params\
-            /properties/agentName"
+          $ref: "#/components/schemas/agent.enablement.get.Input/properties/params/proper\
+            ties/agentName"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.agent.enablement.get.Output"
+              $ref: "#/components/schemas/agent.enablement.get.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -46,9 +46,9 @@ pathItem:
       "504":
         $ref: ../shared/components.yaml#/components/responses/Error
   put:
-    operationId: worker.agent.enablement.put
+    operationId: agent.enablement.put
     tags:
-      - worker
+      - agent
     description: Create or replace an agent enablement at its expected revision.
     x-access-policy: human
     x-timeout-ms: 30000
@@ -61,22 +61,22 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/worker.agent.enablement.put.Input/properties/params\
-            /properties/agentName"
+          $ref: "#/components/schemas/agent.enablement.put.Input/properties/params/proper\
+            ties/agentName"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/worker.agent.enablement.put.Input/properties/body"
+            $ref: "#/components/schemas/agent.enablement.put.Input/properties/body"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.agent.enablement.put.Output"
+              $ref: "#/components/schemas/agent.enablement.put.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -98,9 +98,9 @@ pathItem:
       "504":
         $ref: ../shared/components.yaml#/components/responses/Error
   delete:
-    operationId: worker.agent.enablement.remove
+    operationId: agent.enablement.remove
     tags:
-      - worker
+      - agent
     description: Remove an agent enablement with no dependent bindings.
     x-access-policy: human
     x-timeout-ms: 30000
@@ -113,23 +113,22 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/worker.agent.enablement.remove.Input/properties/par\
-            ams/properties/agentName"
+          $ref: "#/components/schemas/agent.enablement.remove.Input/properties/params/pro\
+            perties/agentName"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/worker.agent.enablement.remove.Input/properties/bod\
-              y"
+            $ref: "#/components/schemas/agent.enablement.remove.Input/properties/body"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.agent.enablement.remove.Output"
+              $ref: "#/components/schemas/agent.enablement.remove.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -152,7 +151,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    worker.agent.enablement.get.Input:
+    agent.enablement.get.Input:
       type: object
       properties:
         params:
@@ -175,7 +174,7 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.agent.enablement.get.Output:
+    agent.enablement.get.Output:
       type: object
       properties:
         agentName:
@@ -280,7 +279,7 @@ components:
         - defaultConfiguration
         - revision
       additionalProperties: false
-    worker.agent.enablement.put.Input:
+    agent.enablement.put.Input:
       type: object
       properties:
         params:
@@ -397,7 +396,7 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.agent.enablement.put.Output:
+    agent.enablement.put.Output:
       type: object
       properties:
         agentName:
@@ -502,7 +501,7 @@ components:
         - defaultConfiguration
         - revision
       additionalProperties: false
-    worker.agent.enablement.remove.Input:
+    agent.enablement.remove.Input:
       type: object
       properties:
         params:
@@ -533,7 +532,7 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.agent.enablement.remove.Output:
+    agent.enablement.remove.Output:
       type: object
       properties:
         agentName:

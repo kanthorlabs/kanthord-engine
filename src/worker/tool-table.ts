@@ -5,15 +5,16 @@ import { findEnvKeys } from "@earendil-works/pi-ai/compat";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Diagnostic } from "../kernel/errors.ts";
 import type { ExecutionBudget } from "./budget.ts";
-import { BuiltinTool, getAgentDeclaration } from "./catalog.ts";
+import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
 import { loadPi, piAgentDirectory, type PiCodingAgent } from "./pi.ts";
 
-import { ToolSource, WorkerErrorCode, type HostTools } from "./contract.ts";
+import { ToolSource } from "../agent/contract.ts";
+import { WorkerErrorCode, type HostTools } from "./contract.ts";
 import {
   evidenceUploadTool,
   EVIDENCE_UPLOAD_PARAMETERS,
 } from "./host-tools.ts";
-export { ToolSource } from "./contract.ts";
+export { ToolSource } from "../agent/contract.ts";
 
 const SUCCESS = 0;
 const MINIMUM_SECONDS = 1;

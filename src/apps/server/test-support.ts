@@ -31,6 +31,8 @@ import {
   type IntakeCheck,
 } from "../../mission/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
+import { agentMigrations } from "../../agent/index.ts";
+import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { composeServices } from "./index.ts";
 import type { OperationRegistry } from "../../kernel/operation.ts";
 import {
@@ -502,6 +504,7 @@ export async function gatewayFixture(
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
     { service: "gateway", migrations: gatewayMigrations },
+    { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
     { service: "worker", migrations: workerMigrations },
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
     { service: "project", migrations: projectMigrations },

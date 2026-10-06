@@ -25,6 +25,7 @@ export const REPORT_MARGIN_MS = 5000;
 export const OWNER_LLM = "llm";
 export const OWNER_REPOSITORY = "repository";
 export const OWNER_STORAGE = "storage";
+export const OWNER_AGENT = "agent";
 export const OWNER_WORKER = "worker";
 export const OWNER_PROJECT = "project";
 
@@ -32,12 +33,14 @@ export type InventoryOwner =
   | typeof OWNER_LLM
   | typeof OWNER_REPOSITORY
   | typeof OWNER_STORAGE
+  | typeof OWNER_AGENT
   | typeof OWNER_WORKER
   | typeof OWNER_PROJECT;
 export interface ResourceInventories {
   llm: (tx: Transaction) => ResourceEntry[];
   repository: (tx: Transaction) => ResourceEntry[];
   storage: (tx: Transaction) => ResourceEntry[];
+  agent: (tx: Transaction) => ResourceEntry[];
   worker: (tx: Transaction) => ResourceEntry[];
   project: (tx: Transaction) => ResourceEntry[];
 }
@@ -104,6 +107,7 @@ export const gatewayOperations = {
         llm: ownerSchema,
         repository: ownerSchema,
         storage: ownerSchema,
+        agent: ownerSchema,
       }),
     }),
     description:

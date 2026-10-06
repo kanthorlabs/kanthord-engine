@@ -163,7 +163,7 @@ components:
             - modelIdentifier
             - reasoningEffort
           additionalProperties: false
-          description: The Worker Service validates the whole configuration.
+          description: The Agent component validates the whole configuration.
             `modelIdentifier` belongs to `getBuiltinModels(provider)` of pi-ai
             0.86.0 or to the `models` metadata of the `openai-compatible`
             credential. `reasoningEffort` belongs to the supported reasoning

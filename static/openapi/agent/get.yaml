@@ -1,9 +1,9 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   get:
-    operationId: worker.agent.get
+    operationId: agent.get
     tags:
-      - worker
+      - agent
     description: Get an agent declaration and its current enablement.
     x-access-policy: human
     x-timeout-ms: 30000
@@ -16,15 +16,15 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/worker.agent.get.Input/properties/params/properties\
-            /agentName"
+          $ref: "#/components/schemas/agent.get.Input/properties/params/properties/agentN\
+            ame"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.agent.get.Output"
+              $ref: "#/components/schemas/agent.get.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -47,7 +47,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    worker.agent.get.Input:
+    agent.get.Input:
       type: object
       properties:
         params:
@@ -70,7 +70,7 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.agent.get.Output:
+    agent.get.Output:
       type: object
       properties:
         agentName:

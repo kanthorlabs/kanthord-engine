@@ -5,11 +5,11 @@ import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { approvedModels } from "../llm/platforms.ts";
+import type { ApprovedModelsFn } from "../agent/contract.ts";
 import {
   executionSetupSchema,
   sshIdentitySchema,
   WorkerErrorCode,
-  type ApprovedModelsFn,
   type CredentialMetadataRecord,
   type ExecutionSetup,
 } from "./contract.ts";

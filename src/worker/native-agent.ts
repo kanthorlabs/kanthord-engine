@@ -18,7 +18,7 @@ import {
   type CompositionRecord,
   type WorkPrompt,
 } from "./prompt-composer.ts";
-import { getAgentDeclaration } from "./catalog.ts";
+import { getAgentDeclaration } from "../agent/catalog.ts";
 import { openSession, withDeadline } from "./agent-session.ts";
 import { countTurns, pinnedLayers } from "./pinned-layers.ts";
 import { loadPi } from "./pi.ts";

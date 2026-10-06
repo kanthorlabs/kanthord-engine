@@ -94,10 +94,14 @@ components:
             storage:
               $ref: "#/components/schemas/gateway.healthcheck.Output/$defs/ResourceHealthOwne\
                 r"
+            agent:
+              $ref: "#/components/schemas/gateway.healthcheck.Output/$defs/ResourceHealthOwne\
+                r"
           required:
             - llm
             - repository
             - storage
+            - agent
           additionalProperties: false
       required:
         - services

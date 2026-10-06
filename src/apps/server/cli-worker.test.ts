@@ -38,7 +38,7 @@ test("agent get CLI publishes the declaration and rejects a machine caller", asy
     ...environment(temporary(t)),
     KANTHORD_ENDPOINT: fixture.endpoint,
   };
-  const leaf = ["worker", "agent", "get"];
+  const leaf = ["agent", "get"];
   const help = await command([...leaf, "--help"], env);
   assert.equal(help.code, ExitCode.Success);
   assert.match(help.stdout, /agent-name/);
@@ -46,7 +46,7 @@ test("agent get CLI publishes the declaration and rejects a machine caller", asy
     TEST_PROJECT_ID,
     TEST_WORKER_BINDING,
   );
-  const response = await fetch(`${fixture.endpoint}/api/worker/agent/swe%401`, {
+  const response = await fetch(`${fixture.endpoint}/api/agent/swe%401`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   assert.equal(response.status, unauthorized);

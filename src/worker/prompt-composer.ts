@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Context } from "../kernel/context.ts";
-import type { AgentDeclaration } from "./catalog.ts";
+import type { AgentDeclaration } from "../agent/catalog.ts";
 import { WorkerMethod } from "./contract.ts";
 import {
   configuredSource,

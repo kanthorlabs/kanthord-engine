@@ -1,10 +1,10 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   post:
-    operationId: worker.agent.enablement.provider.add
+    operationId: agent.enablement.disable
     tags:
-      - worker
-    description: Append a named provider to an agent enablement.
+      - agent
+    description: Disable an agent enablement without validating dependent bindings.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -16,23 +16,22 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/worker.agent.enablement.provider.add.Input/properti\
-            es/params/properties/agentName"
+          $ref: "#/components/schemas/agent.enablement.disable.Input/properties/params/pr\
+            operties/agentName"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/worker.agent.enablement.provider.add.Input/properti\
-              es/body"
+            $ref: "#/components/schemas/agent.enablement.disable.Input/properties/body"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.agent.enablement.provider.add.Output"
+              $ref: "#/components/schemas/agent.enablement.disable.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -55,7 +54,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    worker.agent.enablement.provider.add.Input:
+    agent.enablement.disable.Input:
       type: object
       properties:
         params:
@@ -78,68 +77,15 @@ components:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
-            name:
-              type: string
-              minLength: 1
-            provider:
-              type: string
-              enum:
-                - openai-compatible
-                - amazon-bedrock
-                - ant-ling
-                - anthropic
-                - azure-openai-responses
-                - baseten
-                - cerebras
-                - cloudflare-ai-gateway
-                - cloudflare-workers-ai
-                - deepseek
-                - fireworks
-                - github-copilot
-                - google
-                - google-vertex
-                - groq
-                - huggingface
-                - kimi-coding
-                - minimax
-                - minimax-cn
-                - mistral
-                - moonshotai
-                - moonshotai-cn
-                - nvidia
-                - openai
-                - openai-codex
-                - opencode
-                - opencode-go
-                - openrouter
-                - qwen-token-plan
-                - qwen-token-plan-cn
-                - qwen-token-plan-individual
-                - radius
-                - together
-                - vercel-ai-gateway
-                - xai
-                - xiaomi
-                - xiaomi-token-plan-ams
-                - xiaomi-token-plan-cn
-                - xiaomi-token-plan-sgp
-                - zai
-                - zai-coding-cn
-            credential:
-              type: string
-              minLength: 1
           required:
             - expectedRevision
-            - name
-            - provider
-            - credential
           additionalProperties: false
       required:
         - params
         - query
         - body
       additionalProperties: false
-    worker.agent.enablement.provider.add.Output:
+    agent.enablement.disable.Output:
       type: object
       properties:
         agentName:

@@ -8,6 +8,7 @@ import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
@@ -16,6 +17,7 @@ const PAGE_INVENTORIES = {
   llm: "## Command inventory",
   repository: "## Command inventory",
   storage: "## Command inventory",
+  agent: "## Command inventory",
   project: "## Proposed command inventory and synopsis",
   mission: "## Target command inventory and synopsis",
   scheduler: "## Command inventory and operation mapping",
@@ -28,10 +30,7 @@ const EXEMPT_LEAVES = new Map([
   ["mission evidence upload", "External-harness phase owns the CLI helper"],
   ["mission graph get", "No ERD1 or ERD2 implementation plan"],
   ["mission criterion list", "No ERD1 or ERD2 implementation plan"],
-  [
-    "worker agent list",
-    "Documented future read with no ERD2 implementation plan",
-  ],
+  ["agent list", "Documented future read with no ERD2 implementation plan"],
   [
     "scheduler eligibility get",
     "Documented future read with no ERD2 implementation plan",
@@ -63,6 +62,7 @@ const TOP_LEVEL_NAMES = new Set([
   "llm",
   "repository",
   "storage",
+  "agent",
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
@@ -76,10 +76,11 @@ const PAGE_COUNTS = {
   llm: 14,
   repository: 11,
   storage: 10,
+  agent: 10,
   project: 13,
   mission: 54,
   scheduler: 8,
-  worker: 19,
+  worker: 9,
   gateway: 2,
   other: 7,
 };
@@ -116,7 +117,7 @@ function inventory(group: string, heading: string): Documented[] {
       {
         path: group === OTHER_PAGE ? leaf : `${prefix} ${leaf}`,
         operations: spans.filter((span) =>
-          /^(gateway|llm|repository|storage|worker|scheduler|project|mission)\.[A-Za-z_.]+$/.test(
+          /^(gateway|llm|repository|storage|agent|worker|scheduler|project|mission)\.[A-Za-z_.]+$/.test(
             span,
           ),
         ),
@@ -206,6 +207,7 @@ test("documented ERD2 CLI leaves and API-only operations exactly cover the dispa
     llmOperations,
     repositoryOperations,
     storageOperations,
+    agentOperations,
     workerOperations,
     schedulerOperations,
     projectOperations,

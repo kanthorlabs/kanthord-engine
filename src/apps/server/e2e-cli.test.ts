@@ -19,6 +19,7 @@ const cases = [
       "llm",
       "repository",
       "storage",
+      "agent",
       "project",
       "mission",
       "scheduler",
@@ -45,11 +46,11 @@ const cases = [
     ],
     exact: true,
   },
-  { id: "E08.3", args: ["worker"], names: ["agent"] },
-  { id: "E08.4", args: ["worker", "agent"], names: ["enablement"] },
+  { id: "E08.3", args: ["agent"], names: ["get"] },
+  { id: "E08.4", args: ["agent"], names: ["enablement"] },
   {
     id: "E08.5",
-    args: ["worker", "agent", "enablement"],
+    args: ["agent", "enablement"],
     names: ["list", "get", "put", "enable", "disable", "remove", "provider"],
   },
   {
@@ -80,7 +81,7 @@ const cases = [
   { id: "E08.11", args: ["scheduler", "queue"], names: ["list", "peek"] },
   {
     id: "E08.12",
-    args: ["worker", "agent", "enablement", "provider"],
+    args: ["agent", "enablement", "provider"],
     names: ["add", "remove"],
   },
   {

@@ -5,6 +5,7 @@ export const CommandName = {
   JWT: "jwt",
   Gateway: "gateway",
   Worker: "worker",
+  Agent: "agent",
   Llm: "llm",
   Repository: "repository",
   Storage: "storage",

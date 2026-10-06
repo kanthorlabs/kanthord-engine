@@ -20,6 +20,7 @@ import {
   OWNER_LLM,
   OWNER_REPOSITORY,
   OWNER_STORAGE,
+  OWNER_AGENT,
   OWNER_WORKER,
   OWNER_PROJECT,
   type InventorySnapshot,
@@ -46,6 +47,7 @@ const OWNERS = [
   OWNER_LLM,
   OWNER_REPOSITORY,
   OWNER_STORAGE,
+  OWNER_AGENT,
   OWNER_WORKER,
   OWNER_PROJECT,
 ] as const;
@@ -110,7 +112,7 @@ function fixture(t: TestContext, entries: InventorySnapshot["entries"] = []) {
   };
 }
 
-test("collectInventories isolates failing owners in llm, repository, storage, worker, project order", (t) => {
+test("collectInventories isolates failing owners in llm, repository, storage, agent, worker, project order", (t) => {
   const f = fixture(t);
   const calls: string[] = [];
   const llm = entry("credential");
@@ -130,6 +132,11 @@ test("collectInventories isolates failing owners in llm, repository, storage, wo
       storage: (received) => {
         assert.equal(received, tx);
         calls.push(OWNER_STORAGE);
+        return [];
+      },
+      agent: (received) => {
+        assert.equal(received, tx);
+        calls.push(OWNER_AGENT);
         return [];
       },
       worker: (received) => {
@@ -177,6 +184,7 @@ test("report places every owner and scope with exact capabilities, encoded names
     llm: report.shared.llm,
     repository: report.shared.repository,
     storage: report.shared.storage,
+    agent: report.shared.agent,
     worker: report.services.worker,
     project: report.services.project,
   };

@@ -167,7 +167,7 @@ async function setupInternal(t: TestContext) {
   });
   cli.secrets.push("test_journey_access", "test_journey_secret");
   for (const agent of ["swe@1", "re@1"])
-    await cli.write(["worker", "agent", "enablement", "put", agent], {
+    await cli.write(["agent", "enablement", "put", agent], {
       agentProviders: [
         { name: "default", provider: "anthropic", credential: "anthro-1" },
       ],

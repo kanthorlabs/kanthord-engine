@@ -1,9 +1,9 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   get:
-    operationId: worker.agent.enablement.list
+    operationId: agent.enablement.list
     tags:
-      - worker
+      - agent
     description: List agent enablements in ascending agent-name order.
     x-access-policy: human
     x-timeout-ms: 30000
@@ -16,21 +16,21 @@ pathItem:
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/worker.agent.enablement.list.Input/properties/query\
-            /properties/limit"
+          $ref: "#/components/schemas/agent.enablement.list.Input/properties/query/proper\
+            ties/limit"
       - name: cursor
         in: query
         required: false
         schema:
-          $ref: "#/components/schemas/worker.agent.enablement.list.Input/properties/query\
-            /properties/cursor"
+          $ref: "#/components/schemas/agent.enablement.list.Input/properties/query/proper\
+            ties/cursor"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/worker.agent.enablement.list.Output"
+              $ref: "#/components/schemas/agent.enablement.list.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -53,7 +53,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    worker.agent.enablement.list.Input:
+    agent.enablement.list.Input:
       type: object
       properties:
         params:
@@ -80,7 +80,7 @@ components:
         - query
         - body
       additionalProperties: false
-    worker.agent.enablement.list.Output:
+    agent.enablement.list.Output:
       type: object
       properties:
         items:

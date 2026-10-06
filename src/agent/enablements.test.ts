@@ -8,7 +8,7 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import type { AgentProviderItem, DefaultConfiguration } from "./contract.ts";
-import { WORKER_SERVICE_NAME } from "./contract.ts";
+import { AGENT_COMPONENT_NAME } from "./contract.ts";
 import {
   EnablementState,
   agentProvidersDependentOn,
@@ -18,7 +18,7 @@ import {
   insertEnablementRevision,
   listEnablements,
 } from "./enablements.ts";
-import { workerMigrations } from "./migrations.ts";
+import { agentMigrations } from "./migrations.ts";
 
 const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
@@ -38,7 +38,7 @@ function withStore(work: (tx: Transaction) => void): void {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
-      { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
     ]);
     store.transaction(work);
   } finally {
@@ -74,7 +74,7 @@ test("inserts successive revisions with canonical JSON and prefixed ids", () => 
     );
     const stored = tx.database
       .prepare(
-        "SELECT agent_providers, default_configuration FROM worker_agent_enablement WHERE id = ?",
+        "SELECT agent_providers, default_configuration FROM agent_enablement WHERE id = ?",
       )
       .get(first.id);
     assert.equal(stored?.agent_providers, canonicalJSON(providers));

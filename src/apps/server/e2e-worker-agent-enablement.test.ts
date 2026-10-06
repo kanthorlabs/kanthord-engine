@@ -5,7 +5,7 @@ import { ulid } from "ulid";
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import type { AgentEnablement } from "../../worker/contract.ts";
+import type { AgentEnablement } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
@@ -37,7 +37,7 @@ const ENABLED = "enabled";
 const DISABLED = "disabled";
 const BASE_URL = "https://api.openai.com/v1";
 const LOCAL_ENDPOINT = "http://127.0.0.1:1";
-const COMMAND = ["worker", "agent", "enablement"];
+const COMMAND = ["agent", "enablement"];
 const REVISION = "--expected-revision";
 const SECRET = { key: "e2e-enablement-secret" };
 
@@ -244,7 +244,7 @@ test("E03.4 stale put refuses revision", async (t) => {
   const path = enablementFile(fixture, STALE);
   refusal(
     await kanthord([...COMMAND, "put", AGENT, "--file", path], fixture.env),
-    "worker.agent.enablement.revision_conflict",
+    "agent.enablement.revision_conflict",
   );
 });
 
@@ -298,7 +298,7 @@ test("E03.10 removed enablement is not found", async (t) => {
   await removed(fixture);
   refusal(
     await kanthord([...COMMAND, "get", AGENT], fixture.env),
-    "worker.agent.enablement.not_found",
+    "agent.enablement.not_found",
   );
 });
 
@@ -444,7 +444,7 @@ test("E03.13 invalid enable revision refuses locally", async (t) => {
       ],
       fixture.env,
     ),
-    "cli.worker.agent.enablement.enable.invalid_revision",
+    "cli.agent.enablement.enable.invalid_revision",
   );
 });
 
@@ -464,7 +464,7 @@ test("E03.14 put without token refuses locally", async (t) => {
       ],
       env,
     ),
-    "cli.worker.agent.enablement.put.token_required",
+    "cli.agent.enablement.put.token_required",
   );
 });
 
@@ -476,7 +476,7 @@ test("E03.15 unknown agent refuses put", async (t) => {
       [...COMMAND, "put", UNKNOWN_AGENT, "--file", path],
       fixture.env,
     ),
-    "worker.agent.not_found",
+    "agent.catalog.not_found",
   );
 });
 
@@ -496,6 +496,6 @@ test("E03.16 last provider cannot be removed", async (t) => {
       ],
       fixture.env,
     ),
-    "worker.agent.enablement.provider.required",
+    "agent.enablement.provider.required",
   );
 });

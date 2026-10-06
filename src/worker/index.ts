@@ -12,7 +12,7 @@ export { runVerifications, verificationPassed } from "./verification.ts";
 export { discardChanges, headCommit } from "./local-git.ts";
 export { ExecutionBudget } from "./budget.ts";
 export { renderWorkPrompt } from "./prompt-composer.ts";
-export { checkAgentTools } from "./tool-table.ts";
+export { checkAgentTools, toolDeclarations } from "./tool-table.ts";
 export {
   defaultModelRuntimeFactory,
   type ModelRuntimeFactory,

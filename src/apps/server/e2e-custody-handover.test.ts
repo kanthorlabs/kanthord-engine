@@ -190,7 +190,7 @@ async function resources(c: ReturnType<typeof cli>) {
     secret: {},
   });
   const enabled = await c.write<{ revision: number }>(
-    ["worker", "agent", "enablement", "put", "swe@1"],
+    ["agent", "enablement", "put", "swe@1"],
     {
       agentProviders: [
         { name: "default", provider: PROVIDER, credential: NAME },
@@ -685,7 +685,6 @@ test(
         const claim = await h.pull();
         assert.equal(claim.kind, WorkPullKind.Claimed);
         await h.read([
-          "worker",
           "agent",
           "enablement",
           "disable",
@@ -695,7 +694,7 @@ test(
         ]);
         await h.refuses(
           ["worker", "handover", claim.execution.executionId],
-          "worker.agent.enablement.unavailable",
+          "agent.enablement.unavailable",
           h.env,
         );
         const execution = await h.read<ExecutionRecord>([

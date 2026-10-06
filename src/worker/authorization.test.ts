@@ -11,6 +11,7 @@ import {
   WorkerErrorCode,
   type WorkerBindingRowOf,
 } from "./contract.ts";
+import { AgentErrorCode } from "../agent/contract.ts";
 
 test("Worker authorizes the pinned inference configuration and refuses each broken binding chain", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -42,7 +43,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     resourceIdentity: row.resourceIdentity,
   };
   let valid = true;
-  const issues = [{ path: ["agent"], code: WorkerErrorCode.Unavailable }];
+  const issues = [{ path: ["agent"], code: AgentErrorCode.Unavailable }];
   const authorize = (change = {}) =>
     store.transaction((tx) =>
       authorizeModelInference(
@@ -117,7 +118,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
   valid = false;
   assert.throws(authorize, {
     status: HttpStatus.BadRequest,
-    code: WorkerErrorCode.Unavailable,
+    code: AgentErrorCode.Unavailable,
     details: { issues },
   });
 });

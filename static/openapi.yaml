@@ -4,6 +4,20 @@ info:
   title: kanthord
   version: 28.0.1
 paths:
+  /api/agent/enablement/{agentName}/disable:
+    $ref: ./openapi/agent/enablement.disable.yaml#/pathItem
+  /api/agent/enablement/{agentName}/enable:
+    $ref: ./openapi/agent/enablement.enable.yaml#/pathItem
+  /api/agent/enablement/{agentName}:
+    $ref: ./openapi/agent/enablement.get.yaml#/pathItem
+  /api/agent/enablement:
+    $ref: ./openapi/agent/enablement.list.yaml#/pathItem
+  /api/agent/enablement/{agentName}/provider:
+    $ref: ./openapi/agent/enablement.provider.add.yaml#/pathItem
+  /api/agent/enablement/{agentName}/provider/{providerName}:
+    $ref: ./openapi/agent/enablement.provider.remove.yaml#/pathItem
+  /api/agent/{agentName}:
+    $ref: ./openapi/agent/get.yaml#/pathItem
   /api/healthcheck:
     $ref: ./openapi/gateway/healthcheck.yaml#/pathItem
   /api/liveness:
@@ -208,20 +222,6 @@ paths:
     $ref: ./openapi/storage/credential.verify.yaml#/pathItem
   /api/worker/execution/{executionId}/action/request:
     $ref: ./openapi/worker/action.request.yaml#/pathItem
-  /api/worker/agent/enablement/{agentName}/disable:
-    $ref: ./openapi/worker/agent.enablement.disable.yaml#/pathItem
-  /api/worker/agent/enablement/{agentName}/enable:
-    $ref: ./openapi/worker/agent.enablement.enable.yaml#/pathItem
-  /api/worker/agent/enablement/{agentName}:
-    $ref: ./openapi/worker/agent.enablement.get.yaml#/pathItem
-  /api/worker/agent/enablement:
-    $ref: ./openapi/worker/agent.enablement.list.yaml#/pathItem
-  /api/worker/agent/enablement/{agentName}/provider:
-    $ref: ./openapi/worker/agent.enablement.provider.add.yaml#/pathItem
-  /api/worker/agent/enablement/{agentName}/provider/{providerName}:
-    $ref: ./openapi/worker/agent.enablement.provider.remove.yaml#/pathItem
-  /api/worker/agent/{agentName}:
-    $ref: ./openapi/worker/agent.get.yaml#/pathItem
   /api/worker/catalog/{workerName}:
     $ref: ./openapi/worker/catalog.get.yaml#/pathItem
   /api/worker/catalog:

@@ -23,6 +23,7 @@ import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
 import { missionOperations, NodeKind } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
 import {
@@ -211,7 +212,7 @@ for (const adapter of ["direct", "http"] as const) {
     );
     assert.deepEqual(completed(await read()), before);
     completed(
-      await h.call(workerOperations["agent.enablement.put"], {
+      await h.call(agentOperations["enablement.put"], {
         params: { agentName: "swe@1" },
         query: {},
         body: {
@@ -233,10 +234,10 @@ for (const adapter of ["direct", "http"] as const) {
     refused(
       await read(),
       HttpStatus.BadRequest,
-      "worker.agent.configuration.model_unknown",
+      "agent.configuration.model_unknown",
     );
     completed(
-      await h.call(workerOperations["agent.enablement.disable"], {
+      await h.call(agentOperations["enablement.disable"], {
         params: { agentName: "swe@1" },
         query: {},
         body: { expectedRevision: TWO_REVISIONS },
@@ -245,7 +246,7 @@ for (const adapter of ["direct", "http"] as const) {
     refused(
       await read(),
       HttpStatus.BadRequest,
-      "worker.agent.enablement.unavailable",
+      "agent.enablement.unavailable",
     );
   });
 
@@ -447,7 +448,7 @@ async function setup(
     }),
   );
   completed(
-    await call(workerOperations["agent.enablement.put"], {
+    await call(agentOperations["enablement.put"], {
       params: { agentName: "swe@1" },
       query: {},
       body: {

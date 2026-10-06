@@ -162,7 +162,7 @@ async function setup(t: TestContext, short = false) {
   });
   for (const agent of short ? ["swe@1"] : ["swe@1", "re@1"]) {
     const result = await write<{ revision: number }>(
-      ["worker", "agent", "enablement", "put", agent],
+      ["agent", "enablement", "put", agent],
       {
         agentProviders: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
@@ -571,7 +571,6 @@ test(
     });
     await t.test("E03.13 disabled enablement answers no-work", async () => {
       await h.read([
-        "worker",
         "agent",
         "enablement",
         "disable",

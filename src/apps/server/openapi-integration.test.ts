@@ -10,11 +10,11 @@ import { gatewayOperations, HEALTHCHECK_OK } from "../../gateway/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
+import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
 import {
-  ActionResultKind,
+  agentOperations,
   agentProviderKindSchema,
-  workerOperations,
-} from "../../worker/contract.ts";
+} from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
@@ -336,8 +336,7 @@ const LEGACY_FRAGMENT_EXCEPTIONS = [
   "openapi/mission/import.apply.yaml",
   "openapi/project/bindingSet.get.yaml",
 ];
-const AGENT_PROVIDER_FRAGMENT_EXCEPTION =
-  "openapi/worker/agent.enablement.get.yaml";
+const AGENT_PROVIDER_FRAGMENT_EXCEPTION = "openapi/agent/enablement.get.yaml";
 const PROVIDER_PROPERTY = "provider";
 const ENUM_KEYWORD = "enum";
 const AGENT_PROVIDER_ENUM_COUNT = 3;
@@ -360,6 +359,7 @@ const OPERATION_PREFIXES = [
   "llm.",
   "repository.",
   "storage.",
+  "agent.",
   "scheduler.",
   "worker.",
   "project.",
@@ -516,6 +516,7 @@ const apiOperations = [
   ...Object.values(llmOperations),
   ...Object.values(repositoryOperations),
   ...Object.values(storageOperations),
+  ...Object.values(agentOperations),
   ...Object.values(workerOperations),
   ...Object.values(schedulerOperations),
   ...Object.values(projectOperations),
@@ -562,17 +563,17 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["storage.credential.platform_list", AccessPolicy.Human],
   ["storage.credential.check", AccessPolicy.Human],
   ["storage.credential.verify", AccessPolicy.Human],
-  ["worker.agent.enablement.list", AccessPolicy.Human],
-  ["worker.agent.enablement.get", AccessPolicy.Human],
-  ["worker.agent.enablement.put", AccessPolicy.Human],
-  ["worker.agent.enablement.enable", AccessPolicy.Human],
-  ["worker.agent.enablement.disable", AccessPolicy.Human],
-  ["worker.agent.enablement.remove", AccessPolicy.Human],
-  ["worker.agent.enablement.provider.add", AccessPolicy.Human],
-  ["worker.agent.enablement.provider.remove", AccessPolicy.Human],
+  ["agent.enablement.list", AccessPolicy.Human],
+  ["agent.enablement.get", AccessPolicy.Human],
+  ["agent.enablement.put", AccessPolicy.Human],
+  ["agent.enablement.enable", AccessPolicy.Human],
+  ["agent.enablement.disable", AccessPolicy.Human],
+  ["agent.enablement.remove", AccessPolicy.Human],
+  ["agent.enablement.provider.add", AccessPolicy.Human],
+  ["agent.enablement.provider.remove", AccessPolicy.Human],
   ["worker.catalog.list", AccessPolicy.Human],
   ["worker.catalog.get", AccessPolicy.Human],
-  ["worker.agent.get", AccessPolicy.Human],
+  ["agent.get", AccessPolicy.Human],
   ["worker.instance.list", AccessPolicy.Human],
   ["worker.instance.get", AccessPolicy.Human],
   ["worker.instance.resume", AccessPolicy.Human],
@@ -998,7 +999,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   for (const operation of [
     workerOperations["catalog.list"],
     workerOperations["catalog.get"],
-    workerOperations["agent.get"],
+    agentOperations.get,
   ]) {
     const published = resolved.paths?.[
       operation.path
@@ -1034,6 +1035,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     "llm",
     "repository",
     "storage",
+    "agent",
   ]);
   for (const owner of [
     ...Object.values(services.properties),
@@ -1088,22 +1090,22 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     resolved.paths?.["/api/project/{projectId}/binding-set"]?.put?.operationId,
     projectOperations["bindingSet.write"].id,
   );
-  const emittedWorkerIds = Object.values(resolved.paths ?? {}).flatMap((path) =>
+  const emittedAgentIds = Object.values(resolved.paths ?? {}).flatMap((path) =>
     Object.values(path).map(
       (operation) => (operation as { operationId?: string }).operationId,
     ),
   );
   for (const id of [
-    "worker.agent.enablement.list",
-    "worker.agent.enablement.get",
-    "worker.agent.enablement.put",
-    "worker.agent.enablement.enable",
-    "worker.agent.enablement.disable",
-    "worker.agent.enablement.remove",
-    "worker.agent.enablement.provider.add",
-    "worker.agent.enablement.provider.remove",
+    "agent.enablement.list",
+    "agent.enablement.get",
+    "agent.enablement.put",
+    "agent.enablement.enable",
+    "agent.enablement.disable",
+    "agent.enablement.remove",
+    "agent.enablement.provider.add",
+    "agent.enablement.provider.remove",
   ])
-    assert.ok(emittedWorkerIds.includes(id), id);
+    assert.ok(emittedAgentIds.includes(id), id);
   for (const operation of [
     llmOperations,
     repositoryOperations,

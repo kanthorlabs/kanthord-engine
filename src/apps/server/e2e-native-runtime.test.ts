@@ -40,6 +40,7 @@ import {
   workerOperations,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
 import {
   WorkspaceRoot,
   WorkspaceKind,
@@ -157,7 +158,7 @@ test(
       secret: {},
     });
     for (const agent of ["swe@1", "re@1"])
-      await write(["worker", "agent", "enablement", "put", agent], {
+      await write(["agent", "enablement", "put", agent], {
         agentProviders: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
@@ -350,8 +351,8 @@ test(
 
     await t.test("E07.1 software agent declaration", async () => {
       const declaration = await read<
-        (typeof workerOperations)["agent.get"]["output"]["_output"]
-      >(["worker", "agent", "get", "swe@1"]);
+        (typeof agentOperations)["get"]["output"]["_output"]
+      >(["agent", "get", "swe@1"]);
       assert.equal(declaration.agentName, SWE);
       assert.equal(
         declaration.basePrompt,
@@ -391,18 +392,15 @@ test(
     });
     await t.test("E07.2 reviewer and unknown agent", async () => {
       const declaration = await read<
-        (typeof workerOperations)["agent.get"]["output"]["_output"]
-      >(["worker", "agent", "get", "re@1"]);
+        (typeof agentOperations)["get"]["output"]["_output"]
+      >(["agent", "get", "re@1"]);
       assert.deepEqual(
         declaration.tools.map(({ name }) => name),
         ["read", "grep", "find", "ls"],
       );
-      const unknown = await kanthord(
-        ["worker", "agent", "get", "nope@1"],
-        human,
-      );
+      const unknown = await kanthord(["agent", "get", "nope@1"], human);
       assert.equal(unknown.code, FAILURE_EXIT);
-      assert.ok(unknown.stderr.startsWith("worker.agent.not_found:"));
+      assert.ok(unknown.stderr.startsWith("agent.catalog.not_found:"));
     });
     const repository = runtimeX.setup.repositories[0]!;
     await t.test("E07.3 execution setup and foreign proof", async () => {

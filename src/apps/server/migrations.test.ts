@@ -9,6 +9,8 @@ import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import { custodyMigrations } from "../../custody/index.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
 import { WORKER_SERVICE_NAME } from "../../worker/contract.ts";
+import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
+import { agentMigrations } from "../../agent/index.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { projectMigrations } from "../../project/index.ts";
 import { SCHEDULER_SERVICE_NAME } from "../../scheduler/contract.ts";
@@ -22,6 +24,7 @@ const GATEWAY_SERVICE_NAME = "gateway";
 const services: Migrations = [
   { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   { service: "gateway", migrations: gatewayMigrations },
+  { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
   { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
   { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -29,9 +32,11 @@ const services: Migrations = [
 ];
 const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
-const WORKER_AGENT_ENABLEMENT_TABLE = "worker_agent_enablement";
+const AGENT_ENABLEMENT_TABLE = "agent_enablement";
+const LEGACY_AGENT_ENABLEMENT_TABLE = "worker_agent_enablement";
 const WORKER_INSTANCE_TABLE = "worker_instance";
 const ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE];
+const ERD2_WORKER_MIGRATIONS = 2;
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
@@ -70,6 +75,7 @@ const SINGLE_PREFIX_MATCH = 1;
 const INDEX_SCHEMA_TYPE = "index";
 const UNIQUE_INDEX = 1;
 const ALL_TABLES = [
+  AGENT_ENABLEMENT_TABLE,
   CREDENTIAL_TABLE,
   MISSION_ASSESSMENT_TABLE,
   MISSION_ATTEMPT_TABLE,
@@ -84,10 +90,10 @@ const ALL_TABLES = [
   PROJECT_PROJECT_TABLE,
   SCHEDULER_EXECUTION_TABLE,
   SCHEDULER_JOB_TABLE,
-  WORKER_AGENT_ENABLEMENT_TABLE,
   WORKER_INSTANCE_TABLE,
 ];
 const ALL_INDEXES = [
+  "agent_enablement_agent_name_revision",
   "credential_name_revision",
   MISSION_ASSESSMENT_SEQUENCE_INDEX,
   MISSION_ATTEMPT_OPEN_INDEX,
@@ -99,7 +105,6 @@ const ALL_INDEXES = [
   "scheduler_execution_node_live",
   "scheduler_execution_runtime_live",
   "scheduler_job_node_id",
-  "worker_agent_enablement_agent_name_revision",
   "worker_instance_live_client",
 ];
 
@@ -137,7 +142,7 @@ test("service migrations own distinct prefixes and create only tables in their n
     }
     assert.deepEqual(tables(store), [
       CREDENTIAL_TABLE,
-      WORKER_AGENT_ENABLEMENT_TABLE,
+      AGENT_ENABLEMENT_TABLE,
       ...ERD2_WORKER_TABLES,
       PROJECT_PROJECT_TABLE,
       PROJECT_BINDING_TABLE,
@@ -167,11 +172,10 @@ test("each service migration set applies alone to an empty store", () => {
         assert.deepEqual(tables(store), SCHEDULER_TABLES);
       if (service.service === MISSION_SERVICE_NAME)
         assert.deepEqual(tables(store), MISSION_TABLES);
+      if (service.service === AGENT_COMPONENT_NAME)
+        assert.deepEqual(tables(store), [AGENT_ENABLEMENT_TABLE]);
       if (service.service === WORKER_SERVICE_NAME)
-        assert.deepEqual(tables(store), [
-          WORKER_AGENT_ENABLEMENT_TABLE,
-          ...ERD2_WORKER_TABLES,
-        ]);
+        assert.deepEqual(tables(store), ERD2_WORKER_TABLES);
       if (service.service === PROJECT_SERVICE_NAME) {
         assert.deepEqual(tables(store), [
           PROJECT_PROJECT_TABLE,
@@ -273,6 +277,7 @@ test("all ERD 1 and ERD 2 migrations produce exactly the sixteen tables", () => 
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
     { service: GATEWAY_SERVICE_NAME, migrations: gatewayMigrations },
+    { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
@@ -477,6 +482,51 @@ test("Mission execution records have exactly four unique indexes with the ruled 
         /\bCHECK\s*\(/i,
       );
     }
+  } finally {
+    store.close();
+  }
+});
+
+test("an existing store moves its worker agent enablement rows into the agent table", () => {
+  const previousWorkerMigrations = workerMigrations.slice(
+    0,
+    ERD2_WORKER_MIGRATIONS,
+  );
+  const row = [
+    "agent_enablement_a",
+    "swe@1",
+    1,
+    "enabled",
+    "[]",
+    "{}",
+    1000,
+    null,
+  ];
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    store.migrate([
+      { service: WORKER_SERVICE_NAME, migrations: previousWorkerMigrations },
+    ]);
+    store.database
+      .prepare(
+        `INSERT INTO ${LEGACY_AGENT_ENABLEMENT_TABLE} VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(...row);
+    store.migrate([
+      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
+      { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+    ]);
+    assert.deepEqual(tables(store), [
+      WORKER_INSTANCE_TABLE,
+      AGENT_ENABLEMENT_TABLE,
+    ]);
+    assert.deepEqual(
+      store.database
+        .prepare(`SELECT * FROM ${AGENT_ENABLEMENT_TABLE}`)
+        .all()
+        .map((record) => Object.values(record)),
+      [row],
+    );
   } finally {
     store.close();
   }

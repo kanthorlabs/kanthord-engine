@@ -1,8 +1,6 @@
 # Agent CLI specification
 
-This specification for `kanthord agent` contains **10 command leaves, all proposed**.
-The eight enablement commands ship today as `kanthord worker agent enablement`, with the operation IDs `worker.agent.enablement.*` under `/api/worker/agent/enablement`.
-The move of the [Agent component](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.md) renames them to the routes and the codes below.
+This specification for `kanthord agent` contains **10 command leaves: 9 implemented and 1 proposed**.
 
 See the [CLI index](./README.md) for shared conventions.
 Agent entries of a worker binding belong to [Project](./project.md).
@@ -26,21 +24,21 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 
 ## Command inventory
 
-`P` means proposed. `[R]`, `[M]` and `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
+`P` means proposed; `I` means implemented syntax and operation. `[R]`, `[M]` and `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
 `human` authenticates a human JWT.
 
 | Status | Command after `kanthord agent`                                                                   | Route                                                            | Operation ID                       | Access  |
 | ------ | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------------------------------- | ------- |
 | P      | `list [L]`                                                                                       | `GET /api/agent`                                                 | `agent.list`                       | `human` |
-| P      | `get <agent-name>`                                                                               | `GET /api/agent/:agentName`                                      | `agent.get`                        | `human` |
-| P      | `enablement list [L] [R]`                                                                        | `GET /api/agent/enablement`                                      | `agent.enablement.list`            | `human` |
-| P      | `enablement get <agent-name> [R]`                                                                | `GET /api/agent/enablement/:agentName`                           | `agent.enablement.get`             | `human` |
-| P      | `enablement put <agent-name> --file <path> [M] [R]`                                              | `PUT /api/agent/enablement/:agentName`                           | `agent.enablement.put`             | `human` |
-| P      | `enablement enable <agent-name> --expected-revision <revision> [M] [R]`                          | `POST /api/agent/enablement/:agentName/enable`                   | `agent.enablement.enable`          | `human` |
-| P      | `enablement disable <agent-name> --expected-revision <revision> [M] [R]`                         | `POST /api/agent/enablement/:agentName/disable`                  | `agent.enablement.disable`         | `human` |
-| P      | `enablement remove <agent-name> --expected-revision <revision> [M] [R]`                          | `DELETE /api/agent/enablement/:agentName`                        | `agent.enablement.remove`          | `human` |
-| P      | `enablement provider add <agent-name> --file <path> [M] [R]`                                     | `POST /api/agent/enablement/:agentName/provider`                 | `agent.enablement.provider.add`    | `human` |
-| P      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]` | `DELETE /api/agent/enablement/:agentName/provider/:providerName` | `agent.enablement.provider.remove` | `human` |
+| I      | `get <agent-name>`                                                                               | `GET /api/agent/:agentName`                                      | `agent.get`                        | `human` |
+| I      | `enablement list [L] [R]`                                                                        | `GET /api/agent/enablement`                                      | `agent.enablement.list`            | `human` |
+| I      | `enablement get <agent-name> [R]`                                                                | `GET /api/agent/enablement/:agentName`                           | `agent.enablement.get`             | `human` |
+| I      | `enablement put <agent-name> --file <path> [M] [R]`                                              | `PUT /api/agent/enablement/:agentName`                           | `agent.enablement.put`             | `human` |
+| I      | `enablement enable <agent-name> --expected-revision <revision> [M] [R]`                          | `POST /api/agent/enablement/:agentName/enable`                   | `agent.enablement.enable`          | `human` |
+| I      | `enablement disable <agent-name> --expected-revision <revision> [M] [R]`                         | `POST /api/agent/enablement/:agentName/disable`                  | `agent.enablement.disable`         | `human` |
+| I      | `enablement remove <agent-name> --expected-revision <revision> [M] [R]`                          | `DELETE /api/agent/enablement/:agentName`                        | `agent.enablement.remove`          | `human` |
+| I      | `enablement provider add <agent-name> --file <path> [M] [R]`                                     | `POST /api/agent/enablement/:agentName/provider`                 | `agent.enablement.provider.add`    | `human` |
+| I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]` | `DELETE /api/agent/enablement/:agentName/provider/:providerName` | `agent.enablement.provider.remove` | `human` |
 
 The static `/api/agent/enablement` path takes precedence over `/:agentName`.
 
@@ -59,8 +57,6 @@ It lists every catalog agent, also an agent without an enablement. Each item hol
 [agent enablement record](#agent-enablement-record) or `null` when no record exists.
 
 ### `get <agent-name>`
-
-This command remains proposed.
 
 ```text
 kanthord agent get <agent-name>

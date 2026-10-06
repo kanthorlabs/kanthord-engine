@@ -26,7 +26,7 @@ import { temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { WorkerErrorCode } from "../worker/contract.ts";
+import { AgentErrorCode } from "../agent/contract.ts";
 import {
   BINDING_ID_PREFIX,
   BINDING_SET_INITIAL_VERSION,
@@ -1685,7 +1685,7 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
 test("unknown workers propagate Worker refusal before external-field validation", async (t) => {
   const failure = new OperationError(
     HttpStatus.BadRequest,
-    WorkerErrorCode.InvalidConfiguration,
+    AgentErrorCode.InvalidConfiguration,
     "Unknown worker",
   );
   const calls: Array<{ worker: string; entry: WorkerEntry | null }> = [];
@@ -1708,7 +1708,7 @@ test("unknown workers propagate Worker refusal before external-field validation"
     (error) => error === failure,
   );
   assert.equal(failure.status, HttpStatus.BadRequest);
-  assert.equal(failure.code, WorkerErrorCode.InvalidConfiguration);
+  assert.equal(failure.code, AgentErrorCode.InvalidConfiguration);
   assert.deepEqual(calls, [{ worker: UNKNOWN_WORKER, entry: null }]);
   assert.deepEqual(f.snapshot(), before);
 });
