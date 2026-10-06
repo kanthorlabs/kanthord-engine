@@ -69,57 +69,57 @@ None. Plan 08 is a terminal layer.
 
 ## Operation key to command mapping
 
-| CLI group  | CLI command                        | `httpClient` key                     | Operation ID                              |
-| ---------- | ---------------------------------- | ------------------------------------ | ----------------------------------------- |
-| credential | `create`                           | `"create"`                           | `credential.create`                       |
-| credential | `list`                             | `"list"`                             | `credential.list`                         |
-| credential | `get`                              | `"get"`                              | `credential.get`                          |
-| credential | `rotate`                           | `"rotate"`                           | `credential.rotate`                       |
-| credential | `update-metadata`                  | `"update_metadata"`                  | `credential.update_metadata`              |
-| credential | `revoke`                           | `"revoke"`                           | `credential.revoke`                       |
-| credential | `login`                            | `"login"`                            | `credential.login`                        |
-| credential | `login-code`                       | `"login_code"`                       | `credential.login_code`                   |
-| credential | `login-status`                     | `"login_status"`                     | `credential.login_status`                 |
-| project    | `create`                           | `"create"`                           | `project.create`                          |
-| project    | `list`                             | `"list"`                             | `project.list`                            |
-| project    | `get`                              | `"get"`                              | `project.get`                             |
-| project    | `rename`                           | `"rename"`                           | `project.rename`                          |
-| project    | `binding list`                     | `"binding.list"`                     | `project.binding.list`                    |
-| project    | `binding get`                      | `"binding.get"`                      | `project.binding.get`                     |
-| project    | `binding export`                   | `"bindingSet.get"`                   | `project.bindingSet.get`                  |
-| project    | `binding apply`                    | `"bindingSet.write"`                 | `project.bindingSet.write`                |
-| project    | `binding revision list`            | `"bindingRevision.list"`             | `project.bindingRevision.list`            |
-| project    | `agent list`                       | `"agentConfiguration.list"`          | `project.agentConfiguration.list`         |
-| project    | `agent get`                        | `"agentConfiguration.get"`           | `project.agentConfiguration.get`          |
-| mission    | `get`                              | `"get"`                              | `mission.get`                             |
-| mission    | `node list`                        | `"node.list"`                        | `mission.node.list`                       |
-| mission    | `node get`                         | `"node.get"`                         | `mission.node.get`                        |
-| mission    | `node revision list`               | `"node.revision.list"`               | `mission.node.revision.list`              |
-| mission    | `node revision get`                | `"node.revision.get"`                | `mission.node.revision.get`               |
-| mission    | `edge list`                        | `"edge.list"`                        | `mission.edge.list`                       |
-| mission    | `node retire preview`              | `"node.retire.preview"`              | `mission.node.retire.preview`             |
-| mission    | `export`                           | `"export"`                           | `mission.export`                          |
-| mission    | `node create`                      | `"node.create"`                      | `mission.node.create`                     |
-| mission    | `node update`                      | `"node.update"`                      | `mission.node.update`                     |
-| mission    | `node move`                        | `"node.move"`                        | `mission.node.move`                       |
-| mission    | `dependency add`                   | `"dependency.add"`                   | `mission.dependency.add`                  |
-| mission    | `dependency remove`                | `"dependency.remove"`                | `mission.dependency.remove`               |
-| mission    | `criterion set`                    | `"criterion.set"`                    | `mission.criterion.set`                   |
-| mission    | `node rebind`                      | `"node.rebind"`                      | `mission.node.rebind`                     |
-| mission    | `node priority set`                | `"node.priority.set"`                | `mission.node.priority.set`               |
-| mission    | `node retire`                      | `"node.retire"`                      | `mission.node.retire`                     |
-| mission    | `import preview`                   | `"import.preview"`                   | `mission.import.preview`                  |
-| mission    | `import apply`                     | `"import.apply"`                     | `mission.import.apply`                    |
-| scheduler  | `queue list`                       | `"queueList"`                        | `scheduler.queue.list`                    |
-| scheduler  | `queue peek`                       | `"queuePeek"`                        | `scheduler.queue.peek`                    |
-| worker     | `agent enablement list`            | `"agent.enablement.list"`            | `worker.agent.enablement.list`            |
-| worker     | `agent enablement get`             | `"agent.enablement.get"`             | `worker.agent.enablement.get`             |
-| worker     | `agent enablement put`             | `"agent.enablement.put"`             | `worker.agent.enablement.put`             |
-| worker     | `agent enablement enable`          | `"agent.enablement.enable"`          | `worker.agent.enablement.enable`          |
-| worker     | `agent enablement disable`         | `"agent.enablement.disable"`         | `worker.agent.enablement.disable`         |
-| worker     | `agent enablement remove`          | `"agent.enablement.remove"`          | `worker.agent.enablement.remove`          |
-| worker     | `agent enablement provider add`    | `"agent.enablement.provider.add"`    | `worker.agent.enablement.provider.add`    |
-| worker     | `agent enablement provider remove` | `"agent.enablement.provider.remove"` | `worker.agent.enablement.provider.remove` |
+| CLI group  | CLI command                        | `httpClient` key                     | Operation ID                       |
+| ---------- | ---------------------------------- | ------------------------------------ | ---------------------------------- |
+| credential | `create`                           | `"create"`                           | `credential.create`                |
+| credential | `list`                             | `"list"`                             | `credential.list`                  |
+| credential | `get`                              | `"get"`                              | `credential.get`                   |
+| credential | `rotate`                           | `"rotate"`                           | `credential.rotate`                |
+| credential | `update-metadata`                  | `"update_metadata"`                  | `credential.update_metadata`       |
+| credential | `revoke`                           | `"revoke"`                           | `credential.revoke`                |
+| credential | `login`                            | `"login"`                            | `credential.login`                 |
+| credential | `login-code`                       | `"login_code"`                       | `credential.login_code`            |
+| credential | `login-status`                     | `"login_status"`                     | `credential.login_status`          |
+| project    | `create`                           | `"create"`                           | `project.create`                   |
+| project    | `list`                             | `"list"`                             | `project.list`                     |
+| project    | `get`                              | `"get"`                              | `project.get`                      |
+| project    | `rename`                           | `"rename"`                           | `project.rename`                   |
+| project    | `binding list`                     | `"binding.list"`                     | `project.binding.list`             |
+| project    | `binding get`                      | `"binding.get"`                      | `project.binding.get`              |
+| project    | `binding export`                   | `"bindingSet.get"`                   | `project.bindingSet.get`           |
+| project    | `binding apply`                    | `"bindingSet.write"`                 | `project.bindingSet.write`         |
+| project    | `binding revision list`            | `"bindingRevision.list"`             | `project.bindingRevision.list`     |
+| project    | `agent list`                       | `"agentConfiguration.list"`          | `project.agentConfiguration.list`  |
+| project    | `agent get`                        | `"agentConfiguration.get"`           | `project.agentConfiguration.get`   |
+| mission    | `get`                              | `"get"`                              | `mission.get`                      |
+| mission    | `node list`                        | `"node.list"`                        | `mission.node.list`                |
+| mission    | `node get`                         | `"node.get"`                         | `mission.node.get`                 |
+| mission    | `node revision list`               | `"node.revision.list"`               | `mission.node.revision.list`       |
+| mission    | `node revision get`                | `"node.revision.get"`                | `mission.node.revision.get`        |
+| mission    | `edge list`                        | `"edge.list"`                        | `mission.edge.list`                |
+| mission    | `node retire preview`              | `"node.retire.preview"`              | `mission.node.retire.preview`      |
+| mission    | `export`                           | `"export"`                           | `mission.export`                   |
+| mission    | `node create`                      | `"node.create"`                      | `mission.node.create`              |
+| mission    | `node update`                      | `"node.update"`                      | `mission.node.update`              |
+| mission    | `node move`                        | `"node.move"`                        | `mission.node.move`                |
+| mission    | `dependency add`                   | `"dependency.add"`                   | `mission.dependency.add`           |
+| mission    | `dependency remove`                | `"dependency.remove"`                | `mission.dependency.remove`        |
+| mission    | `criterion set`                    | `"criterion.set"`                    | `mission.criterion.set`            |
+| mission    | `node rebind`                      | `"node.rebind"`                      | `mission.node.rebind`              |
+| mission    | `node priority set`                | `"node.priority.set"`                | `mission.node.priority.set`        |
+| mission    | `node retire`                      | `"node.retire"`                      | `mission.node.retire`              |
+| mission    | `import preview`                   | `"import.preview"`                   | `mission.import.preview`           |
+| mission    | `import apply`                     | `"import.apply"`                     | `mission.import.apply`             |
+| scheduler  | `queue list`                       | `"queueList"`                        | `scheduler.queue.list`             |
+| scheduler  | `queue peek`                       | `"queuePeek"`                        | `scheduler.queue.peek`             |
+| worker     | `agent enablement list`            | `"agent.enablement.list"`            | `agent.enablement.list`            |
+| worker     | `agent enablement get`             | `"agent.enablement.get"`             | `agent.enablement.get`             |
+| worker     | `agent enablement put`             | `"agent.enablement.put"`             | `agent.enablement.put`             |
+| worker     | `agent enablement enable`          | `"agent.enablement.enable"`          | `agent.enablement.enable`          |
+| worker     | `agent enablement disable`         | `"agent.enablement.disable"`         | `agent.enablement.disable`         |
+| worker     | `agent enablement remove`          | `"agent.enablement.remove"`          | `agent.enablement.remove`          |
+| worker     | `agent enablement provider add`    | `"agent.enablement.provider.add"`    | `agent.enablement.provider.add`    |
+| worker     | `agent enablement provider remove` | `"agent.enablement.provider.remove"` | `agent.enablement.provider.remove` |
 
 ## Tasks
 
@@ -185,22 +185,22 @@ None. Plan 08 is a terminal layer.
 - Rules: each row invokes `kanthord(args, {})` without endpoint or token; the exit
   code must be 0; stdout must contain the listed substrings.
 
-| Id     | Commands                                           | Exit | Expect                                                                                                                       |
-| ------ | -------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- |
-| E08.1  | `kanthord --help`                                  | 0    | stdout contains `credential`, `project`, `mission`, `scheduler`, `worker`                                                    |
-| E08.2  | `kanthord credential --help`                       | 0    | stdout lists 9 leaves: `create`, `list`, `get`, `rotate`, `update-metadata`, `revoke`, `login`, `login-code`, `login-status` |
-| E08.3  | `kanthord worker --help`                           | 0    | stdout contains `agent`                                                                                                      |
-| E08.4  | `kanthord worker agent --help`                     | 0    | stdout contains `enablement`                                                                                                 |
-| E08.5  | `kanthord worker agent enablement --help`          | 0    | stdout contains `list`, `get`, `put`, `enable`, `disable`, `remove`, `provider`                                              |
-| E08.6  | `kanthord project --help`                          | 0    | stdout contains `create`, `list`, `get`, `rename`, `binding`, `agent`                                                        |
-| E08.7  | `kanthord project binding --help`                  | 0    | stdout contains `list`, `get`, `export`, `apply`, `revision`                                                                 |
-| E08.8  | `kanthord project agent --help`                    | 0    | stdout contains `list`, `get`                                                                                                |
-| E08.9  | `kanthord mission --help`                          | 0    | stdout contains `get`, `node`, `edge`, `dependency`, `criterion`, `export`, `import`                                         |
-| E08.10 | `kanthord scheduler --help`                        | 0    | stdout contains `queue`                                                                                                      |
-| E08.11 | `kanthord scheduler queue --help`                  | 0    | stdout contains `list`, `peek`                                                                                               |
-| E08.12 | `kanthord worker agent enablement provider --help` | 0    | stdout contains `add`, `remove`                                                                                              |
-| E08.13 | `kanthord mission node --help`                     | 0    | stdout contains `list`, `get`, `create`, `update`, `move`, `revision`, `retire`, `rebind`, `priority`                        |
-| E08.14 | `kanthord mission import --help`                   | 0    | stdout contains `preview`, `apply`                                                                                           |
+| Id     | Commands                                    | Exit | Expect                                                                                                                       |
+| ------ | ------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- |
+| E08.1  | `kanthord --help`                           | 0    | stdout contains `credential`, `project`, `mission`, `scheduler`, `worker`                                                    |
+| E08.2  | `kanthord credential --help`                | 0    | stdout lists 9 leaves: `create`, `list`, `get`, `rotate`, `update-metadata`, `revoke`, `login`, `login-code`, `login-status` |
+| E08.3  | `kanthord worker --help`                    | 0    | stdout contains `agent`                                                                                                      |
+| E08.4  | `kanthord agent --help`                     | 0    | stdout contains `enablement`                                                                                                 |
+| E08.5  | `kanthord agent enablement --help`          | 0    | stdout contains `list`, `get`, `put`, `enable`, `disable`, `remove`, `provider`                                              |
+| E08.6  | `kanthord project --help`                   | 0    | stdout contains `create`, `list`, `get`, `rename`, `binding`, `agent`                                                        |
+| E08.7  | `kanthord project binding --help`           | 0    | stdout contains `list`, `get`, `export`, `apply`, `revision`                                                                 |
+| E08.8  | `kanthord project agent --help`             | 0    | stdout contains `list`, `get`                                                                                                |
+| E08.9  | `kanthord mission --help`                   | 0    | stdout contains `get`, `node`, `edge`, `dependency`, `criterion`, `export`, `import`                                         |
+| E08.10 | `kanthord scheduler --help`                 | 0    | stdout contains `queue`                                                                                                      |
+| E08.11 | `kanthord scheduler queue --help`           | 0    | stdout contains `list`, `peek`                                                                                               |
+| E08.12 | `kanthord agent enablement provider --help` | 0    | stdout contains `add`, `remove`                                                                                              |
+| E08.13 | `kanthord mission node --help`              | 0    | stdout contains `list`, `get`, `create`, `update`, `move`, `revision`, `retire`, `rebind`, `priority`                        |
+| E08.14 | `kanthord mission import --help`            | 0    | stdout contains `preview`, `apply`                                                                                           |
 
 ## Blockers
 

@@ -18,7 +18,7 @@ This plan delivers:
 
 Out of scope:
 
-- `worker.agent.get`. Its answer holds `basePrompt`, `agentPrompt` and `tools` (`worker-service.impl.md:186`). Plan 07 owns the prompt assets (decision D14) and the tool table (`00-index.md` "Shared files", row `src/worker/catalog.ts`), so plan 07 takes the operation. The report of this plan names the index change.
+- `agent.get`. Its answer holds `basePrompt`, `agentPrompt` and `tools` (`worker-service.impl.md:186`). Plan 07 owns the prompt assets (decision D14) and the tool table (`00-index.md` "Shared files", row `src/worker/catalog.ts`), so plan 07 takes the operation. The report of this plan names the index change.
 - The work pull, the claim and every read of `scheduler_execution` (plan 03). This plan consumes them through the Scheduler seam of task 02.9.
 - The health report entries of a registration (plan 10). This plan provides the checks.
 - The handover and the credential report (plan 05). The `worker` application (plan 09). The MCP server (decision D5).
@@ -510,7 +510,7 @@ Setup, in order (each command exits 0):
 
 1. `H: kanthord project create --name registration` → `projectId` = `id`.
 2. `H: kanthord credential create --file anthropic.json` with `{ "name": "anthro-1", "platform": "anthropic", "metadata": null, "secret": { "key": "e2e-registration-secret" } }`.
-3. `H: kanthord worker agent enablement put swe@1 --file enablement.json` with `{ "agentProviders": [{ "name": "default", "provider": "anthropic", "credential": "anthro-1" }], "defaultConfiguration": { "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" } }` → `revision` 1.
+3. `H: kanthord agent enablement put swe@1 --file enablement.json` with `{ "agentProviders": [{ "name": "default", "provider": "anthropic", "credential": "anthro-1" }], "defaultConfiguration": { "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" } }` → `revision` 1.
 4. `H: kanthord project binding apply <projectId> --file v1.json` with `{ "version": 1, "bindings": { "general": { "kind": "worker", "config": { "worker": "general@1", "instanceCount": 1, "entries": [{ "agent": "swe@1", "agentProvider": "default", "modelIdentifier": "claude-sonnet-4-5", "reasoningEffort": "off" }] } } } }` → `bindingSetVersion` 2.
 5. `kanthord jwt generate --project <projectId> --binding general --name worker-a --config issuance.yaml` → `tokenA`; `kanthord jwt generate --project <projectId> --binding general --name worker-b --config issuance.yaml` → `tokenB`.
 

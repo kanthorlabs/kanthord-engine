@@ -74,7 +74,7 @@ The AES-256-GCM envelope and the two HKDF keys of the handover (`custody.impl.md
 
 ## D14 — Prompt assets
 
-The three prompt texts of `docs/brainstorm/assets/prompt/` (`base.md`, `swe@1.md`, `re@1.md`) are copied verbatim into `engine/static/prompt/` by plan 07, next to `static/openapi/`. The catalog declaration reads them at startup and refuses a missing file. `worker.agent.get` answers `basePrompt` and `agentPrompt` from those files (`worker-service.impl.md:186`). A change of a text is a new worker version and a root ruling, never a plan task.
+The three prompt texts of `docs/brainstorm/assets/prompt/` (`base.md`, `swe@1.md`, `re@1.md`) are copied verbatim into `engine/static/prompt/` by plan 07, next to `static/openapi/`. The catalog declaration reads them at startup and refuses a missing file. `agent.get` answers `basePrompt` and `agentPrompt` from those files (`worker-service.impl.md:186`). A change of a text is a new worker version and a root ruling, never a plan task.
 
 ## D15 — E2E of the native runtime
 
