@@ -60,7 +60,13 @@ engine/
 │   │   ├── index.ts            # Component and migration exports
 │   │   ├── migrations.ts       # agent_enablement table
 │   │   ├── catalog.ts          # Static agent declarations
-│   │   ├── prompt-assets.ts    # Byte-exact packaged base and agent prompts
+│   │   ├── prompt-assets.ts    # Byte-exact packaged base, agent and workbench prompts
+│   │   ├── pi.ts               # Cached offline SDK loader and isolated agent directory
+│   │   ├── agent-session.ts    # Isolated sessions and setup deadlines
+│   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
+│   │   ├── prompt-composer.ts  # Layer selection, attribution, digests and work prompts
+│   │   ├── pinned-layers.ts    # Context and inference pins across compaction
+│   │   ├── test-support.ts     # Scripted offline provider
 │   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
 │   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
 │   │   └── service.ts          # Enablement routes, entry validation, agent views, and provider healthchecks
@@ -76,6 +82,7 @@ engine/
 │   │   ├── service.ts          # Record functions, suitability, release, handover, and inventory
 │   │   ├── payload.ts         # Normalized execution credential and stored secret conversion
 │   │   ├── execution-store.ts # Isolated execution credential view and serialized refresh reports
+│   │   ├── workbench-store.ts # Workbench credential view over the newest live revision
 │   │   └── client.ts          # Public execution credential store builder, error and type
 │   ├── project/                # Project Service: projects, binding sets, and binding collaborations
 │   │   ├── contract.ts         # Constants, closed sets, binding schemas, operations, collaboration and dependency types
@@ -142,14 +149,9 @@ engine/
 │   │   ├── action-reuse.ts     # Open pull-request repository and branch checks
 │   │   ├── action-classify.ts  # No-effect, unknown-effect and recording outcomes
 │   │   ├── node-branch.ts      # Shared deterministic node branch name
-│   │   ├── pi.ts               # Cached offline SDK loader and isolated agent directory
 │   │   ├── tool-table.ts       # Declared tools, host checks and bounded hygienic bash
-│   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
-│   │   ├── prompt-composer.ts  # Layer selection, attribution, digests and work prompts
 │   │   ├── model-runtime.ts    # Execution model runtime factory over the LLM model connector
-│   │   ├── test-support.ts     # Scripted offline provider and runtime fixtures
-│   │   ├── agent-session.ts    # Isolated in-memory sessions and setup deadlines
-│   │   ├── pinned-layers.ts    # Context and inference pins across compaction
+│   │   ├── test-support.ts     # Runtime fixtures over the scripted offline provider
 │   │   ├── budget.ts           # Monotonic wall budget, turns and cleanup deadline
 │   │   ├── verification.ts     # Sequential deadline-bounded verification commands
 │   │   ├── local-git.ts        # Workspace head and verification cleanup
@@ -167,6 +169,13 @@ engine/
 │   │   ├── transcript.ts       # Execution transcript sink and no-op implementation
 │   │   ├── native-method.ts    # Injected native method dispatch and resource lifetime
 │   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and entry validation
+│   ├── workbench/              # Workbench Service: human-driven agent sessions
+│   │   ├── contract.ts         # Workbench operations, schemas, and error codes
+│   │   ├── index.ts            # Service, dependencies, and migrations
+│   │   ├── migrations.ts       # Empty migration list
+│   │   ├── sessions.ts         # Workbench directory, pi session list, create, find, and stored configuration
+│   │   ├── prompt.ts           # Global, base, agent, and workbench prompt composition
+│   │   └── service.ts          # Session lifecycle, configuration, credential grant, and operation handlers
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations
@@ -192,7 +201,7 @@ engine/
 │           ├── api.ts          # Server operation clients and bounded backoff
 │           └── index.ts        # Client resolution, version check, and cancellable lifetime
 ├── static/                     # Packaged generated OpenAPI assets
-│   ├── prompt/                 # Byte-exact base, swe@1 and re@1 prompt assets
+│   ├── prompt/                 # Byte-exact base, swe@1, re@1 and workbench prompt assets
 │   ├── openapi.yaml             # Root contract index and package version
 │   └── openapi/                # Service path items and shared schemas
 │       ├── gateway/            # Gateway operation documents
@@ -201,6 +210,7 @@ engine/
 │       ├── storage/            # Storage credential operation documents
 │       ├── agent/              # Agent operation documents
 │       ├── worker/             # Worker operation documents
+│       ├── workbench/          # Workbench operation documents
 │       └── shared/             # Common OpenAPI components
 ├── scripts/                    # Development and acceptance utilities
 ├── docs/                       # Internal implementation notes

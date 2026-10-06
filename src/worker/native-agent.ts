@@ -17,11 +17,11 @@ import {
   composePrompt,
   type CompositionRecord,
   type WorkPrompt,
-} from "./prompt-composer.ts";
+} from "../agent/prompt-composer.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
-import { openSession, withDeadline } from "./agent-session.ts";
-import { countTurns, pinnedLayers } from "./pinned-layers.ts";
-import { loadPi } from "./pi.ts";
+import { openSession, withDeadline } from "../agent/agent-session.ts";
+import { countTurns, pinnedLayers } from "../agent/pinned-layers.ts";
+import { loadPi } from "../agent/pi.ts";
 import { sessionTools } from "./tool-table.ts";
 import type { ModelRuntimeFactory } from "./model-runtime.ts";
 

@@ -4,6 +4,7 @@ import type {
   AgentSession,
   InlineExtension,
   ModelRuntime,
+  SessionManager,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -58,6 +59,7 @@ export async function openSession(input: {
   customTools: ToolDefinition[];
   extensions: InlineExtension[];
   context: Context;
+  sessionManager?: SessionManager;
 }): Promise<AgentSession> {
   assert.ok(input.cwd);
   assert.ok(input.systemPrompt);
@@ -67,7 +69,8 @@ export async function openSession(input: {
     enableInstallTelemetry: false,
     enableAnalytics: false,
   });
-  const sessionManager = pi.SessionManager.inMemory(input.cwd);
+  const sessionManager =
+    input.sessionManager ?? pi.SessionManager.inMemory(input.cwd);
   const resourceLoader = new pi.DefaultResourceLoader({
     cwd: input.cwd,
     agentDir: piAgentDirectory(),

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -13,11 +12,7 @@ import {
   type CredentialMetadataRecord,
   type ExecutionSetup,
 } from "./contract.ts";
-import {
-  configuredSource,
-  readAgentFile,
-  SourceState,
-} from "./prompt-source.ts";
+import { resolveGlobalPrompt } from "../agent/prompt-composer.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 
 const FIRST_ISSUE_INDEX = 0;
@@ -36,18 +31,11 @@ export async function executionSetup(
   worker: Pick<WorkerService, "declarationOf" | "workerAgentView">,
   caller: CallerContext,
 ): Promise<ExecutionSetup> {
-  const configured = configuredSource(dependencies.config.globalPrompt);
-  const source =
-    configured.state === SourceState.Present
-      ? await readAgentFile(
-          resolve(dependencies.dataDirectory, configured.text),
-          { workspace: null, context: caller.context },
-        )
-      : configured;
-  const globalPrompt =
-    source.state === SourceState.Absent
-      ? { state: SourceState.Absent }
-      : source;
+  const globalPrompt = await resolveGlobalPrompt(
+    dependencies.config.globalPrompt,
+    dependencies.dataDirectory,
+    caller.context,
+  );
   return caller.commit((tx) => {
     const claim = caller.execution;
     assert.ok(claim);

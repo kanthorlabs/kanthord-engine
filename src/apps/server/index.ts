@@ -68,6 +68,12 @@ import {
   toolDeclarations,
 } from "../../worker/index.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
+import {
+  WorkbenchService,
+  workbenchMigrations,
+  type WorkbenchModelRuntimeFactory,
+} from "../../workbench/index.ts";
+import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import {
   RepositoryComponent,
@@ -99,6 +105,7 @@ export function composeServices(options: {
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
+  workbenchModelRuntimeFactory?: WorkbenchModelRuntimeFactory;
   inventoryOverrides?: Partial<ResourceInventories>;
   standIns?: {
     intakeStorage?: IntakeStorage;
@@ -330,6 +337,19 @@ export function composeServices(options: {
     health: options.health,
     bindings: options.bindings,
   });
+  const workbench = new WorkbenchService({
+    store: options.store,
+    stateDirectory: options.stateDirectory,
+    dataDirectory: directories(process.env).data,
+    globalPrompt: options.config.worker.globalPrompt,
+    agentConfiguration: {
+      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
+      agentView: (tx, name, entry) => agent.agentView(tx, name, entry),
+    },
+    credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
+    workbenchCredentials: (input) => custody.workbenchCredentials(input),
+    modelRuntimeFactory: options.workbenchModelRuntimeFactory,
+  });
   scheduler.declare(registry);
   llm.declare(registry);
   agent.declare(registry);
@@ -338,6 +358,7 @@ export function composeServices(options: {
   worker.declare(registry);
   mission.declare(registry);
   project.declare(registry);
+  workbench.declare(registry);
   const gateway = new GatewayService({
     config: options.config.gateway,
     logger: options.logger,
@@ -384,6 +405,7 @@ export function composeServices(options: {
     mission,
     project,
     worker,
+    workbench,
     gateway,
     invocation,
     registry,
@@ -453,6 +475,7 @@ export class Server implements Service {
         { service: "worker", migrations: workerMigrations },
         { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
         { service: "project", migrations: projectMigrations },
+        { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
       ]);
       throwIfCancelled(this.shutdown);
       const {
@@ -462,6 +485,7 @@ export class Server implements Service {
         worker,
         mission,
         project,
+        workbench,
         gateway,
         invocation,
       } = composeServices({
@@ -481,6 +505,7 @@ export class Server implements Service {
         worker,
         mission,
         project,
+        workbench,
         gateway,
       ];
       this.services = services;

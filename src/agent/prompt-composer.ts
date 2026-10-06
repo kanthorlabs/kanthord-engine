@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Context } from "../kernel/context.ts";
-import type { AgentDeclaration } from "../agent/catalog.ts";
-import { WorkerMethod } from "./contract.ts";
+import type { AgentDeclaration } from "./catalog.ts";
+import { WorkerMethod } from "../worker/contract.ts";
 import {
   configuredSource,
   readAgentFile,
@@ -19,6 +19,7 @@ export const PromptLayer = {
   Agent: "agent prompt",
   Project: "project prompt",
   Work: "work prompt",
+  Workbench: "workbench prompt",
 } as const;
 export type PromptLayer = (typeof PromptLayer)[keyof typeof PromptLayer];
 export const PRECEDENCE = [
@@ -77,14 +78,14 @@ export interface WorkPrompt {
 const FRAMING =
   "This prompt holds prompt layers. Each layer names its owner and its source. The precedence from the highest to the lowest is: agent prompt, base prompt, work prompt, project prompt, global prompt. A layer of higher precedence governs a layer of lower precedence. No layer revokes an obligation of the agent prompt or of the base prompt. A layer authorizes no operation.";
 
-function digest(text: string): string {
+export function digest(text: string): string {
   const result = createHash("sha256").update(text, "utf8").digest("hex");
   assert.match(result, /^[a-f0-9]{64}$/);
   assert.ok(Buffer.isEncoding("utf8"));
   return result;
 }
 
-function layerText(
+export function layerText(
   layer: PromptLayer,
   owner: string,
   source: string,
@@ -151,8 +152,28 @@ async function fileSource(
   return { state: SourceState.Absent, path: paths.at(-1)! };
 }
 
-async function globalLayer(
-  input: CompositionInput,
+export async function resolveGlobalPrompt(
+  value: string,
+  dataDirectory: string,
+  context: Context,
+): Promise<GlobalPromptSource> {
+  assert.ok(dataDirectory);
+  assert.ok(context);
+  const configured = configuredSource(value);
+  const source =
+    configured.state === SourceState.Present
+      ? await readAgentFile(resolve(dataDirectory, configured.text), {
+          workspace: null,
+          context,
+        })
+      : configured;
+  return source.state === SourceState.Absent
+    ? { state: SourceState.Absent }
+    : source;
+}
+
+export async function globalLayer(
+  input: Pick<CompositionInput, "globalPrompt" | "hostHome">,
   record: CompositionRecord,
   context: Context,
 ): Promise<LayerText | null> {

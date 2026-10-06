@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { canonicalJSON } from "../kernel/json.ts";
-import type { Grant, Material } from "./contract.ts";
+import type { Grant, Material, WorkbenchGrant } from "./contract.ts";
 
 const grants = new WeakSet<object>();
 
@@ -24,6 +24,23 @@ export function mintGrant(fields: Grant): Grant {
   });
   grants.add(grant);
   return grant;
+}
+
+export function mintWorkbenchGrant(fields: WorkbenchGrant): WorkbenchGrant {
+  assert(fields.credential.length);
+  assert(fields.sessionId.length);
+  const grant = Object.freeze({
+    credential: fields.credential,
+    platform: fields.platform,
+    sessionId: fields.sessionId,
+  });
+  grants.add(grant);
+  return grant;
+}
+
+export function consumeWorkbenchGrant(grant: WorkbenchGrant): void {
+  if (!grants.delete(grant)) throw new FacilityError();
+  assert(Object.isFrozen(grant));
 }
 
 export function consumeGrant(grant: Grant): void {

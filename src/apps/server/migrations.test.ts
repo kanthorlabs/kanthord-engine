@@ -17,6 +17,8 @@ import { SCHEDULER_SERVICE_NAME } from "../../scheduler/contract.ts";
 import { schedulerMigrations } from "../../scheduler/index.ts";
 import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import { missionMigrations } from "../../mission/index.ts";
+import { workbenchMigrations } from "../../workbench/index.ts";
+import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 
 const PROJECT_SERVICE_NAME = "project";
 const GATEWAY_SERVICE_NAME = "gateway";
@@ -29,6 +31,7 @@ const services: Migrations = [
   { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
   { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
   { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
+  { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
 ];
 const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
@@ -281,6 +284,7 @@ test("all ERD 1 and ERD 2 migrations produce exactly the sixteen tables", () => 
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
+    { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
   ];
   const prefixes = allServices.map(({ service }) => `${service}_`);
   assert.equal(new Set(prefixes).size, allServices.length);

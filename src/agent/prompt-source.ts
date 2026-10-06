@@ -7,8 +7,8 @@ import {
   throwIfCancelled,
   type Context,
 } from "../kernel/context.ts";
-import { InvalidReason, SourceState } from "./contract.ts";
-export { InvalidReason, SourceState } from "./contract.ts";
+import { InvalidReason, SourceState } from "../worker/contract.ts";
+export { InvalidReason, SourceState } from "../worker/contract.ts";
 
 export const PROMPT_SOURCE_MAX_BYTES = 32768;
 export const PROMPT_READ_DEADLINE_MS = 10000;

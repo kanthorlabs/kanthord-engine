@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { BashToolOptions } from "@earendil-works/pi-coding-agent";
 import { temporary } from "../kernel/test-support.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { loadPi } from "./pi.ts";
+import { loadPi } from "../agent/pi.ts";
 import {
   checkAgentTools,
   childEnvironment,

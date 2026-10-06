@@ -14,10 +14,10 @@ import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import { WorkerMethod } from "./catalog.ts";
-import { composePrompt, renderWorkPrompt } from "./prompt-composer.ts";
-import { openSession } from "./agent-session.ts";
-import { loadPi } from "./pi.ts";
-import { countTurns, pinnedLayers } from "./pinned-layers.ts";
+import { composePrompt, renderWorkPrompt } from "../agent/prompt-composer.ts";
+import { openSession } from "../agent/agent-session.ts";
+import { loadPi } from "../agent/pi.ts";
+import { countTurns, pinnedLayers } from "../agent/pinned-layers.ts";
 import {
   anthropicSetup,
   fauxAssistantMessage,

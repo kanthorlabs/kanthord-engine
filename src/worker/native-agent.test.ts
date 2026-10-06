@@ -14,7 +14,7 @@ import {
   type ExecutionSetup,
   type HostTools,
 } from "./contract.ts";
-import { renderWorkPrompt } from "./prompt-composer.ts";
+import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import {
   anthropicSetup,
   fauxAssistantMessage,

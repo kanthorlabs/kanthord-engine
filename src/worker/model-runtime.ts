@@ -6,7 +6,7 @@ import {
   type ModelConnectorInput,
 } from "../llm/model-connector.ts";
 import type { ExecutionSetup } from "./contract.ts";
-import { loadPi } from "./pi.ts";
+import { loadPi } from "../agent/pi.ts";
 
 export interface ModelRuntimeInput {
   credentials: CredentialStore;

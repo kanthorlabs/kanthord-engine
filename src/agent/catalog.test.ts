@@ -5,6 +5,7 @@ import {
   BASE_PROMPT,
   RE_AGENT_PROMPT,
   SWE_AGENT_PROMPT,
+  WORKBENCH_PROMPT,
 } from "./prompt-assets.ts";
 import { AGENT_DECLARATIONS, getAgentDeclaration } from "./catalog.ts";
 
@@ -34,7 +35,7 @@ test("agent prompts are valid published UTF-8 assets", () => {
   const newline = "\n";
   const firstPrintable = 32;
   const deleteCharacter = 127;
-  for (const file of ["base.md", "swe@1.md", "re@1.md"]) {
+  for (const file of ["base.md", "swe@1.md", "re@1.md", "workbench.md"]) {
     const bytes = readFileSync(
       new URL(`../../static/prompt/${file}`, import.meta.url),
     );
@@ -57,6 +58,7 @@ test("agent prompts are valid published UTF-8 assets", () => {
   assert.ok(SWE_AGENT_PROMPT.startsWith("## Role"));
   assert.ok(SWE_AGENT_PROMPT.includes("swe@1"));
   assert.ok(RE_AGENT_PROMPT.includes("re@1"));
+  assert.ok(WORKBENCH_PROMPT.startsWith("## Human interlocutor"));
 });
 
 test("unknown and inherited names are not agent declarations", () => {

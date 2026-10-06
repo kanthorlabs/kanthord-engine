@@ -6,7 +6,7 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import type { MachineIdentity } from "../kernel/caller.ts";
+import { isHumanIdentity, type MachineIdentity } from "../kernel/caller.ts";
 import {
   HealthScope,
   ResourceStatus,
@@ -16,7 +16,7 @@ import {
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { canonicalJSON } from "../kernel/json.ts";
+import { canonicalJSON, digest } from "../kernel/json.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -54,8 +54,21 @@ import {
   type CustodyExecution,
   type Grant,
   type Material,
+  piCredentialSchema,
+  type WorkbenchCredentialsInput,
+  type WorkbenchGrant,
 } from "./contract.ts";
-import { consumeGrant, mintGrant, MaterialBuffer } from "./facility.ts";
+import {
+  consumeGrant,
+  consumeWorkbenchGrant,
+  FacilityError,
+  mintGrant,
+  mintWorkbenchGrant,
+  MaterialBuffer,
+} from "./facility.ts";
+import { credentialOfSecret } from "./payload.ts";
+import { ExecutionStoreError } from "./execution-store.ts";
+import { workbenchCredentialStore } from "./workbench-store.ts";
 import {
   sealMaterial,
   openReport,
@@ -372,6 +385,93 @@ export class CustodyComponent implements Service, CredentialRecords {
         encrypted.ciphertext,
       ),
     );
+  }
+
+  private workbenchRow(tx: Transaction, grant: WorkbenchGrant): LiveRow {
+    assert(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    consumeWorkbenchGrant(grant);
+    const row = newestLive(tx, grant.credential);
+    if (!row)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        CustodyErrorCode.NotFound,
+        "Credential not found.",
+      );
+    if (row.platform !== grant.platform)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CustodyErrorCode.PlatformMismatch,
+        "Credential platform mismatch.",
+      );
+    return row;
+  }
+
+  releaseWorkbench(tx: Transaction, grant: WorkbenchGrant): Material {
+    const row = this.workbenchRow(tx, grant);
+    return new MaterialBuffer(
+      row.id,
+      row.platform,
+      decrypt(
+        this.envelopeKey,
+        row.id,
+        row.platform,
+        row.nonce,
+        row.ciphertext,
+      ),
+    );
+  }
+
+  workbenchCredentials(input: WorkbenchCredentialsInput) {
+    assert(Object.hasOwn(this.platforms, input.platform));
+    const shape = this.platforms[input.platform]!.secretShape;
+    assert(shape === SecretShape.ApiKey || shape === SecretShape.OAuth);
+    const grant = (tx: Transaction): WorkbenchGrant => {
+      const requester = input.requester();
+      if (!isHumanIdentity(requester)) throw new FacilityError();
+      const { credential, platform } = input.authorize(
+        tx,
+        requester,
+        input.sessionId,
+      );
+      if (platform !== input.platform) throw new FacilityError();
+      return mintWorkbenchGrant({
+        credential,
+        platform,
+        sessionId: input.sessionId,
+      });
+    };
+    return workbenchCredentialStore({
+      providerId: input.platform,
+      type: shape,
+      release: () =>
+        this.store.transaction((tx) => {
+          const material = this.releaseWorkbench(tx, grant(tx));
+          try {
+            return credentialOfSecret(shape, material.value());
+          } finally {
+            material.drop();
+          }
+        }),
+      replace: (current, next) =>
+        this.store.transaction((tx) => {
+          const row = this.workbenchRow(tx, grant(tx));
+          if (this.executions.liveExecutionsPinning(tx, row.id).length)
+            throw new ExecutionStoreError(
+              "A live execution holds the credential revision.",
+            );
+          applyReport(
+            tx,
+            this.envelopeKey,
+            {
+              credentialId: row.id,
+              digest: digest(current),
+              credential: piCredentialSchema.parse(next),
+            },
+            this.platforms,
+          );
+        }),
+    });
   }
 
   handover(

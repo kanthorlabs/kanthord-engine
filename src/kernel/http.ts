@@ -1,6 +1,7 @@
 /** HTTP values shared by transport declarations, clients, and their tests. */
 export const HttpStatus = {
   OK: 200,
+  Accepted: 202,
   NoContent: 204,
   BadRequest: 400,
   Unauthorized: 401,

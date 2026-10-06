@@ -11,7 +11,7 @@ import type { CallerContext } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
-import { PROMPT_SOURCE_MAX_BYTES } from "./prompt-source.ts";
+import { PROMPT_SOURCE_MAX_BYTES } from "../agent/prompt-source.ts";
 import { anthropicSetup } from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
 

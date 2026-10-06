@@ -39,8 +39,8 @@ test("only the pi loader imports the runtime as a value", () => {
     };
     visit(source);
   }
-  assert.deepEqual(paths, ["worker/pi.ts"]);
-  assert.ok(paths.includes("worker/pi.ts"));
+  assert.deepEqual(paths, ["agent/pi.ts"]);
+  assert.ok(paths.includes("agent/pi.ts"));
 });
 
 test("pi loader caches the import and fixes the environment before import", async () => {

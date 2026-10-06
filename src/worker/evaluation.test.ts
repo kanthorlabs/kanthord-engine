@@ -10,7 +10,7 @@ import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "./contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
-import type { WorkPrompt } from "./prompt-composer.ts";
+import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { ActionResultKind } from "./contract.ts";
 

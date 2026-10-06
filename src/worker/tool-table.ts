@@ -6,7 +6,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Diagnostic } from "../kernel/errors.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
-import { loadPi, piAgentDirectory, type PiCodingAgent } from "./pi.ts";
+import { loadPi, piAgentDirectory, type PiCodingAgent } from "../agent/pi.ts";
 
 import { ToolSource } from "../agent/contract.ts";
 import { WorkerErrorCode, type HostTools } from "./contract.ts";

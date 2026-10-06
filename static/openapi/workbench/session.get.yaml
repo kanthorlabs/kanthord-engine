@@ -1,0 +1,143 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: workbench.session.get
+    tags:
+      - workbench
+    description: Get the configuration, the entries of the completed runs and the
+      run state of a workbench session.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.session.get.Input/properties/params/prope\
+            rties/sessionId"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.session.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.session.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            sessionId:
+              type: string
+              minLength: 44
+              maxLength: 44
+              pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_session_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - sessionId
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.session.get.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 44
+          maxLength: 44
+          pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_session_ followed by a canonical 26-character uppercase
+            ULID.
+        agentName:
+          type: string
+        configuration:
+          type: object
+          properties:
+            agentProvider:
+              type: string
+              minLength: 1
+            modelIdentifier:
+              type: string
+              minLength: 1
+            reasoningEffort:
+              type: string
+              enum:
+                - off
+                - minimal
+                - low
+                - medium
+                - high
+                - xhigh
+                - max
+          required:
+            - agentProvider
+            - modelIdentifier
+            - reasoningEffort
+          additionalProperties: false
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              id:
+                type: string
+              parentId:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              timestamp:
+                type: string
+            required:
+              - type
+              - id
+              - parentId
+              - timestamp
+            additionalProperties: {}
+        runActive:
+          type: boolean
+      required:
+        - id
+        - agentName
+        - configuration
+        - entries
+        - runActive
+      additionalProperties: false

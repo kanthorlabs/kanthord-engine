@@ -32,6 +32,8 @@ import {
 } from "../../mission/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { agentMigrations } from "../../agent/index.ts";
+import { workbenchMigrations } from "../../workbench/index.ts";
+import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { composeServices } from "./index.ts";
 import type { OperationRegistry } from "../../kernel/operation.ts";
@@ -491,6 +493,10 @@ export async function gatewayFixture(
     scheduler?: Partial<SchedulerConfig>;
     oauthProviders?: Parameters<typeof composeServices>[0]["oauthProviders"];
     standIns?: Parameters<typeof composeServices>[0]["standIns"];
+    workbenchModelRuntimeFactory?: Parameters<
+      typeof composeServices
+    >[0]["workbenchModelRuntimeFactory"];
+    stateDirectory?: string;
   } = {},
 ) {
   process.umask(0o077);
@@ -508,6 +514,7 @@ export async function gatewayFixture(
     { service: "worker", migrations: workerMigrations },
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
     { service: "project", migrations: projectMigrations },
+    { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
   ]);
   const logs: string[] = [];
   const {
@@ -517,12 +524,14 @@ export async function gatewayFixture(
     project,
     worker,
     mission,
+    workbench,
     invocation,
     repoConnector,
   } = composeServices({
     config,
     store,
-    stateDirectory: temporary(t),
+    stateDirectory: options.stateDirectory ?? temporary(t),
+    workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
     registry: options.registry,
     health: options.health ?? new HealthRegistry(),
     repositoryConnector: options.repositoryConnector,
@@ -544,8 +553,8 @@ export async function gatewayFixture(
     const failures: Error[] = [];
     try {
       const quiescence = await Promise.all(
-        [scheduler, custody, worker, mission, project, gateway].map((service) =>
-          service.quiesce(),
+        [scheduler, custody, worker, mission, project, workbench, gateway].map(
+          (service) => service.quiesce(),
         ),
       );
       failures.push(...quiescence.filter((error) => error !== null));
@@ -554,6 +563,7 @@ export async function gatewayFixture(
       if (invocationError) failures.push(invocationError);
       for (const service of [
         gateway,
+        workbench,
         project,
         mission,
         worker,
@@ -575,6 +585,7 @@ export async function gatewayFixture(
     worker,
     mission,
     project,
+    workbench,
     gateway,
   ]) {
     const error = await service.start();
@@ -592,7 +603,9 @@ export async function gatewayFixture(
     worker,
     custody,
     mission,
+    workbench,
     gateway,
+    invocation,
     store,
     endpoint,
     request,

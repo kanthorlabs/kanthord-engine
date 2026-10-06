@@ -7,7 +7,7 @@ import {
 } from "./execution-run.ts";
 import { readObjectives, allTerminal } from "./node-reads.ts";
 import { reportInstruction } from "./judgement.ts";
-import { renderWorkPrompt } from "./prompt-composer.ts";
+import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import { ExecutionBudget } from "./budget.ts";

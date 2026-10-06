@@ -24,6 +24,7 @@ import {
   missionOperations,
   missionSchema,
 } from "../../mission/contract.ts";
+import { workbenchOperations } from "../../workbench/contract.ts";
 import {
   openapiPath,
   emitOpenAPI,
@@ -364,6 +365,7 @@ const OPERATION_PREFIXES = [
   "worker.",
   "project.",
   "mission.",
+  "workbench.",
 ];
 const BEARER_SECURITY = [{ bearerAuth: [] }];
 const LIVENESS_PATH = "/api/liveness";
@@ -521,6 +523,7 @@ const apiOperations = [
   ...Object.values(schedulerOperations),
   ...Object.values(projectOperations),
   ...Object.values(missionOperations),
+  ...Object.values(workbenchOperations),
 ];
 const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["gateway.liveness", AccessPolicy.Public],
@@ -657,8 +660,12 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.execution.objective.outcome.list", AccessPolicy.Client],
   ["mission.execution.objective.evidence.list", AccessPolicy.Client],
   ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
+  ["workbench.session.list", AccessPolicy.Human],
+  ["workbench.session.create", AccessPolicy.Human],
+  ["workbench.session.get", AccessPolicy.Human],
+  ["workbench.session.configure", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 134;
+const OPERATION_COUNT = 138;
 
 test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();

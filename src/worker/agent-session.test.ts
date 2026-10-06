@@ -15,8 +15,8 @@ import {
   openSession,
   RUNTIME_SETUP_DEADLINE_MS,
   withDeadline,
-} from "./agent-session.ts";
-import { piAgentDirectory } from "./pi.ts";
+} from "../agent/agent-session.ts";
+import { piAgentDirectory } from "../agent/pi.ts";
 import {
   anthropicSetup,
   fauxAssistantMessage,

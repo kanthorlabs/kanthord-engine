@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { getAgentDeclaration } from "../agent/catalog.ts";
-import { WorkerMethod } from "./catalog.ts";
+import { getAgentDeclaration } from "./catalog.ts";
+import { WorkerMethod } from "../worker/contract.ts";
 import {
   composePrompt,
   renderWorkPrompt,

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import type { MachineIdentity } from "../kernel/caller.ts";
+import type { CredentialStore } from "@earendil-works/pi-ai";
+import type { HumanIdentity, MachineIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import {
   ResourceStatus,
@@ -112,6 +113,30 @@ export interface CustodyAuthorization {
     },
   ): ModelInferenceAuthorization;
 }
+
+export type WorkbenchAuthorization = {
+  credential: string;
+  platform: string;
+};
+export type WorkbenchAuthorizeFn = (
+  tx: Transaction,
+  requester: HumanIdentity,
+  sessionId: string,
+) => WorkbenchAuthorization;
+export type WorkbenchCredentialsInput = {
+  sessionId: string;
+  platform: string;
+  requester: () => HumanIdentity | undefined;
+  authorize: WorkbenchAuthorizeFn;
+};
+export type WorkbenchCredentialsFn = (
+  input: WorkbenchCredentialsInput,
+) => CredentialStore;
+export type WorkbenchGrant = Readonly<{
+  credential: string;
+  platform: string;
+  sessionId: string;
+}>;
 
 export type Grant = Readonly<{
   credential: string;

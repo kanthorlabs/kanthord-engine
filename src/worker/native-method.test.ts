@@ -33,7 +33,7 @@ import type { RepositoryTransport } from "./contract.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import { WorkerMethod } from "./contract.ts";
-import { renderWorkPrompt } from "./prompt-composer.ts";
+import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 
 const EXPECTED_CALL_COUNT = 1;
 const NO_RELEASES = 0;

@@ -10,7 +10,7 @@ import {
   type ExecutionEnd,
 } from "./execution-run.ts";
 import { CodedError } from "../kernel/errors.ts";
-import { renderWorkPrompt } from "./prompt-composer.ts";
+import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import {
   commitWork,
   discardChanges,

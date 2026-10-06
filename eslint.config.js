@@ -35,7 +35,7 @@ export default tseslint.config(
         {
           type: "service",
           pattern:
-            "src/(custody|project|mission|scheduler|worker|tracking|gateway)",
+            "src/(custody|project|mission|scheduler|worker|workbench|tracking|gateway)",
           capture: ["name"],
         },
         { type: "apps-server", pattern: "src/apps/server" },
@@ -76,8 +76,8 @@ export default tseslint.config(
                   }),
                 },
                 {
-                  to: element("service", {
-                    captured: { name: "worker" },
+                  to: element("component", {
+                    captured: { name: "agent" },
                     fileInternalPath: "pi.ts",
                   }),
                 },

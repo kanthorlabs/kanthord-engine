@@ -15,7 +15,7 @@ import {
   metadataEnv,
   resolveModel as connectorModel,
 } from "./model-connector.ts";
-import { loadPi } from "../worker/pi.ts";
+import { loadPi } from "../agent/pi.ts";
 import { Platform } from "./platforms.ts";
 
 async function createModelRuntime(input: {

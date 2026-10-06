@@ -26,7 +26,7 @@ import {
   failedVerificationRationale,
   parseJudgement,
 } from "./judgement.ts";
-import { renderWorkPrompt } from "./prompt-composer.ts";
+import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import { ActionResultKind } from "./contract.ts";

@@ -11,14 +11,14 @@ export { nodeBranchOf } from "./node-branch.ts";
 export { runVerifications, verificationPassed } from "./verification.ts";
 export { discardChanges, headCommit } from "./local-git.ts";
 export { ExecutionBudget } from "./budget.ts";
-export { renderWorkPrompt } from "./prompt-composer.ts";
+export { renderWorkPrompt } from "../agent/prompt-composer.ts";
 export { checkAgentTools, toolDeclarations } from "./tool-table.ts";
 export {
   defaultModelRuntimeFactory,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
 export type { RepositoryTransport } from "./contract.ts";
-export { loadPi } from "./pi.ts";
+export { loadPi } from "../agent/pi.ts";
 export {
   runNativeExecution,
   type NativeExecutionInput,

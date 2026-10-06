@@ -1,0 +1,269 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: workbench.session.create
+    tags:
+      - workbench
+    description: Create a workbench session with one agent of the catalog.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/workbench.session.create.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.session.create.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+  get:
+    operationId: workbench.session.list
+    tags:
+      - workbench
+    description: List the workbench sessions of an agent.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: agentName
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.session.list.Input/properties/query/prope\
+            rties/agentName"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.session.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.session.create.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            agentProvider:
+              type: string
+              minLength: 1
+            modelIdentifier:
+              type: string
+              minLength: 1
+            reasoningEffort:
+              type: string
+              enum:
+                - off
+                - minimal
+                - low
+                - medium
+                - high
+                - xhigh
+                - max
+            agentName:
+              type: string
+              minLength: 1
+          required:
+            - agentProvider
+            - modelIdentifier
+            - reasoningEffort
+            - agentName
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.session.create.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 44
+          maxLength: 44
+          pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_session_ followed by a canonical 26-character uppercase
+            ULID.
+        agentName:
+          type: string
+        configuration:
+          type: object
+          properties:
+            agentProvider:
+              type: string
+              minLength: 1
+            modelIdentifier:
+              type: string
+              minLength: 1
+            reasoningEffort:
+              type: string
+              enum:
+                - off
+                - minimal
+                - low
+                - medium
+                - high
+                - xhigh
+                - max
+          required:
+            - agentProvider
+            - modelIdentifier
+            - reasoningEffort
+          additionalProperties: false
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              id:
+                type: string
+              parentId:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              timestamp:
+                type: string
+            required:
+              - type
+              - id
+              - parentId
+              - timestamp
+            additionalProperties: {}
+        runActive:
+          type: boolean
+      required:
+        - id
+        - agentName
+        - configuration
+        - entries
+        - runActive
+      additionalProperties: false
+    workbench.session.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            agentName:
+              type: string
+              minLength: 1
+          required:
+            - agentName
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.session.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              created:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+                description: Unix epoch time in milliseconds.
+              modified:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+                description: Unix epoch time in milliseconds.
+              messageCount:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              firstMessage:
+                type: string
+            required:
+              - id
+              - name
+              - created
+              - modified
+              - messageCount
+              - firstMessage
+            additionalProperties: false
+      required:
+        - items
+      additionalProperties: false
