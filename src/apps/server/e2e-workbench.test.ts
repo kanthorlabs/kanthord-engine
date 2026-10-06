@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import type { FauxResponseStep } from "@earendil-works/pi-ai";
+import {
+  fauxAssistantMessage,
+  type FauxResponseStep,
+} from "@earendil-works/pi-ai";
+import {
+  BASE_PROMPT,
+  SWE_AGENT_PROMPT,
+  WORKBENCH_PROMPT,
+} from "../../agent/prompt-assets.ts";
 import { directClient } from "../../gateway/index.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -10,6 +19,7 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
+import { isString } from "../../kernel/values.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { scriptedProvider } from "../../agent/test-support.ts";
@@ -40,6 +50,11 @@ const CustomType = "custom";
 const ModelChange = "model_change";
 const ThinkingChange = "thinking_level_change";
 const SINGLE = 1;
+const MESSAGE_ENTRY = "message";
+const GLOBAL_PROMPT = "Prefer short answers.";
+const QUESTION = "How many objectives are open?";
+const ANSWER = "Two objectives are open.";
+const MAX_POLLS = 50;
 const FIRST_MESSAGE = "List the open objectives.";
 const identity = testHumanIdentity("kanthord", "Ulrich", "workbench-test");
 
@@ -96,8 +111,11 @@ async function workbenchFixture(
   stateDirectory = temporary(t),
 ) {
   const scripted = scriptedFactory(script);
+  const globalPrompt = join(temporary(t), "global.md");
+  writeFileSync(globalPrompt, GLOBAL_PROMPT);
   const fixture = await gatewayFixture(t, {
     stateDirectory,
+    globalPrompt,
     workbenchModelRuntimeFactory: scripted.factory,
   });
   const options = { identity };
@@ -511,4 +529,212 @@ test("the workbench credential view exposes only the credential of the configure
   await assert.rejects(view.read(ANTHROPIC), {
     code: WorkbenchErrorCode.AuthorizationRefused,
   });
+});
+
+type Fixture = Awaited<ReturnType<typeof workbenchFixture>>;
+type Entry = Record<string, unknown>;
+
+async function message(fixture: Fixture, sessionId: string, text: string) {
+  return fixture.workbench["session.message"](
+    { params: { sessionId }, query: {}, body: { text } },
+    fixture.options,
+  );
+}
+
+async function untilIdle(
+  fixture: Fixture,
+  sessionId: string,
+  after?: string,
+): Promise<Entry[]> {
+  const entries: Entry[] = [];
+  let cursor = after;
+  for (let poll = 0; poll < MAX_POLLS; poll++) {
+    const answer = completed(
+      await fixture.workbench["session.events"](
+        {
+          params: { sessionId },
+          query: cursor === undefined ? {} : { after: cursor },
+          body: null,
+        },
+        fixture.options,
+      ),
+    );
+    entries.push(...answer.entries);
+    cursor = (entries.at(-1)?.id as string | undefined) ?? cursor;
+    if (!answer.snapshot.runActive) return entries;
+  }
+  return assert.fail("The run did not end.");
+}
+
+function texts(entries: readonly Entry[], role: string): string[] {
+  return entries
+    .filter((entry) => entry.type === MESSAGE_ENTRY)
+    .map((entry) => entry.message as { role: string; content: unknown })
+    .filter((message) => message.role === role)
+    .map((message) =>
+      isString(message.content)
+        ? message.content
+        : (message.content as { type: string; text?: string }[])
+            .map((block) => block.text ?? "")
+            .join(""),
+    );
+}
+
+test("a message runs the agent while a long poll follows the run to its end", async (t) => {
+  const gate = Promise.withResolvers<void>();
+  const fixture = await workbenchFixture(t, [
+    async () => {
+      await gate.promise;
+      return fauxAssistantMessage(ANSWER);
+    },
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  const accepted = await message(fixture, sessionId, QUESTION);
+  assert.equal(accepted.type, OperationResultType.Completed);
+  assert.ok(accepted.type === OperationResultType.Completed);
+  assert.equal(accepted.status, HttpStatus.Accepted);
+  assert.deepEqual(accepted.data, { sessionId, runActive: true });
+  failed(
+    await message(fixture, sessionId, QUESTION),
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.RunActive,
+  );
+  failed(
+    await fixture.workbench["session.configure"](
+      { params: { sessionId }, query: {}, body: session.configuration },
+      fixture.options,
+    ),
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.RunActive,
+  );
+  const during = completed(
+    await fixture.workbench["session.get"](
+      { params: { sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(during.runActive, true);
+  assert.deepEqual(during.entries, session.entries);
+  const last = session.entries.at(-1)!.id;
+  const first = completed(
+    await fixture.workbench["session.events"](
+      { params: { sessionId }, query: { after: last }, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(first.snapshot.runActive, true);
+  assert.deepEqual(texts(first.entries, "user"), [QUESTION]);
+  gate.resolve();
+  const rest = await untilIdle(fixture, sessionId, last);
+  assert.deepEqual(texts(rest, "assistant"), [ANSWER]);
+  const after = completed(
+    await fixture.workbench["session.get"](
+      { params: { sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(after.runActive, false);
+  assert.deepEqual(texts(after.entries, "assistant"), [ANSWER]);
+  const call = fixture.provider.calls[0]!;
+  assert.ok(call.systemPrompt?.includes(BASE_PROMPT));
+  assert.ok(call.systemPrompt?.includes(SWE_AGENT_PROMPT));
+  assert.ok(call.systemPrompt?.includes(WORKBENCH_PROMPT));
+  assert.ok(
+    call.systemPrompt?.includes(
+      "agent prompt, base prompt, workbench prompt, global prompt",
+    ),
+  );
+  assert.ok(!call.systemPrompt?.includes(GLOBAL_PROMPT));
+  assert.ok(JSON.stringify(call.messages).includes(GLOBAL_PROMPT));
+  assert.equal(call.apiKey, PRIMARY_KEY);
+});
+
+test("an abort stops the active run", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    async (_context, options) => {
+      await new Promise<void>((resolve) =>
+        options?.signal?.addEventListener("abort", () => resolve(), {
+          once: true,
+        }),
+      );
+      return fauxAssistantMessage(ANSWER);
+    },
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  assert.deepEqual(
+    completed(
+      await fixture.workbench["session.abort"](
+        { params: { sessionId }, query: {}, body: null },
+        fixture.options,
+      ),
+    ),
+    { sessionId, runActive: false },
+  );
+  const read = completed(
+    await fixture.workbench["session.get"](
+      { params: { sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(read.runActive, false);
+  assert.ok(!texts(read.entries, "assistant").includes(ANSWER));
+});
+
+test("a session resumes after a restart with its configuration and its completed runs", async (t) => {
+  const state = temporary(t);
+  const first = await workbenchFixture(
+    t,
+    [fauxAssistantMessage(ANSWER)],
+    state,
+  );
+  const session = await createSession(first, {
+    agentProvider: BACKUP,
+    modelIdentifier: HAIKU,
+    reasoningEffort: LOW,
+  });
+  completed(await message(first, session.id, QUESTION));
+  await untilIdle(first, session.id);
+  completed(
+    await first.workbench["session.abort"](
+      { params: { sessionId: session.id }, query: {}, body: null },
+      first.options,
+    ),
+  );
+  assert.equal((await first.workbenchService.stop()) ?? undefined, undefined);
+  const second = await workbenchFixture(
+    t,
+    [fauxAssistantMessage("Still two.")],
+    state,
+  );
+  const listed = completed(
+    await second.workbench["session.list"](
+      { params: {}, query: { agentName: AGENT }, body: null },
+      second.options,
+    ),
+  );
+  assert.deepEqual(
+    listed.items.map(({ id }) => id),
+    [session.id],
+  );
+  const resumed = completed(
+    await second.workbench["session.get"](
+      { params: { sessionId: session.id }, query: {}, body: null },
+      second.options,
+    ),
+  );
+  assert.deepEqual(resumed.configuration, session.configuration);
+  assert.deepEqual(texts(resumed.entries, "assistant"), [ANSWER]);
+  completed(await message(second, session.id, "And now?"));
+  const entries = await untilIdle(
+    second,
+    session.id,
+    resumed.entries.at(-1)!.id,
+  );
+  assert.deepEqual(texts(entries, "assistant"), ["Still two."]);
+  const call = second.provider.calls[0]!;
+  assert.ok(JSON.stringify(call.messages).includes(QUESTION));
+  assert.equal(call.apiKey, BACKUP_KEY);
 });

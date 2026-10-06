@@ -46,10 +46,13 @@ import type {
 import {
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_SESSION_PREFIX,
+  WORKBENCH_EVENTS_WAIT_MS,
   WorkbenchErrorCode,
   workbenchConfigurationSchema,
   workbenchOperations,
+  type RunSnapshot,
   type SessionEntry,
+  type SessionEvents,
   type WorkbenchConfiguration,
   type WorkbenchSession,
 } from "./contract.ts";
@@ -104,7 +107,24 @@ interface OpenSession {
   agent: AgentSession | null;
   disposeAgent: () => void;
   queue: Promise<void>;
+  run: Run | null;
+  runError: string | null;
+  waiters: Set<() => void>;
 }
+
+interface Run {
+  firstEntry: number;
+  ended: boolean;
+  settled: Promise<void>;
+}
+
+const IDLE_SESSION = {
+  disposeAgent: () => {},
+  run: null,
+  runError: null,
+} as const;
+const NOT_FOUND_INDEX = -1;
+const AGENT_END = "agent_end";
 
 const defaultModelRuntimeFactory: WorkbenchModelRuntimeFactory = async (
   input,
@@ -239,8 +259,9 @@ export class WorkbenchService implements Service {
       configuration: parsed.data,
       requester: undefined,
       agent: null,
-      disposeAgent: () => {},
+      ...IDLE_SESSION,
       queue: Promise.resolve(),
+      waiters: new Set(),
     };
     this.sessions.set(sessionId, session);
     return session;
@@ -325,8 +346,13 @@ export class WorkbenchService implements Service {
       });
       pins.pinInference(agent, prompt.systemPrompt);
       const opened = agent;
+      const unsubscribeEvents = opened.subscribe((event) => {
+        if (event.type === AGENT_END && session.run) session.run.ended = true;
+        this.notify(session);
+      });
       session.agent = opened;
       session.disposeAgent = () => {
+        unsubscribeEvents();
         opened.dispose();
         unsubscribe();
         controller.abort();
@@ -365,13 +391,142 @@ export class WorkbenchService implements Service {
   }
 
   private view(session: OpenSession): WorkbenchSession {
+    const entries = this.entries(session.manager);
     return {
       id: session.id,
       agentName: session.agentName,
       configuration: { ...session.configuration },
-      entries: this.entries(session.manager),
-      runActive: false,
+      entries: this.runActive(session)
+        ? entries.slice(0, session.run!.firstEntry)
+        : entries,
+      runActive: this.runActive(session),
     };
+  }
+
+  private runActive(session: OpenSession): boolean {
+    return session.run !== null && !session.run.ended;
+  }
+
+  private notify(session: OpenSession): void {
+    for (const wake of [...session.waiters]) wake();
+  }
+
+  private requireIdle(session: OpenSession): void {
+    if (session.run)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        WorkbenchErrorCode.RunActive,
+        "The workbench session holds an active run.",
+        { sessionId: session.id },
+      );
+  }
+
+  private snapshot(session: OpenSession): RunSnapshot {
+    const state = session.agent?.state;
+    const streaming = state?.streamingMessage;
+    return {
+      streamingMessage:
+        streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
+      pendingToolCalls: state ? [...state.pendingToolCalls] : [],
+      runActive: this.runActive(session),
+      errorMessage: session.runError ?? state?.errorMessage ?? null,
+    };
+  }
+
+  private changes(session: OpenSession, after: string | undefined) {
+    const entries = this.entries(session.manager);
+    const index =
+      after === undefined
+        ? NOT_FOUND_INDEX
+        : entries.findIndex((entry) => entry.id === after);
+    return {
+      entries: entries.slice(index + 1),
+      snapshot: this.snapshot(session),
+    };
+  }
+
+  async events(
+    sessionId: string,
+    after: string | undefined,
+    context: Context,
+  ): Promise<SessionEvents> {
+    const session = await this.session(sessionId);
+    const window = new CancellationContext(
+      context,
+      Date.now() + WORKBENCH_EVENTS_WAIT_MS,
+    );
+    const wake = () => window.cancel();
+    session.waiters.add(wake);
+    try {
+      const current = this.changes(session, after);
+      if (current.entries.length) return current;
+      await window.done();
+      await new Promise((resolve) => setImmediate(resolve));
+      return this.changes(session, after);
+    } finally {
+      session.waiters.delete(wake);
+      window.cancel();
+    }
+  }
+
+  async message(
+    caller: CallerContext,
+    sessionId: string,
+    text: string,
+  ): Promise<{ sessionId: string; runActive: true }> {
+    const session = await this.session(sessionId);
+    if (session.run?.ended) await session.run.settled;
+    this.requireIdle(session);
+    const completion = Promise.withResolvers<void>();
+    const run: Run = {
+      firstEntry: session.manager.getEntries().length,
+      ended: false,
+      settled: completion.promise,
+    };
+    session.run = run;
+    session.runError = null;
+    this.notify(session);
+    const settle = () => {
+      if (session.run === run) session.run = null;
+      completion.resolve();
+      this.notify(session);
+    };
+    try {
+      await this.exclusive(session, async () => {
+        session.requester = humanOf(caller);
+        const resolved = this.dependencies.store.transaction((tx) =>
+          this.resolve(tx, session.agentName, session.configuration),
+        );
+        if (!session.agent)
+          await this.openAgent(session, resolved, caller.context);
+        assert.ok(session.agent);
+        void session.agent
+          .prompt(text, { expandPromptTemplates: false })
+          .catch((error: unknown) => {
+            session.runError =
+              error instanceof Error ? error.message : String(error);
+          })
+          .finally(settle);
+      });
+    } catch (error) {
+      settle();
+      throw error;
+    }
+    return { sessionId, runActive: true };
+  }
+
+  async abort(sessionId: string): Promise<{
+    sessionId: string;
+    runActive: false;
+  }> {
+    const session = await this.session(sessionId);
+    await this.exclusive(session, async () => {
+      const run = session.run;
+      if (!run) return;
+      await session.agent?.abort();
+      await run.settled;
+    });
+    return { sessionId, runActive: false };
   }
 
   async list(agentName: string) {
@@ -402,8 +557,9 @@ export class WorkbenchService implements Service {
       configuration,
       requester: humanOf(caller),
       agent: null,
-      disposeAgent: () => {},
+      ...IDLE_SESSION,
       queue: Promise.resolve(),
+      waiters: new Set(),
     };
     this.sessions.set(id, session);
     try {
@@ -427,7 +583,9 @@ export class WorkbenchService implements Service {
     configuration: WorkbenchConfiguration,
   ): Promise<WorkbenchConfiguration> {
     const session = await this.session(sessionId);
+    this.requireIdle(session);
     return this.exclusive(session, async () => {
+      this.requireIdle(session);
       const resolved = this.dependencies.store.transaction((tx) =>
         this.resolve(tx, session.agentName, configuration),
       );
@@ -462,6 +620,19 @@ export class WorkbenchService implements Service {
       ({ params, body }, caller) =>
         this.configure(caller, params.sessionId, body),
     );
+    registry.register(
+      workbenchOperations["session.message"],
+      ({ params, body }, caller) =>
+        this.message(caller, params.sessionId, body.text),
+    );
+    registry.register(workbenchOperations["session.abort"], ({ params }) =>
+      this.abort(params.sessionId),
+    );
+    registry.register(
+      workbenchOperations["session.events"],
+      ({ params, query }, caller) =>
+        this.events(params.sessionId, query.after, caller.context),
+    );
   }
 
   start(): Promise<Error | null> {
@@ -483,7 +654,10 @@ export class WorkbenchService implements Service {
   stop(): Promise<Error | null> {
     this.shutdown.cancel();
     this.started = false;
-    for (const session of this.sessions.values()) this.closeAgent(session);
+    for (const session of this.sessions.values()) {
+      void session.agent?.abort();
+      this.closeAgent(session);
+    }
     this.sessions.clear();
     return Promise.resolve(null);
   }

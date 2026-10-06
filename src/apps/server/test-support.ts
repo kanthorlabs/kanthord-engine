@@ -497,6 +497,7 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["workbenchModelRuntimeFactory"];
     stateDirectory?: string;
+    globalPrompt?: string;
   } = {},
 ) {
   process.umask(0o077);
@@ -504,6 +505,9 @@ export async function gatewayFixture(
     masterKey: randomBytes(32).toString("base64"),
     gateway: { port: 0, allowedHosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
+    ...(options.globalPrompt === undefined
+      ? {}
+      : { worker: { globalPrompt: options.globalPrompt } }),
   }).getProperties();
   const store = new Store(options.path ?? ":memory:");
   store.migrate([

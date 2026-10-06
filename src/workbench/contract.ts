@@ -14,7 +14,9 @@ export const WORKBENCH_SESSION_PREFIX = "workbench_session";
 export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_TIMEOUT_MS = 30000;
+export const WORKBENCH_EVENTS_WAIT_MS = 25000;
 export const WORKBENCH_MAX_BODY_BYTES = 64 * 1024;
+export const WORKBENCH_MESSAGE_MAX_BODY_BYTES = 1024 * 1024;
 
 export const WorkbenchErrorCode = {
   Stopped: "workbench.lifecycle.stopped",
@@ -64,6 +66,20 @@ export const workbenchSessionSchema = z.strictObject({
   runActive: z.boolean(),
 });
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
+
+export const runSnapshotSchema = z.strictObject({
+  streamingMessage: z.record(z.string(), z.unknown()).nullable(),
+  pendingToolCalls: z.array(z.string()),
+  runActive: z.boolean(),
+  errorMessage: z.string().nullable(),
+});
+export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
+
+export const sessionEventsSchema = z.strictObject({
+  entries: z.array(sessionEntrySchema),
+  snapshot: runSnapshotSchema,
+});
+export type SessionEvents = z.infer<typeof sessionEventsSchema>;
 
 const emptyFields = z.strictObject({});
 const sessionParams = z.strictObject({
@@ -143,5 +159,52 @@ export const workbenchOperations = {
     }),
     output: workbenchConfigurationSchema,
     description: "Replace the configuration of a workbench session.",
+  },
+  "session.message": {
+    ...workbenchMutation,
+    id: "workbench.session.message",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:sessionId/message",
+    status: HttpStatus.Accepted,
+    maxBodyBytes: WORKBENCH_MESSAGE_MAX_BODY_BYTES,
+    input: z.strictObject({
+      params: sessionParams,
+      query: emptyFields,
+      body: z.strictObject({ text: z.string().min(1) }),
+    }),
+    output: sessionParams.extend({ runActive: z.literal(true) }),
+    description:
+      "Start a run of the agent on one human message. A session holds one run at a time.",
+  },
+  "session.abort": {
+    ...workbenchOperation,
+    id: "workbench.session.abort",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:sessionId/abort",
+    mutation: true,
+    input: z.strictObject({
+      params: sessionParams,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: sessionParams.extend({ runActive: z.literal(false) }),
+    description: "Stop the active run of a workbench session.",
+  },
+  "session.events": {
+    ...workbenchOperation,
+    id: "workbench.session.events",
+    method: HttpMethod.Get,
+    path: "/api/workbench/session/:sessionId/events",
+    lifetime: OperationLifetime.Wait,
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: sessionParams,
+      query: z.strictObject({ after: z.string().min(1).optional() }),
+      body: z.null(),
+    }),
+    output: sessionEventsSchema,
+    description:
+      "Answer the session entries after `after` and the snapshot of the active run, waiting up to 25 seconds for a change.",
   },
 } as const satisfies Record<string, Operation>;

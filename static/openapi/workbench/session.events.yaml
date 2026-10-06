@@ -1,0 +1,140 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: workbench.session.events
+    tags:
+      - workbench
+    description: Answer the session entries after `after` and the snapshot of the
+      active run, waiting up to 25 seconds for a change.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: wait
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.session.events.Input/properties/params/pr\
+            operties/sessionId"
+      - name: after
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/workbench.session.events.Input/properties/query/pro\
+            perties/after"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.session.events.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.session.events.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            sessionId:
+              type: string
+              minLength: 44
+              maxLength: 44
+              pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_session_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - sessionId
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            after:
+              type: string
+              minLength: 1
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.session.events.Output:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              id:
+                type: string
+              parentId:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              timestamp:
+                type: string
+            required:
+              - type
+              - id
+              - parentId
+              - timestamp
+            additionalProperties: {}
+        snapshot:
+          type: object
+          properties:
+            streamingMessage:
+              anyOf:
+                - type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties: {}
+                - type: "null"
+            pendingToolCalls:
+              type: array
+              items:
+                type: string
+            runActive:
+              type: boolean
+            errorMessage:
+              anyOf:
+                - type: string
+                - type: "null"
+          required:
+            - streamingMessage
+            - pendingToolCalls
+            - runActive
+            - errorMessage
+          additionalProperties: false
+      required:
+        - entries
+        - snapshot
+      additionalProperties: false
