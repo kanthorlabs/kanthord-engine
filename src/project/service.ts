@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { isHumanIdentity, IdentityKind } from "../kernel/caller.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -8,6 +9,7 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { ensureDirectory } from "../kernel/files.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -100,9 +102,11 @@ import {
   hasBindingTombstone,
   writeBindingSet,
   type StoredBinding,
+  type StoredProject,
 } from "./store.ts";
 
 const SSH_UNREACHABLE_STATUS = 422;
+const PROJECTS_DIRECTORY = "projects";
 
 function refuseSshHost(address: string, pin: SshPin): void {
   const parsed = parseRepositoryAddress(address);
@@ -215,6 +219,7 @@ function uniqueSubmission(bindings: BindingSetWrite["bindings"]) {
 export interface Dependencies {
   config: Record<string, never>;
   operationalStore: Store;
+  stateDirectory: string;
   createMission: CreateMission;
   liveNodesPinning: LiveNodesPinning;
   validateEntry: ValidateEntry;
@@ -232,6 +237,7 @@ export interface Dependencies {
 export class ProjectService implements Service, ProjectBindings {
   private readonly bindings?: ProjectBindings;
   private readonly operationalStore: Store;
+  private readonly stateDirectory: string;
   private readonly createMission: CreateMission;
   private readonly liveNodesPinning: LiveNodesPinning;
   private readonly validateEntry: ValidateEntry;
@@ -246,6 +252,7 @@ export class ProjectService implements Service, ProjectBindings {
   constructor(dependencies: Dependencies) {
     this.bindings = dependencies.bindings;
     this.operationalStore = dependencies.operationalStore;
+    this.stateDirectory = dependencies.stateDirectory;
     this.createMission = dependencies.createMission;
     this.liveNodesPinning = dependencies.liveNodesPinning;
     this.validateEntry = dependencies.validateEntry;
@@ -260,8 +267,8 @@ export class ProjectService implements Service, ProjectBindings {
     dependencies.health?.register("project", () => this.healthcheck());
   }
   declare(registry: OperationRegistry): void {
-    registry.register(projectOperations.create, ({ body }, caller) =>
-      caller.commit((tx) => {
+    registry.register(projectOperations.create, ({ body }, caller) => {
+      const record = caller.commit((tx) => {
         const identity = caller.identity;
         assert.ok(
           isHumanIdentity(identity),
@@ -277,17 +284,29 @@ export class ProjectService implements Service, ProjectBindings {
           account: identity.accountId,
           name: identity.name,
         });
-        return project;
+        return this.projectRecord(project);
+      });
+      ensureDirectory(record.workspaceDirectory);
+      return record;
+    });
+    registry.register(projectOperations.list, ({ query }, caller) =>
+      caller.commit((tx) => {
+        const { items, nextCursor } = listProjects(tx, query);
+        return {
+          items: items.map((project) => this.projectRecord(project)),
+          nextCursor,
+        };
       }),
     );
-    registry.register(projectOperations.list, ({ query }, caller) =>
-      caller.commit((tx) => listProjects(tx, query)),
-    );
     registry.register(projectOperations.get, ({ params }, caller) =>
-      caller.commit((tx) => requireProject(tx, params.projectId)),
+      caller.commit((tx) =>
+        this.projectRecord(requireProject(tx, params.projectId)),
+      ),
     );
     registry.register(projectOperations.rename, ({ params, body }, caller) =>
-      caller.commit((tx) => renameProject(tx, params.projectId, body.name)),
+      caller.commit((tx) =>
+        this.projectRecord(renameProject(tx, params.projectId, body.name)),
+      ),
     );
     registry.register(
       projectOperations["bindingSet.write"],
@@ -456,6 +475,15 @@ export class ProjectService implements Service, ProjectBindings {
     } finally {
       deadline.cancel();
     }
+  }
+  private workspaceDirectoryOf(projectId: string): string {
+    return join(this.stateDirectory, PROJECTS_DIRECTORY, projectId);
+  }
+  private projectRecord(project: StoredProject) {
+    return {
+      ...project,
+      workspaceDirectory: this.workspaceDirectoryOf(project.id),
+    };
   }
   private agentItem(
     tx: Transaction,

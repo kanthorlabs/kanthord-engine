@@ -519,6 +519,7 @@ export async function gatewayFixture(
   } = composeServices({
     config,
     store,
+    stateDirectory: temporary(t),
     registry: options.registry,
     health: options.health ?? new HealthRegistry(),
     repositoryConnector: options.repositoryConnector,

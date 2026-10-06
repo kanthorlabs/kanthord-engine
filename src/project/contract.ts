@@ -414,6 +414,7 @@ const projectRecord = z.strictObject({
   name: z.string(),
   bindingSetVersion: z.number().int().positive(),
   createdAt: z.number().int(),
+  workspaceDirectory: z.string(),
 });
 const bindingRecord = z.strictObject({
   id: z.string(),

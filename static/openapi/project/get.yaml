@@ -137,11 +137,14 @@ components:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
+        workspaceDirectory:
+          type: string
       required:
         - id
         - name
         - bindingSetVersion
         - createdAt
+        - workspaceDirectory
       additionalProperties: false
     project.rename.Input:
       type: object
@@ -190,9 +193,12 @@ components:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
+        workspaceDirectory:
+          type: string
       required:
         - id
         - name
         - bindingSetVersion
         - createdAt
+        - workspaceDirectory
       additionalProperties: false

@@ -83,6 +83,7 @@ export type { RepositoryConnector } from "../../project/contract.ts";
 export function composeServices(options: {
   config: ServerConfig;
   store: Store;
+  stateDirectory: string;
   logger: Logger;
   health: HealthRegistry;
   repositoryConnector?: RepositoryConnector;
@@ -297,6 +298,7 @@ export function composeServices(options: {
   const project: ProjectService = new ProjectService({
     config: {},
     operationalStore: options.store,
+    stateDirectory: options.stateDirectory,
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     endRegistrations: (tx, projectId, resourceIdentity, now) =>
       worker.endRegistrations(tx, projectId, resourceIdentity, now),
@@ -445,6 +447,7 @@ export class Server implements Service {
       } = composeServices({
         config,
         store: this.store,
+        stateDirectory: paths.state,
         logger: this.log.logger,
         health: this.health,
       });

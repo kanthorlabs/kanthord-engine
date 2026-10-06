@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { statSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { ProjectService, type Dependencies } from "./service.ts";
 import {
@@ -20,6 +22,7 @@ import {
 } from "../kernel/store.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
+import { temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -66,6 +69,7 @@ const ACCOUNT = "alice";
 const DISPLAY_NAME = "Alice";
 const PROJECT_NAME = "alpha";
 const OTHER_NAME = "beta";
+const PROJECTS_CREATED = 2;
 const RENAMED_NAME = "renamed";
 const FIRST_PAGE_LIMIT = 1;
 const SINGLE_INSTANCE = 1;
@@ -113,6 +117,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
   ]);
   const health = new HealthRegistry();
+  const stateDirectory = temporary(t);
   const wakes: string[] = [];
   const registrationEnds: Array<{
     projectId: string;
@@ -122,6 +127,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   const project = new ProjectService({
     config: {},
     operationalStore: store,
+    stateDirectory,
     health,
     wakeup: {
       wake: (projectId) => {
@@ -187,6 +193,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   return {
     store,
     project,
+    stateDirectory,
     health,
     registry,
     caller,
@@ -310,6 +317,29 @@ test("create persists a project and creates its mission inside the caller commit
   assert.equal(missionCalls, ONE_CALL);
   assert.deepEqual(f.invoke("get", null, { projectId: record.id }), record);
   assert.deepEqual(f.invoke("list").items, [record]);
+});
+
+test("create, get and list answer the workspace directory and create answers after it exists", (t) => {
+  const f = fixture(t, { createMission: allowMission });
+  const record = f.invoke("create", { name: PROJECT_NAME });
+  assert.equal(
+    record.workspaceDirectory,
+    join(f.stateDirectory, "projects", record.id),
+  );
+  assert.ok(isAbsolute(record.workspaceDirectory));
+  assert.ok(statSync(record.workspaceDirectory).isDirectory());
+  f.invoke("create", { name: OTHER_NAME });
+  assert.equal(
+    f.invoke("get", null, { projectId: record.id }).workspaceDirectory,
+    record.workspaceDirectory,
+  );
+  const listed = f.invoke("list").items;
+  assert.equal(listed.length, PROJECTS_CREATED);
+  for (const item of listed)
+    assert.equal(
+      item.workspaceDirectory,
+      join(f.stateDirectory, "projects", item.id),
+    );
 });
 
 test("create rejects duplicate names with the holder identity without calling mission again", (t) => {
