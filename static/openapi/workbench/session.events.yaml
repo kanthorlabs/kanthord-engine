@@ -5,7 +5,8 @@ pathItem:
     tags:
       - workbench
     description: Answer the session entries after `after` and the snapshot of the
-      active run, waiting up to 25 seconds for a change.
+      active run at once when `version` differs, else wait up to 25 seconds for
+      a change.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -25,6 +26,12 @@ pathItem:
         schema:
           $ref: "#/components/schemas/workbench.session.events.Input/properties/query/pro\
             perties/after"
+      - name: version
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/workbench.session.events.Input/properties/query/pro\
+            perties/version"
     responses:
       "200":
         description: Completed result
@@ -76,6 +83,10 @@ components:
             after:
               type: string
               minLength: 1
+            version:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
           additionalProperties: false
         body:
           type: "null"
@@ -154,7 +165,12 @@ components:
             - runActive
             - errorMessage
           additionalProperties: false
+        version:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
       required:
         - entries
         - snapshot
+        - version
       additionalProperties: false

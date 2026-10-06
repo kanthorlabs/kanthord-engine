@@ -89,6 +89,7 @@ export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 export const sessionEventsSchema = z.strictObject({
   entries: z.array(sessionEntrySchema),
   snapshot: runSnapshotSchema,
+  version: z.number().int().nonnegative(),
 });
 export type SessionEvents = z.infer<typeof sessionEventsSchema>;
 
@@ -231,11 +232,14 @@ export const workbenchOperations = {
     body: false,
     input: z.strictObject({
       params: sessionParams,
-      query: z.strictObject({ after: z.string().min(1).optional() }),
+      query: z.strictObject({
+        after: z.string().min(1).optional(),
+        version: z.coerce.number().int().nonnegative().optional(),
+      }),
       body: z.null(),
     }),
     output: sessionEventsSchema,
     description:
-      "Answer the session entries after `after` and the snapshot of the active run, waiting up to 25 seconds for a change.",
+      "Answer the session entries after `after` and the snapshot of the active run at once when `version` differs, else wait up to 25 seconds for a change.",
   },
 } as const satisfies Record<string, Operation>;

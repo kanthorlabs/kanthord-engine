@@ -553,12 +553,16 @@ async function untilIdle(
 ): Promise<Entry[]> {
   const entries: Entry[] = [];
   let cursor = after;
+  let version: number | undefined;
   for (let poll = 0; poll < MAX_POLLS; poll++) {
     const answer = completed(
       await fixture.workbench["session.events"](
         {
           params: { sessionId },
-          query: cursor === undefined ? {} : { after: cursor },
+          query: {
+            ...(cursor === undefined ? {} : { after: cursor }),
+            ...(version === undefined ? {} : { version }),
+          },
           body: null,
         },
         fixture.options,
@@ -566,6 +570,7 @@ async function untilIdle(
     );
     entries.push(...answer.entries);
     cursor = (entries.at(-1)?.id as string | undefined) ?? cursor;
+    version = answer.version;
     if (!answer.snapshot.runActive) return entries;
   }
   return assert.fail("The run did not end.");
@@ -748,6 +753,7 @@ const TOOL_USE = "toolUse" as const;
 const SPARE = "spare";
 const TOOL_RESULT = "toolResult";
 const PROVIDER_ADD = "agent.enablement.provider.add";
+const FAST_POLL_MS = 2000;
 
 function toolCall(name: string, args: Parameters<typeof fauxToolCall>[1]) {
   return fauxAssistantMessage(fauxToolCall(name, args), {
@@ -787,15 +793,21 @@ const addSpare = {
 };
 
 async function untilApproval(fixture: Fixture, sessionId: string) {
+  let version: number | undefined;
   for (let poll = 0; poll < MAX_POLLS; poll++) {
     const answer = completed(
       await fixture.workbench["session.events"](
-        { params: { sessionId }, query: {}, body: null },
+        {
+          params: { sessionId },
+          query: version === undefined ? {} : { version },
+          body: null,
+        },
         fixture.options,
       ),
     );
     if (answer.snapshot.pendingApproval) return answer.snapshot.pendingApproval;
     assert.ok(answer.snapshot.runActive);
+    version = answer.version;
   }
   return assert.fail("No call waited for an approval.");
 }
@@ -809,6 +821,45 @@ async function providerNames(fixture: Fixture): Promise<string[]> {
   );
   return enablement.agentProviders.map(({ name }) => name);
 }
+
+test("a poll answers at once when the snapshot changed after the version that the client holds", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    toolCall(toolName(PROVIDER_ADD), addSpare),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  const before = completed(
+    await fixture.workbench["session.events"](
+      { params: { sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  completed(await message(fixture, sessionId, QUESTION));
+  await untilApproval(fixture, sessionId);
+  const all = completed(
+    await fixture.workbench["session.events"](
+      { params: { sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  const last = all.entries.at(-1)?.id as string;
+  const started = performance.now();
+  const answer = completed(
+    await fixture.workbench["session.events"](
+      {
+        params: { sessionId },
+        query: { after: last, version: before.version },
+        body: null,
+      },
+      fixture.options,
+    ),
+  );
+  assert.ok(performance.now() - started < FAST_POLL_MS);
+  assert.deepEqual(answer.entries, []);
+  assert.ok(answer.snapshot.pendingApproval);
+  assert.ok(answer.version > before.version);
+});
 
 test("the tool table holds the built-in tools of the agent and one tool per human operation without secret material", async (t) => {
   const fixture = await workbenchFixture(t, [fauxAssistantMessage(ANSWER)]);

@@ -125,6 +125,7 @@ interface OpenSession {
   run: Run | null;
   runError: string | null;
   waiters: Set<() => void>;
+  version: number;
   approvals: Map<string, Approval>;
 }
 
@@ -283,6 +284,7 @@ export class WorkbenchService implements Service {
       ...IDLE_SESSION,
       queue: Promise.resolve(),
       waiters: new Set(),
+      version: 0,
       approvals: new Map(),
     };
     this.sessions.set(sessionId, session);
@@ -510,6 +512,7 @@ export class WorkbenchService implements Service {
   }
 
   private notify(session: OpenSession): void {
+    session.version++;
     for (const wake of [...session.waiters]) wake();
   }
 
@@ -546,12 +549,14 @@ export class WorkbenchService implements Service {
     return {
       entries: entries.slice(index + 1),
       snapshot: this.snapshot(session),
+      version: session.version,
     };
   }
 
   async events(
     sessionId: string,
     after: string | undefined,
+    version: number | undefined,
     context: Context,
   ): Promise<SessionEvents> {
     const session = await this.session(sessionId);
@@ -563,7 +568,7 @@ export class WorkbenchService implements Service {
     session.waiters.add(wake);
     try {
       const current = this.changes(session, after);
-      if (current.entries.length) return current;
+      if (current.entries.length || version !== current.version) return current;
       await window.done();
       await new Promise((resolve) => setImmediate(resolve));
       return this.changes(session, after);
@@ -665,6 +670,7 @@ export class WorkbenchService implements Service {
       ...IDLE_SESSION,
       queue: Promise.resolve(),
       waiters: new Set(),
+      version: 0,
       approvals: new Map(),
     };
     this.sessions.set(id, session);
@@ -742,7 +748,12 @@ export class WorkbenchService implements Service {
     registry.register(
       workbenchOperations["session.events"],
       ({ params, query }, caller) =>
-        this.events(params.sessionId, query.after, caller.context),
+        this.events(
+          params.sessionId,
+          query.after,
+          query.version,
+          caller.context,
+        ),
     );
   }
 
