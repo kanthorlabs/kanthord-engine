@@ -66,6 +66,7 @@ engine/
 │   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
 │   │   ├── prompt-composer.ts  # Layer selection, attribution, digests and work prompts
 │   │   ├── pinned-layers.ts    # Context and inference pins across compaction
+│   │   ├── environment.ts      # Provider-free child process environment
 │   │   ├── test-support.ts     # Scripted offline provider
 │   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
 │   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
@@ -175,7 +176,8 @@ engine/
 │   │   ├── migrations.ts       # Empty migration list
 │   │   ├── sessions.ts         # Workbench directory, pi session list, create, find, and stored configuration
 │   │   ├── prompt.ts           # Global, base, agent, and workbench prompt composition
-│   │   └── service.ts          # Session lifecycle, configuration, credential grant, and operation handlers
+│   │   ├── tools.ts            # Built-in tools and one tool per human operation without secret material
+│   │   └── service.ts          # Session lifecycle, configuration, credential grant, runs, approvals, and operation handlers
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations

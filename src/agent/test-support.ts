@@ -3,6 +3,7 @@ import {
   createFauxCore,
   createProvider,
   envApiKeyAuth,
+  getCurrentTools,
   getSystemMessageText,
   type FauxResponseStep,
   type SimpleStreamOptions,
@@ -20,6 +21,7 @@ export function scriptedProvider(
 ) {
   assert.ok(options.providerId);
   assert.ok(options.modelIdentifier);
+  const tools: string[][] = [];
   const calls: {
     systemPrompt: ModelContext["systemPrompt"];
     messages: ModelContext["messages"];
@@ -42,6 +44,7 @@ export function scriptedProvider(
         leading?.role === systemRole
           ? getSystemMessageText(leading)
           : undefined;
+      tools.push(getCurrentTools(context.messages).map(({ name }) => name));
       calls.push({
         systemPrompt,
         messages: structuredClone(context.messages),
@@ -59,6 +62,6 @@ export function scriptedProvider(
     },
   });
   core.setResponses(script);
-  return { provider, calls };
+  return { provider, calls, tools };
 }
 export type ScriptedProvider = ReturnType<typeof scriptedProvider>;

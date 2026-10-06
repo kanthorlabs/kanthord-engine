@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
   fauxAssistantMessage,
+  fauxToolCall,
   type FauxResponseStep,
 } from "@earendil-works/pi-ai";
 import {
@@ -27,6 +28,7 @@ import { llmOperations } from "../../llm/contract.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
   WORKBENCH_CONFIGURATION_ENTRY,
+  WORKBENCH_REJECTION_REASON,
   WorkbenchErrorCode,
   workbenchOperations,
   type WorkbenchConfiguration,
@@ -737,4 +739,257 @@ test("a session resumes after a restart with its configuration and its completed
   const call = second.provider.calls[0]!;
   assert.ok(JSON.stringify(call.messages).includes(QUESTION));
   assert.equal(call.apiKey, BACKUP_KEY);
+});
+
+const TOOL_USE = "toolUse" as const;
+const SPARE = "spare";
+const TOOL_RESULT = "toolResult";
+const PROVIDER_ADD = "agent.enablement.provider.add";
+
+function toolCall(name: string, args: Parameters<typeof fauxToolCall>[1]) {
+  return fauxAssistantMessage(fauxToolCall(name, args), {
+    stopReason: TOOL_USE,
+  });
+}
+
+function toolResults(entries: readonly Entry[]) {
+  return entries
+    .filter((entry) => entry.type === MESSAGE_ENTRY)
+    .map(
+      (entry) =>
+        entry.message as {
+          role: string;
+          toolName?: string;
+          isError?: boolean;
+          content: { type: string; text?: string }[];
+        },
+    )
+    .filter((message) => message.role === TOOL_RESULT)
+    .map((message) => ({
+      toolName: message.toolName,
+      isError: message.isError,
+      text: message.content.map((block) => block.text ?? "").join(""),
+    }));
+}
+
+const addSpare = {
+  params: { agentName: AGENT },
+  query: {},
+  body: {
+    expectedRevision: 1,
+    name: SPARE,
+    provider: ANTHROPIC,
+    credential: BACKUP_CREDENTIAL,
+  },
+};
+
+async function untilApproval(fixture: Fixture, sessionId: string) {
+  for (let poll = 0; poll < MAX_POLLS; poll++) {
+    const answer = completed(
+      await fixture.workbench["session.events"](
+        { params: { sessionId }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    if (answer.snapshot.pendingApproval) return answer.snapshot.pendingApproval;
+    assert.ok(answer.snapshot.runActive);
+  }
+  return assert.fail("No call waited for an approval.");
+}
+
+async function providerNames(fixture: Fixture): Promise<string[]> {
+  const enablement = completed(
+    await fixture.agent["enablement.get"](
+      { params: { agentName: AGENT }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  return enablement.agentProviders.map(({ name }) => name);
+}
+
+test("the tool table holds the built-in tools of the agent and one tool per human operation without secret material", async (t) => {
+  const fixture = await workbenchFixture(t, [fauxAssistantMessage(ANSWER)]);
+  const session = await createSession(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  await untilIdle(fixture, session.id);
+  const tools = fixture.provider.tools[0]!;
+  for (const name of [
+    "read",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls",
+    "bash",
+    "agent.get",
+    "agent.enablement.put",
+    "mission.node.list",
+    "project.create",
+    "llm.credential.list",
+    "llm.credential.update_metadata",
+    "workbench.session.get",
+  ])
+    assert.ok(tools.includes(name), name);
+  for (const name of [
+    "llm.credential.create",
+    "llm.credential.rotate",
+    "llm.credential.check",
+    "llm.credential.login_code",
+    "repository.credential.create",
+    "repository.credential.rotate",
+    "repository.credential.check",
+    "storage.credential.create",
+    "storage.credential.rotate",
+    "storage.credential.check",
+    "worker.handover",
+    "mission.evidence.submit",
+    "scheduler.work.pull",
+    "evidence-upload",
+  ])
+    assert.ok(!tools.includes(name), name);
+});
+
+test("a read tool and a built-in tool run at once and a refusal returns the owning service code", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    toolCall("agent.enablement.get", {
+      params: { agentName: AGENT },
+      query: {},
+      body: null,
+    }),
+    toolCall("agent.get", {
+      params: { agentName: "unknown@1" },
+      query: {},
+      body: null,
+    }),
+    toolCall("ls", { path: "." }),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id);
+  const results = toolResults(entries);
+  assert.deepEqual(
+    results.map(({ toolName, isError }) => ({ toolName, isError })),
+    [
+      { toolName: "agent.enablement.get", isError: false },
+      { toolName: "agent.get", isError: true },
+      { toolName: "ls", isError: false },
+    ],
+  );
+  assert.ok(results[0]!.text.includes(PRIMARY_CREDENTIAL));
+  assert.ok(results[1]!.text.startsWith("agent.catalog.not_found:"));
+  assert.deepEqual(texts(entries, "assistant").at(-1), ANSWER);
+});
+
+test("a mutation tool runs only after the human approves the call", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    toolCall(PROVIDER_ADD, addSpare),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const pending = await untilApproval(fixture, sessionId);
+  assert.equal(pending.operationId, PROVIDER_ADD);
+  assert.deepEqual(pending.input, addSpare);
+  assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
+  failed(
+    await fixture.workbench["session.approve"](
+      {
+        params: { sessionId },
+        query: {},
+        body: { toolCallId: "absent", approved: true },
+      },
+      fixture.options,
+    ),
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ApprovalNotFound,
+  );
+  assert.deepEqual(
+    completed(
+      await fixture.workbench["session.approve"](
+        {
+          params: { sessionId },
+          query: {},
+          body: { toolCallId: pending.toolCallId, approved: true },
+        },
+        fixture.options,
+      ),
+    ),
+    { sessionId, toolCallId: pending.toolCallId, approved: true },
+  );
+  const entries = await untilIdle(fixture, sessionId);
+  assert.deepEqual(
+    toolResults(entries).map(({ isError }) => isError),
+    [false],
+  );
+  assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP, SPARE]);
+});
+
+test("a rejected call reaches the agent as a blocked call", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    toolCall(PROVIDER_ADD, addSpare),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const pending = await untilApproval(fixture, sessionId);
+  completed(
+    await fixture.workbench["session.approve"](
+      {
+        params: { sessionId },
+        query: {},
+        body: { toolCallId: pending.toolCallId, approved: false },
+      },
+      fixture.options,
+    ),
+  );
+  const entries = await untilIdle(fixture, sessionId);
+  assert.deepEqual(toolResults(entries), [
+    {
+      toolName: PROVIDER_ADD,
+      isError: true,
+      text: WORKBENCH_REJECTION_REASON,
+    },
+  ]);
+  assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
+});
+
+test("an abort rejects every pending approval", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    toolCall(PROVIDER_ADD, addSpare),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const pending = await untilApproval(fixture, sessionId);
+  completed(
+    await fixture.workbench["session.abort"](
+      { params: { sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  const answer = completed(
+    await fixture.workbench["session.events"](
+      { params: { sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(answer.snapshot.runActive, false);
+  assert.equal(answer.snapshot.pendingApproval, null);
+  failed(
+    await fixture.workbench["session.approve"](
+      {
+        params: { sessionId },
+        query: {},
+        body: { toolCallId: pending.toolCallId, approved: true },
+      },
+      fixture.options,
+    ),
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ApprovalNotFound,
+  );
+  assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
 });

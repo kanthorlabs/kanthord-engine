@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
-import { findEnvKeys } from "@earendil-works/pi-ai/compat";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Diagnostic } from "../kernel/errors.ts";
 import type { ExecutionBudget } from "./budget.ts";
@@ -15,32 +13,13 @@ import {
   EVIDENCE_UPLOAD_PARAMETERS,
 } from "./host-tools.ts";
 export { ToolSource } from "../agent/contract.ts";
+import { childEnvironment } from "../agent/environment.ts";
+export { childEnvironment } from "../agent/environment.ts";
 
 const SUCCESS = 0;
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const COMMAND_ABSENT = "ENOENT";
-export function childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  assert.ok(env);
-  const output = { ...env };
-  const providerEnv = Object.fromEntries(
-    Object.entries(env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-  for (const provider of getBuiltinProviders())
-    for (const name of findEnvKeys(provider, providerEnv) ?? [])
-      delete output[name];
-  for (const name of [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_OAUTH_TOKEN",
-  ])
-    delete output[name];
-  assert.notEqual(output, env);
-  return output;
-}
-
 export function sessionTools(
   pi: PiCodingAgent,
   agentName: string,

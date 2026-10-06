@@ -122,6 +122,25 @@ components:
               type: array
               items:
                 type: string
+            pendingApproval:
+              anyOf:
+                - type: object
+                  properties:
+                    toolCallId:
+                      type: string
+                    operationId:
+                      type: string
+                    input:
+                      type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties: {}
+                  required:
+                    - toolCallId
+                    - operationId
+                    - input
+                  additionalProperties: false
+                - type: "null"
             runActive:
               type: boolean
             errorMessage:
@@ -131,6 +150,7 @@ components:
           required:
             - streamingMessage
             - pendingToolCalls
+            - pendingApproval
             - runActive
             - errorMessage
           additionalProperties: false

@@ -349,6 +349,12 @@ export function composeServices(options: {
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
     workbenchCredentials: (input) => custody.workbenchCredentials(input),
     modelRuntimeFactory: options.workbenchModelRuntimeFactory,
+    operations: () => registry.all().map(({ operation }) => operation),
+    invoke: (operation, input, clientOptions) =>
+      directClient({ [operation.id]: operation }, invocation)[operation.id]!(
+        input as never,
+        clientOptions,
+      ),
   });
   scheduler.declare(registry);
   llm.declare(registry);

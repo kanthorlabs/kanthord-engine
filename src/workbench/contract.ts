@@ -25,6 +25,7 @@ export const WorkbenchErrorCode = {
   RunActive: "workbench.session.run_active",
   SetupRefused: "workbench.session.setup_refused",
   AuthorizationRefused: "workbench.authorization.refused",
+  ApprovalNotFound: "workbench.session.approval_not_found",
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
@@ -67,9 +68,19 @@ export const workbenchSessionSchema = z.strictObject({
 });
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
 
+export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
+
+export const pendingApprovalSchema = z.strictObject({
+  toolCallId: z.string(),
+  operationId: z.string(),
+  input: z.record(z.string(), z.unknown()),
+});
+export type PendingApproval = z.infer<typeof pendingApprovalSchema>;
+
 export const runSnapshotSchema = z.strictObject({
   streamingMessage: z.record(z.string(), z.unknown()).nullable(),
   pendingToolCalls: z.array(z.string()),
+  pendingApproval: pendingApprovalSchema.nullable(),
   runActive: z.boolean(),
   errorMessage: z.string().nullable(),
 });
@@ -189,6 +200,26 @@ export const workbenchOperations = {
     }),
     output: sessionParams.extend({ runActive: z.literal(false) }),
     description: "Stop the active run of a workbench session.",
+  },
+  "session.approve": {
+    ...workbenchMutation,
+    id: "workbench.session.approve",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:sessionId/approve",
+    input: z.strictObject({
+      params: sessionParams,
+      query: emptyFields,
+      body: z.strictObject({
+        toolCallId: z.string().min(1),
+        approved: z.boolean(),
+      }),
+    }),
+    output: sessionParams.extend({
+      toolCallId: z.string(),
+      approved: z.boolean(),
+    }),
+    description:
+      "Approve or reject the pending call of a mutation tool of the active run.",
   },
   "session.events": {
     ...workbenchOperation,

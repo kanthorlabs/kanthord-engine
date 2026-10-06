@@ -16,7 +16,11 @@ import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { HumanIdentity } from "../kernel/caller.ts";
 import { isHumanIdentity } from "../kernel/caller.ts";
-import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
+import type {
+  CallerContext,
+  Operation,
+  OperationRegistry,
+} from "../kernel/operation.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -47,9 +51,11 @@ import {
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_SESSION_PREFIX,
   WORKBENCH_EVENTS_WAIT_MS,
+  WORKBENCH_REJECTION_REASON,
   WorkbenchErrorCode,
   workbenchConfigurationSchema,
   workbenchOperations,
+  type PendingApproval,
   type RunSnapshot,
   type SessionEntry,
   type SessionEvents,
@@ -57,6 +63,12 @@ import {
   type WorkbenchSession,
 } from "./contract.ts";
 import { composeWorkbenchPrompt } from "./prompt.ts";
+import {
+  builtinTools,
+  operationTool,
+  toolOperations,
+  type InvokeOperation,
+} from "./tools.ts";
 import {
   createSession,
   findSession,
@@ -89,6 +101,8 @@ export interface Dependencies {
   credentialMetadata: CredentialMetadataFn;
   workbenchCredentials: WorkbenchCredentialsFn;
   modelRuntimeFactory?: WorkbenchModelRuntimeFactory;
+  operations: () => readonly Operation[];
+  invoke: InvokeOperation;
 }
 
 interface Resolved {
@@ -110,6 +124,12 @@ interface OpenSession {
   run: Run | null;
   runError: string | null;
   waiters: Set<() => void>;
+  approvals: Map<string, Approval>;
+}
+
+interface Approval {
+  approval: PendingApproval;
+  decide: (approved: boolean) => void;
 }
 
 interface Run {
@@ -262,6 +282,7 @@ export class WorkbenchService implements Service {
       ...IDLE_SESSION,
       queue: Promise.resolve(),
       waiters: new Set(),
+      approvals: new Map(),
     };
     this.sessions.set(sessionId, session);
     return session;
@@ -332,19 +353,56 @@ export class WorkbenchService implements Service {
         context,
       );
       const pins = pinnedLayers({ global: prompt.global, project: null });
+      const builtin = builtinTools(
+        await loadPi(),
+        session.agentName,
+        session.place.cwd,
+      );
+      const mutations = new Map<string, Operation>();
+      const operations = toolOperations(this.dependencies.operations()).map(
+        (operation) => {
+          if (operation.mutation) mutations.set(operation.id, operation);
+          return operationTool(
+            operation,
+            this.dependencies.invoke,
+            () => session.requester,
+          );
+        },
+      );
       agent = await openSession({
         cwd: session.place.cwd,
         modelRuntime: runtime,
         model,
         thinkingLevel: session.configuration.reasoningEffort,
         systemPrompt: prompt.systemPrompt,
-        allowlist: [],
-        customTools: [],
+        allowlist: [
+          ...builtin.allowlist,
+          ...operations.map((tool) => tool.name),
+        ],
+        customTools: [...builtin.customTools, ...operations],
         extensions: [pins.extension],
         context,
         sessionManager: session.manager,
       });
       pins.pinInference(agent, prompt.systemPrompt);
+      const beforeToolCall = agent.agent.beforeToolCall;
+      agent.agent.beforeToolCall = async (call, signal) => {
+        const previous = await beforeToolCall?.(call, signal);
+        const operation = mutations.get(call.toolCall.name);
+        if (previous?.block || !operation) return previous;
+        const approved = await this.approval(
+          session,
+          {
+            toolCallId: call.toolCall.id,
+            operationId: operation.id,
+            input: JSON.parse(JSON.stringify(call.args ?? {})),
+          },
+          signal,
+        );
+        return approved
+          ? previous
+          : { block: true, reason: WORKBENCH_REJECTION_REASON };
+      };
       const opened = agent;
       const unsubscribeEvents = opened.subscribe((event) => {
         if (event.type === AGENT_END && session.run) session.run.ended = true;
@@ -365,7 +423,49 @@ export class WorkbenchService implements Service {
     }
   }
 
+  private approval(
+    session: OpenSession,
+    approval: PendingApproval,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    const decision = Promise.withResolvers<boolean>();
+    const reject = () => decide(false);
+    const decide = (approved: boolean) => {
+      signal?.removeEventListener("abort", reject);
+      session.approvals.delete(approval.toolCallId);
+      decision.resolve(approved);
+      this.notify(session);
+    };
+    if (signal?.aborted) return Promise.resolve(false);
+    signal?.addEventListener("abort", reject, { once: true });
+    session.approvals.set(approval.toolCallId, { approval, decide });
+    this.notify(session);
+    return decision.promise;
+  }
+
+  private rejectApprovals(session: OpenSession): void {
+    for (const { decide } of [...session.approvals.values()]) decide(false);
+  }
+
+  approve(
+    sessionId: string,
+    toolCallId: string,
+    approved: boolean,
+  ): { sessionId: string; toolCallId: string; approved: boolean } {
+    const pending = this.sessions.get(sessionId)?.approvals.get(toolCallId);
+    if (!pending)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        WorkbenchErrorCode.ApprovalNotFound,
+        "The workbench session holds no pending call with this identity.",
+        { sessionId, toolCallId },
+      );
+    pending.decide(approved);
+    return { sessionId, toolCallId, approved };
+  }
+
   private closeAgent(session: OpenSession): void {
+    this.rejectApprovals(session);
     session.disposeAgent();
     session.disposeAgent = () => {};
     session.agent = null;
@@ -428,6 +528,8 @@ export class WorkbenchService implements Service {
       streamingMessage:
         streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
       pendingToolCalls: state ? [...state.pendingToolCalls] : [],
+      pendingApproval:
+        session.approvals.values().next().value?.approval ?? null,
       runActive: this.runActive(session),
       errorMessage: session.runError ?? state?.errorMessage ?? null,
     };
@@ -522,6 +624,7 @@ export class WorkbenchService implements Service {
     const session = await this.session(sessionId);
     await this.exclusive(session, async () => {
       const run = session.run;
+      this.rejectApprovals(session);
       if (!run) return;
       await session.agent?.abort();
       await run.settled;
@@ -560,6 +663,7 @@ export class WorkbenchService implements Service {
       ...IDLE_SESSION,
       queue: Promise.resolve(),
       waiters: new Set(),
+      approvals: new Map(),
     };
     this.sessions.set(id, session);
     try {
@@ -624,6 +728,11 @@ export class WorkbenchService implements Service {
       workbenchOperations["session.message"],
       ({ params, body }, caller) =>
         this.message(caller, params.sessionId, body.text),
+    );
+    registry.register(
+      workbenchOperations["session.approve"],
+      ({ params, body }) =>
+        this.approve(params.sessionId, body.toolCallId, body.approved),
     );
     registry.register(workbenchOperations["session.abort"], ({ params }) =>
       this.abort(params.sessionId),
