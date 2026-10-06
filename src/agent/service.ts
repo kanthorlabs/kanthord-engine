@@ -10,12 +10,14 @@ import {
   configurationError,
   configurationIssues,
   effectiveConfiguration,
+  providerModels,
   validateEffectiveConfig,
   validateProvider,
 } from "./configuration.ts";
 import {
   agentOperations,
   agentEnablementSchema,
+  agentModelSchema,
   effectiveConfigurationSchema,
   AgentErrorCode,
   AGENT_PROVIDER_TARGET_KIND,
@@ -391,6 +393,25 @@ export class AgentComponent {
       throw configurationError(agentName, AgentErrorCode.InvalidConfiguration);
   }
 
+  private listModels(tx: Transaction, agentName: string, providerName: string) {
+    requireAgent(agentName);
+    const current = requireEnablement(tx, agentName);
+    const item = current.agentProviders.find(
+      ({ name }) => name === providerName,
+    );
+    if (!item)
+      throw configurationError(agentName, AgentErrorCode.ProviderNotFound);
+    return {
+      items: providerModels(this.dependencies, tx, item).map(
+        ({ id, reasoningLevels }) =>
+          agentModelSchema.parse({
+            modelIdentifier: id,
+            reasoningEfforts: reasoningLevels,
+          }),
+      ),
+    };
+  }
+
   agentView(
     tx: Transaction,
     agentName: string,
@@ -601,6 +622,13 @@ export class AgentComponent {
             params.providerName,
             body.expectedRevision,
           ),
+        ),
+    );
+    registry.register(
+      agentOperations["enablement.provider.model.list"],
+      ({ params }, caller) =>
+        caller.commit((tx) =>
+          this.listModels(tx, params.agentName, params.providerName),
         ),
     );
   }

@@ -8,6 +8,7 @@ import {
   agentProviderKindSchema,
   reasoningEffortSchema,
   type AgentProviderItem,
+  type ApprovedModel,
   type ApprovedModelsFn,
   type CustodySuitability,
   type DefaultConfiguration,
@@ -72,6 +73,22 @@ export function validateProvider(
   }
 }
 
+export function providerModels(
+  dependencies: ConfigurationDependencies,
+  tx: Transaction,
+  item: AgentProviderItem,
+): ApprovedModel[] {
+  if (item.provider === AgentProviderKind.OpenaiCompatible)
+    return [...(dependencies.approvedModels(tx, item.credential) ?? [])];
+  const provider = agentProviderKindSchema
+    .exclude([AgentProviderKind.OpenaiCompatible])
+    .parse(item.provider);
+  return getBuiltinModels(provider).map((model) => ({
+    id: model.id,
+    reasoningLevels: getSupportedThinkingLevels(model),
+  }));
+}
+
 function modelLevels(
   dependencies: ConfigurationDependencies,
   tx: Transaction,
@@ -79,22 +96,11 @@ function modelLevels(
   item: AgentProviderItem,
   modelIdentifier: string,
 ): readonly string[] {
-  if (item.provider === AgentProviderKind.OpenaiCompatible) {
-    const model = dependencies
-      .approvedModels(tx, item.credential)
-      ?.find(({ id }) => id === modelIdentifier);
-    if (!model)
-      throw configurationError(agentName, AgentErrorCode.ModelUnknown);
-    return model.reasoningLevels;
-  }
-  const provider = agentProviderKindSchema
-    .exclude([AgentProviderKind.OpenaiCompatible])
-    .parse(item.provider);
-  const model = getBuiltinModels(provider).find(
+  const model = providerModels(dependencies, tx, item).find(
     ({ id }) => id === modelIdentifier,
   );
   if (!model) throw configurationError(agentName, AgentErrorCode.ModelUnknown);
-  return getSupportedThinkingLevels(model);
+  return model.reasoningLevels;
 }
 
 export function validateEffectiveConfig(

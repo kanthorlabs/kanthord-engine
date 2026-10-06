@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import {
+  getBuiltinModels,
+  getBuiltinProviders,
+} from "@earendil-works/pi-ai/providers/all";
 import { test, type TestContext } from "node:test";
 import { AgentComponent, type Dependencies } from "./service.ts";
 import {
@@ -1032,4 +1036,121 @@ test("agentView resolves valid configurations and returns precise issues without
     valid: false,
     issues: [{ path: [], code: AgentErrorCode.Unavailable }],
   });
+});
+
+const MODEL_LIST = "enablement.provider.model.list";
+
+test("model list answers the built-in catalog of the provider with its supported levels", (t) => {
+  const f = enablementFixture(t, {
+    approvedModels: () => {
+      throw new Error("Built-in catalog must not read metadata.");
+    },
+  });
+  f.invoke("enablement.put", putBody);
+  const { items } = f.invoke(MODEL_LIST, null, {
+    agentName: AGENT,
+    providerName: provider.name,
+  });
+  const catalog = getBuiltinModels(AgentProviderKind.Anthropic);
+  assert.deepEqual(
+    items.map(({ modelIdentifier }) => modelIdentifier),
+    catalog.map(({ id }) => id),
+  );
+  const listed = items.find(({ modelIdentifier }) => modelIdentifier === MODEL);
+  assert.ok(listed);
+  assert.deepEqual(
+    listed.reasoningEfforts,
+    getSupportedThinkingLevels(catalog.find(({ id }) => id === MODEL)!),
+  );
+  assert.equal(f.commits(), SECOND_REVISION);
+});
+
+test("model list answers the approved models and reasoning levels of an openai-compatible credential", (t) => {
+  let models: ApprovedModel[] | null = [
+    { id: MODEL, reasoningLevels: [DEFAULT_REASONING, "high"] },
+    { id: "plain", reasoningLevels: [] },
+  ];
+  const requested: string[] = [];
+  const f = enablementFixture(t, {
+    approvedModels: (_tx, credential) => {
+      requested.push(credential);
+      return models;
+    },
+  });
+  f.invoke("enablement.put", {
+    ...putBody,
+    agentProviders: [
+      { ...provider, provider: AgentProviderKind.OpenaiCompatible },
+    ],
+  });
+  const params = { agentName: AGENT, providerName: provider.name };
+  assert.deepEqual(f.invoke(MODEL_LIST, null, params).items, [
+    {
+      modelIdentifier: MODEL,
+      reasoningEfforts: [DEFAULT_REASONING, "high"],
+    },
+    { modelIdentifier: "plain", reasoningEfforts: [] },
+  ]);
+  assert.ok(
+    requested.every((credential) => credential === provider.credential),
+  );
+  models = null;
+  assert.deepEqual(f.invoke(MODEL_LIST, null, params).items, []);
+});
+
+test("model list refuses an unknown agent, an absent enablement and an absent provider", (t) => {
+  const f = enablementFixture(t);
+  const params = { agentName: AGENT, providerName: provider.name };
+  refuses(
+    () => f.invoke(MODEL_LIST, null, { ...params, agentName: UNKNOWN }),
+    AgentErrorCode.AgentNotFound,
+    HttpStatus.NotFound,
+  );
+  refuses(
+    () => f.invoke(MODEL_LIST, null, params),
+    AgentErrorCode.NotFound,
+    HttpStatus.NotFound,
+  );
+  f.invoke("enablement.put", putBody);
+  refuses(
+    () => f.invoke(MODEL_LIST, null, { ...params, providerName: UNKNOWN }),
+    AgentErrorCode.ProviderNotFound,
+    HttpStatus.NotFound,
+  );
+});
+
+test("every listed model and reasoning effort passes the configuration validation", (t) => {
+  const approved = [
+    { id: MODEL, reasoningLevels: [DEFAULT_REASONING, "low", "high"] },
+    { id: "plain", reasoningLevels: [DEFAULT_REASONING] },
+  ];
+  const f = enablementFixture(t, { approvedModels: () => approved });
+  const custom = {
+    name: "custom",
+    provider: AgentProviderKind.OpenaiCompatible,
+    credential: "gateway",
+  };
+  f.invoke("enablement.put", {
+    ...putBody,
+    agentProviders: [provider, custom],
+  });
+  const row = f.invoke("enablement.get");
+  for (const item of row.agentProviders) {
+    const { items } = f.invoke(MODEL_LIST, null, {
+      agentName: AGENT,
+      providerName: item.name,
+    });
+    assert.ok(items.length);
+    for (const { modelIdentifier, reasoningEfforts } of items)
+      for (const reasoningEffort of reasoningEfforts)
+        f.store.transaction((tx) =>
+          assert.doesNotThrow(() =>
+            f.agent.validateEntry(tx, AGENT, {
+              agentProvider: item.name,
+              modelIdentifier,
+              reasoningEffort,
+            }),
+          ),
+        );
+  }
 });

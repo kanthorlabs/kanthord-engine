@@ -14,6 +14,8 @@ paths:
     $ref: ./openapi/agent/enablement.list.yaml#/pathItem
   /api/agent/enablement/{agentName}/provider:
     $ref: ./openapi/agent/enablement.provider.add.yaml#/pathItem
+  /api/agent/enablement/{agentName}/provider/{providerName}/model:
+    $ref: ./openapi/agent/enablement.provider.model.list.yaml#/pathItem
   /api/agent/enablement/{agentName}/provider/{providerName}:
     $ref: ./openapi/agent/enablement.provider.remove.yaml#/pathItem
   /api/agent/{agentName}:

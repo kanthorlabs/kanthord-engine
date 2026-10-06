@@ -185,6 +185,11 @@ export const effectiveConfigurationSchema = z
   })
   .describe(CONFIGURATION_DESCRIPTION);
 
+export const agentModelSchema = z.strictObject({
+  modelIdentifier: z.string().min(1),
+  reasoningEfforts: z.array(reasoningEffortSchema),
+});
+
 export const agentDeclarationSchema = z.strictObject({
   agentName: z.string().min(1),
   configurationSchema: z.record(z.string(), z.unknown()),
@@ -349,5 +354,24 @@ export const agentOperations = {
     }),
     description:
       "Remove an unused named provider, retaining at least one provider.",
+  },
+  "enablement.provider.model.list": {
+    ...enablementOperation,
+    id: "agent.enablement.provider.model.list",
+    method: HttpMethod.Get,
+    path: "/api/agent/enablement/:agentName/provider/:providerName/model",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: z.strictObject({
+        agentName: z.string().min(1),
+        providerName: z.string().min(1),
+      }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: z.strictObject({ items: z.array(agentModelSchema) }),
+    description:
+      "List the models and reasoning efforts of one agent provider of an agent enablement.",
   },
 } as const satisfies Record<string, Operation>;

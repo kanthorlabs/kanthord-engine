@@ -38,6 +38,7 @@ const providerAddBodySchema = z.strictObject({
 
 const ENABLEMENT = "enablement";
 const PROVIDER = "provider";
+const MODEL = "model";
 const LIST = "list";
 const GET = "get";
 const PUT = "put";
@@ -59,6 +60,8 @@ const REMOVE_TOKEN_REQUIRED = "cli.agent.enablement.remove.token_required";
 const ADD_TOKEN_REQUIRED = "cli.agent.enablement.provider.add.token_required";
 const PROVIDER_REMOVE_TOKEN_REQUIRED =
   "cli.agent.enablement.provider.remove.token_required";
+const MODEL_LIST_TOKEN_REQUIRED =
+  "cli.agent.enablement.provider.model.list.token_required";
 const LIST_INDETERMINATE = "cli.agent.enablement.list.indeterminate";
 const GET_INDETERMINATE = "cli.agent.enablement.get.indeterminate";
 const PUT_INDETERMINATE = "cli.agent.enablement.put.indeterminate";
@@ -68,6 +71,8 @@ const REMOVE_INDETERMINATE = "cli.agent.enablement.remove.indeterminate";
 const ADD_INDETERMINATE = "cli.agent.enablement.provider.add.indeterminate";
 const PROVIDER_REMOVE_INDETERMINATE =
   "cli.agent.enablement.provider.remove.indeterminate";
+const MODEL_LIST_INDETERMINATE =
+  "cli.agent.enablement.provider.model.list.indeterminate";
 const ENABLE_INVALID_REVISION = "cli.agent.enablement.enable.invalid_revision";
 const DISABLE_INVALID_REVISION =
   "cli.agent.enablement.disable.invalid_revision";
@@ -241,6 +246,21 @@ async function providerRemove(
   process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
+async function providerModelList(
+  agentName: string,
+  providerName: string,
+  command: Command,
+): Promise<void> {
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, MODEL_LIST_TOKEN_REQUIRED);
+  const result = await httpClient(agentOperations, endpoint, token)[
+    "enablement.provider.model.list"
+  ]({ params: { agentName, providerName }, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, MODEL_LIST_INDETERMINATE))}\n`,
+  );
+}
+
 export function addAgentCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -366,5 +386,18 @@ export function addAgentCommand(program: Command): void {
     .action(
       (agentName: string, providerName: string, _options, command: Command) =>
         providerRemove(agentName, providerName, command),
+    );
+  const model = provider
+    .command(MODEL)
+    .description("Inspect the models of a provider");
+  model.action(() => model.help());
+  model
+    .command(LIST)
+    .description("List the models of a provider as JSON")
+    .argument("<agent-name>", "Agent name")
+    .argument("<provider-name>", "Provider name")
+    .action(
+      (agentName: string, providerName: string, _options, command: Command) =>
+        providerModelList(agentName, providerName, command),
     );
 }
