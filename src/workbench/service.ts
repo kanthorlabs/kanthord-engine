@@ -68,6 +68,7 @@ import {
   operationTool,
   toolOperations,
   type InvokeOperation,
+  toolName,
 } from "./tools.ts";
 import {
   createSession,
@@ -361,7 +362,8 @@ export class WorkbenchService implements Service {
       const mutations = new Map<string, Operation>();
       const operations = toolOperations(this.dependencies.operations()).map(
         (operation) => {
-          if (operation.mutation) mutations.set(operation.id, operation);
+          if (operation.mutation)
+            mutations.set(toolName(operation.id), operation);
           return operationTool(
             operation,
             this.dependencies.invoke,

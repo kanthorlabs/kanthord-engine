@@ -59,6 +59,10 @@ function parameters(operation: Operation): TSchema {
   return schema as unknown as TSchema;
 }
 
+export function toolName(operationId: string): string {
+  return operationId.replaceAll(".", "--");
+}
+
 export function operationTool(
   operation: Operation,
   invoke: InvokeOperation,
@@ -66,7 +70,7 @@ export function operationTool(
 ): ToolDefinition {
   assert.equal(operation.access, AccessPolicy.Human);
   return {
-    name: operation.id,
+    name: toolName(operation.id),
     label: operation.id,
     description: operation.description,
     parameters: parameters(operation),

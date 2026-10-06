@@ -33,7 +33,10 @@ import {
   workbenchOperations,
   type WorkbenchConfiguration,
 } from "../../workbench/contract.ts";
-import type { WorkbenchModelRuntimeFactory } from "../../workbench/index.ts";
+import {
+  toolName,
+  type WorkbenchModelRuntimeFactory,
+} from "../../workbench/index.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const AGENT = "swe@1";
@@ -829,7 +832,7 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
     "llm.credential.update_metadata",
     "workbench.session.get",
   ])
-    assert.ok(tools.includes(name), name);
+    assert.ok(tools.includes(toolName(name)), name);
   for (const name of [
     "llm.credential.create",
     "llm.credential.rotate",
@@ -846,17 +849,18 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
     "scheduler.work.pull",
     "evidence-upload",
   ])
-    assert.ok(!tools.includes(name), name);
+    assert.ok(!tools.includes(toolName(name)), name);
+  for (const name of tools) assert.match(name, /^[a-zA-Z0-9_-]{1,64}$/);
 });
 
 test("a read tool and a built-in tool run at once and a refusal returns the owning service code", async (t) => {
   const fixture = await workbenchFixture(t, [
-    toolCall("agent.enablement.get", {
+    toolCall(toolName("agent.enablement.get"), {
       params: { agentName: AGENT },
       query: {},
       body: null,
     }),
-    toolCall("agent.get", {
+    toolCall(toolName("agent.get"), {
       params: { agentName: "unknown@1" },
       query: {},
       body: null,
@@ -871,8 +875,8 @@ test("a read tool and a built-in tool run at once and a refusal returns the owni
   assert.deepEqual(
     results.map(({ toolName, isError }) => ({ toolName, isError })),
     [
-      { toolName: "agent.enablement.get", isError: false },
-      { toolName: "agent.get", isError: true },
+      { toolName: toolName("agent.enablement.get"), isError: false },
+      { toolName: toolName("agent.get"), isError: true },
       { toolName: "ls", isError: false },
     ],
   );
@@ -883,7 +887,7 @@ test("a read tool and a built-in tool run at once and a refusal returns the owni
 
 test("a mutation tool runs only after the human approves the call", async (t) => {
   const fixture = await workbenchFixture(t, [
-    toolCall(PROVIDER_ADD, addSpare),
+    toolCall(toolName(PROVIDER_ADD), addSpare),
     fauxAssistantMessage(ANSWER),
   ]);
   const session = await createSession(fixture);
@@ -928,7 +932,7 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
 
 test("a rejected call reaches the agent as a blocked call", async (t) => {
   const fixture = await workbenchFixture(t, [
-    toolCall(PROVIDER_ADD, addSpare),
+    toolCall(toolName(PROVIDER_ADD), addSpare),
     fauxAssistantMessage(ANSWER),
   ]);
   const session = await createSession(fixture);
@@ -948,7 +952,7 @@ test("a rejected call reaches the agent as a blocked call", async (t) => {
   const entries = await untilIdle(fixture, sessionId);
   assert.deepEqual(toolResults(entries), [
     {
-      toolName: PROVIDER_ADD,
+      toolName: toolName(PROVIDER_ADD),
       isError: true,
       text: WORKBENCH_REJECTION_REASON,
     },
@@ -958,7 +962,7 @@ test("a rejected call reaches the agent as a blocked call", async (t) => {
 
 test("an abort rejects every pending approval", async (t) => {
   const fixture = await workbenchFixture(t, [
-    toolCall(PROVIDER_ADD, addSpare),
+    toolCall(toolName(PROVIDER_ADD), addSpare),
     fauxAssistantMessage(ANSWER),
   ]);
   const session = await createSession(fixture);
