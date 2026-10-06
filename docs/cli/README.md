@@ -23,7 +23,8 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `mission`                      | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                          |
 | `scheduler`                    | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                    |
 | `intake`                       | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.    |
-| `worker`                       | [Worker Service](worker.md)                       | Workers, agents, instance registration, and execution hosting.                                          |
+| `agent`                        | [Agent](agent.md)                                 | Agent catalog, agent enablement and agent providers.                                                    |
+| `worker`                       | [Worker Service](worker.md)                       | Workers, instance registration, and execution hosting.                                                  |
 | `tracking`                     | [Tracking Service](tracking.md)                   | Telemetry ingestion and trace inspection.                                                               |
 | `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
