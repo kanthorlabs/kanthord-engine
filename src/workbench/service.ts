@@ -35,6 +35,7 @@ import {
 } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
+import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
 import { resolveGlobalPrompt } from "../agent/prompt-composer.ts";
 import {
@@ -343,6 +344,7 @@ export class WorkbenchService implements Service {
           { sessionId: session.id },
         );
       });
+      const hostHome = this.dependencies.hostHome ?? homedir();
       const prompt = await composeWorkbenchPrompt(
         {
           agent: declaration,
@@ -351,7 +353,7 @@ export class WorkbenchService implements Service {
             this.dependencies.dataDirectory,
             context,
           ),
-          hostHome: this.dependencies.hostHome ?? homedir(),
+          hostHome,
         },
         context,
       );
@@ -384,29 +386,30 @@ export class WorkbenchService implements Service {
           ...operations.map((tool) => tool.name),
         ],
         customTools: [...builtin.customTools, ...operations],
-        extensions: [pins.extension],
+        hostHome,
+        hooks: [
+          pins.hook,
+          toolApproval({
+            approve: async (call, signal) => {
+              const operation = mutations.get(call.toolName);
+              if (!operation) return true;
+              return this.approval(
+                session,
+                {
+                  toolCallId: call.toolCallId,
+                  operationId: operation.id,
+                  input: JSON.parse(JSON.stringify(call.input ?? {})),
+                },
+                signal,
+              );
+            },
+            reason: WORKBENCH_REJECTION_REASON,
+          }),
+        ],
         context,
         sessionManager: session.manager,
       });
       pins.pinInference(agent, prompt.systemPrompt);
-      const beforeToolCall = agent.agent.beforeToolCall;
-      agent.agent.beforeToolCall = async (call, signal) => {
-        const previous = await beforeToolCall?.(call, signal);
-        const operation = mutations.get(call.toolCall.name);
-        if (previous?.block || !operation) return previous;
-        const approved = await this.approval(
-          session,
-          {
-            toolCallId: call.toolCall.id,
-            operationId: operation.id,
-            input: JSON.parse(JSON.stringify(call.args ?? {})),
-          },
-          signal,
-        );
-        return approved
-          ? previous
-          : { block: true, reason: WORKBENCH_REJECTION_REASON };
-      };
       const opened = agent;
       const unsubscribeEvents = opened.subscribe((event) => {
         if (event.type === AGENT_END && session.run) session.run.ended = true;

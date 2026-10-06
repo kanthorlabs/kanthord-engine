@@ -24,7 +24,10 @@ import {
   scriptedProvider,
 } from "./test-support.ts";
 
-test("native session isolates filesystem discovery, settings and session persistence", async (t) => {
+const INLINE_SOURCE = "inline";
+const RELATIVE_CWD_SECTION = "<cwd>\n~/workspace\n</cwd>";
+
+test("native session isolates filesystem discovery, settings and session persistence, and writes its cwd with ~", async (t) => {
   const emptySettings = "{}";
   const home = temporary(t);
   const previous = {
@@ -83,7 +86,8 @@ test("native session isolates filesystem discovery, settings and session persist
     systemPrompt: "owned system",
     allowlist: [],
     customTools: [],
-    extensions: [],
+    hostHome: home,
+    hooks: [],
     context: background,
   });
   t.after(() => session.dispose());
@@ -93,9 +97,16 @@ test("native session isolates filesystem discovery, settings and session persist
     JSON.stringify(provider.calls),
   );
   assert.ok(!JSON.stringify(provider.calls).includes(hostile));
+  assert.ok(provider.calls[0]?.systemPrompt?.includes(RELATIVE_CWD_SECTION));
+  assert.ok(!provider.calls[0]?.systemPrompt?.includes(home));
   assert.deepEqual(session.resourceLoader.getSkills().skills, []);
   assert.deepEqual(session.resourceLoader.getPrompts().prompts, []);
-  assert.deepEqual(session.resourceLoader.getExtensions().extensions, []);
+  assert.deepEqual(
+    session.resourceLoader
+      .getExtensions()
+      .extensions.map((extension) => extension.sourceInfo.source),
+    [INLINE_SOURCE],
+  );
   assert.equal(readFileSync(hostSettings, "utf8"), emptySettings);
   assert.deepEqual(readdirSync(join(home, ".pi"), { recursive: true }), [
     "agent",

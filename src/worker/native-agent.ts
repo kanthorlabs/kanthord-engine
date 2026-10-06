@@ -172,7 +172,8 @@ export async function openNativeAgent(
         budget,
         input.hostTools,
       ),
-      extensions: [pins.extension],
+      hostHome: input.hostHome,
+      hooks: [pins.hook],
       context,
     });
     pins.pinInference(session, composed.systemPrompt);

@@ -83,7 +83,8 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     systemPrompt: composed.systemPrompt,
     allowlist: [],
     customTools: [],
-    extensions: [pinned.extension],
+    hostHome: cwd,
+    hooks: [pinned.hook],
     context: background,
   });
   t.after(() => session.dispose());
@@ -161,7 +162,8 @@ test("two tool calls produce three counted turns with no absent project message"
     systemPrompt: "owned system",
     allowlist: ["read"],
     customTools: [],
-    extensions: [pins.extension],
+    hostHome: cwd,
+    hooks: [pins.hook],
     context: background,
   });
   t.after(() => session.dispose());
@@ -307,7 +309,8 @@ for (const isSplitTurn of [false, true]) {
       systemPrompt: composed.systemPrompt,
       allowlist: [],
       customTools: [],
-      extensions: [pins.extension],
+      hostHome: cwd,
+      hooks: [pins.hook],
       context: background,
     });
     t.after(() => session.dispose());

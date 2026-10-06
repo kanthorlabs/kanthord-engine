@@ -14,6 +14,7 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { loadPi, piAgentDirectory } from "./pi.ts";
+import { homeRelativeCwd } from "./hooks/home-relative-cwd.ts";
 
 export const RUNTIME_SETUP_DEADLINE_MS = 30000;
 
@@ -57,11 +58,13 @@ export async function openSession(input: {
   systemPrompt: string;
   allowlist: string[];
   customTools: ToolDefinition[];
-  extensions: InlineExtension[];
+  hostHome: string;
+  hooks: InlineExtension[];
   context: Context;
   sessionManager?: SessionManager;
 }): Promise<AgentSession> {
   assert.ok(input.cwd);
+  assert.ok(input.hostHome);
   assert.ok(input.systemPrompt);
   throwIfCancelled(input.context);
   const pi = await withDeadline(loadPi(), input.context);
@@ -81,7 +84,7 @@ export async function openSession(input: {
     noThemes: true,
     noContextFiles: true,
     systemPrompt: input.systemPrompt,
-    extensionFactories: input.extensions,
+    extensionFactories: [homeRelativeCwd(input.hostHome), ...input.hooks],
   });
   await withDeadline(resourceLoader.reload(), input.context);
   const { session } = await withDeadline(

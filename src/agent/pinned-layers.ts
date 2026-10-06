@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   contentText,
   type Message,
@@ -10,12 +9,10 @@ import type {
   InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import type { LayerText, WorkPrompt } from "./prompt-composer.ts";
+import { pinnedLayersHook } from "./hooks/pinned-layers.ts";
 
-export const LAYER_MESSAGE_TYPE = "kanthord.prompt-layer";
-const CUSTOM_ROLE = "custom";
 const SYSTEM_ROLE = "system";
 const USER_ROLE = "user";
-const TEXT_TYPE = "text";
 const TURN_END = "turn_end";
 const FIRST_INDEX = 0;
 
@@ -23,58 +20,21 @@ export function pinnedLayers(layers: {
   global: LayerText | null;
   project: LayerText | null;
 }): {
-  extension: InlineExtension;
+  hook: InlineExtension;
   setWork(work: WorkPrompt): void;
   pinInference(session: AgentSession, systemPrompt: string): void;
 } {
   assert.ok(Object.hasOwn(layers, "global"));
   assert.ok(Object.hasOwn(layers, "project"));
   let work: WorkPrompt | null = null;
-  const message = (content: string): AgentMessage => ({
-    role: CUSTOM_ROLE,
-    customType: LAYER_MESSAGE_TYPE,
-    content,
-    display: false,
-    timestamp: Date.now(),
-  });
-  const extension: InlineExtension = (pi) => {
-    pi.on("context", (event) => {
-      const pinned = [layers.global, layers.project]
-        .filter((layer) => layer !== null)
-        .map((layer) => message(layer.marked));
-      const hasWork = event.messages.some(
-        (entry) =>
-          entry.role === USER_ROLE &&
-          (Array.isArray(entry.content)
-            ? entry.content
-                .filter((block) => block.type === TEXT_TYPE)
-                .map((block) => block.text)
-                .join("")
-            : entry.content) === work?.marked,
-      );
-      if (work && !hasWork) pinned.push(message(work.marked));
-      const remaining = event.messages.filter(
-        (entry) =>
-          !(
-            entry.role === CUSTOM_ROLE &&
-            entry.customType === LAYER_MESSAGE_TYPE
-          ),
-      );
-      const boundary = remaining.findIndex(
-        (entry) => entry.role !== SYSTEM_ROLE,
-      );
-      const prefix = boundary < FIRST_INDEX ? remaining.length : boundary;
-      return {
-        messages: [
-          ...remaining.slice(0, prefix),
-          ...pinned,
-          ...remaining.slice(prefix),
-        ],
-      };
-    });
-  };
+  const hook = pinnedLayersHook(() => ({
+    layers: [layers.global, layers.project]
+      .filter((layer) => layer !== null)
+      .map((layer) => layer.marked),
+    work: work?.marked ?? null,
+  }));
   return {
-    extension,
+    hook,
     setWork: (value) => {
       work = value;
     },
