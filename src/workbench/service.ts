@@ -77,6 +77,7 @@ import {
   lastModel,
   lastThinkingLevel,
   listSessions,
+  resumeCommand,
   sessionPlace,
   storedConfiguration,
   type SessionPlace,
@@ -507,6 +508,10 @@ export class WorkbenchService implements Service {
         ? entries.slice(0, session.run!.firstEntry)
         : entries,
       runActive: this.runActive(session),
+      resumeCommand: resumeCommand(
+        session.manager,
+        this.dependencies.hostHome ?? homedir(),
+      ),
     };
   }
 

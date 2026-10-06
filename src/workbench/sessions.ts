@@ -5,6 +5,7 @@ import type {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { ensureDirectory } from "../kernel/files.ts";
+import { homeRelative } from "../kernel/xdg.ts";
 import { isString } from "../kernel/values.ts";
 import { AGENT_DECLARATIONS } from "../agent/catalog.ts";
 import { loadPi, PI_DIRECTORY_NAME } from "../agent/pi.ts";
@@ -131,4 +132,10 @@ export function lastThinkingLevel(
 ): string | undefined {
   const entry = lastOfType(entries, EntryType.ThinkingLevelChange);
   return isString(entry?.thinkingLevel) ? entry.thinkingLevel : undefined;
+}
+
+export function resumeCommand(manager: SessionManager, home: string): string {
+  const file = manager.getSessionFile();
+  assert.ok(file, "A workbench session is stored in a file.");
+  return `pi --session ${homeRelative(file, home)}`;
 }

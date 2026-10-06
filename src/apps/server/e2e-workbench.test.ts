@@ -454,6 +454,7 @@ test("a stored session resumes from the last entry of each kind and lists throug
       fixture.options,
     ),
   );
+  assert.equal(read.resumeCommand, `pi --session ${manager.getSessionFile()}`);
   assert.deepEqual(read.configuration, {
     agentProvider: BACKUP,
     modelIdentifier: HAIKU,

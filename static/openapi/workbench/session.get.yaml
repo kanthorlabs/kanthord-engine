@@ -134,10 +134,13 @@ components:
             additionalProperties: {}
         runActive:
           type: boolean
+        resumeCommand:
+          type: string
       required:
         - id
         - agentName
         - configuration
         - entries
         - runActive
+        - resumeCommand
       additionalProperties: false

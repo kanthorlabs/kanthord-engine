@@ -66,6 +66,7 @@ export const workbenchSessionSchema = z.strictObject({
   configuration: workbenchConfigurationSchema,
   entries: z.array(sessionEntrySchema),
   runActive: z.boolean(),
+  resumeCommand: z.string(),
 });
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
 
