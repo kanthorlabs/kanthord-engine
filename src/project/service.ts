@@ -286,7 +286,11 @@ export class ProjectService implements Service, ProjectBindings {
         });
         return this.projectRecord(project);
       });
-      ensureDirectory(record.workspaceDirectory);
+      try {
+        ensureDirectory(record.workspaceDirectory);
+      } catch (error) {
+        if (!(error instanceof Diagnostic)) throw error;
+      }
       return record;
     });
     registry.register(projectOperations.list, ({ query }, caller) =>

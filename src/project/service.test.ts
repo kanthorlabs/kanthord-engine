@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { statSync } from "node:fs";
+import { existsSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { ProjectService, type Dependencies } from "./service.ts";
@@ -340,6 +340,18 @@ test("create, get and list answer the workspace directory and create answers aft
       item.workspaceDirectory,
       join(f.stateDirectory, "projects", item.id),
     );
+});
+
+test("create answers the committed project when its workspace directory cannot be created", (t) => {
+  const f = fixture(t, { createMission: allowMission });
+  writeFileSync(join(f.stateDirectory, "projects"), "");
+  const record = f.invoke("create", { name: PROJECT_NAME });
+  assert.equal(
+    record.workspaceDirectory,
+    join(f.stateDirectory, "projects", record.id),
+  );
+  assert.ok(!existsSync(record.workspaceDirectory));
+  assert.deepEqual(f.invoke("get", null, { projectId: record.id }), record);
 });
 
 test("create rejects duplicate names with the holder identity without calling mission again", (t) => {
