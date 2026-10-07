@@ -9,6 +9,7 @@ import {
   MAX_DISPLAY_NAME_LENGTH,
   isHumanIdentity,
   isMachineIdentity,
+  isServiceIdentity,
   type HumanIdentity,
   type MachineIdentity,
   type CallerIdentity,
@@ -95,6 +96,7 @@ export class Authentication {
   ): Promise<CallerIdentity> {
     if (isHumanIdentity(identity))
       return mintHumanIdentity(identity.accountId, identity.name, identity.jti);
+    if (isServiceIdentity(identity)) return identity;
     if (!isMachineIdentity(identity)) throw unauthorized();
     const current = await this.resolveMachine(
       identity.clientId,

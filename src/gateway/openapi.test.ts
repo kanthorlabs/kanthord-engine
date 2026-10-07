@@ -9,8 +9,12 @@ import { gatewayOperations, HEALTHCHECK_OK } from "./contract.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { workerOperations } from "../worker/contract.ts";
-import { emptyInput, OperationRegistry } from "../kernel/operation.ts";
-import { emitOpenAPIFiles, writeOpenAPI } from "./openapi.ts";
+import {
+  AccessPolicy,
+  emptyInput,
+  OperationRegistry,
+} from "../kernel/operation.ts";
+import { emitOpenAPIFiles, openAPIFileNames, writeOpenAPI } from "./openapi.ts";
 
 const PROJECT_PATH_REFERENCE = "./openapi/project/read.yaml#/pathItem";
 const HANDWRITTEN_DOCUMENT = "description: operator-owned\n";
@@ -120,4 +124,32 @@ test("a no-content operation publishes no response content", () => {
   assert.deepEqual(path.post.responses[HttpStatus.NoContent], {
     description: "Completed result",
   });
+});
+
+test("the emitter excludes a service operation and a direct operation", () => {
+  const routed = {
+    ...gatewayOperations.liveness,
+    id: "test.routed",
+    service: "test",
+    path: "/api/test/routed",
+  } as const;
+  const service = {
+    ...routed,
+    id: "test.service",
+    path: "/api/test/service",
+    access: AccessPolicy.Service,
+  } as const;
+  const direct = {
+    ...routed,
+    id: "test.direct",
+    path: "/api/test/direct",
+    access: AccessPolicy.Human,
+    direct: true,
+  } as const;
+  const files = emitOpenAPIFiles([routed, service, direct]);
+  assert.deepEqual(Object.keys(files["openapi.yaml"].paths), [routed.path]);
+  const names = openAPIFileNames([routed, service, direct]);
+  assert.ok(names.includes("openapi/test/routed.yaml"));
+  assert.equal(names.includes("openapi/test/service.yaml"), false);
+  assert.equal(names.includes("openapi/test/direct.yaml"), false);
 });

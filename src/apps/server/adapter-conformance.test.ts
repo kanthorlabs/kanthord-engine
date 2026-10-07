@@ -83,6 +83,14 @@ function assertEquivalent(
   }
 }
 
+function assertDirectOnly(result: OperationResult<unknown>): void {
+  assert.notEqual(result.type, OperationResultType.Indeterminate);
+  if (result.type === OperationResultType.Completed)
+    assertWireData(result.data);
+  if (result.type === OperationResultType.Failure)
+    assert.ok(isString(result.error.error.code));
+}
+
 test("every composed operation conforms across direct and HTTP adapters", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
   const machineToken = await fixture.machineToken(
@@ -90,6 +98,7 @@ test("every composed operation conforms across direct and HTTP adapters", async 
     TEST_WORKER_BINDING,
   );
   for (const { operation } of fixture.gateway.registry.all()) {
+    if (operation.access === AccessPolicy.Service) continue;
     await t.test(operation.id, async () => {
       const token =
         operation.access === AccessPolicy.Client ? machineToken : fixture.token;
@@ -97,6 +106,14 @@ test("every composed operation conforms across direct and HTTP adapters", async 
         `Bearer ${token}`,
       );
       const direct = directClient({ operation }, fixture.gateway.invocation);
+      if (operation.direct) {
+        assertDirectOnly(
+          await direct.operation({ malformed: true }, { identity }),
+        );
+        if (!operation.input.safeParse(input).success) return;
+        assertDirectOnly(await direct.operation(input, { identity }));
+        return;
+      }
       const http = httpClient({ operation }, fixture.endpoint, token);
       assertEquivalent(
         await direct.operation({ malformed: true }, { identity }),

@@ -8,6 +8,7 @@ import { Authentication } from "./authentication.ts";
 import {
   isHumanIdentity,
   isMachineIdentity,
+  isServiceIdentity,
   type CallerIdentity,
 } from "../kernel/caller.ts";
 import { GatewayError, failure, unauthorized } from "./errors.ts";
@@ -292,6 +293,11 @@ export class Invocation {
           throw unauthorized();
       }
       if (
+        operation.access === AccessPolicy.Service &&
+        !isServiceIdentity(identity)
+      )
+        throw unauthorized();
+      if (
         operation.access === AccessPolicy.Client &&
         operation.requiresRegistration !== false &&
         isMachineIdentity(identity) &&
@@ -335,7 +341,9 @@ export class Invocation {
           ? identity.accountId
           : isMachineIdentity(identity)
             ? identity.clientId
-            : undefined;
+            : isServiceIdentity(identity)
+              ? identity.service
+              : undefined;
         if (!caller || !identity) throw unauthorized();
         const held = this.idempotency.reserve(
           options.idempotencyKey,

@@ -10,6 +10,7 @@ export const AccessPolicy = {
   Client: "client",
   Public: "public",
   Delivery: "delivery",
+  Service: "service",
 } as const;
 export type AccessPolicy = (typeof AccessPolicy)[keyof typeof AccessPolicy];
 
@@ -57,9 +58,14 @@ export interface Operation<
   replayGuard?: (recorded: unknown, identity: CallerIdentity) => boolean;
   lifetime: OperationLifetime;
   delivery?: true;
+  direct?: true;
   contentType?: string;
   errors?: readonly number[];
   description: string;
+}
+
+export function hasHttpRoute(operation: Operation): boolean {
+  return operation.access !== AccessPolicy.Service && operation.direct !== true;
 }
 
 export interface ExecutionClaim {
@@ -117,6 +123,16 @@ export class OperationRegistry {
     if (!Object.values(AccessPolicy).includes(operation.access))
       throw new Error("Every route must declare an access policy.");
     if (
+      operation.access === AccessPolicy.Service &&
+      (operation.requiresExecution !== undefined ||
+        operation.requiresRegistration !== undefined ||
+        operation.delivery !== undefined ||
+        operation.secret !== undefined)
+    )
+      throw new Error(
+        "A service operation declares no execution, registration, delivery or secret.",
+      );
+    if (
       operation.requiresExecution &&
       (operation.access !== AccessPolicy.Client ||
         operation.requiresRegistration === false)
@@ -124,6 +140,12 @@ export class OperationRegistry {
       throw new Error(
         "An execution proof requires client access and a live registration.",
       );
+    if (
+      operation.direct &&
+      operation.access !== AccessPolicy.Human &&
+      operation.access !== AccessPolicy.Client
+    )
+      throw new Error("Only a human or client operation is direct.");
     if (!Object.values(OperationLifetime).includes(operation.lifetime))
       throw new Error("Every route must declare a valid lifetime.");
     if (

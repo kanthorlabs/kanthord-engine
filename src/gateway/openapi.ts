@@ -12,7 +12,7 @@ import { z } from "zod";
 import { ulidSchema } from "../kernel/identity.ts";
 import { errorDetailsSchema, errorSchema } from "../kernel/errors.ts";
 import type { Operation } from "../kernel/operation.ts";
-import { AccessPolicy } from "../kernel/operation.ts";
+import { AccessPolicy, hasHttpRoute } from "../kernel/operation.ts";
 import { packageVersion } from "../kernel/version.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { isObject, isString } from "../kernel/values.ts";
@@ -58,9 +58,9 @@ export function validateOpenAPIScope(operation: Operation): void {
 function pathGroups(operations: readonly Operation[]) {
   const groups = new Map<string, Operation[]>();
   const identities = new Set<string>();
-  for (const operation of [...operations].sort((a, b) =>
-    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
-  )) {
+  for (const operation of operations
+    .filter(hasHttpRoute)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     validateOpenAPIScope(operation);
     if (identities.has(operation.id))
       throw new Error("Duplicate operation identity.");
