@@ -42,7 +42,7 @@ test("Intake runs each lifecycle phase once and refuses a restart", async (t) =>
 
 test("Intake start refuses the identity of another service", async (t) => {
   const { intake } = fixture(t, "mission");
-  await assert.rejects(intake.start());
+  await assert.rejects(intake.start(), assert.AssertionError);
 });
 
 test("Intake probe answers 200 while running and 503 after stop", async (t) => {
