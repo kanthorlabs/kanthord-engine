@@ -228,19 +228,19 @@ paths:
     $ref: ./openapi/storage/credential.update_metadata.yaml#/pathItem
   /api/storage/credential/{credential_name}/verify:
     $ref: ./openapi/storage/credential.verify.yaml#/pathItem
-  /api/workbench/session/{sessionId}/abort:
+  /api/workbench/session/{session_id}/abort:
     $ref: ./openapi/workbench/session.abort.yaml#/pathItem
-  /api/workbench/session/{sessionId}/approve:
+  /api/workbench/session/{session_id}/approve:
     $ref: ./openapi/workbench/session.approve.yaml#/pathItem
-  /api/workbench/session/{sessionId}/configuration:
+  /api/workbench/session/{session_id}/configuration:
     $ref: ./openapi/workbench/session.configure.yaml#/pathItem
   /api/workbench/session:
     $ref: ./openapi/workbench/session.create.yaml#/pathItem
-  /api/workbench/session/{sessionId}/events:
+  /api/workbench/session/{session_id}/events:
     $ref: ./openapi/workbench/session.events.yaml#/pathItem
-  /api/workbench/session/{sessionId}:
+  /api/workbench/session/{session_id}:
     $ref: ./openapi/workbench/session.get.yaml#/pathItem
-  /api/workbench/session/{sessionId}/message:
+  /api/workbench/session/{session_id}/message:
     $ref: ./openapi/workbench/session.message.yaml#/pathItem
   /api/worker/execution/{execution_id}/action/request:
     $ref: ./openapi/worker/action.request.yaml#/pathItem

@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: sessionId
+      - name: session_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/workbench.session.abort.Input/properties/params/pro\
-            perties/sessionId"
+            perties/session_id"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     responses:
       "200":
@@ -54,7 +54,7 @@ components:
         params:
           type: object
           properties:
-            sessionId:
+            session_id:
               type: string
               minLength: 44
               maxLength: 44
@@ -62,7 +62,7 @@ components:
               description: workbench_session_ followed by a canonical 26-character uppercase
                 ULID.
           required:
-            - sessionId
+            - session_id
           additionalProperties: false
         query:
           type: object
@@ -78,17 +78,17 @@ components:
     workbench.session.abort.Output:
       type: object
       properties:
-        sessionId:
+        session_id:
           type: string
           minLength: 44
           maxLength: 44
           pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: workbench_session_ followed by a canonical 26-character uppercase
             ULID.
-        runActive:
+        run_active:
           type: boolean
           const: false
       required:
-        - sessionId
-        - runActive
+        - session_id
+        - run_active
       additionalProperties: false

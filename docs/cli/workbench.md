@@ -13,16 +13,16 @@ The [operation contracts](../../src/workbench/contract.ts) and the generated Ope
 
 Every operation has `human` access.
 
-| Operation ID                  | Route                                                 | Lifetime |
-| ----------------------------- | ----------------------------------------------------- | -------- |
-| `workbench.session.list`      | `GET /api/workbench/session`                          | `unary`  |
-| `workbench.session.create`    | `POST /api/workbench/session`                         | `unary`  |
-| `workbench.session.get`       | `GET /api/workbench/session/:sessionId`               | `unary`  |
-| `workbench.session.configure` | `PUT /api/workbench/session/:sessionId/configuration` | `unary`  |
-| `workbench.session.message`   | `POST /api/workbench/session/:sessionId/message`      | `unary`  |
-| `workbench.session.approve`   | `POST /api/workbench/session/:sessionId/approve`      | `unary`  |
-| `workbench.session.abort`     | `POST /api/workbench/session/:sessionId/abort`        | `unary`  |
-| `workbench.session.events`    | `GET /api/workbench/session/:sessionId/events`        | `wait`   |
+| Operation ID                  | Route                                                  | Lifetime |
+| ----------------------------- | ------------------------------------------------------ | -------- |
+| `workbench.session.list`      | `GET /api/workbench/session`                           | `unary`  |
+| `workbench.session.create`    | `POST /api/workbench/session`                          | `unary`  |
+| `workbench.session.get`       | `GET /api/workbench/session/:session_id`               | `unary`  |
+| `workbench.session.configure` | `PUT /api/workbench/session/:session_id/configuration` | `unary`  |
+| `workbench.session.message`   | `POST /api/workbench/session/:session_id/message`      | `unary`  |
+| `workbench.session.approve`   | `POST /api/workbench/session/:session_id/approve`      | `unary`  |
+| `workbench.session.abort`     | `POST /api/workbench/session/:session_id/abort`        | `unary`  |
+| `workbench.session.events`    | `GET /api/workbench/session/:session_id/events`        | `wait`   |
 
 ## Error codes
 

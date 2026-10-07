@@ -75,7 +75,7 @@ import {
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
-import { AGENT_COMPONENT_NAME, type AgentEntry } from "../../agent/contract.ts";
+import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import {
   RepositoryComponent,
   RepositoryCredentials,
@@ -92,23 +92,6 @@ import {
 } from "../../kernel/context.ts";
 
 export type { RepositoryConnector } from "../../project/contract.ts";
-
-const AGENT_ENTRY_FIELDS: Readonly<Record<string, string>> = {
-  agentProvider: "agent_provider",
-  modelIdentifier: "model_identifier",
-  reasoningEffort: "reasoning_effort",
-};
-
-function agentEntryOf(entry: object | null): AgentEntry | null {
-  return entry === null
-    ? null
-    : (Object.fromEntries(
-        Object.entries(entry).map(([key, value]) => [
-          AGENT_ENTRY_FIELDS[key] ?? key,
-          value,
-        ]),
-      ) as AgentEntry);
-}
 
 export function composeServices(options: {
   config: ServerConfig;
@@ -370,10 +353,8 @@ export function composeServices(options: {
       compose: (name, context) => agent.composePrompt(name, context),
     },
     agentConfiguration: {
-      validateEntry: (tx, name, entry) =>
-        agent.validateEntry(tx, name, agentEntryOf(entry)),
-      agentView: (tx, name, entry) =>
-        agent.agentView(tx, name, agentEntryOf(entry)),
+      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
+      agentView: (tx, name, entry) => agent.agentView(tx, name, entry),
     },
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
     workbenchCredentials: (input) => custody.workbenchCredentials(input),

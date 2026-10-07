@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: sessionId
+      - name: session_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/workbench.session.configure.Input/properties/params\
-            /properties/sessionId"
+            /properties/session_id"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
@@ -60,7 +60,7 @@ components:
         params:
           type: object
           properties:
-            sessionId:
+            session_id:
               type: string
               minLength: 44
               maxLength: 44
@@ -68,7 +68,7 @@ components:
               description: workbench_session_ followed by a canonical 26-character uppercase
                 ULID.
           required:
-            - sessionId
+            - session_id
           additionalProperties: false
         query:
           type: object
@@ -77,13 +77,13 @@ components:
         body:
           type: object
           properties:
-            agentProvider:
+            agent_provider:
               type: string
               minLength: 1
-            modelIdentifier:
+            model_identifier:
               type: string
               minLength: 1
-            reasoningEffort:
+            reasoning_effort:
               type: string
               enum:
                 - off
@@ -94,9 +94,9 @@ components:
                 - xhigh
                 - max
           required:
-            - agentProvider
-            - modelIdentifier
-            - reasoningEffort
+            - agent_provider
+            - model_identifier
+            - reasoning_effort
           additionalProperties: false
       required:
         - params
@@ -106,13 +106,13 @@ components:
     workbench.session.configure.Output:
       type: object
       properties:
-        agentProvider:
+        agent_provider:
           type: string
           minLength: 1
-        modelIdentifier:
+        model_identifier:
           type: string
           minLength: 1
-        reasoningEffort:
+        reasoning_effort:
           type: string
           enum:
             - off
@@ -123,7 +123,7 @@ components:
             - xhigh
             - max
       required:
-        - agentProvider
-        - modelIdentifier
-        - reasoningEffort
+        - agent_provider
+        - model_identifier
+        - reasoning_effort
       additionalProperties: false

@@ -29,9 +29,9 @@ export const WorkbenchErrorCode = {
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
-  agentProvider: z.string().min(1),
-  modelIdentifier: z.string().min(1),
-  reasoningEffort: reasoningEffortSchema,
+  agent_provider: z.string().min(1),
+  model_identifier: z.string().min(1),
+  reasoning_effort: reasoningEffortSchema,
 });
 export type WorkbenchConfiguration = z.infer<
   typeof workbenchConfigurationSchema
@@ -52,39 +52,39 @@ export type SessionEntry = z.infer<typeof sessionEntrySchema>;
 
 export const sessionListItemSchema = z.strictObject({
   id: z.string(),
-  agentName: z.string(),
+  agent_name: z.string(),
   name: z.string().nullable(),
   created: timestampSchema,
   modified: timestampSchema,
-  messageCount: z.number().int().nonnegative(),
-  firstMessage: z.string(),
+  message_count: z.number().int().nonnegative(),
+  first_message: z.string(),
 });
 
 export const workbenchSessionSchema = z.strictObject({
   id: identitySchema(WORKBENCH_SESSION_PREFIX),
-  agentName: z.string(),
+  agent_name: z.string(),
   configuration: workbenchConfigurationSchema,
   entries: z.array(sessionEntrySchema),
-  runActive: z.boolean(),
-  resumeCommand: z.string(),
+  run_active: z.boolean(),
+  resume_command: z.string(),
 });
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
 
 export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
 
 export const pendingApprovalSchema = z.strictObject({
-  toolCallId: z.string(),
-  operationId: z.string(),
+  tool_call_id: z.string(),
+  operation_id: z.string(),
   input: z.record(z.string(), z.unknown()),
 });
 export type PendingApproval = z.infer<typeof pendingApprovalSchema>;
 
 export const runSnapshotSchema = z.strictObject({
-  streamingMessage: z.record(z.string(), z.unknown()).nullable(),
-  pendingToolCalls: z.array(z.string()),
-  pendingApproval: pendingApprovalSchema.nullable(),
-  runActive: z.boolean(),
-  errorMessage: z.string().nullable(),
+  streaming_message: z.record(z.string(), z.unknown()).nullable(),
+  pending_tool_calls: z.array(z.string()),
+  pending_approval: pendingApprovalSchema.nullable(),
+  run_active: z.boolean(),
+  error_message: z.string().nullable(),
 });
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 
@@ -97,7 +97,7 @@ export type SessionEvents = z.infer<typeof sessionEventsSchema>;
 
 const emptyFields = z.strictObject({});
 const sessionParams = z.strictObject({
-  sessionId: identitySchema(WORKBENCH_SESSION_PREFIX),
+  session_id: identitySchema(WORKBENCH_SESSION_PREFIX),
 });
 const workbenchOperation = {
   service: WORKBENCH_SERVICE_NAME,
@@ -124,7 +124,7 @@ export const workbenchOperations = {
     body: false,
     input: z.strictObject({
       params: emptyFields,
-      query: z.strictObject({ agentName: z.string().min(1).optional() }),
+      query: z.strictObject({ agent_name: z.string().min(1).optional() }),
       body: z.null(),
     }),
     output: z.strictObject({ items: z.array(sessionListItemSchema) }),
@@ -139,7 +139,7 @@ export const workbenchOperations = {
       params: emptyFields,
       query: emptyFields,
       body: workbenchConfigurationSchema.extend({
-        agentName: z.string().min(1),
+        agent_name: z.string().min(1),
       }),
     }),
     output: workbenchSessionSchema,
@@ -149,7 +149,7 @@ export const workbenchOperations = {
     ...workbenchOperation,
     id: "workbench.session.get",
     method: HttpMethod.Get,
-    path: "/api/workbench/session/:sessionId",
+    path: "/api/workbench/session/:session_id",
     mutation: false,
     body: false,
     input: z.strictObject({
@@ -165,7 +165,7 @@ export const workbenchOperations = {
     ...workbenchMutation,
     id: "workbench.session.configure",
     method: HttpMethod.Put,
-    path: "/api/workbench/session/:sessionId/configuration",
+    path: "/api/workbench/session/:session_id/configuration",
     input: z.strictObject({
       params: sessionParams,
       query: emptyFields,
@@ -178,7 +178,7 @@ export const workbenchOperations = {
     ...workbenchMutation,
     id: "workbench.session.message",
     method: HttpMethod.Post,
-    path: "/api/workbench/session/:sessionId/message",
+    path: "/api/workbench/session/:session_id/message",
     status: HttpStatus.Accepted,
     maxBodyBytes: WORKBENCH_MESSAGE_MAX_BODY_BYTES,
     input: z.strictObject({
@@ -186,7 +186,7 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.strictObject({ text: z.string().min(1) }),
     }),
-    output: sessionParams.extend({ runActive: z.literal(true) }),
+    output: sessionParams.extend({ run_active: z.literal(true) }),
     description:
       "Start a run of the agent on one human message. A session holds one run at a time.",
   },
@@ -194,31 +194,31 @@ export const workbenchOperations = {
     ...workbenchOperation,
     id: "workbench.session.abort",
     method: HttpMethod.Post,
-    path: "/api/workbench/session/:sessionId/abort",
+    path: "/api/workbench/session/:session_id/abort",
     mutation: true,
     input: z.strictObject({
       params: sessionParams,
       query: emptyFields,
       body: z.null(),
     }),
-    output: sessionParams.extend({ runActive: z.literal(false) }),
+    output: sessionParams.extend({ run_active: z.literal(false) }),
     description: "Stop the active run of a workbench session.",
   },
   "session.approve": {
     ...workbenchMutation,
     id: "workbench.session.approve",
     method: HttpMethod.Post,
-    path: "/api/workbench/session/:sessionId/approve",
+    path: "/api/workbench/session/:session_id/approve",
     input: z.strictObject({
       params: sessionParams,
       query: emptyFields,
       body: z.strictObject({
-        toolCallId: z.string().min(1),
+        tool_call_id: z.string().min(1),
         approved: z.boolean(),
       }),
     }),
     output: sessionParams.extend({
-      toolCallId: z.string(),
+      tool_call_id: z.string(),
       approved: z.boolean(),
     }),
     description:
@@ -228,7 +228,7 @@ export const workbenchOperations = {
     ...workbenchOperation,
     id: "workbench.session.events",
     method: HttpMethod.Get,
-    path: "/api/workbench/session/:sessionId/events",
+    path: "/api/workbench/session/:session_id/events",
     lifetime: OperationLifetime.Wait,
     mutation: false,
     body: false,

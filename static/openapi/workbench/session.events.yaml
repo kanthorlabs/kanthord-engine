@@ -14,12 +14,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: sessionId
+      - name: session_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/workbench.session.events.Input/properties/params/pr\
-            operties/sessionId"
+            operties/session_id"
       - name: after
         in: query
         required: false
@@ -67,7 +67,7 @@ components:
         params:
           type: object
           properties:
-            sessionId:
+            session_id:
               type: string
               minLength: 44
               maxLength: 44
@@ -75,7 +75,7 @@ components:
               description: workbench_session_ followed by a canonical 26-character uppercase
                 ULID.
           required:
-            - sessionId
+            - session_id
           additionalProperties: false
         query:
           type: object
@@ -122,24 +122,24 @@ components:
         snapshot:
           type: object
           properties:
-            streamingMessage:
+            streaming_message:
               anyOf:
                 - type: object
                   propertyNames:
                     type: string
                   additionalProperties: {}
                 - type: "null"
-            pendingToolCalls:
+            pending_tool_calls:
               type: array
               items:
                 type: string
-            pendingApproval:
+            pending_approval:
               anyOf:
                 - type: object
                   properties:
-                    toolCallId:
+                    tool_call_id:
                       type: string
-                    operationId:
+                    operation_id:
                       type: string
                     input:
                       type: object
@@ -147,23 +147,23 @@ components:
                         type: string
                       additionalProperties: {}
                   required:
-                    - toolCallId
-                    - operationId
+                    - tool_call_id
+                    - operation_id
                     - input
                   additionalProperties: false
                 - type: "null"
-            runActive:
+            run_active:
               type: boolean
-            errorMessage:
+            error_message:
               anyOf:
                 - type: string
                 - type: "null"
           required:
-            - streamingMessage
-            - pendingToolCalls
-            - pendingApproval
-            - runActive
-            - errorMessage
+            - streaming_message
+            - pending_tool_calls
+            - pending_approval
+            - run_active
+            - error_message
           additionalProperties: false
         version:
           type: integer

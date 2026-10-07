@@ -13,12 +13,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: sessionId
+      - name: session_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/workbench.session.get.Input/properties/params/prope\
-            rties/sessionId"
+            rties/session_id"
     responses:
       "200":
         description: Completed result
@@ -54,7 +54,7 @@ components:
         params:
           type: object
           properties:
-            sessionId:
+            session_id:
               type: string
               minLength: 44
               maxLength: 44
@@ -62,7 +62,7 @@ components:
               description: workbench_session_ followed by a canonical 26-character uppercase
                 ULID.
           required:
-            - sessionId
+            - session_id
           additionalProperties: false
         query:
           type: object
@@ -85,18 +85,18 @@ components:
           pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: workbench_session_ followed by a canonical 26-character uppercase
             ULID.
-        agentName:
+        agent_name:
           type: string
         configuration:
           type: object
           properties:
-            agentProvider:
+            agent_provider:
               type: string
               minLength: 1
-            modelIdentifier:
+            model_identifier:
               type: string
               minLength: 1
-            reasoningEffort:
+            reasoning_effort:
               type: string
               enum:
                 - off
@@ -107,9 +107,9 @@ components:
                 - xhigh
                 - max
           required:
-            - agentProvider
-            - modelIdentifier
-            - reasoningEffort
+            - agent_provider
+            - model_identifier
+            - reasoning_effort
           additionalProperties: false
         entries:
           type: array
@@ -132,15 +132,15 @@ components:
               - parentId
               - timestamp
             additionalProperties: {}
-        runActive:
+        run_active:
           type: boolean
-        resumeCommand:
+        resume_command:
           type: string
       required:
         - id
-        - agentName
+        - agent_name
         - configuration
         - entries
-        - runActive
-        - resumeCommand
+        - run_active
+        - resume_command
       additionalProperties: false

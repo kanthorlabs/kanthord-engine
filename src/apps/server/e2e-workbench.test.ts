@@ -181,9 +181,9 @@ async function workbenchFixture(
 async function createSession(
   fixture: Awaited<ReturnType<typeof workbenchFixture>>,
   configuration: WorkbenchConfiguration = {
-    agentProvider: DEFAULT,
-    modelIdentifier: SONNET,
-    reasoningEffort: OFF,
+    agent_provider: DEFAULT,
+    model_identifier: SONNET,
+    reasoning_effort: OFF,
   },
 ) {
   return completed(
@@ -191,7 +191,7 @@ async function createSession(
       {
         params: {},
         query: {},
-        body: { agentName: AGENT, ...configuration },
+        body: { agent_name: AGENT, ...configuration },
       },
       fixture.options,
     ),
@@ -209,17 +209,17 @@ test("a workbench session is created with its configuration in pi entries", asyn
   const fixture = await workbenchFixture(t);
   const session = await createSession(fixture);
   assert.match(session.id, /^workbench_session_[0-9A-HJKMNP-TV-Z]{26}$/);
-  assert.equal(session.agentName, AGENT);
-  assert.equal(session.runActive, false);
+  assert.equal(session.agent_name, AGENT);
+  assert.equal(session.run_active, false);
   assert.deepEqual(session.configuration, {
-    agentProvider: DEFAULT,
-    modelIdentifier: SONNET,
-    reasoningEffort: OFF,
+    agent_provider: DEFAULT,
+    model_identifier: SONNET,
+    reasoning_effort: OFF,
   });
   const custom = entriesOf(session.entries, CustomType);
   assert.equal(custom.length, SINGLE);
   assert.equal(custom[0]!.customType, WORKBENCH_CONFIGURATION_ENTRY);
-  assert.deepEqual(custom[0]!.data, { agentProvider: DEFAULT });
+  assert.deepEqual(custom[0]!.data, { agent_provider: DEFAULT });
   assert.deepEqual(
     entriesOf(session.entries, ModelChange).map(({ provider, modelId }) => ({
       provider,
@@ -235,7 +235,7 @@ test("a workbench session is created with its configuration in pi entries", asyn
   );
   const read = completed(
     await fixture.workbench["session.get"](
-      { params: { sessionId: session.id }, query: {}, body: null },
+      { params: { session_id: session.id }, query: {}, body: null },
       fixture.options,
     ),
   );
@@ -245,11 +245,11 @@ test("a workbench session is created with its configuration in pi entries", asyn
 test("a configuration change appends the custom entry only when the agent provider changes", async (t) => {
   const fixture = await workbenchFixture(t);
   const session = await createSession(fixture);
-  const params = { sessionId: session.id };
+  const params = { session_id: session.id };
   const lowHaiku = {
-    agentProvider: DEFAULT,
-    modelIdentifier: HAIKU,
-    reasoningEffort: LOW,
+    agent_provider: DEFAULT,
+    model_identifier: HAIKU,
+    reasoning_effort: LOW,
   };
   assert.deepEqual(
     completed(
@@ -272,7 +272,7 @@ test("a configuration change appends the custom entry only when the agent provid
     entriesOf(read.entries, ThinkingChange).at(-1)!.thinkingLevel,
     LOW,
   );
-  const backup = { ...lowHaiku, agentProvider: BACKUP };
+  const backup = { ...lowHaiku, agent_provider: BACKUP };
   completed(
     await fixture.workbench["session.configure"](
       { params, query: {}, body: backup },
@@ -287,7 +287,7 @@ test("a configuration change appends the custom entry only when the agent provid
   );
   assert.deepEqual(
     entriesOf(read.entries, CustomType).map(({ data }) => data),
-    [{ agentProvider: DEFAULT }, { agentProvider: BACKUP }],
+    [{ agent_provider: DEFAULT }, { agent_provider: BACKUP }],
   );
   assert.deepEqual(read.configuration, backup);
 });
@@ -300,10 +300,10 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
         params: {},
         query: {},
         body: {
-          agentName: "unknown@1",
-          agentProvider: DEFAULT,
-          modelIdentifier: SONNET,
-          reasoningEffort: OFF,
+          agent_name: "unknown@1",
+          agent_provider: DEFAULT,
+          model_identifier: SONNET,
+          reasoning_effort: OFF,
         },
       },
       fixture.options,
@@ -317,10 +317,10 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
         params: {},
         query: {},
         body: {
-          agentName: AGENT,
-          agentProvider: "absent",
-          modelIdentifier: SONNET,
-          reasoningEffort: OFF,
+          agent_name: AGENT,
+          agent_provider: "absent",
+          model_identifier: SONNET,
+          reasoning_effort: OFF,
         },
       },
       fixture.options,
@@ -334,10 +334,10 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
         params: {},
         query: {},
         body: {
-          agentName: AGENT,
-          agentProvider: DEFAULT,
-          modelIdentifier: "absent-model",
-          reasoningEffort: OFF,
+          agent_name: AGENT,
+          agent_provider: DEFAULT,
+          model_identifier: "absent-model",
+          reasoning_effort: OFF,
         },
       },
       fixture.options,
@@ -349,12 +349,12 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
   failed(
     await fixture.workbench["session.configure"](
       {
-        params: { sessionId: session.id },
+        params: { session_id: session.id },
         query: {},
         body: {
-          agentProvider: DEFAULT,
-          modelIdentifier: SONNET,
-          reasoningEffort: "max" as const,
+          agent_provider: DEFAULT,
+          model_identifier: SONNET,
+          reasoning_effort: "max" as const,
         },
       },
       fixture.options,
@@ -365,7 +365,7 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
   failed(
     await fixture.workbench["session.get"](
       {
-        params: { sessionId: "workbench_session_01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+        params: { session_id: "workbench_session_01ARZ3NDEKTSV4RRFFQ69G5FAV" },
         query: {},
         body: null,
       },
@@ -376,7 +376,7 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
   );
   failed(
     await fixture.workbench["session.list"](
-      { params: {}, query: { agentName: "unknown@1" }, body: null },
+      { params: {}, query: { agent_name: "unknown@1" }, body: null },
       fixture.options,
     ),
     HttpStatus.NotFound,
@@ -394,12 +394,12 @@ test("a stored session resumes from the last entry of each kind and lists throug
     { id },
   );
   manager.appendCustomEntry(WORKBENCH_CONFIGURATION_ENTRY, {
-    agentProvider: DEFAULT,
+    agent_provider: DEFAULT,
   });
   manager.appendModelChange(ANTHROPIC, SONNET);
   manager.appendThinkingLevelChange(OFF);
   manager.appendCustomEntry(WORKBENCH_CONFIGURATION_ENTRY, {
-    agentProvider: BACKUP,
+    agent_provider: BACKUP,
   });
   manager.appendModelChange(ANTHROPIC, HAIKU);
   manager.appendThinkingLevelChange(LOW);
@@ -428,13 +428,13 @@ test("a stored session resumes from the last entry of each kind and lists throug
   const fixture = await workbenchFixture(t, [], state);
   const listed = completed(
     await fixture.workbench["session.list"](
-      { params: {}, query: { agentName: AGENT }, body: null },
+      { params: {}, query: { agent_name: AGENT }, body: null },
       fixture.options,
     ),
   );
   assert.equal(listed.items.length, SINGLE);
   assert.equal(listed.items[0]!.id, id);
-  assert.equal(listed.items[0]!.agentName, AGENT);
+  assert.equal(listed.items[0]!.agent_name, AGENT);
   const everyAgent = completed(
     await fixture.workbench["session.list"](
       { params: {}, query: {}, body: null },
@@ -442,30 +442,30 @@ test("a stored session resumes from the last entry of each kind and lists throug
     ),
   );
   assert.deepEqual(everyAgent.items, listed.items);
-  assert.equal(listed.items[0]!.firstMessage, FIRST_MESSAGE);
+  assert.equal(listed.items[0]!.first_message, FIRST_MESSAGE);
   assert.ok(Number.isSafeInteger(listed.items[0]!.created));
   const read = completed(
     await fixture.workbench["session.get"](
-      { params: { sessionId: id }, query: {}, body: null },
+      { params: { session_id: id }, query: {}, body: null },
       fixture.options,
     ),
   );
-  assert.equal(read.resumeCommand, `pi --session ${manager.getSessionFile()}`);
+  assert.equal(read.resume_command, `pi --session ${manager.getSessionFile()}`);
   assert.deepEqual(read.configuration, {
-    agentProvider: BACKUP,
-    modelIdentifier: HAIKU,
-    reasoningEffort: LOW,
+    agent_provider: BACKUP,
+    model_identifier: HAIKU,
+    reasoning_effort: LOW,
   });
   const same = { ...read.configuration };
   completed(
     await fixture.workbench["session.configure"](
-      { params: { sessionId: id }, query: {}, body: same },
+      { params: { session_id: id }, query: {}, body: same },
       fixture.options,
     ),
   );
   const again = completed(
     await fixture.workbench["session.get"](
-      { params: { sessionId: id }, query: {}, body: null },
+      { params: { session_id: id }, query: {}, body: null },
       fixture.options,
     ),
   );
@@ -495,12 +495,12 @@ test("the workbench credential view exposes only the credential of the configure
   completed(
     await fixture.workbench["session.configure"](
       {
-        params: { sessionId: session.id },
+        params: { session_id: session.id },
         query: {},
         body: {
-          agentProvider: BACKUP,
-          modelIdentifier: SONNET,
-          reasoningEffort: OFF,
+          agent_provider: BACKUP,
+          model_identifier: SONNET,
+          reasoning_effort: OFF,
         },
       },
       fixture.options,
@@ -549,7 +549,7 @@ type Entry = Record<string, unknown>;
 
 async function message(fixture: Fixture, sessionId: string, text: string) {
   return fixture.workbench["session.message"](
-    { params: { sessionId }, query: {}, body: { text } },
+    { params: { session_id: sessionId }, query: {}, body: { text } },
     fixture.options,
   );
 }
@@ -566,7 +566,7 @@ async function untilIdle(
     const answer = completed(
       await fixture.workbench["session.events"](
         {
-          params: { sessionId },
+          params: { session_id: sessionId },
           query: {
             ...(cursor === undefined ? {} : { after: cursor }),
             ...(version === undefined ? {} : { version }),
@@ -579,7 +579,7 @@ async function untilIdle(
     entries.push(...answer.entries);
     cursor = (entries.at(-1)?.id as string | undefined) ?? cursor;
     version = answer.version;
-    if (!answer.snapshot.runActive) return entries;
+    if (!answer.snapshot.run_active) return entries;
   }
   return assert.fail("The run did not end.");
 }
@@ -612,7 +612,7 @@ test("a message runs the agent while a long poll follows the run to its end", as
   assert.equal(accepted.type, OperationResultType.Completed);
   assert.ok(accepted.type === OperationResultType.Completed);
   assert.equal(accepted.status, HttpStatus.Accepted);
-  assert.deepEqual(accepted.data, { sessionId, runActive: true });
+  assert.deepEqual(accepted.data, { session_id: sessionId, run_active: true });
   failed(
     await message(fixture, sessionId, QUESTION),
     HttpStatus.Conflict,
@@ -620,7 +620,11 @@ test("a message runs the agent while a long poll follows the run to its end", as
   );
   failed(
     await fixture.workbench["session.configure"](
-      { params: { sessionId }, query: {}, body: session.configuration },
+      {
+        params: { session_id: sessionId },
+        query: {},
+        body: session.configuration,
+      },
       fixture.options,
     ),
     HttpStatus.Conflict,
@@ -628,31 +632,31 @@ test("a message runs the agent while a long poll follows the run to its end", as
   );
   const during = completed(
     await fixture.workbench["session.get"](
-      { params: { sessionId }, query: {}, body: null },
+      { params: { session_id: sessionId }, query: {}, body: null },
       fixture.options,
     ),
   );
-  assert.equal(during.runActive, true);
+  assert.equal(during.run_active, true);
   assert.deepEqual(during.entries, session.entries);
   const last = session.entries.at(-1)!.id;
   const first = completed(
     await fixture.workbench["session.events"](
-      { params: { sessionId }, query: { after: last }, body: null },
+      { params: { session_id: sessionId }, query: { after: last }, body: null },
       fixture.options,
     ),
   );
-  assert.equal(first.snapshot.runActive, true);
+  assert.equal(first.snapshot.run_active, true);
   assert.deepEqual(texts(first.entries, "user"), [QUESTION]);
   gate.resolve();
   const rest = await untilIdle(fixture, sessionId, last);
   assert.deepEqual(texts(rest, "assistant"), [ANSWER]);
   const after = completed(
     await fixture.workbench["session.get"](
-      { params: { sessionId }, query: {}, body: null },
+      { params: { session_id: sessionId }, query: {}, body: null },
       fixture.options,
     ),
   );
-  assert.equal(after.runActive, false);
+  assert.equal(after.run_active, false);
   assert.deepEqual(texts(after.entries, "assistant"), [ANSWER]);
   const call = fixture.provider.calls[0]!;
   assert.ok(call.systemPrompt?.includes(BASE_PROMPT));
@@ -680,19 +684,19 @@ test("an abort stops the active run", async (t) => {
   assert.deepEqual(
     completed(
       await fixture.workbench["session.abort"](
-        { params: { sessionId }, query: {}, body: null },
+        { params: { session_id: sessionId }, query: {}, body: null },
         fixture.options,
       ),
     ),
-    { sessionId, runActive: false },
+    { session_id: sessionId, run_active: false },
   );
   const read = completed(
     await fixture.workbench["session.get"](
-      { params: { sessionId }, query: {}, body: null },
+      { params: { session_id: sessionId }, query: {}, body: null },
       fixture.options,
     ),
   );
-  assert.equal(read.runActive, false);
+  assert.equal(read.run_active, false);
   assert.ok(!texts(read.entries, "assistant").includes(ANSWER));
 });
 
@@ -704,15 +708,15 @@ test("a session resumes after a restart with its configuration and its completed
     state,
   );
   const session = await createSession(first, {
-    agentProvider: BACKUP,
-    modelIdentifier: HAIKU,
-    reasoningEffort: LOW,
+    agent_provider: BACKUP,
+    model_identifier: HAIKU,
+    reasoning_effort: LOW,
   });
   completed(await message(first, session.id, QUESTION));
   await untilIdle(first, session.id);
   completed(
     await first.workbench["session.abort"](
-      { params: { sessionId: session.id }, query: {}, body: null },
+      { params: { session_id: session.id }, query: {}, body: null },
       first.options,
     ),
   );
@@ -724,7 +728,7 @@ test("a session resumes after a restart with its configuration and its completed
   );
   const listed = completed(
     await second.workbench["session.list"](
-      { params: {}, query: { agentName: AGENT }, body: null },
+      { params: {}, query: { agent_name: AGENT }, body: null },
       second.options,
     ),
   );
@@ -734,7 +738,7 @@ test("a session resumes after a restart with its configuration and its completed
   );
   const resumed = completed(
     await second.workbench["session.get"](
-      { params: { sessionId: session.id }, query: {}, body: null },
+      { params: { session_id: session.id }, query: {}, body: null },
       second.options,
     ),
   );
@@ -801,15 +805,16 @@ async function untilApproval(fixture: Fixture, sessionId: string) {
     const answer = completed(
       await fixture.workbench["session.events"](
         {
-          params: { sessionId },
+          params: { session_id: sessionId },
           query: version === undefined ? {} : { version },
           body: null,
         },
         fixture.options,
       ),
     );
-    if (answer.snapshot.pendingApproval) return answer.snapshot.pendingApproval;
-    assert.ok(answer.snapshot.runActive);
+    if (answer.snapshot.pending_approval)
+      return answer.snapshot.pending_approval;
+    assert.ok(answer.snapshot.run_active);
     version = answer.version;
   }
   return assert.fail("No call waited for an approval.");
@@ -834,7 +839,7 @@ test("a poll answers at once when the snapshot changed after the version that th
   const sessionId = session.id;
   const before = completed(
     await fixture.workbench["session.events"](
-      { params: { sessionId }, query: {}, body: null },
+      { params: { session_id: sessionId }, query: {}, body: null },
       fixture.options,
     ),
   );
@@ -842,7 +847,7 @@ test("a poll answers at once when the snapshot changed after the version that th
   await untilApproval(fixture, sessionId);
   const all = completed(
     await fixture.workbench["session.events"](
-      { params: { sessionId }, query: {}, body: null },
+      { params: { session_id: sessionId }, query: {}, body: null },
       fixture.options,
     ),
   );
@@ -851,7 +856,7 @@ test("a poll answers at once when the snapshot changed after the version that th
   const answer = completed(
     await fixture.workbench["session.events"](
       {
-        params: { sessionId },
+        params: { session_id: sessionId },
         query: { after: last, version: before.version },
         body: null,
       },
@@ -860,7 +865,7 @@ test("a poll answers at once when the snapshot changed after the version that th
   );
   assert.ok(performance.now() - started < FAST_POLL_MS);
   assert.deepEqual(answer.entries, []);
-  assert.ok(answer.snapshot.pendingApproval);
+  assert.ok(answer.snapshot.pending_approval);
   assert.ok(answer.version > before.version);
 });
 
@@ -948,15 +953,15 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId);
-  assert.equal(pending.operationId, PROVIDER_ADD);
+  assert.equal(pending.operation_id, PROVIDER_ADD);
   assert.deepEqual(pending.input, addSpare);
   assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
   failed(
     await fixture.workbench["session.approve"](
       {
-        params: { sessionId },
+        params: { session_id: sessionId },
         query: {},
-        body: { toolCallId: "absent", approved: true },
+        body: { tool_call_id: "absent", approved: true },
       },
       fixture.options,
     ),
@@ -967,14 +972,18 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
     completed(
       await fixture.workbench["session.approve"](
         {
-          params: { sessionId },
+          params: { session_id: sessionId },
           query: {},
-          body: { toolCallId: pending.toolCallId, approved: true },
+          body: { tool_call_id: pending.tool_call_id, approved: true },
         },
         fixture.options,
       ),
     ),
-    { sessionId, toolCallId: pending.toolCallId, approved: true },
+    {
+      session_id: sessionId,
+      tool_call_id: pending.tool_call_id,
+      approved: true,
+    },
   );
   const entries = await untilIdle(fixture, sessionId);
   assert.deepEqual(
@@ -996,9 +1005,9 @@ test("a rejected call reaches the agent as a blocked call", async (t) => {
   completed(
     await fixture.workbench["session.approve"](
       {
-        params: { sessionId },
+        params: { session_id: sessionId },
         query: {},
-        body: { toolCallId: pending.toolCallId, approved: false },
+        body: { tool_call_id: pending.tool_call_id, approved: false },
       },
       fixture.options,
     ),
@@ -1025,24 +1034,24 @@ test("an abort rejects every pending approval", async (t) => {
   const pending = await untilApproval(fixture, sessionId);
   completed(
     await fixture.workbench["session.abort"](
-      { params: { sessionId }, query: {}, body: null },
+      { params: { session_id: sessionId }, query: {}, body: null },
       fixture.options,
     ),
   );
   const answer = completed(
     await fixture.workbench["session.events"](
-      { params: { sessionId }, query: {}, body: null },
+      { params: { session_id: sessionId }, query: {}, body: null },
       fixture.options,
     ),
   );
-  assert.equal(answer.snapshot.runActive, false);
-  assert.equal(answer.snapshot.pendingApproval, null);
+  assert.equal(answer.snapshot.run_active, false);
+  assert.equal(answer.snapshot.pending_approval, null);
   failed(
     await fixture.workbench["session.approve"](
       {
-        params: { sessionId },
+        params: { session_id: sessionId },
         query: {},
-        body: { toolCallId: pending.toolCallId, approved: true },
+        body: { tool_call_id: pending.tool_call_id, approved: true },
       },
       fixture.options,
     ),

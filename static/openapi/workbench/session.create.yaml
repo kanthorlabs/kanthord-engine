@@ -58,12 +58,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: agentName
+      - name: agent_name
         in: query
         required: false
         schema:
           $ref: "#/components/schemas/workbench.session.list.Input/properties/query/prope\
-            rties/agentName"
+            rties/agent_name"
     responses:
       "200":
         description: Completed result
@@ -107,13 +107,13 @@ components:
         body:
           type: object
           properties:
-            agentProvider:
+            agent_provider:
               type: string
               minLength: 1
-            modelIdentifier:
+            model_identifier:
               type: string
               minLength: 1
-            reasoningEffort:
+            reasoning_effort:
               type: string
               enum:
                 - off
@@ -123,14 +123,14 @@ components:
                 - high
                 - xhigh
                 - max
-            agentName:
+            agent_name:
               type: string
               minLength: 1
           required:
-            - agentProvider
-            - modelIdentifier
-            - reasoningEffort
-            - agentName
+            - agent_provider
+            - model_identifier
+            - reasoning_effort
+            - agent_name
           additionalProperties: false
       required:
         - params
@@ -147,18 +147,18 @@ components:
           pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: workbench_session_ followed by a canonical 26-character uppercase
             ULID.
-        agentName:
+        agent_name:
           type: string
         configuration:
           type: object
           properties:
-            agentProvider:
+            agent_provider:
               type: string
               minLength: 1
-            modelIdentifier:
+            model_identifier:
               type: string
               minLength: 1
-            reasoningEffort:
+            reasoning_effort:
               type: string
               enum:
                 - off
@@ -169,9 +169,9 @@ components:
                 - xhigh
                 - max
           required:
-            - agentProvider
-            - modelIdentifier
-            - reasoningEffort
+            - agent_provider
+            - model_identifier
+            - reasoning_effort
           additionalProperties: false
         entries:
           type: array
@@ -194,17 +194,17 @@ components:
               - parentId
               - timestamp
             additionalProperties: {}
-        runActive:
+        run_active:
           type: boolean
-        resumeCommand:
+        resume_command:
           type: string
       required:
         - id
-        - agentName
+        - agent_name
         - configuration
         - entries
-        - runActive
-        - resumeCommand
+        - run_active
+        - resume_command
       additionalProperties: false
     workbench.session.list.Input:
       type: object
@@ -216,7 +216,7 @@ components:
         query:
           type: object
           properties:
-            agentName:
+            agent_name:
               type: string
               minLength: 1
           additionalProperties: false
@@ -237,7 +237,7 @@ components:
             properties:
               id:
                 type: string
-              agentName:
+              agent_name:
                 type: string
               name:
                 anyOf:
@@ -253,20 +253,20 @@ components:
                 minimum: -9007199254740991
                 maximum: 9007199254740991
                 description: Unix epoch time in milliseconds.
-              messageCount:
+              message_count:
                 type: integer
                 minimum: 0
                 maximum: 9007199254740991
-              firstMessage:
+              first_message:
                 type: string
             required:
               - id
-              - agentName
+              - agent_name
               - name
               - created
               - modified
-              - messageCount
-              - firstMessage
+              - message_count
+              - first_message
             additionalProperties: false
       required:
         - items

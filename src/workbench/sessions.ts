@@ -66,12 +66,12 @@ export async function listSessions(place: SessionPlace, agentName: string) {
   );
   return sessions.map((session) => ({
     id: session.id,
-    agentName,
+    agent_name: agentName,
     name: session.name ?? null,
     created: session.created.getTime(),
     modified: session.modified.getTime(),
-    messageCount: session.messageCount,
-    firstMessage: session.firstMessage,
+    message_count: session.messageCount,
+    first_message: session.firstMessage,
   }));
 }
 
@@ -119,11 +119,11 @@ export function storedConfiguration(
   );
   const model = lastOfType(entries, EntryType.ModelChange);
   const thinking = lastOfType(entries, EntryType.ThinkingLevelChange);
-  const data = custom?.data as { agentProvider?: unknown } | undefined;
+  const data = custom?.data as { agent_provider?: unknown } | undefined;
   return {
-    agentProvider: data?.agentProvider,
-    modelIdentifier: model?.modelId,
-    reasoningEffort: thinking?.thinkingLevel,
+    agent_provider: data?.agent_provider,
+    model_identifier: model?.modelId,
+    reasoning_effort: thinking?.thinkingLevel,
   };
 }
 

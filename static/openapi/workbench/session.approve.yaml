@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: sessionId
+      - name: session_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/workbench.session.approve.Input/properties/params/p\
-            roperties/sessionId"
+            roperties/session_id"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
@@ -60,7 +60,7 @@ components:
         params:
           type: object
           properties:
-            sessionId:
+            session_id:
               type: string
               minLength: 44
               maxLength: 44
@@ -68,7 +68,7 @@ components:
               description: workbench_session_ followed by a canonical 26-character uppercase
                 ULID.
           required:
-            - sessionId
+            - session_id
           additionalProperties: false
         query:
           type: object
@@ -77,13 +77,13 @@ components:
         body:
           type: object
           properties:
-            toolCallId:
+            tool_call_id:
               type: string
               minLength: 1
             approved:
               type: boolean
           required:
-            - toolCallId
+            - tool_call_id
             - approved
           additionalProperties: false
       required:
@@ -94,19 +94,19 @@ components:
     workbench.session.approve.Output:
       type: object
       properties:
-        sessionId:
+        session_id:
           type: string
           minLength: 44
           maxLength: 44
           pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: workbench_session_ followed by a canonical 26-character uppercase
             ULID.
-        toolCallId:
+        tool_call_id:
           type: string
         approved:
           type: boolean
       required:
-        - sessionId
-        - toolCallId
+        - session_id
+        - tool_call_id
         - approved
       additionalProperties: false

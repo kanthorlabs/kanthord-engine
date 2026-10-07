@@ -164,7 +164,7 @@ function sessionNotFound(sessionId: string): OperationError {
     HttpStatus.NotFound,
     WorkbenchErrorCode.SessionNotFound,
     "Workbench session not found.",
-    { sessionId },
+    { session_id: sessionId },
   );
 }
 
@@ -173,7 +173,7 @@ function refused(sessionId: string): OperationError {
     HttpStatus.Forbidden,
     WorkbenchErrorCode.AuthorizationRefused,
     "The workbench session refuses the credential release.",
-    { sessionId },
+    { session_id: sessionId },
   );
 }
 
@@ -278,7 +278,7 @@ export class WorkbenchService implements Service {
         HttpStatus.Conflict,
         WorkbenchErrorCode.ConfigurationInvalid,
         "The stored configuration of the workbench session is invalid.",
-        { sessionId },
+        { session_id: sessionId },
       );
     const session: OpenSession = {
       id: sessionId,
@@ -332,11 +332,11 @@ export class WorkbenchService implements Service {
           },
           credentialId: resolved.credentialId,
           configuration: {
-            agent_provider: session.configuration.agentProvider,
+            agent_provider: session.configuration.agent_provider,
             provider: resolved.provider,
-            model_identifier: session.configuration.modelIdentifier,
+            model_identifier: session.configuration.model_identifier,
             reasoning_effort: session.configuration
-              .reasoningEffort as ReasoningLevel,
+              .reasoning_effort as ReasoningLevel,
           },
           metadata: resolved.metadata,
           signal: controller.signal,
@@ -348,7 +348,7 @@ export class WorkbenchService implements Service {
           HttpStatus.Conflict,
           WorkbenchErrorCode.SetupRefused,
           "The agent runtime of the workbench session refuses the configuration.",
-          { sessionId: session.id },
+          { session_id: session.id },
         );
       });
       const hostHome = this.dependencies.hostHome ?? homedir();
@@ -379,7 +379,7 @@ export class WorkbenchService implements Service {
         cwd: session.place.cwd,
         modelRuntime: runtime,
         model,
-        thinkingLevel: session.configuration.reasoningEffort,
+        thinkingLevel: session.configuration.reasoning_effort,
         systemPrompt: prompt,
         allowlist: [
           ...builtin.allowlist,
@@ -396,8 +396,8 @@ export class WorkbenchService implements Service {
               return this.approval(
                 session,
                 {
-                  toolCallId: call.toolCallId,
-                  operationId: operation.id,
+                  tool_call_id: call.toolCallId,
+                  operation_id: operation.id,
                   input: JSON.parse(JSON.stringify(call.input ?? {})),
                 },
                 signal,
@@ -439,13 +439,13 @@ export class WorkbenchService implements Service {
     const reject = () => decide(false);
     const decide = (approved: boolean) => {
       signal?.removeEventListener("abort", reject);
-      session.approvals.delete(approval.toolCallId);
+      session.approvals.delete(approval.tool_call_id);
       decision.resolve(approved);
       this.notify(session);
     };
     if (signal?.aborted) return Promise.resolve(false);
     signal?.addEventListener("abort", reject, { once: true });
-    session.approvals.set(approval.toolCallId, { approval, decide });
+    session.approvals.set(approval.tool_call_id, { approval, decide });
     this.notify(session);
     return decision.promise;
   }
@@ -458,17 +458,17 @@ export class WorkbenchService implements Service {
     sessionId: string,
     toolCallId: string,
     approved: boolean,
-  ): { sessionId: string; toolCallId: string; approved: boolean } {
+  ): { session_id: string; tool_call_id: string; approved: boolean } {
     const pending = this.sessions.get(sessionId)?.approvals.get(toolCallId);
     if (!pending)
       throw new OperationError(
         HttpStatus.NotFound,
         WorkbenchErrorCode.ApprovalNotFound,
         "The workbench session holds no pending call with this identity.",
-        { sessionId, toolCallId },
+        { session_id: sessionId, tool_call_id: toolCallId },
       );
     pending.decide(approved);
-    return { sessionId, toolCallId, approved };
+    return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
 
   private closeAgent(session: OpenSession): void {
@@ -482,32 +482,33 @@ export class WorkbenchService implements Service {
     const { manager, configuration } = session;
     const entries = this.entries(manager);
     if (
-      storedConfiguration(entries).agentProvider !== configuration.agentProvider
+      storedConfiguration(entries).agent_provider !==
+      configuration.agent_provider
     )
       manager.appendCustomEntry(WORKBENCH_CONFIGURATION_ENTRY, {
-        agentProvider: configuration.agentProvider,
+        agent_provider: configuration.agent_provider,
       });
     const model = lastModel(entries);
     if (
       model?.provider !== provider ||
-      model.modelId !== configuration.modelIdentifier
+      model.modelId !== configuration.model_identifier
     )
-      manager.appendModelChange(provider, configuration.modelIdentifier);
-    if (lastThinkingLevel(entries) !== configuration.reasoningEffort)
-      manager.appendThinkingLevelChange(configuration.reasoningEffort);
+      manager.appendModelChange(provider, configuration.model_identifier);
+    if (lastThinkingLevel(entries) !== configuration.reasoning_effort)
+      manager.appendThinkingLevelChange(configuration.reasoning_effort);
   }
 
   private view(session: OpenSession): WorkbenchSession {
     const entries = this.entries(session.manager);
     return {
       id: session.id,
-      agentName: session.agentName,
+      agent_name: session.agentName,
       configuration: { ...session.configuration },
       entries: this.runActive(session)
         ? entries.slice(0, session.run!.firstEntry)
         : entries,
-      runActive: this.runActive(session),
-      resumeCommand: resumeCommand(
+      run_active: this.runActive(session),
+      resume_command: resumeCommand(
         session.manager,
         this.dependencies.hostHome ?? homedir(),
       ),
@@ -529,7 +530,7 @@ export class WorkbenchService implements Service {
         HttpStatus.Conflict,
         WorkbenchErrorCode.RunActive,
         "The workbench session holds an active run.",
-        { sessionId: session.id },
+        { session_id: session.id },
       );
   }
 
@@ -537,13 +538,13 @@ export class WorkbenchService implements Service {
     const state = session.agent?.state;
     const streaming = state?.streamingMessage;
     return {
-      streamingMessage:
+      streaming_message:
         streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
-      pendingToolCalls: state ? [...state.pendingToolCalls] : [],
-      pendingApproval:
+      pending_tool_calls: state ? [...state.pendingToolCalls] : [],
+      pending_approval:
         session.approvals.values().next().value?.approval ?? null,
-      runActive: this.runActive(session),
-      errorMessage: session.runError ?? state?.errorMessage ?? null,
+      run_active: this.runActive(session),
+      error_message: session.runError ?? state?.errorMessage ?? null,
     };
   }
 
@@ -589,7 +590,7 @@ export class WorkbenchService implements Service {
     caller: CallerContext,
     sessionId: string,
     text: string,
-  ): Promise<{ sessionId: string; runActive: true }> {
+  ): Promise<{ session_id: string; run_active: true }> {
     const session = await this.session(sessionId);
     if (session.run?.ended) await session.run.settled;
     this.requireIdle(session);
@@ -628,12 +629,12 @@ export class WorkbenchService implements Service {
       settle();
       throw error;
     }
-    return { sessionId, runActive: true };
+    return { session_id: sessionId, run_active: true };
   }
 
   async abort(sessionId: string): Promise<{
-    sessionId: string;
-    runActive: false;
+    session_id: string;
+    run_active: false;
   }> {
     const session = await this.session(sessionId);
     await this.exclusive(session, async () => {
@@ -643,7 +644,7 @@ export class WorkbenchService implements Service {
       await session.agent?.abort();
       await run.settled;
     });
-    return { sessionId, runActive: false };
+    return { session_id: sessionId, run_active: false };
   }
 
   async list(agentName: string | undefined) {
@@ -663,9 +664,9 @@ export class WorkbenchService implements Service {
 
   async create(
     caller: CallerContext,
-    body: WorkbenchConfiguration & { agentName: string },
+    body: WorkbenchConfiguration & { agent_name: string },
   ): Promise<WorkbenchSession> {
-    const { agentName, ...configuration } = body;
+    const { agent_name: agentName, ...configuration } = body;
     requireAgent(agentName);
     const resolved = this.dependencies.store.transaction((tx) =>
       this.resolve(tx, agentName, configuration),
@@ -731,38 +732,38 @@ export class WorkbenchService implements Service {
 
   declare(registry: OperationRegistry): void {
     registry.register(workbenchOperations["session.list"], ({ query }) =>
-      this.list(query.agentName),
+      this.list(query.agent_name),
     );
     registry.register(
       workbenchOperations["session.create"],
       ({ body }, caller) => this.create(caller, body),
     );
     registry.register(workbenchOperations["session.get"], ({ params }) =>
-      this.get(params.sessionId),
+      this.get(params.session_id),
     );
     registry.register(
       workbenchOperations["session.configure"],
       ({ params, body }, caller) =>
-        this.configure(caller, params.sessionId, body),
+        this.configure(caller, params.session_id, body),
     );
     registry.register(
       workbenchOperations["session.message"],
       ({ params, body }, caller) =>
-        this.message(caller, params.sessionId, body.text),
+        this.message(caller, params.session_id, body.text),
     );
     registry.register(
       workbenchOperations["session.approve"],
       ({ params, body }) =>
-        this.approve(params.sessionId, body.toolCallId, body.approved),
+        this.approve(params.session_id, body.tool_call_id, body.approved),
     );
     registry.register(workbenchOperations["session.abort"], ({ params }) =>
-      this.abort(params.sessionId),
+      this.abort(params.session_id),
     );
     registry.register(
       workbenchOperations["session.events"],
       ({ params, query }, caller) =>
         this.events(
-          params.sessionId,
+          params.session_id,
           query.after,
           query.version,
           caller.context,
