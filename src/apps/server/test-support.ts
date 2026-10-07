@@ -15,6 +15,7 @@ import {
 import { once } from "node:events";
 import type { TestContext } from "node:test";
 import pino from "pino";
+import { z } from "zod";
 import { configuration } from "../../config/index.ts";
 import { custodyMigrations } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
@@ -38,7 +39,13 @@ import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { composeServices } from "./index.ts";
-import type { OperationRegistry } from "../../kernel/operation.ts";
+import {
+  AccessPolicy,
+  emptyInput,
+  OperationLifetime,
+  StoreName,
+  type OperationRegistry,
+} from "../../kernel/operation.ts";
 import {
   workerResourceIdentity,
   type ProjectBindings,
@@ -62,6 +69,22 @@ import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
 import { generateHumanJWT, generateMachineJWT } from "../../gateway/local.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
+
+export const servicePing = {
+  id: "test.service.ping",
+  service: "test",
+  store: StoreName.Operational,
+  lifetime: OperationLifetime.Unary,
+  method: HttpMethod.Post,
+  path: "/api/test/ping",
+  access: AccessPolicy.Service,
+  timeoutMs: 30000,
+  mutation: true,
+  input: emptyInput,
+  output: z.strictObject({ pong: z.literal(true) }),
+  status: HttpStatus.OK,
+  description: "Test the service access policy.",
+} as const;
 
 export const domainHealth = {
   repository: { toolchain: HealthStatus.Healthy },

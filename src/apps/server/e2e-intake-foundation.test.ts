@@ -1,25 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ulid } from "ulid";
-import { z } from "zod";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { directClient } from "../../gateway/index.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../../kernel/http.ts";
 import {
-  AccessPolicy,
-  emptyInput,
-  OperationLifetime,
   OperationRegistry,
   OperationResultType,
-  StoreName,
 } from "../../kernel/operation.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { gatewayFixture, servicePing } from "./test-support.ts";
 
-const SERVICE_PATH = "/api/test/ping";
 const NOT_FOUND = "gateway.routing.not_found";
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
 const FIXTURE_SERVICE_NAMES = [
@@ -34,21 +28,6 @@ const FIXTURE_SERVICE_NAMES = [
 ];
 const EMPTY_OWNER = { global: {}, projects: {} };
 const input = { params: {}, query: {}, body: null };
-const servicePing = {
-  id: "test.service.ping",
-  service: "test",
-  store: StoreName.Operational,
-  lifetime: OperationLifetime.Unary,
-  method: HttpMethod.Post,
-  path: SERVICE_PATH,
-  access: AccessPolicy.Service,
-  timeoutMs: 30000,
-  mutation: true,
-  input: emptyInput,
-  output: z.strictObject({ pong: z.literal(true) }),
-  status: HttpStatus.OK,
-  description: "Test the service access policy.",
-} as const;
 
 test("E01.1 liveness answers the intake events probe beside the existing maps", async (t) => {
   const fixture = await gatewayFixture(t);
@@ -80,7 +59,7 @@ test("E01.3 a service operation has no route and serves a minted service identit
     caller.commit(() => ({ pong: true as const })),
   );
   const fixture = await gatewayFixture(t, { registry });
-  const routed = await fixture.request(SERVICE_PATH, {
+  const routed = await fixture.request(servicePing.path, {
     method: HttpMethod.Post,
     headers: {
       authorization: `Bearer ${fixture.token}`,

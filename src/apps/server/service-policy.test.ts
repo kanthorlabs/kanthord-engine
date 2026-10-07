@@ -1,20 +1,17 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { z } from "zod";
 import { ulid } from "ulid";
 import {
   fakeMachines,
   gatewayFixture,
+  servicePing,
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
 } from "./test-support.ts";
 import {
   AccessPolicy,
-  emptyInput,
-  OperationLifetime,
   OperationRegistry,
   OperationResultType,
-  StoreName,
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { IdentityKind, type CallerIdentity } from "../../kernel/caller.ts";
@@ -25,7 +22,6 @@ import { directClient } from "../../gateway/index.ts";
 import { emitOpenAPIFiles } from "../../gateway/local.ts";
 
 const SERVICE_NAME = "intake";
-const SERVICE_PATH = "/api/test/ping";
 const DIRECT_PATH = "/api/test/direct-ping";
 const SINGLE_CALL = 1;
 const NO_CALLS = 0;
@@ -35,22 +31,6 @@ const ErrorCode = {
   NotFound: "gateway.routing.not_found",
 } as const;
 const input = { params: {}, query: {}, body: null };
-const pong = z.strictObject({ pong: z.literal(true) });
-const servicePing = {
-  id: "test.service.ping",
-  service: "test",
-  store: StoreName.Operational,
-  lifetime: OperationLifetime.Unary,
-  method: HttpMethod.Post,
-  path: SERVICE_PATH,
-  access: AccessPolicy.Service,
-  timeoutMs: 30000,
-  mutation: true,
-  input: emptyInput,
-  output: pong,
-  status: HttpStatus.OK,
-  description: "Test the service access policy.",
-} as const;
 const directPing = {
   ...servicePing,
   id: "test.direct.ping",
@@ -179,11 +159,11 @@ test("a direct human operation serves a forwarded human and refuses a machine", 
 
 test("the HTTP adapter and OpenAPI expose no service or direct operation", async (t) => {
   const { fixture, calls } = await policyFixture(t);
-  await assertNoRoute(fixture, SERVICE_PATH);
+  await assertNoRoute(fixture, servicePing.path);
   await assertNoRoute(fixture, DIRECT_PATH);
   const paths = emittedPaths(fixture);
   assert.ok(paths.includes(humanPing.path));
-  assert.equal(paths.includes(SERVICE_PATH), false);
+  assert.equal(paths.includes(servicePing.path), false);
   assert.equal(paths.includes(DIRECT_PATH), false);
   assert.equal(calls.count, NO_CALLS);
 });
