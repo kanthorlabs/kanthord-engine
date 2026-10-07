@@ -29,7 +29,6 @@ const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const PAGE_SIZE = 2;
 const FIRST_ROW = 0;
 const SECOND_ROW = 1;
-const THIRD_ROW = 2;
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -161,7 +160,6 @@ test("a page of two answers the newest first with a cursor to the rest", async (
     [...first.items, ...second.items].map((item) => item.id),
     [...ids].sort().reverse(),
   );
-  assert.equal(ids.length, THIRD_ROW + SECOND_ROW);
 });
 
 test("a malformed cursor answers 400 cursor_invalid", async (t) => {

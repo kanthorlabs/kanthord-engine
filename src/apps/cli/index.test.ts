@@ -1199,6 +1199,7 @@ test("intake outbound commands expose offline help, reject --config and validate
       env,
     );
     assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
   }
   const invalid = invocation(["intake", "outbound", "get", "bad"], env);
   assert.equal(invalid.status, ExitCode.Failure);

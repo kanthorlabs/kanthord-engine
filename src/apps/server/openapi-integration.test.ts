@@ -686,7 +686,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
 ];
 const OPERATION_COUNT = 151;
 
-test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
+test("the operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();
   assert.equal(expected.length, OPERATION_COUNT);
   assert.deepEqual(
