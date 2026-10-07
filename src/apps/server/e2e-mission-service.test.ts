@@ -200,8 +200,8 @@ const REPOSITORY_CONFIGURATION = {
   available: true,
   platform: REPOSITORY_PLATFORM,
   address: REPOSITORY_ADDRESS,
-  sshCredential: "github-ssh",
-  strategy: { baseBranch: MAIN_BRANCH },
+  ssh_credential: "github-ssh",
+  strategy: { base_branch: MAIN_BRANCH },
   credential: REPOSITORY_PLATFORM,
 };
 const READ_LEAVES = [
@@ -600,15 +600,15 @@ test(
             available: true,
             platform: REPOSITORY_PLATFORM,
             address: REPOSITORY_ADDRESS,
-            sshCredential: "github-ssh",
-            strategy: { baseBranch: "main" },
+            ssh_credential: "github-ssh",
+            strategy: { base_branch: "main" },
             credential: REPOSITORY_PLATFORM,
           },
         },
       },
     });
     const binding = success<{
-      bindingSetVersion: number;
+      binding_set_version: number;
       bindings: Record<string, { id: string }>;
     }>(
       await kanthord(
@@ -616,7 +616,7 @@ test(
         fixture.env,
       ),
     );
-    assert.equal(binding.bindingSetVersion, SECOND_REVISION);
+    assert.equal(binding.binding_set_version, SECOND_REVISION);
     const bindingId = binding.bindings[REPOSITORY_NAME]!.id;
     const first = await createNode(
       fixture,
@@ -935,15 +935,15 @@ async function configureRepository(
           available: true,
           platform: REPOSITORY_PLATFORM,
           address: REPOSITORY_ADDRESS,
-          sshCredential: "github-ssh",
-          strategy: { baseBranch: "main" },
+          ssh_credential: "github-ssh",
+          strategy: { base_branch: "main" },
           credential: REPOSITORY_PLATFORM,
         },
       },
     },
   });
   const result = success<{
-    bindingSetVersion: number;
+    binding_set_version: number;
     bindings: Record<string, { id: string }>;
   }>(
     await kanthord(
@@ -951,7 +951,7 @@ async function configureRepository(
       fixture.env,
     ),
   );
-  assert.equal(result.bindingSetVersion, SECOND_REVISION);
+  assert.equal(result.binding_set_version, SECOND_REVISION);
   assert.ok(projectId);
   return result.bindings[REPOSITORY_NAME]!.id;
 }
@@ -1320,10 +1320,10 @@ async function queued(scenario: Scenario, nodeId: string): Promise<void> {
 
 async function scenarioProject(fixture: Fixture): Promise<Mission> {
   const args = [PROJECT, CREATE, NAME, PROJECT_NAME, KEY, ulid()];
-  const project = success<{ id: string; bindingSetVersion: number }>(
+  const project = success<{ id: string; binding_set_version: number }>(
     await kanthord(args, fixture.env),
   );
-  assert.equal(project.bindingSetVersion, FIRST_REVISION);
+  assert.equal(project.binding_set_version, FIRST_REVISION);
   const mission = success<Mission>(
     await kanthord([MISSION, GET, project.id], fixture.env),
   );
@@ -1618,23 +1618,23 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
 
 async function applyRepositorySet(scenario: Scenario, bindings: RepositorySet) {
   const { fixture, mission } = scenario;
-  const project = success<{ id: string; bindingSetVersion: number }>(
+  const project = success<{ id: string; binding_set_version: number }>(
     await kanthord([PROJECT, GET, mission.projectId], fixture.env),
   );
   const path = jsonFile(fixture, SCENARIO_FILE, {
-    version: project.bindingSetVersion,
+    version: project.binding_set_version,
     bindings,
   });
-  const applied = success<{ projectId: string; bindingSetVersion: number }>(
+  const applied = success<{ project_id: string; binding_set_version: number }>(
     await kanthord(
       [PROJECT, BINDING, APPLY, mission.projectId, FILE, path],
       fixture.env,
     ),
   );
-  assert.equal(applied.projectId, mission.projectId);
+  assert.equal(applied.project_id, mission.projectId);
   assert.equal(
-    applied.bindingSetVersion,
-    project.bindingSetVersion + VERSION_INCREMENT,
+    applied.binding_set_version,
+    project.binding_set_version + VERSION_INCREMENT,
   );
   const listed = success<Page<RepositoryRecord>>(
     await kanthord([PROJECT, BINDING, LIST, mission.projectId], fixture.env),
@@ -1651,7 +1651,7 @@ async function scenarioRebind(scenario: Scenario): Promise<void> {
       kind: BindingKind.Repository,
       config: {
         ...REPOSITORY_CONFIGURATION,
-        strategy: { baseBranch: NEXT_BRANCH },
+        strategy: { base_branch: NEXT_BRANCH },
       },
     },
   });
@@ -1800,7 +1800,7 @@ async function scenarioRemovedBinding(scenario: Scenario): Promise<void> {
     kind: BindingKind.Repository,
     config: {
       ...REPOSITORY_CONFIGURATION,
-      strategy: { baseBranch: NEXT_BRANCH },
+      strategy: { base_branch: NEXT_BRANCH },
     },
   };
   const added = await applyRepositorySet(scenario, {

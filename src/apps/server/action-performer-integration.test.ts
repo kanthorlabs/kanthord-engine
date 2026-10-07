@@ -149,7 +149,7 @@ async function setup(
   ).id;
   completed(
     await call(projectOperations["bindingSet.write"], {
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: {
         version: FIRST_REVISION,
@@ -160,10 +160,10 @@ async function setup(
               available: true,
               platform: "github",
               address: "git@github.com:owner/repo.git",
-              sshCredential: "github-ssh",
+              ssh_credential: "github-ssh",
               credential: "github",
               strategy: {
-                baseBranch: "main",
+                base_branch: "main",
                 action: {
                   name: "pull_request",
                   follows: { type: "assessment_passed" },
@@ -173,7 +173,7 @@ async function setup(
           },
           harness: {
             kind: "worker",
-            config: { worker: "claude@1", instanceCount: TWO_INSTANCES },
+            config: { worker: "claude@1", instance_count: TWO_INSTANCES },
           },
         },
       },
@@ -181,7 +181,7 @@ async function setup(
   );
   const bindings = completed(
     await call(projectOperations["binding.list"], {
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: null,
     }),

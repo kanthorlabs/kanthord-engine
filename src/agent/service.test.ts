@@ -238,25 +238,25 @@ test("agent read with a repository binding answers its working layer and the wor
   const policies: Record<
     string,
     {
-      projectId: string;
-      projectPrompt: string | null;
-      workingLayer: typeof allOn;
+      project_id: string;
+      project_prompt: string | null;
+      working_layer: typeof allOn;
     }
   > = {
     "binding-on": {
-      projectId: "project-a",
-      projectPrompt: PROJECT_TEXT,
-      workingLayer: allOn,
+      project_id: "project-a",
+      project_prompt: PROJECT_TEXT,
+      working_layer: allOn,
     },
     "binding-empty": {
-      projectId: "project-a",
-      projectPrompt: "",
-      workingLayer: allOn,
+      project_id: "project-a",
+      project_prompt: "",
+      working_layer: allOn,
     },
     "binding-off": {
-      projectId: "project-a",
-      projectPrompt: PROJECT_TEXT,
-      workingLayer: { ...allOn, claude_md: false, project_prompt: false },
+      project_id: "project-a",
+      project_prompt: PROJECT_TEXT,
+      working_layer: { ...allOn, claude_md: false, project_prompt: false },
     },
   };
   const f = enablementFixture(t, {

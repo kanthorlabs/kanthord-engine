@@ -33,11 +33,7 @@ import {
 } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import {
-  FAKE_SSH_IDENTITY,
-  gatewayFixture,
-  agentDefaultsOf,
-} from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -67,9 +63,9 @@ const SECRETS = [
 ] as const;
 const [FIRST, SECOND, THIRD, REFRESHED, NEXT, LAST] = SECRETS;
 const CONFIGURATION = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off",
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
 };
 const CONTENT = {
   name: "Recover accounts",
@@ -199,7 +195,7 @@ async function resources(c: ReturnType<typeof cli>) {
       agent_providers: [
         { name: "default", provider: PROVIDER, credential: NAME },
       ],
-      default_configuration: agentDefaultsOf(CONFIGURATION),
+      default_configuration: CONFIGURATION,
     },
   );
   assert.equal(enabled.revision, FIRST_REVISION);
@@ -210,7 +206,7 @@ async function resources(c: ReturnType<typeof cli>) {
     "handover",
   ]);
   const applied = await c.write<{
-    bindingSetVersion: number;
+    binding_set_version: number;
     bindings: Record<string, { id: string }>;
   }>(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
@@ -221,8 +217,8 @@ async function resources(c: ReturnType<typeof cli>) {
           available: true,
           platform: "github",
           address: "git@github.com:owner/repo.git",
-          sshCredential: "github-ssh",
-          strategy: { baseBranch: "main" },
+          ssh_credential: "github-ssh",
+          strategy: { base_branch: "main" },
           credential: "github",
         },
       },
@@ -230,13 +226,13 @@ async function resources(c: ReturnType<typeof cli>) {
         kind: "worker",
         config: {
           worker: "general@1",
-          instanceCount: SINGLE_INSTANCE,
+          instance_count: SINGLE_INSTANCE,
           entries: [{ agent: "swe@1", ...CONFIGURATION }],
         },
       },
     },
   });
-  assert.equal(applied.bindingSetVersion, FULL_BINDING_SET_VERSION);
+  assert.equal(applied.binding_set_version, FULL_BINDING_SET_VERSION);
   return { projectId: project.id, bindingId: applied.bindings.repo!.id };
 }
 

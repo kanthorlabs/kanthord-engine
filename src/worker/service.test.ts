@@ -25,7 +25,6 @@ import {
   agentOperations,
   AgentErrorCode,
   AGENT_COMPONENT_NAME,
-  type AgentEntry,
 } from "../agent/contract.ts";
 import { AgentProviderKind } from "../agent/enablements.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
@@ -299,23 +298,6 @@ const defaults = {
   model_identifier: MODEL,
   reasoning_effort: "off",
 };
-const entryDefaults = {
-  agentProvider: provider.name,
-  modelIdentifier: MODEL,
-  reasoningEffort: "off",
-};
-const ENTRY_KEYS: Readonly<Record<string, string>> = {
-  agentProvider: "agent_provider",
-  modelIdentifier: "model_identifier",
-  reasoningEffort: "reasoning_effort",
-};
-function agentEntryOf(entry: WorkerEntry | null): AgentEntry | null {
-  return entry === null
-    ? null
-    : (Object.fromEntries(
-        Object.entries(entry).map(([key, value]) => [ENTRY_KEYS[key], value]),
-      ) as AgentEntry);
-}
 const putBody = {
   agent_providers: [provider],
   default_configuration: defaults,
@@ -967,9 +949,9 @@ test("native instance health resolves the latest agent entry and enablement in t
   assert.equal(check(), false);
   f.invokeAgent("enablement.put", putBody);
   assert.equal(check(), true);
-  entries = [{ agent: AGENT, modelIdentifier: MISSING_MODEL }];
+  entries = [{ agent: AGENT, model_identifier: MISSING_MODEL }];
   assert.equal(check(), false);
-  entries = [{ agent: AGENT, ...entryDefaults }];
+  entries = [{ agent: AGENT, ...defaults }];
   assert.equal(check(), true);
   f.invokeAgent("enablement.disable", { expected_revision: FIRST_REVISION });
   assert.equal(check(), false);
@@ -1124,10 +1106,9 @@ function enablementFixture(
     store,
     ...fakeCollaborations,
     agentConfiguration: {
-      validateEntry: (tx, name, entry) =>
-        agent.validateEntry(tx, name, agentEntryOf(entry)),
+      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
       agentView: (tx, name, entry, models) =>
-        agent.agentView(tx, name, agentEntryOf(entry), models),
+        agent.agentView(tx, name, entry, models),
     },
     ...collaborations,
   });
@@ -1416,13 +1397,13 @@ test("validateEntry refuses unknown workers and external entries and validates e
   refuses(() => validate(null, UNKNOWN), AgentErrorCode.InvalidConfiguration);
   assert.doesNotThrow(() => validate(null, "claude@1"));
   refuses(
-    () => validate({ modelIdentifier: MODEL }, "claude@1"),
+    () => validate({ model_identifier: MODEL }, "claude@1"),
     AgentErrorCode.InvalidConfiguration,
   );
   f.invokeAgent("enablement.put", putBody);
-  assert.doesNotThrow(() => validate(entryDefaults));
+  assert.doesNotThrow(() => validate(defaults));
   refuses(
-    () => validate({ modelIdentifier: MISSING_MODEL }),
+    () => validate({ model_identifier: MISSING_MODEL }),
     AgentErrorCode.ModelUnknown,
   );
 });
@@ -1455,12 +1436,10 @@ test("workerAgentView answers null outside the agents of the worker and delegate
     issues: [{ path: [], code: AgentErrorCode.Unavailable }],
   });
   f.invokeAgent("enablement.put", putBody);
-  const entry = { modelIdentifier: MISSING_MODEL };
+  const entry = { model_identifier: MISSING_MODEL };
   assert.deepEqual(
     view(entry),
-    f.store.transaction((tx) =>
-      f.agent.agentView(tx, AGENT, agentEntryOf(entry)),
-    ),
+    f.store.transaction((tx) => f.agent.agentView(tx, AGENT, entry)),
   );
   assert.equal(view()?.valid, true);
 });

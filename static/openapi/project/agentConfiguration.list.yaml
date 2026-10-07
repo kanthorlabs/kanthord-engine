@@ -12,18 +12,18 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.agentConfiguration.list.Input/properties/pa\
-            rams/properties/projectId"
-      - name: bindingId
+            rams/properties/project_id"
+      - name: binding_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.agentConfiguration.list.Input/properties/pa\
-            rams/properties/bindingId"
+            rams/properties/binding_id"
       - name: limit
         in: query
         required: false
@@ -71,15 +71,15 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 1
-            bindingId:
+            binding_id:
               type: string
               minLength: 1
           required:
-            - projectId
-            - bindingId
+            - project_id
+            - binding_id
           additionalProperties: false
         query:
           type: object
@@ -113,9 +113,9 @@ components:
                 type: string
               worker:
                 type: string
-              workerBindingId:
+              worker_binding_id:
                 type: string
-              bindingSetVersion:
+              binding_set_version:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
@@ -151,8 +151,8 @@ components:
             required:
               - agent
               - worker
-              - workerBindingId
-              - bindingSetVersion
+              - worker_binding_id
+              - binding_set_version
               - defaults
               - entry
               - effective

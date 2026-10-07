@@ -66,9 +66,9 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const setup = anthropicSetup();
   const entry = {
     agent: setup.agentName,
-    agentProvider: "default",
-    modelIdentifier: setup.effectiveConfiguration.model_identifier,
-    reasoningEffort: "low",
+    agent_provider: "default",
+    model_identifier: setup.effectiveConfiguration.model_identifier,
+    reasoning_effort: "low",
   };
   const composed: string[] = [];
   let commits = 0;
@@ -127,16 +127,16 @@ test("setup answers the system and agent prompt after its single snapshot and su
       >
     ) => {
       assert.deepEqual(args[3], {
-        agentProvider: entry.agentProvider,
-        modelIdentifier: entry.modelIdentifier,
-        reasoningEffort: entry.reasoningEffort,
+        agent_provider: entry.agent_provider,
+        model_identifier: entry.model_identifier,
+        reasoning_effort: entry.reasoning_effort,
       });
       assert.ok(args[4]);
       return {
         defaults: null,
         effective: {
           ...setup.effectiveConfiguration,
-          reasoning_effort: entry.reasoningEffort,
+          reasoning_effort: entry.reasoning_effort,
         },
         valid: true,
         issues: [],
@@ -155,7 +155,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.ok(!answer.prompt.final.includes(WORKING_TEXT));
   assert.equal(
     answer.effectiveConfiguration.reasoning_effort,
-    entry.reasoningEffort,
+    entry.reasoning_effort,
   );
   assert.equal(commits, before + 1);
   await assert.rejects(

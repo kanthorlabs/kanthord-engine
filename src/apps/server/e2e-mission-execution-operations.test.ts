@@ -184,9 +184,9 @@ async function setup(t: TestContext) {
       available: true,
       platform: "github",
       address: `git@github.com:owner/${name}.git`,
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       strategy: {
-        baseBranch: "main",
+        base_branch: "main",
         ...(gated
           ? {
               action: {
@@ -217,12 +217,12 @@ async function setup(t: TestContext) {
       },
       harness: {
         kind: "worker",
-        config: { worker: WORKER, instanceCount: SINGLE_ITEM_COUNT },
+        config: { worker: WORKER, instance_count: SINGLE_ITEM_COUNT },
       },
     },
   });
   const bindings = await read<
-    Page<{ id: string; name: string; resourceIdentity: string }>
+    Page<{ id: string; name: string; resource_identity: string }>
   >(["project", "binding", "list", project.id]);
   const binding = (name: string) => {
     const row = bindings.items.find((item) => item.name === name);
@@ -289,7 +289,7 @@ async function setup(t: TestContext) {
     W,
   );
   const pullBody = {
-    resourceIdentity: binding("harness").resourceIdentity,
+    resourceIdentity: binding("harness").resource_identity,
     runtimeIdentity: registration.runtimeIdentity,
   };
   const pull = () => write<Pull>(["scheduler", "work", "pull"], pullBody, W);
@@ -713,7 +713,7 @@ test(
         subject: "pull request 42",
         address: {
           kind: "pull_request" as const,
-          resourceIdentity: h.binding("gated").resourceIdentity,
+          resourceIdentity: h.binding("gated").resource_identity,
           number: 42,
         },
       };

@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.get.Input/properties/params/properties/proj\
-            ectId"
+            ect_id"
     responses:
       "200":
         description: Completed result
@@ -57,12 +57,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.rename.Input/properties/params/properties/p\
-            rojectId"
+            roject_id"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
@@ -105,11 +105,11 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 1
           required:
-            - projectId
+            - project_id
           additionalProperties: false
         query:
           type: object
@@ -129,22 +129,22 @@ components:
           type: string
         name:
           type: string
-        bindingSetVersion:
+        binding_set_version:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
-        createdAt:
+        created_at:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
-        workspaceDirectory:
+        workspace_directory:
           type: string
       required:
         - id
         - name
-        - bindingSetVersion
-        - createdAt
-        - workspaceDirectory
+        - binding_set_version
+        - created_at
+        - workspace_directory
       additionalProperties: false
     project.rename.Input:
       type: object
@@ -152,11 +152,11 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 1
           required:
-            - projectId
+            - project_id
           additionalProperties: false
         query:
           type: object
@@ -185,20 +185,20 @@ components:
           type: string
         name:
           type: string
-        bindingSetVersion:
+        binding_set_version:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
-        createdAt:
+        created_at:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
-        workspaceDirectory:
+        workspace_directory:
           type: string
       required:
         - id
         - name
-        - bindingSetVersion
-        - createdAt
-        - workspaceDirectory
+        - binding_set_version
+        - created_at
+        - workspace_directory
       additionalProperties: false

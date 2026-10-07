@@ -62,11 +62,6 @@ const CONFIGURATION = {
   model_identifier: SONNET,
   reasoning_effort: OFF,
 };
-const ENTRY_CONFIGURATION = {
-  agentProvider: DEFAULT,
-  modelIdentifier: SONNET,
-  reasoningEffort: OFF,
-};
 const PROVIDERS = [
   { name: DEFAULT, provider: ANTHROPIC, credential: CREDENTIAL },
 ];
@@ -76,8 +71,8 @@ const REPOSITORY: BindingSet["bindings"][string] = {
     available: true,
     platform: REPOSITORY_PLATFORM,
     address: ADDRESS,
-    sshCredential: "github-ssh",
-    strategy: { baseBranch: BASE_BRANCH },
+    ssh_credential: "github-ssh",
+    strategy: { base_branch: BASE_BRANCH },
     credential: REPOSITORY_PLATFORM,
     working_layer: {
       agents_md: true,
@@ -92,8 +87,8 @@ const WORKER_BINDING = {
   kind: BindingKind.Worker,
   config: {
     worker: WORKER,
-    instanceCount: SINGLE_INSTANCE,
-    entries: [{ agent: AGENT, ...ENTRY_CONFIGURATION }],
+    instance_count: SINGLE_INSTANCE,
+    entries: [{ agent: AGENT, ...CONFIGURATION }],
   },
 };
 
@@ -106,10 +101,10 @@ test("binding apply refuses action-end-state follows through CLI validation", as
       available: true,
       platform: "github",
       address: ADDRESS,
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       credential: "github",
       strategy: {
-        baseBranch: BASE_BRANCH,
+        base_branch: BASE_BRANCH,
         action: {
           name: "pull_request",
           follows: { type: "action_end_state", binding: "repo" },
@@ -241,7 +236,7 @@ async function createProject(
     ),
   );
   assert.ok(answer.id.startsWith(`${PROJECT_ID_PREFIX}_`));
-  assert.equal(answer.bindingSetVersion, BINDING_SET_INITIAL_VERSION);
+  assert.equal(answer.binding_set_version, BINDING_SET_INITIAL_VERSION);
   assert.equal(answer.idempotency_key, key);
   return answer;
 }
@@ -268,7 +263,7 @@ async function apply(
       fixture.env,
     ),
   );
-  assert.equal(answer.projectId, projectId);
+  assert.equal(answer.project_id, projectId);
   assert.equal(answer.idempotency_key, key);
   return answer;
 }
@@ -305,7 +300,7 @@ async function bindRepository(
     },
     key,
   );
-  assert.equal(answer.bindingSetVersion, SECOND_BINDING_VERSION);
+  assert.equal(answer.binding_set_version, SECOND_BINDING_VERSION);
   assert.equal(answer.changes[0]?.kind, ChangeKind.Created);
   return answer;
 }
@@ -334,12 +329,12 @@ async function boundAgent(fixture: Fixture) {
   const project = await createProject(fixture);
   const enablement = await enableAgent(fixture);
   const applied = await apply(fixture, project.id, {
-    version: project.bindingSetVersion,
+    version: project.binding_set_version,
     bindings: { [WORKER_NAME]: WORKER_BINDING },
   });
   const binding = applied.bindings[WORKER_NAME];
   assert.ok(binding);
-  assert.equal(applied.bindingSetVersion, SECOND_BINDING_VERSION);
+  assert.equal(applied.binding_set_version, SECOND_BINDING_VERSION);
   return { project, enablement, binding };
 }
 
@@ -356,7 +351,7 @@ async function readAgent(
   );
   assert.equal(answer.agent, AGENT);
   assert.equal(answer.worker, WORKER);
-  assert.equal(answer.workerBindingId, bindingId);
+  assert.equal(answer.worker_binding_id, bindingId);
   assert.equal(answer.valid, true);
   assert.deepEqual(answer.issues, []);
   return answer;
@@ -380,15 +375,15 @@ async function repositoryReads(
     ),
   );
   assert.equal(read.id, bindingId);
-  assert.equal(read.projectId, projectId);
+  assert.equal(read.project_id, projectId);
   assert.equal(read.name, REPOSITORY_NAME);
   assert.equal(read.kind, BindingKind.Repository);
-  assert.equal(read.resourceIdentity, RESOURCE_IDENTITY);
+  assert.equal(read.resource_identity, RESOURCE_IDENTITY);
   assert.equal(read.revision, FIRST_REVISION);
   assert.ok(
-    Number.isSafeInteger(read.createdAt) && read.createdAt > UNIX_EPOCH,
+    Number.isSafeInteger(read.created_at) && read.created_at > UNIX_EPOCH,
   );
-  assert.equal(read.removedAt, null);
+  assert.equal(read.removed_at, null);
   assert.deepEqual(listed.items, [read]);
   const exported = bindingSetWriteInputSchema.parse(
     success<unknown>(
@@ -426,7 +421,7 @@ test(
     assert.equal(listed.items.length, SINGLE_ITEM);
     assert.equal(listed.items[0]?.name, NAME);
     assert.equal(
-      listed.items[0]?.bindingSetVersion,
+      listed.items[0]?.binding_set_version,
       BINDING_SET_INITIAL_VERSION,
     );
     assert.equal(listed.next_cursor, null);
@@ -435,10 +430,10 @@ test(
     );
     assert.equal(read.id, created.id);
     assert.equal(read.name, NAME);
-    assert.equal(read.bindingSetVersion, BINDING_SET_INITIAL_VERSION);
-    assert.equal(read.createdAt, created.createdAt);
+    assert.equal(read.binding_set_version, BINDING_SET_INITIAL_VERSION);
+    assert.equal(read.created_at, created.created_at);
     assert.ok(
-      Number.isSafeInteger(read.createdAt) && read.createdAt > UNIX_EPOCH,
+      Number.isSafeInteger(read.created_at) && read.created_at > UNIX_EPOCH,
     );
     const renamed = success<Mutation>(
       await kanthord(
@@ -479,7 +474,7 @@ test(
         fixture.env,
       ),
     );
-    assert.equal(replayed.bindingSetVersion, SECOND_BINDING_VERSION);
+    assert.equal(replayed.binding_set_version, SECOND_BINDING_VERSION);
     assert.deepEqual(replayed, applied);
     const binding = applied.bindings[REPOSITORY_NAME];
     assert.ok(binding);
@@ -503,7 +498,7 @@ test(
         [WORKER_NAME]: WORKER_BINDING,
       },
     });
-    assert.equal(applied.bindingSetVersion, THIRD_BINDING_VERSION);
+    assert.equal(applied.binding_set_version, THIRD_BINDING_VERSION);
     const binding = applied.bindings[WORKER_NAME];
     assert.ok(binding);
     const listed = success<Page<Agent>>(
@@ -517,7 +512,7 @@ test(
     assert.equal(listed.items[0]?.valid, true);
     assert.equal(listed.next_cursor, null);
     const read = await readAgent(fixture, project.id, binding.id);
-    assert.equal(read.bindingSetVersion, THIRD_BINDING_VERSION);
+    assert.equal(read.binding_set_version, THIRD_BINDING_VERSION);
     assert.deepEqual(listed.items, [read]);
   },
 );
@@ -559,8 +554,8 @@ test("E05.16 tuning entry without an enablement is refused", async (t) => {
         kind: BindingKind.Worker,
         config: {
           worker: WORKER,
-          instanceCount: SINGLE_INSTANCE,
-          entries: [{ agent: AGENT, modelIdentifier: SONNET }],
+          instance_count: SINGLE_INSTANCE,
+          entries: [{ agent: AGENT, model_identifier: SONNET }],
         },
       },
     },
@@ -630,8 +625,8 @@ test("E05.18 replacing a referenced provider is refused atomically", async (t) =
   assert.deepEqual(read.default_configuration, CONFIGURATION);
   assert.equal(read.state, ENABLED);
   const agent = await readAgent(fixture, project.id, binding.id);
-  assert.equal(agent.bindingSetVersion, SECOND_BINDING_VERSION);
-  assert.deepEqual(agent.entry, ENTRY_CONFIGURATION);
+  assert.equal(agent.binding_set_version, SECOND_BINDING_VERSION);
+  assert.deepEqual(agent.entry, CONFIGURATION);
 });
 
 test("E05.19 changing defaults that invalidate a tuning entry is refused atomically", async (t) => {
@@ -639,15 +634,15 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
   const project = await createProject(fixture);
   const defaults = { ...CONFIGURATION, model_identifier: SONNET_MAX };
   const enablement = await enableAgent(fixture, defaults);
-  const entry = { reasoningEffort: MAX };
+  const entry = { reasoning_effort: MAX };
   const applied = await apply(fixture, project.id, {
-    version: project.bindingSetVersion,
+    version: project.binding_set_version,
     bindings: {
       [WORKER_NAME]: {
         kind: BindingKind.Worker,
         config: {
           worker: WORKER,
-          instanceCount: SINGLE_INSTANCE,
+          instance_count: SINGLE_INSTANCE,
           entries: [{ agent: AGENT, ...entry }],
         },
       },
@@ -655,7 +650,7 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
   });
   const binding = applied.bindings[WORKER_NAME];
   assert.ok(binding);
-  assert.equal(applied.bindingSetVersion, SECOND_BINDING_VERSION);
+  assert.equal(applied.binding_set_version, SECOND_BINDING_VERSION);
   const before = await readAgent(fixture, project.id, binding.id);
   assert.deepEqual(before.entry, entry);
   const path = file(fixture.directory, "invalidating.json", {

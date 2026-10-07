@@ -411,8 +411,8 @@ test("a repository working layer reads the switched-on workspace files and the p
   const layer = await resolveRepositoryLayer({
     repository: {
       name: "repo",
-      projectPrompt: "project text",
-      workingLayer: { ...ALL_ON, agents_local_md: false },
+      project_prompt: "project text",
+      working_layer: { ...ALL_ON, agents_local_md: false },
     },
     workspace: f.working,
     hostHome: f.home,
@@ -448,7 +448,7 @@ test("a repository working layer without a workspace reads no file", async (t) =
   const f = fixture(t);
   writeFileSync(join(f.working, "AGENTS.md"), "never read");
   const layer = await resolveRepositoryLayer({
-    repository: { name: "repo", projectPrompt: "", workingLayer: ALL_ON },
+    repository: { name: "repo", project_prompt: "", working_layer: ALL_ON },
     workspace: null,
     hostHome: f.home,
     context: background,
@@ -472,7 +472,7 @@ test("a repository working layer rejects a workspace link that leaves the worksp
   writeFileSync(outside, "outside");
   symlinkSync(outside, join(f.working, "AGENTS.md"));
   const layer = await resolveRepositoryLayer({
-    repository: { name: "repo", projectPrompt: null, workingLayer: ALL_ON },
+    repository: { name: "repo", project_prompt: null, working_layer: ALL_ON },
     workspace: f.working,
     hostHome: f.home,
     context: background,

@@ -200,7 +200,7 @@ async function createProject(fixture: Fixture): Promise<Project> {
     await kanthord(["project", "create", "--name", PROJECT_NAME], fixture.env),
   );
   assert.ok(project.id.startsWith(PROJECT_PREFIX));
-  assert.equal(project.bindingSetVersion, FIRST_REVISION);
+  assert.equal(project.binding_set_version, FIRST_REVISION);
   return project;
 }
 
@@ -399,7 +399,7 @@ test("E07.4 github repository binding advances the binding set to version two", 
     ),
   );
   const path = file(fixture.directory, "bindings.json", {
-    version: project.bindingSetVersion,
+    version: project.binding_set_version,
     bindings: {
       repo: {
         kind: BindingKind.Repository,
@@ -407,8 +407,8 @@ test("E07.4 github repository binding advances the binding set to version two", 
           available: true,
           platform: GITHUB,
           address: "git@github.com:owner/repo.git",
-          sshCredential: "github-ssh",
-          strategy: { baseBranch: "main" },
+          ssh_credential: "github-ssh",
+          strategy: { base_branch: "main" },
           credential: GITHUB,
         },
       },
@@ -420,12 +420,12 @@ test("E07.4 github repository binding advances the binding set to version two", 
       fixture.env,
     ),
   );
-  assert.equal(applied.bindingSetVersion, SECOND_REVISION);
-  assert.equal(applied.projectId, project.id);
+  assert.equal(applied.binding_set_version, SECOND_REVISION);
+  assert.equal(applied.project_id, project.id);
   const read = success<Project>(
     await kanthord(["project", "get", project.id], fixture.env),
   );
-  assert.equal(read.bindingSetVersion, SECOND_REVISION);
+  assert.equal(read.binding_set_version, SECOND_REVISION);
 });
 
 test("E07.5 mission initiative creation queues the created node", async (t) => {

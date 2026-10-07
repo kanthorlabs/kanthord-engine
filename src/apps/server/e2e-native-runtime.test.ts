@@ -65,7 +65,6 @@ import {
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
-  agentDefaultsOf,
 } from "./test-support.ts";
 
 const SUCCESSFUL_EXIT = 0;
@@ -89,9 +88,9 @@ const ADDRESS = "git@github.com:owner/repo.git";
 const SWE = "swe@1";
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const DEFAULTS = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off",
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
 };
 const CONTENT = {
   name: "Say hello",
@@ -167,7 +166,7 @@ test(
         agent_providers: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
-        default_configuration: agentDefaultsOf(DEFAULTS),
+        default_configuration: DEFAULTS,
       });
     const project = await read<{ id: string }>([
       "project",
@@ -177,7 +176,7 @@ test(
     ]);
     const worker = {
       worker: "general@1",
-      instanceCount: SINGLE_INSTANCE,
+      instance_count: SINGLE_INSTANCE,
       entries: [{ agent: "swe@1", ...DEFAULTS }],
     };
     const bindingSet = await write<{
@@ -191,10 +190,10 @@ test(
             available: true,
             platform: "github",
             address: ADDRESS,
-            sshCredential: "github-ssh",
-            strategy: { baseBranch: "main" },
+            ssh_credential: "github-ssh",
+            strategy: { base_branch: "main" },
             credential: "github",
-            projectPrompt: PROJECT,
+            project_prompt: PROJECT,
           },
         },
         general: { kind: "worker", config: worker },
@@ -202,7 +201,7 @@ test(
           kind: "worker",
           config: {
             ...worker,
-            resourceBudget: { turns: SINGLE_TURN, wallTimeMs: 600000 },
+            resource_budget: { turns: SINGLE_TURN, wall_time_ms: 600000 },
           },
         },
       },
@@ -411,7 +410,7 @@ test(
     const repository = runtimeX.setup.repositories[0]!;
     await t.test("E07.3 execution setup and foreign proof", async () => {
       assert.deepEqual(runtimeX.setup.effectiveConfiguration, {
-        ...agentDefaultsOf(DEFAULTS),
+        ...DEFAULTS,
         provider: "anthropic",
         credential: "anthro-1",
       });

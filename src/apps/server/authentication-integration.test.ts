@@ -76,11 +76,11 @@ test("a removed and rebound worker group refuses old tokens on HTTP and direct a
   const bindings = {
     machine: {
       kind: BindingKind.Worker,
-      config: { worker: "claude@1", instanceCount: 1 },
+      config: { worker: "claude@1", instance_count: 1 },
     },
   };
   const first = await projects["bindingSet.write"]({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {},
     body: { version: 1, bindings },
   });
@@ -90,15 +90,15 @@ test("a removed and rebound worker group refuses old tokens on HTTP and direct a
     `Bearer ${token}`,
   );
   const removed = await projects["bindingSet.write"]({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {},
-    body: { version: first.data.bindingSetVersion, bindings: {} },
+    body: { version: first.data.binding_set_version, bindings: {} },
   });
   assert.ok(removed.type === OperationResultType.Completed);
   const rebound = await projects["bindingSet.write"]({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {},
-    body: { version: removed.data.bindingSetVersion, bindings },
+    body: { version: removed.data.binding_set_version, bindings },
   });
   assert.ok(rebound.type === OperationResultType.Completed);
   const input = { params: {}, query: {}, body: null };

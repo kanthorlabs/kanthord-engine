@@ -170,7 +170,7 @@ async function get(projectId: string, command: Command): Promise<void> {
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(token, GET_TOKEN_REQUIRED);
   const result = await httpClient(projectOperations, endpoint, token).get({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {},
     body: null,
   });
@@ -187,7 +187,11 @@ async function rename(projectId: string, command: Command): Promise<void> {
   requireToken(token, RENAME_TOKEN_REQUIRED);
   const key = resolveKey(options);
   const result = await httpClient(projectOperations, endpoint, token).rename(
-    { params: { projectId }, query: {}, body: { name: options.name } },
+    {
+      params: { project_id: projectId },
+      query: {},
+      body: { name: options.name },
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, RENAME_INDETERMINATE, key);
@@ -215,7 +219,7 @@ async function bindingList(projectId: string, command: Command): Promise<void> {
   const result = await httpClient(projectOperations, endpoint, token)[
     "binding.list"
   ]({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {
       ...(kinds !== undefined
         ? { kind: kinds as (typeof BindingKind)[keyof typeof BindingKind][] }
@@ -245,7 +249,7 @@ async function bindingGet(
   const result = await httpClient(projectOperations, endpoint, token)[
     "binding.get"
   ]({
-    params: { projectId, bindingId },
+    params: { project_id: projectId, binding_id: bindingId },
     query: {},
     body: null,
   });
@@ -264,7 +268,7 @@ async function bindingExport(
   const result = await httpClient(projectOperations, endpoint, token)[
     "bindingSet.get"
   ]({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {},
     body: null,
   });
@@ -285,7 +289,10 @@ async function bindingApply(
   const body = readJsonFileAs(options.file, bindingSetWriteInputSchema);
   const result = await httpClient(projectOperations, endpoint, token)[
     "bindingSet.write"
-  ]({ params: { projectId }, query: {}, body }, { idempotencyKey: key });
+  ](
+    { params: { project_id: projectId }, query: {}, body },
+    { idempotencyKey: key },
+  );
   const data = handleMutationResult(result, BINDING_APPLY_INDETERMINATE, key);
   process.stdout.write(
     `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
@@ -306,7 +313,7 @@ async function bindingRevisionList(
   const result = await httpClient(projectOperations, endpoint, token)[
     "bindingRevision.list"
   ]({
-    params: { projectId, bindingId },
+    params: { project_id: projectId, binding_id: bindingId },
     query: {
       limit,
       ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
@@ -332,7 +339,7 @@ async function agentList(
   const result = await httpClient(projectOperations, endpoint, token)[
     "agentConfiguration.list"
   ]({
-    params: { projectId, bindingId: workerBindingId },
+    params: { project_id: projectId, binding_id: workerBindingId },
     query: {
       limit,
       ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
@@ -357,7 +364,11 @@ async function agentGet(
   const result = await httpClient(projectOperations, endpoint, token)[
     "agentConfiguration.get"
   ]({
-    params: { projectId, bindingId: workerBindingId, agentName },
+    params: {
+      project_id: projectId,
+      binding_id: workerBindingId,
+      agent_name: agentName,
+    },
     query: {},
     body: null,
   });
@@ -378,7 +389,7 @@ async function bindingVerify(
   const result = await httpClient(projectOperations, endpoint, token)[
     "binding.verify"
   ]({
-    params: { projectId, bindingId },
+    params: { project_id: projectId, binding_id: bindingId },
     query: {},
     body: null,
   });
@@ -401,7 +412,7 @@ async function bindingCheck(
   );
   const result = await httpClient(projectOperations, endpoint, token)[
     "binding.check"
-  ]({ params: { projectId }, query: {}, body });
+  ]({ params: { project_id: projectId }, query: {}, body });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, BINDING_CHECK_INDETERMINATE))}
 `,

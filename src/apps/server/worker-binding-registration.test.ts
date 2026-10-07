@@ -27,7 +27,7 @@ test("binding availability changes end real registrations atomically and count r
   let version = INITIAL_BINDING_VERSION;
   const write = (count: number | null) =>
     project["bindingSet.write"]({
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: {
         version,
@@ -37,14 +37,14 @@ test("binding availability changes end real registrations atomically and count r
             : {
                 main: {
                   kind: BindingKind.Worker,
-                  config: { worker: "claude@1", instanceCount: count },
+                  config: { worker: "claude@1", instance_count: count },
                 },
               },
       },
     });
   const initial = await write(TWO_INSTANCES);
   assert.ok(initial.type === OperationResultType.Completed);
-  version = initial.data.bindingSetVersion;
+  version = initial.data.binding_set_version;
   const tokenA = await f.machineToken(projectId, "main");
   const tokenB = await f.machineToken(projectId, "main");
   const a = httpClient(workerOperations, f.endpoint, tokenA);
@@ -56,7 +56,7 @@ test("binding availability changes end real registrations atomically and count r
   const clientB = String(decode(tokenB).payload.sub);
   const lowered = await write(SINGLE_INSTANCE);
   assert.ok(lowered.type === OperationResultType.Completed);
-  version = lowered.data.bindingSetVersion;
+  version = lowered.data.binding_set_version;
   assert.ok(f.worker.registrations.findByClient(clientA));
   assert.ok(f.worker.registrations.findByClient(clientB));
   const end = f.worker.endRegistrations.bind(f.worker);
@@ -76,12 +76,12 @@ test("binding availability changes end real registrations atomically and count r
   fail.mock.restore();
   const disabled = await write(NO_INSTANCES);
   assert.ok(disabled.type === OperationResultType.Completed);
-  version = disabled.data.bindingSetVersion;
+  version = disabled.data.binding_set_version;
   assert.equal(f.worker.registrations.findByClient(clientA), undefined);
   assert.equal(f.worker.registrations.findByClient(clientB), undefined);
   const enabled = await write(SINGLE_INSTANCE);
   assert.ok(enabled.type === OperationResultType.Completed);
-  version = enabled.data.bindingSetVersion;
+  version = enabled.data.binding_set_version;
   const next = await a.register(INPUT);
   assert.ok(next.type === OperationResultType.Completed);
   assert.notEqual(next.data.runtimeIdentity, first.data.runtimeIdentity);

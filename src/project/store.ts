@@ -35,7 +35,7 @@ const FIRST_ROW = 0;
 const LAST_ROW_OFFSET = 1;
 const RESOURCE_SEPARATOR = ":";
 const CREDENTIAL_KEY = "credential";
-const SSH_CREDENTIAL_KEY = "sshCredential";
+const SSH_CREDENTIAL_KEY = "ssh_credential";
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const REPOSITORY_ADDRESS_PATTERN =
@@ -62,8 +62,8 @@ type ProjectRow = {
 export type StoredProject = {
   id: string;
   name: string;
-  bindingSetVersion: number;
-  createdAt: number;
+  binding_set_version: number;
+  created_at: number;
 };
 
 function toProject(row: ProjectRow): StoredProject {
@@ -72,8 +72,8 @@ function toProject(row: ProjectRow): StoredProject {
   return {
     id: row.id,
     name: row.name,
-    bindingSetVersion: row.binding_set_version,
-    createdAt: row.created_at,
+    binding_set_version: row.binding_set_version,
+    created_at: row.created_at,
   };
 }
 
@@ -157,13 +157,13 @@ export function listProjects(
 
 export type StoredBinding = {
   id: string;
-  projectId: string;
+  project_id: string;
   name: string;
-  resourceIdentity: string;
+  resource_identity: string;
   revision: number;
   config: unknown;
-  createdAt: number;
-  removedAt: number | null;
+  created_at: number;
+  removed_at: number | null;
 };
 type BindingRow = {
   id: string;
@@ -262,13 +262,13 @@ function toBinding(row: BindingRow): StoredBinding {
   );
   return {
     id: row.id,
-    projectId: row.project_id,
+    project_id: row.project_id,
     name: row.name,
-    resourceIdentity: row.resource_identity,
+    resource_identity: row.resource_identity,
     revision: row.revision,
     config: JSON.parse(row.config),
-    createdAt: row.created_at,
-    removedAt: row.removed_at,
+    created_at: row.created_at,
+    removed_at: row.removed_at,
   };
 }
 
@@ -287,7 +287,7 @@ export function readCurrentBindingSet(
     "Current binding names must be unique.",
   );
   assert.ok(
-    bindings.every((binding) => binding.projectId === projectId),
+    bindings.every((binding) => binding.project_id === projectId),
     "Bindings must belong to the requested project.",
   );
   return current;
@@ -306,7 +306,7 @@ export function readCurrentBindings(tx: Transaction): StoredBinding[] {
 }
 
 export function readCurrentRepositories(tx: Transaction): Array<{
-  projectName: string;
+  project_name: string;
   name: string;
   address: string;
   platform: string;
@@ -326,7 +326,7 @@ export function readCurrentRepositories(tx: Transaction): Array<{
   return rows.map((row) => {
     const config = repositoryConfigSchema.parse(JSON.parse(row.config));
     return {
-      projectName: row.project_name,
+      project_name: row.project_name,
       name: row.name,
       address: config.address,
       platform: config.platform,
@@ -382,7 +382,7 @@ export function hasBindingTombstone(
 ): boolean {
   assert.ok(binding.revision >= INITIAL_REVISION);
   assert.ok(tx.database.isTransaction);
-  if (binding.removedAt !== null) return true;
+  if (binding.removed_at !== null) return true;
   return (
     tx.database
       .prepare(
@@ -409,7 +409,7 @@ function classify(
       kind: ChangeKind.Created,
       insertion: { name, resourceIdentity, config },
     };
-  if (kindOf(previous.resourceIdentity) === BindingKind.Worker) {
+  if (kindOf(previous.resource_identity) === BindingKind.Worker) {
     const stored = previous.config as { worker: string };
     const submitted = entry.config as { worker: string };
     if (stored.worker !== submitted.worker)
@@ -419,7 +419,7 @@ function classify(
         "A binding cannot change its worker.",
       );
   }
-  if (previous.resourceIdentity !== resourceIdentity)
+  if (previous.resource_identity !== resourceIdentity)
     return {
       kind: ChangeKind.Created,
       previous,
@@ -508,12 +508,12 @@ function insertTombstones(
     if (!outcome.previous) continue;
     const previous = outcome.previous;
     assert.equal(
-      previous.projectId,
+      previous.project_id,
       projectId,
       "Tombstone must remain in the same project.",
     );
     assert.equal(
-      previous.removedAt,
+      previous.removed_at,
       null,
       "Only a current binding can be removed.",
     );
@@ -522,7 +522,7 @@ function insertTombstones(
       projectId,
       {
         name: previous.name,
-        resourceIdentity: previous.resourceIdentity,
+        resourceIdentity: previous.resource_identity,
         config: canonicalJSON(previous.config),
       },
       now,
@@ -554,7 +554,7 @@ export function writeBindingSet(
       HttpStatus.Conflict,
       ProjectErrorCode.VersionConflict,
       "Binding set version is stale.",
-      { bindingSetVersion },
+      { binding_set_version: bindingSetVersion },
     );
   const outcomes = bindingDiff(
     readCurrentBindingSet(tx, projectId),
@@ -574,10 +574,10 @@ export function writeBindingSet(
       bindingIdentitySchema.safeParse(bindingId).success,
       "A change must identify a binding revision.",
     );
-    return { kind: outcome.kind, bindingId };
+    return { kind: outcome.kind, binding_id: bindingId };
   });
   return {
-    newVersion: requireProject(tx, projectId).bindingSetVersion,
+    newVersion: requireProject(tx, projectId).binding_set_version,
     changes,
   };
 }
@@ -730,8 +730,8 @@ export function listRevisions(
     );
   const cursorCondition = revision === null ? "" : " AND revision < ?";
   const parameters: SQLInputValue[] = [
-    binding.projectId,
-    binding.resourceIdentity,
+    binding.project_id,
+    binding.resource_identity,
   ];
   if (revision !== null) parameters.push(revision);
   const rows = tx.database

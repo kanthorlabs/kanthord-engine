@@ -57,11 +57,6 @@ const CONFIGURATION = {
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off" as const,
 };
-const entryOf = (configuration: typeof CONFIGURATION) => ({
-  agentProvider: configuration.agent_provider,
-  modelIdentifier: configuration.model_identifier,
-  reasoningEffort: configuration.reasoning_effort,
-});
 type Adapter = "direct" | "http";
 const HTTP_ADAPTER = "http";
 const MAX_WAIT_TURNS = 100;
@@ -179,7 +174,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
   ).id;
   const bindingSet = completed(
     await call(projectOperations["bindingSet.write"], {
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: {
         version: 1,
@@ -190,8 +185,8 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
               available: true,
               platform: "github",
               address: "git@github.com:owner/repo.git",
-              sshCredential: "github-ssh",
-              strategy: { baseBranch: "main" },
+              ssh_credential: "github-ssh",
+              strategy: { base_branch: "main" },
               credential: "github",
             },
           },
@@ -199,16 +194,16 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             kind: "worker",
             config: {
               worker: "general@1",
-              instanceCount: 2,
-              entries: [{ agent: "swe@1", ...entryOf(CONFIGURATION) }],
+              instance_count: 2,
+              entries: [{ agent: "swe@1", ...CONFIGURATION }],
             },
           },
           reviewer: {
             kind: "worker",
             config: {
               worker: "reviewer@1",
-              instanceCount: 1,
-              entries: [{ agent: "re@1", ...entryOf(CONFIGURATION) }],
+              instance_count: 1,
+              entries: [{ agent: "re@1", ...CONFIGURATION }],
             },
           },
         },

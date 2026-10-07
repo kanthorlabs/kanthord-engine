@@ -152,7 +152,7 @@ export const repositoryConfigSchema = z.strictObject({
   platform: z.enum(RepositoryPlatform),
   address: z.string().min(1).refine(isNonblank),
   strategy: z.strictObject({
-    baseBranch: z.string().min(1).refine(isNonblank),
+    base_branch: z.string().min(1).refine(isNonblank),
     action: z
       .strictObject({
         name: z.enum(GitHubAction),
@@ -166,27 +166,27 @@ export const repositoryConfigSchema = z.strictObject({
       })
       .optional(),
   }),
-  sshCredential: z.string().min(1),
+  ssh_credential: z.string().min(1),
   credential: z.string().min(1).optional(),
-  projectPrompt: z.string().optional(),
+  project_prompt: z.string().optional(),
   working_layer: workingLayerSchema,
 });
 export const workerConfigSchema = z.strictObject({
   worker: z.string().min(1),
-  instanceCount: z.number().int(),
-  resourceBudget: z
+  instance_count: z.number().int(),
+  resource_budget: z
     .strictObject({
       turns: z.number().int().positive(),
-      wallTimeMs: z.number().int().positive(),
+      wall_time_ms: z.number().int().positive(),
     })
     .optional(),
   entries: z
     .array(
       z.strictObject({
         agent: z.string().min(1),
-        agentProvider: z.string().optional(),
-        modelIdentifier: z.string().optional(),
-        reasoningEffort: z.string().optional(),
+        agent_provider: z.string().optional(),
+        model_identifier: z.string().optional(),
+        reasoning_effort: z.string().optional(),
       }),
     )
     .optional(),
@@ -215,7 +215,7 @@ export const bindingEditSchema = z.discriminatedUnion("kind", [
 ]);
 export const WorkerField = {
   Entries: "entries",
-  ResourceBudget: "resourceBudget",
+  ResourceBudget: "resource_budget",
 } as const;
 const CUSTOM_ISSUE = "custom";
 type BindingEdits = Record<string, z.infer<typeof bindingEditSchema>>;
@@ -359,13 +359,13 @@ export type WorkerAgentViewFn = (
 ) => WorkerAgentView | null;
 export type HumanActor = { kind: "human"; account: string; name: string };
 export type WorkerEntry = {
-  agentProvider?: string;
-  modelIdentifier?: string;
-  reasoningEffort?: string;
+  agent_provider?: string;
+  model_identifier?: string;
+  reasoning_effort?: string;
 };
 export type AgentDependentBinding = {
-  bindingId: string;
-  workerName: string;
+  binding_id: string;
+  worker_name: string;
   entry: WorkerEntry | null;
 };
 export type BindingNaming = {
@@ -376,7 +376,7 @@ export type BindingNaming = {
 };
 export type BindingChange = {
   kind: (typeof ChangeKind)[keyof typeof ChangeKind];
-  bindingId: string;
+  binding_id: string;
 };
 export type WorkerAgentView = {
   defaults: {
@@ -395,33 +395,33 @@ export type WorkerAgentView = {
   issues: Array<{ path: string[]; code: string }>;
 };
 export type BindingRevisionResult = {
-  projectId: string;
-  bindingId: string;
+  project_id: string;
+  binding_id: string;
   name: string;
-  resourceIdentity: string;
+  resource_identity: string;
   revision: number;
   tombstone: boolean;
   disabled: boolean;
 };
 export type RepositoryPolicy = {
-  bindingId: string;
-  projectId: string;
+  binding_id: string;
+  project_id: string;
   name: string;
   address: string;
   platform: string;
-  sshCredential: string;
+  ssh_credential: string;
   credential: string | null;
-  baseBranch: string;
+  base_branch: string;
   action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
-  projectPrompt: string | null;
-  workingLayer: WorkingLayer;
+  project_prompt: string | null;
+  working_layer: WorkingLayer;
 };
 
 const emptyFields = z.strictObject({});
-const projectParams = z.strictObject({ projectId: z.string().min(1) });
+const projectParams = z.strictObject({ project_id: z.string().min(1) });
 const bindingParams = z.strictObject({
-  projectId: z.string().min(1),
-  bindingId: z.string().min(1),
+  project_id: z.string().min(1),
+  binding_id: z.string().min(1),
 });
 const nameBody = z.strictObject({ name: projectNameSchema });
 const pageQuery = z.strictObject({
@@ -436,26 +436,26 @@ const pageQuery = z.strictObject({
 const projectRecord = z.strictObject({
   id: z.string(),
   name: z.string(),
-  bindingSetVersion: z.number().int().positive(),
-  createdAt: z.number().int(),
-  workspaceDirectory: z.string(),
+  binding_set_version: z.number().int().positive(),
+  created_at: z.number().int(),
+  workspace_directory: z.string(),
 });
 const bindingRecord = z.strictObject({
   id: z.string(),
-  projectId: z.string(),
+  project_id: z.string(),
   name: z.string(),
   kind: z.enum(BindingKind),
-  resourceIdentity: z.string(),
+  resource_identity: z.string(),
   revision: z.number().int().positive(),
   config: z.unknown(),
-  createdAt: z.number().int(),
-  removedAt: z.number().int().nullable(),
+  created_at: z.number().int(),
+  removed_at: z.number().int().nullable(),
 });
 const agentConfigItem = z.strictObject({
   agent: z.string(),
   worker: z.string(),
-  workerBindingId: z.string(),
-  bindingSetVersion: z.number().int().positive(),
+  worker_binding_id: z.string(),
+  binding_set_version: z.number().int().positive(),
   defaults: z.unknown().nullable(),
   entry: z.unknown().nullable(),
   effective: z.unknown().nullable(),
@@ -516,7 +516,7 @@ export const projectOperations = {
     ...readOperation,
     id: "project.get",
     method: HttpMethod.Get,
-    path: "/api/project/:projectId",
+    path: "/api/project/:project_id",
     input: readInput(projectParams, emptyFields),
     output: projectRecord,
     description: "Get a project.",
@@ -525,7 +525,7 @@ export const projectOperations = {
     ...writeOperation,
     id: "project.rename",
     method: HttpMethod.Patch,
-    path: "/api/project/:projectId",
+    path: "/api/project/:project_id",
     input: z.strictObject({
       params: projectParams,
       query: emptyFields,
@@ -538,7 +538,7 @@ export const projectOperations = {
     ...readOperation,
     id: "project.binding.list",
     method: HttpMethod.Get,
-    path: "/api/project/:projectId/binding",
+    path: "/api/project/:project_id/binding",
     input: readInput(
       projectParams,
       z.strictObject({
@@ -565,7 +565,7 @@ export const projectOperations = {
     ...readOperation,
     id: "project.binding.get",
     method: HttpMethod.Get,
-    path: "/api/project/:projectId/binding/:bindingId",
+    path: "/api/project/:project_id/binding/:binding_id",
     input: readInput(bindingParams, emptyFields),
     output: bindingRecord,
     description: "Get a binding revision.",
@@ -574,7 +574,7 @@ export const projectOperations = {
     ...readOperation,
     id: "project.bindingSet.get",
     method: HttpMethod.Get,
-    path: "/api/project/:projectId/binding-set",
+    path: "/api/project/:project_id/binding-set",
     input: readInput(projectParams, emptyFields),
     output: bindingSetWriteInputSchema,
     description: "Export the complete current binding set.",
@@ -583,18 +583,18 @@ export const projectOperations = {
     ...writeOperation,
     id: "project.bindingSet.write",
     method: HttpMethod.Put,
-    path: "/api/project/:projectId/binding-set",
+    path: "/api/project/:project_id/binding-set",
     input: z.strictObject({
       params: projectParams,
       query: emptyFields,
       body: bindingSetWriteInputSchema,
     }),
     output: z.strictObject({
-      projectId: z.string(),
-      bindingSetVersion: z.number().int().positive(),
+      project_id: z.string(),
+      binding_set_version: z.number().int().positive(),
       bindings: z.record(z.string(), bindingRecord),
       changes: z.array(
-        z.strictObject({ kind: z.enum(ChangeKind), bindingId: z.string() }),
+        z.strictObject({ kind: z.enum(ChangeKind), binding_id: z.string() }),
       ),
     }),
     description: "Replace the binding set at its expected version.",
@@ -603,7 +603,7 @@ export const projectOperations = {
     ...readOperation,
     id: "project.bindingRevision.list",
     method: HttpMethod.Get,
-    path: "/api/project/:projectId/binding/:bindingId/revision",
+    path: "/api/project/:project_id/binding/:binding_id/revision",
     input: readInput(bindingParams, pageQuery),
     output: pageOf(bindingRecord),
     description: "List retained binding revisions.",
@@ -612,7 +612,7 @@ export const projectOperations = {
     ...readOperation,
     id: "project.agentConfiguration.list",
     method: HttpMethod.Get,
-    path: "/api/project/:projectId/binding/:bindingId/agent",
+    path: "/api/project/:project_id/binding/:binding_id/agent",
     input: readInput(bindingParams, pageQuery),
     output: pageOf(agentConfigItem),
     description: "List effective agent configuration views.",
@@ -621,12 +621,12 @@ export const projectOperations = {
     ...readOperation,
     id: "project.agentConfiguration.get",
     method: HttpMethod.Get,
-    path: "/api/project/:projectId/binding/:bindingId/agent/:agentName",
+    path: "/api/project/:project_id/binding/:binding_id/agent/:agent_name",
     input: readInput(
       z.strictObject({
-        projectId: z.string().min(1),
-        bindingId: z.string().min(1),
-        agentName: z.string().min(1),
+        project_id: z.string().min(1),
+        binding_id: z.string().min(1),
+        agent_name: z.string().min(1),
       }),
       emptyFields,
     ),
@@ -637,12 +637,12 @@ export const projectOperations = {
     ...readOperation,
     id: "project.binding.verify",
     method: HttpMethod.Post,
-    path: "/api/project/:projectId/binding/:bindingId/verify",
+    path: "/api/project/:project_id/binding/:binding_id/verify",
     timeoutMs: BINDING_VERIFY_TIMEOUT_MS,
     input: readInput(bindingParams, emptyFields),
     output: z.strictObject({
       address: bindingVerifyAnswerEntrySchema,
-      sshCredential: bindingVerifyAnswerEntrySchema,
+      ssh_credential: bindingVerifyAnswerEntrySchema,
       credential: bindingVerifyAnswerEntrySchema.nullable(),
     }),
     description: "Verify one repository binding address and credential.",
@@ -651,7 +651,7 @@ export const projectOperations = {
     ...readOperation,
     id: "project.binding.check",
     method: HttpMethod.Post,
-    path: "/api/project/:projectId/binding/check",
+    path: "/api/project/:project_id/binding/check",
     timeoutMs: BINDING_VERIFY_TIMEOUT_MS,
     body: true,
     input: z.strictObject({
@@ -664,7 +664,7 @@ export const projectOperations = {
     }),
     output: z.strictObject({
       address: bindingVerifyAnswerEntrySchema,
-      sshCredential: bindingVerifyAnswerEntrySchema,
+      ssh_credential: bindingVerifyAnswerEntrySchema,
       credential: bindingVerifyAnswerEntrySchema.nullable(),
     }),
     description:
@@ -682,7 +682,7 @@ export interface ProjectBindings {
     resourceIdentity: string,
     issuedAt: number,
     context: Context,
-  ): Promise<{ projectId: string; resourceIdentity: string } | null>;
+  ): Promise<{ project_id: string; resource_identity: string } | null>;
 }
 
 export type EndRegistrations = (
@@ -693,8 +693,8 @@ export type EndRegistrations = (
 ) => void;
 
 export interface StorageBinding {
-  bindingId: string;
-  projectId: string;
+  binding_id: string;
+  project_id: string;
   endpoint: string;
   bucket: string;
   region: string;
@@ -704,13 +704,13 @@ export interface StorageBinding {
 }
 
 export interface WorkerBindingRow {
-  bindingId: string;
+  binding_id: string;
   name: string;
-  projectName: string;
+  project_name: string;
   revision: number;
-  workerName: string;
-  instanceCount: number;
-  resourceBudget: { turns: number; wallTimeMs: number } | null;
+  worker_name: string;
+  instance_count: number;
+  resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;
   tombstone: boolean;
 }

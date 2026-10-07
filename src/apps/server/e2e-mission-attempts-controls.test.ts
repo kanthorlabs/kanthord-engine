@@ -112,7 +112,7 @@ async function setup(t: TestContext) {
     secret: {},
   });
   const binding = await write<{
-    bindingSetVersion: number;
+    binding_set_version: number;
     bindings: Record<string, { id: string }>;
   }>(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
@@ -123,9 +123,9 @@ async function setup(t: TestContext) {
           available: true,
           platform: "github",
           address: "git@github.com:owner/repo.git",
-          sshCredential: "github-ssh",
+          ssh_credential: "github-ssh",
           strategy: {
-            baseBranch: "main",
+            base_branch: "main",
             action: {
               name: "pull_request",
               follows: { type: "assessment_passed" },
@@ -136,7 +136,7 @@ async function setup(t: TestContext) {
       },
     },
   });
-  assert.equal(binding.bindingSetVersion, SECOND_REVISION);
+  assert.equal(binding.binding_set_version, SECOND_REVISION);
   const create = (body: unknown) =>
     write<NodeChange>(["mission", "node", "create", mission.id], body);
   const initiative = await create({

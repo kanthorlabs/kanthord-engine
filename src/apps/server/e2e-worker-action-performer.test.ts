@@ -161,10 +161,10 @@ async function setup(t: TestContext) {
       available: true,
       platform: "github",
       address: `git@github.com:owner/${name}.git`,
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       credential: "github",
       strategy: {
-        baseBranch: "main",
+        base_branch: "main",
         action: { name: action, follows: { type: "assessment_passed" } },
       },
     },
@@ -176,12 +176,12 @@ async function setup(t: TestContext) {
       pushed: repository(PUSHED, "merge_push"),
       harness: {
         kind: "worker",
-        config: { worker: "claude@1", instanceCount: SINGLE_INSTANCE },
+        config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
       },
     },
   });
   const bindings = await read<
-    Page<{ id: string; name: string; resourceIdentity: string }>
+    Page<{ id: string; name: string; resource_identity: string }>
   >(["project", "binding", "list", project.id]);
   const gated = bindings.items.find((item) => item.name === GATED)!;
   const pushed = bindings.items.find((item) => item.name === PUSHED)!;
@@ -376,7 +376,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   let gWork1: Evidence, gWork2: Evidence, request1: Evidence;
   const pr42 = {
     kind: PlatformAddressKind.PullRequest,
-    resourceIdentity: h.gated.resourceIdentity,
+    resourceIdentity: h.gated.resource_identity,
     number: 42,
   };
 

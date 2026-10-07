@@ -61,7 +61,7 @@ export function fakeLookups() {
         throwIfCancelled(context);
         return projectId === TEST_PROJECT_ID &&
           resourceIdentity === `worker:kanthord:${TEST_WORKER_BINDING}`
-          ? { projectId, resourceIdentity }
+          ? { project_id: projectId, resource_identity: resourceIdentity }
           : null;
       },
     },

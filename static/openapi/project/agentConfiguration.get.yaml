@@ -12,24 +12,24 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.agentConfiguration.get.Input/properties/par\
-            ams/properties/projectId"
-      - name: bindingId
+            ams/properties/project_id"
+      - name: binding_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.agentConfiguration.get.Input/properties/par\
-            ams/properties/bindingId"
-      - name: agentName
+            ams/properties/binding_id"
+      - name: agent_name
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.agentConfiguration.get.Input/properties/par\
-            ams/properties/agentName"
+            ams/properties/agent_name"
     responses:
       "200":
         description: Completed result
@@ -65,19 +65,19 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 1
-            bindingId:
+            binding_id:
               type: string
               minLength: 1
-            agentName:
+            agent_name:
               type: string
               minLength: 1
           required:
-            - projectId
-            - bindingId
-            - agentName
+            - project_id
+            - binding_id
+            - agent_name
           additionalProperties: false
         query:
           type: object
@@ -97,9 +97,9 @@ components:
           type: string
         worker:
           type: string
-        workerBindingId:
+        worker_binding_id:
           type: string
-        bindingSetVersion:
+        binding_set_version:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
@@ -135,8 +135,8 @@ components:
       required:
         - agent
         - worker
-        - workerBindingId
-        - bindingSetVersion
+        - worker_binding_id
+        - binding_set_version
         - defaults
         - entry
         - effective

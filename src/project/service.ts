@@ -155,12 +155,12 @@ type BindingEdit = typeof bindingEditSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
 
 function bindingRecord(binding: StoredBinding) {
-  return { ...binding, kind: kindOf(binding.resourceIdentity) };
+  return { ...binding, kind: kindOf(binding.resource_identity) };
 }
 
 function requireBinding(tx: Transaction, projectId: string, bindingId: string) {
   const binding = readBindingRevision(tx, bindingId);
-  if (!binding || binding.projectId !== projectId)
+  if (!binding || binding.project_id !== projectId)
     throw new OperationError(
       HttpStatus.NotFound,
       ProjectErrorCode.BindingNotFound,
@@ -176,7 +176,7 @@ function requireWorkerBinding(
 ) {
   const project = requireProject(tx, projectId);
   const binding = requireBinding(tx, projectId, bindingId);
-  if (kindOf(binding.resourceIdentity) !== BindingKind.Worker)
+  if (kindOf(binding.resource_identity) !== BindingKind.Worker)
     throw new OperationError(
       HttpStatus.NotFound,
       ProjectErrorCode.BindingNotFound,
@@ -308,18 +308,18 @@ export class ProjectService implements Service, ProjectBindings {
     );
     registry.register(projectOperations.get, ({ params }, caller) =>
       caller.commit((tx) =>
-        this.projectRecord(requireProject(tx, params.projectId)),
+        this.projectRecord(requireProject(tx, params.project_id)),
       ),
     );
     registry.register(projectOperations.rename, ({ params, body }, caller) =>
       caller.commit((tx) =>
-        this.projectRecord(renameProject(tx, params.projectId, body.name)),
+        this.projectRecord(renameProject(tx, params.project_id, body.name)),
       ),
     );
     registry.register(
       projectOperations["bindingSet.write"],
       ({ params, body }, caller) =>
-        this.writeBindings(params.projectId, body, caller),
+        this.writeBindings(params.project_id, body, caller),
     );
     this.declareBindingReads(registry);
     this.declareAgentReads(registry);
@@ -329,28 +329,28 @@ export class ProjectService implements Service, ProjectBindings {
       projectOperations["bindingSet.get"],
       ({ params }, caller) =>
         caller.commit((tx) => {
-          const project = requireProject(tx, params.projectId);
+          const project = requireProject(tx, params.project_id);
           const bindings = Object.fromEntries(
             Array.from(
               readCurrentBindingSet(tx, project.id),
               ([name, binding]) => [
                 name,
                 bindingEditSchema.parse({
-                  kind: kindOf(binding.resourceIdentity),
+                  kind: kindOf(binding.resource_identity),
                   config: binding.config,
                 }),
               ],
             ),
           );
-          return { version: project.bindingSetVersion, bindings };
+          return { version: project.binding_set_version, bindings };
         }),
     );
     registry.register(
       projectOperations["binding.list"],
       ({ params, query }, caller) =>
         caller.commit((tx) => {
-          requireProject(tx, params.projectId);
-          const page = listBindings(tx, params.projectId, {
+          requireProject(tx, params.project_id);
+          const page = listBindings(tx, params.project_id, {
             ...query,
             state: query.state ?? BindingState.Current,
           });
@@ -359,15 +359,15 @@ export class ProjectService implements Service, ProjectBindings {
     );
     registry.register(projectOperations["binding.get"], ({ params }, caller) =>
       caller.commit((tx) =>
-        bindingRecord(requireBinding(tx, params.projectId, params.bindingId)),
+        bindingRecord(requireBinding(tx, params.project_id, params.binding_id)),
       ),
     );
     registry.register(
       projectOperations["bindingRevision.list"],
       ({ params, query }, caller) =>
         caller.commit((tx) => {
-          requireBinding(tx, params.projectId, params.bindingId);
-          const page = listRevisions(tx, params.bindingId, query);
+          requireBinding(tx, params.project_id, params.binding_id);
+          const page = listRevisions(tx, params.binding_id, query);
           return { ...page, items: page.items.map(bindingRecord) };
         }),
     );
@@ -382,17 +382,17 @@ export class ProjectService implements Service, ProjectBindings {
     );
   }
   private async verifyBinding(
-    params: { projectId: string; bindingId: string },
+    params: { project_id: string; binding_id: string },
     caller: CallerContext,
   ) {
     const config = this.operationalStore.transaction((tx) => {
-      requireProject(tx, params.projectId);
-      const binding = readBindingRevision(tx, params.bindingId);
+      requireProject(tx, params.project_id);
+      const binding = readBindingRevision(tx, params.binding_id);
       if (
         !binding ||
-        binding.projectId !== params.projectId ||
+        binding.project_id !== params.project_id ||
         hasBindingTombstone(tx, binding) ||
-        kindOf(binding.resourceIdentity) !== BindingKind.Repository
+        kindOf(binding.resource_identity) !== BindingKind.Repository
       )
         throw new OperationError(
           HttpStatus.NotFound,
@@ -406,19 +406,19 @@ export class ProjectService implements Service, ProjectBindings {
     return caller.commit(() => health);
   }
   private async checkBinding(
-    params: { projectId: string },
+    params: { project_id: string },
     config: typeof repositoryConfigSchema._output,
     caller: CallerContext,
   ) {
     refuseRepositoryAction(config);
     const pin = this.operationalStore.transaction((tx) => {
-      requireProject(tx, params.projectId);
+      requireProject(tx, params.project_id);
       if (config.credential !== undefined)
         this.custodySuitability(tx, {
           credential: config.credential,
           platform: REPOSITORY_PLATFORM,
         });
-      return this.sshPinOf(tx, config.sshCredential);
+      return this.sshPinOf(tx, config.ssh_credential);
     });
     refuseSshHost(config.address, pin);
     throwIfCancelled(caller.context);
@@ -435,7 +435,7 @@ export class ProjectService implements Service, ProjectBindings {
       context,
     );
     const sshCredentialEntry = await this.verifyRepositoryCredential(
-      config.sshCredential,
+      config.ssh_credential,
       context,
     );
     const credentialEntry =
@@ -445,7 +445,7 @@ export class ProjectService implements Service, ProjectBindings {
     throwIfCancelled(context);
     return {
       address: addressEntry,
-      sshCredential: sshCredentialEntry,
+      ssh_credential: sshCredentialEntry,
       credential: credentialEntry,
     };
   }
@@ -490,7 +490,7 @@ export class ProjectService implements Service, ProjectBindings {
   private projectRecord(project: StoredProject) {
     return {
       ...project,
-      workspaceDirectory: homeRelative(
+      workspace_directory: homeRelative(
         this.workspaceDirectoryOf(project.id),
         this.hostHome,
       ),
@@ -512,12 +512,12 @@ export class ProjectService implements Service, ProjectBindings {
       : null;
     const view = this.workerAgentView(tx, config.worker, agent, entry);
     assert.ok(view, "Declared agents must have a worker view.");
-    assert.ok(project.bindingSetVersion >= BINDING_SET_INITIAL_VERSION);
+    assert.ok(project.binding_set_version >= BINDING_SET_INITIAL_VERSION);
     return {
       agent,
       worker: config.worker,
-      workerBindingId: bindingId,
-      bindingSetVersion: project.bindingSetVersion,
+      worker_binding_id: bindingId,
+      binding_set_version: project.binding_set_version,
       defaults: view.defaults,
       entry,
       effective: view.effective,
@@ -532,8 +532,8 @@ export class ProjectService implements Service, ProjectBindings {
         caller.commit((tx) => {
           const { project, config } = requireWorkerBinding(
             tx,
-            params.projectId,
-            params.bindingId,
+            params.project_id,
+            params.binding_id,
           );
           assert.ok(Number.isInteger(query.limit));
           assert.ok(
@@ -549,7 +549,7 @@ export class ProjectService implements Service, ProjectBindings {
           const last = page.at(-LAST_INDEX);
           return {
             items: page.map((name) =>
-              this.agentItem(tx, project, params.bindingId, config, name),
+              this.agentItem(tx, project, params.binding_id, config, name),
             ),
             next_cursor:
               selected.length > query.limit && last
@@ -564,10 +564,10 @@ export class ProjectService implements Service, ProjectBindings {
         caller.commit((tx) => {
           const { project, config } = requireWorkerBinding(
             tx,
-            params.projectId,
-            params.bindingId,
+            params.project_id,
+            params.binding_id,
           );
-          if (!this.workerAgentsOf(config.worker).includes(params.agentName))
+          if (!this.workerAgentsOf(config.worker).includes(params.agent_name))
             throw new OperationError(
               HttpStatus.NotFound,
               ProjectErrorCode.BindingNotFound,
@@ -576,9 +576,9 @@ export class ProjectService implements Service, ProjectBindings {
           return this.agentItem(
             tx,
             project,
-            params.bindingId,
+            params.binding_id,
             config,
-            params.agentName,
+            params.agent_name,
           );
         }),
     );
@@ -593,7 +593,7 @@ export class ProjectService implements Service, ProjectBindings {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
       const pin = this.operationalStore.transaction((tx) =>
-        this.sshPinOf(tx, binding.config.sshCredential),
+        this.sshPinOf(tx, binding.config.ssh_credential),
       );
       await this.checkRepository(binding.config, pin, caller.context);
     }
@@ -612,8 +612,8 @@ export class ProjectService implements Service, ProjectBindings {
         ]),
       );
       return {
-        projectId,
-        bindingSetVersion: result.newVersion,
+        project_id: projectId,
+        binding_set_version: result.newVersion,
         bindings,
         changes: result.changes,
       };
@@ -727,17 +727,21 @@ export class ProjectService implements Service, ProjectBindings {
         change.kind !== ChangeKind.Revised
       )
         continue;
-      const row = readBindingRevision(tx, change.bindingId);
+      const row = readBindingRevision(tx, change.binding_id);
       assert.ok(row);
-      if (kindOf(row.resourceIdentity) !== BindingKind.Worker) continue;
-      const latest = readLatestBinding(tx, row.projectId, row.resourceIdentity);
+      if (kindOf(row.resource_identity) !== BindingKind.Worker) continue;
+      const latest = readLatestBinding(
+        tx,
+        row.project_id,
+        row.resource_identity,
+      );
       assert.ok(latest);
       if (
-        latest.removedAt !== null ||
-        workerConfigSchema.parse(latest.config).instanceCount ===
+        latest.removed_at !== null ||
+        workerConfigSchema.parse(latest.config).instance_count ===
           INSTANCE_COUNT_MIN
       )
-        this.endRegistrations(tx, row.projectId, row.resourceIdentity, now);
+        this.endRegistrations(tx, row.project_id, row.resource_identity, now);
     }
   }
   private validateBinding(
@@ -751,7 +755,7 @@ export class ProjectService implements Service, ProjectBindings {
     }
     if (
       binding.kind === BindingKind.Repository &&
-      Buffer.byteLength(binding.config.projectPrompt ?? "", UTF8_ENCODING) >
+      Buffer.byteLength(binding.config.project_prompt ?? "", UTF8_ENCODING) >
         PROJECT_PROMPT_MAX_BYTES
     )
       throw new OperationError(
@@ -767,7 +771,7 @@ export class ProjectService implements Service, ProjectBindings {
       return;
     }
     this.custodySuitability(tx, {
-      credential: binding.config.sshCredential,
+      credential: binding.config.ssh_credential,
       platform: SSH_CREDENTIAL_PLATFORM,
     });
     if (binding.config.credential !== undefined)
@@ -782,8 +786,8 @@ export class ProjectService implements Service, ProjectBindings {
     config: typeof workerConfigSchema._output,
   ): void {
     if (
-      config.instanceCount < INSTANCE_COUNT_MIN ||
-      config.instanceCount > INSTANCE_COUNT_MAX
+      config.instance_count < INSTANCE_COUNT_MIN ||
+      config.instance_count > INSTANCE_COUNT_MAX
     )
       throw new OperationError(
         HttpStatus.BadRequest,
@@ -822,8 +826,8 @@ export class ProjectService implements Service, ProjectBindings {
     assert.ok(tx.database.isTransaction);
     return readCurrentBindings(tx).flatMap(
       (binding): AgentDependentBinding[] => {
-        assert.equal(binding.removedAt, null);
-        if (kindOf(binding.resourceIdentity) !== BindingKind.Worker) return [];
+        assert.equal(binding.removed_at, null);
+        if (kindOf(binding.resource_identity) !== BindingKind.Worker) return [];
         const config = workerConfigSchema.parse(binding.config);
         if (!this.workerAgentsOf(config.worker).includes(agentName)) return [];
         const entries = new Map(
@@ -831,8 +835,8 @@ export class ProjectService implements Service, ProjectBindings {
         );
         return [
           {
-            bindingId: binding.id,
-            workerName: config.worker,
+            binding_id: binding.id,
+            worker_name: config.worker,
             entry: entries.get(agentName) ?? null,
           },
         ];
@@ -849,8 +853,8 @@ export class ProjectService implements Service, ProjectBindings {
       )
       .map(({ binding }) => ({
         binding_id: binding.id,
-        project_id: binding.projectId,
-        project_name: requireProject(tx, binding.projectId).name,
+        project_id: binding.project_id,
+        project_name: requireProject(tx, binding.project_id).name,
         name: binding.name,
       }));
     assert.equal(
@@ -863,30 +867,30 @@ export class ProjectService implements Service, ProjectBindings {
     tx: Transaction,
     projectId: string,
     bindingName: string,
-  ): { bindingId: string; resourceIdentity: string } | null {
+  ): { binding_id: string; resource_identity: string } | null {
     const binding = readCurrentBindingByName(tx, projectId, bindingName);
     if (!binding) return null;
-    assert.equal(binding.removedAt, null);
-    assert.equal(binding.projectId, projectId);
+    assert.equal(binding.removed_at, null);
+    assert.equal(binding.project_id, projectId);
     return {
-      bindingId: binding.id,
-      resourceIdentity: binding.resourceIdentity,
+      binding_id: binding.id,
+      resource_identity: binding.resource_identity,
     };
   }
   resolveBindingIdentity(
     tx: Transaction,
     projectId: string,
     bindingId: string,
-  ): { bindingId: string; resourceIdentity: string } | null {
+  ): { binding_id: string; resource_identity: string } | null {
     const binding = readBindingRevision(tx, bindingId);
-    if (!binding || binding.projectId !== projectId) return null;
+    if (!binding || binding.project_id !== projectId) return null;
     if (hasBindingTombstone(tx, binding)) return null;
-    const latest = readLatestBinding(tx, projectId, binding.resourceIdentity);
+    const latest = readLatestBinding(tx, projectId, binding.resource_identity);
     assert.ok(latest, "A retained binding must have a latest revision.");
-    assert.equal(latest.removedAt, null);
+    assert.equal(latest.removed_at, null);
     return {
-      bindingId: latest.id,
-      resourceIdentity: latest.resourceIdentity,
+      binding_id: latest.id,
+      resource_identity: latest.resource_identity,
     };
   }
   getBindingRevision(
@@ -897,24 +901,24 @@ export class ProjectService implements Service, ProjectBindings {
     if (!binding) return null;
     const latest = readLatestBinding(
       tx,
-      binding.projectId,
-      binding.resourceIdentity,
+      binding.project_id,
+      binding.resource_identity,
     );
     assert.ok(latest, "A retained binding must have a latest revision.");
     assert.ok(latest.revision >= binding.revision);
     const current = bindingEditSchema.parse({
-      kind: kindOf(latest.resourceIdentity),
+      kind: kindOf(latest.resource_identity),
       config: latest.config,
     });
     const disabled =
       current.kind === BindingKind.Worker
-        ? current.config.instanceCount === INSTANCE_COUNT_MIN
+        ? current.config.instance_count === INSTANCE_COUNT_MIN
         : current.config.available === false;
     return {
-      projectId: binding.projectId,
-      bindingId: binding.id,
+      project_id: binding.project_id,
+      binding_id: binding.id,
       name: binding.name,
-      resourceIdentity: binding.resourceIdentity,
+      resource_identity: binding.resource_identity,
       revision: binding.revision,
       tombstone: hasBindingTombstone(tx, binding),
       disabled,
@@ -923,31 +927,31 @@ export class ProjectService implements Service, ProjectBindings {
   workerBindingRowOf(tx: Transaction, bindingId: string) {
     assert.ok(tx.database.isTransaction);
     const binding = readBindingRevision(tx, bindingId);
-    if (!binding || kindOf(binding.resourceIdentity) !== BindingKind.Worker)
+    if (!binding || kindOf(binding.resource_identity) !== BindingKind.Worker)
       return null;
     const config = workerConfigSchema.parse(binding.config);
     const resolution = this.getBindingRevision(tx, bindingId);
     assert.ok(resolution);
     return {
-      bindingId: binding.id,
-      projectId: binding.projectId,
-      workerName: config.worker,
-      resourceIdentity: binding.resourceIdentity,
+      binding_id: binding.id,
+      project_id: binding.project_id,
+      worker_name: config.worker,
+      resource_identity: binding.resource_identity,
       tombstone: resolution.tombstone,
       disabled: resolution.disabled,
       entries: config.entries ?? [],
-      resourceBudget: config.resourceBudget ?? null,
+      resource_budget: config.resource_budget ?? null,
     };
   }
   storageBindingOf(tx: Transaction, bindingId: string): StorageBinding | null {
     assert.ok(tx.database.isTransaction);
     const binding = readBindingRevision(tx, bindingId);
-    if (!binding || kindOf(binding.resourceIdentity) !== BindingKind.Storage)
+    if (!binding || kindOf(binding.resource_identity) !== BindingKind.Storage)
       return null;
     assert.equal(binding.id, bindingId);
     return {
-      bindingId: binding.id,
-      projectId: binding.projectId,
+      binding_id: binding.id,
+      project_id: binding.project_id,
       ...storageConfigSchema.parse(binding.config),
     };
   }
@@ -957,22 +961,25 @@ export class ProjectService implements Service, ProjectBindings {
   ): RepositoryPolicy | null {
     assert.ok(tx.database.isTransaction);
     const binding = readBindingRevision(tx, bindingId);
-    if (!binding || kindOf(binding.resourceIdentity) !== BindingKind.Repository)
+    if (
+      !binding ||
+      kindOf(binding.resource_identity) !== BindingKind.Repository
+    )
       return null;
     assert.equal(binding.id, bindingId);
     const config = repositoryConfigSchema.parse(binding.config);
     return {
-      bindingId: binding.id,
-      projectId: binding.projectId,
+      binding_id: binding.id,
+      project_id: binding.project_id,
       name: binding.name,
       address: config.address,
       platform: config.platform,
-      sshCredential: config.sshCredential,
+      ssh_credential: config.ssh_credential,
       credential: config.credential ?? null,
-      baseBranch: config.strategy.baseBranch,
+      base_branch: config.strategy.base_branch,
       action: config.strategy.action?.name ?? null,
-      projectPrompt: config.projectPrompt ?? null,
-      workingLayer: config.working_layer,
+      project_prompt: config.project_prompt ?? null,
+      working_layer: config.working_layer,
     };
   }
   workerBindingOf(
@@ -982,20 +989,20 @@ export class ProjectService implements Service, ProjectBindings {
   ): WorkerBindingRow | null {
     assert.ok(tx.database.isTransaction);
     const row = readLatestBinding(tx, projectId, resourceIdentity);
-    if (!row || kindOf(row.resourceIdentity) !== BindingKind.Worker)
+    if (!row || kindOf(row.resource_identity) !== BindingKind.Worker)
       return null;
-    assert.equal(row.projectId, projectId);
+    assert.equal(row.project_id, projectId);
     const config = workerConfigSchema.parse(row.config);
     return {
-      bindingId: row.id,
+      binding_id: row.id,
       name: row.name,
-      projectName: requireProject(tx, projectId).name,
+      project_name: requireProject(tx, projectId).name,
       revision: row.revision,
-      workerName: config.worker,
-      instanceCount: config.instanceCount,
-      resourceBudget: config.resourceBudget ?? null,
+      worker_name: config.worker,
+      instance_count: config.instance_count,
+      resource_budget: config.resource_budget ?? null,
       entries: config.entries ?? [],
-      tombstone: row.removedAt !== null,
+      tombstone: row.removed_at !== null,
     };
   }
   async resolveWorkerGroup(
@@ -1016,20 +1023,20 @@ export class ProjectService implements Service, ProjectBindings {
       const row = readLatestBinding(tx, projectId, resourceIdentity);
       if (
         !row ||
-        kindOf(row.resourceIdentity) !== BindingKind.Worker ||
-        row.removedAt !== null
+        kindOf(row.resource_identity) !== BindingKind.Worker ||
+        row.removed_at !== null
       )
         return null;
-      assert.equal(row.projectId, projectId);
-      assert.equal(row.resourceIdentity, resourceIdentity);
+      assert.equal(row.project_id, projectId);
+      assert.equal(row.resource_identity, resourceIdentity);
       if (
-        workerConfigSchema.parse(row.config).instanceCount ===
+        workerConfigSchema.parse(row.config).instance_count ===
         INSTANCE_COUNT_MIN
       )
         return null;
       const tombstone = readLatestTombstone(tx, projectId, resourceIdentity);
-      if (tombstone && tombstone.createdAt > issuedAt) return null;
-      return { projectId, resourceIdentity };
+      if (tombstone && tombstone.created_at > issuedAt) return null;
+      return { project_id: projectId, resource_identity: resourceIdentity };
     });
   }
   private readonly shutdown = new CancellationContext();
@@ -1074,7 +1081,7 @@ export class ProjectService implements Service, ProjectBindings {
   }
   resourceInventory(tx: Transaction): ResourceEntry[] {
     return readCurrentRepositories(tx).map(
-      ({ projectName, name, address, platform }) => {
+      ({ project_name: projectName, name, address, platform }) => {
         const check: ResourceCheck = async (context, observe) => {
           try {
             const deadline = context.deadline();

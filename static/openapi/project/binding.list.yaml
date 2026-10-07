@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.binding.list.Input/properties/params/proper\
-            ties/projectId"
+            ties/project_id"
       - name: kind
         in: query
         required: false
@@ -77,11 +77,11 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 1
           required:
-            - projectId
+            - project_id
           additionalProperties: false
         query:
           type: object
@@ -127,7 +127,7 @@ components:
             properties:
               id:
                 type: string
-              projectId:
+              project_id:
                 type: string
               name:
                 type: string
@@ -137,18 +137,18 @@ components:
                   - repository
                   - worker
                   - storage
-              resourceIdentity:
+              resource_identity:
                 type: string
               revision:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
               config: {}
-              createdAt:
+              created_at:
                 type: integer
                 minimum: -9007199254740991
                 maximum: 9007199254740991
-              removedAt:
+              removed_at:
                 anyOf:
                   - type: integer
                     minimum: -9007199254740991
@@ -156,14 +156,14 @@ components:
                   - type: "null"
             required:
               - id
-              - projectId
+              - project_id
               - name
               - kind
-              - resourceIdentity
+              - resource_identity
               - revision
               - config
-              - createdAt
-              - removedAt
+              - created_at
+              - removed_at
             additionalProperties: false
         next_cursor:
           anyOf:

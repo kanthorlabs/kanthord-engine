@@ -63,6 +63,15 @@ import {
 } from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
 import {
+  bindingIdentityView,
+  bindingRevisionView,
+  repositoryPolicyView,
+  schedulerWorkerBinding,
+  storageBindingView,
+  workerBindingRow,
+  workerWorkerBinding,
+} from "./project-ports.ts";
+import {
   WorkerService,
   workerMigrations,
   toolDeclarations,
@@ -184,7 +193,9 @@ export function composeServices(options: {
     },
     bindings: {
       workerBindingOf: (tx, projectId, resourceIdentity) =>
-        project.workerBindingOf(tx, projectId, resourceIdentity),
+        schedulerWorkerBinding(
+          project.workerBindingOf(tx, projectId, resourceIdentity),
+        ),
     },
     traceIdentity: {
       mint: () => ({
@@ -258,12 +269,7 @@ export function composeServices(options: {
     approvedModels: (tx, name) => llm.approvedModels(tx, name),
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
     providerCapability: (tx, name) => llm.providerCapability(tx, name),
-    entriesOfAgent: (tx, name) =>
-      project.entriesOfAgent(tx, name).map((binding) => ({
-        binding_id: binding.bindingId,
-        worker_name: binding.workerName,
-        entry: agentEntryOf(binding.entry),
-      })),
+    entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
     repositoryWorkingOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     toolDeclarations: (name) => toolDeclarations(name),
   });
@@ -302,9 +308,13 @@ export function composeServices(options: {
     },
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>
-      project.workerBindingOf(tx, projectId, resourceIdentity),
-    workerBindingRowOf: (tx, id) => project.workerBindingRowOf(tx, id),
-    repositoryPolicyOf: (tx, id) => project.repositoryPolicyOf(tx, id),
+      workerWorkerBinding(
+        project.workerBindingOf(tx, projectId, resourceIdentity),
+      ),
+    workerBindingRowOf: (tx, id) =>
+      workerBindingRow(project.workerBindingRowOf(tx, id)),
+    repositoryPolicyOf: (tx, id) =>
+      repositoryPolicyView(project.repositoryPolicyOf(tx, id)),
     repositoryBindingIdsOf: (tx, nodeId, revision) =>
       mission.repositoryBindingIdsOf(tx, nodeId, revision),
     pinnedCredentialMetadata: (tx, execution, name, now) =>
@@ -319,10 +329,9 @@ export function composeServices(options: {
     health: options.health,
     registrations: options.registrations,
     agentConfiguration: {
-      validateEntry: (tx, name, entry) =>
-        agent.validateEntry(tx, name, agentEntryOf(entry)),
+      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
       agentView: (tx, name, entry, models) =>
-        agent.agentView(tx, name, agentEntryOf(entry), models),
+        agent.agentView(tx, name, entry, models),
     },
   });
   const mission: MissionService = new MissionService({
@@ -350,12 +359,16 @@ export function composeServices(options: {
       of: (...args) => scheduler.executionAttribution(...args),
     },
     bindings: {
-      resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
+      resolveBinding: (tx, pid, name) =>
+        bindingIdentityView(project.resolveBinding(tx, pid, name)),
       resolveBindingIdentity: (tx, pid, bid) =>
-        project.resolveBindingIdentity(tx, pid, bid),
-      getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
-      repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
-      storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid),
+        bindingIdentityView(project.resolveBindingIdentity(tx, pid, bid)),
+      getBindingRevision: (tx, bid) =>
+        bindingRevisionView(project.getBindingRevision(tx, bid)),
+      repositoryPolicyOf: (tx, bid) =>
+        repositoryPolicyView(project.repositoryPolicyOf(tx, bid)),
+      storageBindingOf: (tx, bid) =>
+        storageBindingView(project.storageBindingOf(tx, bid)),
     },
   });
   const project: ProjectService = new ProjectService({

@@ -159,8 +159,8 @@ test("execution proof precedes reservation and replay and supplies only proven c
     lookups: {
       project: {
         resolveWorkerGroup: async () => ({
-          projectId: identity.projectId,
-          resourceIdentity: identity.resourceIdentity,
+          project_id: identity.projectId,
+          resource_identity: identity.resourceIdentity,
         }),
       },
       worker: {

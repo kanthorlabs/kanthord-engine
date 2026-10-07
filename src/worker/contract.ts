@@ -460,9 +460,9 @@ export interface SchedulerClaims {
 }
 
 export type WorkerEntry = {
-  agentProvider?: string;
-  modelIdentifier?: string;
-  reasoningEffort?: string;
+  agent_provider?: string;
+  model_identifier?: string;
+  reasoning_effort?: string;
 };
 
 export type CredentialMetadataRecord = {

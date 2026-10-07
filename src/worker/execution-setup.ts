@@ -82,9 +82,9 @@ export async function executionSetup(
     );
     const entry = configuredEntry
       ? {
-          agentProvider: configuredEntry.agentProvider,
-          modelIdentifier: configuredEntry.modelIdentifier,
-          reasoningEffort: configuredEntry.reasoningEffort,
+          agent_provider: configuredEntry.agent_provider,
+          model_identifier: configuredEntry.model_identifier,
+          reasoning_effort: configuredEntry.reasoning_effort,
         }
       : null;
     const view = worker.workerAgentView(

@@ -50,7 +50,6 @@ import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   scriptedActions,
-  agentDefaultsOf,
 } from "./test-support.ts";
 
 const SUCCESSFUL_EXIT = 0;
@@ -66,9 +65,9 @@ const REPOSITORY = "repository";
 const GATED_REQUIREMENT = "gated.pull_request";
 const SECRET = "test_e2e_methods_secret";
 const DEFAULTS = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off",
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
 };
 const CONTENT = {
   name: "Say hello",
@@ -158,7 +157,7 @@ test(
         agent_providers: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
-        default_configuration: agentDefaultsOf(DEFAULTS),
+        default_configuration: DEFAULTS,
       });
     const project = await read<{ id: string }>([
       "project",
@@ -168,15 +167,15 @@ test(
     ]);
     const worker = {
       worker: "general@1",
-      instanceCount: SINGLE_INSTANCE,
+      instance_count: SINGLE_INSTANCE,
       entries: [{ agent: "swe@1", ...DEFAULTS }],
     };
     const repository = (name: string) => ({
       available: true,
       platform: "github",
       address: `git@github.com:owner/${name}.git`,
-      sshCredential: "github-ssh",
-      strategy: { baseBranch: "main" },
+      ssh_credential: "github-ssh",
+      strategy: { base_branch: "main" },
       credential: "github",
     });
     const bindingSet = await write<{
@@ -190,7 +189,7 @@ test(
           config: {
             ...repository("gated"),
             strategy: {
-              baseBranch: "main",
+              base_branch: "main",
               action: {
                 name: "pull_request",
                 follows: { type: "assessment_passed" },
@@ -203,14 +202,14 @@ test(
           kind: "worker",
           config: {
             ...worker,
-            resourceBudget: { turns: SINGLE_TURN, wallTimeMs: 600000 },
+            resource_budget: { turns: SINGLE_TURN, wall_time_ms: 600000 },
           },
         },
         review: {
           kind: "worker",
           config: {
             worker: "reviewer@1",
-            instanceCount: SINGLE_INSTANCE,
+            instance_count: SINGLE_INSTANCE,
             entries: [{ agent: "re@1", ...DEFAULTS }],
           },
         },

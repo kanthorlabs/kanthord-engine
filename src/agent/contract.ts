@@ -10,7 +10,6 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import type { WorkingLayer } from "../project/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
 export const ENABLEMENT_MAX_BODY_BYTES = 64 * 1024;
@@ -192,16 +191,6 @@ export type ProviderCapabilityFn = (
   tx: Transaction,
   credentialName: string,
 ) => string;
-
-export type RepositoryWorkingOf = (
-  tx: Transaction,
-  bindingId: string,
-) => {
-  projectId: string;
-  name: string;
-  projectPrompt: string | null;
-  workingLayer: WorkingLayer;
-} | null;
 
 export type EntriesOfAgent = (
   tx: Transaction,

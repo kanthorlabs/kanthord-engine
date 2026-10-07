@@ -140,8 +140,8 @@ export async function openNativeAgent(
           await resolveRepositoryLayer({
             repository: {
               name: repository.name,
-              projectPrompt: repository.projectPrompt,
-              workingLayer: repository.working_layer,
+              project_prompt: repository.projectPrompt,
+              working_layer: repository.working_layer,
             },
             workspace:
               input.method === WorkerMethod.Evaluation ? null : input.workspace,

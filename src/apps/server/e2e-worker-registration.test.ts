@@ -19,11 +19,7 @@ import {
   workerOperations,
 } from "../../worker/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import {
-  FAKE_SSH_IDENTITY,
-  gatewayFixture,
-  agentDefaultsOf,
-} from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -54,9 +50,9 @@ const JOURNEY_TIMEOUT = 120000;
 const TOKEN_DELAY = 1000;
 const BUDGET = { turns: 200, wallTimeMs: 7200000 };
 const CONFIGURATION = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off",
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
 };
 const ErrorCode = {
   Catalog: "worker.catalog.not_found",
@@ -144,7 +140,7 @@ function bindings(instanceCount: number) {
       kind: "worker",
       config: {
         worker: NATIVE,
-        instanceCount,
+        instance_count: instanceCount,
         entries: [{ agent: AGENT, ...CONFIGURATION }],
       },
     },
@@ -180,7 +176,7 @@ async function setup(t: TestContext) {
     agent_providers: [
       { name: "default", provider: "anthropic", credential: "anthro-1" },
     ],
-    default_configuration: agentDefaultsOf(CONFIGURATION),
+    default_configuration: CONFIGURATION,
   });
   const enabled = success<{ revision: number }>(
     await kanthord(
@@ -193,13 +189,13 @@ async function setup(t: TestContext) {
     version: FIRST_REVISION,
     bindings: bindings(SINGLE_INSTANCE),
   });
-  const applied = success<{ bindingSetVersion: number }>(
+  const applied = success<{ binding_set_version: number }>(
     await kanthord(
       ["project", "binding", "apply", project.id, "--file", initial],
       H,
     ),
   );
-  assert.equal(applied.bindingSetVersion, SECOND_BINDING_VERSION);
+  assert.equal(applied.binding_set_version, SECOND_BINDING_VERSION);
   writePrivate(
     join(directory, "issuance.yaml"),
     stringify(
@@ -228,12 +224,12 @@ async function apply(
     version,
     bindings: instanceCount === null ? {} : bindings(instanceCount),
   });
-  return success<{ bindingSetVersion: number }>(
+  return success<{ binding_set_version: number }>(
     await kanthord(
       ["project", "binding", "apply", f.projectId, "--file", path],
       f.H,
     ),
-  ).bindingSetVersion;
+  ).binding_set_version;
 }
 
 test(
@@ -498,7 +494,7 @@ test(
               EXECUTION,
               second.projectId,
               createIdentity("node"),
-              binding.bindingId,
+              binding.binding_id,
               RESOURCE,
               runtimeIdentity,
               now + BUDGET.wallTimeMs,

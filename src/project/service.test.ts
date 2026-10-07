@@ -120,8 +120,8 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   const stateDirectory = temporary(t);
   const wakes: string[] = [];
   const registrationEnds: Array<{
-    projectId: string;
-    resourceIdentity: string;
+    project_id: string;
+    resource_identity: string;
     now: number;
   }> = [];
   const project = new ProjectService({
@@ -150,7 +150,11 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     endRegistrations: (tx, projectId, resourceIdentity, now) => {
       assert.ok(tx.database.isTransaction);
       assert.equal(tx.database, store.database);
-      registrationEnds.push({ projectId, resourceIdentity, now });
+      registrationEnds.push({
+        project_id: projectId,
+        resource_identity: resourceIdentity,
+        now,
+      });
     },
     ...overrides,
   });
@@ -312,10 +316,10 @@ test("create persists a project and creates its mission inside the caller commit
   const record = f.invoke("create", { name: PROJECT_NAME });
   assert.ok(identitySchema(PROJECT_ID_PREFIX).safeParse(record.id).success);
   assert.equal(record.name, PROJECT_NAME);
-  assert.equal(record.bindingSetVersion, BINDING_SET_INITIAL_VERSION);
-  assert.ok(record.createdAt >= before && record.createdAt <= Date.now());
+  assert.equal(record.binding_set_version, BINDING_SET_INITIAL_VERSION);
+  assert.ok(record.created_at >= before && record.created_at <= Date.now());
   assert.equal(missionCalls, ONE_CALL);
-  assert.deepEqual(f.invoke("get", null, { projectId: record.id }), record);
+  assert.deepEqual(f.invoke("get", null, { project_id: record.id }), record);
   assert.deepEqual(f.invoke("list").items, [record]);
 });
 
@@ -323,21 +327,21 @@ test("create, get and list answer the workspace directory and create answers aft
   const f = fixture(t, { createMission: allowMission });
   const record = f.invoke("create", { name: PROJECT_NAME });
   assert.equal(
-    record.workspaceDirectory,
+    record.workspace_directory,
     join(f.stateDirectory, "projects", record.id),
   );
-  assert.ok(isAbsolute(record.workspaceDirectory));
-  assert.ok(statSync(record.workspaceDirectory).isDirectory());
+  assert.ok(isAbsolute(record.workspace_directory));
+  assert.ok(statSync(record.workspace_directory).isDirectory());
   f.invoke("create", { name: OTHER_NAME });
   assert.equal(
-    f.invoke("get", null, { projectId: record.id }).workspaceDirectory,
-    record.workspaceDirectory,
+    f.invoke("get", null, { project_id: record.id }).workspace_directory,
+    record.workspace_directory,
   );
   const listed = f.invoke("list").items;
   assert.equal(listed.length, PROJECTS_CREATED);
   for (const item of listed)
     assert.equal(
-      item.workspaceDirectory,
+      item.workspace_directory,
       join(f.stateDirectory, "projects", item.id),
     );
 });
@@ -351,15 +355,15 @@ test("create, get and list write the home directory of the workspace directory a
   });
   const record = f.invoke("create", { name: PROJECT_NAME });
   const expected = join("~", "kanthord", "projects", record.id);
-  assert.equal(record.workspaceDirectory, expected);
+  assert.equal(record.workspace_directory, expected);
   assert.ok(
     statSync(join(state, "kanthord", "projects", record.id)).isDirectory(),
   );
   assert.equal(
-    f.invoke("get", null, { projectId: record.id }).workspaceDirectory,
+    f.invoke("get", null, { project_id: record.id }).workspace_directory,
     expected,
   );
-  assert.equal(f.invoke("list").items[0]!.workspaceDirectory, expected);
+  assert.equal(f.invoke("list").items[0]!.workspace_directory, expected);
 });
 
 test("create answers the committed project when its workspace directory cannot be created", (t) => {
@@ -367,11 +371,11 @@ test("create answers the committed project when its workspace directory cannot b
   writeFileSync(join(f.stateDirectory, "projects"), "");
   const record = f.invoke("create", { name: PROJECT_NAME });
   assert.equal(
-    record.workspaceDirectory,
+    record.workspace_directory,
     join(f.stateDirectory, "projects", record.id),
   );
-  assert.ok(!existsSync(record.workspaceDirectory));
-  assert.deepEqual(f.invoke("get", null, { projectId: record.id }), record);
+  assert.ok(!existsSync(record.workspace_directory));
+  assert.deepEqual(f.invoke("get", null, { project_id: record.id }), record);
 });
 
 test("create rejects duplicate names with the holder identity without calling mission again", (t) => {
@@ -527,7 +531,7 @@ test("list rejects malformed, noncanonical, and non-project cursors", (t) => {
 
 test("get and rename reject an absent project", (t) => {
   const f = fixture(t);
-  const params = { projectId: createIdentity(PROJECT_ID_PREFIX) };
+  const params = { project_id: createIdentity(PROJECT_ID_PREFIX) };
   refuses(
     () => f.invoke("get", null, params),
     HttpStatus.NotFound,
@@ -544,7 +548,7 @@ test("rename preserves fields, accepts its current name, and rejects another hol
   const f = fixture(t, { createMission: allowMission });
   const project = f.invoke("create", { name: PROJECT_NAME });
   const holder = f.invoke("create", { name: OTHER_NAME });
-  const params = { projectId: project.id };
+  const params = { project_id: project.id };
   refuses(
     () => f.invoke("rename", { name: OTHER_NAME }, params),
     HttpStatus.Conflict,
@@ -567,7 +571,7 @@ function bindingFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     if (instanceCount !== null)
       submission.set("worker", {
         kind: BindingKind.Worker,
-        config: { worker: "developer", instanceCount },
+        config: { worker: "developer", instance_count: instanceCount },
       });
     const result = f.store.transaction((tx) =>
       writeBindingSet(tx, project.id, version, submission),
@@ -576,18 +580,18 @@ function bindingFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     const change = result.changes.at(-FIRST_PAGE_LIMIT);
     assert.ok(change);
     assert.ok(
-      identitySchema(BINDING_ID_PREFIX).safeParse(change.bindingId).success,
+      identitySchema(BINDING_ID_PREFIX).safeParse(change.binding_id).success,
     );
-    return change.bindingId;
+    return change.binding_id;
   }
-  return { ...f, projectId: project.id, write };
+  return { ...f, project_id: project.id, write };
 }
 
 test("worker group resolution rejects absence, disablement and removal", async (t) => {
   const f = bindingFixture(t);
   const resolve = (resourceIdentity = WORKER_GROUP) =>
     f.project.resolveWorkerGroup(
-      f.projectId,
+      f.project_id,
       resourceIdentity,
       GROUP_ISSUED_AT,
       background,
@@ -595,8 +599,8 @@ test("worker group resolution rejects absence, disablement and removal", async (
   assert.equal(await resolve(), null);
   f.write(SINGLE_INSTANCE);
   assert.deepEqual(await resolve(), {
-    projectId: f.projectId,
-    resourceIdentity: WORKER_GROUP,
+    project_id: f.project_id,
+    resource_identity: WORKER_GROUP,
   });
   assert.equal(await resolve(MISSING_GROUP), null);
   f.write(INSTANCE_COUNT_MIN);
@@ -633,7 +637,7 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
   f.write(SINGLE_INSTANCE);
   assert.equal(
     await f.project.resolveWorkerGroup(
-      f.projectId,
+      f.project_id,
       WORKER_GROUP,
       GROUP_ISSUED_AT,
       background,
@@ -642,12 +646,12 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
   );
   assert.deepEqual(
     await f.project.resolveWorkerGroup(
-      f.projectId,
+      f.project_id,
       WORKER_GROUP,
       TOMBSTONE_AT,
       background,
     ),
-    { projectId: f.projectId, resourceIdentity: WORKER_GROUP },
+    { project_id: f.project_id, resource_identity: WORKER_GROUP },
   );
   const secondTombstoneAt = TOMBSTONE_AT + GROUP_ISSUED_AT;
   t.mock.method(Date, "now", () => secondTombstoneAt);
@@ -655,7 +659,7 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
   f.write(SINGLE_INSTANCE);
   assert.equal(
     await f.project.resolveWorkerGroup(
-      f.projectId,
+      f.project_id,
       WORKER_GROUP,
       TOMBSTONE_AT,
       background,
@@ -664,12 +668,12 @@ test("worker group resolution uses the latest tombstone and accepts equality at 
   );
   assert.deepEqual(
     await f.project.resolveWorkerGroup(
-      f.projectId,
+      f.project_id,
       WORKER_GROUP,
       secondTombstoneAt,
       background,
     ),
-    { projectId: f.projectId, resourceIdentity: WORKER_GROUP },
+    { project_id: f.project_id, resource_identity: WORKER_GROUP },
   );
 });
 
@@ -677,37 +681,37 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
   const f = bindingFixture(t);
   const read = () =>
     f.store.transaction((tx) =>
-      f.project.workerBindingOf(tx, f.projectId, WORKER_GROUP),
+      f.project.workerBindingOf(tx, f.project_id, WORKER_GROUP),
     );
   assert.equal(read(), null);
   const first = f.write(SINGLE_INSTANCE);
   assert.deepEqual(read(), {
-    bindingId: first,
+    binding_id: first,
     name: GROUP_BINDING_NAME,
-    projectName: PROJECT_NAME,
+    project_name: PROJECT_NAME,
     revision: REVISION_ONE,
-    workerName: GROUP_WORKER_NAME,
-    instanceCount: SINGLE_INSTANCE,
-    resourceBudget: null,
+    worker_name: GROUP_WORKER_NAME,
+    instance_count: SINGLE_INSTANCE,
+    resource_budget: null,
     entries: [],
     tombstone: false,
   });
   const next = f.write(TWO_INSTANCES);
   const txResult = f.store.transaction((tx) => {
     t.mock.method(f.store, "transaction", unexpected);
-    return f.project.workerBindingOf(tx, f.projectId, WORKER_GROUP);
+    return f.project.workerBindingOf(tx, f.project_id, WORKER_GROUP);
   });
   t.mock.restoreAll();
-  assert.equal(txResult?.bindingId, next);
+  assert.equal(txResult?.binding_id, next);
   assert.equal(txResult?.revision, REVISION_TWO);
-  assert.equal(txResult?.instanceCount, TWO_INSTANCES);
+  assert.equal(txResult?.instance_count, TWO_INSTANCES);
   f.write(INSTANCE_COUNT_MIN);
-  assert.equal(read()?.instanceCount, INSTANCE_COUNT_MIN);
+  assert.equal(read()?.instance_count, INSTANCE_COUNT_MIN);
   f.write(null);
   assert.equal(read()?.tombstone, true);
   assert.equal(read()?.name, GROUP_BINDING_NAME);
-  f.invoke("rename", { name: RENAMED_NAME }, { projectId: f.projectId });
-  assert.equal(read()?.projectName, RENAMED_NAME);
+  f.invoke("rename", { name: RENAMED_NAME }, { project_id: f.project_id });
+  assert.equal(read()?.project_name, RENAMED_NAME);
 });
 
 test("worker group reads reject a repository group and preserve cancellation", async (t) => {
@@ -716,7 +720,7 @@ test("worker group reads reject a repository group and preserve cancellation", a
   f.store.transaction((tx) =>
     writeBindingSet(
       tx,
-      f.projectId,
+      f.project_id,
       BINDING_SET_INITIAL_VERSION,
       new Map([
         [
@@ -731,7 +735,7 @@ test("worker group reads reject a repository group and preserve cancellation", a
   );
   assert.equal(
     await f.project.resolveWorkerGroup(
-      f.projectId,
+      f.project_id,
       repositoryGroup,
       GROUP_ISSUED_AT,
       background,
@@ -740,7 +744,7 @@ test("worker group reads reject a repository group and preserve cancellation", a
   );
   assert.equal(
     f.store.transaction((tx) =>
-      f.project.workerBindingOf(tx, f.projectId, repositoryGroup),
+      f.project.workerBindingOf(tx, f.project_id, repositoryGroup),
     ),
     null,
   );
@@ -748,7 +752,7 @@ test("worker group reads reject a repository group and preserve cancellation", a
   context.cancel();
   await assert.rejects(
     f.project.resolveWorkerGroup(
-      f.projectId,
+      f.project_id,
       WORKER_GROUP,
       GROUP_ISSUED_AT,
       context,
@@ -758,13 +762,16 @@ test("worker group reads reject a repository group and preserve cancellation", a
 });
 
 test("worker group override receives the exact group, issuance and context without bypassing cancellation", async (t) => {
-  const group = { projectId: "fake-project", resourceIdentity: WORKER_GROUP };
+  const group = { project_id: "fake-project", resource_identity: WORKER_GROUP };
   let calls = NO_CALLS;
   const f = fixture(t, {
     bindings: {
       async resolveWorkerGroup(projectId, resourceIdentity, issuedAt, context) {
         calls++;
-        assert.deepEqual({ projectId, resourceIdentity }, group);
+        assert.deepEqual(
+          { project_id: projectId, resource_identity: resourceIdentity },
+          group,
+        );
         assert.equal(issuedAt, GROUP_ISSUED_AT);
         assert.equal(context, background);
         return group;
@@ -774,8 +781,8 @@ test("worker group override receives the exact group, issuance and context witho
   t.mock.method(f.store, "transaction", unexpected);
   assert.equal(
     await f.project.resolveWorkerGroup(
-      group.projectId,
-      group.resourceIdentity,
+      group.project_id,
+      group.resource_identity,
       GROUP_ISSUED_AT,
       background,
     ),
@@ -785,8 +792,8 @@ test("worker group override receives the exact group, issuance and context witho
   context.cancel();
   await assert.rejects(
     f.project.resolveWorkerGroup(
-      group.projectId,
-      group.resourceIdentity,
+      group.project_id,
+      group.resource_identity,
       GROUP_ISSUED_AT,
       context,
     ),
@@ -875,8 +882,8 @@ function repositoryBinding(
       available: true,
       platform: REPOSITORY_PLATFORM,
       address,
-      strategy: { baseBranch: "main" },
-      sshCredential: sshCredentialOf(address),
+      strategy: { base_branch: "main" },
+      ssh_credential: sshCredentialOf(address),
       credential: REPOSITORY_CREDENTIAL,
       working_layer: {
         agents_md: true,
@@ -892,7 +899,7 @@ function repositoryBinding(
 function workerBinding(worker = NATIVE_WORKER) {
   return {
     kind: BindingKind.Worker,
-    config: { worker, instanceCount: SINGLE_INSTANCE },
+    config: { worker, instance_count: SINGLE_INSTANCE },
   };
 }
 
@@ -955,7 +962,7 @@ function writeFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     ...overrides,
   });
   const project = f.invoke("create", { name: PROJECT_NAME });
-  const params = { projectId: project.id };
+  const params = { project_id: project.id };
   async function write(
     bindings: Bindings,
     version = BINDING_SET_INITIAL_VERSION,
@@ -1001,21 +1008,21 @@ test("binding writes wake Scheduler once after commit and refused writes wake no
   const f = writeFixture(t);
   assert.deepEqual(f.wakes, []);
   const result = await f.write({ general: workerBinding() });
-  assert.deepEqual(f.wakes, [f.params.projectId]);
+  assert.deepEqual(f.wakes, [f.params.project_id]);
   assert.equal(
-    f.store.transaction((tx) => requireProject(tx, f.params.projectId))
-      .bindingSetVersion,
-    result.bindingSetVersion,
+    f.store.transaction((tx) => requireProject(tx, f.params.project_id))
+      .binding_set_version,
+    result.binding_set_version,
   );
   await assert.rejects(f.write({}));
-  assert.deepEqual(f.wakes, [f.params.projectId]);
+  assert.deepEqual(f.wakes, [f.params.project_id]);
 });
 
 function storedBindings(f: ReturnType<typeof writeFixture>) {
   return f.store.transaction((tx) =>
     Object.fromEntries(
       Array.from(
-        readCurrentBindingSet(tx, f.params.projectId),
+        readCurrentBindingSet(tx, f.params.project_id),
         ([name, binding]) => [name, binding],
       ),
     ),
@@ -1024,48 +1031,54 @@ function storedBindings(f: ReturnType<typeof writeFixture>) {
 
 test("binding edits end registrations only for removed or zero-count worker groups in the write transaction", async (t) => {
   const f = writeFixture(t);
-  const config = { ...workerBinding().config, instanceCount: TWO_INSTANCES };
+  const config = { ...workerBinding().config, instance_count: TWO_INSTANCES };
   let result = await f.write({
     worker: { kind: BindingKind.Worker, config },
     repository: repositoryBinding(),
   });
   result = await f.write(
     { worker: workerBinding(), repository: repositoryBinding() },
-    result.bindingSetVersion,
+    result.binding_set_version,
   );
   assert.equal(f.registrationEnds.length, NO_CALLS);
   result = await f.write(
     {
       worker: {
         kind: BindingKind.Worker,
-        config: { ...config, resourceBudget: { turns: 10, wallTimeMs: 1000 } },
+        config: {
+          ...config,
+          resource_budget: { turns: 10, wall_time_ms: 1000 },
+        },
       },
     },
-    result.bindingSetVersion,
+    result.binding_set_version,
   );
   assert.equal(f.registrationEnds.length, NO_CALLS);
   result = await f.write(
     {
       worker: {
         kind: BindingKind.Worker,
-        config: { ...config, instanceCount: INSTANCE_COUNT_MIN },
+        config: { ...config, instance_count: INSTANCE_COUNT_MIN },
       },
     },
-    result.bindingSetVersion,
+    result.binding_set_version,
   );
   assert.equal(f.registrationEnds.length, ONE_CALL);
-  assert.equal(f.registrationEnds[0]!.projectId, f.params.projectId);
-  assert.equal(f.registrationEnds[0]!.resourceIdentity, WORKER_GROUP);
+  assert.equal(f.registrationEnds[0]!.project_id, f.params.project_id);
+  assert.equal(f.registrationEnds[0]!.resource_identity, WORKER_GROUP);
   assert.ok(Number.isSafeInteger(f.registrationEnds[0]!.now));
-  result = await f.write({ worker: workerBinding() }, result.bindingSetVersion);
+  result = await f.write(
+    { worker: workerBinding() },
+    result.binding_set_version,
+  );
   await rejectsWrite(
-    f.write({}, result.bindingSetVersion - VERSION_INCREMENT),
+    f.write({}, result.binding_set_version - VERSION_INCREMENT),
     HttpStatus.Conflict,
     ProjectErrorCode.VersionConflict,
-    { bindingSetVersion: result.bindingSetVersion },
+    { binding_set_version: result.binding_set_version },
   );
   assert.equal(f.registrationEnds.length, ONE_CALL);
-  await f.write({}, result.bindingSetVersion);
+  await f.write({}, result.binding_set_version);
   assert.equal(f.registrationEnds.length, TWO_CALLS);
 });
 
@@ -1084,9 +1097,9 @@ function assertCurrent(
     assert.ok(Object.values(BindingKind).includes(kind));
   }
   assert.equal(
-    f.store.transaction((tx) => requireProject(tx, f.params.projectId))
-      .bindingSetVersion,
-    result.bindingSetVersion,
+    f.store.transaction((tx) => requireProject(tx, f.params.project_id))
+      .binding_set_version,
+    result.binding_set_version,
   );
 }
 
@@ -1099,16 +1112,16 @@ test("binding write probes every repository outside and before commit, validates
       ...workerBinding(),
       config: {
         ...workerBinding().config,
-        entries: [{ agent: AGENT, modelIdentifier: MODEL }],
+        entries: [{ agent: AGENT, model_identifier: MODEL }],
       },
     },
     [STORAGE_NAME]: storageBinding(),
   };
   const before = f.commits();
   const result = await f.write(bindings);
-  assert.equal(result.projectId, f.params.projectId);
+  assert.equal(result.project_id, f.params.project_id);
   assert.equal(
-    result.bindingSetVersion,
+    result.binding_set_version,
     BINDING_SET_INITIAL_VERSION + Object.keys(bindings).length,
   );
   assert.equal(f.commits(), before + ONE_CALL);
@@ -1141,14 +1154,14 @@ test("binding write probes every repository outside and before commit, validates
   ]);
   assert.deepEqual(f.workers, [NATIVE_WORKER]);
   assert.deepEqual(f.entries, [
-    { worker: NATIVE_WORKER, entry: { modelIdentifier: MODEL } },
+    { worker: NATIVE_WORKER, entry: { model_identifier: MODEL } },
     { worker: NATIVE_WORKER, entry: null },
   ]);
   assert.deepEqual(
     result.changes,
     Object.keys(bindings).map((name) => ({
       kind: ChangeKind.Created,
-      bindingId: result.bindings[name]!.id,
+      binding_id: result.bindings[name]!.id,
     })),
   );
   for (const binding of Object.values(result.bindings))
@@ -1156,13 +1169,13 @@ test("binding write probes every repository outside and before commit, validates
   assertCurrent(f, result);
   const exported = f.invoke("bindingSet.get", null, f.params);
   assert.deepEqual(bindingSetWriteInputSchema.parse(exported), {
-    version: result.bindingSetVersion,
+    version: result.binding_set_version,
     bindings,
   });
   const repeated = await f.write(exported.bindings, exported.version);
   assert.equal(f.ssh.length, TWO_CALLS + TWO_CALLS);
   assert.deepEqual(repeated.bindings, result.bindings);
-  assert.equal(repeated.bindingSetVersion, result.bindingSetVersion);
+  assert.equal(repeated.binding_set_version, result.binding_set_version);
   assert.ok(
     repeated.changes.every(({ kind }) => kind === ChangeKind.Unchanged),
   );
@@ -1176,17 +1189,17 @@ test("equal and reordered configurations keep the version without inserting revi
   const rows = f.snapshot().bindings;
   const reordered = {
     kind: BindingKind.Worker,
-    config: { instanceCount: SINGLE_INSTANCE, worker: NATIVE_WORKER },
+    config: { instance_count: SINGLE_INSTANCE, worker: NATIVE_WORKER },
   };
   for (const binding of [reordered, original]) {
     const version = f.invoke("bindingSet.get", null, f.params).version;
     const result = await f.write({ [WORKER_NAME]: binding }, version);
-    assert.equal(result.bindingSetVersion, version);
+    assert.equal(result.binding_set_version, version);
     assert.deepEqual(result.bindings, first.bindings);
     assert.deepEqual(result.changes, [
       {
         kind: ChangeKind.Unchanged,
-        bindingId: first.bindings[WORKER_NAME]!.id,
+        binding_id: first.bindings[WORKER_NAME]!.id,
       },
     ]);
     assert.deepEqual(f.snapshot().bindings, rows);
@@ -1201,12 +1214,12 @@ test("stale versions and changed worker names refuse the entire edit", async (t)
     f.write({}),
     HttpStatus.Conflict,
     ProjectErrorCode.VersionConflict,
-    { bindingSetVersion: first.bindingSetVersion },
+    { binding_set_version: first.binding_set_version },
   );
   await rejectsWrite(
     f.write(
       { [WORKER_NAME]: workerBinding(OTHER_WORKER) },
-      first.bindingSetVersion,
+      first.binding_set_version,
     ),
     HttpStatus.Conflict,
     ProjectErrorCode.WorkerResourceChanged,
@@ -1252,7 +1265,7 @@ test("concurrent writes probe before committing and only one expected version wi
   assert.equal(failure.reason.status, HttpStatus.Conflict);
   assert.equal(failure.reason.code, ProjectErrorCode.VersionConflict);
   assert.deepEqual(failure.reason.details, {
-    bindingSetVersion: success.value.bindingSetVersion,
+    binding_set_version: success.value.binding_set_version,
   });
   assert.equal(f.snapshot().bindings.length, ONE_CALL);
   assertCurrent(f, success.value);
@@ -1433,7 +1446,7 @@ test("an SSH credential of another host is refused with ssh_host_mismatch before
         ...binding,
         config: {
           ...binding.config,
-          sshCredential: sshCredentialOf(ALIAS_ADDRESS),
+          ssh_credential: sshCredentialOf(ALIAS_ADDRESS),
         },
       },
     }),
@@ -1524,7 +1537,7 @@ test("a write stores the full working layer map and a switch change revises the 
         config: { ...config, working_layer: { agents_local_md: false } },
       } as Bindings[string],
     },
-    first.bindingSetVersion,
+    first.binding_set_version,
   );
   assert.equal(second.bindings[REPOSITORY_NAME]?.revision, SECOND_REVISION);
   assert.deepEqual(
@@ -1575,7 +1588,7 @@ test("a git-only platform accepts merge_push and refuses a credential or pull_re
     },
   });
   assert.equal(
-    result.bindings[REPOSITORY_NAME]?.resourceIdentity,
+    result.bindings[REPOSITORY_NAME]?.resource_identity,
     GITLAB_IDENTITY,
   );
   assert.deepEqual(
@@ -1642,7 +1655,7 @@ test("SSH failure leaves all rows and the version unchanged without entering com
         [REPOSITORY_NAME]: repositoryBinding(),
         [WORKER_NAME]: workerBinding(),
       },
-      first.bindingSetVersion,
+      first.binding_set_version,
     ),
     SSH_FAILURE_STATUS,
     ProjectErrorCode.RepositorySshUnreachable,
@@ -1694,7 +1707,7 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
       f.write({
         [WORKER_NAME]: {
           ...workerBinding(),
-          config: { ...workerBinding().config, instanceCount },
+          config: { ...workerBinding().config, instance_count: instanceCount },
         },
       }),
       HttpStatus.BadRequest,
@@ -1708,7 +1721,10 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
     f.write({
       [REPOSITORY_NAME]: {
         ...repositoryBinding(),
-        config: { ...repositoryBinding().config, projectPrompt },
+        config: {
+          ...repositoryBinding().config,
+          project_prompt: projectPrompt,
+        },
       },
     }),
     HttpStatus.BadRequest,
@@ -1720,7 +1736,7 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
         ...repositoryBinding(),
         config: {
           ...repositoryBinding().config,
-          projectPrompt: "a".repeat(PROJECT_PROMPT_MAX_BYTES + ONE_BYTE_OVER),
+          project_prompt: "a".repeat(PROJECT_PROMPT_MAX_BYTES + ONE_BYTE_OVER),
         },
       },
     }),
@@ -1742,13 +1758,13 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
       {
         [WORKER_NAME]: {
           ...workerBinding(),
-          config: { ...workerBinding().config, instanceCount },
+          config: { ...workerBinding().config, instance_count: instanceCount },
         },
         [REPOSITORY_NAME]: {
           ...repositoryBinding(),
           config: {
             ...repositoryBinding().config,
-            projectPrompt: "a".repeat(PROJECT_PROMPT_MAX_BYTES),
+            project_prompt: "a".repeat(PROJECT_PROMPT_MAX_BYTES),
           },
         },
       },
@@ -1798,7 +1814,7 @@ test("known external workers reject either native field after the null-entry che
       [field]:
         field === WorkerField.Entries
           ? []
-          : { turns: SINGLE_INSTANCE, wallTimeMs: SINGLE_INSTANCE },
+          : { turns: SINGLE_INSTANCE, wall_time_ms: SINGLE_INSTANCE },
     };
     await rejectsWrite(
       f.write({ [WORKER_NAME]: { kind: BindingKind.Worker, config } }),
@@ -1885,7 +1901,7 @@ function followingRepository(target?: string) {
     config: {
       ...repositoryBinding().config,
       strategy: {
-        baseBranch: "main",
+        base_branch: "main",
         action: {
           name: GitHubAction.PullRequest,
           follows:
@@ -1900,7 +1916,7 @@ function followingRepository(target?: string) {
 
 function schemaIssues(bindings: unknown) {
   const result = projectOperations["bindingSet.write"].input.safeParse({
-    params: { projectId: "project" },
+    params: { project_id: "project" },
     query: EMPTY_QUERY,
     body: { version: BINDING_SET_INITIAL_VERSION, bindings },
   });
@@ -2042,7 +2058,7 @@ test("whole-set schema rejects self and multi-binding cycles and duplicate agent
 
 test("binding set and binding list reads refuse an absent project", (t) => {
   const f = writeFixture(t);
-  const params = { projectId: createIdentity(PROJECT_ID_PREFIX) };
+  const params = { project_id: createIdentity(PROJECT_ID_PREFIX) };
   for (const operation of ["bindingSet.get", "binding.list"] as const)
     refuses(
       () => f.invoke(operation, null, params),
@@ -2067,31 +2083,31 @@ test("binding reads preserve ownership and paginate filtered current, removed an
   });
   const pinned = first.bindings[WORKER_NAME]!;
   assert.deepEqual(
-    f.invoke("binding.get", null, { ...f.params, bindingId: pinned.id }),
+    f.invoke("binding.get", null, { ...f.params, binding_id: pinned.id }),
     pinned,
   );
   const second = await f.write(
     {
       [WORKER_NAME]: {
         ...workerBinding(),
-        config: { ...workerBinding().config, instanceCount: TWO_INSTANCES },
+        config: { ...workerBinding().config, instance_count: TWO_INSTANCES },
       },
       [STORAGE_NAME]: storageBinding(),
     },
-    first.bindingSetVersion,
+    first.binding_set_version,
   );
   const third = await f.write(
     { [STORAGE_NAME]: storageBinding() },
-    second.bindingSetVersion,
+    second.binding_set_version,
   );
   const removedId = third.changes.find(
     ({ kind }) => kind === ChangeKind.Removed,
-  )!.bindingId;
+  )!.binding_id;
   const removed = f.invoke("binding.get", null, {
     ...f.params,
-    bindingId: removedId,
+    binding_id: removedId,
   });
-  assert.notEqual(removed.removedAt, null);
+  assert.notEqual(removed.removed_at, null);
   assert.equal(removed.revision, REVISION_THREE);
   assertCurrent(f, third);
   assert.deepEqual(f.invoke("binding.list", null, f.params).items, [
@@ -2136,7 +2152,7 @@ test("binding reads preserve ownership and paginate filtered current, removed an
       assert.equal(cursor, Buffer.from(binding.id).toString(CURSOR_ENCODING));
   }
   assert.equal(cursor, null);
-  const params = { ...f.params, bindingId: pinned.id };
+  const params = { ...f.params, binding_id: pinned.id };
   const history = [removed, second.bindings[WORKER_NAME]!, pinned];
   assert.deepEqual(
     f.invoke("bindingRevision.list", null, params).items,
@@ -2167,7 +2183,7 @@ test("binding reads preserve ownership and paginate filtered current, removed an
       () =>
         f.invoke(operation, null, {
           ...f.params,
-          bindingId: createIdentity(BINDING_ID_PREFIX),
+          binding_id: createIdentity(BINDING_ID_PREFIX),
         }),
       HttpStatus.NotFound,
       ProjectErrorCode.BindingNotFound,
@@ -2175,8 +2191,8 @@ test("binding reads preserve ownership and paginate filtered current, removed an
     refuses(
       () =>
         f.invoke(operation, null, {
-          projectId: other.id,
-          bindingId: pinned.id,
+          project_id: other.id,
+          binding_id: pinned.id,
         }),
       HttpStatus.NotFound,
       ProjectErrorCode.BindingNotFound,
@@ -2218,18 +2234,18 @@ test("agent views page sorted declarations and copy worker views with stripped e
       kind: BindingKind.Worker,
       config: {
         worker: NATIVE_WORKER,
-        instanceCount: SINGLE_INSTANCE,
-        entries: [{ agent: SECOND_AGENT, modelIdentifier: MODEL }],
+        instance_count: SINGLE_INSTANCE,
+        entries: [{ agent: SECOND_AGENT, model_identifier: MODEL }],
       },
     },
   });
   const bindingId = result.bindings[WORKER_NAME]!.id;
-  const params = { ...f.params, bindingId };
+  const params = { ...f.params, binding_id: bindingId };
   const expected = (agent: string, entry: WorkerEntry | null) => ({
     agent,
     worker: NATIVE_WORKER,
-    workerBindingId: bindingId,
-    bindingSetVersion: result.bindingSetVersion,
+    worker_binding_id: bindingId,
+    binding_set_version: result.binding_set_version,
     ...view,
     entry,
   });
@@ -2240,7 +2256,7 @@ test("agent views page sorted declarations and copy worker views with stripped e
   assert.deepEqual(first, {
     items: [
       expected(AGENT, null),
-      expected(SECOND_AGENT, { modelIdentifier: MODEL }),
+      expected(SECOND_AGENT, { model_identifier: MODEL }),
     ],
     next_cursor: Buffer.from(SECOND_AGENT).toString(CURSOR_ENCODING),
   });
@@ -2255,15 +2271,15 @@ test("agent views page sorted declarations and copy worker views with stripped e
   assert.deepEqual(
     f.invoke("agentConfiguration.get", null, {
       ...params,
-      agentName: SECOND_AGENT,
+      agent_name: SECOND_AGENT,
     }),
-    expected(SECOND_AGENT, { modelIdentifier: MODEL }),
+    expected(SECOND_AGENT, { model_identifier: MODEL }),
   );
   assert.deepEqual(calls, [
     { agent: AGENT, entry: null },
-    { agent: SECOND_AGENT, entry: { modelIdentifier: MODEL } },
+    { agent: SECOND_AGENT, entry: { model_identifier: MODEL } },
     { agent: THIRD_AGENT, entry: null },
-    { agent: SECOND_AGENT, entry: { modelIdentifier: MODEL } },
+    { agent: SECOND_AGENT, entry: { model_identifier: MODEL } },
   ]);
   assert.equal(f.commits(), before + REVISION_THREE);
   for (const cursor of [MALFORMED_CURSOR, `${first.next_cursor}=`])
@@ -2276,7 +2292,7 @@ test("agent views page sorted declarations and copy worker views with stripped e
     () =>
       f.invoke("agentConfiguration.get", null, {
         ...params,
-        agentName: UNKNOWN_AGENT,
+        agent_name: UNKNOWN_AGENT,
       }),
     HttpStatus.NotFound,
     ProjectErrorCode.BindingNotFound,
@@ -2296,25 +2312,28 @@ test("agent views reject missing, foreign and non-worker bindings; external list
     [STORAGE_NAME]: storageBinding(),
   });
   const workerId = result.bindings[WORKER_NAME]!.id;
-  const params = { ...f.params, bindingId: workerId };
+  const params = { ...f.params, binding_id: workerId };
   assert.deepEqual(f.invoke("agentConfiguration.list", null, params), {
     items: [],
     next_cursor: null,
   });
   const missingProject = {
     ...params,
-    projectId: createIdentity(PROJECT_ID_PREFIX),
+    project_id: createIdentity(PROJECT_ID_PREFIX),
   };
   const other = f.invoke("create", { name: OTHER_NAME });
-  const foreign = { ...params, projectId: other.id };
-  const absent = { ...params, bindingId: createIdentity(BINDING_ID_PREFIX) };
-  const nonWorker = { ...params, bindingId: result.bindings[STORAGE_NAME]!.id };
+  const foreign = { ...params, project_id: other.id };
+  const absent = { ...params, binding_id: createIdentity(BINDING_ID_PREFIX) };
+  const nonWorker = {
+    ...params,
+    binding_id: result.bindings[STORAGE_NAME]!.id,
+  };
   for (const operation of [
     "agentConfiguration.list",
     "agentConfiguration.get",
   ] as const) {
     const input: Record<string, string> =
-      operation === AGENT_GET_KEY ? { agentName: AGENT } : {};
+      operation === AGENT_GET_KEY ? { agent_name: AGENT } : {};
     refuses(
       () => f.invoke(operation, null, { ...missingProject, ...input }),
       HttpStatus.NotFound,
@@ -2345,10 +2364,10 @@ function persistBindings(
   const result = writeBindingSet(
     tx,
     projectId,
-    project.bindingSetVersion,
+    project.binding_set_version,
     new Map(Object.entries(bindings)),
   );
-  assert.ok(result.newVersion >= project.bindingSetVersion);
+  assert.ok(result.newVersion >= project.binding_set_version);
   return {
     ...result,
     bindings: Object.fromEntries(readCurrentBindingSet(tx, projectId)),
@@ -2523,9 +2542,9 @@ test("entriesOfAgent selects latest workers across projects, strips selectors an
     const first = insertProject(tx, PROJECT_NAME);
     const second = insertProject(tx, OTHER_NAME);
     const entry = {
-      agentProvider: ENTRY_PROVIDER,
-      modelIdentifier: MODEL,
-      reasoningEffort: ENTRY_REASONING,
+      agent_provider: ENTRY_PROVIDER,
+      model_identifier: MODEL,
+      reasoning_effort: ENTRY_REASONING,
     };
     persistBindings(tx, first.id, { [WORKER_NAME]: workerBinding() });
     const explicit = persistBindings(tx, first.id, {
@@ -2533,7 +2552,7 @@ test("entriesOfAgent selects latest workers across projects, strips selectors an
         kind: BindingKind.Worker,
         config: {
           ...workerBinding().config,
-          instanceCount: INSTANCE_COUNT_MIN,
+          instance_count: INSTANCE_COUNT_MIN,
           entries: [{ agent: SECOND_AGENT }, { agent: AGENT, ...entry }],
         },
       },
@@ -2549,16 +2568,16 @@ test("entriesOfAgent selects latest workers across projects, strips selectors an
       new Map(
         f.project
           .entriesOfAgent(tx, AGENT)
-          .map((item) => [item.bindingId, item]),
+          .map((item) => [item.binding_id, item]),
       ),
       new Map([
         [
           explicit.id,
-          { bindingId: explicit.id, workerName: NATIVE_WORKER, entry },
+          { binding_id: explicit.id, worker_name: NATIVE_WORKER, entry },
         ],
         [
           implicit.id,
-          { bindingId: implicit.id, workerName: NATIVE_WORKER, entry: null },
+          { binding_id: implicit.id, worker_name: NATIVE_WORKER, entry: null },
         ],
       ]),
     );
@@ -2569,7 +2588,7 @@ test("entriesOfAgent selects latest workers across projects, strips selectors an
     assert.deepEqual(
       f.project
         .entriesOfAgent(tx, SECOND_AGENT)
-        .find(({ bindingId }) => bindingId === explicit.id)?.entry,
+        .find(({ binding_id }) => binding_id === explicit.id)?.entry,
       {},
     );
     assert.deepEqual(f.project.entriesOfAgent(tx, UNKNOWN_AGENT), []);
@@ -2747,11 +2766,14 @@ test("resolveBinding selects the latest named group in its project after revisio
       }).bindings[REPOSITORY_NAME]!;
       assert.deepEqual(
         f.project.resolveBinding(tx, first.id, REPOSITORY_NAME),
-        { bindingId: current.id, resourceIdentity: current.resourceIdentity },
+        {
+          binding_id: current.id,
+          resource_identity: current.resource_identity,
+        },
       );
       assert.deepEqual(
         f.project.resolveBinding(tx, second.id, REPOSITORY_NAME),
-        { bindingId: other.id, resourceIdentity: other.resourceIdentity },
+        { binding_id: other.id, resource_identity: other.resource_identity },
       );
     }
     assert.equal(f.project.resolveBinding(tx, first.id, MISSING_NAME), null);
@@ -2784,8 +2806,8 @@ test("resolveBindingIdentity pins the latest revision of a live binding of its p
     assert.notEqual(older.id, latest.id);
     for (const id of [older.id, latest.id])
       assert.deepEqual(f.project.resolveBindingIdentity(tx, first.id, id), {
-        bindingId: latest.id,
-        resourceIdentity: latest.resourceIdentity,
+        binding_id: latest.id,
+        resource_identity: latest.resource_identity,
       });
     assert.equal(
       f.project.resolveBindingIdentity(tx, first.id, other.id),
@@ -2803,7 +2825,8 @@ test("resolveBindingIdentity pins the latest revision of a live binding of its p
       null,
     );
     assert.equal(
-      f.project.resolveBindingIdentity(tx, first.id, replacement.id)?.bindingId,
+      f.project.resolveBindingIdentity(tx, first.id, replacement.id)
+        ?.binding_id,
       replacement.id,
     );
     persistBindings(tx, first.id, {});
@@ -2831,15 +2854,15 @@ test("resolveBindingIdentity refuses an identity from before a removal of the bi
         config: { ...repositoryBinding().config, available: false },
       },
     }).bindings[REPOSITORY_NAME]!;
-    assert.equal(added.resourceIdentity, before.resourceIdentity);
+    assert.equal(added.resource_identity, before.resource_identity);
     assert.equal(
       f.project.resolveBindingIdentity(tx, project.id, before.id),
       null,
     );
     for (const id of [added.id, latest.id])
       assert.deepEqual(f.project.resolveBindingIdentity(tx, project.id, id), {
-        bindingId: latest.id,
-        resourceIdentity: latest.resourceIdentity,
+        binding_id: latest.id,
+        resource_identity: latest.resource_identity,
       });
   });
 });
@@ -2858,8 +2881,8 @@ test("storageBindingOf reads the pinned configuration after a prefix revision", 
     }).bindings[STORAGE_NAME]!;
     assert.notEqual(pinned.id, later.id);
     assert.deepEqual(f.project.storageBindingOf(tx, pinned.id), {
-      bindingId: pinned.id,
-      projectId: project.id,
+      binding_id: pinned.id,
+      project_id: project.id,
       ...original.config,
     });
     assert.equal(f.project.storageBindingOf(tx, later.id)?.prefix, prefix);
@@ -2899,7 +2922,7 @@ test("storageBindingOf shares the caller transaction and rollback", (t) => {
         }).bindings[STORAGE_NAME]!.id;
         const nested = t.mock.method(f.store, "transaction", unexpected);
         assert.equal(
-          f.project.storageBindingOf(tx, bindingId)?.bindingId,
+          f.project.storageBindingOf(tx, bindingId)?.binding_id,
           bindingId,
         );
         assert.equal(nested.mock.callCount(), NO_CALLS);
@@ -2927,9 +2950,9 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
     const entries = [
       {
         agent: "swe@1",
-        agentProvider: "default",
-        modelIdentifier: "claude-sonnet-4-5",
-        reasoningEffort: "off",
+        agent_provider: "default",
+        model_identifier: "claude-sonnet-4-5",
+        reasoning_effort: "off",
       },
     ];
     persistBindings(tx, project.id, {
@@ -2939,14 +2962,14 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
     assert.deepEqual(
       f.project.workerBindingRowOf(tx, pinned[WORKER_NAME]!.id),
       {
-        bindingId: pinned[WORKER_NAME]!.id,
-        projectId: project.id,
-        workerName: original.config.worker,
-        resourceIdentity: pinned[WORKER_NAME]!.resourceIdentity,
+        binding_id: pinned[WORKER_NAME]!.id,
+        project_id: project.id,
+        worker_name: original.config.worker,
+        resource_identity: pinned[WORKER_NAME]!.resource_identity,
         tombstone: false,
         disabled: false,
         entries: [],
-        resourceBudget: null,
+        resource_budget: null,
       },
     );
     assert.equal(
@@ -2970,7 +2993,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       name: GitHubAction.PullRequest,
       follows: { type: FollowsType.AssessmentPassed },
     };
-    original.config.projectPrompt = projectPrompt;
+    original.config.project_prompt = projectPrompt;
     const pinned = persistBindings(tx, project.id, {
       [REPOSITORY_NAME]: original,
     }).bindings[REPOSITORY_NAME]!;
@@ -2980,7 +3003,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
         config: {
           ...original.config,
           strategy: {
-            baseBranch,
+            base_branch: baseBranch,
             action: {
               name: GitHubAction.MergePush,
               follows: { type: FollowsType.AssessmentPassed },
@@ -2991,21 +3014,21 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
     }).bindings[REPOSITORY_NAME]!;
     assert.notEqual(pinned.id, later.id);
     assert.deepEqual(f.project.repositoryPolicyOf(tx, pinned.id), {
-      bindingId: pinned.id,
-      projectId: project.id,
+      binding_id: pinned.id,
+      project_id: project.id,
       name: REPOSITORY_NAME,
       address: original.config.address,
       platform: original.config.platform,
-      sshCredential: original.config.sshCredential,
+      ssh_credential: original.config.ssh_credential,
       credential: original.config.credential,
-      baseBranch: original.config.strategy.baseBranch,
+      base_branch: original.config.strategy.base_branch,
       action: GitHubAction.PullRequest,
-      projectPrompt,
-      workingLayer: original.config.working_layer,
+      project_prompt: projectPrompt,
+      working_layer: original.config.working_layer,
     });
     const latest = f.project.repositoryPolicyOf(tx, later.id);
     assert.equal(latest?.action, GitHubAction.MergePush);
-    assert.equal(latest?.baseBranch, baseBranch);
+    assert.equal(latest?.base_branch, baseBranch);
   });
 });
 
@@ -3033,7 +3056,7 @@ test("a working layer switch change inserts the next binding revision and the po
     }).bindings[REPOSITORY_NAME]!;
     assert.equal(later.revision, pinned.revision + 1);
     assert.deepEqual(
-      f.project.repositoryPolicyOf(tx, pinned.id)?.workingLayer,
+      f.project.repositoryPolicyOf(tx, pinned.id)?.working_layer,
       {
         agents_md: true,
         agents_local_md: true,
@@ -3042,13 +3065,16 @@ test("a working layer switch change inserts the next binding revision and the po
         project_prompt: true,
       },
     );
-    assert.deepEqual(f.project.repositoryPolicyOf(tx, later.id)?.workingLayer, {
-      agents_md: true,
-      agents_local_md: true,
-      claude_md: false,
-      claude_local_md: true,
-      project_prompt: false,
-    });
+    assert.deepEqual(
+      f.project.repositoryPolicyOf(tx, later.id)?.working_layer,
+      {
+        agents_md: true,
+        agents_local_md: true,
+        claude_md: false,
+        claude_local_md: true,
+        project_prompt: false,
+      },
+    );
   });
 });
 
@@ -3108,9 +3134,9 @@ test("repositoryPolicyOf shares the caller transaction and does not retain rolle
         const nested = t.mock.method(f.store, "transaction", unexpected);
         const policy = f.project.repositoryPolicyOf(tx, bindingId);
         assert.ok(policy);
-        assert.equal(policy.bindingId, bindingId);
+        assert.equal(policy.binding_id, bindingId);
         assert.equal(policy.action, null);
-        assert.equal(policy.projectPrompt, null);
+        assert.equal(policy.project_prompt, null);
         assert.equal(nested.mock.callCount(), NO_CALLS);
         nested.mock.restore();
         assert.ok(tx.database.isTransaction);
@@ -3144,7 +3170,7 @@ test("getBindingRevision keeps pinned fields and derives disablement from the la
           ...workerBinding(),
           config: {
             ...workerBinding().config,
-            instanceCount: disabled ? INSTANCE_COUNT_MIN : SINGLE_INSTANCE,
+            instance_count: disabled ? INSTANCE_COUNT_MIN : SINGLE_INSTANCE,
           },
         },
         [STORAGE_NAME]: {
@@ -3154,10 +3180,10 @@ test("getBindingRevision keeps pinned fields and derives disablement from the la
       });
       for (const row of Object.values(original))
         assert.deepEqual(f.project.getBindingRevision(tx, row.id), {
-          projectId: project.id,
-          bindingId: row.id,
+          project_id: project.id,
+          binding_id: row.id,
           name: row.name,
-          resourceIdentity: row.resourceIdentity,
+          resource_identity: row.resource_identity,
           revision: REVISION_ONE,
           tombstone: false,
           disabled,
@@ -3182,7 +3208,7 @@ test("getBindingRevision marks removed rows and preceding pins without reviving 
     )!;
     assert.equal(f.project.getBindingRevision(tx, old.id)?.tombstone, true);
     assert.equal(
-      f.project.getBindingRevision(tx, removed.bindingId)?.tombstone,
+      f.project.getBindingRevision(tx, removed.binding_id)?.tombstone,
       true,
     );
     const rebound = persistBindings(tx, first.id, {
@@ -3190,14 +3216,14 @@ test("getBindingRevision marks removed rows and preceding pins without reviving 
         ...workerBinding(),
         config: {
           ...workerBinding().config,
-          instanceCount: INSTANCE_COUNT_MIN,
+          instance_count: INSTANCE_COUNT_MIN,
         },
       },
     }).bindings[WORKER_NAME]!;
     assert.equal(f.project.getBindingRevision(tx, old.id)?.tombstone, true);
     assert.equal(f.project.getBindingRevision(tx, old.id)?.disabled, true);
     assert.equal(
-      f.project.getBindingRevision(tx, removed.bindingId)?.tombstone,
+      f.project.getBindingRevision(tx, removed.binding_id)?.tombstone,
       true,
     );
     assert.equal(
@@ -3226,7 +3252,7 @@ test("collaborations read uncommitted rows without opening or committing a trans
           ONE_CALL,
         );
         assert.equal(
-          f.project.resolveBinding(tx, project.id, WORKER_NAME)?.bindingId,
+          f.project.resolveBinding(tx, project.id, WORKER_NAME)?.binding_id,
           current[WORKER_NAME]!.id,
         );
         assert.equal(
@@ -3311,14 +3337,14 @@ test("binding.verify returns healthy for a valid repository binding", async (t) 
   const binding = bindings[NO_ITEMS];
   assert.ok(binding);
   const result = await f.invokeAsync("binding.verify", {
-    projectId: project.id,
-    bindingId: binding.id,
+    project_id: project.id,
+    binding_id: binding.id,
   });
   assert.deepEqual(result.address, {
     status: ResourceStatus.Healthy,
     capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   });
-  assert.deepEqual(result.sshCredential, credentialAnswer);
+  assert.deepEqual(result.ssh_credential, credentialAnswer);
   assert.deepEqual(result.credential, credentialAnswer);
   assert.equal(sshCalls.length, ONE_CALL);
   assert.equal(sshCalls[0]?.address, REPOSITORY_ADDRESS);
@@ -3349,8 +3375,8 @@ test("binding.verify returns unhealthy for address when SSH read fails", async (
   const binding = bindings[NO_ITEMS];
   assert.ok(binding);
   const result = await f.invokeAsync("binding.verify", {
-    projectId: project.id,
-    bindingId: binding.id,
+    project_id: project.id,
+    binding_id: binding.id,
   });
   assert.equal(result.address.status, ResourceStatus.Unhealthy);
   assert.equal(result.address.capability, RESOURCE_CAPABILITY_NETWORK_GIT_READ);
@@ -3379,8 +3405,8 @@ test("binding.verify returns unknown for address when the SSH read exceeds its d
   assert.ok(binding);
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
   const pending = f.invokeAsync("binding.verify", {
-    projectId: project.id,
-    bindingId: binding.id,
+    project_id: project.id,
+    binding_id: binding.id,
   });
   await sshStarted.promise;
   t.mock.timers.tick(BINDING_CHECK_TIMEOUT_MS);
@@ -3409,8 +3435,8 @@ test("binding.verify propagates a credential record-verify refusal unchanged", a
   assert.ok(binding);
   await assert.rejects(
     f.invokeAsync("binding.verify", {
-      projectId: project.id,
-      bindingId: binding.id,
+      project_id: project.id,
+      binding_id: binding.id,
     }),
     (error) => {
       assert.ok(error instanceof OperationError);
@@ -3426,8 +3452,8 @@ test("binding.verify returns 404 for an absent binding", async (t) => {
   const project = f.store.transaction((tx) => insertProject(tx, PROJECT_NAME));
   await assert.rejects(
     f.invokeAsync("binding.verify", {
-      projectId: project.id,
-      bindingId: `${BINDING_ID_PREFIX}_01ARZ3NDEKTSV4RRFFQ69G5FAV`,
+      project_id: project.id,
+      binding_id: `${BINDING_ID_PREFIX}_01ARZ3NDEKTSV4RRFFQ69G5FAV`,
     }),
     (error) => {
       assert.ok(error instanceof OperationError);
@@ -3445,23 +3471,23 @@ test("binding.verify returns 404 for a removed binding", async (t) => {
     const result = writeBindingSet(
       tx,
       p.id,
-      p.bindingSetVersion,
+      p.binding_set_version,
       new Map([[REPOSITORY_NAME, repositoryBinding()]]),
     );
-    const bindingId = result.changes[NO_ITEMS]?.bindingId;
+    const bindingId = result.changes[NO_ITEMS]?.binding_id;
     assert.ok(bindingId);
     writeBindingSet(
       tx,
       p.id,
-      p.bindingSetVersion + VERSION_INCREMENT,
+      p.binding_set_version + VERSION_INCREMENT,
       new Map(),
     );
-    return { projectId: p.id, bindingId };
+    return { project_id: p.id, binding_id: bindingId };
   });
   await assert.rejects(
     f.invokeAsync("binding.verify", {
-      projectId: project.projectId,
-      bindingId: project.bindingId,
+      project_id: project.project_id,
+      binding_id: project.binding_id,
     }),
     (error) => {
       assert.ok(error instanceof OperationError);
@@ -3479,17 +3505,17 @@ test("binding.verify returns 404 for a non-repository binding", async (t) => {
     const result = writeBindingSet(
       tx,
       p.id,
-      p.bindingSetVersion,
+      p.binding_set_version,
       new Map([[WORKER_NAME, workerBinding()]]),
     );
-    const bindingId = result.changes[NO_ITEMS]?.bindingId;
+    const bindingId = result.changes[NO_ITEMS]?.binding_id;
     assert.ok(bindingId);
-    return { projectId: p.id, bindingId };
+    return { project_id: p.id, binding_id: bindingId };
   });
   await assert.rejects(
     f.invokeAsync("binding.verify", {
-      projectId: project.projectId,
-      bindingId: project.bindingId,
+      project_id: project.project_id,
+      binding_id: project.binding_id,
     }),
     (error) => {
       assert.ok(error instanceof OperationError);
@@ -3507,7 +3533,7 @@ async function checkBinding(
 ) {
   const operation = projectOperations["binding.check"];
   const input = operation.input.parse({
-    params: { projectId },
+    params: { project_id: projectId },
     query: EMPTY_QUERY,
     body: { kind: BindingKind.Repository, config },
   });
@@ -3532,7 +3558,7 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
       status: ResourceStatus.Healthy,
       capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
     },
-    sshCredential: credentialAnswer,
+    ssh_credential: credentialAnswer,
     credential: credentialAnswer,
   });
   assert.deepEqual(
@@ -3583,7 +3609,7 @@ test("binding.check refuses a static violation with the write code before any SS
   await rejectsWrite(
     checkBinding(f, project.id, {
       ...config,
-      sshCredential: sshCredentialOf(ALIAS_ADDRESS),
+      ssh_credential: sshCredentialOf(ALIAS_ADDRESS),
     }),
     HttpStatus.BadRequest,
     ProjectErrorCode.RepositorySshHostMismatch,

@@ -12,18 +12,18 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.binding.verify.Input/properties/params/prop\
-            erties/projectId"
-      - name: bindingId
+            erties/project_id"
+      - name: binding_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.binding.verify.Input/properties/params/prop\
-            erties/bindingId"
+            erties/binding_id"
     responses:
       "200":
         description: Completed result
@@ -59,15 +59,15 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 1
-            bindingId:
+            binding_id:
               type: string
               minLength: 1
           required:
-            - projectId
-            - bindingId
+            - project_id
+            - binding_id
           additionalProperties: false
         query:
           type: object
@@ -99,7 +99,7 @@ components:
             - status
             - capability
           additionalProperties: false
-        sshCredential:
+        ssh_credential:
           type: object
           properties:
             status:
@@ -135,6 +135,6 @@ components:
             - type: "null"
       required:
         - address
-        - sshCredential
+        - ssh_credential
         - credential
       additionalProperties: false

@@ -45,9 +45,9 @@ export function authorizeModelInference(
   const selected = row.entries.find((item) => item.agent === agent);
   const entry = selected
     ? {
-        agentProvider: selected.agentProvider,
-        modelIdentifier: selected.modelIdentifier,
-        reasoningEffort: selected.reasoningEffort,
+        agent_provider: selected.agent_provider,
+        model_identifier: selected.model_identifier,
+        reasoning_effort: selected.reasoning_effort,
       }
     : null;
   const view = worker.workerAgentView(tx, row.workerName, agent, entry);

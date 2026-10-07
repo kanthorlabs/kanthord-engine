@@ -78,11 +78,6 @@ const CONFIGURATION = {
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off" as const,
 };
-const entryOf = (configuration: typeof CONFIGURATION) => ({
-  agentProvider: configuration.agent_provider,
-  modelIdentifier: configuration.model_identifier,
-  reasoningEffort: configuration.reasoning_effort,
-});
 const CONTENT = {
   name: "Work",
   requirement: "Do work",
@@ -481,7 +476,7 @@ async function setup(
   ).id;
   const bindingSet = completed(
     await call(projectOperations["bindingSet.write"], {
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: {
         version: 1,
@@ -492,22 +487,25 @@ async function setup(
               available: true,
               platform: "github",
               address: "git@github.com:owner/repo.git",
-              sshCredential: "github-ssh",
-              strategy: { baseBranch: "main" },
+              ssh_credential: "github-ssh",
+              strategy: { base_branch: "main" },
               credential: "github",
-              projectPrompt: "Follow repository conventions.",
+              project_prompt: "Follow repository conventions.",
             },
           },
           general: {
             kind: "worker",
             config: {
               worker: setupOptions.workerName ?? "general@1",
-              instanceCount: setupOptions.instanceCount ?? 1,
-              resourceBudget: setupOptions.resourceBudget,
+              instance_count: setupOptions.instanceCount ?? 1,
+              resource_budget: setupOptions.resourceBudget && {
+                turns: setupOptions.resourceBudget.turns,
+                wall_time_ms: setupOptions.resourceBudget.wallTimeMs,
+              },
               entries:
                 setupOptions.workerName || setupOptions.noEntries
                   ? undefined
-                  : [{ agent: "swe@1", ...entryOf(configuration) }],
+                  : [{ agent: "swe@1", ...configuration }],
             },
           },
         },

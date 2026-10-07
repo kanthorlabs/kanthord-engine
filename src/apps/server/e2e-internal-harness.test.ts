@@ -26,7 +26,6 @@ import {
   scriptedCheck,
   scriptedActions,
   inProcessWorker,
-  agentDefaultsOf,
 } from "./test-support.ts";
 import {
   fauxAssistantMessage,
@@ -76,9 +75,9 @@ const EXPECTED_END = "expected-end";
 const TOOL_RESULT = "toolResult";
 const UPLOAD = "evidence-upload";
 const DEFAULTS = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off",
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
 };
 const JUDGED =
   'kanthord-judgement: {"criterionMet":true,"rationale":"hello.txt holds hello"}';
@@ -172,7 +171,7 @@ async function setupInternal(t: TestContext) {
       agent_providers: [
         { name: "default", provider: "anthropic", credential: "anthro-1" },
       ],
-      default_configuration: agentDefaultsOf(DEFAULTS),
+      default_configuration: DEFAULTS,
     });
   const project = await cli.read<{ id: string }>([
     "project",
@@ -186,10 +185,10 @@ async function setupInternal(t: TestContext) {
       available: true,
       platform: "github",
       address,
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       credential: "github",
       strategy: {
-        baseBranch: "main",
+        base_branch: "main",
         ...(gated
           ? {
               action: {
@@ -205,12 +204,12 @@ async function setupInternal(t: TestContext) {
     kind: "worker",
     config: {
       worker: name,
-      instanceCount: SINGLE_INSTANCE,
+      instance_count: SINGLE_INSTANCE,
       entries: [{ agent, ...DEFAULTS }],
     },
   });
   const bindingSet = await cli.write<{
-    bindings: Record<string, { id: string; resourceIdentity: string }>;
+    bindings: Record<string, { id: string; resource_identity: string }>;
   }>(["project", "binding", "apply", project.id], {
     version: INITIAL_BINDING_VERSION,
     bindings: {
@@ -339,7 +338,7 @@ test(
     });
     const pr42 = {
       kind: "pull_request" as const,
-      resourceIdentity: f.bindings.gated!.resourceIdentity,
+      resourceIdentity: f.bindings.gated!.resource_identity,
       number: 42,
     };
     f.actions.performAnswers.push(pr42);
@@ -383,11 +382,11 @@ test(
         assert.equal(readyR.workerName, REVIEWER);
         assert.equal(
           readyG.resourceIdentity,
-          f.bindings.general!.resourceIdentity,
+          f.bindings.general!.resource_identity,
         );
         assert.equal(
           readyR.resourceIdentity,
-          f.bindings.review!.resourceIdentity,
+          f.bindings.review!.resource_identity,
         );
         const page = await f.cli.read<
           Page<{ runtimeIdentity: string; registered: boolean }>

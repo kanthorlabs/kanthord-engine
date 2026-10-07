@@ -43,7 +43,6 @@ import {
   type EntriesOfAgent,
   type ProviderCapabilityFn,
   type ProviderHealthCheckFn,
-  type RepositoryWorkingOf,
   type ToolDeclarationsFn,
 } from "./contract.ts";
 import {
@@ -57,11 +56,14 @@ import {
   type EnablementRow,
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
-import { ProjectErrorCode } from "../project/contract.ts";
+import {
+  ProjectErrorCode,
+  type RepositoryPolicy,
+} from "../project/contract.ts";
 import {
   resolveLayers,
   type PromptSettingsSet,
-  type RepositoryWorking,
+  type RepositoryLayerSource,
   type ResolvedLayer,
 } from "./prompt-layers.ts";
 import { finalPrompt, PromptConsumer } from "./prompt-render.ts";
@@ -262,7 +264,13 @@ export interface Dependencies {
   custodySuitability: CustodySuitability;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
-  repositoryWorkingOf: RepositoryWorkingOf;
+  repositoryWorkingOf: (
+    tx: Transaction,
+    bindingId: string,
+  ) => Pick<
+    RepositoryPolicy,
+    "project_id" | "name" | "project_prompt" | "working_layer"
+  > | null;
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -704,11 +712,11 @@ export class AgentComponent {
   private repositoryWorking(
     projectId: string,
     bindingId: string,
-  ): RepositoryWorking {
+  ): RepositoryLayerSource {
     const repository = this.dependencies.store.transaction((tx) =>
       this.dependencies.repositoryWorkingOf(tx, bindingId),
     );
-    if (repository?.projectId !== projectId)
+    if (repository?.project_id !== projectId)
       throw new OperationError(
         HttpStatus.NotFound,
         ProjectErrorCode.BindingNotFound,
@@ -721,7 +729,7 @@ export class AgentComponent {
   composePrompt(
     agentName: string,
     context: Context,
-    repository: RepositoryWorking | null = null,
+    repository: RepositoryLayerSource | null = null,
   ): Promise<ResolvedLayer[]> {
     const agent = getAgentDeclaration(agentName);
     assert.ok(agent);

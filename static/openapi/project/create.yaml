@@ -133,22 +133,22 @@ components:
           type: string
         name:
           type: string
-        bindingSetVersion:
+        binding_set_version:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
-        createdAt:
+        created_at:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
-        workspaceDirectory:
+        workspace_directory:
           type: string
       required:
         - id
         - name
-        - bindingSetVersion
-        - createdAt
-        - workspaceDirectory
+        - binding_set_version
+        - created_at
+        - workspace_directory
       additionalProperties: false
     project.list.Input:
       type: object
@@ -189,22 +189,22 @@ components:
                 type: string
               name:
                 type: string
-              bindingSetVersion:
+              binding_set_version:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
-              createdAt:
+              created_at:
                 type: integer
                 minimum: -9007199254740991
                 maximum: 9007199254740991
-              workspaceDirectory:
+              workspace_directory:
                 type: string
             required:
               - id
               - name
-              - bindingSetVersion
-              - createdAt
-              - workspaceDirectory
+              - binding_set_version
+              - created_at
+              - workspace_directory
             additionalProperties: false
         next_cursor:
           anyOf:

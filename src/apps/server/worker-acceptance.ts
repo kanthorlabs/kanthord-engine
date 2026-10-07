@@ -7,20 +7,15 @@ import { configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import {
-  gatewayFixture,
-  objectSink,
-  sinkStorage,
-  agentDefaultsOf,
-} from "./test-support.ts";
+import { gatewayFixture, objectSink, sinkStorage } from "./test-support.ts";
 
 const SUCCESS = 0;
 const NO_STDERR = "";
 export const WORKER_TEST_KEY = "test_worker_provider_key";
 export const WORKER_DEFAULTS = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off",
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
 };
 
 export async function workerAcceptance(t: TestContext, host = false) {
@@ -81,7 +76,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
     agent_providers: [
       { name: "default", provider: "anthropic", credential: "anthro-1" },
     ],
-    default_configuration: agentDefaultsOf(WORKER_DEFAULTS),
+    default_configuration: WORKER_DEFAULTS,
   });
   const storage = {
     endpoint: "https://s3.example.com",
@@ -128,8 +123,8 @@ export async function workerAcceptance(t: TestContext, host = false) {
           available: true,
           platform: "github",
           address: "git@github.com:owner/repo.git",
-          strategy: { baseBranch: "main" },
-          sshCredential: "github-ssh",
+          strategy: { base_branch: "main" },
+          ssh_credential: "github-ssh",
           credential: "github",
         },
       },
@@ -137,7 +132,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
         kind: "worker",
         config: {
           worker: "general@1",
-          instanceCount: 1,
+          instance_count: 1,
           entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
         },
       },

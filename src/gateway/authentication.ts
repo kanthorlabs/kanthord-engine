@@ -62,20 +62,26 @@ export class Authentication {
     );
     if (
       !resolved ||
-      resolved.projectId !== projectId ||
-      resolved.resourceIdentity !== resourceIdentity
+      resolved.project_id !== projectId ||
+      resolved.resource_identity !== resourceIdentity
     )
       throw unauthorized();
     const registration = this.machines!.worker.findByClient(clientId);
     if (
       registration &&
       (registration.clientId !== clientId ||
-        registration.resourceIdentity !== resolved.resourceIdentity ||
-        registration.projectId !== resolved.projectId)
+        registration.resourceIdentity !== resolved.resource_identity ||
+        registration.projectId !== resolved.project_id)
     )
       throw unauthorized();
     return mintMachineIdentity(
-      { clientId, name, ...resolved, issuedAt },
+      {
+        clientId,
+        name,
+        projectId: resolved.project_id,
+        resourceIdentity: resolved.resource_identity,
+        issuedAt,
+      },
       jti,
       registration?.runtimeIdentity,
     );

@@ -156,25 +156,25 @@ paths:
     $ref: ./openapi/mission/outcome.get.yaml#/pathItem
   /api/mission/node/{nodeId}/outcome:
     $ref: ./openapi/mission/outcome.list.yaml#/pathItem
-  /api/project/{projectId}/binding/{bindingId}/agent/{agentName}:
+  /api/project/{project_id}/binding/{binding_id}/agent/{agent_name}:
     $ref: ./openapi/project/agentConfiguration.get.yaml#/pathItem
-  /api/project/{projectId}/binding/{bindingId}/agent:
+  /api/project/{project_id}/binding/{binding_id}/agent:
     $ref: ./openapi/project/agentConfiguration.list.yaml#/pathItem
-  /api/project/{projectId}/binding/check:
+  /api/project/{project_id}/binding/check:
     $ref: ./openapi/project/binding.check.yaml#/pathItem
-  /api/project/{projectId}/binding/{bindingId}:
+  /api/project/{project_id}/binding/{binding_id}:
     $ref: ./openapi/project/binding.get.yaml#/pathItem
-  /api/project/{projectId}/binding:
+  /api/project/{project_id}/binding:
     $ref: ./openapi/project/binding.list.yaml#/pathItem
-  /api/project/{projectId}/binding/{bindingId}/verify:
+  /api/project/{project_id}/binding/{binding_id}/verify:
     $ref: ./openapi/project/binding.verify.yaml#/pathItem
-  /api/project/{projectId}/binding/{bindingId}/revision:
+  /api/project/{project_id}/binding/{binding_id}/revision:
     $ref: ./openapi/project/bindingRevision.list.yaml#/pathItem
-  /api/project/{projectId}/binding-set:
+  /api/project/{project_id}/binding-set:
     $ref: ./openapi/project/bindingSet.get.yaml#/pathItem
   /api/project:
     $ref: ./openapi/project/create.yaml#/pathItem
-  /api/project/{projectId}:
+  /api/project/{project_id}:
     $ref: ./openapi/project/get.yaml#/pathItem
   /api/repository/credential/{credential_name}/archive:
     $ref: ./openapi/repository/credential.archive.yaml#/pathItem

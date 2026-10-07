@@ -32,10 +32,10 @@ test("action follows accepts assessment and refuses action dependencies before r
       available: true,
       platform: "github",
       address: "git@github.com:owner/repo.git",
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       credential: "github",
       strategy: {
-        baseBranch: "main",
+        base_branch: "main",
         action: { name: "pull_request", follows },
       },
     },
@@ -123,7 +123,7 @@ const repository = (
     address,
     available,
     credential: "github",
-    strategy: { baseBranch: "main" },
+    strategy: { base_branch: "main" },
   },
 });
 const worker = (
@@ -200,7 +200,7 @@ function assertChange(
   kind: string,
   bindingId: string,
 ) {
-  assert.deepEqual(result.changes, [{ kind, bindingId }]);
+  assert.deepEqual(result.changes, [{ kind, binding_id: bindingId }]);
   assert.ok(identitySchema(BINDING_ID_PREFIX).safeParse(bindingId).success);
 }
 
@@ -297,12 +297,12 @@ test("new names create revision one with canonical JSON and a new version", (t) 
   assert.equal(result.newVersion, SECOND_BINDING_VERSION);
   assert.equal(f.version(), SECOND_BINDING_VERSION);
   assert.equal(binding.revision, INITIAL_BINDING_VERSION);
-  assert.equal(binding.removedAt, null);
-  assert.equal(binding.projectId, f.projectId);
+  assert.equal(binding.removed_at, null);
+  assert.equal(binding.project_id, f.projectId);
   assert.deepEqual(binding.config, entry.config);
   assert.equal(f.rows().length, SINGLE_BINDING_ROW);
   assert.equal(f.rows()[FIRST_ROW_INDEX]!.config, canonicalJSON(entry.config));
-  assert.equal(f.rows()[FIRST_ROW_INDEX]!.created_at, binding.createdAt);
+  assert.equal(f.rows()[FIRST_ROW_INDEX]!.created_at, binding.created_at);
 });
 
 test("unchanged configuration retains its row and keeps the version", (t) => {
@@ -323,7 +323,7 @@ test("reordered nested JSON is canonical-equal and creates no revision", (t) => 
   const config = {
     address: "git@github.com:owner/first.git",
     strategy: {
-      baseBranch: "main",
+      base_branch: "main",
       action: { name: "merge_push", follows: { type: "assessment_passed" } },
     },
     available: true,
@@ -337,7 +337,7 @@ test("reordered nested JSON is canonical-equal and creates no revision", (t) => 
     available: true,
     strategy: {
       action: { follows: { type: "assessment_passed" }, name: "merge_push" },
-      baseBranch: "main",
+      base_branch: "main",
     },
     address: config.address,
   };
@@ -363,7 +363,7 @@ test("same-resource changes append a revision and retain the pinned configuratio
   assertChange(result, ChangeKind.Revised, revised.id);
   assert.notEqual(revised.id, original.id);
   assert.equal(revised.revision, SECOND_BINDING_VERSION);
-  assert.equal(revised.resourceIdentity, original.resourceIdentity);
+  assert.equal(revised.resource_identity, original.resource_identity);
   assert.deepEqual(revised.config, disabled.config);
   assert.deepEqual(
     f.store.transaction((tx) => readBindingRevision(tx, original.id)),
@@ -388,7 +388,7 @@ test("identity replacement tombstones the old resource before inserting the new 
   );
   const current = f.current().get(MAIN)!;
   assertChange(result, ChangeKind.Created, current.id);
-  assert.equal(current.resourceIdentity, OTHER_REPOSITORY_IDENTITY);
+  assert.equal(current.resource_identity, OTHER_REPOSITORY_IDENTITY);
   assert.equal(current.revision, INITIAL_BINDING_VERSION);
   const rows = f.rows();
   assert.equal(rows.length, TRIPLE_ROW_COUNT);
@@ -444,7 +444,7 @@ test("resource swaps insert every tombstone before any new revision", (t) => {
     result.changes,
     Array.from(f.current().values())
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((binding) => ({ kind: ChangeKind.Created, bindingId: binding.id })),
+      .map((binding) => ({ kind: ChangeKind.Created, binding_id: binding.id })),
   );
   assert.equal(f.current().size, BINDING_PAIR_COUNT);
   assert.equal(f.version(), result.newVersion);
@@ -457,15 +457,15 @@ test("omission retains all rows and returns the newly inserted tombstone identit
   const result = f.write(SECOND_BINDING_VERSION, submission());
   const rows = f.rows();
   const tombstone = f.store.transaction((tx) =>
-    readBindingRevision(tx, result.changes[FIRST_ROW_INDEX]!.bindingId),
+    readBindingRevision(tx, result.changes[FIRST_ROW_INDEX]!.binding_id),
   )!;
   assertChange(result, ChangeKind.Removed, tombstone.id);
   assert.equal(rows.length, BINDING_PAIR_COUNT);
   assert.equal(f.current().size, EMPTY_BINDING_COUNT);
   assert.equal(tombstone.revision, SECOND_BINDING_VERSION);
-  assert.notEqual(tombstone.removedAt, null);
+  assert.notEqual(tombstone.removed_at, null);
   assert.deepEqual(tombstone.config, original.config);
-  assert.equal(tombstone.resourceIdentity, original.resourceIdentity);
+  assert.equal(tombstone.resource_identity, original.resource_identity);
   assert.deepEqual(
     f.store.transaction((tx) => readBindingRevision(tx, original.id)),
     original,
@@ -508,11 +508,11 @@ test("renaming an allocated resource tombstones its old name before rebinding", 
     [ChangeKind.Created, ChangeKind.Removed],
   );
   assert.equal(
-    result.changes[FIRST_ROW_INDEX]!.bindingId,
+    result.changes[FIRST_ROW_INDEX]!.binding_id,
     f.current().get(OTHER)!.id,
   );
   assert.equal(
-    result.changes[SECOND_ROW_INDEX]!.bindingId,
+    result.changes[SECOND_ROW_INDEX]!.binding_id,
     f.rows()[SECOND_ROW_INDEX]!.id,
   );
 });
@@ -565,7 +565,7 @@ test("worker disablement revises the same group without changing its worker", (t
   );
   const binding = f.current().get(AGENT)!;
   assertChange(result, ChangeKind.Revised, binding.id);
-  assert.equal(binding.resourceIdentity, WORKER_IDENTITY);
+  assert.equal(binding.resource_identity, WORKER_IDENTITY);
   assert.equal(binding.revision, SECOND_BINDING_VERSION);
   assert.deepEqual(
     binding.config,
@@ -604,13 +604,13 @@ test("stale and concurrent submissions expose the current binding-set version", 
   assert.throws(
     () => f.write(readVersion, submission()),
     errorIs(HttpStatus.Conflict, ProjectErrorCode.VersionConflict, {
-      bindingSetVersion: SECOND_BINDING_VERSION,
+      binding_set_version: SECOND_BINDING_VERSION,
     }),
   );
   assert.throws(
     () => f.write(FOURTH_BINDING_VERSION, submission()),
     errorIs(HttpStatus.Conflict, ProjectErrorCode.VersionConflict, {
-      bindingSetVersion: SECOND_BINDING_VERSION,
+      binding_set_version: SECOND_BINDING_VERSION,
     }),
   );
   assert.deepEqual(f.rows(), before);
@@ -659,7 +659,7 @@ test("equal and empty submissions on an equal or empty set keep the version", (t
     result.changes,
     Array.from(entries.keys(), (name) => ({
       kind: ChangeKind.Unchanged,
-      bindingId: f.current().get(name)!.id,
+      binding_id: f.current().get(name)!.id,
     })),
   );
   assert.equal(result.newVersion, firstResult.newVersion);
@@ -731,7 +731,7 @@ test("binding lists select latest rows before filtering state and exact kinds", 
       removed.items[FIRST_ROW_INDEX]!.revision,
       SECOND_BINDING_VERSION,
     );
-    assert.notEqual(removed.items[FIRST_ROW_INDEX]!.removedAt, null);
+    assert.notEqual(removed.items[FIRST_ROW_INDEX]!.removed_at, null);
     assert.equal(
       list({ state: BindingState.All }).items.length,
       THIRD_BINDING_VERSION,
@@ -830,7 +830,7 @@ test("revision lists paginate descending within the pinned row's group, includin
       first.items.map((binding) => binding.revision),
       [3],
     );
-    assert.notEqual(first.items[FIRST_ROW_INDEX]!.removedAt, null);
+    assert.notEqual(first.items[FIRST_ROW_INDEX]!.removed_at, null);
     assert.equal(first.next_cursor, encode(String(THIRD_BINDING_VERSION)));
     const second = listRevisions(tx, pinned.id, {
       limit: PAGE_LIMIT,

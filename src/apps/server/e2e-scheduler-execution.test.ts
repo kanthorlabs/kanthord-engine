@@ -15,11 +15,7 @@ import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
-import {
-  FAKE_SSH_IDENTITY,
-  gatewayFixture,
-  agentDefaultsOf,
-} from "./test-support.ts";
+import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
 const SUCCESS = 0;
@@ -48,9 +44,9 @@ const CONTENT = {
   bindings: [],
 };
 const CONFIGURATION = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off",
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
 };
 type Page<T> = { items: T[]; next_cursor: string | null };
 type Node = { state: string; attempt: number; visibleRevision: number };
@@ -171,7 +167,7 @@ async function setup(t: TestContext, short = false) {
         agent_providers: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
-        default_configuration: agentDefaultsOf(CONFIGURATION),
+        default_configuration: CONFIGURATION,
       },
     );
     assert.equal(result.revision, INITIAL_ENABLEMENT_REVISION);
@@ -189,8 +185,8 @@ async function setup(t: TestContext, short = false) {
         available: true,
         platform: "github",
         address: "git@github.com:owner/repo.git",
-        sshCredential: "github-ssh",
-        strategy: { baseBranch: "main" },
+        ssh_credential: "github-ssh",
+        strategy: { base_branch: "main" },
         credential: "github",
       },
     },
@@ -198,9 +194,9 @@ async function setup(t: TestContext, short = false) {
       kind: "worker",
       config: {
         worker: "general@1",
-        instanceCount: 1,
+        instance_count: 1,
         entries: [{ agent: "swe@1", ...CONFIGURATION }],
-        ...(short ? { resourceBudget: { turns: 1, wallTimeMs: 1 } } : {}),
+        ...(short ? { resource_budget: { turns: 1, wall_time_ms: 1 } } : {}),
       },
     },
     ...(!short
@@ -209,7 +205,7 @@ async function setup(t: TestContext, short = false) {
             kind: "worker",
             config: {
               worker: "reviewer@1",
-              instanceCount: 1,
+              instance_count: 1,
               entries: [{ agent: "re@1", ...CONFIGURATION }],
             },
           },
@@ -217,11 +213,11 @@ async function setup(t: TestContext, short = false) {
       : {}),
   };
   const applied = await write<{
-    bindingSetVersion: number;
+    binding_set_version: number;
     bindings: Record<string, { id: string }>;
   }>(["project", "binding", "apply", project.id], { version: 1, bindings });
   assert.equal(
-    applied.bindingSetVersion,
+    applied.binding_set_version,
     INITIAL_BINDING_VERSION + Object.keys(bindings).length,
   );
   const mission = await read<{ id: string }>(["mission", "get", project.id]);

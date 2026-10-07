@@ -64,7 +64,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
               defaults: null,
               effective: valid
                 ? {
-                    agent_provider: entry?.agentProvider ?? "default",
+                    agent_provider: entry?.agent_provider ?? "default",
                     provider: "anthropic",
                     credential: "anthro-1",
                     model_identifier: "claude-sonnet-4-5",
@@ -85,8 +85,8 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     provider_id: "anthropic",
     agent_provider: "default",
   });
-  row.entries = [{ agent: "swe@1", agentProvider: "override" }];
-  assert.equal(authorize().agent_provider, row.entries[0]!.agentProvider);
+  row.entries = [{ agent: "swe@1", agent_provider: "override" }];
+  assert.equal(authorize().agent_provider, row.entries[0]!.agent_provider);
   for (const change of [
     { worker_binding_id: "absent" },
     { project_id: "other" },

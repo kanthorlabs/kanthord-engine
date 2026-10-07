@@ -73,7 +73,7 @@ test(
       "harness",
     ]);
     const bindings = await cli.write<{
-      bindings: Record<string, { id: string; resourceIdentity: string }>;
+      bindings: Record<string, { id: string; resource_identity: string }>;
     }>(["project", "binding", "apply", project.id], {
       version: INITIAL_BINDING_VERSION,
       bindings: {
@@ -83,14 +83,14 @@ test(
             available: true,
             platform: "github",
             address: REPOSITORY_ADDRESS,
-            sshCredential: "github-ssh",
-            strategy: { baseBranch: "main" },
+            ssh_credential: "github-ssh",
+            strategy: { base_branch: "main" },
             credential: "github",
           },
         },
         harness: {
           kind: "worker",
-          config: { worker: WORKER, instanceCount: SINGLE_INSTANCE },
+          config: { worker: WORKER, instance_count: SINGLE_INSTANCE },
         },
       },
     });
@@ -132,7 +132,7 @@ test(
       idempotency_key: string;
     }>(["worker", "register"], auth.token);
     const runtime = registration.runtimeIdentity;
-    const resource = bindings.bindings.harness!.resourceIdentity;
+    const resource = bindings.bindings.harness!.resource_identity;
     await t.test("EX10.1 registration and capacity", async () => {
       assert.match(runtime, /^worker_instance_/);
       assert.equal(registration.resourceIdentity, resource);

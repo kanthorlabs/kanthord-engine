@@ -396,7 +396,9 @@ export function fakeMachines(
           binding.available !== false &&
           binding.capacity > NO_INSTANCES,
       );
-      return match ? { projectId, resourceIdentity } : null;
+      return match
+        ? { project_id: projectId, resource_identity: resourceIdentity }
+        : null;
     },
   };
   const worker = {
@@ -628,17 +630,5 @@ export async function gatewayFixture(
     config,
     accountId: KANTHORD_AUTH_USERNAME,
     logs,
-  };
-}
-
-export function agentDefaultsOf(configuration: {
-  agentProvider: string;
-  modelIdentifier: string;
-  reasoningEffort: string;
-}) {
-  return {
-    agent_provider: configuration.agentProvider,
-    model_identifier: configuration.modelIdentifier,
-    reasoning_effort: configuration.reasoningEffort,
   };
 }

@@ -14,7 +14,7 @@ import {
   WorkbenchPromptSource,
   type PromptSettings,
 } from "./contract.ts";
-import type { WorkingLayer } from "../project/contract.ts";
+import type { RepositoryPolicy } from "../project/contract.ts";
 import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest, PromptLayer } from "./prompt-composer.ts";
 import {
@@ -73,11 +73,10 @@ export interface PromptSettingsSet {
   working: PromptSettings;
 }
 
-export interface RepositoryWorking {
-  name: string;
-  projectPrompt: string | null;
-  workingLayer: WorkingLayer;
-}
+export type RepositoryLayerSource = Pick<
+  RepositoryPolicy,
+  "name" | "project_prompt" | "working_layer"
+>;
 
 export interface LayerInput {
   agent: AgentDeclaration;
@@ -87,12 +86,12 @@ export interface LayerInput {
   dataDirectory: string;
   hostHome: string;
   workingDirectory: string;
-  repository?: RepositoryWorking | null;
+  repository?: RepositoryLayerSource | null;
   context: Context;
 }
 
 export interface RepositoryLayerInput {
-  repository: RepositoryWorking;
+  repository: RepositoryLayerSource;
   workspace: string | null;
   hostHome: string;
   context: Context;
@@ -299,7 +298,7 @@ function workingSpecs(input: LayerInput): SourceSpec[] {
 }
 
 function repositorySpecs(input: RepositoryLayerInput): SourceSpec[] {
-  const { name, projectPrompt } = input.repository;
+  const { name, project_prompt } = input.repository;
   const owner = `repository binding ${name}`;
   const workspace = input.workspace;
   return [
@@ -321,7 +320,7 @@ function repositorySpecs(input: RepositoryLayerInput): SourceSpec[] {
       path: null,
       owner,
       label: () => "database project prompt",
-      load: textSource(projectPrompt ?? ""),
+      load: textSource(project_prompt ?? ""),
     },
   ];
 }
@@ -356,7 +355,7 @@ export function resolveRepositoryLayer(
     PromptLayerKind.Working,
     PromptLayer.WorkingLayer,
     repositorySpecs(input),
-    input.repository.workingLayer,
+    input.repository.working_layer,
     input.hostHome,
   );
 }

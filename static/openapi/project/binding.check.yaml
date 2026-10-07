@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/project.binding.check.Input/properties/params/prope\
-            rties/projectId"
+            rties/project_id"
     requestBody:
       required: true
       content:
@@ -59,11 +59,11 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 1
           required:
-            - projectId
+            - project_id
           additionalProperties: false
         query:
           type: object
@@ -92,7 +92,7 @@ components:
                 strategy:
                   type: object
                   properties:
-                    baseBranch:
+                    base_branch:
                       type: string
                       minLength: 1
                     action:
@@ -132,15 +132,15 @@ components:
                         - follows
                       additionalProperties: false
                   required:
-                    - baseBranch
+                    - base_branch
                   additionalProperties: false
-                sshCredential:
+                ssh_credential:
                   type: string
                   minLength: 1
                 credential:
                   type: string
                   minLength: 1
-                projectPrompt:
+                project_prompt:
                   type: string
                 working_layer:
                   type: object
@@ -167,7 +167,7 @@ components:
                 - platform
                 - address
                 - strategy
-                - sshCredential
+                - ssh_credential
                 - working_layer
               additionalProperties: false
           required:
@@ -198,7 +198,7 @@ components:
             - status
             - capability
           additionalProperties: false
-        sshCredential:
+        ssh_credential:
           type: object
           properties:
             status:
@@ -234,6 +234,6 @@ components:
             - type: "null"
       required:
         - address
-        - sshCredential
+        - ssh_credential
         - credential
       additionalProperties: false

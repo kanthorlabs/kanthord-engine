@@ -1103,7 +1103,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     projectOperations.create.id,
   );
   assert.equal(
-    resolved.paths?.["/api/project/{projectId}/binding-set"]?.put?.operationId,
+    resolved.paths?.["/api/project/{project_id}/binding-set"]?.put?.operationId,
     projectOperations["bindingSet.write"].id,
   );
   const emittedAgentIds = Object.values(resolved.paths ?? {}).flatMap((path) =>
