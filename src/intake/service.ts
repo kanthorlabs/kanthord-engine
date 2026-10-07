@@ -17,6 +17,7 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import { INTAKE_SERVICE_NAME, intakeOperations } from "./contract.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
+import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
 
 export interface Dependencies {
@@ -48,6 +49,21 @@ export class IntakeService implements Service {
       intakeOperations["outbound.request.get"],
       ({ params }, caller) =>
         caller.commit((tx) => getOutbound(tx, params.outbound_request_id)),
+    );
+    registry.register(
+      intakeOperations["outbound.request.discard"],
+      ({ params }, caller) =>
+        caller.commit((tx) =>
+          discardOutbound(
+            tx,
+            this.outboundInFlight,
+            params.outbound_request_id,
+          ),
+        ),
+    );
+    registry.register(
+      intakeOperations["outbound.request.delete"],
+      ({ body }, caller) => caller.commit((tx) => deleteOutbound(tx, body)),
     );
   }
 

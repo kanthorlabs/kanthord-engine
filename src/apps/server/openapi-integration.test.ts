@@ -681,8 +681,10 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["workbench.session.approve", AccessPolicy.Human],
   ["intake.outbound.request.list", AccessPolicy.Human],
   ["intake.outbound.request.get", AccessPolicy.Human],
+  ["intake.outbound.request.discard", AccessPolicy.Human],
+  ["intake.outbound.request.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 149;
+const OPERATION_COUNT = 151;
 
 test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();
@@ -1404,4 +1406,23 @@ test("published outbound request reads are human unary routes", async () => {
   assert.equal(list?.["x-access-policy"], AccessPolicy.Human);
   assert.equal(get?.operationId, intakeOperations["outbound.request.get"].id);
   assert.equal(get?.["x-access-policy"], AccessPolicy.Human);
+});
+
+test("published outbound request discard and delete are human mutation routes", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const discard = resolved.paths?.[
+    "/api/intake/outbound/{outbound_request_id}/discard"
+  ]?.post as ResolvedOperation | undefined;
+  const remove = resolved.paths?.["/api/intake/outbound/delete"]?.post as
+    ResolvedOperation | undefined;
+  assert.equal(
+    discard?.operationId,
+    intakeOperations["outbound.request.discard"].id,
+  );
+  assert.equal(discard?.["x-access-policy"], AccessPolicy.Human);
+  assert.equal(
+    remove?.operationId,
+    intakeOperations["outbound.request.delete"].id,
+  );
+  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
 });

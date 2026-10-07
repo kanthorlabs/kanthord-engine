@@ -32,6 +32,10 @@ export const ADMISSION_CONCURRENCY = 1;
 export const IntakeErrorCode = {
   CursorInvalid: "system.pagination.cursor_invalid",
   OutboundRequestNotFound: "intake.outbound.request.not_found",
+  OutboundRequestInFlight: "intake.outbound.request.in_flight",
+  OutboundRequestStateConflict: "intake.outbound.request.state_conflict",
+  OutboundRequestForceRequired: "intake.outbound.request.force_required",
+  OutboundRequestFilterInvalid: "intake.outbound.request.filter_invalid",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -90,6 +94,18 @@ export const outboundRequestSchema = z.strictObject({
   created_at: timestamp,
 });
 
+export const outboundDeleteSchema = z.strictObject({
+  force: z.boolean().optional(),
+  state: outboundRequestStateSchema.optional(),
+  from: identitySchema(OUTBOUND_REQUEST_ID_PREFIX).optional(),
+  to: identitySchema(OUTBOUND_REQUEST_ID_PREFIX).optional(),
+  ids: z
+    .array(identitySchema(OUTBOUND_REQUEST_ID_PREFIX))
+    .min(1)
+    .max(DELETE_IDS_MAX)
+    .optional(),
+});
+
 export type InboundKindValue = z.infer<typeof inboundKindSchema>;
 export type InboundPlatformValue = z.infer<typeof inboundPlatformSchema>;
 export type ConsumerValue = z.infer<typeof consumerSchema>;
@@ -100,6 +116,7 @@ export type OutboundRequestStateValue = z.infer<
 export type OutboundOperationValue = z.infer<typeof outboundOperationSchema>;
 export type ResultClassValue = z.infer<typeof resultClassSchema>;
 export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
+export type OutboundDelete = z.infer<typeof outboundDeleteSchema>;
 
 const baseOperation = {
   service: INTAKE_SERVICE_NAME,
@@ -113,6 +130,11 @@ const readOperation = {
   ...baseOperation,
   mutation: false,
   body: false,
+} as const;
+const mutationOperation = {
+  ...baseOperation,
+  method: HttpMethod.Post,
+  mutation: true,
 } as const;
 const readInput = <P extends z.ZodType, Q extends z.ZodType>(
   params: P,
@@ -160,5 +182,34 @@ export const intakeOperations = {
     ),
     output: outboundRequestSchema,
     description: "Get one outbound request.",
+  },
+  "outbound.request.discard": {
+    ...mutationOperation,
+    id: "intake.outbound.request.discard",
+    path: "/api/intake/outbound/:outbound_request_id/discard",
+    body: false,
+    input: z.strictObject({
+      params: z.strictObject({
+        outbound_request_id: identitySchema(OUTBOUND_REQUEST_ID_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: outboundRequestSchema,
+    description: "Discard a pending outbound request whose call does not run.",
+  },
+  "outbound.request.delete": {
+    ...mutationOperation,
+    id: "intake.outbound.request.delete",
+    path: "/api/intake/outbound/delete",
+    body: true,
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: outboundDeleteSchema,
+    }),
+    output: z.strictObject({ count: z.number().int().nonnegative() }),
+    description:
+      "Delete settled outbound requests by a state with an identity range or by a list of identities.",
   },
 } as const;

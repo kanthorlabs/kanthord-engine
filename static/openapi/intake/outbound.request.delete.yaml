@@ -1,0 +1,116 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: intake.outbound.request.delete
+    tags:
+      - intake
+    description: Delete settled outbound requests by a state with an identity range
+      or by a list of identities.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/intake.outbound.request.delete.Input/properties/bod\
+              y"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/intake.outbound.request.delete.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    intake.outbound.request.delete.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            force:
+              type: boolean
+            state:
+              type: string
+              enum:
+                - pending
+                - succeeded
+                - failed
+                - discarded
+            from:
+              type: string
+              minLength: 43
+              maxLength: 43
+              pattern: ^outbound_request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: outbound_request_ followed by a canonical 26-character uppercase
+                ULID.
+            to:
+              type: string
+              minLength: 43
+              maxLength: 43
+              pattern: ^outbound_request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: outbound_request_ followed by a canonical 26-character uppercase
+                ULID.
+            ids:
+              minItems: 1
+              maxItems: 1000
+              type: array
+              items:
+                type: string
+                minLength: 43
+                maxLength: 43
+                pattern: ^outbound_request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: outbound_request_ followed by a canonical 26-character uppercase
+                  ULID.
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    intake.outbound.request.delete.Output:
+      type: object
+      properties:
+        count:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+      required:
+        - count
+      additionalProperties: false
