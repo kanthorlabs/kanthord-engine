@@ -1,7 +1,5 @@
 import type { Migration } from "../kernel/store.ts";
 
-const LEGACY_ENABLEMENT_TABLE = "worker_agent_enablement";
-
 const createEnablementTable: Migration = (database) => {
   database.exec(`
     CREATE TABLE agent_enablement (
@@ -16,16 +14,6 @@ const createEnablementTable: Migration = (database) => {
     );
     CREATE UNIQUE INDEX agent_enablement_agent_name_revision ON agent_enablement (agent_name, revision);
   `);
-  const legacy = database
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
-    .get(LEGACY_ENABLEMENT_TABLE);
-  if (legacy)
-    database.exec(`
-      INSERT INTO agent_enablement
-        (id, agent_name, revision, state, agent_providers, default_configuration, created_at, removed_at)
-      SELECT id, agent_name, revision, state, agent_providers, default_configuration, created_at, removed_at
-      FROM ${LEGACY_ENABLEMENT_TABLE};
-    `);
 };
 
 const createPromptTable: Migration = (database) => {
@@ -36,6 +24,7 @@ const createPromptTable: Migration = (database) => {
       agent_name TEXT NOT NULL,
       switches TEXT NOT NULL,
       custom_text TEXT NOT NULL,
+      system_layer TEXT,
       revision INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -43,15 +32,7 @@ const createPromptTable: Migration = (database) => {
   `);
 };
 
-const addSystemLayerOverride: Migration = (database) => {
-  database.exec(`
-    ALTER TABLE agent_prompt ADD COLUMN system_layer TEXT;
-    UPDATE agent_prompt SET system_layer = 'inherit' WHERE scope = 'agent';
-  `);
-};
-
 export const agentMigrations: readonly Migration[] = [
   createEnablementTable,
   createPromptTable,
-  addSystemLayerOverride,
 ];

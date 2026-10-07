@@ -5,7 +5,6 @@ const createProjectTables: Migration = (database) => {
     CREATE TABLE project_project (
       id TEXT NOT NULL PRIMARY KEY,
       name TEXT NOT NULL,
-      binding_set_version INTEGER NOT NULL,
       created_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX project_project_name ON project_project (name);
@@ -23,11 +22,4 @@ const createProjectTables: Migration = (database) => {
   `);
 };
 
-const dropBindingSetVersion: Migration = (database) => {
-  database.exec("ALTER TABLE project_project DROP COLUMN binding_set_version;");
-};
-
-export const projectMigrations: readonly Migration[] = [
-  createProjectTables,
-  dropBindingSetVersion,
-];
+export const projectMigrations: readonly Migration[] = [createProjectTables];

@@ -61,45 +61,6 @@ test("agent migration creates the agent enablement schema", () => {
   }
 });
 
-test("agent migration keeps every row of the legacy worker enablement table", () => {
-  const legacyTable = "worker_agent_enablement";
-  const rows = [
-    ["agent_enablement_a", "swe@1", 1, "enabled", "[]", "{}", 1000, null],
-    ["agent_enablement_b", "swe@1", 2, "disabled", "[]", "{}", 2000, 3000],
-  ];
-  const store = new Store(IN_MEMORY_DATABASE);
-  try {
-    store.database.exec(`
-      CREATE TABLE ${legacyTable} (
-        id TEXT NOT NULL PRIMARY KEY,
-        agent_name TEXT NOT NULL,
-        revision INTEGER NOT NULL,
-        state TEXT NOT NULL,
-        agent_providers TEXT NOT NULL,
-        default_configuration TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        removed_at INTEGER
-      );
-    `);
-    const insert = store.database.prepare(
-      `INSERT INTO ${legacyTable} VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const row of rows) insert.run(...row);
-    store.migrate([
-      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
-    ]);
-    assert.deepEqual(
-      store.database
-        .prepare(`SELECT * FROM ${AGENT_ENABLEMENT_TABLE} ORDER BY revision`)
-        .all()
-        .map((row) => Object.values(row)),
-      rows,
-    );
-  } finally {
-    store.close();
-  }
-});
-
 test("agent migration creates the prompt settings schema", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
@@ -117,9 +78,9 @@ test("agent migration creates the prompt settings schema", () => {
         { name: "agent_name", type: "TEXT", notnull: 1, pk: 0 },
         { name: "switches", type: "TEXT", notnull: 1, pk: 0 },
         { name: "custom_text", type: "TEXT", notnull: 1, pk: 0 },
+        { name: "system_layer", type: "TEXT", notnull: 0, pk: 0 },
         { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
         { name: "updated_at", type: "INTEGER", notnull: 1, pk: 0 },
-        { name: "system_layer", type: "TEXT", notnull: 0, pk: 0 },
       ],
     );
     assert.deepEqual(
@@ -137,39 +98,6 @@ test("agent migration creates the prompt settings schema", () => {
         ?.sql?.toString()
         .includes("CHECK"),
       false,
-    );
-  } finally {
-    store.close();
-  }
-});
-
-test("agent migration sets the system layer override of an existing agent row to inherit", () => {
-  const store = new Store(IN_MEMORY_DATABASE);
-  try {
-    store.migrate([
-      {
-        service: AGENT_COMPONENT_NAME,
-        migrations: agentMigrations.slice(0, 2),
-      },
-    ]);
-    const insert = store.database.prepare(
-      `INSERT INTO agent_prompt (id, scope, agent_name, switches, custom_text, revision, updated_at)
-       VALUES (?, ?, ?, '{}', '', 1, 0)`,
-    );
-    insert.run("agent_prompt_a", "agent", "swe@1");
-    insert.run("agent_prompt_s", "system", "");
-    store.migrate([
-      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
-    ]);
-    assert.deepEqual(
-      store.database
-        .prepare("SELECT scope, system_layer FROM agent_prompt ORDER BY scope")
-        .all()
-        .map(({ scope, system_layer }) => ({ scope, system_layer })),
-      [
-        { scope: "agent", system_layer: "inherit" },
-        { scope: "system", system_layer: null },
-      ],
     );
   } finally {
     store.close();

@@ -37,10 +37,8 @@ const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
 const AGENT_ENABLEMENT_TABLE = "agent_enablement";
 const AGENT_PROMPT_TABLE = "agent_prompt";
-const LEGACY_AGENT_ENABLEMENT_TABLE = "worker_agent_enablement";
 const WORKER_INSTANCE_TABLE = "worker_instance";
 const ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE];
-const ERD2_WORKER_MIGRATIONS = 2;
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
@@ -493,52 +491,6 @@ test("Mission execution records have exactly four unique indexes with the ruled 
         /\bCHECK\s*\(/i,
       );
     }
-  } finally {
-    store.close();
-  }
-});
-
-test("an existing store moves its worker agent enablement rows into the agent table", () => {
-  const previousWorkerMigrations = workerMigrations.slice(
-    0,
-    ERD2_WORKER_MIGRATIONS,
-  );
-  const row = [
-    "agent_enablement_a",
-    "swe@1",
-    1,
-    "enabled",
-    "[]",
-    "{}",
-    1000,
-    null,
-  ];
-  const store = new Store(IN_MEMORY_DATABASE);
-  try {
-    store.migrate([
-      { service: WORKER_SERVICE_NAME, migrations: previousWorkerMigrations },
-    ]);
-    store.database
-      .prepare(
-        `INSERT INTO ${LEGACY_AGENT_ENABLEMENT_TABLE} VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(...row);
-    store.migrate([
-      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
-      { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
-    ]);
-    assert.deepEqual(tables(store), [
-      WORKER_INSTANCE_TABLE,
-      AGENT_ENABLEMENT_TABLE,
-      AGENT_PROMPT_TABLE,
-    ]);
-    assert.deepEqual(
-      store.database
-        .prepare(`SELECT * FROM ${AGENT_ENABLEMENT_TABLE}`)
-        .all()
-        .map((record) => Object.values(record)),
-      [row],
-    );
   } finally {
     store.close();
   }
