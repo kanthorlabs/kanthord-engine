@@ -103,7 +103,7 @@ export function admitControl(
   )
     stateConflict(node);
   requireControlState(node, admitted);
-  validateText("reason", body.reason, dependencies.config.textMaxBytes);
+  validateText("reason", body.reason, dependencies.config.text_max_bytes);
   return { node, mission };
 }
 

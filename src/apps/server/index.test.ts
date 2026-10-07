@@ -61,8 +61,8 @@ function layout(directory: string) {
   ])
     mkdirSync(join(path, "kanthord"), { mode: 0o700, recursive: true });
   const config = configuration({
-    masterKey: Buffer.alloc(32).toString("base64"),
-    gateway: { port: 0, allowedHosts: ["localhost"] },
+    master_key: Buffer.alloc(32).toString("base64"),
+    gateway: { port: 0, allowed_hosts: ["localhost"] },
   }).getProperties();
   writePrivate(env.KANTHORD_CONFIG!, stringify(config));
   return {

@@ -212,7 +212,7 @@ test("assessment admission checks rationale and evidence ownership before public
       h.admit({
         ...h.body,
         rationale: "x".repeat(
-          h.dependencies.config.textMaxBytes + TEXT_OVERFLOW,
+          h.dependencies.config.text_max_bytes + TEXT_OVERFLOW,
         ),
       }),
     (error) =>

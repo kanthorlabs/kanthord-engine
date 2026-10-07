@@ -349,7 +349,7 @@ test("loss routes below the limit, pauses at the limit and resume permits anothe
     h.service.loss(
       tx,
       h.nodeId,
-      h.dependencies.config.consecutiveLossLimit,
+      h.dependencies.config.consecutive_loss_limit,
       NOW,
     ),
   );

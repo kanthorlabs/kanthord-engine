@@ -17,7 +17,7 @@ test("in-process worker helper reaches ready with injection and stops cleanly", 
   const host = await inProcessWorker(t, {
     endpoint: fixture.endpoint,
     token,
-    clientSecret: Buffer.alloc(32, 9).toString("base64"),
+    client_secret: Buffer.alloc(32, 9).toString("base64"),
     modelRuntimeFactory: async () => {
       assert.fail("No inference is expected");
     },

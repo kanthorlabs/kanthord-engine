@@ -6,10 +6,10 @@ export const IPV6_LOOPBACK = "::1";
 export interface GatewayConfig {
   bind: string;
   port: number;
-  allowedHosts: string[];
-  allowedOrigins: string[];
-  tokenLifetime: number;
-  idempotencyTtl: number;
+  allowed_hosts: string[];
+  allowed_origins: string[];
+  token_lifetime: number;
+  idempotency_ttl: number;
 }
 const strings = (value: unknown) => {
   if (
@@ -34,22 +34,22 @@ export const gatewayConfigSchema = {
     },
   },
   port: { doc: "HTTP listener port.", format: "port", default: 31415 },
-  allowedHosts: {
+  allowed_hosts: {
     doc: "Accepted Host headers, including port.",
     format: strings,
     default: ["127.0.0.1:31415", "localhost:31415"],
   },
-  allowedOrigins: {
+  allowed_origins: {
     doc: "Allowed CORS origins.",
     format: strings,
     default: ["http://127.0.0.1:27182", "http://localhost:27182"],
   },
-  tokenLifetime: {
+  token_lifetime: {
     doc: "Token lifetime in seconds.",
     format: "nat",
     default: 31536000,
   },
-  idempotencyTtl: {
+  idempotency_ttl: {
     doc: "Idempotency record lifetime in seconds.",
     format(value: unknown) {
       if (

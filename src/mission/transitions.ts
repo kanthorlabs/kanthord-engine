@@ -195,7 +195,7 @@ export function loss(
       consecutiveLosses > NO_CONSECUTIVE_LOSSES,
   );
   const state =
-    consecutiveLosses >= dependencies.config.consecutiveLossLimit
+    consecutiveLosses >= dependencies.config.consecutive_loss_limit
       ? NodeState.Paused
       : node.state === NodeState.Executing
         ? NodeState.Available

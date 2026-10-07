@@ -2,14 +2,14 @@ import type { Schema } from "convict";
 import { isNumber } from "../kernel/values.ts";
 
 export interface WorkerConfig {
-  heartbeatWindow: number;
+  heartbeat_window: number;
 }
 
 const DEFAULT_HEARTBEAT_WINDOW = 300;
 const NO_HEARTBEAT_WINDOW = 0;
 
 export const workerConfigSchema: Schema<WorkerConfig> = {
-  heartbeatWindow: {
+  heartbeat_window: {
     doc: "Registration heartbeat window in seconds.",
     format(value: unknown) {
       if (

@@ -84,7 +84,7 @@ export async function inProcessWorker(
   input: Pick<
     WorkerOptions,
     "endpoint" | "token" | "modelRuntimeFactory" | "repositoryTransport"
-  > & { clientSecret: string },
+  > & { client_secret: string },
 ) {
   const root = temporary(t);
   const previous = process.env.PATH;
@@ -101,7 +101,7 @@ export async function inProcessWorker(
   };
   writePrivate(
     clientConfigPath(env),
-    stringify({ clientSecret: input.clientSecret }),
+    stringify({ client_secret: input.client_secret }),
   );
   const logs: Record<string, unknown>[] = [];
   const ready = Promise.withResolvers<void>();
@@ -501,8 +501,8 @@ export async function gatewayFixture(
 ) {
   process.umask(0o077);
   const config = configuration({
-    masterKey: randomBytes(32).toString("base64"),
-    gateway: { port: 0, allowedHosts: ["localhost"] },
+    master_key: randomBytes(32).toString("base64"),
+    gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
   }).getProperties();
   const store = new Store(options.path ?? ":memory:");
@@ -592,7 +592,7 @@ export async function gatewayFixture(
     if (error) throw error;
   }
   const port = gateway.address()!.port;
-  config.gateway.allowedHosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
+  config.gateway.allowed_hosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
   const endpoint = `http://127.0.0.1:${port}`;
   const request = (path: string, init?: RequestInit) =>
     fetch(endpoint + path, init);
@@ -610,7 +610,7 @@ export async function gatewayFixture(
     endpoint,
     request,
     token: (
-      await generateHumanJWT(config.masterKey, config.gateway.tokenLifetime)
+      await generateHumanJWT(config.master_key, config.gateway.token_lifetime)
     ).token,
     machineToken: async (
       projectId: string,
@@ -619,8 +619,8 @@ export async function gatewayFixture(
     ) =>
       (
         await generateMachineJWT(
-          config.masterKey,
-          config.gateway.tokenLifetime,
+          config.master_key,
+          config.gateway.token_lifetime,
           { projectId, bindingName },
           name,
         )

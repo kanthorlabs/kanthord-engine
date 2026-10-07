@@ -142,7 +142,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
   writePrivate(
     configPath,
     stringify(
-      configuration({ masterKey: fixture.config.masterKey }).getProperties(),
+      configuration({ master_key: fixture.config.master_key }).getProperties(),
     ),
   );
   function machine(name: string) {
@@ -170,7 +170,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
     );
     assert.equal(result.status, SUCCESS, result.stderr);
     assert.equal(result.stderr, NO_STDERR);
-    return parse(result.stdout) as { token: string; clientSecret: string };
+    return parse(result.stdout) as { token: string; client_secret: string };
   }
   if (!host)
     await read([

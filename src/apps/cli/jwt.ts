@@ -163,14 +163,14 @@ export function addJWTCommand(program: Command): void {
         const { token } =
           options.binding === undefined
             ? await generateHumanJWT(
-                config.masterKey,
-                config.gateway.tokenLifetime,
+                config.master_key,
+                config.gateway.token_lifetime,
                 username,
                 options.name,
               )
             : await generateMachineJWT(
-                config.masterKey,
-                config.gateway.tokenLifetime,
+                config.master_key,
+                config.gateway.token_lifetime,
                 { projectId: options.project!, bindingName: options.binding },
                 options.name,
               );
@@ -191,9 +191,9 @@ export function addJWTCommand(program: Command): void {
         else {
           const { sub } = decode(token).payload;
           assert.ok(isString(sub));
-          const clientSecret = deriveClientSecret(config.masterKey, sub);
+          const clientSecret = deriveClientSecret(config.master_key, sub);
           process.stdout.write(
-            `token: ${token}\nclientSecret: ${clientSecret}\n`,
+            `token: ${token}\nclient_secret: ${clientSecret}\n`,
           );
         }
         if (command.optsWithGlobals().verbose)

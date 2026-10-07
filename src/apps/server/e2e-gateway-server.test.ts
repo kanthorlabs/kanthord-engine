@@ -222,8 +222,8 @@ function serveEnvironment(directory: string): NodeJS.ProcessEnv {
       recursive: true,
     });
   const config = configuration({
-    masterKey: randomBytes(32).toString("base64"),
-    gateway: { port: 0, allowedHosts: ["localhost"] },
+    master_key: randomBytes(32).toString("base64"),
+    gateway: { port: 0, allowed_hosts: ["localhost"] },
   }).getProperties();
   writePrivate(env.KANTHORD_CONFIG, stringify(config));
   assert.equal(config.gateway.port, UNSET_PORT);

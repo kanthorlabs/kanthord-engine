@@ -118,14 +118,14 @@ export function composeServices(options: {
   const repoConnector =
     options.repositoryConnector ??
     new RepositoryComponent({ health: options.health });
-  const envelopeKey = deriveEnvelopeKey(options.config.masterKey);
+  const envelopeKey = deriveEnvelopeKey(options.config.master_key);
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
     registry,
     stores: { [StoreName.Operational]: options.store },
-    idempotencyTtl: options.config.gateway.idempotencyTtl,
-    masterKey: options.config.masterKey,
-    tokenLifetime: options.config.gateway.tokenLifetime,
+    idempotencyTtl: options.config.gateway.idempotency_ttl,
+    masterKey: options.config.master_key,
+    tokenLifetime: options.config.gateway.token_lifetime,
     lookups: {
       scheduler: {
         executionOf: (executionId) => scheduler.executionOf(executionId),
@@ -201,7 +201,7 @@ export function composeServices(options: {
         worker.authorizeModelInference(...args),
     },
     clientSecret: (clientId) =>
-      deriveClientSecret(options.config.masterKey, clientId),
+      deriveClientSecret(options.config.master_key, clientId),
     store: options.store,
     envelopeKey,
     logger: options.logger,

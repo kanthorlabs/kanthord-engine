@@ -7,9 +7,9 @@ const MAX_SEQUENCE_ENTRIES = 4094;
 
 test("YAML rejects duplicate keys, extra documents, malformed secrets, arrays, and non-mappings without excerpts", () => {
   for (const source of [
-    "masterKey: secret-marker\nmasterKey: again",
+    "master_key: secret-marker\nmaster_key: again",
     "a: 1\n---\nb: 2",
-    "masterKey: [secret-marker",
+    "master_key: [secret-marker",
     "- secret-marker",
     "null",
   ]) {

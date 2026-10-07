@@ -590,7 +590,7 @@ test("agent get and prompt commands expose help and refuse invalid options befor
   assert.match(missing.stderr, /^cli\.file\.not_found:/);
 });
 
-test("serve worker rejects server configuration and requires a clientSecret before contacting an unavailable server", (t) => {
+test("serve worker rejects server configuration and requires a client_secret before contacting an unavailable server", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
   const config = invocation(
@@ -607,7 +607,7 @@ test("serve worker rejects server configuration and requires a clientSecret befo
   assert.deepEqual(readdirSync(directory), []);
 });
 
-test("serve worker with a clientSecret reports an unavailable server without changing cli.yaml", (t) => {
+test("serve worker with a client_secret reports an unavailable server without changing cli.yaml", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
   const tools = temporary(t);
@@ -618,7 +618,7 @@ test("serve worker with a clientSecret reports an unavailable server without cha
   env.PATH = `${tools}:${process.env.PATH ?? ""}`;
   const path = clientConfigPath(env);
   const content = stringify({
-    clientSecret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
   });
   writePrivate(path, content);
   const filesBefore = readdirSync(directory, { recursive: true });
@@ -643,7 +643,7 @@ test("config init is non-interactive, writes validated private configuration wit
   const content = readFileSync(env.KANTHORD_CONFIG!, "utf8");
   assert.equal(accepted.stdout, `Created ${env.KANTHORD_CONFIG!}\n`);
   assert.ok(
-    !accepted.stdout.includes(loadConfig(env.KANTHORD_CONFIG!).masterKey),
+    !accepted.stdout.includes(loadConfig(env.KANTHORD_CONFIG!).master_key),
   );
   assert.equal(statSync(env.KANTHORD_CONFIG!).mode & 0o777, PRIVATE_FILE_MODE);
   const existing = invocation(["config", "init"], env);
@@ -699,7 +699,7 @@ test("validate/show and serve never create or repair configuration and never dis
     assert.match(result.stderr, /^system\.config\.not_found:/);
     assert.deepEqual(readdirSync(directory), []);
   }
-  writePrivate(env.KANTHORD_CONFIG!, "masterKey: [secret-marker");
+  writePrivate(env.KANTHORD_CONFIG!, "master_key: [secret-marker");
   const invalid = invocation(["config", "validate"], env);
   assert.notEqual(invalid.status, ExitCode.Success);
   assert.doesNotMatch(invalid.stderr + invalid.stdout, /secret-marker/);
@@ -719,7 +719,7 @@ test("top-level jwt uses its optional username or the constant default, the conf
   const env = environment(directory);
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
   const config = loadConfig(env.KANTHORD_CONFIG!);
-  config.gateway.tokenLifetime = TOKEN_LIFETIME_SECONDS;
+  config.gateway.token_lifetime = TOKEN_LIFETIME_SECONDS;
   writePrivate(env.KANTHORD_CONFIG!, stringify(config), true);
   const redirected = invocation(["jwt", "generate"], env);
   assert.equal(redirected.status, ExitCode.Failure);
@@ -756,7 +756,7 @@ test("top-level jwt uses its optional username or the constant default, the conf
     assert.equal(result.stdout, `${token}\n`);
     const key = await crypto.subtle.importKey(
       "raw",
-      new Uint8Array(deriveKey(config.masterKey, "gateway/jwt-hs256/v1")),
+      new Uint8Array(deriveKey(config.master_key, "gateway/jwt-hs256/v1")),
       { name: "HMAC", hash: "SHA-256" },
       false,
       ["verify"],
@@ -794,7 +794,7 @@ test("jwt --output creates a private default client file with a verifiable human
   assert.equal(resolveClient({}, env).token, document.token);
   const key = await crypto.subtle.importKey(
     "raw",
-    new Uint8Array(deriveKey(config.masterKey, "gateway/jwt-hs256/v1")),
+    new Uint8Array(deriveKey(config.master_key, "gateway/jwt-hs256/v1")),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["verify"],
@@ -979,16 +979,16 @@ test("jwt accepts display names and issues fresh machine identities without open
       true,
     );
     assert.equal(result.status, ExitCode.Success, result.stderr);
-    const { token, clientSecret } = parse(result.stdout);
+    const { token, client_secret: clientSecret } = parse(result.stdout);
     assert.equal(
       result.stdout,
-      `token: ${token}\nclientSecret: ${clientSecret}\n`,
+      `token: ${token}\nclient_secret: ${clientSecret}\n`,
     );
     assert.equal(result.stderr, EMPTY_OUTPUT);
     const claims = decode(token).payload;
     assert.equal(
       clientSecret,
-      deriveClientSecret(config.masterKey, String(claims.sub)),
+      deriveClientSecret(config.master_key, String(claims.sub)),
     );
     assert.equal(
       Buffer.from(clientSecret, "base64").length,
@@ -1100,11 +1100,11 @@ test("jwt group, verbose generation, inspection and token precedence", (t) => {
   const [tokenLine, secretLine, ...machineClaims] = machine.stdout.split("\n");
   const machineToken = tokenLine!.slice("token: ".length);
   const machineSecret = deriveClientSecret(
-    loadConfig(env.KANTHORD_CONFIG!).masterKey,
+    loadConfig(env.KANTHORD_CONFIG!).master_key,
     String(decode(machineToken).payload.sub),
   );
   assert.equal(tokenLine, `token: ${machineToken}`);
-  assert.equal(secretLine, `clientSecret: ${machineSecret}`);
+  assert.equal(secretLine, `client_secret: ${machineSecret}`);
   const machineInspect = invocation(["jwt", "inspect", machineToken], env);
   assert.equal(machineInspect.status, ExitCode.Success, machineInspect.stderr);
   assert.equal(machineClaims.join("\n"), machineInspect.stdout);

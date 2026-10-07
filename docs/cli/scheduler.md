@@ -487,7 +487,7 @@ Completion of an already-admitted remote operation belongs to Project's design
 and the later action integration; revocation does not undo that operation.
 
 The claim fixes `expiredAt` at `createdAt` plus effective `wallTimeMs` plus
-1000 times `scheduler.releaseReserve` (default 600 seconds); a sweep settles
+1000 times `scheduler.release_reserve` (default 600 seconds); a sweep settles
 expired unsettled rows every 30 seconds under the [Scheduler design](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.md#liveness).
 A claim, work-pull lookup, registration resume or Mission transition settles
 an expired unsettled row before checking its own preconditions. Settlement is

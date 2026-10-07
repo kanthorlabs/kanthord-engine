@@ -139,7 +139,7 @@ async function fixture(
   writePrivate(
     clientConfigPath(env),
     stringify({
-      clientSecret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+      client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
     }),
   );
   return {
@@ -267,7 +267,7 @@ test("worker healthcheck stays unavailable after version mismatch", async (t) =>
   });
 });
 
-test("worker healthcheck stays unavailable after absent clientSecret", async (t) => {
+test("worker healthcheck stays unavailable after absent client_secret", async (t) => {
   const options = await fixture(t, packageVersion());
   unlinkSync(clientConfigPath(options.env));
   const worker = new Worker({ ...options, log: () => {} });
@@ -279,7 +279,7 @@ test("worker healthcheck stays unavailable after absent clientSecret", async (t)
   });
 });
 
-test("worker refuses an absent clientSecret before contacting the server", async (t) => {
+test("worker refuses an absent client_secret before contacting the server", async (t) => {
   const options = await fixture(t, packageVersion());
   unlinkSync(clientConfigPath(options.env));
   const messages: string[] = [];
@@ -293,7 +293,7 @@ test("worker refuses an absent clientSecret before contacting the server", async
   assert.equal(options.requests(), NO_REQUESTS);
 });
 
-test("worker refuses invalid and non-canonical clientSecrets before contacting the server", async (t) => {
+test("worker refuses invalid and non-canonical client_secret values before contacting the server", async (t) => {
   const options = await fixture(t, packageVersion());
   const invalidKeys = [
     randomBytes(SHORT_KEY_BYTES).toString("base64"),
@@ -303,7 +303,7 @@ test("worker refuses invalid and non-canonical clientSecrets before contacting t
   for (const clientSecret of invalidKeys) {
     writePrivate(
       clientConfigPath(options.env),
-      stringify({ clientSecret }),
+      stringify({ client_secret: clientSecret }),
       true,
     );
     const messages: string[] = [];
@@ -318,31 +318,35 @@ test("worker refuses invalid and non-canonical clientSecrets before contacting t
   }
 });
 
-test("client reads clientSecret only from cli.yaml while accepting service configuration", async (t) => {
+test("client reads client_secret only from cli.yaml while accepting service configuration", async (t) => {
   const options = await fixture(t, packageVersion());
   const clientSecret = randomBytes(CLIENT_SECRET_BYTES).toString("base64");
   writePrivate(
     clientConfigPath(options.env),
-    stringify({ clientSecret }),
+    stringify({ client_secret: clientSecret }),
     true,
   );
   const env = { ...options.env, KANTHORD_CLIENT_SECRET: ENV_CLIENT_SECRET };
-  assert.equal(resolveClient({}, env).clientSecret, clientSecret);
+  assert.equal(resolveClient({}, env).client_secret, clientSecret);
   assert.equal(
-    resolveClient({ clientSecret: OPTION_CLIENT_SECRET }, env).clientSecret,
+    resolveClient({ client_secret: OPTION_CLIENT_SECRET }, env).client_secret,
     clientSecret,
   );
   unlinkSync(clientConfigPath(options.env));
   assert.equal(
-    resolveClient({ clientSecret: OPTION_CLIENT_SECRET }, env).clientSecret,
+    resolveClient({ client_secret: OPTION_CLIENT_SECRET }, env).client_secret,
     undefined,
   );
 });
 
-test("client rejects a masterKey field without disclosing its value", async (t) => {
+test("client rejects a master_key field without disclosing its value", async (t) => {
   const options = await fixture(t, packageVersion());
   const masterKey = randomBytes(CLIENT_SECRET_BYTES).toString("base64");
-  writePrivate(clientConfigPath(options.env), stringify({ masterKey }), true);
+  writePrivate(
+    clientConfigPath(options.env),
+    stringify({ master_key: masterKey }),
+    true,
+  );
   assert.throws(
     () => resolveClient({}, options.env),
     (error: unknown) => {

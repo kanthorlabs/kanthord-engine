@@ -13,7 +13,7 @@ The runner requires Python 3 with POSIX PTY support. It builds the engine, start
 It also verifies an environment-supplied token without login, checks the published verification and worker-registration contracts, proves that redirected server startup prints no token, stops the server, and removes disposable state.
 
 Sanitized proof is written under the workspace's `.dev/e2e/<YYMMdd>-jwt-verification/`, with a suffix for repeat runs. The proof includes decoded claims, status codes, exit codes, process provenance, and cleanup checks. The proof excludes raw JWTs, client secrets and master keys. The runner reads
-the machine `token:` and `clientSecret:` lines from a PTY. It checks that the
+the machine `token:` and `client_secret:` lines from a PTY. It checks that the
 client secret has the canonical 32-byte base64 form. The sentinel sweep checks
 every evidence file for both values.
 

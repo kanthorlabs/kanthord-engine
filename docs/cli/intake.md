@@ -19,7 +19,7 @@ configuration changes after the insert. The create validates before the
 insert: a poll performs one request. A webhook names no credential, kanthord
 calls no platform for it, and a human sets its address and secret at the
 platform. The Intake Service verifies a webhook event with a secret that it
-derives from `masterKey` and the inbound identity. It hands a pending event
+derives from `master_key` and the inbound identity. It hands a pending event
 over once to the delivery admission operation of the Mission Service and
 retries nothing by itself. A human retries, discards and deletes events. The
 Intake Service also performs every outbound operation and check on a platform

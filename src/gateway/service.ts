@@ -284,7 +284,7 @@ export class GatewayService implements Service {
       const host = context.req.header("host");
       if (
         !host ||
-        !this.options.config.allowedHosts.includes(host.toLowerCase())
+        !this.options.config.allowed_hosts.includes(host.toLowerCase())
       )
         return respondError(
           new GatewayError(
@@ -334,7 +334,7 @@ export class GatewayService implements Service {
           );
       }
       return cors({
-        origin: this.options.config.allowedOrigins,
+        origin: this.options.config.allowed_origins,
         credentials: false,
         allowMethods: Object.values(HttpMethod),
         allowHeaders: [

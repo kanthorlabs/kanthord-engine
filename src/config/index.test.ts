@@ -46,32 +46,32 @@ test("service fragments preserve the existing YAML field set", () => {
     "agent",
     "gateway",
     "log",
-    "masterKey",
+    "master_key",
     "mission",
     "scheduler",
     "worker",
   ]);
-  assert.deepEqual(Object.keys(config.worker), ["heartbeatWindow"]);
-  assert.deepEqual(Object.keys(config.scheduler), ["releaseReserve"]);
+  assert.deepEqual(Object.keys(config.worker), ["heartbeat_window"]);
+  assert.deepEqual(Object.keys(config.scheduler), ["release_reserve"]);
   assert.deepEqual(initial.scheduler, {
-    releaseReserve: DEFAULT_RELEASE_RESERVE,
+    release_reserve: DEFAULT_RELEASE_RESERVE,
   });
   assert.deepEqual(initial.worker, {
-    heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
+    heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
   });
   assert.deepEqual(Object.keys(config.mission).sort(), [
-    "consecutiveLossLimit",
-    "textMaxBytes",
+    "consecutive_loss_limit",
+    "text_max_bytes",
   ]);
   assert.deepEqual(Object.keys(config.gateway).sort(), [
-    "allowedHosts",
-    "allowedOrigins",
+    "allowed_hosts",
+    "allowed_origins",
     "bind",
-    "idempotencyTtl",
+    "idempotency_ttl",
     "port",
-    "tokenLifetime",
+    "token_lifetime",
   ]);
-  assert.deepEqual(config.gateway.allowedOrigins, [
+  assert.deepEqual(config.gateway.allowed_origins, [
     "http://127.0.0.1:27182",
     "http://localhost:27182",
   ]);
@@ -79,19 +79,22 @@ test("service fragments preserve the existing YAML field set", () => {
 
 test("worker configuration defaults and strict validation", () => {
   const masterKey = randomBytes(32).toString("base64");
-  assert.deepEqual(configuration({ masterKey }).getProperties().worker, {
-    heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
-  });
+  assert.deepEqual(
+    configuration({ master_key: masterKey }).getProperties().worker,
+    {
+      heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
+    },
+  );
   for (const worker of [
-    { heartbeatWindow: 0 },
-    { heartbeatWindow: -1 },
-    { heartbeatWindow: 1.5 },
-    { heartbeatWindow: Number.MAX_SAFE_INTEGER + 1 },
+    { heartbeat_window: 0 },
+    { heartbeat_window: -1 },
+    { heartbeat_window: 1.5 },
+    { heartbeat_window: Number.MAX_SAFE_INTEGER + 1 },
     { globalPrompt: "prompts/global.md" },
     { unknown: true },
   ]) {
     assert.throws(
-      () => configuration({ masterKey, worker }),
+      () => configuration({ master_key: masterKey, worker }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
         assert.match(error.message, /worker/);
@@ -103,18 +106,21 @@ test("worker configuration defaults and strict validation", () => {
 
 test("agent prompt configuration defaults to empty paths and accepts strings", () => {
   const masterKey = randomBytes(32).toString("base64");
-  assert.deepEqual(configuration({ masterKey }).getProperties().agent, {
-    prompt: { systemFile: "", agentDirectory: "" },
-  });
-  const prompt = { systemFile: "a/AGENTS.md", agentDirectory: "/agents" };
   assert.deepEqual(
-    configuration({ masterKey, agent: { prompt } }).getProperties().agent
-      .prompt,
+    configuration({ master_key: masterKey }).getProperties().agent,
+    {
+      prompt: { system_file: "", agent_directory: "" },
+    },
+  );
+  const prompt = { system_file: "a/AGENTS.md", agent_directory: "/agents" };
+  assert.deepEqual(
+    configuration({ master_key: masterKey, agent: { prompt } }).getProperties()
+      .agent.prompt,
     prompt,
   );
-  for (const bad of [{ systemFile: 1 }, { agentDirectory: null }, { x: "" }])
+  for (const bad of [{ system_file: 1 }, { agent_directory: null }, { x: "" }])
     assert.throws(
-      () => configuration({ masterKey, agent: { prompt: bad } }),
+      () => configuration({ master_key: masterKey, agent: { prompt: bad } }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
         return true;
@@ -138,17 +144,18 @@ test("config init emits Worker and Scheduler fields", (t) => {
   assert.ifError(result.error);
   assert.equal(result.status, ExitCode.Success);
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).worker, {
-    heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
+    heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
   });
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).scheduler, {
-    releaseReserve: DEFAULT_RELEASE_RESERVE,
+    release_reserve: DEFAULT_RELEASE_RESERVE,
   });
 });
 
 test("Scheduler reserve accepts only a positive safe integer", () => {
   const masterKey = randomBytes(32).toString("base64");
   assert.equal(
-    configuration({ masterKey }).getProperties().scheduler.releaseReserve,
+    configuration({ master_key: masterKey }).getProperties().scheduler
+      .release_reserve,
     DEFAULT_RELEASE_RESERVE,
   );
   for (const releaseReserve of [
@@ -160,10 +167,14 @@ test("Scheduler reserve accepts only a positive safe integer", () => {
     Number.MAX_SAFE_INTEGER + 1,
   ]) {
     assert.throws(
-      () => configuration({ masterKey, scheduler: { releaseReserve } }),
+      () =>
+        configuration({
+          master_key: masterKey,
+          scheduler: { release_reserve: releaseReserve },
+        }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(error.message, /scheduler.releaseReserve/);
+        assert.match(error.message, /scheduler.release_reserve/);
         return true;
       },
     );
@@ -172,21 +183,22 @@ test("Scheduler reserve accepts only a positive safe integer", () => {
 
 test("mission configuration defaults and strict validation", () => {
   const masterKey = randomBytes(32).toString("base64");
-  const mission = configuration({ masterKey }).getProperties().mission;
-  assert.equal(mission.consecutiveLossLimit, DEFAULT_CONSECUTIVE_LOSS_LIMIT);
-  assert.equal(mission.textMaxBytes, DEFAULT_TEXT_MAX_BYTES);
+  const mission = configuration({ master_key: masterKey }).getProperties()
+    .mission;
+  assert.equal(mission.consecutive_loss_limit, DEFAULT_CONSECUTIVE_LOSS_LIMIT);
+  assert.equal(mission.text_max_bytes, DEFAULT_TEXT_MAX_BYTES);
   assert.doesNotThrow(() =>
     configuration({
-      masterKey,
-      mission: { consecutiveLossLimit: DEFAULT_CONSECUTIVE_LOSS_LIMIT },
+      master_key: masterKey,
+      mission: { consecutive_loss_limit: DEFAULT_CONSECUTIVE_LOSS_LIMIT },
     }),
   );
   for (const invalidMission of [
     { unknown: true },
-    { consecutiveLossLimit: -1 },
+    { consecutive_loss_limit: -1 },
   ]) {
     assert.throws(
-      () => configuration({ masterKey, mission: invalidMission }),
+      () => configuration({ master_key: masterKey, mission: invalidMission }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
         assert.match(error.message, /mission/);
@@ -200,7 +212,7 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   const directory = temporary(t);
   const path = join(directory, "kanthord.yaml");
   const masterKey = randomBytes(32).toString("base64");
-  writePrivate(path, `masterKey: ${masterKey}\ngateway:\n  port: 12345\n`);
+  writePrivate(path, `master_key: ${masterKey}\ngateway:\n  port: 12345\n`);
   const previous = process.env.GATEWAY_PORT;
   process.env.GATEWAY_PORT = "9999";
   t.after(() => {
@@ -217,14 +229,14 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   assert.throws(
     () => configuration({ gateway: { bind: "0.0.0.0", port: -1 } }),
     (error: Error) => {
-      assert.match(error.message, /masterKey/);
+      assert.match(error.message, /master_key/);
       assert.match(error.message, /gateway.bind/);
       assert.match(error.message, /gateway.port/);
       return true;
     },
   );
   assert.throws(
-    () => configuration({ masterKey, unexpected: "secret-marker" }),
+    () => configuration({ master_key: masterKey, unexpected: "secret-marker" }),
     (error: Error) => {
       assert.doesNotMatch(error.message, /secret-marker/);
       return true;
@@ -234,8 +246,8 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
 
 test("configuration rejects malformed secrets and accepts its initial document", () => {
   assert.throws(
-    () => configuration({ masterKey: "secret-marker" }),
-    /masterKey/,
+    () => configuration({ master_key: "secret-marker" }),
+    /master_key/,
   );
   assert.doesNotThrow(() => configuration(parseMapping(initialConfig())));
 });
@@ -249,7 +261,7 @@ test("collection keys fail without YAML warnings or configuration excerpts", (t)
     "extra: &key [secret-marker]\n? *key\n: 1",
   ];
   for (const source of sources) {
-    writePrivate(path, `masterKey: ${masterKey}\n${source}\n`, true);
+    writePrivate(path, `master_key: ${masterKey}\n${source}\n`, true);
     const result = spawnSync(
       process.execPath,
       [
@@ -276,9 +288,9 @@ test("cyclic aliases fail promptly before Convict validation", (t) => {
   for (const source of [
     "extra: &a {self: *a}",
     "gateway: &a {extra: *a}",
-    "gateway:\n  allowedHosts: &a [*a]",
+    "gateway:\n  allowed_hosts: &a [*a]",
   ]) {
-    writePrivate(path, `masterKey: ${masterKey}\n${source}\n`, true);
+    writePrivate(path, `master_key: ${masterKey}\n${source}\n`, true);
     const result = spawnSync(
       process.execPath,
       [
@@ -308,7 +320,7 @@ test("strict validation rejects dotted and prototype keys before Convict can dis
     "gateway:\n  __proto__: {secret-marker: ignored}",
   ]) {
     assert.throws(
-      () => configuration(parseMapping(`masterKey: ${masterKey}\n${source}`)),
+      () => configuration(parseMapping(`master_key: ${masterKey}\n${source}`)),
       (error: Error) => {
         assert.match(error.message, /undeclared field/);
         assert.doesNotMatch(error.message, /secret-marker/);
@@ -322,28 +334,28 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
   assert.throws(
     () =>
       configuration({
-        masterKey: null,
+        master_key: null,
         log: { level: null, destination: null },
         gateway: {
           bind: null,
           port: -1,
-          allowedHosts: null,
-          allowedOrigins: null,
-          tokenLifetime: null,
+          allowed_hosts: null,
+          allowed_origins: null,
+          token_lifetime: null,
         },
       }),
     (error: Error) => {
       assert.equal(
         error.message,
         [
-          "masterKey",
+          "master_key",
           "log.level",
           "log.destination",
           "gateway.bind",
           "gateway.port",
-          "gateway.allowedHosts",
-          "gateway.allowedOrigins",
-          "gateway.tokenLifetime",
+          "gateway.allowed_hosts",
+          "gateway.allowed_origins",
+          "gateway.token_lifetime",
         ]
           .map((path) => `${path}: invalid or missing value.`)
           .join("\n"),
@@ -353,30 +365,30 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
     },
   );
   const config = configuration({
-    masterKey: randomBytes(32).toString("base64"),
+    master_key: randomBytes(32).toString("base64"),
   }).getProperties();
   assert.equal(config.log.level, DEFAULT_LOG_LEVEL);
   assert.equal(config.gateway.port, DEFAULT_PORT);
-  assert.equal(config.gateway.idempotencyTtl, DEFAULT_IDEMPOTENCY_TTL);
+  assert.equal(config.gateway.idempotency_ttl, DEFAULT_IDEMPOTENCY_TTL);
   for (const idempotencyTtl of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
     assert.throws(
       () =>
         configuration({
-          masterKey: randomBytes(32).toString("base64"),
-          gateway: { idempotencyTtl },
+          master_key: randomBytes(32).toString("base64"),
+          gateway: { idempotency_ttl: idempotencyTtl },
         }),
-      /gateway.idempotencyTtl/,
+      /gateway.idempotency_ttl/,
     );
 });
 
 test("configuration accepts ordinary aliases", () => {
   const value = parseMapping("first: &hosts [localhost]\nsecond: *hosts");
   const config = configuration({
-    masterKey: randomBytes(32).toString("base64"),
-    gateway: { allowedHosts: value.first, allowedOrigins: value.second },
+    master_key: randomBytes(32).toString("base64"),
+    gateway: { allowed_hosts: value.first, allowed_origins: value.second },
   }).getProperties();
-  assert.deepEqual(config.gateway.allowedHosts, ["localhost"]);
-  assert.deepEqual(config.gateway.allowedOrigins, ["localhost"]);
+  assert.deepEqual(config.gateway.allowed_hosts, ["localhost"]);
+  assert.deepEqual(config.gateway.allowed_origins, ["localhost"]);
 });
 
 test("programmatic configuration cannot bypass cycle and structure checks", () => {
@@ -384,20 +396,23 @@ test("programmatic configuration cannot bypass cycle and structure checks", () =
   const cycle: Record<string, unknown> = {};
   cycle.self = cycle;
   assert.throws(
-    () => configuration({ masterKey, extra: cycle }),
+    () => configuration({ master_key: masterKey, extra: cycle }),
     /cyclic aliases/,
   );
   assert.throws(
     () =>
       configuration({
-        masterKey,
-        gateway: { allowedHosts: Array<string>(4096).fill("localhost") },
+        master_key: masterKey,
+        gateway: { allowed_hosts: Array<string>(4096).fill("localhost") },
       }),
     /too many values/,
   );
-  assert.throws(() => configuration({ masterKey, log: null, gateway: [] }), {
-    message: "log: expected a mapping.\ngateway: expected a mapping.",
-  });
+  assert.throws(
+    () => configuration({ master_key: masterKey, log: null, gateway: [] }),
+    {
+      message: "log: expected a mapping.\ngateway: expected a mapping.",
+    },
+  );
   assert.throws(() => configuration(new Map()), /plain mapping/);
   assert.throws(() => configuration([]), /expected a mapping/);
 });

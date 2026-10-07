@@ -30,7 +30,7 @@ test("submission rejects blank and oversized nested Text before signing or inser
   const h = evidenceHarness(t, IDENTITY);
   for (const field of Object.values(Field)) {
     const subject = field === Field.Subject ? " \t " : "Valid";
-    const long = "é".repeat(h.dependencies.config.textMaxBytes);
+    const long = "é".repeat(h.dependencies.config.text_max_bytes);
     const verification = {
       testedInput: {
         kind: AssetKind.Repository,

@@ -16,8 +16,8 @@ test("one direct client forwards each call's identity without retaining a previo
   const client = directClient(gatewayOperations, fixture.gateway.invocation);
   for (const username of usernames) {
     const issued = await generateHumanJWT(
-      fixture.config.masterKey,
-      fixture.config.gateway.tokenLifetime,
+      fixture.config.master_key,
+      fixture.config.gateway.token_lifetime,
       username,
     );
     const identity = await fixture.gateway.authentication.authenticate(

@@ -132,7 +132,7 @@ function tasksOfChange(
         dependencies.bindings,
         projectId,
         { ...task, kind: NodeKind.Task, reason: change.reason },
-        dependencies.config.textMaxBytes,
+        dependencies.config.text_max_bytes,
       ),
     }));
 }
@@ -147,7 +147,7 @@ function changeRevision(
   actor: HumanActor,
   now: number,
 ): number {
-  validateText(REASON, change.reason, dependencies.config.textMaxBytes);
+  validateText(REASON, change.reason, dependencies.config.text_max_bytes);
   const content = resolveContent(
     tx,
     dependencies.bindings,
@@ -158,7 +158,7 @@ function changeRevision(
       content: change.content,
       reason: change.reason,
     },
-    dependencies.config.textMaxBytes,
+    dependencies.config.text_max_bytes,
   );
   const tasks = tasksOfChange(tx, dependencies, node, projectId, change);
   const changedFields = contentChanges(content, previous.content);

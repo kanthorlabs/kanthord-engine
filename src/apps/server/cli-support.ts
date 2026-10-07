@@ -18,13 +18,13 @@ export function generateMachineToken(input: {
   projectId: string;
   bindingName: string;
   name: string;
-}): { token: string; clientSecret: string } {
+}): { token: string; client_secret: string } {
   assert.ok(input.env.XDG_CONFIG_HOME);
   assert.ok(input.projectId && input.bindingName && input.name);
   const path = join(input.env.XDG_CONFIG_HOME, "issuance.yaml");
   writePrivate(
     path,
-    stringify(configuration({ masterKey: input.masterKey }).getProperties()),
+    stringify(configuration({ master_key: input.masterKey }).getProperties()),
     true,
   );
   const args = [
@@ -54,11 +54,11 @@ export function generateMachineToken(input: {
   assert.equal(generated.stderr, EMPTY_OUTPUT);
   const fragment = parse(generated.stdout) as {
     token: string;
-    clientSecret: string;
+    client_secret: string;
   };
   assert.ok(isString(fragment.token) && fragment.token.length);
-  assert.ok(isString(fragment.clientSecret) && fragment.clientSecret.length);
-  return { token: fragment.token, clientSecret: fragment.clientSecret };
+  assert.ok(isString(fragment.client_secret) && fragment.client_secret.length);
+  return { token: fragment.token, client_secret: fragment.client_secret };
 }
 
 export function kanthord(

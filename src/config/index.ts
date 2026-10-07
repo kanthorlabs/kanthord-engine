@@ -154,7 +154,7 @@ export function configuration(value: unknown) {
   const properties = config.getProperties();
   assert.deepEqual(Object.keys(properties), Object.keys(schema));
   assert.equal(
-    Buffer.from(properties.masterKey, "base64").length,
+    Buffer.from(properties.master_key, "base64").length,
     MASTER_KEY_BYTES,
   );
   return config;
@@ -173,7 +173,7 @@ export function loadConfig(path: string): ServerConfig {
 export function initialConfig(): string {
   return stringify(
     configuration({
-      masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+      master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
     }).getProperties(),
   );
 }

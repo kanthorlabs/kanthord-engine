@@ -3,11 +3,11 @@ import { isString } from "../kernel/values.ts";
 export { LogDestination } from "../kernel/log.ts";
 export const MASTER_KEY_BYTES = 32;
 export interface GlobalConfig {
-  masterKey: string;
+  master_key: string;
   log: LogConfig;
 }
 export const globalConfigSchema = {
-  masterKey: {
+  master_key: {
     doc: "32-byte master key, encoded as base64.",
     default: null,
     sensitive: true,

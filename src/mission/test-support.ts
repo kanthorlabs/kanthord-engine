@@ -215,8 +215,8 @@ export function missionHarness(
     },
     intakeCheck: { check: unexpectedCollaboration },
     config: {
-      consecutiveLossLimit: CONSECUTIVE_LOSS_LIMIT,
-      textMaxBytes: TEXT_MAX_BYTES,
+      consecutive_loss_limit: CONSECUTIVE_LOSS_LIMIT,
+      text_max_bytes: TEXT_MAX_BYTES,
     },
     bindings: {
       storageBindingOf: unexpectedCollaboration,

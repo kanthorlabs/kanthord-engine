@@ -78,7 +78,7 @@ function storeAt(path = ":memory:"): Store {
 async function tokens(config: TestConfig) {
   return {
     token: (
-      await generateHumanJWT(config.masterKey, config.gateway.tokenLifetime)
+      await generateHumanJWT(config.master_key, config.gateway.token_lifetime)
     ).token,
     machineToken: async (
       projectId: string,
@@ -87,8 +87,8 @@ async function tokens(config: TestConfig) {
     ) =>
       (
         await generateMachineJWT(
-          config.masterKey,
-          config.gateway.tokenLifetime,
+          config.master_key,
+          config.gateway.token_lifetime,
           { projectId, bindingName },
           name,
         )
@@ -102,11 +102,11 @@ export async function authenticationFixture(
   lookups: AuthenticationLookups = fakeLookups(),
 ) {
   const config = configuration({
-    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
   }).getProperties();
   const store = storeAt();
   t.after(() => store.close());
-  const authentication = new Authentication(config.masterKey, lookups);
+  const authentication = new Authentication(config.master_key, lookups);
   return { config, store, authentication, ...(await tokens(config)) };
 }
 
@@ -123,9 +123,9 @@ export function composeGateway(options: {
   const invocation = createInvocation({
     registry,
     stores: { [StoreName.Operational]: options.store },
-    idempotencyTtl: options.config.gateway.idempotencyTtl,
-    masterKey: options.config.masterKey,
-    tokenLifetime: options.config.gateway.tokenLifetime,
+    idempotencyTtl: options.config.gateway.idempotency_ttl,
+    masterKey: options.config.master_key,
+    tokenLifetime: options.config.gateway.token_lifetime,
     lookups: options.lookups,
   });
   const gateway = new GatewayService({
@@ -156,8 +156,8 @@ export async function gatewayFixture(
 ) {
   process.umask(0o077);
   const config = configuration({
-    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
-    gateway: { port: 0, allowedHosts: ["localhost"] },
+    master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    gateway: { port: 0, allowed_hosts: ["localhost"] },
   }).getProperties();
   const store = storeAt(options.path);
   const logs: string[] = [];
@@ -188,7 +188,7 @@ export async function gatewayFixture(
   const error = await gateway.start();
   if (error) throw error;
   const port = gateway.address()!.port;
-  config.gateway.allowedHosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
+  config.gateway.allowed_hosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
   const endpoint = `http://127.0.0.1:${port}`;
   const request = (path: string, init?: RequestInit) =>
     fetch(endpoint + path, init);

@@ -76,7 +76,7 @@ const defaults = {
 const putBody = { agentProviders: [provider], defaultConfiguration: defaults };
 const binding = { bindingId: "binding", workerName: WORKER, entry: null };
 const fakeCollaborations: Omit<Dependencies, "store"> = {
-  config: { prompt: { systemFile: "", agentDirectory: "" } },
+  config: { prompt: { system_file: "", agent_directory: "" } },
   dataDirectory: "/nonexistent/data",
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,

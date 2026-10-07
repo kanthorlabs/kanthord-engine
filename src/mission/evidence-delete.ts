@@ -84,7 +84,7 @@ export function prepareAssetDelete(
     );
   const mission = admitDelete(tx, requireNode(tx, evidence.node_id), body);
   if (body.reason !== undefined)
-    requireTextBound("reason", body.reason, dependencies.config.textMaxBytes);
+    requireTextBound("reason", body.reason, dependencies.config.text_max_bytes);
   return { asset, evidence, mission };
 }
 
@@ -143,7 +143,7 @@ export function prepareEvidenceDelete(
   const node = requireNode(tx, evidence.node_id);
   const mission = admitDelete(tx, node, body);
   if (body.reason !== undefined)
-    requireTextBound("reason", body.reason, dependencies.config.textMaxBytes);
+    requireTextBound("reason", body.reason, dependencies.config.text_max_bytes);
   return { evidence, node, mission, assets: readAssets(tx, evidenceId) };
 }
 

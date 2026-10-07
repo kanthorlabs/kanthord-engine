@@ -32,7 +32,7 @@ export function requestEvidence(
 ) {
   const admitted = admitExecution(tx, dependencies, claim, nodeId, body, now);
   requireEvaluationClaim(admitted.node);
-  requireTextBound("subject", body.subject, dependencies.config.textMaxBytes);
+  requireTextBound("subject", body.subject, dependencies.config.text_max_bytes);
   const action = requiredActionsOf(
     tx,
     dependencies.bindings,

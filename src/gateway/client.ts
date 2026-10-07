@@ -33,12 +33,12 @@ const endpoint = z.url().refine((value) => {
 export const clientSchema = z.strictObject({
   endpoint: endpoint.optional(),
   token: z.string().min(1).optional(),
-  clientSecret: z.string().optional(),
+  client_secret: z.string().optional(),
 });
 export interface ClientConfiguration {
   endpoint: string;
   token?: string;
-  clientSecret?: string;
+  client_secret?: string;
 }
 export const clientConfigPath = (env = process.env) =>
   join(directories(env).config, "cli.yaml");
@@ -73,7 +73,7 @@ export function resolveClient(
       stored.endpoint ??
       "http://127.0.0.1:31415",
     token: options.token ?? env.KANTHORD_TOKEN ?? stored.token,
-    clientSecret: stored.clientSecret,
+    client_secret: stored.client_secret,
   };
   validateClientEndpoint(resolved.endpoint);
   return resolved;

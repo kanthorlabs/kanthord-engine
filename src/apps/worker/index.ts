@@ -45,7 +45,7 @@ const WORKER_STOP_EXIT_FAILURE = 1;
 function ignoreHangup(): void {}
 
 export interface WorkerOptions extends Partial<
-  Omit<ClientConfiguration, "clientSecret">
+  Omit<ClientConfiguration, "client_secret">
 > {
   env?: NodeJS.ProcessEnv;
   context?: Context;
@@ -91,19 +91,19 @@ export class Worker implements Service {
       );
     this.startTask ??= lifecycle(async () => {
       const config = resolveClient(this.options, this.options.env);
-      if (config.clientSecret === undefined)
+      if (config.client_secret === undefined)
         throw new Diagnostic(
           "worker.start.client_secret_absent",
-          "worker: clientSecret is required in cli.yaml.",
+          "worker: client_secret is required in cli.yaml.",
         );
-      const secret = Buffer.from(config.clientSecret, "base64");
+      const secret = Buffer.from(config.client_secret, "base64");
       if (
         secret.length !== CLIENT_SECRET_BYTES ||
-        secret.toString("base64") !== config.clientSecret
+        secret.toString("base64") !== config.client_secret
       )
         throw new Diagnostic(
           "worker.start.client_secret_invalid",
-          "worker: clientSecret must be a base64 encoding of exactly 32 bytes.",
+          "worker: client_secret must be a base64 encoding of exactly 32 bytes.",
         );
       this.clientSecret = secret;
       throwIfCancelled(this.shutdown);

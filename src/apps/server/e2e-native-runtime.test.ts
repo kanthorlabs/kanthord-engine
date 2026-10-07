@@ -230,7 +230,7 @@ test(
     writePrivate(
       join(directory, "server.yaml"),
       stringify(
-        configuration({ masterKey: f.config.masterKey }).getProperties(),
+        configuration({ master_key: f.config.master_key }).getProperties(),
       ),
     );
     function machine(binding: string) {
@@ -257,7 +257,7 @@ test(
         { env: human, encoding: "utf8", timeout: 10000 },
       );
       assert.equal(result.status, SUCCESSFUL_EXIT, result.stderr);
-      return parse(result.stdout) as { token: string; clientSecret: string };
+      return parse(result.stdout) as { token: string; client_secret: string };
     }
     async function claim(binding: string) {
       const auth = machine(binding);
@@ -313,7 +313,7 @@ test(
           body: { executionId: holder.execution.executionId },
         }),
       );
-      const keys = deriveHandoverKeys(holder.clientSecret);
+      const keys = deriveHandoverKeys(holder.client_secret);
       const payload = handoverPayloadSchema.parse(
         openEnvelope(
           keys.handover,

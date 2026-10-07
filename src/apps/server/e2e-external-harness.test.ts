@@ -112,7 +112,7 @@ test(
     const issue = (name: string) =>
       generateMachineToken({
         env: cli.human,
-        masterKey: fixture.config.masterKey,
+        masterKey: fixture.config.master_key,
         projectId: project.id,
         bindingName: "harness",
         name,
@@ -122,8 +122,8 @@ test(
     cli.secrets.push(
       auth.token,
       other.token,
-      auth.clientSecret,
-      other.clientSecret,
+      auth.client_secret,
+      other.client_secret,
     );
     const registration = await cli.read<{
       runtimeIdentity: string;

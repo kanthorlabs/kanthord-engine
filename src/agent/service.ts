@@ -686,8 +686,8 @@ export class AgentComponent {
     return resolveLayers({
       agent,
       settings,
-      systemFile: config.prompt.systemFile,
-      agentDirectory: config.prompt.agentDirectory,
+      systemFile: config.prompt.system_file,
+      agentDirectory: config.prompt.agent_directory,
       dataDirectory,
       hostHome: this.dependencies.hostHome ?? homedir(),
       workingDirectory: workbenchDirectory(agentName),

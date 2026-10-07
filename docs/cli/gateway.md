@@ -79,7 +79,7 @@ requires safe-integer `iat` and `exp` claims and an unexpired `exp`, validates
 the human username and display name as nonblank strings of 1–64 characters,
 requires a string `jti` and enforces the `human` access policy. The [Gateway signing key
 ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
-uses `gateway.tokenVersion` for revocation. The human token cannot carry `binding`. A missing credential, wrong
+uses `gateway.token_version` for revocation. The human token cannot carry `binding`. A missing credential, wrong
 signature, expired token, or machine token fails with HTTP `401` and
 `gateway.authentication.unauthorized`. A username allowlist or
 account database is not involved. The identity is established by Gateway,
@@ -256,7 +256,7 @@ logout, and rotation commands are not part of this specification.
 | OpenAPI package version    | The index carries the `version` of `package.json` in `info.version`. Compatibility enforcement stays with the worker startup check.                                                                                                                                                                                                                                               |
 | Help completeness          | The target requires help to state every default and validation rule. Current `--endpoint` help says only “Server endpoint”; this page specifies behavior that help still needs to expose. The inherited unused endpoint option also appears in local `openapi` help.                                                                                                              |
 | Credential validation      | The server verification checks above are implemented. Local validation of option/environment token values is weaker than the client-file schema. The [JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract. Global issuance syntax stays in [other commands](./other.md). |
-| User management            | The system holds no user management, and no user, session-list or revoke command exists. The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key) revokes every JWT through `gateway.tokenVersion`.                                                                                            |
+| User management            | The system holds no user management, and no user, session-list or revoke command exists. The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key) revokes every JWT through `gateway.token_version`.                                                                                           |
 | Future services in OpenAPI | The CLI assembles the Gateway, LLM, Repository, Storage, Worker, Scheduler, Project and Mission contracts explicitly. A future declared service must be added to the emission set and to server routing; the generator does not scan source directories.                                                                                                                          |
 
 ## Error codes

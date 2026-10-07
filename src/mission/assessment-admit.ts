@@ -119,7 +119,7 @@ export function admitAssessment(
   requireTextBound(
     "rationale",
     body.rationale,
-    dependencies.config.textMaxBytes,
+    dependencies.config.text_max_bytes,
   );
   const evidence = body.evidenceIds.map((id) => readEvidence(tx, id));
   if (

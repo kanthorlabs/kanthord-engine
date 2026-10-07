@@ -270,7 +270,7 @@ async function setupInternal(t: TestContext) {
   const issue = (bindingName: string) =>
     generateMachineToken({
       env: cli.human,
-      masterKey: fixture.config.masterKey,
+      masterKey: fixture.config.master_key,
       projectId: project.id,
       bindingName,
       name: `test_${bindingName}`,
@@ -279,9 +279,9 @@ async function setupInternal(t: TestContext) {
   const reviewAuth = issue("review");
   cli.secrets.push(
     generalAuth.token,
-    generalAuth.clientSecret,
+    generalAuth.client_secret,
     reviewAuth.token,
-    reviewAuth.clientSecret,
+    reviewAuth.client_secret,
   );
   assert.ok(bindingSet.bindings.repo && bindingSet.bindings.gated);
   assert.ok(objective && gated && initiative);

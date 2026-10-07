@@ -31,7 +31,7 @@ async function tokenKey(masterKey: string) {
 
 test("expired human and machine JWTs fail HTTP", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
-  const key = await tokenKey(fixture.config.masterKey);
+  const key = await tokenKey(fixture.config.master_key);
   for (const token of [
     fixture.token,
     await fixture.machineToken(TEST_PROJECT_ID, TEST_WORKER_BINDING),

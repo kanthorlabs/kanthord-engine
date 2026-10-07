@@ -159,9 +159,9 @@ function machine(
   assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
-    clientSecret: string;
+    client_secret: string;
   };
-  assert.ok(fragment.token && fragment.clientSecret);
+  assert.ok(fragment.token && fragment.client_secret);
   return fragment;
 }
 
@@ -287,7 +287,7 @@ async function setup(t: TestContext) {
   writePrivate(
     join(directory, "server.yaml"),
     stringify(
-      configuration({ masterKey: fixture.config.masterKey }).getProperties(),
+      configuration({ master_key: fixture.config.master_key }).getProperties(),
     ),
   );
   const general = machine(directory, projectId, "general-a", human);
@@ -315,7 +315,7 @@ async function setup(t: TestContext) {
     NAME,
   ]);
   assert.ok(stored.revisions[0]);
-  const keys = deriveHandoverKeys(general.clientSecret);
+  const keys = deriveHandoverKeys(general.client_secret);
   t.after(() => {
     keys.handover.fill(0);
     keys.report.fill(0);

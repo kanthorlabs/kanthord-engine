@@ -209,7 +209,7 @@ export class WorkerService implements Service {
 
   sweepRegistrations(): void {
     const expired = this.heartbeatClock.expired(
-      this.dependencies.config.heartbeatWindow,
+      this.dependencies.config.heartbeat_window,
     );
     const ended = this.dependencies.store.transaction((tx) => {
       const now = Date.now();
@@ -288,7 +288,7 @@ export class WorkerService implements Service {
         capability: REGISTRATION_CAPABILITY,
         check: async (context) => {
           throwIfCancelled(context);
-          const window = this.dependencies.config.heartbeatWindow;
+          const window = this.dependencies.config.heartbeat_window;
           assert.ok(Number.isSafeInteger(window) && window > NO_ITEMS);
           assert.ok(runtimeIdentity);
           const age = this.heartbeatClock.ageMs(runtimeIdentity);

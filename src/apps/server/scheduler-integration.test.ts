@@ -620,7 +620,7 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
         );
       }
       const routing = step.mock.method(h.f.mission, "loss");
-      const limit = h.f.config.mission.consecutiveLossLimit;
+      const limit = h.f.config.mission.consecutive_loss_limit;
       for (let loss = 1; loss <= limit; loss++) {
         const claim = completed(
           await h.pull(

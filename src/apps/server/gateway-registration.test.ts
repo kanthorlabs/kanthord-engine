@@ -429,8 +429,8 @@ test("a new invocation loses replay but registration retains its natural-key ide
   const invocation = createInvocation({
     registry: fixture.gateway.registry,
     stores: { [StoreName.Operational]: fixture.store },
-    masterKey: fixture.config.masterKey,
-    tokenLifetime: fixture.config.gateway.tokenLifetime,
+    masterKey: fixture.config.master_key,
+    tokenLifetime: fixture.config.gateway.token_lifetime,
     lookups: fixture.machines,
   });
   t.after(() => invocation.stop());

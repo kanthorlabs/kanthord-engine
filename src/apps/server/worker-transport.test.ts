@@ -22,7 +22,7 @@ const ExpectedErrorCode = {
 } as const;
 test("real listener serves unversioned liveness, applies host/origin policy and uses one failure envelope", async (t) => {
   const fixture = await gatewayFixture(t);
-  fixture.config.gateway.allowedOrigins.push("https://allowed.example");
+  fixture.config.gateway.allowed_origins.push("https://allowed.example");
   const response = await fixture.request("/api/liveness");
   assert.equal(response.status, HttpStatus.OK);
   assert.deepEqual(await response.json(), {

@@ -126,9 +126,9 @@ function machineToken(
   assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
-    clientSecret: string;
+    client_secret: string;
   };
-  assert.ok(fragment.token && fragment.clientSecret);
+  assert.ok(fragment.token && fragment.client_secret);
   return fragment.token;
 }
 
@@ -199,7 +199,7 @@ async function setup(t: TestContext) {
   writePrivate(
     join(directory, "issuance.yaml"),
     stringify(
-      configuration({ masterKey: fixture.config.masterKey }).getProperties(),
+      configuration({ master_key: fixture.config.master_key }).getProperties(),
     ),
   );
   const A = {

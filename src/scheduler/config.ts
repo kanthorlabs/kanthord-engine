@@ -2,7 +2,7 @@ import convict, { type Schema } from "convict";
 import { isNumber } from "../kernel/values.ts";
 
 export interface SchedulerConfig {
-  releaseReserve: number;
+  release_reserve: number;
 }
 
 export const DEFAULT_RELEASE_RESERVE_SECONDS = 600;
@@ -18,7 +18,7 @@ convict.addFormat({
 });
 
 export const schedulerConfigSchema: Schema<SchedulerConfig> = {
-  releaseReserve: {
+  release_reserve: {
     doc: "Reserve after the effective worker wall time, in seconds.",
     format: RELEASE_RESERVE_FORMAT,
     default: DEFAULT_RELEASE_RESERVE_SECONDS,

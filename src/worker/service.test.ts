@@ -130,7 +130,7 @@ const fakeCollaborations = {
 };
 const PROVIDER_CAPABILITY = "model-list read";
 const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
-  config: { prompt: { systemFile: "", agentDirectory: "" } },
+  config: { prompt: { system_file: "", agent_directory: "" } },
   dataDirectory: "/nonexistent/data",
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
@@ -142,7 +142,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => [],
 };
-const WORKER_CONFIG = { heartbeatWindow: 300 };
+const WORKER_CONFIG = { heartbeat_window: 300 };
 
 test("action handler forwards only the proved claim and caller before its commit", async (t) => {
   const f = enablementFixture(t);
@@ -641,7 +641,7 @@ test("start resets live heartbeats and sweep ends only expired rows while preser
   const zero = 0;
   const f = enablementFixture(t, {
     monotonicNow: () => now,
-    config: { ...WORKER_CONFIG, heartbeatWindow: window },
+    config: { ...WORKER_CONFIG, heartbeat_window: window },
   });
   const row = f.store.transaction((tx) =>
     f.worker.registrations.register(tx, client, Date.now()),
@@ -969,7 +969,7 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
   const beyond = 1;
   const f = enablementFixture(t, {
     monotonicNow: () => now,
-    config: { ...WORKER_CONFIG, heartbeatWindow: 1 },
+    config: { ...WORKER_CONFIG, heartbeat_window: 1 },
   });
   const row = f.store.transaction((tx) =>
     f.worker.registrations.register(tx, client, Date.now()),

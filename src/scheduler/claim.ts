@@ -120,7 +120,7 @@ function acquire(
     expiredAt:
       now +
       wallTimeMs +
-      MILLISECONDS_PER_SECOND * dependencies.config.releaseReserve,
+      MILLISECONDS_PER_SECOND * dependencies.config.release_reserve,
     ...trace,
     createdAt: now,
     endedAt: null,

@@ -69,7 +69,7 @@ test("a failed listener releases resources", async (t) => {
   const gateway = composeGateway({
     store,
     config: configuration({
-      masterKey: Buffer.alloc(32).toString("base64"),
+      master_key: Buffer.alloc(32).toString("base64"),
       gateway: { port: address.port },
     }).getProperties(),
     logger: pino({ enabled: false }),
@@ -86,7 +86,7 @@ test("cancellation before and during gateway startup returns an error after rele
   t.after(() => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
   const config = configuration({
-    masterKey: Buffer.alloc(32).toString("base64"),
+    master_key: Buffer.alloc(32).toString("base64"),
     gateway: { port: 0 },
   }).getProperties();
   for (const before of [true, false]) {

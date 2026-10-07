@@ -127,7 +127,9 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
   const claims = decode(token).payload;
   const key = await crypto.subtle.importKey(
     "raw",
-    new Uint8Array(deriveKey(fixture.config.masterKey, "gateway/jwt-hs256/v1")),
+    new Uint8Array(
+      deriveKey(fixture.config.master_key, "gateway/jwt-hs256/v1"),
+    ),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"],
@@ -187,8 +189,8 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     HttpStatus.Unauthorized,
   );
   const fresh = await generateHumanJWT(
-    fixture.config.masterKey,
-    fixture.config.gateway.tokenLifetime,
+    fixture.config.master_key,
+    fixture.config.gateway.token_lifetime,
   );
   assert.equal(
     (
@@ -202,7 +204,7 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     registry: fixture.gateway.registry,
     stores: { [StoreName.Operational]: fixture.store },
     masterKey: otherMasterKey,
-    tokenLifetime: fixture.config.gateway.tokenLifetime,
+    tokenLifetime: fixture.config.gateway.token_lifetime,
   });
   t.after(() => rotated.stop());
   await assert.rejects(
@@ -219,7 +221,7 @@ test("a JWT issued for an explicit username authenticates that human over HTTP a
   });
   const fixture = await gatewayFixture(t, { registry });
   const { token } = await generateHumanJWT(
-    fixture.config.masterKey,
+    fixture.config.master_key,
     600,
     "ulrich",
   );
@@ -245,7 +247,7 @@ test("a JWT issued for an explicit username authenticates that human over HTTP a
       assert.deepEqual(result.data, { accountId: "ulrich" });
   }
   const reissued = await generateHumanJWT(
-    fixture.config.masterKey,
+    fixture.config.master_key,
     600,
     "ulrich",
   );
@@ -258,7 +260,7 @@ test("a JWT issued for an explicit username authenticates that human over HTTP a
     { ...identity, jti: decode(reissued.token).payload.jti },
   );
   await assert.rejects(
-    generateHumanJWT(fixture.config.masterKey, 600, ""),
+    generateHumanJWT(fixture.config.master_key, 600, ""),
     /username:/,
   );
 });
@@ -397,7 +399,7 @@ test("expired replay executes the handler again while an unexpired replay does n
   const first = await client.operation(input, options);
   assert.deepEqual(await client.operation(input, options), first);
   assert.equal(calls, SINGLE_EXECUTION_COUNT);
-  now += fixture.config.gateway.idempotencyTtl * 1000;
+  now += fixture.config.gateway.idempotency_ttl * 1000;
   assert.notDeepEqual(await client.operation(input, options), first);
   assert.equal(calls, SINGLE_EXECUTION_COUNT + SINGLE_EXECUTION_COUNT);
 });

@@ -26,9 +26,9 @@ test("machine issuance helper preserves group claims and independently derives p
   };
   const first = generateMachineToken(input);
   const second = generateMachineToken(input);
-  assert.equal(Buffer.from(first.clientSecret, "base64").length, KEY_BYTES);
-  assert.equal(Buffer.from(second.clientSecret, "base64").length, KEY_BYTES);
-  assert.ok(first.clientSecret !== second.clientSecret);
+  assert.equal(Buffer.from(first.client_secret, "base64").length, KEY_BYTES);
+  assert.equal(Buffer.from(second.client_secret, "base64").length, KEY_BYTES);
+  assert.ok(first.client_secret !== second.client_secret);
   assert.equal(
     statSync(join(env.XDG_CONFIG_HOME!, "issuance.yaml")).mode & MODE_MASK,
     PRIVATE_MODE,

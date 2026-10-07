@@ -151,7 +151,7 @@ class Run:
         os.close(slave)
         try:
             machine = "--binding" in args
-            pattern = rb"^token: " + TOKEN + rb"clientSecret: ([^\r\n]+)\r?\n" if machine else rb"^" + TOKEN
+            pattern = rb"^token: " + TOKEN + rb"client_secret: ([^\r\n]+)\r?\n" if machine else rb"^" + TOKEN
             values = terminal_read(master, child, pattern)
             self.secrets.extend(values)
             token = values[0]
@@ -218,13 +218,13 @@ class Run:
           const file = process.env.KANTHORD_CONFIG;
           const config = loadConfig(file);
           config.gateway.port = Number(process.env.E2E_PORT);
-          config.gateway.allowedHosts = [`127.0.0.1:${config.gateway.port}`];
-          config.gateway.tokenLifetime = 600;
+          config.gateway.allowed_hosts = [`127.0.0.1:${config.gateway.port}`];
+          config.gateway.token_lifetime = 600;
           writePrivate(file, stringify(config), true);
-          writePrivate(file + '.expired', stringify({...config, gateway: {...config.gateway, tokenLifetime: 0}}));
-          const other = {...config, masterKey: randomBytes(32).toString('base64')};
+          writePrivate(file + '.expired', stringify({...config, gateway: {...config.gateway, token_lifetime: 0}}));
+          const other = {...config, master_key: randomBytes(32).toString('base64')};
           writePrivate(file + '.wrong-key', stringify(other));
-          console.log(JSON.stringify({masterKey: config.masterKey, otherKey: other.masterKey}));
+          console.log(JSON.stringify({masterKey: config.master_key, otherKey: other.master_key}));
         """)
         self.secrets.extend(prepared.values())
         self.metadata.update({"port": port, "endpoint": f"http://127.0.0.1:{port}"})

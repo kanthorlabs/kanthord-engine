@@ -112,7 +112,7 @@ async function fixture(t: TestContext) {
   };
   const auth = setup.machine("general-a");
   assert.ok(nodeId);
-  assert.ok(auth.clientSecret);
+  assert.ok(auth.client_secret);
   return { ...setup, nodeId, bare, git, auth, transport };
 }
 
@@ -295,7 +295,7 @@ test(
         const host = await inProcessWorker(t, {
           endpoint: setup.fixture.endpoint,
           token: setup.auth.token,
-          clientSecret: other.clientSecret,
+          client_secret: other.client_secret,
           modelRuntimeFactory: scriptedModelRuntime(provider),
           repositoryTransport: setup.transport,
         });

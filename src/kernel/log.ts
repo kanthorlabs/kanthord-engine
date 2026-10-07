@@ -15,9 +15,11 @@ export interface LogConfig {
 
 export const redactionPaths = [
   "masterKey",
+  "master_key",
   "password",
   "token",
   "clientSecret",
+  "client_secret",
   "credential",
   "payload",
   "material",
@@ -37,8 +39,8 @@ export const redactionPaths = [
   "req.body.clientSecret",
   "req.body.token",
   "req.body.masterKey",
-  "config.masterKey",
-  "config.clientSecret",
+  "config.master_key",
+  "config.client_secret",
 ];
 
 export class OperationalLog {

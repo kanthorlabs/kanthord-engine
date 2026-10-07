@@ -92,7 +92,7 @@ test("claim pins binding, attempt, revision, trace and the fixed effective deadl
   assert.deepEqual(first.row!.credentials, []);
   assert.equal(Object.hasOwn(first.row!, "kind"), false);
   h.binding.resourceBudget = { wallTimeMs: 1 };
-  h.dependencies.config.releaseReserve = 1;
+  h.dependencies.config.release_reserve = 1;
   const repeat = h.claim();
   assert.equal(repeat.outcome, ClaimOutcome.Running);
   assert.deepEqual(repeat.row, first.row);

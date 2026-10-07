@@ -27,7 +27,7 @@ const REASON_LIMIT = 12;
 const CONTENT_INVALID = "mission.node.content_invalid";
 test("controls reject blank and oversized UTF-8 reasons without writes, preserving exact-limit text", async (t) => {
   const h = controlHarness(t, IDENTITY);
-  h.dependencies.config.textMaxBytes = REASON_LIMIT;
+  h.dependencies.config.text_max_bytes = REASON_LIMIT;
   const before = h.node();
   for (const reason of [
     "   ",

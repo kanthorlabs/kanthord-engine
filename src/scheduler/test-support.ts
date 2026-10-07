@@ -59,7 +59,7 @@ export function schedulerHarness(
   };
   const dependencies: Dependencies = {
     store,
-    config: { releaseReserve: DEFAULT_RELEASE_RESERVE_SECONDS },
+    config: { release_reserve: DEFAULT_RELEASE_RESERVE_SECONDS },
     transitions: {
       claim: (...args) => {
         record("claim", args);

@@ -244,7 +244,7 @@ that a default or an entry names. Rotation makes no remote call and commits in o
 It changes no binding revision. HTTP `200` returns the credential answer
 without the secret.
 Custody logs the human identity and record identity, never material.
-This command does not rotate `masterKey`.
+This command does not rotate `master_key`.
 
 ## `update-metadata <credential-name>`
 

@@ -297,7 +297,7 @@ function makeService(
   health: HealthRegistry,
   store: Store,
   collaborators: Collaborators = { bindings, workQueue },
-  textMaxBytes = TEXT_MAX_BYTES,
+  text_max_bytes = TEXT_MAX_BYTES,
 ): MissionService {
   return new MissionService({
     store,
@@ -310,8 +310,8 @@ function makeService(
     },
     intakeCheck: { check: unexpectedCollaboration },
     config: {
-      consecutiveLossLimit: CONSECUTIVE_LOSS_LIMIT,
-      textMaxBytes,
+      consecutive_loss_limit: CONSECUTIVE_LOSS_LIMIT,
+      text_max_bytes,
     },
     health,
     schedulerClaims: {
@@ -332,7 +332,7 @@ function makeService(
 function fixture(
   t: TestContext,
   collaborators?: Collaborators,
-  textMaxBytes?: number,
+  text_max_bytes?: number,
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
@@ -345,7 +345,7 @@ function fixture(
       new HealthRegistry(),
       store,
       collaborators,
-      textMaxBytes,
+      text_max_bytes,
     ),
   };
 }
@@ -353,9 +353,9 @@ function fixture(
 function handlerFixture(
   t: TestContext,
   collaborators?: Collaborators,
-  textMaxBytes?: number,
+  text_max_bytes?: number,
 ) {
-  const { store, mission } = fixture(t, collaborators, textMaxBytes);
+  const { store, mission } = fixture(t, collaborators, text_max_bytes);
   const registry = new OperationRegistry();
   mission.declare(registry);
   let commits = 0;
@@ -665,7 +665,7 @@ function nodeFixture(
           disabled: false,
         };
   },
-  textMaxBytes?: number,
+  text_max_bytes?: number,
   collaborators: Partial<Collaborators> = {},
 ) {
   const calls: QueueCall[] = [];
@@ -703,7 +703,7 @@ function nodeFixture(
       },
       ...collaborators,
     },
-    textMaxBytes,
+    text_max_bytes,
   );
   f.store.transaction((tx) =>
     f.mission.createMission(tx, PROJECT_ID, HUMAN_ACTOR),
@@ -1676,10 +1676,10 @@ const REASON_FIELD = "reason";
 function dependencyFixture(
   t: TestContext,
   bindingRevision?: MissionBindings["getBindingRevision"],
-  textMaxBytes?: number,
+  text_max_bytes?: number,
   collaborators: Partial<Collaborators> = {},
 ) {
-  const f = nodeFixture(t, bindingRevision, textMaxBytes, collaborators);
+  const f = nodeFixture(t, bindingRevision, text_max_bytes, collaborators);
   f.store.database.exec(
     "CREATE TABLE test_mission_job (node_id TEXT PRIMARY KEY)",
   );
@@ -4257,10 +4257,15 @@ const IMPORT_NODE_COUNT = 4;
 function importApplyFixture(
   t: TestContext,
   bindingRevision?: MissionBindings["getBindingRevision"],
-  textMaxBytes?: number,
+  text_max_bytes?: number,
   collaborators: Partial<Collaborators> = {},
 ) {
-  const f = dependencyFixture(t, bindingRevision, textMaxBytes, collaborators);
+  const f = dependencyFixture(
+    t,
+    bindingRevision,
+    text_max_bytes,
+    collaborators,
+  );
   function entry(
     filename: string,
     kind: NodeKind,

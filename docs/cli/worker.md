@@ -32,7 +32,7 @@ are implemented and wired to Project authorization and Scheduler execution pins.
 The `handover` CLI leaf is implemented with its published validation code.
 
 The [Worker configuration fragment](../../src/worker/config.ts) declares
-`heartbeatWindow`. The catalog, report-only instance
+`heartbeat_window`. The catalog, report-only instance
 healthcheck collaboration and registration heartbeat lifecycle are implemented.
 Native agent loops, server-placement pools, prompt consumption, repository
 actions and MCP remain later runtime work. The service probe reports
@@ -192,7 +192,7 @@ activity collaborations remain stand-ins under D6/D9 until Plan 03; production
 calls requiring those unwired collaborators fail explicitly. The [Gateway signing
 key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
 revokes every JWT after an increment
-of `gateway.tokenVersion` and a restart.
+of `gateway.token_version` and a restart.
 
 Source checks: [CLI integration tests](../../src/apps/server/cli-worker.test.ts),
 [registration integration tests](../../src/apps/server/gateway-registration.test.ts)
@@ -211,7 +211,7 @@ kanthord worker [--endpoint <url>] heartbeat [--token <jwt>]
 The command calls `POST /api/worker/heartbeat`, operation `worker.heartbeat`, with `client` access and an empty body.
 The operation requires a live registration and answers 204.
 Every authenticated request of the registered client identity renews its heartbeat.
-`worker.heartbeatWindow` defaults to 300 s; a sweep every 30 s ends expired registrations and frees their slots.
+`worker.heartbeat_window` defaults to 300 s; a sweep every 30 s ends expired registrations and frees their slots.
 The [registration heartbeat](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#registration-heartbeat) rules expiry, renewed registration and execution loss.
 The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration) rules the window default.
 
@@ -516,14 +516,14 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | ----- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | local | `worker.version.unavailable`                              | The server package version is unavailable.                                                                                                                                                                                        | serve worker                                                                  |
 | local | `worker.version.mismatch`                                 | The server package version differs.                                                                                                                                                                                               | serve worker                                                                  |
-| local | `worker.start.client_secret_invalid`                      | The clientSecret is not a canonical 32-byte base64 value.                                                                                                                                                                         | serve worker                                                                  |
-| local | `worker.start.client_secret_absent`                       | The worker has no clientSecret in cli.yaml.                                                                                                                                                                                       | serve worker                                                                  |
+| local | `worker.start.client_secret_invalid`                      | The client_secret is not a canonical 32-byte base64 value.                                                                                                                                                                        | serve worker                                                                  |
+| local | `worker.start.client_secret_absent`                       | The worker has no client_secret in cli.yaml.                                                                                                                                                                                      | serve worker                                                                  |
 | local | `worker.start.tool_missing`                               | `rg`, or `fd` (`fdfind`), cannot run on the worker host.                                                                                                                                                                          | serve worker                                                                  |
 | local | `worker.runtime.setup_refused`                            | The adapter cannot map the execution setup onto pi; `details.reason` is `model_unknown`, `reasoning_effort_unsupported`, `credential_absent` or `credential_revision_mismatch`.                                                   | serve worker                                                                  |
 | local | `worker.start.registration_indeterminate`                 | The registration at startup answers an indeterminate result.                                                                                                                                                                      | serve worker                                                                  |
 | local | `worker.stop.execution_live`                              | A stop signal arrives during a live execution; the application aborts the agent, deregisters nothing and exits 1.                                                                                                                 | serve worker                                                                  |
 | local | `worker.stop.deregistration_indeterminate`                | The deregistration at a stop answers an indeterminate result.                                                                                                                                                                     | serve worker                                                                  |
-| local | `worker.handover.decryption_failed`                       | The handover envelope does not open under the handover key of the clientSecret.                                                                                                                                                   | serve worker                                                                  |
+| local | `worker.handover.decryption_failed`                       | The handover envelope does not open under the handover key of the client_secret.                                                                                                                                                  | serve worker                                                                  |
 | local | `worker.evidence_upload.path_refused`                     | The path of `evidence-upload` is absolute, leaves the workspace, is a symbolic link, is not a regular file or is replaced during the open; `details.reason` is `outside_workspace`, `symbolic_link`, `not_regular` or `replaced`. | serve worker                                                                  |
 | local | `worker.evidence_upload.transfer_failed`                  | The PUT to the presigned destination fails or answers a status outside 2xx.                                                                                                                                                       | serve worker                                                                  |
 | 409   | `worker.execution.no_native_agent`                        | The setup read names an execution of an externally hosted worker.                                                                                                                                                                 | worker.execution.setup.get (API only)                                         |

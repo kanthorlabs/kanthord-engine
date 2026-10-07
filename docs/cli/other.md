@@ -142,17 +142,17 @@ file's fields use those contracts; its location and file checks follow below.
 
 ### `cli.yaml` and its effects
 
-The file accepts `endpoint`, `token` and `clientSecret` under the [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
-Only `serve worker` reads `clientSecret`; service-group commands ignore it.
+The file accepts `endpoint`, `token` and `client_secret` under the [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
+Only `serve worker` reads `client_secret`; service-group commands ignore it.
 The client secret is a canonical base64 encoding of 32 bytes.
 It has no environment variable and no option.
 See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
-A `masterKey` field fails with `cli.config.invalid`.
+A `master_key` field fails with `cli.config.invalid`.
 
 The path is `<XDG configuration directory>/kanthord/cli.yaml`, normally
 `~/.config/kanthord/cli.yaml`. There is no `--client-config` path option and
 `KANTHORD_CONFIG` does not select this file. An absent file is allowed. When
-present, it accepts only optional `endpoint`, `token` and `clientSecret` fields
+present, it accepts only optional `endpoint`, `token` and `client_secret` fields
 in one YAML mapping. It shares the bounded YAML parser described under
 [server configuration](#server-configuration).
 
@@ -247,7 +247,7 @@ A changed effect needs a new logical invocation and key, after resolving any
 uncertainty about the original effect.
 
 **Implemented:** replay is in memory, scoped to the caller and one
-server process, with `gateway.idempotencyTtl` defaulting to `86400` seconds.
+server process, with `gateway.idempotency_ttl` defaulting to `86400` seconds.
 An in-progress key or a key reused for a different operation/payload produces
 HTTP `409`. A completed record replays within its lifetime, subject to operation rules
 such as worker registration still being live. Restart or expiry can run the
@@ -271,7 +271,7 @@ request; transport correlation alone never deduplicates a domain effect.
 does not prove cleanup has finished and undoes no committed effect. Cancelling
 a work pull releases no committed claim and ends no accepted obligation.
 Closing an MCP stream ends the connection, not the domain session. An increment
-of `gateway.tokenVersion` and a server restart invalidate every issued JWT,
+of `gateway.token_version` and a server restart invalidate every issued JWT,
 but cancel no request already verified.
 
 Stopping the CLI, closing a connection, restarting the server without a
@@ -309,7 +309,7 @@ bindings or option overrides for server field values. `KANTHORD_ENDPOINT` does
 not change `gateway.bind` or `gateway.port`. Configuration is read at startup,
 and an edit takes effect on the next start. **Target requirement:** a relative
 path-valued field inside the configuration resolves against the data directory.
-`agent.prompt.systemFile` and `agent.prompt.agentDirectory` declare such fields.
+`agent.prompt.system_file` and `agent.prompt.agent_directory` declare such fields.
 
 Reads require a user-owned regular `0600` file and a user-owned `0700` containing
 directory. Exact modes are checked, including rejection of special bits and
@@ -328,7 +328,7 @@ and reasons without field values or YAML excerpts.
 
 The implemented fields are:
 
-- `masterKey`: required canonical base64 encoding of exactly 32 bytes. There
+- `master_key`: required canonical base64 encoding of exactly 32 bytes. There
   is no usable default. `config init` generates it using `crypto.randomBytes`.
 - `log.level`: optional enum `trace|debug|info|warn|error|fatal`, default `info`.
 - `log.destination`: optional enum `stderr|file`, default `stderr`; `file` uses
@@ -336,25 +336,25 @@ The implemented fields are:
 - `gateway.bind`: optional loopback-IP string, default `127.0.0.1`; current
   validation accepts IPv4 `127.*` loopback addresses and `::1`.
 - `gateway.port`: optional Convict `port`, default `31415`.
-- `gateway.allowedHosts`: optional array of nonempty strings, default
+- `gateway.allowed_hosts`: optional array of nonempty strings, default
   `["127.0.0.1:31415", "localhost:31415"]`.
-- `gateway.allowedOrigins`: optional array of nonempty strings, default `[]`.
-- `gateway.tokenLifetime`: optional Convict `nat` in seconds, default
+- `gateway.allowed_origins`: optional array of nonempty strings, default `[]`.
+- `gateway.token_lifetime`: optional Convict `nat` in seconds, default
   `31536000` (one year). Local issuance additionally requires a nonnegative safe
   integer; zero produces an immediately expiring token.
-- `gateway.idempotencyTtl`: optional positive safe integer in seconds, default
+- `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
-- `mission.consecutiveLossLimit`: optional Convict `nat`, default `3`. It
+- `mission.consecutive_loss_limit`: optional Convict `nat`, default `3`. It
   holds the consecutive loss limit of the Mission Service.
-- `mission.textMaxBytes`: optional Convict `nat` in UTF-8 bytes, default
+- `mission.text_max_bytes`: optional Convict `nat` in UTF-8 bytes, default
   `32768`. It bounds every `Text` value of a Mission write; a stored value keeps
   its length after a change of the bound.
 
-- `worker.heartbeatWindow`: optional positive safe integer in seconds, default
+- `worker.heartbeat_window`: optional positive safe integer in seconds, default
   `300`. A 30-second sweep ends expired registrations.
 
-- `scheduler.releaseReserve`: optional positive safe integer in seconds, default
+- `scheduler.release_reserve`: optional positive safe integer in seconds, default
   `600`. A claim adds this reserve after its effective worker wall time.
 
 The current Project fragment is empty and adds no YAML section.
@@ -502,7 +502,7 @@ only, and it opens no database.
 
 No other option exists. The worker binding, the worker, the agent configuration
 and the instance count come from the server through the binding that the machine
-token names. `clientSecret` comes from `cli.yaml` alone, under the
+token names. `client_secret` comes from `cli.yaml` alone, under the
 [client configuration ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-configuration-file).
 The workspace lives under the XDG state directory of the host.
 
@@ -512,7 +512,7 @@ of a worker binding need N processes with N machine tokens.
 
 Output: operational JSON log records go to stderr. Startup prints no token and
 requires no terminal. Startup resolves the client configuration, checks
-`clientSecret` for a canonical 32-byte base64 value, checks the server package
+`client_secret` for a canonical 32-byte base64 value, checks the server package
 version, registers the instance, and then
 logs one record `Worker application ready` with `runtimeIdentity`,
 `resourceIdentity` and `workerName`. A version mismatch refuses startup with both
@@ -636,15 +636,15 @@ Without `--verbose`, machine mode prints this `cli.yaml` fragment:
 
 ```yaml
 token: <jwt>
-clientSecret: <secret>
+client_secret: <secret>
 ```
 
 Each line ends with a newline. Paste the fragment below `endpoint:` in private
-`cli.yaml`. The command derives the client secret from the server `masterKey`
+`cli.yaml`. The command derives the client secret from the server `master_key`
 and the new token's `sub`. It uses HKDF-SHA256 with an empty salt, the label
 `"worker/client-secret/v1/" + sub`, and 32 output bytes in canonical base64.
 The `v1` matches the current signing-key label. The code does not yet implement
-`tokenVersion`. See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
+`token_version`. See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
 The server stores no client secret. Each new machine token has a different
 client secret. Human mode issues no client secret.
 
@@ -684,9 +684,9 @@ the two-line machine fragment, or the `Created <absolute path>` line with
 **Implemented:** both modes read the validated whole server configuration,
 derive the signing key using HKDF-SHA-256 with an empty salt and the label
 `gateway/jwt-hs256/v1`, and sign with HS256. Both include `iat` and `exp` in
-JWT Unix seconds and a fresh bare ULID `jti`; `exp = iat + gateway.tokenLifetime`.
+JWT Unix seconds and a fresh bare ULID `jti`; `exp = iat + gateway.token_lifetime`.
 The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
-sets the target label to `gateway/jwt-hs256/v<tokenVersion>`.
+sets the target label to `gateway/jwt-hs256/v<token_version>`.
 The CLI has no lifetime, algorithm, issuer, audience, custom-claims, subject-ID,
 or signing-key override flags.
 The [Gateway JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract.
@@ -698,7 +698,7 @@ substitution, or other non-terminal stdout fails with
 token signing. Stdin need not be a terminal and is never read.
 
 Without `--output` or `--verbose`, human mode prints exactly `<JWT>\n`.
-Machine mode prints exactly `token: <jwt>\nclientSecret: <secret>\n`, as shown
+Machine mode prints exactly `token: <jwt>\nclient_secret: <secret>\n`, as shown
 above. Exit is `0`. With `--verbose`, the same claim list follows the human JWT
 line or the machine fragment. It adds no client secret to the claims.
 No secret is printed to stderr. Invalid inputs, an absent or invalid
@@ -715,11 +715,11 @@ configuration. Terminal-only output does not detect a terminal recorder.
 Issuance and a server restart without a configuration change revoke no earlier
 token. Under the [Gateway signing key
 ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key),
-an increment of `gateway.tokenVersion` and a restart invalidate every issued
+an increment of `gateway.token_version` and a restart invalidate every issued
 JWT and change every client secret. The Custody key stays unchanged.
 A token remains usable subject to verification, expiry, and, for machines,
 binding availability. Replacing
-`masterKey` invalidates tokens and changes every client secret and every other
+`master_key` invalidates tokens and changes every client secret and every other
 key derived from it. This specification adds no secret-rotation command or
 recovery workflow. The CLI cannot reissue a lost machine token with the same
 client identity;
@@ -799,7 +799,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 401             | `gateway.authentication.unauthorized`            | A required JWT is absent, invalid, expired or has the wrong caller kind.                                                | authenticated remote commands                             |
 | 503             | `gateway.healthcheck.inventory_failed`           | A resource owner did not supply its health inventory.                                                                   | GET /api/healthcheck                                      |
 | upstream status | `gateway.http.failed`                            | HTTP middleware raises an HTTP exception other than a timeout.                                                          | HTTP routes                                               |
-| 403             | `gateway.http.host_not_allowed`                  | The request Host header is absent or not on `allowedHosts`.                                                             | HTTP routes                                               |
+| 403             | `gateway.http.host_not_allowed`                  | The request Host header is absent or not on `allowed_hosts`.                                                            | HTTP routes                                               |
 | 409             | `gateway.idempotency.conflict`                   | The same caller reuses a key for a different operation or input.                                                        | remote mutations                                          |
 | 400             | `gateway.idempotency.invalid_key`                | The Idempotency-Key header is not a canonical ULID.                                                                     | remote mutations                                          |
 | 403             | `gateway.invocation.execution_proof_failed`      | The execution identity of the input is no live claim of the registration of the machine identity.                       | machine operations that require a live execution          |

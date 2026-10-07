@@ -97,15 +97,15 @@ function machineToken(
   assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
-    clientSecret: string;
+    client_secret: string;
   };
-  assert.ok(fragment.token && fragment.clientSecret);
+  assert.ok(fragment.token && fragment.client_secret);
   return fragment.token;
 }
 
 async function setup(t: TestContext, short = false) {
   const fixture = await gatewayFixture(t, {
-    scheduler: short ? { releaseReserve: 1 } : {},
+    scheduler: short ? { release_reserve: 1 } : {},
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
@@ -249,7 +249,7 @@ async function setup(t: TestContext, short = false) {
   writePrivate(
     join(directory, "server.yaml"),
     stringify(
-      configuration({ masterKey: fixture.config.masterKey }).getProperties(),
+      configuration({ master_key: fixture.config.master_key }).getProperties(),
     ),
   );
   const G = {

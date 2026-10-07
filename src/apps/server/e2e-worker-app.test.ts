@@ -82,7 +82,7 @@ function clientFile(env: NodeJS.ProcessEnv, clientSecret: string): void {
   assert.ok(clientSecret);
   writePrivate(
     join(directories(env).config, "cli.yaml"),
-    stringify({ clientSecret }),
+    stringify({ client_secret: clientSecret }),
   );
 }
 
@@ -295,7 +295,7 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
   writePrivate(
     configPath,
     stringify(
-      configuration({ masterKey: fixture.config.masterKey }).getProperties(),
+      configuration({ master_key: fixture.config.master_key }).getProperties(),
     ),
   );
   const entry = new URL("../../main.ts", import.meta.url).href;
@@ -324,7 +324,7 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
     join(directories(env).config, "cli.yaml"),
     `endpoint: ${fixture.endpoint}\n${generated.stdout}`,
   );
-  const { token, clientSecret } = parse(generated.stdout);
+  const { token, client_secret: clientSecret } = parse(generated.stdout);
   assert.ok(token);
   assert.ok(clientSecret);
   const proc = spawnWorker(WORKER_ARGS, env);
@@ -351,7 +351,7 @@ test("E09.1 worker refuses --config", async (t) => {
   assert.ok(result.stderr.startsWith("cli.serve.worker_config:"));
 });
 
-test("E09.2 absent clientSecret refuses before network", async (t) => {
+test("E09.2 absent client_secret refuses before network", async (t) => {
   const env = workerEnvironment(t);
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
@@ -361,7 +361,7 @@ test("E09.2 absent clientSecret refuses before network", async (t) => {
   }
 });
 
-test("E09.3 invalid clientSecret refuses before network", async (t) => {
+test("E09.3 invalid client_secret refuses before network", async (t) => {
   const env = workerEnvironment(t);
   clientFile(env, randomBytes(INVALID_KEY_BYTES).toString("base64"));
   const proc = spawnWorker(WORKER_ARGS, env);
@@ -468,7 +468,7 @@ test(
       KANTHORD_ENDPOINT: setup.fixture.endpoint,
       KANTHORD_TOKEN: auth.token,
     };
-    clientFile(env, auth.clientSecret);
+    clientFile(env, auth.client_secret);
     const ready = async (proc: WorkerProcess, previous?: string) => {
       const line = await proc.waitForLine(
         (entry) =>
@@ -499,7 +499,7 @@ test(
       for (const line of result.stderr.filter(Boolean)) {
         JSON.parse(line);
         assert.ok(!line.includes(auth.token));
-        assert.ok(!line.includes(auth.clientSecret));
+        assert.ok(!line.includes(auth.client_secret));
       }
       const missing = await kanthord(
         ["worker", "instance", "get", identity],
@@ -525,7 +525,7 @@ test(
         KANTHORD_ENDPOINT: setup.fixture.endpoint,
         KANTHORD_TOKEN: other.token,
       };
-      clientFile(otherEnv, other.clientSecret);
+      clientFile(otherEnv, other.client_secret);
       const refused = spawnWorker(WORKER_ARGS, otherEnv);
       try {
         await failure(refused, "worker.instance.slot_unavailable");
