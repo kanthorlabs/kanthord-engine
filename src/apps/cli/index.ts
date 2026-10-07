@@ -31,6 +31,7 @@ import { addRepositoryCommand } from "./repository.ts";
 import { addStorageCommand } from "./storage.ts";
 import { addProjectCommand } from "./project.ts";
 import { addMissionCommand } from "./mission.ts";
+import { addIntakeCommand } from "./intake.ts";
 import { addSchedulerCommand } from "./scheduler.ts";
 import {
   CommandName,
@@ -168,6 +169,7 @@ export function createProgram(
   addProjectCommand(program);
   addSchedulerCommand(program);
   addMissionCommand(program);
+  addIntakeCommand(program);
   for (const name of [CommandName.Tracking]) {
     const group = program
       .command(name)

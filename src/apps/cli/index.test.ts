@@ -1173,3 +1173,71 @@ test("launcher rejects an unsupported runtime before importing application code"
     assert.match(result.stderr, />=24.15.0 <25/);
   }
 });
+
+test("intake outbound commands expose offline help, reject --config and validate identities before I/O", (t) => {
+  const env = environment(temporary(t));
+  const outboundId = "outbound_request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  for (const args of [
+    ["intake", "--help"],
+    ["intake", "outbound", "--help"],
+    ["intake", "outbound", "list", "--help"],
+    ["intake", "outbound", "get", "--help"],
+    ["intake", "outbound", "discard", "--help"],
+    ["intake", "outbound", "delete", "--help"],
+  ]) {
+    const help = invocation(args, env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+  }
+  for (const leaf of [
+    ["list"],
+    ["get", outboundId],
+    ["discard", outboundId],
+    ["delete"],
+  ]) {
+    const result = invocation(
+      ["intake", "outbound", ...leaf, "--config", "x.yaml"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+  }
+  const invalid = invocation(["intake", "outbound", "get", "bad"], env);
+  assert.equal(invalid.status, ExitCode.Failure);
+  assert.match(
+    invalid.stderr,
+    /^cli\.intake\.outbound\.get\.invalid_outbound_request_id:/,
+  );
+  const discard = invocation(["intake", "outbound", "discard", "bad"], env);
+  assert.match(
+    discard.stderr,
+    /^cli\.intake\.outbound\.discard\.invalid_outbound_request_id:/,
+  );
+  const repeated = invocation(
+    ["intake", "outbound", "list", "--state", "failed", "--state", "failed"],
+    env,
+  );
+  assert.match(repeated.stderr, /^cli\.option\.duplicate:/);
+});
+
+test("intake outbound discard prints the generated key when the result is indeterminate", (t) => {
+  const env = environment(temporary(t));
+  const args = [
+    "intake",
+    "outbound",
+    "discard",
+    "outbound_request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "--endpoint",
+    "http://127.0.0.1:1",
+    "--token",
+    "t",
+  ];
+  const result = invocation(args, env);
+  assert.equal(result.status, ExitCode.Failure);
+  assert.match(
+    result.stderr,
+    /^cli\.intake\.outbound\.discard\.indeterminate:/,
+  );
+  assert.match(
+    result.stderr,
+    /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
+  );
+});

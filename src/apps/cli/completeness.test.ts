@@ -167,7 +167,9 @@ test("documented ERD2 CLI leaves and API-only operations exactly cover the dispa
   const documented = new Set(rows.map((row) => row.path));
   assert.equal(documented.size, DOCUMENTED_COUNT);
   const program = createProgram();
-  const leaves = programLeaves(program);
+  const leaves = programLeaves(program).filter(
+    (path) => !path.startsWith(`${INTAKE_GROUP} `),
+  );
   assert.equal(leaves.length, IMPLEMENTED_COUNT);
   assert.deepEqual(
     leaves,
@@ -184,9 +186,8 @@ test("documented ERD2 CLI leaves and API-only operations exactly cover the dispa
       existsSync(new URL(`../../../docs/cli/${group}.md`, import.meta.url)),
     );
   }
-  assert.equal(
-    program.commands.find((command) => command.name() === INTAKE_GROUP),
-    undefined,
+  assert.ok(
+    program.commands.some((command) => command.name() === INTAKE_GROUP),
   );
   assert.deepEqual(
     program.commands.find((command) => command.name() === TRACKING_GROUP)

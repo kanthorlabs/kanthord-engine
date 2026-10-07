@@ -11,6 +11,7 @@ export const CommandName = {
   Storage: "storage",
   Project: "project",
   Mission: "mission",
+  Intake: "intake",
   Scheduler: "scheduler",
   Tracking: "tracking",
 } as const;
