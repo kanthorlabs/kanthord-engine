@@ -17,6 +17,7 @@ import {
   parsePositiveInt,
   readJsonFile,
   readJsonFileAs,
+  readTextFile,
   requireToken,
   resolveKey,
   singleUse,
@@ -30,6 +31,7 @@ const DUPLICATE_KEY = "cli.file.duplicate_key";
 const NOT_JSON = "cli.file.not_json";
 const INVALID_ENCODING = "cli.file.encoding_invalid";
 const INVALID_SCHEMA = "cli.file.schema_invalid";
+const TEXT_CONTENT = "# Title\n{not json";
 const INVALID_PERMISSIONS = "system.files.invalid_permissions";
 const INVALID_KEY = "cli.idempotency_key.invalid";
 const BAD_INT = "cli.test.bad_int";
@@ -63,6 +65,21 @@ test("JSON file checks path, existence, type, and object shape", (t) => {
   assert.deepEqual(readJsonFile(path), { a: 1 });
   writeFileSync(path, "[1,2]");
   assert.throws(() => readJsonFile(path), diagnosticCode(NOT_OBJECT));
+});
+
+test("text file checks path, existence, type, and encoding", (t) => {
+  const directory = temporary(t);
+  assert.throws(() => readTextFile("-"), diagnosticCode(INVALID_PATH));
+  assert.throws(
+    () => readTextFile(join(directory, "missing.md")),
+    diagnosticCode(NOT_FOUND),
+  );
+  assert.throws(() => readTextFile(directory), diagnosticCode(NOT_REGULAR));
+  const path = join(directory, "text.md");
+  writeFileSync(path, TEXT_CONTENT);
+  assert.equal(readTextFile(path), TEXT_CONTENT);
+  writeFileSync(path, Buffer.from([0xff, 0xfe]));
+  assert.throws(() => readTextFile(path), diagnosticCode(INVALID_ENCODING));
 });
 
 test("duplicate keys are detected at each object depth after escape decoding", (t) => {

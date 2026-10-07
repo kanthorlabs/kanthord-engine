@@ -426,6 +426,170 @@ test("agent enablement commands expose offline help and validate inputs before I
   );
 });
 
+test("agent get and prompt commands expose help and refuse invalid options before I/O", (t) => {
+  const env = environment(temporary(t));
+  const remote = ["--endpoint", "http://127.0.0.1:1", "--token", "t"];
+  for (const [path, flags] of [
+    [["get"], /--view <view>[\s\S]*--project <project-id>[\s\S]*--binding/],
+    [["prompt", "put"], /--scope <scope>[\s\S]*--file <path>/],
+    [["prompt", "switch"], /--switch <source>[\s\S]*--on[\s\S]*--off/],
+  ] as const) {
+    const help = invocation(["agent", ...path, "--help"], env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+    assert.match(help.stdout, flags);
+  }
+  for (const [args, code] of [
+    [["get", "swe@1", "--view", "full"], "cli.agent.get.invalid_view"],
+    [
+      ["get", "swe@1", "--project", PROJECT_ID],
+      "cli.agent.get.project_binding_pair_required",
+    ],
+    [
+      ["get", "swe@1", "--binding", BINDING_ID],
+      "cli.agent.get.project_binding_pair_required",
+    ],
+    [["get", "swe@1", "--view", "final"], "cli.agent.get.token_required"],
+    [
+      ["prompt", "put", "--scope", "global", "--file", "a.md"],
+      "cli.agent.prompt.put.invalid_scope",
+    ],
+    [
+      [
+        "prompt",
+        "put",
+        "--scope",
+        "system",
+        "--agent",
+        "swe@1",
+        "--file",
+        "a.md",
+      ],
+      "cli.agent.prompt.put.agent_refused",
+    ],
+    [
+      ["prompt", "put", "--scope", "agent", "--file", "a.md"],
+      "cli.agent.prompt.put.agent_required",
+    ],
+    [
+      [
+        "prompt",
+        "put",
+        "--scope",
+        "system",
+        "--expected-revision",
+        "0",
+        "--file",
+        "a.md",
+      ],
+      "cli.agent.prompt.put.invalid_revision",
+    ],
+    [
+      ["prompt", "put", "--scope", "system", "--file", "a.md"],
+      "cli.agent.prompt.put.token_required",
+    ],
+    [
+      ["prompt", "switch", "--scope", "agent", "--switch", "custom", "--on"],
+      "cli.agent.prompt.switch.agent_required",
+    ],
+    [
+      [
+        "prompt",
+        "switch",
+        "--scope",
+        "system",
+        "--agent",
+        "swe@1",
+        "--switch",
+        "custom",
+        "--on",
+      ],
+      "cli.agent.prompt.switch.agent_refused",
+    ],
+    [
+      [
+        "prompt",
+        "switch",
+        "--scope",
+        "system",
+        "--switch",
+        "agent_file",
+        "--on",
+      ],
+      "cli.agent.prompt.switch.invalid_switch",
+    ],
+    [
+      ["prompt", "switch", "--scope", "system", "--switch", "custom"],
+      "cli.agent.prompt.switch.state_required",
+    ],
+    [
+      [
+        "prompt",
+        "switch",
+        "--scope",
+        "system",
+        "--switch",
+        "custom",
+        "--on",
+        "--off",
+      ],
+      "cli.agent.prompt.switch.state_required",
+    ],
+    [
+      [
+        "prompt",
+        "switch",
+        "--scope",
+        "system",
+        "--switch",
+        "custom",
+        "--on",
+        "--expected-revision",
+        "x",
+      ],
+      "cli.agent.prompt.switch.invalid_revision",
+    ],
+    [
+      ["prompt", "switch", "--scope", "system", "--switch", "custom", "--on"],
+      "cli.agent.prompt.switch.token_required",
+    ],
+  ] as const) {
+    const withToken = code.endsWith("token_required") ? [] : remote;
+    const result = invocation(
+      [
+        "agent",
+        ...args,
+        ...withToken,
+        ...(code.endsWith("token_required")
+          ? ["--endpoint", "http://127.0.0.1:1"]
+          : []),
+      ],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure, code);
+    assert.equal(result.stdout, EMPTY_OUTPUT, code);
+    assert.match(
+      result.stderr,
+      new RegExp(`^${code.replaceAll(".", "\\.")}:`),
+      code,
+    );
+  }
+  const missing = invocation(
+    [
+      "agent",
+      "prompt",
+      "put",
+      "--scope",
+      "system",
+      "--file",
+      "absent.md",
+      ...remote,
+    ],
+    env,
+  );
+  assert.equal(missing.status, ExitCode.Failure);
+  assert.match(missing.stderr, /^cli\.file\.not_found:/);
+});
+
 test("serve worker rejects server configuration and requires a clientSecret before contacting an unavailable server", (t) => {
   const directory = temporary(t);
   const env = environment(directory);

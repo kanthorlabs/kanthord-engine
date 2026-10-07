@@ -122,6 +122,13 @@ Custody's [serialized credential budget](https://github.com/kanthorlabs/kanthord
 
 The planned `worker.execution.setup.get` runs inside the `worker` application alone and is no CLI command. Its target route is `GET /api/worker/execution/:executionId/setup`, with `client` access and a live execution requirement. The [execution setup](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-execution-setup) rules its answer and its handover prerequisite.
 
+The answer holds `prompt` and `repositories`, among other fields.
+`prompt` is `{ final }`. `final` holds the framing, the system layer and the agent layer that the server composes, as [`agent get`](./agent.md#the-prompt-answer) with `--view final` answers them.
+Each item of `repositories` holds `{ bindingId, name, address, sshIdentity, strategy, projectPrompt, working_layer }`.
+`working_layer` is the map of the booleans `agents_md`, `agents_local_md`, `claude_md`, `claude_local_md` and `project_prompt` of the pinned binding revision, with all five keys present.
+The worker application appends the working layer of each workspace. It reads the agent files whose switch is on and the `projectPrompt` when `project_prompt` is on.
+[Project](./project.md#binding-resource-and-complete-set-edits) rules the switches.
+
 The four human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
 Each is `unary`, has `mutation: false` and a default timeout of 30 s, and reads
 no table of another service. Every authenticated human has the

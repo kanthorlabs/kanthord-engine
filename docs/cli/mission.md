@@ -802,7 +802,7 @@ The assessment result follows this order:
    The reviewer execution writes the assessment immediately; its required rationale names that verification.
    In a steps execution, a failed task verification leads the agent to revise within the resource budget first, and the execution records no task assessment.
 2. Otherwise, judgement against the criterion gives `success`, `criterion-not-met` or `undetermined`.
-3. When the worker declares a base prompt, a default-standard violation turns `success` into `criterion-not-met`.
+3. For a worker that kanthord hosts, a default-standard violation turns `success` into `criterion-not-met`.
 
 Only the first case permits an empty judgement; the rationale is never absent or blank.
 HTTP 400 with an issue list rejects a method field, absent or blank rationale, or a result that violates this order.

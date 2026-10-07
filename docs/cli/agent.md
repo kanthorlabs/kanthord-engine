@@ -1,6 +1,6 @@
 # Agent CLI specification
 
-This specification for `kanthord agent` contains **11 command leaves: 10 implemented and 1 proposed**.
+This specification for `kanthord agent` contains **13 command leaves: 12 implemented and 1 proposed**.
 
 See the [CLI index](./README.md) for shared conventions.
 Agent entries of a worker binding belong to [Project](./project.md).
@@ -11,14 +11,14 @@ Agent entries of a worker binding belong to [Project](./project.md).
 
 The request, output, failure and replay rules of the [Worker shared contract](./worker.md#shared-input-and-output-contract) apply.
 
-| Common flag                                                                      | Applies to / Agent requirement                                                     |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| [`--endpoint`](./common-flags.md#--endpoint)                                     | Every command; inherited from the `agent` group.                                   |
-| [`--token`](./common-flags.md#--token)                                           | Every operation requires a nonblank resolved human token.                          |
-| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | Mutations only.                                                                    |
-| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Each list command.                                                                 |
-| [`--file`](./common-flags.md#--file)                                             | Required for `enablement put` and `enablement provider add`; schemas appear below. |
-| [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                              |
+| Common flag                                                                      | Applies to / Agent requirement                                                                   |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| [`--endpoint`](./common-flags.md#--endpoint)                                     | Every command; inherited from the `agent` group.                                                 |
+| [`--token`](./common-flags.md#--token)                                           | Every operation requires a nonblank resolved human token.                                        |
+| [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | Mutations only.                                                                                  |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Each list command.                                                                               |
+| [`--file`](./common-flags.md#--file)                                             | Required for `enablement put`, `enablement provider add` and `prompt put`; schemas appear below. |
+| [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                                            |
 
 `AgentName` and `WorkerName` follow the [Worker names and identities](./worker.md#names-and-identities).
 
@@ -27,19 +27,21 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 `P` means proposed; `I` means implemented syntax and operation. `[R]`, `[M]` and `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
 `human` authenticates a human JWT.
 
-| Status | Command after `kanthord agent`                                                                   | Route                                                               | Operation ID                           | Access  |
-| ------ | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------- | ------- |
-| P      | `list [L]`                                                                                       | `GET /api/agent`                                                    | `agent.list`                           | `human` |
-| I      | `get <agent-name>`                                                                               | `GET /api/agent/:agentName`                                         | `agent.get`                            | `human` |
-| I      | `enablement list [L] [R]`                                                                        | `GET /api/agent/enablement`                                         | `agent.enablement.list`                | `human` |
-| I      | `enablement get <agent-name> [R]`                                                                | `GET /api/agent/enablement/:agentName`                              | `agent.enablement.get`                 | `human` |
-| I      | `enablement put <agent-name> --file <path> [M] [R]`                                              | `PUT /api/agent/enablement/:agentName`                              | `agent.enablement.put`                 | `human` |
-| I      | `enablement enable <agent-name> --expected-revision <revision> [M] [R]`                          | `POST /api/agent/enablement/:agentName/enable`                      | `agent.enablement.enable`              | `human` |
-| I      | `enablement disable <agent-name> --expected-revision <revision> [M] [R]`                         | `POST /api/agent/enablement/:agentName/disable`                     | `agent.enablement.disable`             | `human` |
-| I      | `enablement remove <agent-name> --expected-revision <revision> [M] [R]`                          | `DELETE /api/agent/enablement/:agentName`                           | `agent.enablement.remove`              | `human` |
-| I      | `enablement provider add <agent-name> --file <path> [M] [R]`                                     | `POST /api/agent/enablement/:agentName/provider`                    | `agent.enablement.provider.add`        | `human` |
-| I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]` | `DELETE /api/agent/enablement/:agentName/provider/:providerName`    | `agent.enablement.provider.remove`     | `human` |
-| I      | `enablement provider model list <agent-name> <provider-name>`                                    | `GET /api/agent/enablement/:agentName/provider/:providerName/model` | `agent.enablement.provider.model.list` | `human` |
+| Status | Command after `kanthord agent`                                                                                                | Route                                                               | Operation ID                           | Access  |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------- | ------- |
+| P      | `list [L]`                                                                                                                    | `GET /api/agent`                                                    | `agent.list`                           | `human` |
+| I      | `get <agent-name> [--view final] [--project <project-id> --binding <binding-id>]`                                             | `GET /api/agent/:agentName`                                         | `agent.get`                            | `human` |
+| I      | `enablement list [L] [R]`                                                                                                     | `GET /api/agent/enablement`                                         | `agent.enablement.list`                | `human` |
+| I      | `enablement get <agent-name> [R]`                                                                                             | `GET /api/agent/enablement/:agentName`                              | `agent.enablement.get`                 | `human` |
+| I      | `enablement put <agent-name> --file <path> [M] [R]`                                                                           | `PUT /api/agent/enablement/:agentName`                              | `agent.enablement.put`                 | `human` |
+| I      | `enablement enable <agent-name> --expected-revision <revision> [M] [R]`                                                       | `POST /api/agent/enablement/:agentName/enable`                      | `agent.enablement.enable`              | `human` |
+| I      | `enablement disable <agent-name> --expected-revision <revision> [M] [R]`                                                      | `POST /api/agent/enablement/:agentName/disable`                     | `agent.enablement.disable`             | `human` |
+| I      | `enablement remove <agent-name> --expected-revision <revision> [M] [R]`                                                       | `DELETE /api/agent/enablement/:agentName`                           | `agent.enablement.remove`              | `human` |
+| I      | `enablement provider add <agent-name> --file <path> [M] [R]`                                                                  | `POST /api/agent/enablement/:agentName/provider`                    | `agent.enablement.provider.add`        | `human` |
+| I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]`                              | `DELETE /api/agent/enablement/:agentName/provider/:providerName`    | `agent.enablement.provider.remove`     | `human` |
+| I      | `enablement provider model list <agent-name> <provider-name>`                                                                 | `GET /api/agent/enablement/:agentName/provider/:providerName/model` | `agent.enablement.provider.model.list` | `human` |
+| I      | `prompt put --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --file <path> [M]`                        | `PUT /api/agent/prompt`                                             | `agent.prompt.put`                     | `human` |
+| I      | `prompt switch --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --switch <source> (--on \| --off) [M]` | `POST /api/agent/prompt/switch`                                     | `agent.prompt.switch`                  | `human` |
 
 The static `/api/agent/enablement` path takes precedence over `/:agentName`.
 
@@ -60,20 +62,28 @@ It lists every catalog agent, also an agent without an enablement. Each item hol
 ### `get <agent-name>`
 
 ```text
-kanthord agent get <agent-name>
+kanthord agent get <agent-name> [--view final] [--project <project-id> --binding <binding-id>]
 ```
 
 `agent-name` is required `AgentName`, with no default, and maps to
 `params.agentName`. The key names one catalog declaration, not a worker binding.
-Required token: human JWT. Empty query, absent body. HTTP `200` returns
+Required token: human JWT. Absent body. HTTP `200` returns
 `agentName` and the following declaration/configuration fields:
+
+| Option                   | Query       | Meaning                                                                                                                                       |
+| ------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--view final`           | `view`      | Optional. The only value is `final`. The `prompt` answer holds `final` only and no `layers`.                                                  |
+| `--project <project-id>` | `projectId` | Optional, and only together with `--binding`. Selects the repository binding of the working layer.                                            |
+| `--binding <binding-id>` | `bindingId` | Optional, and only together with `--project`. A binding that is no repository binding of the project answers `404 project.binding.not_found`. |
+
+Without `--project` and `--binding`, the working layer is the workbench working layer of the agent.
 
 | Result field          | Type and meaning                                                                                                                                                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `configurationSchema` | JSON Schema draft 2020-12 object describing the effective configuration: every allowed field, its type, requiredness and enumeration. Its `description` states the whole-configuration constraint that the Agent component checks; JSON Schema validates no cross-field lookup. |
 | `overridableFields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agentProvider", "modelIdentifier", "reasoningEffort"]`.                                                                                               |
 | `enablement`          | The [agent enablement record](#agent-enablement-record), or `null` when no record exists.                                                                                                                                                                                       |
-| `prompt`              | Required object; `layers` holds the system, agent and working layers with `{ source, origin, path, enabled, state, digest, text }` per source, and `final` holds the framing and the text of every present source.                                                              |
+| `prompt`              | Required object `{ layers, final }`. The [prompt answer](#the-prompt-answer) below defines both fields.                                                                                                                                                                         |
 | `tools`               | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`) and `inputSchema: object`. Project-added tools are inspected through Project configuration instead.                                                     |
 
 The [configuration schema](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration-schema)
@@ -107,6 +117,64 @@ name returns `404 agent.catalog.not_found`. Catalog prompt changes require a
 new worker version. An enablement default change creates a revision.
 This command neither composes the prompt of an execution nor
 reads a local `AGENTS.md`/`CLAUDE.md`. Each prompt source holds at most 32768 UTF-8 bytes under the [Worker implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md).
+
+### The prompt answer
+
+`layers` holds the system layer, the agent layer and the working layer, in reading order.
+Each item holds `{ layer, sources }`, and `layer` is `system`, `agent` or `working`.
+Each source holds the following fields:
+
+| Source field | Type and meaning                                                                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source`     | The source name, for example `host_file`, `base`, `custom`, `agent_file`, `shipped` or `agents_md`.                                                  |
+| `origin`     | One of `binary`, `file` and `database`.                                                                                                              |
+| `path`       | The home-relative path of a `file` source, else `null`.                                                                                              |
+| `enabled`    | The boolean switch of the source.                                                                                                                    |
+| `state`      | One of `present`, `absent`, `invalid`, `off` and `deferred`. `deferred` marks an agent file of a workspace, which only the worker application reads. |
+| `digest`     | The digest of the text when `state` is `present`, else `null`.                                                                                       |
+| `text`       | The text of the source when `state` is `present`, else `null`.                                                                                       |
+
+`final` holds the framing, then the text of every `present` source, in reading order.
+With `--view final`, `layers` is absent.
+
+```sh
+kanthord agent get swe@1 --view final
+kanthord agent get swe@1 --project project_01ARZ3NDEKTSV4RRFFQ69G5FAV --binding binding_01ARZ3NDEKTSV4RRFFQ69G5FAV
+```
+
+## Prompt settings commands
+
+The system layer holds the sources `host_file`, `base` and `custom`.
+The agent layer holds `agent_file`, `shipped` and `custom`.
+The workbench working layer holds `agents_md`, `agents_local_md`, `claude_md`, `claude_local_md`, `shipped` and `custom`.
+The settings of a scope are `{ scope, agentName, switches, customText, revision }`.
+The working switches of a repository binding belong to [Project](./project.md#binding-resource-and-complete-set-edits).
+
+### `prompt put --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --file <path>`
+
+Uses `[M] [R]`. `--scope` is required and is `system`, `agent` or `workbench`.
+`--agent` is required for `agent` and `workbench` and refused for `system`.
+`--expected-revision` is the revision that the human read. Omit it only when the scope has no row.
+`--file` names a UTF-8 text file with the new custom text. The command refuses `-` and any directory.
+The custom text holds at most 32768 UTF-8 bytes.
+The command replaces the custom text and answers the saved settings with the `idempotencyKey`.
+
+```sh
+kanthord agent prompt put --scope system --file system.md
+kanthord agent prompt put --scope agent --agent swe@1 --expected-revision 1 --file swe.md
+```
+
+### `prompt switch --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --switch <source> (--on | --off)`
+
+Uses `[M] [R]`. `--scope`, `--agent` and `--expected-revision` follow `prompt put`.
+`--switch` names one source of the scope. Exactly one of `--on` and `--off` is required.
+A switch that turns off every source of an `agent` scope answers `409 agent.prompt.agent_layer_empty`.
+The command answers the saved settings with the `idempotencyKey`.
+
+```sh
+kanthord agent prompt switch --scope system --switch host_file --off
+kanthord agent prompt switch --scope workbench --agent swe@1 --expected-revision 2 --switch claude_md --on
+```
 
 ## Agent enablement record
 
@@ -239,35 +307,56 @@ The human [provider check](./llm.md#provider-check) belongs to the LLM component
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                                      | Condition                                                          | Commands                                                                                                                                                                |
-| ----- | --------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| local | `cli.agent.list.token_required`                           | No option, environment variable or `cli.yaml` supplies a token.    | agent list                                                                                                                                                              |
-| local | `cli.agent.list.indeterminate`                            | The read result is indeterminate.                                  | agent list                                                                                                                                                              |
-| local | `cli.agent.get.token_required`                            | No option, environment variable or `cli.yaml` supplies a token.    | agent get                                                                                                                                                               |
-| local | `cli.agent.get.indeterminate`                             | The read result is indeterminate.                                  | agent get                                                                                                                                                               |
-| local | `cli.agent.enablement.provider.model.list.token_required` | No option, environment variable or `cli.yaml` supplies a token.    | agent enablement provider model list                                                                                                                                    |
-| local | `cli.agent.enablement.provider.model.list.indeterminate`  | The read result is indeterminate.                                  | agent enablement provider model list                                                                                                                                    |
-| local | `cli.agent.enablement.disable.invalid_revision`           | The `<expected-revision>` argument is not a positive safe integer. | agent enablement disable                                                                                                                                                |
-| local | `cli.agent.enablement.enable.invalid_revision`            | The `<expected-revision>` argument is not a positive safe integer. | agent enablement enable                                                                                                                                                 |
-| local | `cli.agent.enablement.provider.remove.invalid_revision`   | The `<expected-revision>` argument is not a positive safe integer. | agent enablement provider remove                                                                                                                                        |
-| local | `cli.agent.enablement.remove.invalid_revision`            | The `<expected-revision>` argument is not a positive safe integer. | agent enablement remove                                                                                                                                                 |
-| 400   | `agent.configuration.credential_unsuitable`               | The selected credential is not suitable for the provider.          | binding apply, agent enablement put, agent enablement provider add, handover, worker.execution.setup.get (API only)                                                     |
-| 400   | `agent.configuration.invalid`                             | A worker or entry configuration fails shape validation.            | binding apply, agent enablement put, handover, worker.execution.setup.get (API only)                                                                                    |
-| 400   | `agent.configuration.model_unknown`                       | The selected model is absent from the catalog.                     | agent enablement put, binding apply, handover, worker.execution.setup.get (API only)                                                                                    |
-| 400   | `agent.configuration.override_not_allowed`                | An entry overrides a forbidden field.                              | binding apply, handover, worker.execution.setup.get (API only)                                                                                                          |
-| 400   | `agent.configuration.reasoning_effort_unsupported`        | The selected model does not support this reasoning level.          | agent enablement put, binding apply, handover, worker.execution.setup.get (API only)                                                                                    |
-| 409   | `agent.enablement.in_use`                                 | Worker bindings still use the enablement.                          | agent enablement remove                                                                                                                                                 |
-| 409   | `agent.enablement.invalidates_bindings`                   | The change invalidates dependent bindings.                         | agent enablement put                                                                                                                                                    |
-| 404   | `agent.enablement.not_found`                              | The live enablement does not exist.                                | agent enablement get, agent enablement provider model list, agent enablement mutations                                                                                  |
-| 409   | `agent.enablement.provider.fixed`                         | An edit changes a retained provider.                               | agent enablement put                                                                                                                                                    |
-| 409   | `agent.enablement.provider.in_use`                        | Defaults or entries still use this provider.                       | agent enablement put, agent enablement provider remove                                                                                                                  |
-| 409   | `agent.enablement.provider.name_conflict`                 | An agent provider already uses this name.                          | agent enablement put, agent enablement provider add                                                                                                                     |
-| 409   | `agent.enablement.provider.credential_conflict`           | An agent provider already uses this credential.                    | agent enablement put, agent enablement provider add                                                                                                                     |
-| 404   | `agent.enablement.provider.not_found`                     | The agent provider does not exist.                                 | agent enablement put, agent enablement provider remove, agent enablement provider model list, binding apply                                                             |
-| 400   | `agent.enablement.provider.required`                      | The write leaves no agent provider.                                | agent enablement put, agent enablement provider remove                                                                                                                  |
-| 409   | `agent.enablement.revision_conflict`                      | The expected enablement revision is stale.                         | agent enablement mutations                                                                                                                                              |
-| 400   | `agent.enablement.unavailable`                            | The agent lacks a live enabled configuration.                      | binding apply, agent configuration reads, handover, worker.execution.setup.get (API only)                                                                               |
-| 404   | `agent.catalog.not_found`                                 | The agent name is absent from the agent catalog.                   | agent enablement get, agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove, agent enablement provider model list, agent get |
+| HTTP  | Code                                                      | Condition                                                                                   | Commands                                                                                                                                                                                                       |
+| ----- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| local | `cli.agent.list.token_required`                           | No option, environment variable or `cli.yaml` supplies a token.                             | agent list                                                                                                                                                                                                     |
+| local | `cli.agent.list.indeterminate`                            | The read result is indeterminate.                                                           | agent list                                                                                                                                                                                                     |
+| local | `cli.agent.get.token_required`                            | No option, environment variable or `cli.yaml` supplies a token.                             | agent get                                                                                                                                                                                                      |
+| local | `cli.agent.get.indeterminate`                             | The read result is indeterminate.                                                           | agent get                                                                                                                                                                                                      |
+| local | `cli.agent.get.invalid_view`                              | The `--view` value is not `final`.                                                          | agent get                                                                                                                                                                                                      |
+| local | `cli.agent.get.project_binding_pair_required`             | One of `--project` and `--binding` is present without the other.                            | agent get                                                                                                                                                                                                      |
+| local | `cli.agent.prompt.put.token_required`                     | No option, environment variable or `cli.yaml` supplies a token.                             | agent prompt put                                                                                                                                                                                               |
+| local | `cli.agent.prompt.put.indeterminate`                      | The write result is indeterminate; retry with the same key.                                 | agent prompt put                                                                                                                                                                                               |
+| local | `cli.agent.prompt.put.invalid_scope`                      | The `--scope` value is not `system`, `agent` or `workbench`.                                | agent prompt put                                                                                                                                                                                               |
+| local | `cli.agent.prompt.put.agent_required`                     | The scope is `agent` or `workbench` and `--agent` is absent.                                | agent prompt put                                                                                                                                                                                               |
+| local | `cli.agent.prompt.put.agent_refused`                      | The scope is `system` and `--agent` is present.                                             | agent prompt put                                                                                                                                                                                               |
+| local | `cli.agent.prompt.put.invalid_revision`                   | The `--expected-revision` value is not a positive safe integer.                             | agent prompt put                                                                                                                                                                                               |
+| local | `cli.agent.prompt.switch.token_required`                  | No option, environment variable or `cli.yaml` supplies a token.                             | agent prompt switch                                                                                                                                                                                            |
+| local | `cli.agent.prompt.switch.indeterminate`                   | The write result is indeterminate; retry with the same key.                                 | agent prompt switch                                                                                                                                                                                            |
+| local | `cli.agent.prompt.switch.invalid_scope`                   | The `--scope` value is not `system`, `agent` or `workbench`.                                | agent prompt switch                                                                                                                                                                                            |
+| local | `cli.agent.prompt.switch.agent_required`                  | The scope is `agent` or `workbench` and `--agent` is absent.                                | agent prompt switch                                                                                                                                                                                            |
+| local | `cli.agent.prompt.switch.agent_refused`                   | The scope is `system` and `--agent` is present.                                             | agent prompt switch                                                                                                                                                                                            |
+| local | `cli.agent.prompt.switch.invalid_revision`                | The `--expected-revision` value is not a positive safe integer.                             | agent prompt switch                                                                                                                                                                                            |
+| local | `cli.agent.prompt.switch.invalid_switch`                  | The `--switch` value is not a source of the scope.                                          | agent prompt switch                                                                                                                                                                                            |
+| local | `cli.agent.prompt.switch.state_required`                  | The command holds none or both of `--on` and `--off`.                                       | agent prompt switch                                                                                                                                                                                            |
+| local | `cli.agent.enablement.provider.model.list.token_required` | No option, environment variable or `cli.yaml` supplies a token.                             | agent enablement provider model list                                                                                                                                                                           |
+| local | `cli.agent.enablement.provider.model.list.indeterminate`  | The read result is indeterminate.                                                           | agent enablement provider model list                                                                                                                                                                           |
+| local | `cli.agent.enablement.disable.invalid_revision`           | The `<expected-revision>` argument is not a positive safe integer.                          | agent enablement disable                                                                                                                                                                                       |
+| local | `cli.agent.enablement.enable.invalid_revision`            | The `<expected-revision>` argument is not a positive safe integer.                          | agent enablement enable                                                                                                                                                                                        |
+| local | `cli.agent.enablement.provider.remove.invalid_revision`   | The `<expected-revision>` argument is not a positive safe integer.                          | agent enablement provider remove                                                                                                                                                                               |
+| local | `cli.agent.enablement.remove.invalid_revision`            | The `<expected-revision>` argument is not a positive safe integer.                          | agent enablement remove                                                                                                                                                                                        |
+| 400   | `agent.configuration.credential_unsuitable`               | The selected credential is not suitable for the provider.                                   | binding apply, agent enablement put, agent enablement provider add, handover, worker.execution.setup.get (API only)                                                                                            |
+| 400   | `agent.configuration.invalid`                             | A worker or entry configuration fails shape validation.                                     | binding apply, agent enablement put, handover, worker.execution.setup.get (API only)                                                                                                                           |
+| 400   | `agent.configuration.model_unknown`                       | The selected model is absent from the catalog.                                              | agent enablement put, binding apply, handover, worker.execution.setup.get (API only)                                                                                                                           |
+| 400   | `agent.configuration.override_not_allowed`                | An entry overrides a forbidden field.                                                       | binding apply, handover, worker.execution.setup.get (API only)                                                                                                                                                 |
+| 400   | `agent.configuration.reasoning_effort_unsupported`        | The selected model does not support this reasoning level.                                   | agent enablement put, binding apply, handover, worker.execution.setup.get (API only)                                                                                                                           |
+| 409   | `agent.enablement.in_use`                                 | Worker bindings still use the enablement.                                                   | agent enablement remove                                                                                                                                                                                        |
+| 409   | `agent.enablement.invalidates_bindings`                   | The change invalidates dependent bindings.                                                  | agent enablement put                                                                                                                                                                                           |
+| 404   | `agent.enablement.not_found`                              | The live enablement does not exist.                                                         | agent enablement get, agent enablement provider model list, agent enablement mutations                                                                                                                         |
+| 409   | `agent.enablement.provider.fixed`                         | An edit changes a retained provider.                                                        | agent enablement put                                                                                                                                                                                           |
+| 409   | `agent.enablement.provider.in_use`                        | Defaults or entries still use this provider.                                                | agent enablement put, agent enablement provider remove                                                                                                                                                         |
+| 409   | `agent.enablement.provider.name_conflict`                 | An agent provider already uses this name.                                                   | agent enablement put, agent enablement provider add                                                                                                                                                            |
+| 409   | `agent.enablement.provider.credential_conflict`           | An agent provider already uses this credential.                                             | agent enablement put, agent enablement provider add                                                                                                                                                            |
+| 404   | `agent.enablement.provider.not_found`                     | The agent provider does not exist.                                                          | agent enablement put, agent enablement provider remove, agent enablement provider model list, binding apply                                                                                                    |
+| 400   | `agent.enablement.provider.required`                      | The write leaves no agent provider.                                                         | agent enablement put, agent enablement provider remove                                                                                                                                                         |
+| 409   | `agent.enablement.revision_conflict`                      | The expected enablement revision is stale.                                                  | agent enablement mutations                                                                                                                                                                                     |
+| 400   | `agent.enablement.unavailable`                            | The agent lacks a live enabled configuration.                                               | binding apply, agent configuration reads, handover, worker.execution.setup.get (API only)                                                                                                                      |
+| 404   | `agent.catalog.not_found`                                 | The agent name is absent from the agent catalog.                                            | agent enablement get, agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove, agent enablement provider model list, agent get, agent prompt put, agent prompt switch |
+| 409   | `agent.prompt.revision_conflict`                          | The expected revision is stale or absent; `details.current` holds the current row.          | agent prompt put, agent prompt switch                                                                                                                                                                          |
+| 400   | `agent.prompt.too_large`                                  | The custom text exceeds 32768 UTF-8 bytes.                                                  | agent prompt put                                                                                                                                                                                               |
+| 409   | `agent.prompt.agent_layer_empty`                          | The switch turns off every source of an `agent` scope.                                      | agent prompt switch                                                                                                                                                                                            |
+| 404   | `project.binding.not_found`                               | The `--binding` value names no repository binding of the `--project` value.                 | agent get                                                                                                                                                                                                      |
+| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a switch that is no source of the scope. | agent get, agent prompt put, agent prompt switch                                                                                                                                                               |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 

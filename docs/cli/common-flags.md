@@ -182,6 +182,8 @@ There are no prompts or interactive confirmations. This convention replaces
 neither server/client YAML configuration nor a raw append-log format; none of
 the global `config`, `serve`, or `jwt generate` forms accepts it.
 
+`agent prompt put` reads a UTF-8 text file instead of a JSON file. The path rules above apply.
+
 The command page enumerates the JSON fields, types, requiredness, defaults,
 validation, and mapping to operation input. The current proposals require one
 JSON object. Invalid UTF-8 or JSON, duplicate object members, unknown fields,

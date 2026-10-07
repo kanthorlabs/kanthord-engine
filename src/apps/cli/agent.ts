@@ -12,6 +12,9 @@ import {
   defaultConfigurationSchema,
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
+  PROMPT_SWITCHES,
+  PromptScope,
+  PromptView,
 } from "../../agent/contract.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import {
@@ -19,6 +22,7 @@ import {
   handleReadResult,
   parsePositiveInt,
   readJsonFileAs,
+  readTextFile,
   requireToken,
   resolveKey,
   singleUse,
@@ -46,9 +50,28 @@ const ENABLE = "enable";
 const DISABLE = "disable";
 const REMOVE = "remove";
 const ADD = "add";
+const PROMPT = "prompt";
+const SWITCH = "switch";
 const FILE_OPTION = "--file";
 const REVISION_OPTION = "--expected-revision";
 const KEY_OPTION = "--idempotency-key";
+const GET_INVALID_VIEW = "cli.agent.get.invalid_view";
+const GET_BINDING_PAIR = "cli.agent.get.project_binding_pair_required";
+const PROMPT_PUT_TOKEN_REQUIRED = "cli.agent.prompt.put.token_required";
+const PROMPT_PUT_INDETERMINATE = "cli.agent.prompt.put.indeterminate";
+const PROMPT_PUT_INVALID_SCOPE = "cli.agent.prompt.put.invalid_scope";
+const PROMPT_PUT_INVALID_REVISION = "cli.agent.prompt.put.invalid_revision";
+const PROMPT_PUT_AGENT_REQUIRED = "cli.agent.prompt.put.agent_required";
+const PROMPT_PUT_AGENT_REFUSED = "cli.agent.prompt.put.agent_refused";
+const PROMPT_SWITCH_TOKEN_REQUIRED = "cli.agent.prompt.switch.token_required";
+const PROMPT_SWITCH_INDETERMINATE = "cli.agent.prompt.switch.indeterminate";
+const PROMPT_SWITCH_INVALID_SCOPE = "cli.agent.prompt.switch.invalid_scope";
+const PROMPT_SWITCH_INVALID_REVISION =
+  "cli.agent.prompt.switch.invalid_revision";
+const PROMPT_SWITCH_AGENT_REQUIRED = "cli.agent.prompt.switch.agent_required";
+const PROMPT_SWITCH_AGENT_REFUSED = "cli.agent.prompt.switch.agent_refused";
+const PROMPT_SWITCH_INVALID_SWITCH = "cli.agent.prompt.switch.invalid_switch";
+const PROMPT_SWITCH_STATE_REQUIRED = "cli.agent.prompt.switch.state_required";
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 const LIST_TOKEN_REQUIRED = "cli.agent.enablement.list.token_required";
@@ -111,16 +134,127 @@ async function list(command: Command): Promise<void> {
 async function agentGet(agentName: string, command: Command): Promise<void> {
   assert.equal(agentOperations.get.access, AccessPolicy.Human);
   assert.equal(agentOperations.get.mutation, false);
-  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  const options = command.optsWithGlobals();
+  if (
+    options.view !== undefined &&
+    !Object.values(PromptView).includes(options.view)
+  )
+    throw new Diagnostic(GET_INVALID_VIEW, "the only view is final");
+  if ((options.project === undefined) !== (options.binding === undefined))
+    throw new Diagnostic(
+      GET_BINDING_PAIR,
+      "--project and --binding go together",
+    );
+  const { endpoint, token } = resolveClient(options);
   requireToken(token, "cli.agent.get.token_required");
   const result = await httpClient(agentOperations, endpoint, token).get({
     params: { agentName },
-    query: {},
+    query: {
+      ...(options.view !== undefined ? { view: options.view } : {}),
+      ...(options.project !== undefined
+        ? { projectId: options.project, bindingId: options.binding }
+        : {}),
+    },
     body: null,
   });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, "cli.agent.get.indeterminate"))}\n`,
   );
+}
+
+type PromptCodes = {
+  scope: string;
+  revision: string;
+  agentRequired: string;
+  agentRefused: string;
+};
+
+function promptTarget(
+  options: Record<string, string | undefined>,
+  codes: PromptCodes,
+) {
+  const scope = Object.values(PromptScope).find(
+    (value) => value === options.scope,
+  );
+  if (scope === undefined)
+    throw new Diagnostic(codes.scope, "scope is system, agent or workbench");
+  if (scope === PromptScope.System && options.agent !== undefined)
+    throw new Diagnostic(codes.agentRefused, "the system scope takes no agent");
+  if (scope !== PromptScope.System && options.agent === undefined)
+    throw new Diagnostic(codes.agentRequired, "the scope requires --agent");
+  return {
+    scope,
+    ...(options.agent !== undefined ? { agentName: options.agent } : {}),
+    ...(options.expectedRevision !== undefined
+      ? {
+          expectedRevision: parsePositiveInt(
+            options.expectedRevision,
+            codes.revision,
+          ),
+        }
+      : {}),
+  };
+}
+
+async function promptPut(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const target = promptTarget(options, {
+    scope: PROMPT_PUT_INVALID_SCOPE,
+    revision: PROMPT_PUT_INVALID_REVISION,
+    agentRequired: PROMPT_PUT_AGENT_REQUIRED,
+    agentRefused: PROMPT_PUT_AGENT_REFUSED,
+  });
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, PROMPT_PUT_TOKEN_REQUIRED);
+  const key = resolveKey(options);
+  const customText = readTextFile(options.file);
+  const result = await httpClient(agentOperations, endpoint, token)[
+    "prompt.put"
+  ](
+    {
+      params: {},
+      query: {},
+      body: { ...target, customText },
+    },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(result, PROMPT_PUT_INDETERMINATE, key);
+  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+}
+
+async function promptSwitch(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const target = promptTarget(options, {
+    scope: PROMPT_SWITCH_INVALID_SCOPE,
+    revision: PROMPT_SWITCH_INVALID_REVISION,
+    agentRequired: PROMPT_SWITCH_AGENT_REQUIRED,
+    agentRefused: PROMPT_SWITCH_AGENT_REFUSED,
+  });
+  if (!PROMPT_SWITCHES[target.scope].includes(options.switch))
+    throw new Diagnostic(
+      PROMPT_SWITCH_INVALID_SWITCH,
+      "the switch is not a source of the scope",
+    );
+  if (options.on === options.off)
+    throw new Diagnostic(
+      PROMPT_SWITCH_STATE_REQUIRED,
+      "pass exactly one of --on and --off",
+    );
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, PROMPT_SWITCH_TOKEN_REQUIRED);
+  const key = resolveKey(options);
+  const result = await httpClient(agentOperations, endpoint, token)[
+    "prompt.switch"
+  ](
+    {
+      params: {},
+      query: {},
+      body: { ...target, switch: options.switch, enabled: options.on === true },
+    },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(result, PROMPT_SWITCH_INDETERMINATE, key);
+  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
 async function get(agentName: string, command: Command): Promise<void> {
@@ -278,10 +412,61 @@ export function addAgentCommand(program: Command): void {
   agent
     .command("get <agent-name>")
     .description("Get an agent declaration (human JWT)")
+    .option(
+      "--view <view>",
+      "Answer the final prompt only",
+      singleUse("--view"),
+    )
+    .option("--project <project-id>", "Project", singleUse("--project"))
+    .option(
+      "--binding <binding-id>",
+      "Repository binding",
+      singleUse("--binding"),
+    )
     .action((agentName: string, _options, command: Command) =>
       agentGet(agentName, command),
     );
   agent.action(() => agent.help());
+  const prompt = agent
+    .command(PROMPT)
+    .description("Manage the prompt settings");
+  prompt.action(() => prompt.help());
+  prompt
+    .command(PUT)
+    .description("Replace the custom text of a prompt scope as JSON")
+    .requiredOption(
+      "--scope <scope>",
+      "system, agent or workbench",
+      singleUse("--scope"),
+    )
+    .option("--agent <agent-name>", "Agent name", singleUse("--agent"))
+    .option(
+      "--expected-revision <revision>",
+      "Current revision",
+      singleUse(REVISION_OPTION),
+    )
+    .requiredOption("--file <path>", "Custom text file", singleUse(FILE_OPTION))
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action((_options, command: Command) => promptPut(command));
+  prompt
+    .command(SWITCH)
+    .description("Turn one prompt source of a scope on or off as JSON")
+    .requiredOption(
+      "--scope <scope>",
+      "system, agent or workbench",
+      singleUse("--scope"),
+    )
+    .option("--agent <agent-name>", "Agent name", singleUse("--agent"))
+    .option(
+      "--expected-revision <revision>",
+      "Current revision",
+      singleUse(REVISION_OPTION),
+    )
+    .requiredOption("--switch <source>", "Prompt source", singleUse("--switch"))
+    .option("--on", "Turn the source on")
+    .option("--off", "Turn the source off")
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action((_options, command: Command) => promptSwitch(command));
   const enablement = agent
     .command(ENABLEMENT)
     .description("Manage agent enablements");

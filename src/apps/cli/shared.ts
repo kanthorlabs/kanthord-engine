@@ -80,25 +80,26 @@ export function detectDuplicateKeys(text: string): void {
   }
 }
 
-export function readJsonFile(path: string, requirePrivate = false): unknown {
+export function readTextFile(path: string, requirePrivate = false): string {
   if (path === STDIN)
     throw new Diagnostic(INVALID_PATH, "stdin is not accepted");
   const stat = statSync(path, { throwIfNoEntry: false });
   if (!stat) throw new Diagnostic(NOT_FOUND, `${path}: file not found`);
   if (!stat.isFile())
     throw new Diagnostic(NOT_REGULAR, `${path}: not a regular file`);
-  let text: string;
-  if (requirePrivate) text = readPrivate(path);
-  else {
-    const buffer = readFileSync(path);
-    try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-    } catch (error) {
-      if (error instanceof TypeError)
-        throw new Diagnostic(INVALID_ENCODING, `${path}: invalid UTF-8`);
-      throw error;
-    }
+  if (requirePrivate) return readPrivate(path);
+  const buffer = readFileSync(path);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch (error) {
+    if (error instanceof TypeError)
+      throw new Diagnostic(INVALID_ENCODING, `${path}: invalid UTF-8`);
+    throw error;
   }
+}
+
+export function readJsonFile(path: string, requirePrivate = false): unknown {
+  const text = readTextFile(path, requirePrivate);
   detectDuplicateKeys(text);
   let raw: unknown;
   try {
