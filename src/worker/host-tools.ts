@@ -19,7 +19,7 @@ export function evidenceUploadTool(
     name: HostTool.EvidenceUpload,
     label: "Upload workspace evidence",
     description:
-      "Upload a workspace-relative path and return evidenceId, assetId and uri.",
+      "Upload a workspace-relative path and return evidence_id, asset_id and uri.",
     parameters: EVIDENCE_UPLOAD_PARAMETERS,
     async execute(_id, params, signal) {
       assert.ok(params.path);

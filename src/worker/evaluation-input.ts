@@ -151,7 +151,8 @@ export async function prepareEvaluation(
       workspace.tested_input ?? placedOf(evidence)?.asset.address;
     if (!testedInput) return run.stop(EndReason.OperationFailed);
     const evidenceIds = new Set(workspace.evidenceIds);
-    const assets: { evidenceId: string; assetId: string; path: string }[] = [];
+    const assets: { evidence_id: string; asset_id: string; path: string }[] =
+      [];
     const support = evidence.filter(
       (item) => !item.verification && !item.requirement_key,
     );
@@ -171,7 +172,7 @@ export async function prepareEvaluation(
     for (const { evidenceId, asset } of selected) {
       const path = await placeAsset(workspace.directory, run, asset, deadline);
       evidenceIds.add(evidenceId);
-      assets.push({ evidenceId, assetId: asset.id, path });
+      assets.push({ evidence_id: evidenceId, asset_id: asset.id, path });
     }
     return {
       directory: workspace.directory,

@@ -100,12 +100,12 @@ test("B3 review bundle places all supporting assets beside repositories and remo
     const clients = {
       mission: {
         "execution.evidence.asset.content.get": async (input: {
-          params: { assetId: string };
+          params: { asset_id: string };
         }) => ({
           type: "completed",
           status: 200,
           data:
-            input.params.assetId === first
+            input.params.asset_id === first
               ? {
                   asset_id: first,
                   address: produced,
@@ -197,7 +197,7 @@ test("evaluation places a produced report privately and preserves command order"
         type: "completed",
         status: 200,
         data: {
-          assetId,
+          asset_id: assetId,
           address,
           data: Buffer.from("report").toString("base64"),
           encoding: "base64",
