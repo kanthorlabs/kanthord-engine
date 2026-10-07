@@ -13,11 +13,17 @@ import {
 } from "./connector.ts";
 import type { SshIdentity, SshPin } from "./ssh-identity.ts";
 import { proveSshPin } from "./credential-platform.ts";
+import { GitHubPlatform } from "./github.ts";
+import { RepositoryPlatform } from "../project/contract.ts";
 export {
   RepositoryCredentials,
   type CredentialDependencies,
 } from "./credential.ts";
 export { REPOSITORY_PLATFORMS } from "./credential-platform.ts";
+
+export const platformImplementations = {
+  [RepositoryPlatform.GitHub]: GitHubPlatform,
+} as const;
 
 export interface Dependencies {
   health?: HealthRegistry;
