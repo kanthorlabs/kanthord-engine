@@ -142,19 +142,19 @@ test("pagination skips tombstones before limiting and validates cursors", () => 
       first.items.map((item) => item.agentName),
       ["alpha"],
     );
-    assert.equal(first.nextCursor, Buffer.from("alpha").toString("base64url"));
-    const second = listEnablements(tx, 1, first.nextCursor);
+    assert.equal(first.next_cursor, Buffer.from("alpha").toString("base64url"));
+    const second = listEnablements(tx, 1, first.next_cursor);
     assert.deepEqual(
       second.items.map((item) => item.agentName),
       ["charlie"],
     );
-    assert.notEqual(second.nextCursor, null);
-    const third = listEnablements(tx, 1, second.nextCursor);
+    assert.notEqual(second.next_cursor, null);
+    const third = listEnablements(tx, 1, second.next_cursor);
     assert.deepEqual(
       third.items.map((item) => item.agentName),
       ["delta"],
     );
-    assert.equal(third.nextCursor, null);
+    assert.equal(third.next_cursor, null);
     assert.throws(() => listEnablements(tx, 1, "!!"), {
       code: "system.pagination.cursor_invalid",
     });

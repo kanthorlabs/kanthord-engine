@@ -154,9 +154,9 @@ type Agent = z.infer<
 type BindingSet = z.infer<typeof bindingSetWriteInputSchema>;
 type Applied = z.infer<
   (typeof projectOperations)["bindingSet.write"]["output"]
-> & { idempotencyKey: string };
-type Mutation = Project & { idempotencyKey: string };
-type Page<T> = { items: T[]; nextCursor: string | null };
+> & { idempotency_key: string };
+type Mutation = Project & { idempotency_key: string };
+type Page<T> = { items: T[]; next_cursor: string | null };
 
 async function setup(t: TestContext): Promise<Fixture> {
   const fixture = await gatewayFixture(t, {
@@ -237,7 +237,7 @@ async function createProject(
   );
   assert.ok(answer.id.startsWith(`${PROJECT_ID_PREFIX}_`));
   assert.equal(answer.bindingSetVersion, BINDING_SET_INITIAL_VERSION);
-  assert.equal(answer.idempotencyKey, key);
+  assert.equal(answer.idempotency_key, key);
   return answer;
 }
 
@@ -264,7 +264,7 @@ async function apply(
     ),
   );
   assert.equal(answer.projectId, projectId);
-  assert.equal(answer.idempotencyKey, key);
+  assert.equal(answer.idempotency_key, key);
   return answer;
 }
 
@@ -367,7 +367,7 @@ async function repositoryReads(
   );
   assert.equal(listed.items.length, SINGLE_ITEM);
   assert.equal(listed.items[0]?.kind, BindingKind.Repository);
-  assert.equal(listed.nextCursor, null);
+  assert.equal(listed.next_cursor, null);
   const read = success<Binding>(
     await kanthord(
       ["project", "binding", "get", projectId, bindingId],
@@ -401,7 +401,7 @@ async function repositoryReads(
   );
   assert.equal(revisions.items.length, SINGLE_ITEM);
   assert.deepEqual(revisions.items, [read]);
-  assert.equal(revisions.nextCursor, null);
+  assert.equal(revisions.next_cursor, null);
 }
 
 test(
@@ -424,7 +424,7 @@ test(
       listed.items[0]?.bindingSetVersion,
       BINDING_SET_INITIAL_VERSION,
     );
-    assert.equal(listed.nextCursor, null);
+    assert.equal(listed.next_cursor, null);
     const read = success<Project>(
       await kanthord(["project", "get", created.id], fixture.env),
     );
@@ -442,7 +442,7 @@ test(
       ),
     );
     assert.equal(renamed.name, RENAMED);
-    assert.ok(renamed.idempotencyKey);
+    assert.ok(renamed.idempotency_key);
     const reread = success<Project>(
       await kanthord(["project", "get", created.id], fixture.env),
     );
@@ -510,7 +510,7 @@ test(
     assert.equal(listed.items.length, SINGLE_ITEM);
     assert.equal(listed.items[0]?.agent, AGENT);
     assert.equal(listed.items[0]?.valid, true);
-    assert.equal(listed.nextCursor, null);
+    assert.equal(listed.next_cursor, null);
     const read = await readAgent(fixture, project.id, binding.id);
     assert.equal(read.bindingSetVersion, THIRD_BINDING_VERSION);
     assert.deepEqual(listed.items, [read]);
@@ -604,7 +604,7 @@ test("E05.18 replacing a referenced provider is refused atomically", async (t) =
   const fixture = await setup(t);
   const { project, binding, enablement } = await boundAgent(fixture);
   const path = file(fixture.directory, "invalidating.json", {
-    expectedRevision: enablement.revision,
+    expected_revision: enablement.revision,
     agentProviders: [
       { name: BACKUP, provider: ANTHROPIC, credential: CREDENTIAL },
     ],
@@ -654,7 +654,7 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
   const before = await readAgent(fixture, project.id, binding.id);
   assert.deepEqual(before.entry, entry);
   const path = file(fixture.directory, "invalidating.json", {
-    expectedRevision: enablement.revision,
+    expected_revision: enablement.revision,
     agentProviders: PROVIDERS,
     defaultConfiguration: CONFIGURATION,
   });

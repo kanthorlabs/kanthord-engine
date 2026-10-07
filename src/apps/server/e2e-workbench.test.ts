@@ -534,7 +534,7 @@ test("the workbench credential view exposes only the credential of the configure
       {
         params: { agentName: AGENT },
         query: {},
-        body: { expectedRevision: enablement.revision },
+        body: { expected_revision: enablement.revision },
       },
       fixture.options,
     ),
@@ -788,7 +788,7 @@ const addSpare = {
   params: { agentName: AGENT },
   query: {},
   body: {
-    expectedRevision: 1,
+    expected_revision: 1,
     name: SPARE,
     provider: ANTHROPIC,
     credential: SPARE_CREDENTIAL,

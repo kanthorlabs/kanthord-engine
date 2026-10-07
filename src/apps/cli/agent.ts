@@ -30,12 +30,12 @@ import {
 } from "./shared.ts";
 
 const agentEnablementPutBodySchema = z.strictObject({
-  expectedRevision: z.number().int().positive().optional(),
+  expected_revision: z.number().int().positive().optional(),
   agentProviders: z.array(agentProviderItemSchema).min(1),
   defaultConfiguration: defaultConfigurationSchema,
 });
 const providerAddBodySchema = z.strictObject({
-  expectedRevision: z.number().int().positive(),
+  expected_revision: z.number().int().positive(),
   name: z.string().min(1),
   provider: agentProviderKindSchema,
   credential: z.string().min(1),
@@ -202,7 +202,7 @@ function promptTarget(
     ...(options.agent !== undefined ? { agentName: options.agent } : {}),
     ...(options.expectedRevision !== undefined
       ? {
-          expectedRevision: parsePositiveInt(
+          expected_revision: parsePositiveInt(
             options.expectedRevision,
             codes.revision,
           ),
@@ -234,7 +234,9 @@ async function promptPut(command: Command): Promise<void> {
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, PROMPT_PUT_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 function sourceSwitch(
@@ -330,7 +332,9 @@ async function promptSwitch(command: Command): Promise<void> {
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, PROMPT_SWITCH_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function get(agentName: string, command: Command): Promise<void> {
@@ -354,7 +358,9 @@ async function put(agentName: string, command: Command): Promise<void> {
     "enablement.put"
   ]({ params: { agentName }, query: {}, body }, { idempotencyKey: key });
   const data = handleMutationResult(result, PUT_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function enable(agentName: string, command: Command): Promise<void> {
@@ -369,11 +375,17 @@ async function enable(agentName: string, command: Command): Promise<void> {
   const result = await httpClient(agentOperations, endpoint, token)[
     "enablement.enable"
   ](
-    { params: { agentName }, query: {}, body: { expectedRevision } },
+    {
+      params: { agentName },
+      query: {},
+      body: { expected_revision: expectedRevision },
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, ENABLE_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function disable(agentName: string, command: Command): Promise<void> {
@@ -388,11 +400,17 @@ async function disable(agentName: string, command: Command): Promise<void> {
   const result = await httpClient(agentOperations, endpoint, token)[
     "enablement.disable"
   ](
-    { params: { agentName }, query: {}, body: { expectedRevision } },
+    {
+      params: { agentName },
+      query: {},
+      body: { expected_revision: expectedRevision },
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, DISABLE_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function remove(agentName: string, command: Command): Promise<void> {
@@ -407,12 +425,16 @@ async function remove(agentName: string, command: Command): Promise<void> {
   const result = await httpClient(agentOperations, endpoint, token)[
     "enablement.remove"
   ](
-    { params: { agentName }, query: {}, body: { expectedRevision } },
+    {
+      params: { agentName },
+      query: {},
+      body: { expected_revision: expectedRevision },
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, REMOVE_INDETERMINATE, key);
   process.stdout.write(
-    `${JSON.stringify({ agentName: data.agentName, idempotencyKey: key })}\n`,
+    `${JSON.stringify({ agentName: data.agentName, idempotency_key: key })}\n`,
   );
 }
 
@@ -426,7 +448,9 @@ async function providerAdd(agentName: string, command: Command): Promise<void> {
     "enablement.provider.add"
   ]({ params: { agentName }, query: {}, body }, { idempotencyKey: key });
   const data = handleMutationResult(result, ADD_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function providerRemove(
@@ -448,12 +472,14 @@ async function providerRemove(
     {
       params: { agentName, providerName },
       query: {},
-      body: { expectedRevision },
+      body: { expected_revision: expectedRevision },
     },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, PROVIDER_REMOVE_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function providerModelList(

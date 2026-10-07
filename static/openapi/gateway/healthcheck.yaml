@@ -7,7 +7,7 @@ pathItem:
     description: Check resource health on demand, grouped by owner and scope.
       Returns every inventory entry with status and capability, including
       unknown for unfinished checks. A missing inventory returns 503 with
-      missingInventories in error.details.
+      missing_inventories in error.details.
     x-access-policy: human
     x-timeout-ms: 120000
     x-mutation: false

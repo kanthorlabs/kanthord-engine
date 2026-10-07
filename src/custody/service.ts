@@ -857,7 +857,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       names.length > limit
         ? Buffer.from(page.at(-1)!.name, "utf8").toString("base64url")
         : null;
-    return { items, nextCursor };
+    return { items, next_cursor: nextCursor };
   }
 
   private insertRevision(
@@ -909,7 +909,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     humanIdentity: string | undefined,
   ): CredentialAnswer {
     refuseForeign(tx, set, credentialName);
-    const row = requireLive(tx, credentialName, body.expectedRevision);
+    const row = requireLive(tx, credentialName, body.expected_revision);
     const entry = ownedPlatform(set, row.platform)!;
     const secret = secretSchemas[entry.secretShape].safeParse(body.secret);
     if (!secret.success) throw invalidInput();
@@ -941,7 +941,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     humanIdentity: string | undefined,
   ): CredentialAnswer {
     refuseForeign(tx, set, credentialName);
-    const row = requireLive(tx, credentialName, body.expectedRevision);
+    const row = requireLive(tx, credentialName, body.expected_revision);
     const entry = ownedPlatform(set, row.platform)!;
     const metadata = validatedMetadata(entry, body.metadata);
     set.checkMetadata?.(tx, {

@@ -289,7 +289,7 @@ export class RepositoryCredentials {
         const pin = sshPinSchema.safeParse(live?.metadata);
         if (pin.success) hosts.add(pin.data.host);
       }
-      cursor = page.nextCursor ?? undefined;
+      cursor = page.next_cursor ?? undefined;
     } while (cursor !== undefined);
     return hosts;
   }

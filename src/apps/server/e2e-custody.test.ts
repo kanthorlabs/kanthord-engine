@@ -31,7 +31,7 @@ const LLM = ["llm", "credential"];
 const REPOSITORY = ["repository", "credential"];
 
 type CommandResult = Awaited<ReturnType<typeof kanthord>>;
-type ListAnswer = { items: CredentialAnswer[]; nextCursor: string | null };
+type ListAnswer = { items: CredentialAnswer[]; next_cursor: string | null };
 
 async function setup(t: TestContext) {
   const fixture = await gatewayFixture(t);
@@ -67,7 +67,7 @@ function rotateFile(directory: string): string {
   const path = join(directory, "rotate.json");
   writePrivate(
     path,
-    JSON.stringify({ expectedRevision: FIRST_REVISION, secret: SECRET }),
+    JSON.stringify({ expected_revision: FIRST_REVISION, secret: SECRET }),
   );
   return path;
 }
@@ -146,7 +146,7 @@ test("E01.4 list contains the created credential without secrets", async (t) => 
   success(await kanthord([...LLM, "create", "--file", file], env));
   const listed = success<ListAnswer>(await kanthord([...LLM, "list"], env));
   assert.ok(listed.items.some((item) => item.name === NAME));
-  assert.equal(listed.nextCursor, null);
+  assert.equal(listed.next_cursor, null);
 });
 
 test("E01.5 list filters credentials by platform", async (t) => {
@@ -202,7 +202,7 @@ test(
     const rotation = join(directory, "stale.json");
     writePrivate(
       rotation,
-      JSON.stringify({ expectedRevision: observed, secret: SECRET }),
+      JSON.stringify({ expected_revision: observed, secret: SECRET }),
     );
     const args = [...REPOSITORY, "rotate", NAME, "--file", rotation];
     success(await kanthord(args, env));
@@ -226,7 +226,7 @@ test("E01.9 updating metadata adds a model in a secret-free revision", async (t)
   writeFileSync(
     metadata,
     JSON.stringify({
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       metadata: { baseUrl: BASE_URL, models: [{ id: MODEL_ID }] },
     }),
   );
@@ -407,7 +407,7 @@ test("rotate refuses expected revision zero without a server", async (t) => {
   const rotation = join(directory, "zero.json");
   writePrivate(
     rotation,
-    JSON.stringify({ expectedRevision: INVALID_REVISION, secret: SECRET }),
+    JSON.stringify({ expected_revision: INVALID_REVISION, secret: SECRET }),
   );
   refusal(
     await kanthord([...LLM, "rotate", NAME, "--file", rotation], env),

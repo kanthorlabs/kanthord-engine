@@ -84,7 +84,7 @@ export function assessmentPage(
     .map((row) => assessmentRecord(tx, dependencies, row));
   return {
     items,
-    nextCursor:
+    next_cursor:
       rows.length > limit ? encode(items.at(-LAST_ITEM_OFFSET)!.id) : null,
   };
 }
@@ -115,7 +115,7 @@ export function outcomePage(
     .map((row) => outcomeRecord(tx, dependencies.bindings, row));
   return {
     items,
-    nextCursor:
+    next_cursor:
       rows.length > limit ? encode(items.at(-LAST_ITEM_OFFSET)!.id) : null,
   };
 }
@@ -204,7 +204,7 @@ export function attemptPage(
     .map((row) => attemptRecord(tx, bindings, row));
   return {
     items,
-    nextCursor:
+    next_cursor:
       rows.length > limit
         ? encode(String(items.at(-LAST_ITEM_OFFSET)!.attempt))
         : null,
@@ -295,7 +295,7 @@ export function externalActionPage(
   const last = items.at(-LAST_ITEM_OFFSET);
   return {
     items,
-    nextCursor:
+    next_cursor:
       records.length > limit && last !== undefined
         ? encode(`${last.attempt}|${last.action.key}`)
         : null,

@@ -37,7 +37,7 @@ export function evidencePage(
     .map((row) => evidenceRecord(tx, row));
   return {
     items,
-    nextCursor:
+    next_cursor:
       rows.length > limit ? encode(items.at(-LAST_ITEM_OFFSET)!.id) : null,
   };
 }

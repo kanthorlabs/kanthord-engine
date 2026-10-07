@@ -102,7 +102,7 @@ for (const filenames of [
       query: {},
       body: {
         blockedAttempt: FIRST_ATTEMPT,
-        expectedRevision: FIRST_ATTEMPT,
+        expected_revision: FIRST_ATTEMPT,
         expectedMissionVersion: FIRST_ATTEMPT,
         change,
       },
@@ -215,7 +215,7 @@ test("objective unblock validates the exact task set and writes the changed task
     query: {},
     body: {
       blockedAttempt: NO_ATTEMPT,
-      expectedRevision: FIRST_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
       expectedMissionVersion: FIRST_ATTEMPT,
       change,
     },
@@ -277,7 +277,7 @@ for (const attempt of [NO_ATTEMPT, FIRST_ATTEMPT]) {
       query: {},
       body: {
         blockedAttempt: attempt,
-        expectedRevision: FIRST_ATTEMPT,
+        expected_revision: FIRST_ATTEMPT,
         expectedMissionVersion: FIRST_ATTEMPT,
       },
     };
@@ -314,7 +314,7 @@ test("unblock checks attempt and revision before changing content; changed conte
   });
   const body = {
     blockedAttempt: FIRST_ATTEMPT,
-    expectedRevision: FIRST_ATTEMPT,
+    expected_revision: FIRST_ATTEMPT,
     expectedMissionVersion: FIRST_ATTEMPT,
     change: {
       content: { ...blocked.node.content, name: "New direction" },
@@ -334,7 +334,7 @@ test("unblock checks attempt and revision before changing content; changed conte
       error.code === ControlError.StateConflict,
   );
   await assert.rejects(
-    invoke({ expectedRevision: SECOND_ATTEMPT }),
+    invoke({ expected_revision: SECOND_ATTEMPT }),
     (error) =>
       error instanceof OperationError &&
       error.code === MissionErrorCode.RevisionConflict,
@@ -375,7 +375,7 @@ test("unchanged content makes no revision and unsatisfied closure routes unblock
     query: {},
     body: {
       blockedAttempt: NO_ATTEMPT,
-      expectedRevision: FIRST_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
       expectedMissionVersion: FIRST_ATTEMPT,
       change: { content: blocked.node.content, reason: "Preserve" },
     },

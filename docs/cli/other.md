@@ -105,7 +105,7 @@ catalog, use ascending order and continue above the last key.
 The base64url last-key cursor does not expire, a malformed cursor returns `400`,
 and a list takes no snapshot. Do not silently traverse all pages. Preserve the
 same list scope and filters when using a continuation. The result holds `items`
-and `nextCursor`, both required, with `nextCursor: null` on the final page;
+and `next_cursor`, both required, with `next_cursor: null` on the final page;
 the service owns any additional metadata.
 These options are not implemented universal flags, and commands that return a
 bounded catalogue or a single object do not inherit them automatically.
@@ -261,7 +261,7 @@ Do not blindly retry with a new key, loop indefinitely on 409, assume a timeout
 rolled back a mutation, or claim that reusing a key guarantees exactly-once
 effects across server restarts.
 
-No domain operation carries a durable `requestId`. The idempotency key is
+No domain operation carries a durable `request_id`. The idempotency key is
 distinct from Gateway's transport `X-Request-Id`, which identifies one HTTP
 request; transport correlation alone never deduplicates a domain effect.
 

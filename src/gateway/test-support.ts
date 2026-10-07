@@ -137,7 +137,7 @@ export function composeGateway(options: {
   });
   gateway.declare(
     registry,
-    options.collect ?? (() => ({ entries: [], missingInventories: [] })),
+    options.collect ?? (() => ({ entries: [], missing_inventories: [] })),
     options.logger,
   );
   registry.seal({ [StoreName.Operational]: options.store });

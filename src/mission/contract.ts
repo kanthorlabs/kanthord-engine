@@ -463,7 +463,7 @@ export const nodeUpdateSchema = z.strictObject({
   filename: planFileNameSchema,
   content: contentSchema,
   reason: z.string().min(1),
-  expectedRevision: z.number().int().positive(),
+  expected_revision: z.number().int().positive(),
   expectedMissionVersion: z.number().int().positive(),
 });
 export type NodeUpdate = z.infer<typeof nodeUpdateSchema>;
@@ -471,7 +471,7 @@ export const moveSchema = z.strictObject({
   newParentId: identitySchema("node"),
   reason: z.string().min(1),
   expectedMissionVersion: z.number().int().positive(),
-  expectedRevision: z.number().int().positive(),
+  expected_revision: z.number().int().positive(),
   expectedOldParentRevision: z.number().int().positive(),
   expectedNewParentRevision: z.number().int().positive(),
 });
@@ -485,7 +485,7 @@ export const criterionSetSchema = z.strictObject({
   criterion: z.string().min(1),
   verifications: z.array(z.string().min(1)).min(1),
   reason: z.string().min(1),
-  expectedRevision: z.number().int().positive(),
+  expected_revision: z.number().int().positive(),
   expectedMissionVersion: z.number().int().positive(),
 });
 export type CriterionSet = z.infer<typeof criterionSetSchema>;
@@ -939,7 +939,7 @@ export const unblockChangeSchema = z.strictObject({
 export type UnblockChange = z.infer<typeof unblockChangeSchema>;
 export const unblockSchema = z.strictObject({
   blockedAttempt: z.number().int().nonnegative(),
-  expectedRevision: z.number().int().positive(),
+  expected_revision: z.number().int().positive(),
   expectedMissionVersion: z.number().int().positive(),
   change: unblockChangeSchema.optional(),
 });
@@ -1150,7 +1150,7 @@ export const missionSchema = z.strictObject({
 export type Mission = z.infer<typeof missionSchema>;
 
 export const pageOf = <T extends z.ZodType>(item: T) =>
-  z.strictObject({ items: z.array(item), nextCursor: z.string().nullable() });
+  z.strictObject({ items: z.array(item), next_cursor: z.string().nullable() });
 const baseOperation = {
   service: MISSION_SERVICE_NAME,
   store: StoreName.Operational,

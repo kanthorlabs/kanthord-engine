@@ -255,7 +255,7 @@ The design's closed record disposition set is `Stored` and `Refused`:
   without an acknowledged disposition remain retained for retry. Pressure can
   lose telemetry; the server counts drops, and that telemetry can also be lost.
 
-**Proposed CLI output:** one JSON object containing `idempotencyKey`,
+**Proposed CLI output:** one JSON object containing `idempotency_key`,
 `dispositions` (entries with `recordId`, `disposition`, and an optional coded
 structural refusal reason), and counts `submitted`, `stored`, `refused`, and
 `retained`. Counts are nonnegative integers for this submitted batch only;
@@ -294,8 +294,8 @@ unknown state to an outcome.
 
 ### `trace list` and `trace get`
 
-`trace list` returns a proposed `{items, nextCursor}` envelope, with at most
-`limit` trace summaries. `nextCursor` is an opaque string or `null` at the end.
+`trace list` returns a proposed `{ items, next_cursor }` envelope, with at most
+`limit` trace summaries. `next_cursor` is an opaque string or `null` at the end.
 The optional filters are defined above; absence of both project selectors
 includes project-scoped and projectless traces. It lists what is retained,
 rather than asserting that every execution has a trace.
@@ -313,7 +313,7 @@ not a causal watermark and is not the extension's local ingestion cursor.
 
 ### `span list` and `span get`
 
-`span list` returns a proposed `{items, nextCursor}` page under the specified
+`span list` returns a proposed `{ items, next_cursor }` page under the specified
 trace. `span get` returns one span under that same scope, never a span from a
 different trace. Both project each stored span's identity, operation, recorded
 start/end times, parent reference, attributes, events, status, cross-trace links,
@@ -349,7 +349,7 @@ cross-project joins have no command contract here. Registered identity
 attribute names can support object correlation, but their full canonical key
 registry remains **[blocked][tracking-contract]**.
 
-The response uses the same span projection and `{items, nextCursor}` envelope
+The response uses the same span projection and `{ items, next_cursor }` envelope
 as `span list`. A client keeps the same trace and filter document for a
 continuation. The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies.
 

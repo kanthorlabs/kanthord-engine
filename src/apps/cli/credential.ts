@@ -160,7 +160,9 @@ async function create(group: CredentialGroup, command: Command): Promise<void> {
     credentialCode(group, CREATE, INDETERMINATE),
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function rotate(
@@ -182,7 +184,9 @@ async function rotate(
     credentialCode(group, ROTATE, INDETERMINATE),
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function updateMetadata(
@@ -211,7 +215,9 @@ async function updateMetadata(
     credentialCode(group, UPDATE_METADATA_CODE, INDETERMINATE),
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function revoke(
@@ -237,7 +243,9 @@ async function revoke(
     credentialCode(group, REVOKE, INDETERMINATE),
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function archive(
@@ -258,7 +266,9 @@ async function archive(
     credentialCode(group, ARCHIVE, INDETERMINATE),
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function check(group: CredentialGroup, command: Command): Promise<void> {

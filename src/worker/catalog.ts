@@ -103,7 +103,7 @@ export function listWorkerDeclarations(limit: number, cursor: string | null) {
     names.length > limit
       ? Buffer.from(items.at(-1)!.name, TEXT_ENCODING).toString(CURSOR_ENCODING)
       : null;
-  return { items, nextCursor };
+  return { items, next_cursor: nextCursor };
 }
 
 function decodeCatalogCursor(cursor: string): string {

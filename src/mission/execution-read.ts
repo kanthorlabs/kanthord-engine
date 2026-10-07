@@ -69,7 +69,7 @@ function identityPage<T extends { id: string }>(
   const page = rows.slice(SLICE_FROM_START, limit);
   return {
     items: page,
-    nextCursor:
+    next_cursor:
       rows.length > limit ? encode(page.at(-FIRST_ATTEMPT)!.id) : null,
   };
 }

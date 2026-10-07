@@ -165,11 +165,11 @@ components:
               - createdAt
               - removedAt
             additionalProperties: false
-        nextCursor:
+        next_cursor:
           anyOf:
             - type: string
             - type: "null"
       required:
         - items
-        - nextCursor
+        - next_cursor
       additionalProperties: false

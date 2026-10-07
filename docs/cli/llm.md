@@ -42,7 +42,7 @@ repair. The contents go to custody and are never echoed. Metadata update uses
 the ordinary JSON-file rules and accepts no secret.
 
 Success exits `0`. Except for the login line output specified below, it prints
-one JSON value. Lists return one page `{ items, nextCursor }`, with a string
+one JSON value. Lists return one page `{ items, next_cursor }`, with a string
 cursor or `null` on the last page. No answer holds a secret, token, ciphertext,
 authentication header or reusable grant. Failures exit nonzero and print a
 non-secret diagnostic. A supplied identity never proves authorization.
@@ -230,7 +230,7 @@ an unknown name, or a name of another component, answers `404 credential.credent
 ## `rotate <credential-name>`
 
 The required `CredentialName` maps to `params.credentialName`; query is empty.
-The required file supplies `{ expectedRevision, secret }` and an optional `metadata`. `expectedRevision` is the newest live revision that the human read. The secret shape of the
+The required file supplies `{ expected_revision, secret }` and an optional `metadata`. `expected_revision` is the newest live revision that the human read. The secret shape of the
 platform determines its closed secret schema. `api_key` uses the create schema.
 An OAuth secret is `{ refresh, access, expires }`, the pi-ai credential shape;
 initial OAuth material enters only through a login session.
@@ -249,7 +249,7 @@ This command does not rotate `master_key`.
 ## `update-metadata <credential-name>`
 
 The required `CredentialName` maps to `params.credentialName`; query is empty.
-The required file supplies exactly `{ expectedRevision, metadata }`, with the newest live revision that the human read and a complete replacement that
+The required file supplies exactly `{ expected_revision, metadata }`, with the newest live revision that the human read and a complete replacement that
 matches the platform schema. It accepts no secret or platform change.
 The edit inserts the next revision with the secret of the newest live revision, and the older revisions stay live until custody drains them or a human revokes them. HTTP `200` returns
 the credential answer. An `openai-compatible.baseUrl` change fails with `409 llm.metadata.base_url_fixed`; a rotation sets a new one.

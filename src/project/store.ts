@@ -139,7 +139,7 @@ export function renameProject(
 export function listProjects(
   tx: Transaction,
   filter: PageFilter,
-): { items: StoredProject[]; nextCursor: string | null } {
+): { items: StoredProject[]; next_cursor: string | null } {
   const cursor =
     filter.cursor == null
       ? null
@@ -184,7 +184,7 @@ type Outcome = {
   bindingId?: string;
 };
 type PageFilter = { limit: number; cursor?: string | null };
-type BindingPage = { items: StoredBinding[]; nextCursor: string | null };
+type BindingPage = { items: StoredBinding[]; next_cursor: string | null };
 
 export function kindOf(
   resourceIdentity: string,
@@ -656,7 +656,7 @@ function page<Row, Item>(
   limit: number,
   key: (row: Row) => string,
   convert: (row: Row) => Item,
-): { items: Item[]; nextCursor: string | null } {
+): { items: Item[]; next_cursor: string | null } {
   assert.ok(
     Number.isInteger(limit) &&
       limit >= MINIMUM_LIMIT &&
@@ -673,7 +673,7 @@ function page<Row, Item>(
     rows.length > limit && last
       ? Buffer.from(key(last), TEXT_ENCODING).toString(CURSOR_ENCODING)
       : null;
-  return { items: selected.map(convert), nextCursor };
+  return { items: selected.map(convert), next_cursor: nextCursor };
 }
 
 export function listBindings(

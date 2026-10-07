@@ -75,7 +75,7 @@ function refused<T>(result: OperationResult<T>, status: number, code: string) {
   );
   assert.equal(result.status, status);
   assert.equal(result.error.error.code, code);
-  assert.ok(result.error.requestId);
+  assert.ok(result.error.request_id);
 }
 
 async function setup(

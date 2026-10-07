@@ -27,7 +27,7 @@ export function inputValidationFailure(error: z.ZodError): RecordedResponse {
           code: issue.code,
         })),
       },
-      requestId: resolveRequestId(),
+      request_id: resolveRequestId(),
     },
   };
 }

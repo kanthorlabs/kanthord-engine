@@ -141,7 +141,7 @@ async function release(executionId: string, command: Command): Promise<void> {
     { idempotencyKey: key },
   );
   process.stdout.write(
-    `${JSON.stringify({ ...handleMutationResult(result, "cli.scheduler.execution.release.indeterminate", key), idempotencyKey: key })}\n`,
+    `${JSON.stringify({ ...handleMutationResult(result, "cli.scheduler.execution.release.indeterminate", key), idempotency_key: key })}\n`,
   );
 }
 
@@ -157,7 +157,7 @@ async function pull(command: Command): Promise<void> {
     token,
   ).workPull({ params: {}, query: {}, body }, { idempotencyKey: key });
   process.stdout.write(
-    `${JSON.stringify({ ...handleMutationResult(result, INDETERMINATE, key), idempotencyKey: key })}\n`,
+    `${JSON.stringify({ ...handleMutationResult(result, INDETERMINATE, key), idempotency_key: key })}\n`,
   );
 }
 

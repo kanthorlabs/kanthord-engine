@@ -150,7 +150,7 @@ components:
                       - message
                       - details
                     additionalProperties: false
-                  requestId:
+                  request_id:
                     type: string
                     minLength: 34
                     maxLength: 34
@@ -158,7 +158,7 @@ components:
                     description: request_ followed by a canonical 26-character uppercase ULID.
                 required:
                   - error
-                  - requestId
+                  - request_id
                 additionalProperties: false
             required:
               - evidenceId

@@ -161,14 +161,14 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
 type PromptTarget = {
   scope: PromptScope;
   agentName?: string | undefined;
-  expectedRevision?: number | undefined;
+  expected_revision?: number | undefined;
 };
 
 function currentPrompt(tx: Transaction, target: PromptTarget): PromptSettings {
   const agentName = target.agentName ?? "";
   if (target.scope !== PromptScope.System) requireAgent(agentName);
   const current = promptSettings(tx, target.scope, agentName);
-  if ((target.expectedRevision ?? ABSENT_REVISION) !== current.revision)
+  if ((target.expected_revision ?? ABSENT_REVISION) !== current.revision)
     throw new OperationError(
       HttpStatus.Conflict,
       AgentErrorCode.PromptRevisionConflict,
@@ -314,7 +314,7 @@ export class AgentComponent {
     body: (typeof agentOperations)["enablement.put"]["input"]["_output"]["body"],
   ) {
     requireAgent(agentName);
-    checkRevision(tx, agentName, body.expectedRevision);
+    checkRevision(tx, agentName, body.expected_revision);
     const current = getEnablement(tx, agentName);
     const { agentProviders, defaultConfiguration } = body;
     if (agentProviders.length === NO_ITEMS)
@@ -426,7 +426,7 @@ export class AgentComponent {
     agentName: string,
     body: (typeof agentOperations)["enablement.provider.add"]["input"]["_output"]["body"],
   ) {
-    const current = currentRevision(tx, agentName, body.expectedRevision);
+    const current = currentRevision(tx, agentName, body.expected_revision);
     const { name, provider, credential } = body;
     if (current.agentProviders.some((item) => item.name === name))
       throw conflict(agentName, AgentErrorCode.ProviderNameConflict);
@@ -637,11 +637,11 @@ export class AgentComponent {
         );
       }
       assert.notEqual(
-        page.nextCursor,
+        page.next_cursor,
         cursor === null ? undefined : cursor,
         "Enablement pagination must advance.",
       );
-      cursor = page.nextCursor;
+      cursor = page.next_cursor;
     } while (cursor !== null);
     return entries;
   }
@@ -685,11 +685,11 @@ export class AgentComponent {
         if (dependent) matches.set(row.agentName, wireRecord(row));
       }
       assert.notEqual(
-        page.nextCursor,
+        page.next_cursor,
         cursor === null ? undefined : cursor,
         "Enablement pagination must advance.",
       );
-      cursor = page.nextCursor;
+      cursor = page.next_cursor;
     } while (cursor !== null);
     return [...matches.values()];
   }
@@ -745,7 +745,7 @@ export class AgentComponent {
         const page = listEnablements(tx, query.limit, query.cursor ?? null);
         return {
           items: page.items.map(wireRecord),
-          nextCursor: page.nextCursor,
+          next_cursor: page.next_cursor,
         };
       }),
     );
@@ -808,7 +808,7 @@ export class AgentComponent {
           this.setEnablementState(
             tx,
             params.agentName,
-            body.expectedRevision,
+            body.expected_revision,
             EnablementState.Enabled,
           ),
         ),
@@ -820,7 +820,7 @@ export class AgentComponent {
           this.setEnablementState(
             tx,
             params.agentName,
-            body.expectedRevision,
+            body.expected_revision,
             EnablementState.Disabled,
           ),
         ),
@@ -829,7 +829,7 @@ export class AgentComponent {
       agentOperations["enablement.remove"],
       ({ params, body }, caller) =>
         caller.commit((tx) =>
-          this.removeEnablement(tx, params.agentName, body.expectedRevision),
+          this.removeEnablement(tx, params.agentName, body.expected_revision),
         ),
     );
     registry.register(
@@ -845,7 +845,7 @@ export class AgentComponent {
             tx,
             params.agentName,
             params.providerName,
-            body.expectedRevision,
+            body.expected_revision,
           ),
         ),
     );

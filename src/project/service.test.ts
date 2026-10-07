@@ -440,7 +440,7 @@ test("create refuses a structurally identical but unminted human identity withou
     () => f.invoke("create", { name: PROJECT_NAME }),
     assert.AssertionError,
   );
-  assert.deepEqual(f.invoke("list"), { items: [], nextCursor: null });
+  assert.deepEqual(f.invoke("list"), { items: [], next_cursor: null });
   assert.equal(
     f.store.database
       .prepare("SELECT COUNT(*) AS count FROM project_project")
@@ -474,7 +474,7 @@ test("create refuses unauthenticated and machine callers before inserting a proj
 
 test("list uses descending project identities and limit-plus-one pagination", (t) => {
   const f = fixture(t, { createMission: allowMission });
-  assert.deepEqual(f.invoke("list"), { items: [], nextCursor: null });
+  assert.deepEqual(f.invoke("list"), { items: [], next_cursor: null });
   const records = [PROJECT_NAME, OTHER_NAME, RENAMED_NAME].map((name) =>
     f.invoke("create", { name }),
   );
@@ -490,7 +490,7 @@ test("list uses descending project identities and limit-plus-one pagination", (t
     );
     assert.deepEqual(page.items, [expected]);
     seen.push(...page.items);
-    cursor = page.nextCursor;
+    cursor = page.next_cursor;
     if (expected !== records.at(-FIRST_PAGE_LIMIT))
       assert.equal(cursor, Buffer.from(expected.id).toString(CURSOR_ENCODING));
   }
@@ -498,7 +498,7 @@ test("list uses descending project identities and limit-plus-one pagination", (t
   assert.deepEqual(seen, records);
   assert.deepEqual(f.invoke("list", null, {}, { limit: records.length }), {
     items: records,
-    nextCursor: null,
+    next_cursor: null,
   });
 });
 
@@ -521,7 +521,7 @@ test("list rejects malformed, noncanonical, and non-project cursors", (t) => {
   }
   assert.deepEqual(f.invoke("list", null, {}, { cursor: valid }), {
     items: [],
-    nextCursor: null,
+    next_cursor: null,
   });
 });
 
@@ -2055,7 +2055,7 @@ test("binding set and binding list reads refuse an absent project", (t) => {
   });
   assert.deepEqual(f.invoke("binding.list", null, f.params), {
     items: [],
-    nextCursor: null,
+    next_cursor: null,
   });
 });
 
@@ -2131,7 +2131,7 @@ test("binding reads preserve ownership and paginate filtered current, removed an
         ...(cursor ? { cursor } : {}),
       });
     assert.deepEqual(page.items, [binding]);
-    cursor = page.nextCursor;
+    cursor = page.next_cursor;
     if (binding !== expected.at(-FIRST_PAGE_LIMIT))
       assert.equal(cursor, Buffer.from(binding.id).toString(CURSOR_ENCODING));
   }
@@ -2153,7 +2153,7 @@ test("binding reads preserve ownership and paginate filtered current, removed an
         ...(cursor ? { cursor } : {}),
       });
     assert.deepEqual(page.items, [binding]);
-    cursor = page.nextCursor;
+    cursor = page.next_cursor;
     if (binding !== history.at(-FIRST_PAGE_LIMIT))
       assert.equal(
         cursor,
@@ -2242,15 +2242,15 @@ test("agent views page sorted declarations and copy worker views with stripped e
       expected(AGENT, null),
       expected(SECOND_AGENT, { modelIdentifier: MODEL }),
     ],
-    nextCursor: Buffer.from(SECOND_AGENT).toString(CURSOR_ENCODING),
+    next_cursor: Buffer.from(SECOND_AGENT).toString(CURSOR_ENCODING),
   });
   const last = f.invoke("agentConfiguration.list", null, params, {
     limit: AGENT_PAGE_LIMIT,
-    cursor: first.nextCursor!,
+    cursor: first.next_cursor!,
   });
   assert.deepEqual(last, {
     items: [expected(THIRD_AGENT, null)],
-    nextCursor: null,
+    next_cursor: null,
   });
   assert.deepEqual(
     f.invoke("agentConfiguration.get", null, {
@@ -2266,7 +2266,7 @@ test("agent views page sorted declarations and copy worker views with stripped e
     { agent: SECOND_AGENT, entry: { modelIdentifier: MODEL } },
   ]);
   assert.equal(f.commits(), before + REVISION_THREE);
-  for (const cursor of [MALFORMED_CURSOR, `${first.nextCursor}=`])
+  for (const cursor of [MALFORMED_CURSOR, `${first.next_cursor}=`])
     refuses(
       () => f.invoke("agentConfiguration.list", null, params, { cursor }),
       HttpStatus.BadRequest,
@@ -2299,7 +2299,7 @@ test("agent views reject missing, foreign and non-worker bindings; external list
   const params = { ...f.params, bindingId: workerId };
   assert.deepEqual(f.invoke("agentConfiguration.list", null, params), {
     items: [],
-    nextCursor: null,
+    next_cursor: null,
   });
   const missingProject = {
     ...params,

@@ -81,7 +81,7 @@ test("failed probes preserve healthy siblings, use the shared failure envelope a
     gateway,
   });
   assert.doesNotMatch(JSON.stringify(body), /secret|token/);
-  assert.equal(body.requestId, response.headers.get("x-request-id"));
+  assert.equal(body.request_id, response.headers.get("x-request-id"));
 });
 
 test("a timed-out service returns the complete report rather than blocking the health endpoint", async (t) => {
@@ -140,7 +140,7 @@ test("resource healthcheck requires a human and returns four empty owners", asyn
 
 test("resource healthcheck reports missing owners through the shared 503 envelope", async (t) => {
   const fixture = await gatewayFixture(t, {
-    collect: () => ({ entries: [], missingInventories: [OWNER_PROJECT] }),
+    collect: () => ({ entries: [], missing_inventories: [OWNER_PROJECT] }),
   });
   const response = await fixture.request(gatewayOperations.healthcheck.path, {
     headers: { Authorization: `Bearer ${fixture.token}` },
@@ -148,7 +148,9 @@ test("resource healthcheck reports missing owners through the shared 503 envelop
   assert.equal(response.status, HttpStatus.ServiceUnavailable);
   const body = errorSchema.parse(await response.json());
   assert.equal(body.error.code, INVENTORY_ERROR_CODE);
-  assert.deepEqual(body.error.details, { missingInventories: [OWNER_PROJECT] });
+  assert.deepEqual(body.error.details, {
+    missing_inventories: [OWNER_PROJECT],
+  });
 });
 
 test("a closed SQLite database is reported alongside other registered services", async (t) => {

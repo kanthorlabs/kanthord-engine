@@ -123,16 +123,16 @@ command here accepts a caller-supplied service identity or linked-human identity
 ### Results, pagination, retries and cancellation
 
 Successful reads print one JSON value and exit zero. A successful mutation
-prints its result with an additional CLI field `idempotencyKey`, and exits
+prints its result with an additional CLI field `idempotency_key`, and exits
 zero. Help exits zero. Input, authentication, authorization and operation
 failures exit nonzero with a diagnostic. An indeterminate result also exits
 nonzero. For a mutation, the diagnostic supplies the retry key without claiming
 that no effect occurred. For a read, it instructs the user to retry the command.
 Tokens and delivery verification material never appear in these outputs.
 
-Every list result is `{ "items": [...], "nextCursor": null | string }`:
+Every list result is `{ "items": [...], "next_cursor": null | string }`:
 both fields are required; `items` contains at most `limit` records and
-`nextCursor: null` ends the traversal. An empty list is successful. Each call
+`next_cursor: null` ends the traversal. An empty list is successful. Each call
 reads one page; there is no implicit unbounded traversal or polling loop.
 The shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) applies; pagination reserves no work.
 

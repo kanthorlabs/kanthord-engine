@@ -110,7 +110,9 @@ async function loginCode(
     credentialCode(LLM_GROUP, LOGIN_CODE_CODE, INDETERMINATE),
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 function providerCheckCode(reason: string): string {

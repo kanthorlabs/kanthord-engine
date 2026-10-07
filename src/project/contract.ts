@@ -465,7 +465,7 @@ const agentConfigItem = z.strictObject({
   ),
 });
 const pageOf = <T extends z.ZodType>(item: T) =>
-  z.strictObject({ items: z.array(item), nextCursor: z.string().nullable() });
+  z.strictObject({ items: z.array(item), next_cursor: z.string().nullable() });
 const baseOperation = {
   service: PROJECT_SERVICE_NAME,
   store: StoreName.Operational,

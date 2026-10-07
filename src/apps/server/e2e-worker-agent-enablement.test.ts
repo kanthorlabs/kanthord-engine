@@ -43,8 +43,8 @@ const REVISION = "--expected-revision";
 const SECRET = { key: "e2e-enablement-secret" };
 
 type Result = Awaited<ReturnType<typeof kanthord>>;
-type Answer = AgentEnablement & { idempotencyKey: string };
-type CredentialResult = CredentialAnswer & { idempotencyKey: string };
+type Answer = AgentEnablement & { idempotency_key: string };
+type CredentialResult = CredentialAnswer & { idempotency_key: string };
 type Fixture = { directory: string; env: NodeJS.ProcessEnv };
 
 async function setup(t: TestContext): Promise<Fixture> {
@@ -87,7 +87,9 @@ function enablementFile(fixture: Fixture, expectedRevision?: number): string {
       ? "enablement.json"
       : "stale-enablement.json",
     {
-      ...(expectedRevision === undefined ? {} : { expectedRevision }),
+      ...(expectedRevision === undefined
+        ? {}
+        : { expected_revision: expectedRevision }),
       agentProviders: [
         { name: DEFAULT, provider: ANTHROPIC, credential: CREDENTIAL },
       ],
@@ -162,7 +164,7 @@ async function added(fixture: Fixture): Promise<void> {
   await enabled(fixture);
   await createCredential(fixture, BACKUP_CREDENTIAL);
   const path = file(fixture.directory, "provider-add.json", {
-    expectedRevision: THIRD_REVISION,
+    expected_revision: THIRD_REVISION,
     name: BACKUP,
     provider: ANTHROPIC,
     credential: BACKUP_CREDENTIAL,
@@ -225,11 +227,11 @@ test("E03.2 list enablements", async (t) => {
   await created(fixture);
   const answer = success<{
     items: AgentEnablement[];
-    nextCursor: string | null;
+    next_cursor: string | null;
   }>(await kanthord([...COMMAND, "list"], fixture.env));
   assert.equal(answer.items.length, SINGLE_ITEM);
   assert.equal(answer.items[0]?.agentName, AGENT);
-  assert.equal(answer.nextCursor, null);
+  assert.equal(answer.next_cursor, null);
 });
 
 test("E03.3 get enablement", async (t) => {
@@ -287,7 +289,7 @@ test("E03.7a provider add refuses a credential that another agent provider names
   const fixture = await setup(t);
   await enabled(fixture);
   const path = file(fixture.directory, "provider-taken.json", {
-    expectedRevision: THIRD_REVISION,
+    expected_revision: THIRD_REVISION,
     name: BACKUP,
     provider: ANTHROPIC,
     credential: CREDENTIAL,
@@ -340,7 +342,7 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
   assert.ok(createdCredential.revisions[0]);
   const metadata = (name: string, expectedRevision: number, models: string[]) =>
     file(directory, name, {
-      expectedRevision,
+      expected_revision: expectedRevision,
       metadata: { baseUrl: BASE_URL, models: models.map((id) => ({ id })) },
     });
   const twoModels = metadata(
@@ -445,8 +447,8 @@ test("E03.12 put replays same idempotency key", async (t) => {
   const first = success(await kanthord(args, fixture.env));
   const second = success(await kanthord(args, fixture.env));
   assert.equal(first.revision, second.revision);
-  assert.equal(first.idempotencyKey, key);
-  assert.equal(second.idempotencyKey, key);
+  assert.equal(first.idempotency_key, key);
+  assert.equal(second.idempotency_key, key);
   assert.deepEqual(second, first);
 });
 

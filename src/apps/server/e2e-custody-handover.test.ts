@@ -383,14 +383,14 @@ test(
       async () => {
         const receipt = await h.read<{
           received: boolean;
-          idempotencyKey: string;
+          idempotency_key: string;
         }>(["worker", "handover", X], h.env);
         assert.deepEqual(Object.keys(receipt).sort(), [
-          "idempotencyKey",
+          "idempotency_key",
           "received",
         ]);
         assert.equal(receipt.received, true);
-        assert.ok(ulidSchema.safeParse(receipt.idempotencyKey).success);
+        assert.ok(ulidSchema.safeParse(receipt.idempotency_key).success);
         const execution = await h.read<ExecutionRecord>([
           "scheduler",
           "execution",
@@ -453,7 +453,7 @@ test(
       "E05.4 rotation retains the pinned older revision",
       async () => {
         await h.write(["llm", "credential", "rotate", NAME], {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: { key: SECOND },
         });
         const stored = await h.read<CredentialAnswer>([
@@ -640,7 +640,7 @@ test(
         ]);
         assert.deepEqual(execution.credentials, [C2]);
         await h.write(["llm", "credential", "rotate", NAME], {
-          expectedRevision: SECOND_REVISION,
+          expected_revision: SECOND_REVISION,
           secret: { key: THIRD },
         });
         const stored = await h.read<CredentialAnswer>([

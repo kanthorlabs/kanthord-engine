@@ -173,7 +173,7 @@ export function applyEndState(
 
 function checkError(error: unknown, requestId: string): ErrorBody {
   return {
-    requestId,
+    request_id: requestId,
     error:
       error instanceof OperationError
         ? { code: error.code, message: error.message, details: error.details }

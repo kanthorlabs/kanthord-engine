@@ -52,7 +52,7 @@ const CONTENT = {
   verifications: ["true"],
   bindings: [],
 };
-type Page<T> = { items: T[]; nextCursor: string | null };
+type Page<T> = { items: T[]; next_cursor: string | null };
 
 async function setup(t: TestContext) {
   const directory = temporary(t);
@@ -328,7 +328,7 @@ test(
     await scenario("E01.6 unblock opens exactly the next attempt", async () => {
       const answer = await control("unblock", h.objectiveId, {
         blockedAttempt: FIRST_ATTEMPT,
-        expectedRevision: h.revision,
+        expected_revision: h.revision,
         expectedMissionVersion: VERSION,
       });
       state(answer, NodeState.Available);
@@ -347,7 +347,7 @@ test(
         list.items.map((item) => item.attempt),
         [SECOND_ATTEMPT, FIRST_ATTEMPT],
       );
-      assert.equal(list.nextCursor, null);
+      assert.equal(list.next_cursor, null);
       const closed = await h.read<Attempt>([
         "mission",
         "attempt",

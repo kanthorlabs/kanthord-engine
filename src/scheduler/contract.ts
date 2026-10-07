@@ -293,7 +293,7 @@ export const schedulerOperations = {
     }),
     output: z.strictObject({
       items: z.array(executionRecordSchema),
-      nextCursor: z.string().nullable(),
+      next_cursor: z.string().nullable(),
     }),
   },
   executionGet: {
@@ -415,7 +415,7 @@ export const schedulerOperations = {
     }),
     output: z.strictObject({
       items: z.array(jobSchema),
-      nextCursor: z.string().nullable(),
+      next_cursor: z.string().nullable(),
     }),
   },
   queuePeek: {

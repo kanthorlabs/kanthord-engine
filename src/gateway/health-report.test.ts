@@ -92,7 +92,7 @@ function fixture(t: TestContext, entries: InventorySnapshot["entries"] = []) {
   );
   const collect = () => {
     collections++;
-    return { entries, missingInventories: [] };
+    return { entries, missing_inventories: [] };
   };
   t.after(() => {
     context.cancel();
@@ -157,7 +157,7 @@ test("collectInventories isolates failing owners in llm, repository, storage, ag
       { owner: OWNER_LLM, entry: llm },
       { owner: OWNER_PROJECT, entry: project },
     ],
-    missingInventories: [OWNER_WORKER],
+    missing_inventories: [OWNER_WORKER],
   });
 });
 
@@ -460,7 +460,7 @@ test("report budget includes inventory collection time and never starts expired 
             }),
           },
         ],
-        missingInventories: [],
+        missing_inventories: [],
       };
     },
     f.logger,
@@ -541,13 +541,13 @@ test("collector transaction failures propagate unchanged and missing inventories
   await assert.rejects(
     resourceHealthReport(
       f.caller,
-      () => ({ entries: [], missingInventories: [OWNER_PROJECT] }),
+      () => ({ entries: [], missing_inventories: [OWNER_PROJECT] }),
       f.logger,
       LIMITS,
     ),
     {
       code: "gateway.healthcheck.inventory_failed",
-      details: { missingInventories: [OWNER_PROJECT] },
+      details: { missing_inventories: [OWNER_PROJECT] },
     },
   );
   assert.equal(f.commits(), EMPTY_COUNT);

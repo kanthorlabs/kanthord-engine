@@ -43,7 +43,7 @@ test("registration returns server facts with a fresh key and translates refusal 
     type: OperationResultType.Failure,
     status: 409,
     error: {
-      requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       error: { code, message: "No slot", details: null },
     },
   }));
@@ -69,7 +69,7 @@ test("deregistration accepts only success or owned not-found and never retries",
       type: OperationResultType.Failure,
       status: entry.status,
       error: {
-        requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+        request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
         error: { code: entry.code, message: "test refusal", details: null },
       },
     }));

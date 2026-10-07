@@ -246,8 +246,8 @@ test("queue list handler pages the work queue order with no duplicate and no omi
         cursor === undefined ? { limit } : { limit, cursor },
       );
       pages.push(page.items.map((job) => job.jobId));
-      cursors.push(page.nextCursor);
-      cursor = page.nextCursor ?? undefined;
+      cursors.push(page.next_cursor);
+      cursor = page.next_cursor ?? undefined;
     } while (cursor !== undefined && pages.length <= QUEUE_ORDER.length);
     assert.deepEqual(pages, expectedPages);
     assert.deepEqual(pages.flat(), QUEUE_ORDER);
@@ -276,17 +276,17 @@ test("queue list handler continues after a cursor whose job left the queue", (t)
     first.items.map((job) => job.jobId),
     [JOB_A, JOB_B, JOB_C],
   );
-  assert.ok(first.nextCursor);
+  assert.ok(first.next_cursor);
   store.database.prepare("DELETE FROM scheduler_job WHERE id = ?").run(JOB_C);
   const second = invokeList(registry, caller, projectId, {
     limit: QUEUE_LIST_LIMIT_DEFAULT,
-    cursor: first.nextCursor,
+    cursor: first.next_cursor,
   });
   assert.deepEqual(
     second.items.map((job) => job.jobId),
     [JOB_D, JOB_E, JOB_F, JOB_G],
   );
-  assert.equal(second.nextCursor, null);
+  assert.equal(second.next_cursor, null);
 });
 
 test("queue list handler rejects an invalid cursor", (t) => {

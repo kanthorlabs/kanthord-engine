@@ -180,7 +180,7 @@ test("all record reads enforce human access with valid parameters and return pre
     assert.equal(explicitZero.status, HttpStatus.OK);
     assert.deepEqual(await explicitZero.json(), {
       items: [],
-      nextCursor: null,
+      next_cursor: null,
     });
   }
   for (const name of ["attempt.get", "externalAction.get"] as const) {

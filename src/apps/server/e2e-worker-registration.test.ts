@@ -250,7 +250,7 @@ test(
         page.items.map((item) => item.name),
         [EXTERNAL, NATIVE, "opencode@1", "reviewer@1"],
       );
-      assert.equal(page.nextCursor, null);
+      assert.equal(page.next_cursor, null);
       assert.equal(page.items[NATIVE_WORKER_INDEX]!.host, HOST);
       assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.declaredNodeStates, [
         "Available",
@@ -275,10 +275,10 @@ test(
         page.items.map((item) => item.name),
         [EXTERNAL, NATIVE],
       );
-      assert.equal(typeof page.nextCursor, STRING_TYPE);
+      assert.equal(typeof page.next_cursor, STRING_TYPE);
       const next = success<CatalogPage>(
         await kanthord(
-          ["worker", "list", "--limit", "2", "--cursor", page.nextCursor!],
+          ["worker", "list", "--limit", "2", "--cursor", page.next_cursor!],
           f.H,
         ),
       );
@@ -286,7 +286,7 @@ test(
         next.items.map((item) => item.name),
         ["opencode@1", "reviewer@1"],
       );
-      assert.equal(next.nextCursor, null);
+      assert.equal(next.next_cursor, null);
     });
     await t.test("E02.3 host-specific catalog fields", async () => {
       const native = success<Record<string, unknown>>(
@@ -339,11 +339,11 @@ test(
       assert.equal(success(await kanthord(["worker", "heartbeat"], f.A)), null),
     );
     await t.test("E02.11 filtered inventory", async () => {
-      const page = success<{ items: Instance[]; nextCursor: string | null }>(
+      const page = success<{ items: Instance[]; next_cursor: string | null }>(
         await kanthord([...list, "--binding", BINDING], f.H),
       );
       assert.equal(page.items.length, SINGLE_ITEM);
-      assert.equal(page.nextCursor, null);
+      assert.equal(page.next_cursor, null);
       record = page.items[0]!;
       assert.ok(
         identitySchema("client_identity").safeParse(record.clientId).success,
@@ -387,11 +387,11 @@ test(
     });
     await t.test("E02.14 live resume is idempotent", async () => {
       const result = success<
-        Registration & { registered: boolean; idempotencyKey: string }
+        Registration & { registered: boolean; idempotency_key: string }
       >(await kanthord(["worker", "instance", "resume", ridA], f.H));
       assert.equal(result.runtimeIdentity, ridA);
       assert.equal(result.registered, true);
-      assert.ok(ulidSchema.safeParse(result.idempotencyKey).success);
+      assert.ok(ulidSchema.safeParse(result.idempotency_key).success);
     });
     await t.test("E02.15 foreign client cannot deregister", async () =>
       refusal(
@@ -413,7 +413,7 @@ test(
       assert.deepEqual(result, {
         runtimeIdentity: ridA,
         registered: false,
-        idempotencyKey: key,
+        idempotency_key: key,
       });
       assert.deepEqual(success(await kanthord(args, f.A)), result);
       refusal(
@@ -422,7 +422,7 @@ test(
       );
       assert.deepEqual(success(await kanthord(list, f.H)), {
         items: [],
-        nextCursor: null,
+        next_cursor: null,
       });
     });
     await t.test("E02.17 ended resume needs running execution", async () =>
@@ -445,7 +445,7 @@ test(
       );
       assert.deepEqual(success(await kanthord(list, f.H)), {
         items: [],
-        nextCursor: null,
+        next_cursor: null,
       });
       refusal(
         await kanthord(["worker", "heartbeat"], f.B),

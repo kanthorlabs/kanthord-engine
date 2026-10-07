@@ -141,7 +141,7 @@ const unblock = (
     query: {},
     body: {
       expectedMissionVersion: FIRST_REVISION,
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       blockedAttempt,
     },
   } as never);

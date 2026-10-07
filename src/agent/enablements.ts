@@ -109,7 +109,7 @@ export function listEnablements(
   tx: Transaction,
   limit: number,
   cursor: string | null,
-): { items: EnablementRow[]; nextCursor: string | null } {
+): { items: EnablementRow[]; next_cursor: string | null } {
   const after = cursor === null ? null : decodeCursor(cursor);
   const rows = liveEnablements(tx, after, limit + EXTRA_ROW);
   const items = rows.slice(FIRST_ROW, limit);
@@ -119,7 +119,7 @@ export function listEnablements(
           CURSOR_ENCODING,
         )
       : null;
-  return { items, nextCursor };
+  return { items, next_cursor: nextCursor };
 }
 
 export function getEnablement(

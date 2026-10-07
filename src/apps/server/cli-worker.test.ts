@@ -92,7 +92,7 @@ test("deregistration CLI validates identity and token and returns replayable JSO
   assert.deepEqual(JSON.parse(ended.stdout), {
     runtimeIdentity,
     registered: false,
-    idempotencyKey: key,
+    idempotency_key: key,
   });
 });
 
@@ -204,7 +204,7 @@ test("instance inspection CLI validates filters and identity and denies machine 
   assert.match(denied.stderr, /^gateway.authentication.unauthorized:/);
   const page = await command(["worker", "instance", "list"], env);
   assert.equal(page.code, ExitCode.Success, page.stderr);
-  assert.deepEqual(JSON.parse(page.stdout), { items: [], nextCursor: null });
+  assert.deepEqual(JSON.parse(page.stdout), { items: [], next_cursor: null });
   const invalidQuery = await fixture.request(
     "/api/worker/instance?resourceIdentity=worker:kanthord:general",
     { headers: { Authorization: `Bearer ${fixture.token}` } },
@@ -235,9 +235,9 @@ test("worker catalog CLI lists ascending pages", async (t) => {
     page.items.map((item: { name: string }) => item.name),
     ["claude@1", "general@1"],
   );
-  assert.equal(typeof page.nextCursor, STRING_TYPE);
+  assert.equal(typeof page.next_cursor, STRING_TYPE);
   const second = await command(
-    ["worker", "list", "--limit", "2", "--cursor", page.nextCursor],
+    ["worker", "list", "--limit", "2", "--cursor", page.next_cursor],
     env,
   );
   assert.equal(second.code, ExitCode.Success, second.stderr);
@@ -246,7 +246,7 @@ test("worker catalog CLI lists ascending pages", async (t) => {
     last.items.map((item: { name: string }) => item.name),
     ["opencode@1", "reviewer@1"],
   );
-  assert.equal(last.nextCursor, null);
+  assert.equal(last.next_cursor, null);
 });
 
 test("worker catalog CLI gets native and external budgets and reports missing workers", async (t) => {
@@ -356,12 +356,12 @@ test("worker register prints registration facts and key to redirected stdout and
     assert.equal(result.stderr, EMPTY_OUTPUT);
     const response = JSON.parse(result.stdout);
     assert.deepEqual(Object.keys(response).sort(), [
-      "idempotencyKey",
+      "idempotency_key",
       "resourceIdentity",
       "runtimeIdentity",
       "workerName",
     ]);
-    assert.equal(response.idempotencyKey, key);
+    assert.equal(response.idempotency_key, key);
     assert.equal(
       response.runtimeIdentity,
       machines.worker.findByClient(String(decode(token).payload.sub))
@@ -440,7 +440,7 @@ test("worker registration resolves option over environment over file without rew
       machines.worker.findByClient(String(decode(entry.token).payload.sub))
         ?.runtimeIdentity,
     );
-    assert.match(response.idempotencyKey, /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
+    assert.match(response.idempotency_key, /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
     assert.ok(!result.stdout.includes(entry.token));
   }
   assert.equal(machines.worker.registrations.size, TOKEN_SOURCES);

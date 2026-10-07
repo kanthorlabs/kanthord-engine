@@ -204,7 +204,7 @@ const INPUTS = [
     schema: unblockSchema,
     input: {
       blockedAttempt: ZERO_ATTEMPT,
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       expectedMissionVersion: FIRST_REVISION,
     },
   },

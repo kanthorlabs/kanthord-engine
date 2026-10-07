@@ -41,7 +41,10 @@ test("reads concatenate ordered pages and enforce their finite limit", async (t)
     return {
       type: OperationResultType.Completed,
       status: 200,
-      data: { items: cursor ? [2] : [1], nextCursor: cursor ? null : "second" },
+      data: {
+        items: cursor ? [2] : [1],
+        next_cursor: cursor ? null : "second",
+      },
     };
   });
   assert.deepEqual(items, [1, 2]);
@@ -53,7 +56,7 @@ test("reads concatenate ordered pages and enforce their finite limit", async (t)
       return {
         type: OperationResultType.Completed,
         status: 200,
-        data: { items: [], nextCursor: "again" },
+        data: { items: [], next_cursor: "again" },
       };
     }),
     ExecutionStop,

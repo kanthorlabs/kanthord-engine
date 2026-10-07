@@ -1493,14 +1493,14 @@ test("node reads map current and retired task snapshots, revisions and paginatio
     page.items.map((item) => item.revision),
     [NEXT_REVISION],
   );
-  assert.ok(page.nextCursor);
+  assert.ok(page.next_cursor);
   assert.deepEqual(
     pageOf(revisionSchema)
       .parse(
         invoke(
           "node.revision.list",
           { nodeId: objective },
-          { limit: "1", cursor: page.nextCursor },
+          { limit: "1", cursor: page.next_cursor },
         ),
       )
       .items.map((item) => item.revision),
@@ -1510,12 +1510,12 @@ test("node reads map current and retired task snapshots, revisions and paginatio
     invoke("node.list", { missionId: f.missionId }, { limit: "1" }),
   );
   assert.equal(first.items.length, SINGLE_ITEM);
-  assert.ok(first.nextCursor);
+  assert.ok(first.next_cursor);
   const second = pageOf(nodeSchema).parse(
     invoke(
       "node.list",
       { missionId: f.missionId },
-      { limit: "1", cursor: first.nextCursor },
+      { limit: "1", cursor: first.next_cursor },
     ),
   );
   assert.equal(second.items.length, SINGLE_ITEM);
@@ -2188,7 +2188,7 @@ test("edge.list lists only current incident edges, filters kinds and paginates d
     { kind: EdgeKind.Containment, parentId: nodeId, childId: task },
   ].sort((a, b) => (a.parentId > b.parentId ? -SORT_AFTER : SORT_AFTER));
   const expected = [dependency, ...containment];
-  assert.deepEqual(f.edges(), { items: expected, nextCursor: null });
+  assert.deepEqual(f.edges(), { items: expected, next_cursor: null });
   assert.deepEqual(f.edges({ kind: EdgeKind.Dependency }).items, [dependency]);
   assert.deepEqual(f.edges({ kind: EdgeKind.Containment }).items, containment);
   assert.deepEqual(f.edges({ nodeId }).items, expected);
@@ -2202,7 +2202,7 @@ test("edge.list lists only current incident edges, filters kinds and paginates d
   for (const edge of expected) {
     const page = f.edges({ limit: SINGLE_ITEM, cursor });
     assert.deepEqual(page.items, [edge]);
-    cursor = page.nextCursor ?? undefined;
+    cursor = page.next_cursor ?? undefined;
   }
   assert.equal(cursor, undefined);
   f.store.database
@@ -2272,12 +2272,12 @@ function updateBody(f: ReturnType<typeof nodeFixture>, id: string): NodeUpdate {
       filename: row.filename,
       content,
       kind: row.kind,
-      expectedRevision: revision.revision,
+      expected_revision: revision.revision,
     };
   });
   return {
     filename: node.filename,
-    expectedRevision: node.expectedRevision,
+    expected_revision: node.expected_revision,
     content: {
       ...node.content,
       bindings: node.kind === NodeKind.Objective ? [BINDING_ID] : [],
@@ -2668,11 +2668,11 @@ test("node.update task revises only its objective and maps filename conflicts", 
   assert.equal(changed.revisions[FIRST_ELEMENT_INDEX]?.nodeId, objectiveId);
   assert.equal(
     changed.revisions[FIRST_ELEMENT_INDEX]?.revision,
-    body.expectedRevision + VERSION_INCREMENT,
+    body.expected_revision + VERSION_INCREMENT,
   );
   assert.deepEqual(changed.revisions[FIRST_ELEMENT_INDEX]?.change, {
     write: RevisionWrite.NodeUpdate,
-    previousRevision: body.expectedRevision,
+    previousRevision: body.expected_revision,
     changedFields: [TASKS_FIELD],
     tasks: [
       {
@@ -2750,7 +2750,7 @@ test("node.update checks existence, retirement, version and revision in order", 
   updateRefuses(
     f,
     id,
-    { ...body, expectedRevision: NEXT_REVISION },
+    { ...body, expected_revision: NEXT_REVISION },
     MissionErrorCode.RevisionConflict,
     { current: FIRST_REVISION },
   );
@@ -2808,7 +2808,7 @@ function criterionBody(
     criterion: update.content.criterion,
     verifications: update.content.verifications,
     reason: REASON,
-    expectedRevision: update.expectedRevision,
+    expected_revision: update.expected_revision,
     expectedMissionVersion: update.expectedMissionVersion,
   };
 }
@@ -2859,7 +2859,7 @@ test("criterion.set no-op preserves mission and revision; changed criterion pres
   assert.equal(f.version(), changed.missionVersion);
   assert.deepEqual(revision.change, {
     write: RevisionWrite.CriterionSet,
-    previousRevision: body.expectedRevision,
+    previousRevision: body.expected_revision,
     changedFields: [ContentField.Criterion],
     tasks: [],
   });
@@ -2968,7 +2968,7 @@ test("criterion.set enforces check order, revisions and content validation", (t)
   criterionRefuses(
     f,
     id,
-    { ...body, expectedRevision: FIRST_REVISION },
+    { ...body, expected_revision: FIRST_REVISION },
     MissionErrorCode.RevisionConflict,
     { current: NEXT_REVISION },
   );
@@ -3061,7 +3061,7 @@ function moveFixture(t: TestContext) {
         newParentId,
         reason: REASON,
         expectedMissionVersion: f.version(),
-        expectedRevision: revision(ownerId ?? nodeId),
+        expected_revision: revision(ownerId ?? nodeId),
         expectedOldParentRevision: revision(oldParentId ?? nodeId),
         expectedNewParentRevision: revision(newParentId),
         ...overrides,
@@ -3222,7 +3222,7 @@ test("node.move checks version, revisions, parents, terminal and retirement befo
     newParent,
     MissionErrorCode.RevisionConflict,
     { current: SECOND_REVISION },
-    { expectedRevision: FIRST_REVISION },
+    { expected_revision: FIRST_REVISION },
   );
   f.refuses(
     task,

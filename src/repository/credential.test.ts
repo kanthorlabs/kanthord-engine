@@ -637,7 +637,7 @@ test("an ssh record pins the resolved identity and refuses an ambiguous or drift
     params: { credentialName: "kanthorlabs-ssh" },
     query: {},
     body: {
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       metadata: { ...PIN, hostname: "github.com", port: 22 },
     },
   })) as CredentialAnswer;
@@ -647,7 +647,7 @@ test("an ssh record pins the resolved identity and refuses an ambiguous or drift
       params: { credentialName: "kanthorlabs-ssh" },
       query: {},
       body: {
-        expectedRevision: FIRST_REVISION + ONE_CALL,
+        expected_revision: FIRST_REVISION + ONE_CALL,
         secret: {},
         metadata: PIN,
       },

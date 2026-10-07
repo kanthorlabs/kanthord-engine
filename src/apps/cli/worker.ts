@@ -64,7 +64,7 @@ async function register(command: Command): Promise<void> {
       `worker register: request failed (HTTP ${result.status}); idempotency key ${key}.`,
     );
   process.stdout.write(
-    `${JSON.stringify({ ...result.data, idempotencyKey: key })}\n`,
+    `${JSON.stringify({ ...result.data, idempotency_key: key })}\n`,
   );
 }
 
@@ -95,7 +95,7 @@ async function handover(executionId: string, command: Command): Promise<void> {
       `worker handover: request failed (HTTP ${result.status}); idempotency key ${key}.`,
     );
   process.stdout.write(
-    `${JSON.stringify({ received: true, idempotencyKey: key })}\n`,
+    `${JSON.stringify({ received: true, idempotency_key: key })}\n`,
   );
 }
 
@@ -173,7 +173,9 @@ async function deregister(
     "cli.worker.instance.deregister.indeterminate",
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function catalogGet(workerName: string, command: Command): Promise<void> {
@@ -215,7 +217,9 @@ async function resume(
     "cli.worker.instance.resume.indeterminate",
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 function instanceListQuery(options: Record<string, string | undefined>) {

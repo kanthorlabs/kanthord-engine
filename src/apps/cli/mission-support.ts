@@ -85,7 +85,9 @@ export async function mutate<S extends z.ZodTypeAny, T extends object>(
     `cli.mission.${name}.indeterminate`,
     key,
   );
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 export function addPagination(command: Command): Command {

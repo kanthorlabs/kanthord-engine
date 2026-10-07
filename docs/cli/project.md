@@ -118,10 +118,10 @@ or secret selection. A caller-supplied project, binding, or actor field is not
 authentication; requests contain no `caller` or `humanIdentity` override.
 
 Ordinary success prints one JSON value and exits `0`. A list prints one page
-with required proposed fields `items` (array) and `nextCursor` (nonempty opaque
+with required proposed fields `items` (array) and `next_cursor` (nonempty opaque
 string, or `null` on the final page). It fetches no further pages implicitly.
 Binding and effective-configuration reads also report `bindingSetVersion`.
-Mutation results include the proposed `idempotencyKey` CLI field alongside
+Mutation results include the proposed `idempotency_key` CLI field alongside
 the operation result. They contain metadata and credential references, never
 credential material.
 

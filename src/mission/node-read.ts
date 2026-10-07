@@ -173,7 +173,7 @@ export function nodePage(
     .map((row) => nodeRecord(tx, row, bindings));
   return {
     items,
-    nextCursor: rows.length > limit ? encode(items.at(-1)!.id) : null,
+    next_cursor: rows.length > limit ? encode(items.at(-1)!.id) : null,
   };
 }
 
@@ -196,7 +196,7 @@ export function revisionPage(
     .map((row) => revisionFromRow(tx, row));
   return {
     items,
-    nextCursor:
+    next_cursor:
       rows.length > limit ? encode(String(items.at(-1)!.revision)) : null,
   };
 }

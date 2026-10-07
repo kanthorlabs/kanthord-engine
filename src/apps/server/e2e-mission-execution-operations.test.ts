@@ -84,7 +84,7 @@ const PASS = [
     timedOut: false,
   },
 ];
-type Page<T> = { items: T[]; nextCursor: string | null };
+type Page<T> = { items: T[]; next_cursor: string | null };
 type Submission = z.infer<typeof evidenceSubmitResultSchema>;
 type Assessment = z.infer<typeof assessmentSubmitResultSchema>;
 type Pull = { kind: string; execution: ExecutionRecord };
@@ -478,7 +478,7 @@ test(
         h.W,
       );
       assert.equal(page.items.length, PAIR_COUNT);
-      assert.equal(page.nextCursor, null);
+      assert.equal(page.next_cursor, null);
     });
     await t.test("E04.9 release to Waiting", async () => {
       await release(e1);
@@ -664,13 +664,13 @@ test(
         [...args, "--force"],
         "gateway.request.validation_failed",
       );
-      const answer = await h.read<{ idempotencyKey: string }>([
+      const answer = await h.read<{ idempotency_key: string }>([
         ...args,
         "--force",
         "--reason",
         "cleanup",
       ]);
-      assert.ok(answer.idempotencyKey);
+      assert.ok(answer.idempotency_key);
       await h.refuses(
         ["mission", "evidence", "get", failed.evidence.id],
         "mission.record.not_found",

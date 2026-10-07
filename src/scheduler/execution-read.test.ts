@@ -87,9 +87,9 @@ test("human execution reads paginate all states and isolate project, node and at
   assert.equal(all.items.length, TOTAL_ITEM_COUNT);
   const first = await list({ limit: 1 });
   assert.equal(first.items.length, SINGLE_ITEM_COUNT);
-  const second = await list({ limit: 1, cursor: first.nextCursor });
+  const second = await list({ limit: 1, cursor: first.next_cursor });
   assert.deepEqual([...first.items, ...second.items], all.items);
-  assert.equal(second.nextCursor, null);
+  assert.equal(second.next_cursor, null);
   assert.deepEqual((await list({ nodeId: h.row.nodeId })).items, all.items);
   assert.deepEqual(
     (await list({ nodeId: h.row.nodeId, attempt: 2 })).items.map(

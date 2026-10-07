@@ -265,7 +265,7 @@ test("other checks block while none stays unresolved and failed checks retain fa
   assert.equal(failed.results.length, NO_RESULTS);
   assert.equal(failed.failures.length, SINGLE_FAILURE);
   assert.equal(
-    failed.failures[FIRST_RESULT_INDEX]!.error.requestId,
+    failed.failures[FIRST_RESULT_INDEX]!.error.request_id,
     h.caller.requestId,
   );
   h.dependencies.intakeCheck.check = async () => ({

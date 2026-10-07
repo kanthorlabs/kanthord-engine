@@ -69,8 +69,8 @@ ones and the applicable shared options; its request body is absent, represented
 as `body: null` in the service-client envelope.
 
 Successful unary commands print one JSON line and exit `0`. List results
-are `{ "items": [...], "nextCursor": null | string }`. Mutations also
-print the used `idempotencyKey`. Failures print a diagnostic and exit nonzero;
+are `{ "items": [...], "next_cursor": null | string }`. Mutations also
+print the used `idempotency_key`. Failures print a diagnostic and exit nonzero;
 they do not print tokens. An indeterminate mutation reports its key and does not
 assert that the operation had no effect. Repeating the same logical request uses
 the same caller, inputs and key; starting another CLI invocation without that key
@@ -164,7 +164,7 @@ The operation is a mutation, declares a `10,000 ms` timeout and a `40 KiB` body
 limit, and returns HTTP `200` with `{ "runtimeIdentity": "...", "resourceIdentity": "...", "workerName": "..." }`. The body limit
 does not permit a registration payload. The runtime identity is `worker_instance_<ulid>`.
 
-The CLI prints one JSON line with `runtimeIdentity`, `resourceIdentity`, `workerName` and `idempotencyKey`, saves no configuration and prints no token.
+The CLI prints one JSON line with `runtimeIdentity`, `resourceIdentity`, `workerName` and `idempotency_key`, saves no configuration and prints no token.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
 worker definition or human account. The credential comes from local `jwt generate`
 issuance described in [other commands](./other.md).
@@ -223,7 +223,7 @@ kanthord worker [--endpoint <url>] handover <execution-id> [--token <jwt>] [--id
 
 The command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and the body `{ executionId }`, which names the execution that the invocation chain proves. It is a secret mutation with `[M]`: a repeat of its key answers 409 without the envelope, and a lost answer takes a new key.
 The operation is implemented, requires a live execution and returns the strict AES-256-GCM envelope `{ nonce, ciphertext }` as canonical base64. It has a 30-second timeout and a 1 KiB body limit. Registration and execution proof precede replay lookup; the handler repeats execution liveness in its one write transaction before authorization, pinning and encryption.
-The command prints only `{ "received": true, "idempotencyKey": "<key>" }` and never prints the envelope.
+The command prints only `{ "received": true, "idempotency_key": "<key>" }` and never prints the envelope.
 The [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-credential-handover) rules the application call after a claim and before inference.
 The [Custody handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#the-credential-handover) rules the envelope and credential report.
 

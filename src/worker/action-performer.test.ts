@@ -319,7 +319,7 @@ test("refused or thrown recording retains the known address as recording uncerta
     status: HttpStatus.Conflict,
     error: {
       error: { code: NOT_RUNNING, message: "ended", details: null },
-      requestId: "request",
+      request_id: "request",
     },
   });
   const expected = {

@@ -102,7 +102,7 @@ test("expired registration registers again while authentication refusal ends the
     type: OperationResultType.Failure,
     status: 403,
     error: {
-      requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       error: {
         code: ++pulls === ONCE ? "gateway.registration.required" : terminal,
         message: "test refusal",

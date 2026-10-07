@@ -394,7 +394,7 @@ test("agent declaration read exposes prompts, tools and current enablement witho
   );
   const enabled = f.invoke("enablement.put", putBody);
   assert.deepEqual((await read()).enablement, enabled);
-  f.invoke("enablement.disable", { expectedRevision: enabled.revision });
+  f.invoke("enablement.disable", { expected_revision: enabled.revision });
   assert.equal((await read()).enablement?.state, disabled);
   await assert.rejects(read("nope@1"), {
     code: AgentErrorCode.AgentNotFound,
@@ -544,14 +544,14 @@ test("enablement operations use one commit, page ascending, and project only wir
     page.items.map(({ agentName }) => agentName),
     [OTHER_AGENT],
   );
-  assert.ok(page.nextCursor);
+  assert.ok(page.next_cursor);
   const next = f.invoke(
     "enablement.list",
     null,
     {},
-    { limit: 1, cursor: page.nextCursor },
+    { limit: 1, cursor: page.next_cursor },
   );
-  assert.deepEqual(next, { items: [first], nextCursor: null });
+  assert.deepEqual(next, { items: [first], next_cursor: null });
   assert.deepEqual(f.invoke("enablement.get"), first);
   const expectedCommits = 6;
   assert.equal(f.commits(), expectedCommits);
@@ -571,14 +571,14 @@ test("put checks catalog then tombstone-aware expected revision and restarts ena
     () =>
       f.invoke(
         "enablement.put",
-        { ...putBody, expectedRevision: 1 },
+        { ...putBody, expected_revision: 1 },
         { agentName: UNKNOWN },
       ),
     AgentErrorCode.AgentNotFound,
     HttpStatus.NotFound,
   );
   refuses(
-    () => f.invoke("enablement.put", { ...putBody, expectedRevision: 1 }),
+    () => f.invoke("enablement.put", { ...putBody, expected_revision: 1 }),
     AgentErrorCode.RevisionConflict,
     HttpStatus.Conflict,
     { agentName: AGENT, revision: null },
@@ -590,8 +590,8 @@ test("put checks catalog then tombstone-aware expected revision and restarts ena
     HttpStatus.Conflict,
     { agentName: AGENT, revision: FIRST_REVISION },
   );
-  f.invoke("enablement.disable", { expectedRevision: 1 });
-  assert.deepEqual(f.invoke("enablement.remove", { expectedRevision: 2 }), {
+  f.invoke("enablement.disable", { expected_revision: 1 });
+  assert.deepEqual(f.invoke("enablement.remove", { expected_revision: 2 }), {
     agentName: AGENT,
     removed: true,
   });
@@ -608,7 +608,7 @@ test("put checks catalog then tombstone-aware expected revision and restarts ena
   );
   const restored = f.invoke("enablement.put", {
     ...putBody,
-    expectedRevision: 3,
+    expected_revision: 3,
   });
   assert.deepEqual(
     { revision: restored.revision, state: restored.state },
@@ -627,8 +627,8 @@ test("mutations check catalog, existence, and then revision in order", (t) => {
   ] as const) {
     const body =
       key === ADD_PROVIDER
-        ? { ...spare, expectedRevision: 99 }
-        : { expectedRevision: 99 };
+        ? { ...spare, expected_revision: 99 }
+        : { expected_revision: 99 };
     const params: Record<string, string> =
       key === REMOVE_PROVIDER
         ? { agentName: AGENT, providerName: spare.name }
@@ -646,7 +646,7 @@ test("mutations check catalog, existence, and then revision in order", (t) => {
   }
   f.invoke("enablement.put", putBody);
   refuses(
-    () => f.invoke("enablement.disable", { expectedRevision: 99 }),
+    () => f.invoke("enablement.disable", { expected_revision: 99 }),
     AgentErrorCode.RevisionConflict,
     HttpStatus.Conflict,
   );
@@ -658,11 +658,11 @@ test("disable skips dependent validation; enable validates defaults and every bi
   f.invoke("enablement.put", putBody);
   entries = [{ ...binding, entry: { modelIdentifier: MISSING_MODEL } }];
   const disabled = f.invoke("enablement.disable", {
-    expectedRevision: 1,
+    expected_revision: 1,
   });
   assert.equal(disabled.state, EnablementState.Disabled);
   refuses(
-    () => f.invoke("enablement.enable", { expectedRevision: 2 }),
+    () => f.invoke("enablement.enable", { expected_revision: 2 }),
     AgentErrorCode.InvalidatesBindings,
     HttpStatus.Conflict,
     {
@@ -678,11 +678,11 @@ test("disable skips dependent validation; enable validates defaults and every bi
   );
   entries = [binding];
   assert.equal(
-    f.invoke("enablement.enable", { expectedRevision: 2 }).state,
+    f.invoke("enablement.enable", { expected_revision: 2 }).state,
     EnablementState.Enabled,
   );
   assert.equal(
-    f.invoke("enablement.put", { ...putBody, expectedRevision: 3 }).revision,
+    f.invoke("enablement.put", { ...putBody, expected_revision: 3 }).revision,
     THIRD_REVISION + 1,
   );
 });
@@ -693,7 +693,7 @@ test("remove refuses bindings and tombstones only when unused", (t) => {
   f.invoke("enablement.put", putBody);
   entries = [binding];
   refuses(
-    () => f.invoke("enablement.remove", { expectedRevision: 1 }),
+    () => f.invoke("enablement.remove", { expected_revision: 1 }),
     AgentErrorCode.InUse,
     HttpStatus.Conflict,
     {
@@ -702,13 +702,13 @@ test("remove refuses bindings and tombstones only when unused", (t) => {
     },
   );
   entries = [];
-  assert.deepEqual(f.invoke("enablement.remove", { expectedRevision: 1 }), {
+  assert.deepEqual(f.invoke("enablement.remove", { expected_revision: 1 }), {
     agentName: AGENT,
     removed: true,
   });
   assert.deepEqual(f.invoke("enablement.list", null, {}), {
     items: [],
-    nextCursor: null,
+    next_cursor: null,
   });
 });
 
@@ -719,7 +719,7 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
   const remove = (name: string, revision: number) =>
     f.invoke(
       "enablement.provider.remove",
-      { expectedRevision: revision },
+      { expected_revision: revision },
       { agentName: AGENT, providerName: name },
     );
   refuses(
@@ -729,7 +729,7 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
   );
   refuses(() => remove(provider.name, 1), AgentErrorCode.ProviderRequired);
   assert.deepEqual(
-    f.invoke("enablement.provider.add", { ...spare, expectedRevision: 1 })
+    f.invoke("enablement.provider.add", { ...spare, expected_revision: 1 })
       .agentProviders,
     [provider, spare],
   );
@@ -737,7 +737,7 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
     () =>
       f.invoke("enablement.provider.add", {
         ...spare,
-        expectedRevision: 2,
+        expected_revision: 2,
       }),
     AgentErrorCode.ProviderNameConflict,
     HttpStatus.Conflict,
@@ -747,7 +747,7 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
       f.invoke("enablement.provider.add", {
         ...spare,
         name: "second",
-        expectedRevision: 2,
+        expected_revision: 2,
       }),
     AgentErrorCode.ProviderCredentialConflict,
     HttpStatus.Conflict,
@@ -818,7 +818,7 @@ test("put rejects duplicate names, duplicate credentials, absent defaults, provi
     () =>
       f.invoke("enablement.put", {
         ...putBody,
-        expectedRevision: 1,
+        expected_revision: 1,
         agentProviders: [
           provider,
           { ...spare, provider: AgentProviderKind.GithubCopilot },
@@ -829,7 +829,7 @@ test("put rejects duplicate names, duplicate credentials, absent defaults, provi
   );
   entries = [{ ...binding, entry: { ...defaults, agentProvider: spare.name } }];
   refuses(
-    () => f.invoke("enablement.put", { ...putBody, expectedRevision: 1 }),
+    () => f.invoke("enablement.put", { ...putBody, expected_revision: 1 }),
     AgentErrorCode.ProviderInUse,
     HttpStatus.Conflict,
     {
@@ -860,7 +860,7 @@ test("put collects binding validation failures and validates its defaults first"
     },
   ];
   refuses(
-    () => f.invoke("enablement.put", { ...putBody, expectedRevision: 1 }),
+    () => f.invoke("enablement.put", { ...putBody, expected_revision: 1 }),
     AgentErrorCode.InvalidatesBindings,
     HttpStatus.Conflict,
     {
@@ -883,7 +883,7 @@ test("put collects binding validation failures and validates its defaults first"
     () =>
       f.invoke("enablement.put", {
         ...putBody,
-        expectedRevision: 1,
+        expected_revision: 1,
         defaultConfiguration: { ...defaults, modelIdentifier: MISSING_MODEL },
       }),
     AgentErrorCode.ModelUnknown,
@@ -1025,7 +1025,7 @@ test("openai-compatible approved models establish models and reasoning levels, i
   assert.equal(
     f.invoke("enablement.put", {
       ...customBody,
-      expectedRevision: 1,
+      expected_revision: 1,
       defaultConfiguration: { ...defaults, reasoningEffort: "high" },
     }).revision,
     SECOND_REVISION,
@@ -1056,7 +1056,7 @@ test("null credential records permit no model; malformed metadata propagates in 
   f.invoke("enablement.put", customBody);
   broken = true;
   for (const action of [
-    () => f.invoke("enablement.put", { ...customBody, expectedRevision: 1 }),
+    () => f.invoke("enablement.put", { ...customBody, expected_revision: 1 }),
     () => f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null)),
   ])
     assert.throws(action, (error) => error === malformed);
@@ -1076,14 +1076,14 @@ test("Custody refusals map to credential_unsuitable, while unexpected failures p
     "Missing credential.",
   );
   refuses(
-    () => f.invoke("enablement.put", { ...putBody, expectedRevision: 1 }),
+    () => f.invoke("enablement.put", { ...putBody, expected_revision: 1 }),
     AgentErrorCode.CredentialUnsuitable,
   );
   refuses(
     () =>
       f.invoke("enablement.provider.add", {
         ...spare,
-        expectedRevision: 1,
+        expected_revision: 1,
       }),
     AgentErrorCode.CredentialUnsuitable,
   );
@@ -1097,7 +1097,7 @@ test("Custody refusals map to credential_unsuitable, while unexpected failures p
     "Unwired collaboration.",
   );
   for (const action of [
-    () => f.invoke("enablement.put", { ...putBody, expectedRevision: 1 }),
+    () => f.invoke("enablement.put", { ...putBody, expected_revision: 1 }),
     view,
   ]) {
     assert.throws(action, (error) => error === failure);
@@ -1137,7 +1137,7 @@ test("validateEntry enforces availability, allowlist and entry forms", (t) => {
     () => validate({ reasoningEffort: "invented" }),
     AgentErrorCode.ReasoningUnsupported,
   );
-  f.invoke("enablement.disable", { expectedRevision: 1 });
+  f.invoke("enablement.disable", { expected_revision: 1 });
   refuses(() => validate(defaults), AgentErrorCode.Unavailable);
 });
 
@@ -1273,7 +1273,7 @@ test("agentView resolves valid configurations and returns precise issues without
       valid: false,
       issues: [{ path: [path], code }],
     });
-  f.invoke("enablement.disable", { expectedRevision: 1 });
+  f.invoke("enablement.disable", { expected_revision: 1 });
   assert.deepEqual(view(), {
     defaults: null,
     effective: null,
@@ -1509,7 +1509,7 @@ test("prompt writes create the row at revision one and replace it at the expecte
     });
     const switched = f.invoke(
       "prompt.switch",
-      { ...target, expectedRevision: 1, switch: "custom", enabled: false },
+      { ...target, expected_revision: 1, switch: "custom", enabled: false },
       {},
     );
     assert.deepEqual(switched, {
@@ -1519,7 +1519,7 @@ test("prompt writes create the row at revision one and replace it at the expecte
     });
     const replaced = f.invoke(
       "prompt.put",
-      { ...target, expectedRevision: 2, customText: "two" },
+      { ...target, expected_revision: 2, customText: "two" },
       {},
     );
     assert.deepEqual(
@@ -1591,7 +1591,7 @@ test("the system layer switch and the override of an agent decide its system lay
     "prompt.switch",
     {
       scope: PromptScope.System,
-      expectedRevision: 1,
+      expected_revision: 1,
       switch: "layer",
       enabled: true,
     },
@@ -1599,7 +1599,7 @@ test("the system layer switch and the override of an agent decide its system lay
   );
   f.invoke(
     "prompt.switch",
-    { ...target, expectedRevision: 1, system_layer: "off" },
+    { ...target, expected_revision: 1, system_layer: "off" },
     {},
   );
   assert.equal((await systemLayer())?.enabled, false);
@@ -1637,14 +1637,14 @@ test("a second prompt write at one expected revision answers a conflict with the
   const first = f.invoke("prompt.put", { ...target, customText: "a" }, {});
   f.invoke(
     "prompt.put",
-    { ...target, expectedRevision: 1, customText: "b" },
+    { ...target, expected_revision: 1, customText: "b" },
     {},
   );
   refuses(
     () =>
       f.invoke(
         "prompt.put",
-        { ...target, expectedRevision: 1, customText: "c" },
+        { ...target, expected_revision: 1, customText: "c" },
         {},
       ),
     AgentErrorCode.PromptRevisionConflict,
@@ -1666,7 +1666,7 @@ test("a second prompt write at one expected revision answers a conflict with the
         "prompt.switch",
         {
           scope: PromptScope.System,
-          expectedRevision: 1,
+          expected_revision: 1,
           switch: "base",
           enabled: false,
         },
@@ -1699,19 +1699,19 @@ test("prompt writes refuse an oversized text, an empty agent layer and an unknow
   );
   f.invoke(
     "prompt.switch",
-    { ...target, expectedRevision: 1, switch: "agent_file", enabled: false },
+    { ...target, expected_revision: 1, switch: "agent_file", enabled: false },
     {},
   );
   f.invoke(
     "prompt.switch",
-    { ...target, expectedRevision: 2, switch: "shipped", enabled: false },
+    { ...target, expected_revision: 2, switch: "shipped", enabled: false },
     {},
   );
   refuses(
     () =>
       f.invoke(
         "prompt.switch",
-        { ...target, expectedRevision: 3, switch: "custom", enabled: false },
+        { ...target, expected_revision: 3, switch: "custom", enabled: false },
         {},
       ),
     AgentErrorCode.PromptAgentLayerEmpty,

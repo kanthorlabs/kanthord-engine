@@ -93,14 +93,14 @@ test("OpenAPI publishes the same request-ID and idempotency-key formats as valid
   const files = emitOpenAPIFiles(Object.values(apiOperations));
   const shared = files["openapi/shared/components.yaml"] as {
     components: {
-      schemas: { Error: { properties: { requestId: object } } };
+      schemas: { Error: { properties: { request_id: object } } };
       parameters: { IdempotencyKey: { schema: { pattern: string } } };
     };
   };
   const { $schema: dialect, ...schema } = z.toJSONSchema(requestIdSchema);
   assert.ok(dialect?.includes("json-schema"));
   assert.deepEqual(
-    shared.components.schemas.Error.properties.requestId,
+    shared.components.schemas.Error.properties.request_id,
     schema,
   );
   const keyPattern = new RegExp(
@@ -120,7 +120,7 @@ test("HTTP responses and logs share the validated prefixed request ID, including
     assert.equal(response.status, HttpStatus.NotFound);
     const body = errorSchema.parse(await response.json());
     const id = requestIdSchema.parse(response.headers.get("x-request-id"));
-    assert.equal(body.requestId, id);
+    assert.equal(body.request_id, id);
     if (supplied === requestId) assert.equal(id, supplied);
     else assert.notEqual(id, supplied);
     const logs = fixture.logs.slice(start).map((line) => JSON.parse(line));

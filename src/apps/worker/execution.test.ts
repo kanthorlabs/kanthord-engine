@@ -120,7 +120,7 @@ test("host takes handover before setup and method, discards on every method end"
         type: OperationResultType.Failure,
         status,
         error: {
-          requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+          request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
           error: { code, message: "Ended", details: null },
         },
       };
@@ -166,7 +166,7 @@ test("host takes handover before setup and method, discards on every method end"
     type: OperationResultType.Failure,
     status: 403,
     error: {
-      requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       error: {
         code: "gateway.invocation.execution_proof_failed",
         message: "Ended",

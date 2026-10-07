@@ -62,13 +62,13 @@ export function collectInventories(
   tx: Transaction,
   inventories: ResourceInventories,
 ): InventorySnapshot {
-  const snapshot: InventorySnapshot = { entries: [], missingInventories: [] };
+  const snapshot: InventorySnapshot = { entries: [], missing_inventories: [] };
   for (const owner of INVENTORY_OWNERS) {
     try {
       const entries = inventories[owner](tx);
       for (const entry of entries) snapshot.entries.push({ owner, entry });
     } catch {
-      snapshot.missingInventories.push(owner);
+      snapshot.missing_inventories.push(owner);
     }
   }
   return snapshot;
@@ -96,12 +96,12 @@ export async function resourceHealthReport(
   );
   throwIfCancelled(caller.context);
   const snapshot = collect();
-  if (snapshot.missingInventories.length > EMPTY_COUNT)
+  if (snapshot.missing_inventories.length > EMPTY_COUNT)
     throw new GatewayError(
       HttpStatus.ServiceUnavailable,
       "gateway.healthcheck.inventory_failed",
       "One or more resource owners failed to supply their inventory.",
-      { missingInventories: snapshot.missingInventories },
+      { missing_inventories: snapshot.missing_inventories },
     );
   const unique = new Map<string, InventoryEntry>();
   for (const item of snapshot.entries)

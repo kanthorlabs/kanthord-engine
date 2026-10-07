@@ -298,12 +298,12 @@ export const credentialCheckBodySchema = credentialCreateSchema.omit({
   name: true,
 });
 export const credentialRotateBodySchema = z.strictObject({
-  expectedRevision: z.number().int().positive(),
+  expected_revision: z.number().int().positive(),
   secret: z.unknown(),
   metadata: z.unknown().optional(),
 });
 export const credentialUpdateMetadataBodySchema = z.strictObject({
-  expectedRevision: z.number().int().positive(),
+  expected_revision: z.number().int().positive(),
   metadata: z.unknown(),
 });
 export const credentialListQuerySchema = z.strictObject({
@@ -334,7 +334,7 @@ export const credentialAnswerSchema = z.strictObject({
 });
 export const credentialListAnswerSchema = z.strictObject({
   items: z.array(credentialAnswerSchema),
-  nextCursor: z.string().nullable(),
+  next_cursor: z.string().nullable(),
 });
 export const credentialCheckAnswerSchema = z.strictObject({
   status: z.enum([

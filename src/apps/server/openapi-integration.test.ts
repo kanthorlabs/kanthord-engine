@@ -458,7 +458,7 @@ test("published Worker lists preserve optional limits, filter dependency and con
     assert.equal(limit.schema.maximum, maximum);
     const output =
       operation.responses[HttpStatus.OK]!.content["application/json"].schema;
-    assert.deepEqual(output.required, ["items", "nextCursor"]);
+    assert.deepEqual(output.required, ["items", "next_cursor"]);
     assert.equal(output.properties.items?.type, ARRAY_SCHEMA_TYPE);
   }
   const fragment = parse(
@@ -809,9 +809,9 @@ test("named evidence exceptions retain record shapes and conditional request val
       `${operation}.Output`
     ] as ResolvedSchema;
     if (page) {
-      assert.deepEqual(output.required, ["items", "nextCursor"]);
+      assert.deepEqual(output.required, ["items", "next_cursor"]);
       assert.ok(
-        output.properties.nextCursor!.anyOf!.some(
+        output.properties.next_cursor!.anyOf!.some(
           (item) => item.type === NULL_SCHEMA_TYPE,
         ),
       );
@@ -859,7 +859,7 @@ test("objective list exception preserves full objective and identity-only varian
   );
   const output =
     fragment.components.schemas["mission.execution.objective.list.Output"];
-  assert.deepEqual(output.required, ["items", "nextCursor"]);
+  assert.deepEqual(output.required, ["items", "next_cursor"]);
   const [full, minimal] = output.properties.items.items.anyOf;
   assert.deepEqual(minimal.required, ["id", "state"]);
   assert.deepEqual(Object.keys(minimal.properties).sort(), ["id", "state"]);
@@ -1186,7 +1186,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     Object.keys(
       executionPage.content["application/json"].schema.properties,
     ).sort(),
-    ["items", "nextCursor"],
+    ["items", "next_cursor"],
   );
   assert.deepEqual(
     pullResponse.content["application/json"].schema.oneOf.map(
@@ -1206,7 +1206,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
         schema: {
           properties: {
             items: { type: string };
-            nextCursor: { anyOf: { type: string }[] };
+            next_cursor: { anyOf: { type: string }[] };
           };
         };
       };
@@ -1216,7 +1216,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     queueListResponse.content["application/json"].schema.properties;
   assert.equal(queueListProperties.items.type, ARRAY_SCHEMA_TYPE);
   assert.ok(
-    queueListProperties.nextCursor.anyOf.some(
+    queueListProperties.next_cursor.anyOf.some(
       (schema) => schema.type === NULL_SCHEMA_TYPE,
     ),
   );
@@ -1290,7 +1290,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
       Object.keys(
         response.content["application/json"].schema.properties,
       ).sort(),
-      ["items", "nextCursor"],
+      ["items", "next_cursor"],
     );
   }
   assert.deepEqual(

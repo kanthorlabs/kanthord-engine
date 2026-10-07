@@ -762,7 +762,7 @@ test("binding lists select latest rows before filtering state and exact kinds", 
       INITIAL_BINDING_VERSION,
     );
     assert.equal(list({ kind: [] }).items.length, SECOND_BINDING_VERSION);
-    assert.equal(list().nextCursor, null);
+    assert.equal(list().next_cursor, null);
   });
 });
 
@@ -781,32 +781,32 @@ test("binding lists paginate by descending identity and emit no terminal cursor"
       first.items,
       expected.slice(EMPTY_BINDING_COUNT, INITIAL_BINDING_VERSION),
     );
-    assert.equal(first.nextCursor, encode(first.items[FIRST_ROW_INDEX]!.id));
+    assert.equal(first.next_cursor, encode(first.items[FIRST_ROW_INDEX]!.id));
     const second = listBindings(tx, f.projectId, {
       limit: PAGE_LIMIT,
-      cursor: first.nextCursor,
+      cursor: first.next_cursor,
     });
     assert.deepEqual(
       second.items,
       expected.slice(INITIAL_BINDING_VERSION, SECOND_BINDING_VERSION),
     );
-    assert.equal(second.nextCursor, encode(second.items[FIRST_ROW_INDEX]!.id));
+    assert.equal(second.next_cursor, encode(second.items[FIRST_ROW_INDEX]!.id));
     const third = listBindings(tx, f.projectId, {
       limit: PAGE_LIMIT,
-      cursor: second.nextCursor,
+      cursor: second.next_cursor,
     });
     assert.deepEqual(third.items, expected.slice(SECOND_BINDING_VERSION));
-    assert.equal(third.nextCursor, null);
+    assert.equal(third.next_cursor, null);
     assert.deepEqual(
       listBindings(tx, f.projectId, {
         limit: PAGE_LIMIT,
         cursor: encode(third.items[FIRST_ROW_INDEX]!.id),
       }),
-      { items: [], nextCursor: null },
+      { items: [], next_cursor: null },
     );
     assert.equal(
       listBindings(tx, f.projectId, { limit: THIRD_BINDING_VERSION })
-        .nextCursor,
+        .next_cursor,
       null,
     );
   });
@@ -831,28 +831,28 @@ test("revision lists paginate descending within the pinned row's group, includin
       [3],
     );
     assert.notEqual(first.items[FIRST_ROW_INDEX]!.removedAt, null);
-    assert.equal(first.nextCursor, encode(String(THIRD_BINDING_VERSION)));
+    assert.equal(first.next_cursor, encode(String(THIRD_BINDING_VERSION)));
     const second = listRevisions(tx, pinned.id, {
       limit: PAGE_LIMIT,
-      cursor: first.nextCursor,
+      cursor: first.next_cursor,
     });
     assert.deepEqual(
       second.items.map((binding) => binding.revision),
       [2],
     );
-    assert.equal(second.nextCursor, encode(String(SECOND_BINDING_VERSION)));
+    assert.equal(second.next_cursor, encode(String(SECOND_BINDING_VERSION)));
     const third = listRevisions(tx, pinned.id, {
       limit: PAGE_LIMIT,
-      cursor: second.nextCursor,
+      cursor: second.next_cursor,
     });
     assert.deepEqual(third.items, [pinned]);
-    assert.equal(third.nextCursor, null);
+    assert.equal(third.next_cursor, null);
     assert.deepEqual(
       listRevisions(tx, pinned.id, {
         limit: PAGE_LIMIT,
         cursor: encode(String(INITIAL_BINDING_VERSION)),
       }),
-      { items: [], nextCursor: null },
+      { items: [], next_cursor: null },
     );
     const all = listRevisions(tx, first.items[FIRST_ROW_INDEX]!.id, {
       limit: THIRD_BINDING_VERSION,
@@ -861,7 +861,7 @@ test("revision lists paginate descending within the pinned row's group, includin
       all.items.map((binding) => binding.revision),
       [3, 2, 1],
     );
-    assert.equal(all.nextCursor, null);
+    assert.equal(all.next_cursor, null);
   });
 });
 

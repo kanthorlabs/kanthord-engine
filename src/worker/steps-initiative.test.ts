@@ -69,13 +69,13 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
       status: 200,
       data,
     });
-    const empty = async () => completed({ items: [], nextCursor: null });
+    const empty = async () => completed({ items: [], next_cursor: null });
     const clients = {
       mission: {
         "execution.objective.list": async () =>
           completed({
             items: [{ id: "objective", state: scenario.states[reads++] }],
-            nextCursor: null,
+            next_cursor: null,
           }),
         "execution.objective.outcome.list": empty,
         "execution.objective.evidence.list": empty,
@@ -161,7 +161,7 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
     const page = async () => ({
       type: "completed",
       status: 200,
-      data: { items: [], nextCursor: null },
+      data: { items: [], next_cursor: null },
     });
     let releases = 0;
     const clients = {

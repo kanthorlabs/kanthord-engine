@@ -168,7 +168,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
         query: {},
         body: null,
       }),
-      { items: [], nextCursor: null },
+      { items: [], next_cursor: null },
     );
 });
 
@@ -285,11 +285,11 @@ test("execution revision reads carry the pinned tasks and exclude later human re
   assert.equal(first.items[FIRST_ITEM_INDEX]!.revision, SECOND_REVISION);
   const second = await h.invoke("execution.revision.list", {
     params: { executionId: h.claim.executionId },
-    query: { cursor: first.nextCursor, limit: SINGLE_ITEM },
+    query: { cursor: first.next_cursor, limit: SINGLE_ITEM },
     body: null,
   });
   assert.equal(second.items[FIRST_ITEM_INDEX]!.revision, FIRST_REVISION);
-  assert.equal(second.nextCursor, null);
+  assert.equal(second.next_cursor, null);
   await assert.rejects(
     h.invoke("execution.revision.get", {
       params: { executionId: h.claim.executionId, revision: THIRD_REVISION },

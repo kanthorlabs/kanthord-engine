@@ -795,7 +795,7 @@ export const workerOperations = {
     }),
     output: z.strictObject({
       items: z.array(instanceRecordSchema),
-      nextCursor: z.string().nullable(),
+      next_cursor: z.string().nullable(),
     }),
     description:
       "Page live registrations in descending runtime identity order without changing runtime state.",
@@ -837,7 +837,7 @@ export const workerOperations = {
     }),
     output: z.strictObject({
       items: z.array(catalogItemSchema),
-      nextCursor: z.string().nullable(),
+      next_cursor: z.string().nullable(),
     }),
     description: "List supplied workers in ascending worker-name order.",
   },

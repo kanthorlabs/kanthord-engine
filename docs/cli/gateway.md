@@ -121,7 +121,7 @@ Failure exits `1`, produces no success JSON, and prints a diagnostic on stderr:
 
 - A well-formed API failure uses its error code with
   `gateway verify: request failed (HTTP <status>).` The API envelope is
-  `{"error":{"code":"...","message":"...","details":null},"requestId":"request_<ulid>"}`;
+  `{"error":{"code":"...","message":"...","details":null},"request_id":"request_<ulid>"}`;
   `details` may instead be structured JSON. The current CLI does not print the
   envelope, its details, or request ID.
 - A transport failure, redirect refusal, deadline, invalid JSON, or response

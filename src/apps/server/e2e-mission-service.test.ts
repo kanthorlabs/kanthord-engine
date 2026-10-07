@@ -285,8 +285,8 @@ const INVALID_CASES = [
 
 type Result = Awaited<ReturnType<typeof kanthord>>;
 type Fixture = { directory: string; env: NodeJS.ProcessEnv };
-type Mutation = NodeChange & { idempotencyKey: string };
-type ImportMutation = ImportResult & { idempotencyKey: string };
+type Mutation = NodeChange & { idempotency_key: string };
+type ImportMutation = ImportResult & { idempotency_key: string };
 
 function isolated(t: TestContext): Fixture {
   const directory = temporary(t);
@@ -526,7 +526,7 @@ test(
       key,
     ];
     const created = success<Mutation>(await kanthord(createArgs, fixture.env));
-    assert.equal(created.idempotencyKey, key);
+    assert.equal(created.idempotency_key, key);
     assert.equal(created.revisions.length, SINGLE_ITEM);
     const initiativeId = created.revisions[0]!.nodeId;
     const replayed = success<Mutation>(await kanthord(createArgs, fixture.env));
@@ -544,7 +544,7 @@ test(
             filename: "initiative.md",
             content: { ...CONTENT, name: "Updated plan" },
             reason: REASON,
-            expectedRevision: FIRST_REVISION,
+            expected_revision: FIRST_REVISION,
             expectedMissionVersion: SECOND_REVISION,
           }),
         ],
@@ -556,7 +556,7 @@ test(
       created.missionVersion + VERSION_INCREMENT,
     );
     assert.equal(updated.revisions[0]?.revision, SECOND_REVISION);
-    assert.ok(updated.idempotencyKey);
+    assert.ok(updated.idempotency_key);
     const credential = jsonFile(fixture, "credential.json", {
       name: REPOSITORY_PLATFORM,
       platform: REPOSITORY_PLATFORM,
@@ -659,7 +659,7 @@ test(
             newParentId: newParent,
             reason: REASON,
             expectedMissionVersion: task.missionVersion,
-            expectedRevision: SECOND_REVISION,
+            expected_revision: SECOND_REVISION,
             expectedOldParentRevision: SECOND_REVISION,
             expectedNewParentRevision: FIRST_REVISION,
           }),
@@ -668,7 +668,7 @@ test(
       ),
     );
     assert.equal(moved.missionVersion, task.missionVersion + VERSION_INCREMENT);
-    assert.ok(moved.idempotencyKey);
+    assert.ok(moved.idempotency_key);
     const read = success<{ parentId: string }>(
       await kanthord([MISSION, NODE, GET, taskId], fixture.env),
     );
@@ -696,7 +696,7 @@ test(
       added.missionVersion,
       moved.missionVersion + VERSION_INCREMENT,
     );
-    assert.ok(added.idempotencyKey);
+    assert.ok(added.idempotency_key);
     const pending = success<{ state: string }>(
       await kanthord([MISSION, NODE, GET, oldParent], fixture.env),
     );
@@ -736,7 +736,7 @@ test(
             criterion: "Revised criterion",
             verifications: ["true"],
             reason: REASON,
-            expectedRevision: available.visibleRevision,
+            expected_revision: available.visibleRevision,
             expectedMissionVersion: removed.missionVersion,
           }),
         ],
@@ -750,7 +750,7 @@ test(
     const priority = success<{
       id: string;
       priority: number;
-      idempotencyKey: string;
+      idempotency_key: string;
     }>(
       await kanthord(
         [
@@ -770,7 +770,7 @@ test(
     );
     assert.equal(priority.id, newParent);
     assert.equal(priority.priority, PRIORITY_VALUE);
-    assert.ok(priority.idempotencyKey);
+    assert.ok(priority.idempotency_key);
   },
 );
 
@@ -971,7 +971,7 @@ async function previewImport(
   );
   assert.match(preview.previewDigest, DIGEST_PATTERN);
   assert.deepEqual(preview.violations, []);
-  assert.ok(!Object.hasOwn(preview, "idempotencyKey"));
+  assert.ok(!Object.hasOwn(preview, "idempotency_key"));
   return preview;
 }
 
@@ -1002,7 +1002,7 @@ async function applyImport(
     key,
   ];
   const applied = success<ImportMutation>(await kanthord(args, fixture.env));
-  assert.equal(applied.idempotencyKey, key);
+  assert.equal(applied.idempotency_key, key);
   assert.deepEqual(success(await kanthord(args, fixture.env)), applied);
   return applied;
 }
@@ -1061,7 +1061,7 @@ test(
       preview,
     );
     assert.equal(unchanged.missionVersion, exported.missionVersion);
-    assert.ok(unchanged.idempotencyKey);
+    assert.ok(unchanged.idempotency_key);
     assert.equal(unchanged.assignedIds.length, THREE_ITEMS);
     const newPath = join(fixture.directory, NEW_OBJECTIVE_FILE);
     writePrivate(newPath, NEW_OBJECTIVE_CONTENT);
@@ -1084,7 +1084,7 @@ test(
       applied.missionVersion,
       unchanged.missionVersion + VERSION_INCREMENT,
     );
-    assert.ok(applied.idempotencyKey);
+    assert.ok(applied.idempotency_key);
     assert.equal(
       applied.assignedIds.length,
       unchanged.assignedIds.length + VERSION_INCREMENT,
@@ -1126,7 +1126,7 @@ async function retireImportedNode(
     retired.missionVersion,
     applied.missionVersion + VERSION_INCREMENT,
   );
-  assert.equal(retired.idempotencyKey, key);
+  assert.equal(retired.idempotency_key, key);
   assert.deepEqual(success(await kanthord(args, fixture.env)), retired);
 }
 
@@ -1183,7 +1183,7 @@ test("mission node retire force previews and removes dependent edges", async (t)
     retired.missionVersion,
     preview.missionVersion + VERSION_INCREMENT,
   );
-  assert.ok(retired.idempotencyKey);
+  assert.ok(retired.idempotency_key);
 });
 
 test("mission imports accept empty Markdown controls, embedded files and JSON entries", async (t) => {
@@ -1203,7 +1203,7 @@ test("mission imports accept empty Markdown controls, embedded files and JSON en
       preview,
     );
     assert.equal(applied.missionVersion, mission.version);
-    assert.ok(applied.idempotencyKey);
+    assert.ok(applied.idempotency_key);
   }
 });
 
@@ -1255,7 +1255,7 @@ test("mission Markdown export refuses occupied destinations before network I/O",
   }
 });
 
-type Page<T> = { items: T[]; nextCursor: string | null };
+type Page<T> = { items: T[]; next_cursor: string | null };
 type Scenario = {
   fixture: Fixture;
   mission: Mission;
@@ -1302,7 +1302,7 @@ async function scenarioChange(
     await kanthord([MISSION, ...args, FILE, path], fixture.env),
   );
   assert.equal(changed.missionVersion, version + VERSION_INCREMENT);
-  assert.ok(changed.idempotencyKey);
+  assert.ok(changed.idempotency_key);
   scenario.version = changed.missionVersion;
   return changed;
 }
@@ -1312,7 +1312,7 @@ async function queued(scenario: Scenario, nodeId: string): Promise<void> {
   const queue = success<Page<Job>>(
     await kanthord([SCHEDULER, QUEUE, LIST, mission.projectId], fixture.env),
   );
-  assert.equal(queue.nextCursor, null);
+  assert.equal(queue.next_cursor, null);
   const job = queue.items.find((item) => item.nodeId === nodeId);
   assert.ok(job);
   assert.equal(job.projectId, mission.projectId);
@@ -1427,7 +1427,7 @@ async function scenarioChildren(scenario: Scenario): Promise<void> {
     await kanthord([MISSION, NODE, LIST, mission.id], fixture.env),
   );
   assert.equal(listed.items.length, THREE_ITEMS);
-  assert.equal(listed.nextCursor, null);
+  assert.equal(listed.next_cursor, null);
   assert.deepEqual(
     listed.items.map(({ id }) => id).sort(),
     [initiativeId, scenario.objectiveId, taskId].sort(),
@@ -1440,7 +1440,7 @@ async function scenarioRevisions(scenario: Scenario): Promise<void> {
   await scenarioChange(scenario, [NODE, UPDATE, objectiveId], {
     filename: before.filename,
     content: { ...before.content, name: UPDATED_NAME },
-    expectedRevision: before.visibleRevision,
+    expected_revision: before.visibleRevision,
   });
   const updated = await readNode(fixture, objectiveId);
   assert.equal(updated.content.name, UPDATED_NAME);
@@ -1484,7 +1484,7 @@ async function scenarioMove(scenario: Scenario): Promise<void> {
   const task = await readNode(fixture, taskId);
   await scenarioChange(scenario, [NODE, MOVE, taskId], {
     newParentId: newParent.id,
-    expectedRevision: task.visibleRevision,
+    expected_revision: task.visibleRevision,
     expectedOldParentRevision: oldParent.visibleRevision,
     expectedNewParentRevision: newParent.visibleRevision,
   });
@@ -1517,11 +1517,11 @@ async function scenarioDependencies(scenario: Scenario): Promise<void> {
     await kanthord([MISSION, EDGE, LIST, mission.id], fixture.env),
   );
   assert.ok(edges.items.length >= FIRST_REVISION);
-  assert.equal(edges.nextCursor, null);
+  assert.equal(edges.next_cursor, null);
   await scenarioChange(scenario, [CRITERION, SET, objectiveId], {
     criterion: UPDATED_CRITERION,
     verifications: CONTENT.verifications,
-    expectedRevision: available.visibleRevision,
+    expected_revision: available.visibleRevision,
   });
   const revised = await readNode(fixture, objectiveId);
   assert.equal(revised.content.criterion, UPDATED_CRITERION);
@@ -1640,7 +1640,7 @@ async function applyRepositorySet(scenario: Scenario, bindings: RepositorySet) {
     await kanthord([PROJECT, BINDING, LIST, mission.projectId], fixture.env),
   );
   assert.equal(listed.items.length, Object.keys(bindings).length);
-  assert.equal(listed.nextCursor, null);
+  assert.equal(listed.next_cursor, null);
   return listed.items;
 }
 

@@ -142,7 +142,9 @@ async function create(command: Command): Promise<void> {
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, CREATE_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function list(command: Command): Promise<void> {
@@ -189,7 +191,9 @@ async function rename(projectId: string, command: Command): Promise<void> {
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, RENAME_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function bindingList(projectId: string, command: Command): Promise<void> {
@@ -283,7 +287,9 @@ async function bindingApply(
     "bindingSet.write"
   ]({ params: { projectId }, query: {}, body }, { idempotencyKey: key });
   const data = handleMutationResult(result, BINDING_APPLY_INDETERMINATE, key);
-  process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
 }
 
 async function bindingRevisionList(

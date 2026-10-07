@@ -230,7 +230,7 @@ first request of a poll.
 **Request and validation:** no body or positional argument. Accept the project,
 kind and platform filters and shared pagination.
 
-**Effects and idempotency:** read one bounded `{items, nextCursor}` page and
+**Effects and idempotency:** read one bounded `{ items, next_cursor }` page and
 change nothing. The [pagination conventions](./other.md#pagination) and the
 shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination) apply.
 
@@ -276,7 +276,7 @@ ends with no answer.
 **Request and validation:** no positional argument or body. Accept the inbound
 and state filters and shared pagination.
 
-**Effects and idempotency:** return one bounded `{items, nextCursor}` page.
+**Effects and idempotency:** return one bounded `{ items, next_cursor }` page.
 Read only. Read bounds remain **[blocked][intake-bounds]**.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
@@ -340,7 +340,7 @@ component or the Storage component, the HTTP status, `timeout` or
 **Request and validation:** no positional argument or body. Accept the
 project, state and operation filters and shared pagination.
 
-**Effects and idempotency:** return one bounded `{items, nextCursor}` page in
+**Effects and idempotency:** return one bounded `{ items, next_cursor }` page in
 the order of `id`. Read only. Read bounds remain **[blocked][intake-bounds]**.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
@@ -431,7 +431,7 @@ standard error. Successful commands exit `0`; local input, file,
 authentication, transport and operation failures exit `1`. A successful event
 read can report `failed` without failing the read.
 
-Mutation results include the effective `idempotencyKey`. The
+Mutation results include the effective `idempotency_key`. The
 [shared retry rules](./other.md#idempotency-and-retries) apply. CLI commands
 perform no automatic retry. Cancellation ends the client wait and undoes no
 committed effect. Preserve `Completed`, `Failure` and `Indeterminate` rather

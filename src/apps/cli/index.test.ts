@@ -361,7 +361,7 @@ test("worker handover validates locally and prints receipt metadata without the 
   assert.equal(result.stderr, EMPTY_OUTPUT);
   assert.deepEqual(JSON.parse(result.stdout), {
     received: true,
-    idempotencyKey: key,
+    idempotency_key: key,
   });
   assert.doesNotMatch(result.stdout, /nonce|ciphertext/);
 });

@@ -51,6 +51,6 @@ export function edgePage(
   assert.ok(rows.length <= limit || last, "A continued page has a last edge.");
   return {
     items: selected.map(edgeRecord),
-    nextCursor: rows.length > limit ? encode(last!.key) : null,
+    next_cursor: rows.length > limit ? encode(last!.key) : null,
   };
 }

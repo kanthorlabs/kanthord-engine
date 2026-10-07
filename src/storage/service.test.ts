@@ -180,7 +180,7 @@ test("a name of another component answers not found and the inventory heads the 
       f.invoke(storageOperations.update_metadata, {
         params: { credentialName: "github" },
         query: {},
-        body: { expectedRevision: FIRST_REVISION, metadata: null },
+        body: { expected_revision: FIRST_REVISION, metadata: null },
       }),
     HttpStatus.NotFound,
     NOT_FOUND_CODE,

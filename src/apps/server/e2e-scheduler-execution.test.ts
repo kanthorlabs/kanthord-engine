@@ -48,12 +48,12 @@ const CONFIGURATION = {
   modelIdentifier: "claude-sonnet-4-5",
   reasoningEffort: "off",
 };
-type Page<T> = { items: T[]; nextCursor: string | null };
+type Page<T> = { items: T[]; next_cursor: string | null };
 type Node = { state: string; attempt: number; visibleRevision: number };
 type Pull = {
   kind: string;
   execution: ExecutionRecord;
-  idempotencyKey: string;
+  idempotency_key: string;
 };
 type Attempt = {
   attempt: number;
@@ -477,11 +477,11 @@ test(
         const result = await h.read<{
           executionId: string;
           endedAt: number;
-          idempotencyKey: string;
+          idempotency_key: string;
         }>(["scheduler", "execution", "release", X, "--file", further], h.G);
         assert.equal(result.executionId, X);
         assert.ok(Number.isSafeInteger(result.endedAt));
-        assert.ok(ulidSchema.safeParse(result.idempotencyKey).success);
+        assert.ok(ulidSchema.safeParse(result.idempotency_key).success);
         assert.equal((await h.claim(X)).claimState, ClaimState.Finished);
         const node = await h.node();
         assert.equal(node.state, NodeState.Available);
@@ -552,7 +552,7 @@ test(
           result.items.map((row) => row.claimState),
           [ClaimState.Running, ClaimState.Finished],
         );
-        assert.equal(result.nextCursor, null);
+        assert.equal(result.next_cursor, null);
         await h.refuses(
           ["scheduler", "execution", "list", h.projectId, "--attempt", "1"],
           "gateway.request.validation_failed",

@@ -74,7 +74,7 @@ const DEFAULT_PROVIDER = "default";
 const REASONING_OFF = "off";
 const SECRET_FIELD = "secret";
 const SECRET_VALUE = "e2e-gateway-secret-never-print";
-const IDEMPOTENCY_KEY = "idempotencyKey";
+const IDEMPOTENCY_KEY = "idempotency_key";
 const ENABLEMENT_COMMAND = ["agent", "enablement"];
 const MODEL_IN_USE = "llm.metadata.model_in_use";
 const LIVENESS_UNHEALTHY = "gateway.liveness.unhealthy";
@@ -468,7 +468,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
     models: [],
   });
   const add = file(fixture.directory, "add-model.json", {
-    expectedRevision: FIRST_REVISION,
+    expected_revision: FIRST_REVISION,
     metadata: { baseUrl: BASE_URL, models: [{ id: GPT }] },
   });
   const updated = success<CredentialAnswer>(
@@ -498,7 +498,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
   );
   assert.equal(put.defaultConfiguration.modelIdentifier, GPT);
   const remove = file(fixture.directory, "remove-model.json", {
-    expectedRevision: SECOND_REVISION,
+    expected_revision: SECOND_REVISION,
     metadata: { baseUrl: BASE_URL, models: [] },
   });
   refusal(
@@ -673,9 +673,9 @@ test("E07.12 a failed project inventory refuses the healthcheck report", async (
   const { error } = errorSchema.parse(await response.json());
   assert.equal(error.code, INVENTORY_FAILED);
   const details = z
-    .object({ missingInventories: z.array(z.string()) })
+    .object({ missing_inventories: z.array(z.string()) })
     .parse(error.details);
-  assert.ok(details.missingInventories.includes(OWNER_PROJECT));
+  assert.ok(details.missing_inventories.includes(OWNER_PROJECT));
 });
 
 test("E07.13 a resource check past its deadline reports unknown", async (t) => {

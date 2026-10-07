@@ -165,7 +165,7 @@ for (const adapter of ["direct", "http"] as const) {
       await h.call(llmOperations.rotate, {
         params: { credentialName: "anthro-1" },
         query: {},
-        body: { expectedRevision: FIRST_REVISION, secret: { key: ROTATED } },
+        body: { expected_revision: FIRST_REVISION, secret: { key: ROTATED } },
       }),
     );
     completed(
@@ -206,7 +206,7 @@ for (const adapter of ["direct", "http"] as const) {
         params: { credentialName: "anthro-1" },
         query: {},
         body: {
-          expectedRevision: TWO_REVISIONS,
+          expected_revision: TWO_REVISIONS,
           secret: { key: ROTATED },
           metadata: {
             baseUrl: "http://localhost:12345/v2",
@@ -221,7 +221,7 @@ for (const adapter of ["direct", "http"] as const) {
         params: { agentName: "swe@1" },
         query: {},
         body: {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           agentProviders: [
             {
               name: "default",
@@ -245,7 +245,7 @@ for (const adapter of ["direct", "http"] as const) {
       await h.call(agentOperations["enablement.disable"], {
         params: { agentName: "swe@1" },
         query: {},
-        body: { expectedRevision: TWO_REVISIONS },
+        body: { expected_revision: TWO_REVISIONS },
       }),
     );
     refused(
@@ -410,7 +410,7 @@ async function setup(
         params: { credentialName: "anthro-1" },
         query: {},
         body: {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata: {
             baseUrl: "http://localhost:12345/v1",
             models: [
@@ -854,7 +854,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
           params: { credentialName: "anthro-1" },
           query: {},
           body: {
-            expectedRevision: FIRST_REVISION,
+            expected_revision: FIRST_REVISION,
             secret: { key: oversized.key },
           },
         }),
@@ -896,7 +896,7 @@ for (const adapter of ["direct", "http"] as const) {
         params: { credentialName: "anthro-1" },
         query: {},
         body: {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: { key: ROTATED },
         },
       }),

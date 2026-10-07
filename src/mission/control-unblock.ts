@@ -219,7 +219,7 @@ export function unblockNode(
   requireControlState(node, [NodeState.Blocked]);
   const row = readCurrentRevision(tx, nodeId);
   assert.ok(row && node.attempt !== null);
-  if (row.revision !== body.expectedRevision)
+  if (row.revision !== body.expected_revision)
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.RevisionConflict,

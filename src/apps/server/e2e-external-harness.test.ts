@@ -129,7 +129,7 @@ test(
       runtimeIdentity: string;
       resourceIdentity: string;
       workerName: string;
-      idempotencyKey: string;
+      idempotency_key: string;
     }>(["worker", "register"], auth.token);
     const runtime = registration.runtimeIdentity;
     const resource = bindings.bindings.harness!.resourceIdentity;
@@ -137,7 +137,7 @@ test(
       assert.match(runtime, /^worker_instance_/);
       assert.equal(registration.resourceIdentity, resource);
       assert.equal(registration.workerName, WORKER);
-      assert.match(registration.idempotencyKey, /^[0-9A-HJKMNP-TV-Z]{26}$/);
+      assert.match(registration.idempotency_key, /^[0-9A-HJKMNP-TV-Z]{26}$/);
       await cli.refuses(
         ["worker", "register"],
         other.token,

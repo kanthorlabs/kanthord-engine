@@ -195,18 +195,18 @@ test("instance inventory pages live rows descending with both filters and canoni
       first.items.map((row) => row.runtimeIdentity),
       expected.slice(0, limit),
     );
-    assert.ok(first.nextCursor);
+    assert.ok(first.next_cursor);
     const second = listInstanceRecords(
       tx,
       dependencies,
-      { ...query, cursor: first.nextCursor },
+      { ...query, cursor: first.next_cursor },
       NOW,
     );
     assert.deepEqual(
       second.items.map((row) => row.runtimeIdentity),
       expected.slice(limit),
     );
-    assert.equal(second.nextCursor, null);
+    assert.equal(second.next_cursor, null);
     const allLimit = 100;
     assert.equal(
       listInstanceRecords(
@@ -225,7 +225,7 @@ test("instance inventory pages live rows descending with both filters and canoni
     );
     for (const cursor of [
       "invalid",
-      `${first.nextCursor}=`,
+      `${first.next_cursor}=`,
       Buffer.from("wrong").toString("base64url"),
     ])
       assert.throws(

@@ -52,7 +52,7 @@ export const errorSchema = z.strictObject({
     message: z.string(),
     details: errorDetailsSchema.nullable(),
   }),
-  requestId: identitySchema("request"),
+  request_id: identitySchema("request"),
 });
 export type ErrorBody = z.infer<typeof errorSchema>;
 

@@ -503,7 +503,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
         attempt: { attempt: number };
       }>(["mission", "node", "unblock", h.G], {
         blockedAttempt: FIRST_ATTEMPT,
-        expectedRevision: FIRST_REVISION,
+        expected_revision: FIRST_REVISION,
         expectedMissionVersion: h.M,
       });
       assert.equal(unblock.node.state, NodeState.Available);

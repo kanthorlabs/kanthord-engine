@@ -19,14 +19,14 @@ export async function readAllPages<T>(
   read: (
     cursor: string | null,
     options: ClientOptions,
-  ) => Promise<OperationResult<{ items: T[]; nextCursor: string | null }>>,
+  ) => Promise<OperationResult<{ items: T[]; next_cursor: string | null }>>,
 ): Promise<T[]> {
   const items: T[] = [];
   let cursor: string | null = null;
   for (let page = 0; page < READ_PAGE_LIMIT; page++) {
     const answer = await run.call((options) => read(cursor, options));
     items.push(...answer.items);
-    cursor = answer.nextCursor;
+    cursor = answer.next_cursor;
     if (cursor === null) return items;
   }
   return run.stop(EndReason.OperationFailed);

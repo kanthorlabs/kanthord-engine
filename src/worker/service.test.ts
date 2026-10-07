@@ -950,9 +950,9 @@ test("native instance health resolves the latest agent entry and enablement in t
   assert.equal(check(), false);
   entries = [{ agent: AGENT, ...defaults }];
   assert.equal(check(), true);
-  f.invokeAgent("enablement.disable", { expectedRevision: FIRST_REVISION });
+  f.invokeAgent("enablement.disable", { expected_revision: FIRST_REVISION });
   assert.equal(check(), false);
-  f.invokeAgent("enablement.enable", { expectedRevision: SECOND_REVISION });
+  f.invokeAgent("enablement.enable", { expected_revision: SECOND_REVISION });
   assert.equal(check(), true);
   failure = new Error("Unexpected custody failure");
   assert.throws(check, (error) => error === failure);
@@ -1243,24 +1243,24 @@ test("catalog pages supplied declarations once per commit and registrations add 
     before.items.map((item) => item.name),
     ["claude@1", "general@1", "opencode@1", "reviewer@1"],
   );
-  assert.equal(before.nextCursor, null);
+  assert.equal(before.next_cursor, null);
   const first = f.invoke("catalog.list", null, {}, { limit: pageSize });
   assert.deepEqual(
     first.items.map((item) => item.name),
     ["claude@1", "general@1"],
   );
-  assert.equal(first.nextCursor, Buffer.from(WORKER).toString("base64url"));
+  assert.equal(first.next_cursor, Buffer.from(WORKER).toString("base64url"));
   const second = f.invoke(
     "catalog.list",
     null,
     {},
-    { limit: pageSize, cursor: first.nextCursor },
+    { limit: pageSize, cursor: first.next_cursor },
   );
   assert.deepEqual(
     second.items.map((item) => item.name),
     ["opencode@1", "reviewer@1"],
   );
-  assert.equal(second.nextCursor, null);
+  assert.equal(second.next_cursor, null);
   await f.worker.start();
   t.after(() => f.worker.stop());
   f.store.transaction((tx) =>
@@ -1345,7 +1345,7 @@ test("catalog reads expose host-specific budgets and refuse unknown names and ma
       {},
       { cursor: Buffer.from("zzz").toString("base64url") },
     ),
-    { items: [], nextCursor: null },
+    { items: [], next_cursor: null },
   );
   assert.equal(
     workerOperations["catalog.get"].output.safeParse({

@@ -335,7 +335,7 @@ export class SchedulerService implements Service, WorkQueue {
       const items = (rows as JobRow[]).slice(FIRST_ROW, limit).map(toJob);
       const nextCursor =
         rows.length > limit ? encodeQueueCursor(items.at(-1)!) : null;
-      return { items, nextCursor };
+      return { items, next_cursor: nextCursor };
     });
   }
 

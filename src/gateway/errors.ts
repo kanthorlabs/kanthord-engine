@@ -17,7 +17,7 @@ export function failure(
     status: safe.status,
     body: {
       error: { code: safe.code, message: safe.message, details: safe.details },
-      requestId,
+      request_id: requestId,
     },
   };
 }

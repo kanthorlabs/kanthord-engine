@@ -114,7 +114,7 @@ export function listInstanceRecords(
     .map((row) => instanceRecord(tx, dependencies, row, now));
   return {
     items,
-    nextCursor:
+    next_cursor:
       rows.length > query.limit
         ? Buffer.from(items.at(-1)!.runtimeIdentity, "utf8").toString(
             "base64url",

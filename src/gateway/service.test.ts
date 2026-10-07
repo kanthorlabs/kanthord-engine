@@ -355,11 +355,11 @@ test("direct and HTTP adapters share transactional idempotency, validation, fail
     assert.deepEqual(badHTTP.error.error, badDirect.error.error);
     assert.equal(badHTTP.error.error.code, ExpectedErrorCode.ValidationFailed);
     assert.match(
-      badHTTP.error.requestId,
+      badHTTP.error.request_id,
       /^request_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
     );
     assert.match(
-      badDirect.error.requestId,
+      badDirect.error.request_id,
       /^request_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
     );
   }
@@ -599,7 +599,7 @@ test("component health reports stopped in-memory idempotency with integer codes"
   assert.equal(response.status, HttpStatus.ServiceUnavailable);
   const body = errorSchema.parse(await response.json());
   assert.deepEqual(body.error.details, { gateway: components });
-  assert.match(body.requestId, /^request_[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
+  assert.match(body.request_id, /^request_[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
 });
 
 test("quiescence cancels HTTP work, preserves direct calls during drain and releases only after drain", async (t) => {

@@ -126,7 +126,7 @@ test("composed Custody and Worker share credential and enablement collaborations
       method: llmOperations.update_metadata.method,
       headers: { ...headers, "Idempotency-Key": ulid() },
       body: JSON.stringify({
-        expectedRevision: FIRST_REVISION,
+        expected_revision: FIRST_REVISION,
         metadata: {
           baseUrl: BASE_URL,
           models: [{ id: MODEL_NAME, reasoningLevels: [REASONING_LEVEL] }],

@@ -145,22 +145,22 @@ test("evaluation writes failed-verification assessments without inference and ga
                 assets: [],
               },
             ],
-            nextCursor: null,
+            next_cursor: null,
           }),
         "execution.objective.list": async () =>
           complete({
             items: [{ id: "child", state: "Completed" }],
-            nextCursor: null,
+            next_cursor: null,
           }),
         "execution.objective.outcome.list": async () =>
           complete({
             items: [
               { id: "child-outcome", result: "success", nodeId: "child" },
             ],
-            nextCursor: null,
+            next_cursor: null,
           }),
         "execution.objective.evidence.list": async () =>
-          complete({ items: [], nextCursor: null }),
+          complete({ items: [], next_cursor: null }),
         "execution.evidence.asset.content.get": async () =>
           complete({
             assetId,
@@ -183,7 +183,7 @@ test("evaluation writes failed-verification assessments without inference and ga
                   message: "ended",
                   details: null,
                 },
-                requestId: "test",
+                request_id: "test",
               },
             };
           return complete({ evidence: { id: "verification" } });

@@ -329,7 +329,7 @@ const promptSwitchNames = [
 const promptTarget = {
   scope: z.enum(PromptScope),
   agentName: z.string().min(1).optional(),
-  expectedRevision: z.number().int().positive().optional(),
+  expected_revision: z.number().int().positive().optional(),
 };
 
 function checkPromptSwitch(
@@ -385,7 +385,7 @@ function checkPromptTarget(
 const emptyFields = z.strictObject({});
 const agentParams = z.strictObject({ agentName: z.string().min(1) });
 const revisionBody = z.strictObject({
-  expectedRevision: z.number().int().positive(),
+  expected_revision: z.number().int().positive(),
 });
 const enablementOperation = {
   service: AGENT_COMPONENT_NAME,
@@ -431,7 +431,7 @@ export const agentOperations = {
     }),
     output: z.strictObject({
       items: z.array(agentEnablementSchema),
-      nextCursor: z.string().nullable(),
+      next_cursor: z.string().nullable(),
     }),
     description: "List agent enablements in ascending agent-name order.",
   },
@@ -486,7 +486,7 @@ export const agentOperations = {
       params: agentParams,
       query: emptyFields,
       body: z.strictObject({
-        expectedRevision: z.number().int().positive().optional(),
+        expected_revision: z.number().int().positive().optional(),
         agentProviders: z.array(agentProviderItemSchema).min(1),
         defaultConfiguration: defaultConfigurationSchema,
       }),
@@ -526,7 +526,7 @@ export const agentOperations = {
       params: agentParams,
       query: emptyFields,
       body: z.strictObject({
-        expectedRevision: z.number().int().positive(),
+        expected_revision: z.number().int().positive(),
         name: z.string().min(1),
         provider: agentProviderKindSchema,
         credential: z.string().min(1),

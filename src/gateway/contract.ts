@@ -46,7 +46,7 @@ export interface ResourceInventories {
 }
 export interface InventorySnapshot {
   entries: { owner: InventoryOwner; entry: ResourceEntry }[];
-  missingInventories: InventoryOwner[];
+  missing_inventories: InventoryOwner[];
 }
 export type InventoryCollector = () => InventorySnapshot;
 
@@ -111,7 +111,7 @@ export const gatewayOperations = {
       }),
     }),
     description:
-      "Check resource health on demand, grouped by owner and scope. Returns every inventory entry with status and capability, including unknown for unfinished checks. A missing inventory returns 503 with missingInventories in error.details.",
+      "Check resource health on demand, grouped by owner and scope. Returns every inventory entry with status and capability, including unknown for unfinished checks. A missing inventory returns 503 with missing_inventories in error.details.",
   },
   verify: {
     ...base,

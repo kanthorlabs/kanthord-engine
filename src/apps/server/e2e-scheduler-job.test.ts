@@ -23,7 +23,7 @@ const TOKEN_REQUIRED_CODE = "cli.scheduler.queue.list.token_required:";
 const LIMIT_OUT_OF_RANGE_CODE = "cli.pagination.limit_out_of_range:";
 const CURSOR_INVALID_CODE = "system.pagination.cursor_invalid:";
 
-const EMPTY_LIST = { items: [], nextCursor: null };
+const EMPTY_LIST = { items: [], next_cursor: null };
 const EMPTY_PEEK = { job: null };
 
 test("E02.1 queue list returns empty items for an empty project", async (t) => {

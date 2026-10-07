@@ -81,7 +81,7 @@ export function addEvidenceCommands(mission: Command): void {
       "cli.mission.evidence.delete.indeterminate",
       key,
     );
-    process.stdout.write(`${JSON.stringify({ idempotencyKey: key })}\n`);
+    process.stdout.write(`${JSON.stringify({ idempotency_key: key })}\n`);
   });
   const asset = evidence.command("asset").description("Evidence assets");
   asset.action(() => asset.help());
@@ -112,7 +112,7 @@ export function addEvidenceCommands(mission: Command): void {
       "cli.mission.evidence.asset.delete.indeterminate",
       key,
     );
-    process.stdout.write(`${JSON.stringify({ idempotencyKey: key })}\n`);
+    process.stdout.write(`${JSON.stringify({ idempotency_key: key })}\n`);
   });
   const content = asset.command("content").description("Stored asset content");
   content.action(() => content.help());

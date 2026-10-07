@@ -147,7 +147,7 @@ export function handleMutationResult<T>(
   if (result.type === OperationResultType.Failure)
     throw new Diagnostic(
       result.error.error.code,
-      JSON.stringify({ ...result.error.error, idempotencyKey: key }),
+      JSON.stringify({ ...result.error.error, idempotency_key: key }),
     );
   throw new Diagnostic(
     indeterminateCode,

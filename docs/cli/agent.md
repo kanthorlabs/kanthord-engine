@@ -56,7 +56,7 @@ Each is `unary`, has `mutation: false` and a default timeout of 30 s.
 
 This command remains proposed. It uses `[L]`, no positional arguments and no filters.
 Required token: human JWT. Query holds `limit` and optional `cursor`. Returns
-`{ items, nextCursor }`, paged by `agentName` in ascending alphabetical order.
+`{ items, next_cursor }`, paged by `agentName` in ascending alphabetical order.
 It lists every catalog agent, also an agent without an enablement. Each item holds
 `agentName: AgentName`, `workerNames: WorkerName[]` and `enablement`, the
 [agent enablement record](#agent-enablement-record) or `null` when no record exists.
@@ -171,7 +171,7 @@ Uses `[M] [R]`. `--scope` is required and is `system`, `agent` or `workbench`.
 `--expected-revision` is the revision that the human read. Omit it only when the scope has no row.
 `--file` names a UTF-8 text file with the new custom text. The command refuses `-` and any directory.
 The custom text holds at most 32768 UTF-8 bytes.
-The command replaces the custom text and answers the saved settings with the `idempotencyKey`.
+The command replaces the custom text and answers the saved settings with the `idempotency_key`.
 
 ```sh
 kanthord agent prompt put --scope system --file system.md
@@ -185,7 +185,7 @@ Exactly one of `--switch` and `--system-layer` is required.
 `--switch` names one source of the scope, or `layer` for the system scope. Exactly one of `--on` and `--off` is required with it.
 `--system-layer` is `inherit`, `on` or `off`, and only the `agent` scope takes it.
 A switch that turns off every source of an `agent` scope answers `409 agent.prompt.agent_layer_empty`.
-The command answers the saved settings with the `idempotencyKey`.
+The command answers the saved settings with the `idempotency_key`.
 
 ```sh
 kanthord agent prompt switch --scope system --switch host_file --off
@@ -233,13 +233,13 @@ All commands below use `human` access. Required names have no default.
 `params.providerName`. Mutations use the shared replay key and print it.
 Reads and writes are unary. Unless stated otherwise, query is empty and success
 answers HTTP `200` with the enablement record. Reads have no body. Enable,
-disable, remove and provider remove send `{ expectedRevision }` from
+disable, remove and provider remove send `{ expected_revision }` from
 `--expected-revision`; put and provider add use their documented file bodies.
 
 ### `enablement list`
 
 Uses `[L] [R]`, no positional arguments and no filters. Query holds `limit` and
-optional `cursor`. Returns `{ items, nextCursor }`, paged by agent name in
+optional `cursor`. Returns `{ items, next_cursor }`, paged by agent name in
 ascending alphabetical order. It lists records, not catalog agents without an enablement.
 
 ### `enablement get <agent-name>`
@@ -251,8 +251,8 @@ Uses `[R]`. Returns one enablement. An absent record answers
 ### `enablement put <agent-name> --file <path>`
 
 Uses `[M] [R]`. The required file supplies exactly
-`{ expectedRevision, agentProviders, defaultConfiguration }`. `agentProviders`
-and `defaultConfiguration` are required with no default. `expectedRevision` is
+`{ expected_revision, agentProviders, defaultConfiguration }`. `agentProviders`
+and `defaultConfiguration` are required with no default. `expected_revision` is
 the latest revision of the agent that the human read, and it is absent only when
 the agent holds no row. It creates or replaces the complete configuration. Creation
 sets `state: enabled`; replacement preserves the record's state. The explicit
@@ -286,7 +286,7 @@ removal commit in one transaction. Success is
 
 ### `enablement provider add <agent-name> --file <path>`
 
-Uses `[M] [R]`. The required file supplies exactly `{ expectedRevision, name, provider, credential }`,
+Uses `[M] [R]`. The required file supplies exactly `{ expected_revision, name, provider, credential }`,
 with all fields required. It adds a named agent provider to an existing record
 and returns the revised enablement. A duplicate name fails. Use `put` to revise
 a credential reference or default configuration.

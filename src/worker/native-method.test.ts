@@ -104,7 +104,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
       status: 409,
       error: {
         error: { code: EXECUTION_NOT_RUNNING, message: "ended", details: null },
-        requestId: "test",
+        request_id: "test",
       },
     }));
     throw new Error("unexpected");
@@ -178,7 +178,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
               assets: [],
             },
           ],
-          nextCursor: null,
+          next_cursor: null,
         }),
       "execution.evidence.asset.content.get": async () =>
         complete({
@@ -248,7 +248,7 @@ test("native entry runs an initiative report with the scripted provider", async 
     status: 200,
     data,
   });
-  const page = async () => complete({ items: [], nextCursor: null });
+  const page = async () => complete({ items: [], next_cursor: null });
   const clients = {
     mission: {
       "execution.pinnedRevision.get": async () =>
@@ -308,7 +308,7 @@ test("refused execution evidence aborts the agent and prevents later server oper
           status,
           error: {
             error: { code, message: "ended", details: null },
-            requestId: "test",
+            request_id: "test",
           },
         }),
       },

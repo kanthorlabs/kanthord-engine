@@ -175,7 +175,7 @@ test("mutation results return data or include the retry key", () => {
     status: FAILURE_STATUS,
     error: {
       error: { code: FAILURE_CODE, message: "failed", details: null },
-      requestId: "request_" + KEY,
+      request_id: "request_" + KEY,
     },
   };
   const indeterminate: OperationResult<number> = {
@@ -212,7 +212,7 @@ test("read results return data, preserve server failures, and signal uncertainty
     status: FAILURE_STATUS,
     error: {
       error: { code: FAILURE_CODE, message: "failed", details: null },
-      requestId: "request_" + KEY,
+      request_id: "request_" + KEY,
     },
   };
   const indeterminate: OperationResult<number> = {

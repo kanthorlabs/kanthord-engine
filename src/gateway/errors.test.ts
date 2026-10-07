@@ -36,7 +36,7 @@ test("declared failures retain their originating code, status, details and reque
       message: error.message,
       details: { retryAfter: 60 },
     },
-    requestId,
+    request_id: requestId,
   });
   const response = respondError(error, requestId);
   assert.equal(response.status, HttpStatus.TooManyRequests);
@@ -83,7 +83,7 @@ test("HTTP clients reject nonconforming failure envelopes as indeterminate", asy
       Response.json(
         {
           error: { code: "UNAUTHORIZED", message: "Failure.", details: null },
-          requestId,
+          request_id: requestId,
         },
         { status: 401 },
       ),

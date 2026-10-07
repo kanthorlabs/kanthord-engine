@@ -329,12 +329,12 @@ test("a name of another component answers not found and stays out of the list", 
       () => f.get("github"),
       () =>
         f.rotate("github", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: apiSecret,
         }),
       () =>
         f.updateMetadata("github", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata: null,
         }),
       () => f.revoke("github", FIRST_REVISION),
@@ -386,7 +386,7 @@ test("rotation of an openai-compatible credential may set a new base URL", () =>
   try {
     f.create(inputs[1]);
     const changed = f.rotate("openai", {
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       secret: apiSecret,
       metadata: {
         baseUrl: ROTATED_BASE_URL,
@@ -442,7 +442,7 @@ test("metadata edits re-encrypt under new identity and enforce base URL and revi
     f.create(inputs[1]);
     const metadata = { ...inputs[1]!.metadata, models: [{ id: "added" }] };
     const answer = f.updateMetadata("openai", {
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       metadata,
     }) as { revisions: { id: string; revision: number; metadata: unknown }[] };
     assert.equal(answer.revisions[0]!.revision, NEXT_REVISION);
@@ -469,7 +469,7 @@ test("metadata edits re-encrypt under new identity and enforce base URL and revi
     fails(
       () =>
         f.updateMetadata("openai", {
-          expectedRevision: NEXT_REVISION,
+          expected_revision: NEXT_REVISION,
           metadata: { ...metadata, baseUrl: ROTATED_BASE_URL },
         }),
       HttpStatus.Conflict,
@@ -478,7 +478,7 @@ test("metadata edits re-encrypt under new identity and enforce base URL and revi
     fails(
       () =>
         f.updateMetadata("openai", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata,
         }),
       HttpStatus.Conflict,
@@ -487,7 +487,7 @@ test("metadata edits re-encrypt under new identity and enforce base URL and revi
     fails(
       () =>
         f.updateMetadata("missing", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata,
         }),
       HttpStatus.NotFound,
@@ -496,7 +496,7 @@ test("metadata edits re-encrypt under new identity and enforce base URL and revi
     fails(
       () =>
         f.updateMetadata("openai", {
-          expectedRevision: NEXT_REVISION,
+          expected_revision: NEXT_REVISION,
           metadata: {},
         }),
       HttpStatus.BadRequest,
@@ -527,7 +527,7 @@ test("a repeated approved model id answers invalid input at create, rotate and u
     fails(
       () =>
         f.rotate("openai", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: apiSecret,
           metadata: duplicated,
         }),
@@ -537,7 +537,7 @@ test("a repeated approved model id answers invalid input at create, rotate and u
     fails(
       () =>
         f.updateMetadata("openai", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata: duplicated,
         }),
       HttpStatus.BadRequest,
@@ -613,19 +613,19 @@ for (const mode of Object.values(RemovalMode)) {
         models: [{ id: REMOVED_MODEL }, { id: KEPT_MODEL }],
       };
       f.updateMetadata("openai", {
-        expectedRevision: FIRST_REVISION,
+        expected_revision: FIRST_REVISION,
         metadata: existing,
       });
       const next = { baseUrl, models: [{ id: KEPT_MODEL }] };
       const change = () =>
         mode === RemovalMode.Rotation
           ? f.rotate("openai", {
-              expectedRevision: NEXT_REVISION,
+              expected_revision: NEXT_REVISION,
               secret: apiSecret,
               metadata: next,
             })
           : f.updateMetadata("openai", {
-              expectedRevision: NEXT_REVISION,
+              expected_revision: NEXT_REVISION,
               metadata: next,
             });
       assert.throws(change, (error) => {
@@ -1500,14 +1500,14 @@ for (const { platform, metadata, edited } of llmMetadataCases) {
       fails(
         () =>
           f.updateMetadata("llm", {
-            expectedRevision: FIRST_REVISION,
+            expected_revision: FIRST_REVISION,
             metadata: invalid,
           }),
         HttpStatus.BadRequest,
         INVALID_INPUT_CODE,
       );
     const updated = f.updateMetadata("llm", {
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       metadata: edited,
     }) as CredentialAnswer;
     assert.equal(updated.revisions[0]!.revision, NEXT_REVISION);
@@ -1813,7 +1813,7 @@ test("approved models answer the openai-compatible metadata models with defaults
     metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
   });
   f.updateMetadata("compatible", {
-    expectedRevision: FIRST_REVISION,
+    expected_revision: FIRST_REVISION,
     metadata: {
       baseUrl: HEALTH_BASE_URL,
       models: [{ id: KEPT_MODEL, reasoningLevels: ["high"] }],

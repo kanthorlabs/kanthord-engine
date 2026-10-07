@@ -81,7 +81,7 @@ function refused<T>(
   );
   assert.equal(result.status, status);
   assert.equal(result.error.error.code, code);
-  assert.ok(result.error.requestId);
+  assert.ok(result.error.request_id);
 }
 
 async function setup(t: TestContext, adapter: Adapter, path?: string) {
@@ -542,10 +542,10 @@ test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and b
   assert.equal(invalidFilter.status, HttpStatus.BadRequest);
   const invalidFilterError = (await invalidFilter.json()) as {
     error: { code: string };
-    requestId: string;
+    request_id: string;
   };
   assert.equal(invalidFilterError.error.code, VALIDATION_FAILED);
-  assert.ok(invalidFilterError.requestId);
+  assert.ok(invalidFilterError.request_id);
   for (const operation of Object.values(schedulerOperations)) {
     const isPull = operation.id === schedulerOperations.workPull.id;
     assert.equal(
@@ -572,10 +572,10 @@ test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and b
     assert.equal(response.status, HttpStatus.BadRequest);
     const error = (await response.json()) as {
       error: { code: string };
-      requestId: string;
+      request_id: string;
     };
     assert.equal(error.error.code, VALIDATION_FAILED);
-    assert.ok(error.requestId);
+    assert.ok(error.request_id);
   }
   for (const operation of [
     schedulerOperations.workPull,

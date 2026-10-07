@@ -98,7 +98,7 @@ test("action pages cross actionless batches and never derive attempts newer than
     page.items.map((item) => item.attempt),
     [FIRST_ATTEMPT],
   );
-  assert.equal(page.nextCursor, null);
+  assert.equal(page.next_cursor, null);
   assert.equal(derivations, MANY_ATTEMPTS);
   derivations = NO_ATTEMPT;
   const older = await h.invoke("externalAction.list", {
@@ -213,10 +213,10 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
     });
     const next = await h.invoke(operation, {
       ...base,
-      query: { cursor: page.nextCursor! },
+      query: { cursor: page.next_cursor! },
     });
     assert.ok(page.items[FIRST_INDEX]!.id > next.items[FIRST_INDEX]!.id);
-    assert.equal(next.nextCursor, null);
+    assert.equal(next.next_cursor, null);
     assert.equal(
       (
         await h.invoke(operation, {
@@ -283,13 +283,13 @@ test("attempt and external-action reads page in descending order and filter atte
   );
   const next = await h.invoke("attempt.list", {
     ...input,
-    query: { cursor: first.nextCursor! },
+    query: { cursor: first.next_cursor! },
   });
   assert.deepEqual(
     next.items.map((item) => item.attempt),
     [FIRST_ATTEMPT],
   );
-  assert.equal(next.nextCursor, null);
+  assert.equal(next.next_cursor, null);
   const actions = await h.invoke("externalAction.list", input);
   assert.deepEqual(
     actions.items.map((item) => item.attempt),
@@ -297,7 +297,7 @@ test("attempt and external-action reads page in descending order and filter atte
   );
   const older = await h.invoke("externalAction.list", {
     ...input,
-    query: { cursor: actions.nextCursor! },
+    query: { cursor: actions.next_cursor! },
   });
   assert.deepEqual(
     older.items.map((item) => item.attempt),
@@ -307,7 +307,7 @@ test("attempt and external-action reads page in descending order and filter atte
     ...input,
     query: { attempt: 0 },
   });
-  assert.deepEqual(empty, { items: [], nextCursor: null });
+  assert.deepEqual(empty, { items: [], next_cursor: null });
   const filtered = await h.invoke("externalAction.list", {
     ...input,
     query: { attempt: FIRST_ATTEMPT },
@@ -321,7 +321,7 @@ test("attempt and external-action reads page in descending order and filter atte
       ...input,
       query: { attempt: SECOND_ATTEMPT + FIRST_ATTEMPT },
     }),
-    { items: [], nextCursor: null },
+    { items: [], next_cursor: null },
   );
   const get = await h.invoke("externalAction.get", {
     params: { nodeId: h.nodeId, attempt: SECOND_ATTEMPT, actionKey: KEY },

@@ -73,7 +73,7 @@ test("proof refusals and failed calls stop once and prevent every later invocati
             message: "ended",
             details: null,
           },
-          requestId: "test",
+          request_id: "test",
         },
       },
       EndReason.Revoked,
@@ -89,7 +89,7 @@ test("proof refusals and failed calls stop once and prevent every later invocati
             message: "ended",
             details: null,
           },
-          requestId: "test",
+          request_id: "test",
         },
       },
       EndReason.Revoked,
@@ -101,7 +101,7 @@ test("proof refusals and failed calls stop once and prevent every later invocati
         status: 500,
         error: {
           error: { code: ERROR, message: "failed", details: null },
-          requestId: "test",
+          request_id: "test",
         },
       },
       EndReason.OperationFailed,
@@ -235,7 +235,7 @@ test("release refusal preserves the owning error code", async (t) => {
       status: 409,
       error: {
         error: { code, message: "unmet", details: null },
-        requestId: "test",
+        request_id: "test",
       },
     }),
   } as unknown as MethodClients["scheduler"];

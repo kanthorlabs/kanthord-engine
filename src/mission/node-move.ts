@@ -190,7 +190,7 @@ export function moveNode(
   checkParent(node, newParent);
   if (node.kind === NodeKind.Task) requireNonterminal(newParent);
   const ownerId = node.kind === NodeKind.Task ? oldParent!.id : node.id;
-  currentRevision(tx, ownerId, body.expectedRevision);
+  currentRevision(tx, ownerId, body.expected_revision);
   const oldRevision =
     oldParent === null
       ? null

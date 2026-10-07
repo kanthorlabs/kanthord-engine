@@ -57,7 +57,7 @@ export function executionList(
             CURSOR_ENCODING,
           )
         : null;
-    return { items, nextCursor };
+    return { items, next_cursor: nextCursor };
   });
 }
 

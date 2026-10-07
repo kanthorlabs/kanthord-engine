@@ -122,7 +122,7 @@ test("credential creation and rotation enforce the serialized budget before any 
   fails(
     () =>
       f.rotate(created.name, {
-        expectedRevision: FIRST_REVISION,
+        expected_revision: FIRST_REVISION,
         secret: oversized,
       }),
     HttpStatus.BadRequest,
@@ -133,7 +133,7 @@ test("credential creation and rotation enforce the serialized budget before any 
     before,
   );
   const rotated = f.rotate(created.name, {
-    expectedRevision: FIRST_REVISION,
+    expected_revision: FIRST_REVISION,
     secret: maximum,
   }) as CredentialAnswer;
   assert.equal(rotated.revisions[0]?.revision, NEXT_REVISION);
@@ -413,10 +413,10 @@ test("get orders revisions and list paginates sorted names with filters", () => 
       const page = f.list({
         limit: 1,
         ...(cursor === null ? {} : { cursor }),
-      }) as { items: { name: string }[]; nextCursor: string | null };
+      }) as { items: { name: string }[]; next_cursor: string | null };
       noSecret(page);
       names.push(...page.items.map((item) => item.name));
-      cursor = page.nextCursor;
+      cursor = page.next_cursor;
     } while (cursor !== null && names.length < inputs.length + 1);
     assert.deepEqual(names, ["anthropic", "github", "openai", "storage"]);
     assert.equal(cursor, null);
@@ -435,7 +435,7 @@ test("rotate copies or replaces metadata and guards revisions", () => {
   try {
     f.create(inputs[3]);
     const copied = f.rotate("storage", {
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       secret: inputs[3]!.secret,
     }) as { revisions: { id: string; revision: number; metadata: unknown }[] };
     assert.deepEqual(copied.revisions[0]!.metadata, inputs[3]!.metadata);
@@ -443,7 +443,7 @@ test("rotate copies or replaces metadata and guards revisions", () => {
     noSecret(copied);
     const replacement = { ...inputs[3]!.metadata, bucket: "other" };
     const replaced = f.rotate("storage", {
-      expectedRevision: NEXT_REVISION,
+      expected_revision: NEXT_REVISION,
       secret: inputs[3]!.secret,
       metadata: replacement,
     }) as { revisions: { id: string; revision: number; metadata: unknown }[] };
@@ -453,7 +453,7 @@ test("rotate copies or replaces metadata and guards revisions", () => {
     assert.throws(
       () =>
         f.rotate("storage", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: apiSecret,
         }),
       (error) =>
@@ -466,7 +466,7 @@ test("rotate copies or replaces metadata and guards revisions", () => {
     fails(
       () =>
         f.rotate("missing", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: apiSecret,
         }),
       HttpStatus.NotFound,
@@ -474,7 +474,7 @@ test("rotate copies or replaces metadata and guards revisions", () => {
     );
     fails(
       () =>
-        f.rotate("storage", { expectedRevision: THIRD_REVISION, secret: {} }),
+        f.rotate("storage", { expected_revision: THIRD_REVISION, secret: {} }),
       HttpStatus.BadRequest,
       "credential.input.invalid",
     );
@@ -492,14 +492,14 @@ test("two rotations with the same expected revision reject the second", () => {
     f.create(inputs[0]);
     noSecret(
       f.rotate("github", {
-        expectedRevision: FIRST_REVISION,
+        expected_revision: FIRST_REVISION,
         secret: apiSecret,
       }),
     );
     fails(
       () =>
         f.rotate("github", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: apiSecret,
         }),
       HttpStatus.Conflict,
@@ -516,7 +516,7 @@ test("metadata edits re-encrypt under new identity and enforce revision", () => 
     f.create(inputs[2]);
     const metadata = { ...inputs[2]!.metadata, models: [{ id: "added" }] };
     const answer = f.updateMetadata("openai", {
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       metadata,
     }) as { revisions: { id: string; revision: number; metadata: unknown }[] };
     assert.equal(answer.revisions[0]!.revision, NEXT_REVISION);
@@ -537,7 +537,7 @@ test("metadata edits re-encrypt under new identity and enforce revision", () => 
     fails(
       () =>
         f.updateMetadata("openai", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata,
         }),
       HttpStatus.Conflict,
@@ -546,7 +546,7 @@ test("metadata edits re-encrypt under new identity and enforce revision", () => 
     fails(
       () =>
         f.updateMetadata("missing", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata,
         }),
       HttpStatus.NotFound,
@@ -555,7 +555,7 @@ test("metadata edits re-encrypt under new identity and enforce revision", () => 
     fails(
       () =>
         f.updateMetadata("openai", {
-          expectedRevision: NEXT_REVISION,
+          expected_revision: NEXT_REVISION,
           metadata: {},
         }),
       HttpStatus.BadRequest,
@@ -575,14 +575,14 @@ test("two metadata edits with the same expected revision reject the second", () 
     f.create(inputs[0]);
     noSecret(
       f.updateMetadata("github", {
-        expectedRevision: FIRST_REVISION,
+        expected_revision: FIRST_REVISION,
         metadata: null,
       }),
     );
     fails(
       () =>
         f.updateMetadata("github", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata: null,
         }),
       HttpStatus.Conflict,
@@ -601,7 +601,7 @@ test("rotation drains unpinned revisions while reads drain released pins", () =>
     const first = created.revisions[0]!.id;
     pins.set(first, ["live-execution"]);
     const rotated = f.rotate("github", {
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       secret: apiSecret,
     }) as CredentialAnswer;
     assert(rotated.revisions.every((row) => row.endedAt === null));
@@ -610,7 +610,7 @@ test("rotation drains unpinned revisions while reads drain released pins", () =>
     assert.notEqual(read.revisions[1]!.endedAt, null);
     assert.equal(read.revisions[0]!.endedAt, null);
     const again = f.rotate("github", {
-      expectedRevision: NEXT_REVISION,
+      expected_revision: NEXT_REVISION,
       secret: apiSecret,
     }) as CredentialAnswer;
     assert.notEqual(again.revisions[1]!.endedAt, null);
@@ -633,7 +633,7 @@ test("list drains every returned name and revoke drains other unpinned revisions
       const created = f.create(input) as CredentialAnswer;
       pins.set(created.revisions[0]!.id, ["live-execution"]);
       f.rotate(input.name, {
-        expectedRevision: FIRST_REVISION,
+        expected_revision: FIRST_REVISION,
         secret: apiSecret,
       });
     }
@@ -646,11 +646,14 @@ test("list drains every returned name and revoke drains other unpinned revisions
     const current = f.get("github") as CredentialAnswer;
     pins.set(current.revisions[0]!.id, ["live-execution"]);
     const third = f.rotate("github", {
-      expectedRevision: NEXT_REVISION,
+      expected_revision: NEXT_REVISION,
       secret: apiSecret,
     }) as CredentialAnswer;
     pins.set(third.revisions[0]!.id, ["live-execution"]);
-    f.rotate("github", { expectedRevision: THIRD_REVISION, secret: apiSecret });
+    f.rotate("github", {
+      expected_revision: THIRD_REVISION,
+      secret: apiSecret,
+    });
     pins.clear();
     const revoked = f.revoke("github", THIRD_REVISION) as CredentialAnswer;
     assert.equal(revoked.revisions[0]!.endedAt, null);
@@ -695,7 +698,10 @@ test("pinned metadata retains a rotated revision without creating a pin and refu
     assert.equal(metadata(), null);
     assert.equal(credentials.length, noPins);
     credentials.push(created.revisions[0]!.id);
-    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    });
     assert.deepEqual(metadata(), {
       id: created.revisions[0]!.id,
       name: "github",
@@ -777,7 +783,10 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
     const created = f.create(inputs[0]) as CredentialAnswer;
     assert.equal(release(), created.revisions[0]!.id);
     assert.deepEqual(credentials, [created.revisions[0]!.id]);
-    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    });
     assert.equal(release(), created.revisions[0]!.id);
     assert.deepEqual(credentials, [created.revisions[0]!.id]);
     platform = TestPlatform.AccessKey;
@@ -804,7 +813,10 @@ test("revoke ends only an older live revision", () => {
   try {
     const created = f.create(inputs[0]) as CredentialAnswer;
     pins.set(created.revisions[0]!.id, ["live-execution"]);
-    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    });
     fails(
       () => f.revoke("github", NEXT_REVISION),
       HttpStatus.Conflict,
@@ -864,7 +876,10 @@ test("custody suitability checks the newest live revision and platform", () => {
       HttpStatus.BadRequest,
       PLATFORM_MISMATCH_CODE,
     );
-    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    });
     f.revoke("github", FIRST_REVISION);
     f.store.transaction((tx) =>
       suitability(tx, { credential: "github", platform: TestPlatform.Key }),
@@ -906,7 +921,7 @@ test("credential metadata returns only nonsecret fields from the newest live rev
       null,
     );
     const rotated = f.rotate("openai", {
-      expectedRevision: FIRST_REVISION,
+      expected_revision: FIRST_REVISION,
       secret: apiSecret,
       metadata: { baseUrl: ROTATED_BASE_URL, models: [] },
     }) as { revisions: { id: string }[] };
@@ -962,12 +977,12 @@ test("a name of another platform set answers not found on every read and write",
       () => f.get("foreign"),
       () =>
         f.rotate("foreign", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: apiSecret,
         }),
       () =>
         f.updateMetadata("foreign", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata: null,
         }),
       () => f.revoke("foreign", FIRST_REVISION),
@@ -1092,7 +1107,10 @@ test("archive ends every live revision and keeps every row", () => {
   try {
     const created = f.create(inputs[0]) as CredentialAnswer;
     pins.set(created.revisions[0]!.id, ["live-execution"]);
-    f.rotate("github", { expectedRevision: FIRST_REVISION, secret: apiSecret });
+    f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    });
     const archived = archiveCall(f, "github")() as CredentialAnswer;
     assert.equal(archived.name, GITHUB_NAME);
     assert.equal(archived.revisions.length, NEXT_REVISION);
@@ -1136,7 +1154,7 @@ test("an archived name refuses rotate, update-metadata and a second archive", ()
     fails(
       () =>
         f.rotate("github", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           secret: apiSecret,
         }),
       HttpStatus.Conflict,
@@ -1145,7 +1163,7 @@ test("an archived name refuses rotate, update-metadata and a second archive", ()
     fails(
       () =>
         f.updateMetadata("github", {
-          expectedRevision: FIRST_REVISION,
+          expected_revision: FIRST_REVISION,
           metadata: null,
         }),
       HttpStatus.Conflict,
@@ -1189,7 +1207,7 @@ test("a rotation never archives a name", () => {
     for (let step = 0; step < EVERY_ARCHIVE_STEP; step += 1) {
       const read = f.get("github") as CredentialAnswer;
       const answer = f.rotate("github", {
-        expectedRevision: read.revisions[0]!.revision,
+        expected_revision: read.revisions[0]!.revision,
         secret: apiSecret,
       }) as CredentialAnswer;
       assert(answer.revisions.some((row) => row.endedAt === null));
@@ -1219,15 +1237,15 @@ test("list leaves out an archived name unless includeArchived is true and pages 
     ]);
     const first = f.list({ limit: PAGE_OF_ONE }) as {
       items: CredentialAnswer[];
-      nextCursor: string | null;
+      next_cursor: string | null;
     };
     assert.deepEqual(names(first), ["github"]);
     const second = f.list({
       limit: PAGE_OF_ONE,
-      cursor: first.nextCursor,
-    }) as { items: CredentialAnswer[]; nextCursor: string | null };
+      cursor: first.next_cursor,
+    }) as { items: CredentialAnswer[]; next_cursor: string | null };
     assert.deepEqual(names(second), ["openai"]);
-    assert.equal(second.nextCursor, null);
+    assert.equal(second.next_cursor, null);
   } finally {
     f.store.close();
   }

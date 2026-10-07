@@ -69,9 +69,9 @@ test("evidence reads paginate descending identities, include attempt zero and pr
     first.items[FIRST_ITEM_INDEX]!.assets[FIRST_ITEM_INDEX]!.publishedAt,
     null,
   );
-  const second = await page({ cursor: first.nextCursor });
+  const second = await page({ cursor: first.next_cursor });
   assert.equal(second.items[FIRST_ITEM_INDEX]!.id, ids[FIRST_ITEM_INDEX]);
-  assert.equal(second.nextCursor, null);
+  assert.equal(second.next_cursor, null);
   assert.equal(
     (await page({ attempt: NO_ATTEMPT })).items.length,
     SINGLE_RESULT,

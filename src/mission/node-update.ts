@@ -46,7 +46,7 @@ const CRITERION_FIELDS = [ContentField.Criterion, ContentField.Verifications];
 
 type EditBody = Pick<
   NodeUpdate,
-  "reason" | "expectedMissionVersion" | "expectedRevision"
+  "reason" | "expectedMissionVersion" | "expected_revision"
 >;
 type EditContext = {
   node: NodeRow;
@@ -92,7 +92,7 @@ function editContext(
     owner.id,
     "Revision must belong to content owner.",
   );
-  if (current.revision !== body.expectedRevision)
+  if (current.revision !== body.expected_revision)
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.RevisionConflict,

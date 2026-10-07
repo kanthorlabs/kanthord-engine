@@ -299,10 +299,10 @@ export class ProjectService implements Service, ProjectBindings {
     });
     registry.register(projectOperations.list, ({ query }, caller) =>
       caller.commit((tx) => {
-        const { items, nextCursor } = listProjects(tx, query);
+        const { items, next_cursor: nextCursor } = listProjects(tx, query);
         return {
           items: items.map((project) => this.projectRecord(project)),
-          nextCursor,
+          next_cursor: nextCursor,
         };
       }),
     );
@@ -551,7 +551,7 @@ export class ProjectService implements Service, ProjectBindings {
             items: page.map((name) =>
               this.agentItem(tx, project, params.bindingId, config, name),
             ),
-            nextCursor:
+            next_cursor:
               selected.length > query.limit && last
                 ? Buffer.from(last, UTF8_ENCODING).toString(CURSOR_ENCODING)
                 : null,
