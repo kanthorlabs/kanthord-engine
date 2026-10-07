@@ -18,6 +18,11 @@ pathItem:
         schema:
           $ref: "#/components/schemas/agent.get.Input/properties/params/properties/agentN\
             ame"
+      - name: view
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/agent.get.Input/properties/query/properties/view"
     responses:
       "200":
         description: Completed result
@@ -61,7 +66,11 @@ components:
           additionalProperties: false
         query:
           type: object
-          properties: {}
+          properties:
+            view:
+              type: string
+              enum:
+                - final
           additionalProperties: false
         body:
           type: "null"
@@ -85,10 +94,74 @@ components:
           type: array
           items:
             type: string
-        basePrompt:
-          type: string
-        agentPrompt:
-          type: string
+        prompt:
+          type: object
+          properties:
+            layers:
+              type: array
+              items:
+                type: object
+                properties:
+                  layer:
+                    type: string
+                    enum:
+                      - system
+                      - agent
+                      - working
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source:
+                          type: string
+                          minLength: 1
+                        origin:
+                          type: string
+                          enum:
+                            - binary
+                            - file
+                            - database
+                        path:
+                          anyOf:
+                            - type: string
+                            - type: "null"
+                        enabled:
+                          type: boolean
+                        state:
+                          type: string
+                          enum:
+                            - present
+                            - absent
+                            - invalid
+                            - off
+                            - deferred
+                        digest:
+                          anyOf:
+                            - type: string
+                            - type: "null"
+                        text:
+                          anyOf:
+                            - type: string
+                            - type: "null"
+                      required:
+                        - source
+                        - origin
+                        - path
+                        - enabled
+                        - state
+                        - digest
+                        - text
+                      additionalProperties: false
+                required:
+                  - layer
+                  - sources
+                additionalProperties: false
+            final:
+              type: string
+          required:
+            - final
+          additionalProperties: false
         tools:
           type: array
           items:
@@ -224,7 +297,7 @@ components:
         - agentName
         - configurationSchema
         - overridableFields
-        - agentPrompt
+        - prompt
         - tools
         - enablement
       additionalProperties: false

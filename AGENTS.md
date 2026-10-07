@@ -40,6 +40,7 @@ engine/
 │   │   ├── files.ts            # Private filesystem validation and publication
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
 │   │   ├── probe.ts            # Remote HTTP probe and failure-reason redaction
+│   │   ├── assets.ts           # Shipped assets from the single binary or static/
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
 │   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, and repository credentials
 │   │   ├── contract.ts         # Repository credential route group
@@ -58,13 +59,17 @@ engine/
 │   ├── agent/                  # Agent component: agent catalog, enablements, effective configuration, and provider healthchecks
 │   │   ├── contract.ts         # Agent routes, enablement and configuration schemas, and error codes
 │   │   ├── index.ts            # Component and migration exports
-│   │   ├── migrations.ts       # agent_enablement table
+│   │   ├── migrations.ts       # agent_enablement and agent_prompt tables
+│   │   ├── config.ts           # Prompt system file and agent directory configuration fragment
 │   │   ├── catalog.ts          # Static agent declarations
 │   │   ├── prompt-assets.ts    # Byte-exact packaged base, agent and workbench prompts
 │   │   ├── pi.ts               # Cached offline SDK loader and isolated agent directory
 │   │   ├── agent-session.ts    # Isolated sessions and setup deadlines
 │   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
 │   │   ├── prompt-composer.ts  # Layer selection, attribution, digests and work prompts
+│   │   ├── prompt-layers.ts    # System, agent and working layer sources, switches and states
+│   │   ├── prompt-render.ts    # Framing, system prompt, pinned working texts and final prompt
+│   │   ├── prompts.ts          # agent_prompt settings reads and writes
 │   │   ├── pinned-layers.ts    # Context and inference pins across compaction
 │   │   ├── environment.ts      # Provider-free child process environment
 │   │   ├── test-support.ts     # Scripted offline provider
@@ -175,7 +180,6 @@ engine/
 │   │   ├── index.ts            # Service, dependencies, and migrations
 │   │   ├── migrations.ts       # Empty migration list
 │   │   ├── sessions.ts         # Workbench directory, pi session list, create, find, and stored configuration
-│   │   ├── prompt.ts           # Global, base, agent, and workbench prompt composition
 │   │   ├── tools.ts            # Built-in tools and one tool per human operation without secret material
 │   │   └── service.ts          # Session lifecycle, configuration, credential grant, runs, approvals, and operation handlers
 │   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention

@@ -16,19 +16,15 @@ const USER_ROLE = "user";
 const TURN_END = "turn_end";
 const FIRST_INDEX = 0;
 
-export function pinnedLayers(layers: {
-  global: LayerText | null;
-  project: LayerText | null;
-}): {
+export function pinnedLayers(layers: readonly (LayerText | null)[]): {
   hook: InlineExtension;
   setWork(work: WorkPrompt): void;
   pinInference(session: AgentSession, systemPrompt: string): void;
 } {
-  assert.ok(Object.hasOwn(layers, "global"));
-  assert.ok(Object.hasOwn(layers, "project"));
+  assert.ok(Array.isArray(layers));
   let work: WorkPrompt | null = null;
   const hook = pinnedLayersHook(() => ({
-    layers: [layers.global, layers.project]
+    layers: layers
       .filter((layer) => layer !== null)
       .map((layer) => layer.marked),
     work: work?.marked ?? null,
@@ -46,11 +42,9 @@ export function pinnedLayers(layers: {
           pinContext(
             context,
             systemPrompt,
-            [
-              layers.global?.marked,
-              layers.project?.marked,
-              work?.marked,
-            ].filter((text) => text !== undefined),
+            [...layers.map((layer) => layer?.marked), work?.marked].filter(
+              (text) => text !== undefined,
+            ),
           ),
           options,
         );

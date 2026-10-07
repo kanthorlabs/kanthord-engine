@@ -47,6 +47,34 @@ export const WorkbenchPromptSource = {
   Custom: "custom",
 } as const;
 
+export const PromptLayerKind = {
+  System: "system",
+  Agent: "agent",
+  Working: "working",
+} as const;
+export type PromptLayerKind =
+  (typeof PromptLayerKind)[keyof typeof PromptLayerKind];
+
+export const PromptOrigin = {
+  Binary: "binary",
+  File: "file",
+  Database: "database",
+} as const;
+export type PromptOrigin = (typeof PromptOrigin)[keyof typeof PromptOrigin];
+
+export const PromptSourceState = {
+  Present: "present",
+  Absent: "absent",
+  Invalid: "invalid",
+  Off: "off",
+  Deferred: "deferred",
+} as const;
+export type PromptSourceState =
+  (typeof PromptSourceState)[keyof typeof PromptSourceState];
+
+export const PromptView = { Final: "final" } as const;
+export type PromptView = (typeof PromptView)[keyof typeof PromptView];
+
 export const PROMPT_SWITCHES: Record<PromptScope, readonly string[]> = {
   [PromptScope.System]: Object.values(SystemPromptSource),
   [PromptScope.Agent]: Object.values(AgentPromptSource),
@@ -229,12 +257,33 @@ export const agentModelSchema = z.strictObject({
   reasoningEfforts: z.array(reasoningEffortSchema),
 });
 
+export const promptSourceSchema = z.strictObject({
+  source: z.string().min(1),
+  origin: z.enum(PromptOrigin),
+  path: z.string().nullable(),
+  enabled: z.boolean(),
+  state: z.enum(PromptSourceState),
+  digest: z.string().nullable(),
+  text: z.string().nullable(),
+});
+export type PromptSource = z.infer<typeof promptSourceSchema>;
+
+export const promptLayerSchema = z.strictObject({
+  layer: z.enum(PromptLayerKind),
+  sources: z.array(promptSourceSchema),
+});
+export type PromptLayerAnswer = z.infer<typeof promptLayerSchema>;
+
+export const promptAnswerSchema = z.strictObject({
+  layers: z.array(promptLayerSchema).optional(),
+  final: z.string(),
+});
+
 export const agentDeclarationSchema = z.strictObject({
   agentName: z.string().min(1),
   configurationSchema: z.record(z.string(), z.unknown()),
   overridableFields: z.array(z.string()),
-  basePrompt: z.string().optional(),
-  agentPrompt: z.string(),
+  prompt: promptAnswerSchema,
   tools: z.array(toolDeclarationSchema),
   enablement: agentEnablementSchema.nullable(),
 });
@@ -343,7 +392,7 @@ export const agentOperations = {
     body: false,
     input: z.strictObject({
       params: agentParams,
-      query: emptyFields,
+      query: z.strictObject({ view: z.enum(PromptView).optional() }),
       body: z.null(),
     }),
     output: agentDeclarationSchema,

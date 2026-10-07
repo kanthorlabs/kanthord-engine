@@ -28,6 +28,15 @@ export interface SessionPlace {
   sessionDir: string;
 }
 
+export function workbenchDirectory(
+  stateDirectory: string,
+  agentName: string,
+): string {
+  assert.ok(stateDirectory);
+  assert.ok(agentName);
+  return join(stateDirectory, WORKBENCH_DIRECTORY_NAME, agentName);
+}
+
 export function sessionPlace(
   stateDirectory: string,
   agentName: string,
@@ -35,7 +44,7 @@ export function sessionPlace(
   assert.ok(stateDirectory);
   assert.ok(Object.hasOwn(AGENT_DECLARATIONS, agentName));
   const place = {
-    cwd: join(stateDirectory, WORKBENCH_DIRECTORY_NAME, agentName),
+    cwd: workbenchDirectory(stateDirectory, agentName),
     sessionDir: join(
       stateDirectory,
       PI_DIRECTORY_NAME,

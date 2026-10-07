@@ -70,6 +70,7 @@ import {
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
   WorkbenchService,
+  workbenchDirectory,
   workbenchMigrations,
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
@@ -221,7 +222,11 @@ export function composeServices(options: {
       agent.enablementsDependentOnModel(tx, name, model),
   });
   const agent: AgentComponent = new AgentComponent({
+    store: options.store,
     config: options.config.agent,
+    dataDirectory: directories(process.env).data,
+    workbenchDirectory: (name) =>
+      workbenchDirectory(options.stateDirectory, name),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     approvedModels: (tx, name) => llm.approvedModels(tx, name),
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
@@ -341,8 +346,9 @@ export function composeServices(options: {
   const workbench = new WorkbenchService({
     store: options.store,
     stateDirectory: options.stateDirectory,
-    dataDirectory: directories(process.env).data,
-    globalPrompt: options.config.worker.globalPrompt,
+    agentPrompt: {
+      compose: (name, context) => agent.composePrompt(name, context),
+    },
     agentConfiguration: {
       validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
       agentView: (tx, name, entry) => agent.agentView(tx, name, entry),

@@ -354,20 +354,18 @@ test(
         (typeof agentOperations)["get"]["output"]["_output"]
       >(["agent", "get", "swe@1"]);
       assert.equal(declaration.agentName, SWE);
-      assert.equal(
-        declaration.basePrompt,
-        readFileSync(
-          new URL("../../../static/prompt/base.md", import.meta.url),
-          "utf8",
-        ),
+      const texts = declaration.prompt.layers!.flatMap(({ sources }) =>
+        sources.map((source) => source.text),
       );
-      assert.equal(
-        declaration.agentPrompt,
-        readFileSync(
-          new URL("../../../static/prompt/swe@1.md", import.meta.url),
-          "utf8",
-        ),
-      );
+      for (const name of ["base.md", "swe@1.md"])
+        assert.ok(
+          texts.includes(
+            readFileSync(
+              new URL(`../../../static/prompt/${name}`, import.meta.url),
+              "utf8",
+            ),
+          ),
+        );
       assert.deepEqual(
         declaration.tools.map(({ name, source }) => ({ name, source })),
         [

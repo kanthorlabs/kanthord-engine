@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
 import { z } from "zod";
+import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HealthScope, type ResourceEntry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import { getAgentDeclaration } from "./catalog.ts";
 import type { AgentConfig } from "./config.ts";
 import {
@@ -24,6 +26,8 @@ import {
   type PromptSettings,
   agentModelSchema,
   effectiveConfigurationSchema,
+  PromptView,
+  type PromptLayerAnswer,
   AgentErrorCode,
   AGENT_PROVIDER_TARGET_KIND,
   LIST_LIMIT_DEFAULT,
@@ -51,6 +55,12 @@ import {
   type EnablementRow,
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
+import {
+  resolveLayers,
+  type PromptSettingsSet,
+  type ResolvedLayer,
+} from "./prompt-layers.ts";
+import { finalPrompt, PromptConsumer } from "./prompt-render.ts";
 
 const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
@@ -206,8 +216,27 @@ function switchPrompt(
   );
 }
 
+function layerAnswer(layer: ResolvedLayer): PromptLayerAnswer {
+  return {
+    layer: layer.layer,
+    sources: layer.sources.map((source) => ({
+      source: source.source,
+      origin: source.origin,
+      path: source.path,
+      enabled: source.enabled,
+      state: source.state,
+      digest: source.digest,
+      text: source.text,
+    })),
+  };
+}
+
 export interface Dependencies {
+  store: Store;
   config: AgentConfig;
+  dataDirectory: string;
+  hostHome?: string;
+  workbenchDirectory: (agentName: string) => string;
   custodySuitability: CustodySuitability;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
@@ -618,6 +647,29 @@ export class AgentComponent {
     return [...matches.values()];
   }
 
+  composePrompt(agentName: string, context: Context): Promise<ResolvedLayer[]> {
+    const agent = getAgentDeclaration(agentName);
+    assert.ok(agent);
+    const settings: PromptSettingsSet = this.dependencies.store.transaction(
+      (tx) => ({
+        system: promptSettings(tx, PromptScope.System),
+        agent: promptSettings(tx, PromptScope.Agent, agentName),
+        working: promptSettings(tx, PromptScope.Workbench, agentName),
+      }),
+    );
+    const { config, dataDirectory, workbenchDirectory } = this.dependencies;
+    return resolveLayers({
+      agent,
+      settings,
+      systemFile: config.prompt.systemFile,
+      agentDirectory: config.prompt.agentDirectory,
+      dataDirectory,
+      hostHome: this.dependencies.hostHome ?? homedir(),
+      workingDirectory: workbenchDirectory(agentName),
+      context,
+    });
+  }
+
   declare(registry: OperationRegistry): void {
     registry.register(agentOperations["enablement.list"], ({ query }, caller) =>
       caller.commit((tx) => {
@@ -628,27 +680,37 @@ export class AgentComponent {
         };
       }),
     );
-    registry.register(agentOperations.get, async ({ params }, caller) => {
-      requireAgent(params.agentName);
-      const declaration = getAgentDeclaration(params.agentName);
-      assert.ok(declaration);
-      const tools = await this.dependencies.toolDeclarations(params.agentName);
-      assert.equal(declaration.agentName, params.agentName);
-      return caller.commit((tx) => {
-        const row = getEnablement(tx, params.agentName);
-        return {
-          agentName: declaration.agentName,
-          configurationSchema: z.toJSONSchema(effectiveConfigurationSchema),
-          overridableFields: [...declaration.overridableFields],
-          ...(declaration.basePrompt === undefined
-            ? {}
-            : { basePrompt: declaration.basePrompt }),
-          agentPrompt: declaration.agentPrompt,
-          tools,
-          enablement: row ? wireRecord(row) : null,
-        };
-      });
-    });
+    registry.register(
+      agentOperations.get,
+      async ({ params, query }, caller) => {
+        requireAgent(params.agentName);
+        const declaration = getAgentDeclaration(params.agentName);
+        assert.ok(declaration);
+        const tools = await this.dependencies.toolDeclarations(
+          params.agentName,
+        );
+        assert.equal(declaration.agentName, params.agentName);
+        const layers = await this.composePrompt(
+          params.agentName,
+          caller.context,
+        );
+        const final = finalPrompt(layers, PromptConsumer.Workbench);
+        return caller.commit((tx) => {
+          const row = getEnablement(tx, params.agentName);
+          return {
+            agentName: declaration.agentName,
+            configurationSchema: z.toJSONSchema(effectiveConfigurationSchema),
+            overridableFields: [...declaration.overridableFields],
+            prompt:
+              query.view === PromptView.Final
+                ? { final }
+                : { layers: layers.map(layerAnswer), final },
+            tools,
+            enablement: row ? wireRecord(row) : null,
+          };
+        });
+      },
+    );
     registry.register(agentOperations["enablement.get"], ({ params }, caller) =>
       caller.commit((tx) =>
         wireRecord(requireEnablement(tx, params.agentName)),

@@ -55,7 +55,10 @@ test("pinned prompt layers survive compaction and all model calls retain their o
       verifications: [],
     },
   });
-  const pinned = pinnedLayers(composed.layers);
+  const pinned = pinnedLayers([
+    composed.layers.global,
+    composed.layers.project,
+  ]);
   pinned.setWork(work);
   const provider = scriptedProvider([
     fauxAssistantMessage("first ".repeat(30000)),
@@ -132,7 +135,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
 test("two tool calls produce three counted turns with no absent project message", async (t) => {
   const cwd = temporary(t);
   writeFileSync(join(cwd, "file"), "content");
-  const pins = pinnedLayers({ global: null, project: null });
+  const pins = pinnedLayers([]);
   const provider = scriptedProvider([
     fauxAssistantMessage(fauxToolCall("read", { path: "file" }), {
       stopReason: "toolUse",
@@ -188,7 +191,7 @@ test("inference pin preserves stream arguments and later system updates across w
     throw failure;
   };
   const session = { agent: { streamFunction: original } } as AgentSession;
-  const pins = pinnedLayers({ global: null, project: null });
+  const pins = pinnedLayers([]);
   const systemPrompt = "declared system";
   pins.pinInference(session, systemPrompt);
   const model = {} as Parameters<StreamFn>[0];
@@ -275,7 +278,10 @@ for (const isSplitTurn of [false, true]) {
         verifications: [],
       },
     });
-    const pins = pinnedLayers(composed.layers);
+    const pins = pinnedLayers([
+      composed.layers.global,
+      composed.layers.project,
+    ]);
     pins.setWork(work);
     const provider = scriptedProvider([
       fauxAssistantMessage("", {

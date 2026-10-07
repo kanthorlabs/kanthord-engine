@@ -125,8 +125,11 @@ const fakeCollaborations = {
   },
 };
 const PROVIDER_CAPABILITY = "model-list read";
-const fakeAgentCollaborations: AgentDependencies = {
+const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   config: { prompt: { systemFile: "", agentDirectory: "" } },
+  dataDirectory: "/nonexistent/data",
+  hostHome: "/nonexistent/home",
+  workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
   custodySuitability: () => {},
   approvedModels: () => null,
   entriesOfAgent: () => [],
@@ -1086,6 +1089,7 @@ function enablementFixture(
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   ]);
   const agent = new AgentComponent({
+    store,
     ...fakeAgentCollaborations,
     ...agentCollaborations,
   });

@@ -1,0 +1,355 @@
+import assert from "node:assert/strict";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { background } from "../kernel/context.ts";
+import { temporary } from "../kernel/test-support.ts";
+import { getAgentDeclaration } from "./catalog.ts";
+import {
+  PromptLayerKind,
+  PromptOrigin,
+  PromptScope,
+  PromptSourceState,
+  PROMPT_SWITCHES,
+  type PromptSettings,
+} from "./contract.ts";
+import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
+import { digest } from "./prompt-composer.ts";
+import {
+  resolveLayers,
+  type LayerInput,
+  type PromptSettingsSet,
+  type ResolvedLayer,
+} from "./prompt-layers.ts";
+import {
+  compositionRecord,
+  finalPrompt,
+  framing,
+  PromptConsumer,
+  systemPrompt,
+  workingTexts,
+} from "./prompt-render.ts";
+import { PROMPT_SOURCE_MAX_BYTES, InvalidReason } from "./prompt-source.ts";
+
+const CLAUDE_PATH = "~/.claude/CLAUDE.md";
+const CLAUDE_LABEL = "file ~/.claude/CLAUDE.md";
+const BASE_LABEL = "binary base.md";
+const SYSTEM_CUSTOM_LABEL = "database custom system prompt";
+const SYSTEM_CUSTOM = "system custom";
+const AGENT_CUSTOM = "agent custom";
+const WORKING_FILE = "working file";
+const WORKING_CUSTOM = "working custom";
+const CONFIGURED_RELATIVE = "configured relative";
+const CONFIGURED_ABSOLUTE = "configured absolute";
+const DISCOVERED = "discovered";
+const SECOND_HOST = "second";
+const FIRST_HOST = "first";
+const AGENTS_PATH = "~/.agents/AGENTS.md";
+const AGENT_FILE_TEXT = "agent file text";
+const WORKING_LAYER = "working layer";
+const RECORD_REJECTED_COUNT = 4;
+const AGENT = "swe@1";
+const declaration = getAgentDeclaration(AGENT)!;
+
+function settings(
+  scope: PromptScope,
+  customText = "",
+  off: readonly string[] = [],
+): PromptSettings {
+  return {
+    scope,
+    agentName: scope === PromptScope.System ? "" : AGENT,
+    switches: Object.fromEntries(
+      PROMPT_SWITCHES[scope].map((name) => [name, !off.includes(name)]),
+    ),
+    customText,
+    version: 1,
+  };
+}
+
+function settingsSet(
+  custom: { system?: string; agent?: string; working?: string } = {},
+  off: { system?: string[]; agent?: string[]; working?: string[] } = {},
+): PromptSettingsSet {
+  return {
+    system: settings(PromptScope.System, custom.system, off.system),
+    agent: settings(PromptScope.Agent, custom.agent, off.agent),
+    working: settings(PromptScope.Workbench, custom.working, off.working),
+  };
+}
+
+function fixture(t: Parameters<typeof temporary>[0]) {
+  const root = temporary(t);
+  const home = join(root, "home");
+  const data = join(root, "data");
+  const working = join(root, "working");
+  for (const directory of [
+    home,
+    join(home, ".agents"),
+    join(home, ".claude"),
+    data,
+    working,
+  ])
+    mkdirSync(directory, { recursive: true });
+  const input = (overrides: Partial<LayerInput> = {}): LayerInput => ({
+    agent: declaration,
+    settings: settingsSet(),
+    systemFile: "",
+    agentDirectory: "",
+    dataDirectory: data,
+    hostHome: home,
+    workingDirectory: working,
+    context: background,
+    ...overrides,
+  });
+  return { root, home, data, working, input };
+}
+
+function source(layers: ResolvedLayer[], kind: string, name: string) {
+  const found = layers
+    .find((layer) => layer.layer === kind)!
+    .sources.find((entry) => entry.source === name);
+  assert.ok(found);
+  return found;
+}
+
+test("every origin resolves present with its path, digest and text", async (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.home, ".claude/CLAUDE.md"), "host text");
+  writeFileSync(join(f.working, "AGENTS.md"), WORKING_FILE);
+  const layers = await resolveLayers(
+    f.input({
+      settings: settingsSet({
+        system: "system custom",
+        agent: "agent custom",
+        working: "working custom",
+      }),
+    }),
+  );
+  assert.deepEqual(
+    layers.map((layer) => layer.layer),
+    [PromptLayerKind.System, PromptLayerKind.Agent, PromptLayerKind.Working],
+  );
+  const host = source(layers, "system", "host_file");
+  assert.equal(host.origin, PromptOrigin.File);
+  assert.equal(host.path, CLAUDE_PATH);
+  assert.equal(host.label, CLAUDE_LABEL);
+  assert.equal(host.state, PromptSourceState.Present);
+  assert.equal(host.digest, digest("host text"));
+  const base = source(layers, "system", "base");
+  assert.equal(base.origin, PromptOrigin.Binary);
+  assert.equal(base.path, null);
+  assert.equal(base.label, BASE_LABEL);
+  assert.equal(base.text, BASE_PROMPT);
+  const custom = source(layers, "system", "custom");
+  assert.equal(custom.origin, PromptOrigin.Database);
+  assert.equal(custom.label, SYSTEM_CUSTOM_LABEL);
+  assert.equal(custom.text, SYSTEM_CUSTOM);
+  assert.equal(
+    source(layers, "agent", "shipped").text,
+    declaration.agentPrompt,
+  );
+  assert.equal(source(layers, "agent", "custom").text, AGENT_CUSTOM);
+  assert.equal(source(layers, "working", "agents_md").text, WORKING_FILE);
+  assert.equal(source(layers, "working", "shipped").text, WORKBENCH_PROMPT);
+  assert.equal(source(layers, "working", "custom").text, WORKING_CUSTOM);
+});
+
+test("absent sources hold no digest and no text", async (t) => {
+  const f = fixture(t);
+  const layers = await resolveLayers(f.input());
+  const host = source(layers, "system", "host_file");
+  assert.equal(host.state, PromptSourceState.Absent);
+  assert.equal(host.path, CLAUDE_PATH);
+  assert.equal(host.digest, null);
+  assert.equal(host.text, null);
+  assert.equal(
+    source(layers, "system", "custom").state,
+    PromptSourceState.Absent,
+  );
+  const agentFile = source(layers, "agent", "agent_file");
+  assert.equal(agentFile.state, PromptSourceState.Absent);
+  assert.equal(agentFile.path, null);
+  assert.equal(
+    source(layers, "working", "claude_local_md").state,
+    PromptSourceState.Absent,
+  );
+});
+
+test("invalid sources add no text and the composer continues", async (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.home, ".agents/AGENTS.md"), "bad\u0001text");
+  writeFileSync(
+    join(f.working, "AGENTS.md"),
+    "x".repeat(PROMPT_SOURCE_MAX_BYTES + 1),
+  );
+  const outside = join(f.root, "outside.md");
+  writeFileSync(outside, "outside");
+  symlinkSync(outside, join(f.working, "CLAUDE.md"));
+  const layers = await resolveLayers(
+    f.input({ settings: settingsSet({ agent: "y".repeat(40000) }) }),
+  );
+  const host = source(layers, "system", "host_file");
+  assert.equal(host.state, PromptSourceState.Invalid);
+  assert.equal(host.reason, InvalidReason.ControlCharacter);
+  assert.equal(host.text, null);
+  assert.equal(host.digest, null);
+  assert.equal(
+    source(layers, "system", "base").state,
+    PromptSourceState.Present,
+  );
+  assert.equal(
+    source(layers, "working", "agents_md").reason,
+    InvalidReason.TooLarge,
+  );
+  assert.equal(
+    source(layers, "working", "claude_md").reason,
+    InvalidReason.OutsideWorkspace,
+  );
+  const custom = source(layers, "agent", "custom");
+  assert.equal(custom.state, PromptSourceState.Invalid);
+  assert.equal(custom.origin, PromptOrigin.Database);
+  assert.equal(custom.reason, InvalidReason.TooLarge);
+  const record = compositionRecord(layers);
+  assert.equal(record.rejected.length, RECORD_REJECTED_COUNT);
+  assert.deepEqual(
+    record.rejected.map(({ reason }) => reason).sort(),
+    [
+      InvalidReason.ControlCharacter,
+      InvalidReason.OutsideWorkspace,
+      InvalidReason.TooLarge,
+      InvalidReason.TooLarge,
+    ].sort(),
+  );
+  assert.ok(
+    record.selected.every(({ digest: value }) => /^[a-f0-9]{64}$/.test(value)),
+  );
+});
+
+test("a switch that is off skips the read", async (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.home, ".agents/AGENTS.md"), "bad\u0001text");
+  const layers = await resolveLayers(
+    f.input({
+      settings: settingsSet(
+        { system: "kept" },
+        { system: ["host_file", "base"], working: ["agents_md"] },
+      ),
+    }),
+  );
+  const host = source(layers, "system", "host_file");
+  assert.equal(host.state, PromptSourceState.Off);
+  assert.equal(host.enabled, false);
+  assert.equal(host.reason, null);
+  assert.equal(host.text, null);
+  assert.equal(source(layers, "system", "base").state, PromptSourceState.Off);
+  assert.equal(
+    source(layers, "working", "agents_md").state,
+    PromptSourceState.Off,
+  );
+  assert.equal(source(layers, "system", "custom").enabled, true);
+  const rendered = finalPrompt(layers, PromptConsumer.Workbench);
+  assert.ok(rendered.includes("kept"));
+  assert.ok(!rendered.includes(BASE_PROMPT));
+});
+
+test("a configured system file replaces discovery", async (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.home, ".agents/AGENTS.md"), DISCOVERED);
+  writeFileSync(join(f.data, "system.md"), CONFIGURED_RELATIVE);
+  const relative = await resolveLayers(f.input({ systemFile: "system.md" }));
+  const host = source(relative, "system", "host_file");
+  assert.equal(host.text, CONFIGURED_RELATIVE);
+  assert.equal(host.path, join(f.data, "system.md"));
+  const missing = await resolveLayers(f.input({ systemFile: "missing.md" }));
+  assert.equal(
+    source(missing, "system", "host_file").state,
+    PromptSourceState.Absent,
+  );
+  const absolute = join(f.root, "absolute.md");
+  writeFileSync(absolute, CONFIGURED_ABSOLUTE);
+  const named = await resolveLayers(f.input({ systemFile: absolute }));
+  assert.equal(source(named, "system", "host_file").text, CONFIGURED_ABSOLUTE);
+  const discovery = await resolveLayers(f.input());
+  assert.equal(source(discovery, "system", "host_file").text, DISCOVERED);
+});
+
+test("discovery takes the first existing host file", async (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.home, ".claude/CLAUDE.md"), SECOND_HOST);
+  const second = await resolveLayers(f.input());
+  assert.equal(source(second, "system", "host_file").text, SECOND_HOST);
+  writeFileSync(join(f.home, ".agents/AGENTS.md"), FIRST_HOST);
+  const first = await resolveLayers(f.input());
+  assert.equal(source(first, "system", "host_file").text, FIRST_HOST);
+  assert.equal(source(first, "system", "host_file").path, AGENTS_PATH);
+});
+
+test("the agent directory supplies the agent file", async (t) => {
+  const f = fixture(t);
+  mkdirSync(join(f.data, "agents"));
+  writeFileSync(join(f.data, "agents", `${AGENT}.md`), AGENT_FILE_TEXT);
+  const relative = await resolveLayers(f.input({ agentDirectory: "agents" }));
+  const file = source(relative, "agent", "agent_file");
+  assert.equal(file.state, PromptSourceState.Present);
+  assert.equal(file.text, AGENT_FILE_TEXT);
+  assert.equal(file.origin, PromptOrigin.File);
+  const other = await resolveLayers(
+    f.input({ agentDirectory: join(f.data, "none") }),
+  );
+  assert.equal(
+    source(other, "agent", "agent_file").state,
+    PromptSourceState.Absent,
+  );
+});
+
+test("working files read in order and the framing states the precedence", async (t) => {
+  const f = fixture(t);
+  for (const name of [
+    "AGENTS.md",
+    "AGENTS.local.md",
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+  ])
+    writeFileSync(join(f.working, name), name);
+  const layers = await resolveLayers(f.input());
+  const working = workingTexts(layers);
+  assert.deepEqual(
+    working.map(({ text }) => text),
+    [
+      "AGENTS.md",
+      "AGENTS.local.md",
+      "CLAUDE.md",
+      "CLAUDE.local.md",
+      WORKBENCH_PROMPT,
+    ],
+  );
+  assert.ok(working.every(({ layer }) => layer === WORKING_LAYER));
+  const system = systemPrompt(layers, PromptConsumer.Workbench);
+  assert.ok(!system.includes("CLAUDE.local.md"));
+  assert.ok(!system.includes(WORKBENCH_PROMPT));
+  assert.ok(system.includes(declaration.agentPrompt));
+  assert.ok(system.includes('<prompt-layer name="system layer"'));
+  assert.ok(system.includes('<prompt-layer name="agent layer"'));
+  assert.ok(system.includes('source="binary base.md"'));
+  assert.ok(system.startsWith(framing(PromptConsumer.Workbench)));
+  assert.ok(
+    system.indexOf('name="system layer"') <
+      system.indexOf('name="agent layer"'),
+  );
+  assert.match(
+    framing(PromptConsumer.Workbench),
+    /highest to the lowest is: agent layer, system layer, working layer\./,
+  );
+  assert.match(
+    framing(PromptConsumer.Worker),
+    /highest to the lowest is: agent layer, system layer, work prompt, working layer\./,
+  );
+  assert.match(
+    framing(PromptConsumer.Worker),
+    /No layer revokes an obligation of the agent layer or of the system layer\. A layer authorizes no operation\./,
+  );
+  const final = finalPrompt(layers, PromptConsumer.Workbench);
+  assert.ok(final.includes("CLAUDE.local.md"));
+  assert.ok(!final.includes(f.home));
+});

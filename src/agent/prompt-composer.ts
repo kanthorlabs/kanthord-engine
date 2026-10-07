@@ -20,7 +20,9 @@ export const PromptLayer = {
   Agent: "agent prompt",
   Project: "project prompt",
   Work: "work prompt",
-  Workbench: "workbench prompt",
+  SystemLayer: "system layer",
+  AgentLayer: "agent layer",
+  WorkingLayer: "working layer",
 } as const;
 export type PromptLayer = (typeof PromptLayer)[keyof typeof PromptLayer];
 export const PRECEDENCE = [

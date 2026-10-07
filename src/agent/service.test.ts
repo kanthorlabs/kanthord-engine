@@ -4,12 +4,16 @@ import {
   getBuiltinModels,
   getBuiltinProviders,
 } from "@earendil-works/pi-ai/providers/all";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { temporary } from "../kernel/test-support.ts";
 import { AgentComponent, type Dependencies } from "./service.ts";
 import {
   agentOperations,
   AgentErrorCode,
   PromptScope,
+  PromptSourceState,
   PROMPT_SWITCHES,
   PROMPT_TEXT_MAX_BYTES,
   AGENT_COMPONENT_NAME,
@@ -38,6 +42,9 @@ import { CodedError, OperationError } from "../kernel/errors.ts";
 
 const PROVIDER_CAPABILITY = "model-list read";
 const DEFAULT_REASONING = "off";
+const WORKING_PATH = "~/working/AGENTS.md";
+const WORKING_TEXT = "workbench directory text";
+const CUSTOM_TEXT = "custom workbench text";
 const AGENT = "swe@1";
 const OTHER_AGENT = "re@1";
 const WORKER = "general@1";
@@ -63,8 +70,11 @@ const defaults = {
 };
 const putBody = { agentProviders: [provider], defaultConfiguration: defaults };
 const binding = { bindingId: "binding", workerName: WORKER, entry: null };
-const fakeCollaborations: Dependencies = {
+const fakeCollaborations: Omit<Dependencies, "store"> = {
   config: { prompt: { systemFile: "", agentDirectory: "" } },
+  dataDirectory: "/nonexistent/data",
+  hostHome: "/nonexistent/home",
+  workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
   custodySuitability: () => {},
   approvedModels: () => null,
   entriesOfAgent: () => [],
@@ -85,6 +95,7 @@ function enablementFixture(
     { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
   ]);
   const agent = new AgentComponent({
+    store,
     ...fakeCollaborations,
     ...collaborations,
   });
@@ -130,6 +141,81 @@ function refuses(
   });
 }
 
+test("agent read answers the layers, the working layer of the workbench and the final prompt", async (t) => {
+  const root = temporary(t);
+  const working = join(root, "working");
+  mkdirSync(working);
+  writeFileSync(join(working, "AGENTS.md"), WORKING_TEXT);
+  const f = enablementFixture(t, {
+    dataDirectory: root,
+    hostHome: root,
+    workbenchDirectory: () => working,
+  });
+  f.invoke(
+    "prompt.put",
+    {
+      scope: PromptScope.Workbench,
+      agentName: AGENT,
+      customText: CUSTOM_TEXT,
+    },
+    {},
+  );
+  f.invoke(
+    "prompt.switch",
+    { scope: PromptScope.System, switch: "base", enabled: false },
+    {},
+  );
+  const operation = agentOperations.get;
+  const read = async (query: Record<string, unknown> = {}) =>
+    operation.output.parse(
+      await f.registry.get(operation.id).handler(
+        operation.input.parse({
+          params: { agentName: AGENT },
+          query,
+          body: null,
+        }),
+        f.caller,
+      ),
+    );
+  const answer = await read();
+  const layers = answer.prompt.layers!;
+  assert.deepEqual(
+    layers.map(({ layer }) => layer),
+    ["system", "agent", "working"],
+  );
+  assert.deepEqual(
+    layers.map(({ sources }) => sources.map(({ source }) => source)),
+    [
+      ["host_file", "base", "custom"],
+      ["agent_file", "shipped", "custom"],
+      [
+        "agents_md",
+        "agents_local_md",
+        "claude_md",
+        "claude_local_md",
+        "shipped",
+        "custom",
+      ],
+    ],
+  );
+  const base = layers[0]!.sources[1]!;
+  assert.equal(base.state, PromptSourceState.Off);
+  assert.equal(base.enabled, false);
+  assert.equal(base.text, null);
+  const file = layers[2]!.sources[0]!;
+  assert.equal(file.state, PromptSourceState.Present);
+  assert.equal(file.path, WORKING_PATH);
+  assert.equal(file.text, WORKING_TEXT);
+  assert.match(file.digest!, /^[a-f0-9]{64}$/);
+  assert.equal(layers[2]!.sources[5]!.text, CUSTOM_TEXT);
+  assert.ok(answer.prompt.final.includes(WORKING_TEXT));
+  assert.ok(answer.prompt.final.includes(CUSTOM_TEXT));
+  assert.ok(!answer.prompt.final.includes(base.text ?? "\u0000"));
+  const final = await read({ view: "final" });
+  assert.equal(final.prompt.layers, undefined);
+  assert.equal(final.prompt.final, answer.prompt.final);
+});
+
 test("agent declaration read exposes prompts, tools and current enablement without writes", async (t) => {
   const schemaVersion = "https://json-schema.org/draft/2020-12/schema";
   const disabled = "disabled";
@@ -153,10 +239,17 @@ test("agent declaration read exposes prompts, tools and current enablement witho
   const declaration = await read();
   assert.equal(declaration.enablement, null);
   assert.deepEqual(declaration.tools, TOOLS);
-  assert.ok(
-    declaration.basePrompt?.startsWith("You are a senior software engineer."),
+  const sources = Object.fromEntries(
+    declaration.prompt.layers!.flatMap(({ layer, sources }) =>
+      sources.map((source) => [`${layer}.${source.source}`, source]),
+    ),
   );
-  assert.ok(declaration.agentPrompt.startsWith("## Role"));
+  assert.ok(
+    sources["system.base"]!.text?.startsWith(
+      "You are a senior software engineer.",
+    ),
+  );
+  assert.ok(sources["agent.shipped"]!.text?.startsWith("## Role"));
   assert.equal(declaration.configurationSchema.$schema, schemaVersion);
   assert.equal(declaration.configurationSchema.additionalProperties, false);
   assert.deepEqual(declaration.configurationSchema.required, [

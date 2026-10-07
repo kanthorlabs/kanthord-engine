@@ -37,7 +37,12 @@ import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
-import { resolveGlobalPrompt } from "../agent/prompt-composer.ts";
+import type { ResolvedLayer } from "../agent/prompt-layers.ts";
+import {
+  systemPrompt,
+  PromptConsumer,
+  workingTexts,
+} from "../agent/prompt-render.ts";
 import {
   connectModel,
   type ModelConnectorInput,
@@ -63,7 +68,6 @@ import {
   type WorkbenchConfiguration,
   type WorkbenchSession,
 } from "./contract.ts";
-import { composeWorkbenchPrompt } from "./prompt.ts";
 import {
   builtinTools,
   operationTool,
@@ -90,9 +94,10 @@ export type WorkbenchModelRuntimeFactory = (
 export interface Dependencies {
   store: Store;
   stateDirectory: string;
-  dataDirectory: string;
-  globalPrompt: string;
   hostHome?: string;
+  agentPrompt: {
+    compose(agentName: string, context: Context): Promise<ResolvedLayer[]>;
+  };
   agentConfiguration: {
     validateEntry(tx: Transaction, agentName: string, entry: AgentEntry): void;
     agentView(
@@ -346,19 +351,12 @@ export class WorkbenchService implements Service {
         );
       });
       const hostHome = this.dependencies.hostHome ?? homedir();
-      const prompt = await composeWorkbenchPrompt(
-        {
-          agent: declaration,
-          globalPrompt: await resolveGlobalPrompt(
-            this.dependencies.globalPrompt,
-            this.dependencies.dataDirectory,
-            context,
-          ),
-          hostHome,
-        },
+      const layers = await this.dependencies.agentPrompt.compose(
+        session.agentName,
         context,
       );
-      const pins = pinnedLayers({ global: prompt.global, project: null });
+      const prompt = systemPrompt(layers, PromptConsumer.Workbench);
+      const pins = pinnedLayers(workingTexts(layers));
       const builtin = builtinTools(
         await loadPi(),
         session.agentName,
@@ -381,7 +379,7 @@ export class WorkbenchService implements Service {
         modelRuntime: runtime,
         model,
         thinkingLevel: session.configuration.reasoningEffort,
-        systemPrompt: prompt.systemPrompt,
+        systemPrompt: prompt,
         allowlist: [
           ...builtin.allowlist,
           ...operations.map((tool) => tool.name),
@@ -410,7 +408,7 @@ export class WorkbenchService implements Service {
         context,
         sessionManager: session.manager,
       });
-      pins.pinInference(agent, prompt.systemPrompt);
+      pins.pinInference(agent, prompt);
       const opened = agent;
       const unsubscribeEvents = opened.subscribe((event) => {
         if (event.type === AGENT_END && session.run) session.run.ended = true;

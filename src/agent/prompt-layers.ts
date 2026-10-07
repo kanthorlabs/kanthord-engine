@@ -1,0 +1,302 @@
+import assert from "node:assert/strict";
+import { join, resolve } from "node:path";
+import type { Context } from "../kernel/context.ts";
+import { homeRelative } from "../kernel/xdg.ts";
+import type { AgentDeclaration } from "./catalog.ts";
+import {
+  AgentPromptSource,
+  PromptLayerKind,
+  PromptOrigin,
+  PromptSourceState,
+  SystemPromptSource,
+  WorkbenchPromptSource,
+  type PromptSettings,
+} from "./contract.ts";
+import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
+import { digest, PromptLayer } from "./prompt-composer.ts";
+import {
+  readAgentFile,
+  SourceState,
+  validateText,
+  type InvalidReason,
+} from "./prompt-source.ts";
+
+const HOST_DISCOVERY = [".agents/AGENTS.md", ".claude/CLAUDE.md"] as const;
+const SYSTEM_OWNER = "operator of the server";
+const WORKING_OWNER = "Workbench Service";
+const SHIPPED_BASE_NAME = "base.md";
+const SHIPPED_WORKBENCH_NAME = "workbench.md";
+const MARKDOWN_EXTENSION = ".md";
+const WORKING_FILES = [
+  [WorkbenchPromptSource.AgentsMd, "AGENTS.md"],
+  [WorkbenchPromptSource.AgentsLocalMd, "AGENTS.local.md"],
+  [WorkbenchPromptSource.ClaudeMd, "CLAUDE.md"],
+  [WorkbenchPromptSource.ClaudeLocalMd, "CLAUDE.local.md"],
+] as const;
+
+type Loaded =
+  | { state: typeof SourceState.Present; path: string | null; text: string }
+  | { state: typeof SourceState.Absent; path: string | null }
+  | {
+      state: typeof SourceState.Invalid;
+      path: string | null;
+      reason: InvalidReason;
+    };
+
+export interface ResolvedSource {
+  source: string;
+  origin: PromptOrigin;
+  path: string | null;
+  enabled: boolean;
+  state: PromptSourceState;
+  reason: InvalidReason | null;
+  digest: string | null;
+  text: string | null;
+  owner: string;
+  label: string;
+}
+
+export interface ResolvedLayer {
+  layer: PromptLayerKind;
+  name: PromptLayer;
+  sources: ResolvedSource[];
+}
+
+export interface PromptSettingsSet {
+  system: PromptSettings;
+  agent: PromptSettings;
+  working: PromptSettings;
+}
+
+export interface LayerInput {
+  agent: AgentDeclaration;
+  settings: PromptSettingsSet;
+  systemFile: string;
+  agentDirectory: string;
+  dataDirectory: string;
+  hostHome: string;
+  workingDirectory: string;
+  context: Context;
+}
+
+interface SourceSpec {
+  source: string;
+  origin: PromptOrigin;
+  owner: string;
+  label: (path: string | null) => string;
+  load: () => Promise<Loaded>;
+}
+
+function textSource(text: string): () => Promise<Loaded> {
+  return async () => {
+    if (!text) return { state: SourceState.Absent, path: null };
+    const reason = validateText(text);
+    return reason
+      ? { state: SourceState.Invalid, path: null, reason }
+      : { state: SourceState.Present, path: null, text };
+  };
+}
+
+function fileSource(
+  paths: readonly string[],
+  workspace: string | null,
+  context: Context,
+): () => Promise<Loaded> {
+  assert.ok(paths.length);
+  return async () => {
+    for (const path of paths) {
+      const result = await readAgentFile(path, { workspace, context });
+      if (result.state !== SourceState.Absent) return result;
+    }
+    return { state: SourceState.Absent, path: paths.at(-1)! };
+  };
+}
+
+function resolveSource(
+  spec: SourceSpec,
+  settings: PromptSettings,
+  hostHome: string,
+): Promise<ResolvedSource> {
+  const enabled = settings.switches[spec.source] === true;
+  const base = {
+    source: spec.source,
+    origin: spec.origin,
+    enabled,
+    owner: spec.owner,
+    reason: null,
+    digest: null,
+    text: null,
+  };
+  const home = (path: string | null) =>
+    path === null ? null : homeRelative(path, hostHome);
+  if (!enabled)
+    return Promise.resolve({
+      ...base,
+      path: null,
+      state: PromptSourceState.Off,
+      label: spec.label(null),
+    });
+  return spec.load().then((loaded) => {
+    const path = spec.origin === PromptOrigin.File ? home(loaded.path) : null;
+    const label = spec.label(path);
+    if (loaded.state === SourceState.Invalid)
+      return {
+        ...base,
+        path,
+        label,
+        state: PromptSourceState.Invalid,
+        reason: loaded.reason,
+      };
+    if (loaded.state === SourceState.Absent)
+      return { ...base, path, label, state: PromptSourceState.Absent };
+    return {
+      ...base,
+      path,
+      label,
+      state: PromptSourceState.Present,
+      digest: digest(loaded.text),
+      text: loaded.text,
+    };
+  });
+}
+
+const fileLabel = (path: string | null) => `file ${path ?? "unset"}`;
+
+function systemSpecs(input: LayerInput): SourceSpec[] {
+  const discovery = input.systemFile
+    ? [resolve(input.dataDirectory, input.systemFile)]
+    : HOST_DISCOVERY.map((path) => join(input.hostHome, path));
+  return [
+    {
+      source: SystemPromptSource.HostFile,
+      origin: PromptOrigin.File,
+      owner: SYSTEM_OWNER,
+      label: fileLabel,
+      load: fileSource(discovery, null, input.context),
+    },
+    {
+      source: SystemPromptSource.Base,
+      origin: PromptOrigin.Binary,
+      owner: SYSTEM_OWNER,
+      label: () => `binary ${SHIPPED_BASE_NAME}`,
+      load: textSource(BASE_PROMPT),
+    },
+    {
+      source: SystemPromptSource.Custom,
+      origin: PromptOrigin.Database,
+      owner: SYSTEM_OWNER,
+      label: () => "database custom system prompt",
+      load: textSource(input.settings.system.customText),
+    },
+  ];
+}
+
+function agentSpecs(input: LayerInput): SourceSpec[] {
+  const owner = `agent ${input.agent.agentName}`;
+  const path = input.agentDirectory
+    ? join(
+        resolve(input.dataDirectory, input.agentDirectory),
+        `${input.agent.agentName}${MARKDOWN_EXTENSION}`,
+      )
+    : null;
+  return [
+    {
+      source: AgentPromptSource.AgentFile,
+      origin: PromptOrigin.File,
+      owner,
+      label: fileLabel,
+      load:
+        path === null
+          ? async () => ({ state: SourceState.Absent, path: null })
+          : fileSource([path], null, input.context),
+    },
+    {
+      source: AgentPromptSource.Shipped,
+      origin: PromptOrigin.Binary,
+      owner,
+      label: () => `binary ${input.agent.agentName}${MARKDOWN_EXTENSION}`,
+      load: textSource(input.agent.agentPrompt),
+    },
+    {
+      source: AgentPromptSource.Custom,
+      origin: PromptOrigin.Database,
+      owner,
+      label: () => "database custom agent prompt",
+      load: textSource(input.settings.agent.customText),
+    },
+  ];
+}
+
+function workingSpecs(input: LayerInput): SourceSpec[] {
+  return [
+    ...WORKING_FILES.map(([source, name]): SourceSpec => ({
+      source,
+      origin: PromptOrigin.File,
+      owner: WORKING_OWNER,
+      label: fileLabel,
+      load: fileSource(
+        [join(input.workingDirectory, name)],
+        input.workingDirectory,
+        input.context,
+      ),
+    })),
+    {
+      source: WorkbenchPromptSource.Shipped,
+      origin: PromptOrigin.Binary,
+      owner: WORKING_OWNER,
+      label: () => `binary ${SHIPPED_WORKBENCH_NAME}`,
+      load: textSource(WORKBENCH_PROMPT),
+    },
+    {
+      source: WorkbenchPromptSource.Custom,
+      origin: PromptOrigin.Database,
+      owner: WORKING_OWNER,
+      label: () => "database custom workbench prompt",
+      load: textSource(input.settings.working.customText),
+    },
+  ];
+}
+
+async function resolveLayer(
+  layer: PromptLayerKind,
+  name: PromptLayer,
+  specs: SourceSpec[],
+  settings: PromptSettings,
+  hostHome: string,
+): Promise<ResolvedLayer> {
+  assert.ok(specs.length);
+  const sources: ResolvedSource[] = [];
+  for (const spec of specs)
+    sources.push(await resolveSource(spec, settings, hostHome));
+  return { layer, name, sources };
+}
+
+export async function resolveLayers(
+  input: LayerInput,
+): Promise<ResolvedLayer[]> {
+  assert.ok(input.hostHome);
+  assert.ok(input.workingDirectory);
+  return [
+    await resolveLayer(
+      PromptLayerKind.System,
+      PromptLayer.SystemLayer,
+      systemSpecs(input),
+      input.settings.system,
+      input.hostHome,
+    ),
+    await resolveLayer(
+      PromptLayerKind.Agent,
+      PromptLayer.AgentLayer,
+      agentSpecs(input),
+      input.settings.agent,
+      input.hostHome,
+    ),
+    await resolveLayer(
+      PromptLayerKind.Working,
+      PromptLayer.WorkingLayer,
+      workingSpecs(input),
+      input.settings.working,
+      input.hostHome,
+    ),
+  ];
+}

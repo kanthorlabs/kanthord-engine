@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
@@ -58,7 +57,6 @@ const ModelChange = "model_change";
 const ThinkingChange = "thinking_level_change";
 const SINGLE = 1;
 const MESSAGE_ENTRY = "message";
-const GLOBAL_PROMPT = "Prefer short answers.";
 const QUESTION = "How many objectives are open?";
 const ANSWER = "Two objectives are open.";
 const MAX_POLLS = 50;
@@ -118,11 +116,8 @@ async function workbenchFixture(
   stateDirectory = temporary(t),
 ) {
   const scripted = scriptedFactory(script);
-  const globalPrompt = join(temporary(t), "global.md");
-  writeFileSync(globalPrompt, GLOBAL_PROMPT);
   const fixture = await gatewayFixture(t, {
     stateDirectory,
-    globalPrompt,
     workbenchModelRuntimeFactory: scripted.factory,
   });
   const options = { identity };
@@ -661,14 +656,11 @@ test("a message runs the agent while a long poll follows the run to its end", as
   const call = fixture.provider.calls[0]!;
   assert.ok(call.systemPrompt?.includes(BASE_PROMPT));
   assert.ok(call.systemPrompt?.includes(SWE_AGENT_PROMPT));
-  assert.ok(call.systemPrompt?.includes(WORKBENCH_PROMPT));
+  assert.ok(!call.systemPrompt?.includes(WORKBENCH_PROMPT));
   assert.ok(
-    call.systemPrompt?.includes(
-      "agent prompt, base prompt, workbench prompt, global prompt",
-    ),
+    call.systemPrompt?.includes("agent layer, system layer, working layer"),
   );
-  assert.ok(!call.systemPrompt?.includes(GLOBAL_PROMPT));
-  assert.ok(JSON.stringify(call.messages).includes(GLOBAL_PROMPT));
+  assert.ok(JSON.stringify(call.messages).includes("## Human interlocutor"));
   assert.equal(call.apiKey, PRIMARY_KEY);
 });
 
