@@ -97,6 +97,10 @@ engine/
 │   │   ├── migrations.ts       # project_project and project_binding tables
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
+│   ├── intake/                 # Intake Service: inbound events and outbound requests
+│   │   ├── contract.ts         # Service name, closed sets, identity prefixes, and numeric bounds
+│   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
+│   │   └── service.ts          # Lifecycle, health probe, and resource inventory
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
 │   │   ├── contract.ts         # Mission schemas, operations, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations

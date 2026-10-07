@@ -25,6 +25,7 @@ import { gatewayConfigSchema, type GatewayConfig } from "../gateway/config.ts";
 import { missionConfigSchema, type MissionConfig } from "../mission/config.ts";
 import { agentConfigSchema, type AgentConfig } from "../agent/index.ts";
 import { projectConfigSchema } from "../project/index.ts";
+import { intakeConfigSchema } from "../intake/index.ts";
 import { workerConfigSchema, type WorkerConfig } from "../worker/config.ts";
 import {
   schedulerConfigSchema,
@@ -56,6 +57,7 @@ const fragments = {
   gateway: gatewayConfigSchema,
   mission: missionConfigSchema,
   project: projectConfigSchema,
+  intake: intakeConfigSchema,
   agent: agentConfigSchema,
   worker: workerConfigSchema,
   scheduler: schedulerConfigSchema,
