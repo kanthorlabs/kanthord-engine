@@ -331,9 +331,12 @@ test("only successful authentication of a live registration renews its heartbeat
   assert.equal(heartbeat.mock.calls.length, NO_REGISTRATIONS);
   const runtimeIdentity = "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAV";
   machines.worker.registrations.set(identity.clientId, {
-    ...identity,
-    runtimeIdentity,
-    registeredAt: Date.now(),
+    client_id: identity.clientId,
+    name: identity.name,
+    project_id: identity.projectId,
+    resource_identity: identity.resourceIdentity,
+    runtime_identity: runtimeIdentity,
+    registered_at: Date.now(),
   });
   await fixture.authentication.authenticate(`Bearer ${token}`);
   const once = 1;
@@ -357,10 +360,12 @@ test("only successful authentication of a live registration renews its heartbeat
   const threeTimes = 3;
   assert.equal(heartbeat.mock.calls.length, threeTimes);
   machines.worker.registrations.set(identity.clientId, {
-    ...identity,
-    runtimeIdentity,
-    registeredAt: Date.now(),
-    resourceIdentity: "worker:kanthord:other",
+    client_id: identity.clientId,
+    name: identity.name,
+    project_id: identity.projectId,
+    runtime_identity: runtimeIdentity,
+    registered_at: Date.now(),
+    resource_identity: "worker:kanthord:other",
   });
   await assert.rejects(
     fixture.authentication.authenticate(`Bearer ${token}`),

@@ -14,12 +14,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: executionId
+      - name: execution_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/worker.execution.setup.get.Input/properties/params/\
-            properties/executionId"
+            properties/execution_id"
     responses:
       "200":
         description: Completed result
@@ -55,14 +55,14 @@ components:
         params:
           type: object
           properties:
-            executionId:
+            execution_id:
               type: string
               minLength: 36
               maxLength: 36
               pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: execution_ followed by a canonical 26-character uppercase ULID.
           required:
-            - executionId
+            - execution_id
           additionalProperties: false
         query:
           type: object
@@ -78,19 +78,19 @@ components:
     worker.execution.setup.get.Output:
       type: object
       properties:
-        executionId:
+        execution_id:
           type: string
           minLength: 36
           maxLength: 36
           pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: execution_ followed by a canonical 26-character uppercase ULID.
-        workerName:
+        worker_name:
           type: string
           minLength: 1
-        agentName:
+        agent_name:
           type: string
           minLength: 1
-        effectiveConfiguration:
+        effective_configuration:
           type: object
           properties:
             agent_provider:
@@ -168,7 +168,7 @@ components:
             0.86.0 or to the `models` metadata of the `openai-compatible`
             credential. `reasoning_effort` belongs to the supported reasoning
             levels of that model. JSON Schema validates neither lookup.
-        credentialId:
+        credential_id:
           type: string
           minLength: 37
           maxLength: 37
@@ -181,10 +181,10 @@ components:
                 type: string
               additionalProperties: {}
             - type: "null"
-        resourceBudget:
+        resource_budget:
           type: object
           properties:
-            wallTimeMs:
+            wall_time_ms:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
@@ -193,14 +193,14 @@ components:
               exclusiveMinimum: 0
               maximum: 9007199254740991
           required:
-            - wallTimeMs
+            - wall_time_ms
           additionalProperties: false
         repositories:
           type: array
           items:
             type: object
             properties:
-              bindingId:
+              binding_id:
                 type: string
                 minLength: 34
                 maxLength: 34
@@ -210,7 +210,7 @@ components:
                 type: string
               address:
                 type: string
-              sshIdentity:
+              ssh_identity:
                 type: object
                 properties:
                   host:
@@ -235,12 +235,12 @@ components:
               strategy:
                 type: object
                 properties:
-                  baseBranch:
+                  base_branch:
                     type: string
                 required:
-                  - baseBranch
+                  - base_branch
                 additionalProperties: false
-              projectPrompt:
+              project_prompt:
                 anyOf:
                   - type: string
                   - type: "null"
@@ -265,12 +265,12 @@ components:
                   - project_prompt
                 additionalProperties: false
             required:
-              - bindingId
+              - binding_id
               - name
               - address
-              - sshIdentity
+              - ssh_identity
               - strategy
-              - projectPrompt
+              - project_prompt
               - working_layer
             additionalProperties: false
         prompt:
@@ -282,13 +282,13 @@ components:
             - final
           additionalProperties: false
       required:
-        - executionId
-        - workerName
-        - agentName
-        - effectiveConfiguration
-        - credentialId
+        - execution_id
+        - worker_name
+        - agent_name
+        - effective_configuration
+        - credential_id
         - metadata
-        - resourceBudget
+        - resource_budget
         - repositories
         - prompt
       additionalProperties: false

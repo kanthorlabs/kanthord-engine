@@ -67,7 +67,7 @@ test("execution attribution reads retained registration and tombstoned binding a
   const h = schedulerHarness(t);
   const row = executionFixture({ endedAt: FIXTURE_NOW });
   const attribution = {
-    clientId: createIdentity("client_identity"),
+    client_id: createIdentity("client_identity"),
     name: "retired-program",
   };
   const workerName = "general@1";
@@ -92,7 +92,8 @@ test("execution attribution reads retained registration and tombstoned binding a
   h.store.transaction((tx) => {
     insertExecution(tx, row);
     assert.deepEqual(h.service.executionAttribution(tx, row.executionId), {
-      ...attribution,
+      clientId: attribution.client_id,
+      name: attribution.name,
       workerName,
     });
     assert.equal(

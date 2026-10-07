@@ -183,7 +183,10 @@ export function executionRecord(
       workerBindingId,
       resourceIdentity,
       runtimeIdentity,
-      ...attribution,
+      ...(attribution && {
+        clientId: attribution.client_id,
+        name: attribution.name,
+      }),
     },
     claimState: claimStateOf(row, now),
   };

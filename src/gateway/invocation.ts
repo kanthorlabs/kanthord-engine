@@ -84,9 +84,12 @@ export class Invocation {
     const body = isObject(input.body)
       ? (input.body as Record<string, unknown>)
       : {};
-    const executionId = isString(params.executionId)
-      ? params.executionId
-      : body.executionId;
+    const executionId = [
+      params.execution_id,
+      params.executionId,
+      body.execution_id,
+      body.executionId,
+    ].find(isString);
     const row = isString(executionId)
       ? this.scheduler?.executionOf(executionId)
       : undefined;

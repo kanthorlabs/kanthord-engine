@@ -28,10 +28,10 @@ interface Preparation {
   deadlineMs: number;
 }
 interface WorkspaceRepository {
-  bindingId: string;
+  binding_id: string;
   address: string;
-  sshIdentity: SshIdentityPin;
-  strategy: { baseBranch: string };
+  ssh_identity: SshIdentityPin;
+  strategy: { base_branch: string };
 }
 
 export class WorkspaceRoot {
@@ -69,7 +69,7 @@ export class WorkspaceRoot {
     const key = this.objectiveKey(input.objectiveId);
     const directory = this.objectiveDirectory(
       input.objectiveId,
-      input.repository.bindingId,
+      input.repository.binding_id,
     );
     const existing = existsSync(directory);
     this.hold(key);
@@ -80,7 +80,7 @@ export class WorkspaceRoot {
       this.touch(key);
       if (!existing) {
         await input.transport.proveSshIdentity(
-          input.repository.sshIdentity,
+          input.repository.ssh_identity,
           input.context,
           end - performance.now(),
         );
@@ -93,14 +93,14 @@ export class WorkspaceRoot {
       }
       const nodeBranch = nodeBranchOf(input.objectiveId);
       await input.transport.proveSshIdentity(
-        input.repository.sshIdentity,
+        input.repository.ssh_identity,
         input.context,
         end - performance.now(),
       );
       const head = await input.transport.fetchAndCheckout(
         directory,
         nodeBranch,
-        input.repository.strategy.baseBranch,
+        input.repository.strategy.base_branch,
         input.context,
         end - performance.now(),
       );
@@ -114,7 +114,7 @@ export class WorkspaceRoot {
   async prepareSnapshot(
     input: Preparation & {
       executionId: string;
-      repository: { address: string; sshIdentity: SshIdentityPin };
+      repository: { address: string; ssh_identity: SshIdentityPin };
       commit: string;
     },
   ): Promise<{ directory: string; head: string }> {
@@ -122,7 +122,7 @@ export class WorkspaceRoot {
     const end = performance.now() + input.deadlineMs;
     try {
       await input.transport.proveSshIdentity(
-        input.repository.sshIdentity,
+        input.repository.ssh_identity,
         input.context,
         end - performance.now(),
       );
@@ -160,25 +160,25 @@ export class WorkspaceRoot {
       for (const repository of input.repositories) {
         const target = join(
           directory,
-          identitySchema("binding").parse(repository.bindingId),
+          identitySchema("binding").parse(repository.binding_id),
         );
         assert.ok(!existsSync(target), "Duplicate repository binding");
         ensureDirectory(target);
         await input.transport.proveSshIdentity(
-          repository.sshIdentity,
+          repository.ssh_identity,
           input.context,
           end - performance.now(),
         );
         const commit = await input.transport.cloneSnapshot(
           repository.address,
-          `origin/${repository.strategy.baseBranch}`,
+          `origin/${repository.strategy.base_branch}`,
           target,
           input.context,
           end - performance.now(),
         );
         testedInput.push({
           kind: "repository",
-          bindingId: repository.bindingId,
+          bindingId: repository.binding_id,
           commit,
         });
       }

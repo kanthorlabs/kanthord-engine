@@ -321,11 +321,16 @@ test(
     async function register(binding: string) {
       const auth = machine(binding);
       const env = { ...human, KANTHORD_TOKEN: auth.token };
-      const registration = await read<{ runtimeIdentity: string }>(
+      const registration = await read<{ runtime_identity: string }>(
         ["worker", "register"],
         env,
       );
-      return { ...auth, ...registration, env, binding };
+      return {
+        ...auth,
+        runtimeIdentity: registration.runtime_identity,
+        env,
+        binding,
+      };
     }
     const general = await register("general");
     const lab = await register("lab");
@@ -390,7 +395,7 @@ test(
         await workerClient.handover({
           params: {},
           query: {},
-          body: { executionId: execution.executionId },
+          body: { execution_id: execution.executionId },
         }),
       );
       const keys = deriveHandoverKeys(holder.client_secret);
@@ -404,7 +409,7 @@ test(
             params: {},
             query: {},
             body: {
-              executionId: execution.executionId,
+              execution_id: execution.executionId,
               ...sealEnvelope(keys.report, aad, report),
             },
           }),
@@ -412,7 +417,7 @@ test(
       });
       const setup = completed(
         await workerClient["execution.setup.get"]({
-          params: { executionId: execution.executionId },
+          params: { execution_id: execution.executionId },
           query: {},
           body: null,
         }),
@@ -474,7 +479,7 @@ test(
       assert.equal(items.length, SINGLE_ITEM);
       assert.deepEqual(items[0]!.assets[0]!.address, {
         kind: "repository",
-        bindingId: answer.setup.repositories[0]!.bindingId,
+        bindingId: answer.setup.repositories[0]!.binding_id,
         commit: headA,
       });
       assert.ok(
@@ -556,7 +561,7 @@ test(
         )!;
         assert.deepEqual(verified.verification!.testedInput, {
           kind: "repository",
-          bindingId: answer.setup.repositories[0]!.bindingId,
+          bindingId: answer.setup.repositories[0]!.binding_id,
           commit: headA,
         });
         assert.deepEqual(
@@ -586,7 +591,7 @@ test(
       async () => {
         actions.performAnswers.push({
           kind: "pull_request",
-          resourceIdentity: gatedResource,
+          resource_identity: gatedResource,
           number: 42,
         });
         const answer = await execute(reviewer, C, review());

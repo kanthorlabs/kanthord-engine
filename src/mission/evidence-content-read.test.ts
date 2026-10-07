@@ -292,7 +292,7 @@ test("external addresses answer typed conflicts only after the execution bound a
       AssetKind.Platform,
       {
         kind: PlatformAddressKind.PullRequest,
-        resourceIdentity: "repository:github:owner/repo",
+        resource_identity: "repository:github:owner/repo",
         number: FIRST_ATTEMPT,
       },
       MissionErrorCode.EvidenceContentPlatform,

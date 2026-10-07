@@ -28,7 +28,7 @@ export function performedItem(
   answer: PlatformAddress | ResultClassAnswer,
 ): ActionResultItem | null {
   assert.ok(ref.key);
-  assert.ok(ref.bindingId);
+  assert.ok(ref.binding_id);
   if (!isResultClass(answer)) return null;
   if (answer.class === ResultClass.UnknownOutcome)
     return {
@@ -52,7 +52,7 @@ export function readRefusalItem(
   answer: ResultClassAnswer,
 ): ActionResultItem {
   assert.ok(ref.key);
-  assert.ok(ref.bindingId);
+  assert.ok(ref.binding_id);
   return {
     kind: ActionResultKind.FailedBeforeEffect,
     action: ref,
@@ -73,7 +73,7 @@ export function recordedItem(
   result: OperationResult<unknown>,
 ): ActionResultItem {
   assert.ok(ref.key);
-  assert.ok(address.resourceIdentity);
+  assert.ok(address.resource_identity);
   if (result.type === OperationResultType.Completed) {
     assert.ok(isObject(result.data) && !Array.isArray(result.data));
     return {

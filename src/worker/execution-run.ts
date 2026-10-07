@@ -192,7 +192,7 @@ export class ExecutionRun {
     const answer = await this.call((options) =>
       this.clients.worker["action.request"](
         {
-          params: { executionId: this.claim.executionId },
+          params: { execution_id: this.claim.executionId },
           query: {},
           body: null,
         },

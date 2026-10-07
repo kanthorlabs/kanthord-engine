@@ -14,12 +14,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: executionId
+      - name: execution_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/worker.action.request.Input/properties/params/prope\
-            rties/executionId"
+            rties/execution_id"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     responses:
       "200":
@@ -56,14 +56,14 @@ components:
         params:
           type: object
           properties:
-            executionId:
+            execution_id:
               type: string
               minLength: 36
               maxLength: 36
               pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: execution_ followed by a canonical 26-character uppercase ULID.
           required:
-            - executionId
+            - execution_id
           additionalProperties: false
         query:
           type: object
@@ -79,7 +79,7 @@ components:
     worker.action.request.Output:
       type: object
       properties:
-        toolName:
+        tool_name:
           type: string
           const: repository-action-request
         items:
@@ -112,7 +112,7 @@ components:
                       key:
                         type: string
                         minLength: 1
-                      bindingId:
+                      binding_id:
                         type: string
                         minLength: 34
                         maxLength: 34
@@ -120,7 +120,7 @@ components:
                         description: binding_ followed by a canonical 26-character uppercase ULID.
                     required:
                       - key
-                      - bindingId
+                      - binding_id
                     additionalProperties: false
                   prerequisite:
                     type: object
@@ -128,7 +128,7 @@ components:
                       key:
                         type: string
                         minLength: 1
-                      evidenceId:
+                      evidence_id:
                         type: string
                         minLength: 35
                         maxLength: 35
@@ -136,7 +136,7 @@ components:
                         description: evidence_ followed by a canonical 26-character uppercase ULID.
                     required:
                       - key
-                      - evidenceId
+                      - evidence_id
                     additionalProperties: false
                 required:
                   - kind
@@ -154,7 +154,7 @@ components:
                       key:
                         type: string
                         minLength: 1
-                      bindingId:
+                      binding_id:
                         type: string
                         minLength: 34
                         maxLength: 34
@@ -162,7 +162,7 @@ components:
                         description: binding_ followed by a canonical 26-character uppercase ULID.
                     required:
                       - key
-                      - bindingId
+                      - binding_id
                     additionalProperties: false
                   refusal:
                     type: object
@@ -199,7 +199,7 @@ components:
                       key:
                         type: string
                         minLength: 1
-                      bindingId:
+                      binding_id:
                         type: string
                         minLength: 34
                         maxLength: 34
@@ -207,7 +207,7 @@ components:
                         description: binding_ followed by a canonical 26-character uppercase ULID.
                     required:
                       - key
-                      - bindingId
+                      - binding_id
                     additionalProperties: false
                   uncertainty:
                     type: string
@@ -222,7 +222,7 @@ components:
                           kind:
                             type: string
                             const: pull_request
-                          resourceIdentity:
+                          resource_identity:
                             type: string
                             minLength: 1
                           number:
@@ -231,7 +231,7 @@ components:
                             maximum: 9007199254740991
                         required:
                           - kind
-                          - resourceIdentity
+                          - resource_identity
                           - number
                         additionalProperties: false
                       - type: object
@@ -239,7 +239,7 @@ components:
                           kind:
                             type: string
                             const: branch_push
-                          resourceIdentity:
+                          resource_identity:
                             type: string
                             minLength: 1
                           branch:
@@ -250,7 +250,7 @@ components:
                             minLength: 1
                         required:
                           - kind
-                          - resourceIdentity
+                          - resource_identity
                           - branch
                           - commit
                         additionalProperties: false
@@ -260,6 +260,6 @@ components:
                   - uncertainty
                 additionalProperties: false
       required:
-        - toolName
+        - tool_name
         - items
       additionalProperties: false

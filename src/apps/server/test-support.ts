@@ -409,7 +409,7 @@ export function fakeMachines(
       assert.ok(runtimeIdentity);
       const row = registrationHistory.get(runtimeIdentity);
       return row &&
-        registrations.get(row.clientId)?.runtimeIdentity === runtimeIdentity
+        registrations.get(row.client_id)?.runtime_identity === runtimeIdentity
         ? row
         : null;
     },
@@ -417,7 +417,7 @@ export function fakeMachines(
       assert.ok(tx.database.isTransaction);
       assert.ok(runtimeIdentity);
       const row = registrationHistory.get(runtimeIdentity);
-      return row ? { clientId: row.clientId, name: row.name } : null;
+      return row ? { client_id: row.client_id, name: row.name } : null;
     },
     heartbeat: (runtimeIdentity: string) => {
       assert.ok(runtimeIdentity);
@@ -426,25 +426,25 @@ export function fakeMachines(
       transaction: Transaction,
       client: VerifiedClient,
       now: number,
-    ): Registration & { workerName: string } {
+    ): Registration & { worker_name: string } {
       assert.ok(transaction.database.isTransaction);
       const binding = [...bindings].find(
         ([name, binding]) =>
-          workerResourceIdentity(name) === client.resourceIdentity &&
-          binding.projectId === client.projectId,
+          workerResourceIdentity(name) === client.resource_identity &&
+          binding.projectId === client.project_id,
       )?.[1];
       assert.ok(binding && binding.available !== false);
-      assert.equal(binding.projectId, client.projectId);
+      assert.equal(binding.projectId, client.project_id);
       assert.ok(
         Number.isSafeInteger(binding.capacity) &&
           binding.capacity >= NO_INSTANCES,
       );
-      const previous = registrations.get(client.clientId);
-      if (previous) return { ...previous, workerName: "general@1" };
+      const previous = registrations.get(client.client_id);
+      if (previous) return { ...previous, worker_name: "general@1" };
       const count = [...registrations.values()].filter(
         (entry) =>
-          entry.resourceIdentity === client.resourceIdentity &&
-          entry.projectId === client.projectId,
+          entry.resource_identity === client.resource_identity &&
+          entry.project_id === client.project_id,
       ).length;
       if (count >= binding.capacity)
         throw new GatewayError(
@@ -454,12 +454,12 @@ export function fakeMachines(
         );
       const registration = {
         ...client,
-        workerName: "general@1",
-        runtimeIdentity: createIdentity("worker_instance"),
-        registeredAt: now,
+        worker_name: "general@1",
+        runtime_identity: createIdentity("worker_instance"),
+        registered_at: now,
       };
-      registrations.set(client.clientId, registration);
-      registrationHistory.set(registration.runtimeIdentity, registration);
+      registrations.set(client.client_id, registration);
+      registrationHistory.set(registration.runtime_identity, registration);
       return registration;
     },
     deregister(tx: Transaction, runtimeIdentity: string, now: number): void {
@@ -468,9 +468,9 @@ export function fakeMachines(
       const row = registrationHistory.get(runtimeIdentity);
       if (
         row &&
-        registrations.get(row.clientId)?.runtimeIdentity === runtimeIdentity
+        registrations.get(row.client_id)?.runtime_identity === runtimeIdentity
       )
-        registrations.delete(row.clientId);
+        registrations.delete(row.client_id);
     },
     restart(): void {
       registrations.clear();

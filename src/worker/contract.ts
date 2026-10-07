@@ -48,10 +48,10 @@ export const WorkerMethod = {
 } as const;
 export type WorkerMethod = (typeof WorkerMethod)[keyof typeof WorkerMethod];
 export interface VerifiedClient {
-  clientId: string;
+  client_id: string;
   name: string;
-  resourceIdentity: string;
-  projectId: string;
+  resource_identity: string;
+  project_id: string;
 }
 export const HANDOVER_TIMEOUT_MS = 30000;
 export const ACTION_REQUEST_TOOL_NAME = "repository-action-request";
@@ -96,12 +96,12 @@ export const PlatformAddressKind = {
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(PlatformAddressKind.PullRequest),
-    resourceIdentity: z.string().min(1),
+    resource_identity: z.string().min(1),
     number: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   }),
   z.strictObject({
     kind: z.literal(PlatformAddressKind.BranchPush),
-    resourceIdentity: z.string().min(1),
+    resource_identity: z.string().min(1),
     branch: z.string().min(1),
     commit: z.string().min(1),
   }),
@@ -109,7 +109,7 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
 export const actionRefSchema = z.strictObject({
   key: z.string().min(1),
-  bindingId: identitySchema("binding"),
+  binding_id: identitySchema("binding"),
 });
 export type ActionRef = z.infer<typeof actionRefSchema>;
 export const actionResultItemSchema = z.discriminatedUnion("kind", [
@@ -124,7 +124,7 @@ export const actionResultItemSchema = z.discriminatedUnion("kind", [
     action: actionRefSchema,
     prerequisite: z.strictObject({
       key: z.string().min(1),
-      evidenceId: identitySchema("evidence"),
+      evidence_id: identitySchema("evidence"),
     }),
   }),
   z.strictObject({
@@ -145,7 +145,7 @@ export const actionResultItemSchema = z.discriminatedUnion("kind", [
 ]);
 export type ActionResultItem = z.infer<typeof actionResultItemSchema>;
 export const actionRequestResultSchema = z.strictObject({
-  toolName: z.literal(ACTION_REQUEST_TOOL_NAME),
+  tool_name: z.literal(ACTION_REQUEST_TOOL_NAME),
   items: z.array(actionResultItemSchema),
 });
 export type ActionRequestResult = z.infer<typeof actionRequestResultSchema>;
@@ -306,21 +306,21 @@ export interface CustodyHandover {
   ): void;
 }
 export interface Registration extends VerifiedClient {
-  runtimeIdentity: string;
-  registeredAt: number;
+  runtime_identity: string;
+  registered_at: number;
 }
 export type WorkerBindingOf = (
   tx: Transaction,
   projectId: string,
   resourceIdentity: string,
 ) => {
-  bindingId: string;
+  binding_id: string;
   name: string;
-  projectName: string;
+  project_name: string;
   revision: number;
-  workerName: string;
-  instanceCount: number;
-  resourceBudget: { turns: number; wallTimeMs: number } | null;
+  worker_name: string;
+  instance_count: number;
+  resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: Array<WorkerEntry & { agent: string }>;
   tombstone: boolean;
 } | null;
@@ -338,27 +338,27 @@ export type WorkerBindingRowOf = (
   tx: Transaction,
   bindingId: string,
 ) => {
-  bindingId: string;
-  projectId: string;
-  resourceIdentity: string;
+  binding_id: string;
+  project_id: string;
+  resource_identity: string;
   tombstone: boolean;
   disabled: boolean;
-  workerName: string;
+  worker_name: string;
   entries: Array<WorkerEntry & { agent: string }>;
-  resourceBudget: { turns: number; wallTimeMs: number } | null;
+  resource_budget: { turns: number; wall_time_ms: number } | null;
 } | null;
 
 export type RepositoryPolicyOf = (
   tx: Transaction,
   bindingId: string,
 ) => {
-  bindingId: string;
+  binding_id: string;
   name: string;
   address: string;
-  sshCredential: string;
-  baseBranch: string;
-  projectPrompt: string | null;
-  workingLayer: WorkingLayer;
+  ssh_credential: string;
+  base_branch: string;
+  project_prompt: string | null;
+  working_layer: WorkingLayer;
 } | null;
 
 export type RepositoryBindingIdsOf = (
@@ -383,17 +383,17 @@ export const workerResourceIdentitySchema = z
   .regex(/^worker:kanthord:[a-z][a-z0-9-]{0,62}$/);
 export const instanceRecordSchema = z
   .strictObject({
-    runtimeIdentity: identitySchema("worker_instance"),
-    projectId: identitySchema("project"),
-    resourceIdentity: workerResourceIdentitySchema,
-    workerName: z.string().min(1),
+    runtime_identity: identitySchema("worker_instance"),
+    project_id: identitySchema("project"),
+    resource_identity: workerResourceIdentitySchema,
+    worker_name: z.string().min(1),
     host: z.enum(WorkerHost),
     placement: z.enum(InstancePlacement).optional(),
-    clientId: identitySchema("client_identity").optional(),
+    client_id: identitySchema("client_identity").optional(),
     name: z.string().min(1).max(64).optional(),
     activity: z.enum(InstanceActivity),
     draining: z.boolean(),
-    executionId: identitySchema("execution").optional(),
+    execution_id: identitySchema("execution").optional(),
     registered: z.boolean(),
   })
   .and(
@@ -412,12 +412,12 @@ export const instanceRecordSchema = z
     z.union([
       z.looseObject({
         registered: z.literal(true),
-        clientId: identitySchema("client_identity"),
+        client_id: identitySchema("client_identity"),
         name: z.string().min(1).max(64),
       }),
       z.looseObject({
         registered: z.literal(false),
-        clientId: z.never().optional(),
+        client_id: z.never().optional(),
         name: z.never().optional(),
       }),
     ]),
@@ -426,11 +426,11 @@ export const instanceRecordSchema = z
     z.union([
       z.looseObject({
         activity: z.literal(InstanceActivity.Executing),
-        executionId: identitySchema("execution"),
+        execution_id: identitySchema("execution"),
       }),
       z.looseObject({
         activity: z.enum([InstanceActivity.Idle, InstanceActivity.Pulling]),
-        executionId: z.never().optional(),
+        execution_id: z.never().optional(),
       }),
     ]),
   );
@@ -504,7 +504,7 @@ export interface WorkerRegistrations {
     transaction: Transaction,
     client: VerifiedClient,
     now: number,
-  ): Registration & { workerName: string };
+  ): Registration & { worker_name: string };
   findByClient(clientId: string): Registration | undefined;
   liveRegistrationOf(
     tx: Transaction,
@@ -513,7 +513,7 @@ export interface WorkerRegistrations {
   clientAttributionOf(
     tx: Transaction,
     runtimeIdentity: string,
-  ): { clientId: string; name: string } | null;
+  ): { client_id: string; name: string } | null;
   heartbeat(runtimeIdentity: string): void;
 }
 
@@ -542,8 +542,8 @@ export const WorkerErrorCode = {
 export const HostTool = { EvidenceUpload: "evidence-upload" } as const;
 export type HostTool = (typeof HostTool)[keyof typeof HostTool];
 export const uploadResultSchema = z.strictObject({
-  evidenceId: identitySchema("evidence"),
-  assetId: identitySchema("evidence_asset"),
+  evidence_id: identitySchema("evidence"),
+  asset_id: identitySchema("evidence_asset"),
   uri: z.string().startsWith("s3://"),
 });
 export type UploadResult = z.infer<typeof uploadResultSchema>;
@@ -596,11 +596,11 @@ export type ExecutionSetup = z.infer<typeof executionSetupSchema>;
 export const catalogItemSchema = z.strictObject({
   name: z.string().min(1),
   host: z.enum(WorkerHost),
-  declaredNodeStates: z.array(z.string()),
-  requiredNodeFormat: z.array(z.string()),
+  declared_node_states: z.array(z.string()),
+  required_node_format: z.array(z.string()),
 });
 const resourceBudgetSchema = z.strictObject({
-  wallTimeMs: z.number().int().positive(),
+  wall_time_ms: z.number().int().positive(),
   turns: z.number().int().positive().optional(),
 });
 export const workingLayerSchema = z.strictObject({
@@ -623,21 +623,21 @@ export type CredentialMetadataOf = (
   credentialName: string,
 ) => { platform: string; metadata: Record<string, unknown> | null } | null;
 export const executionSetupSchema = z.strictObject({
-  executionId: identitySchema("execution"),
-  workerName: z.string().min(1),
-  agentName: z.string().min(1),
-  effectiveConfiguration: effectiveConfigurationSchema,
-  credentialId: identitySchema("credential"),
+  execution_id: identitySchema("execution"),
+  worker_name: z.string().min(1),
+  agent_name: z.string().min(1),
+  effective_configuration: effectiveConfigurationSchema,
+  credential_id: identitySchema("credential"),
   metadata: z.record(z.string(), z.unknown()).nullable(),
-  resourceBudget: resourceBudgetSchema,
+  resource_budget: resourceBudgetSchema,
   repositories: z.array(
     z.strictObject({
-      bindingId: identitySchema("binding"),
+      binding_id: identitySchema("binding"),
       name: z.string(),
       address: z.string(),
-      sshIdentity: sshIdentitySchema,
-      strategy: z.strictObject({ baseBranch: z.string() }),
-      projectPrompt: z.string().nullable(),
+      ssh_identity: sshIdentitySchema,
+      strategy: z.strictObject({ base_branch: z.string() }),
+      project_prompt: z.string().nullable(),
       working_layer: workingLayerSchema,
     }),
   ),
@@ -647,19 +647,19 @@ export const catalogEntrySchema = z.discriminatedUnion("host", [
   catalogItemSchema.extend({
     host: z.literal(WorkerHost.Kanthord),
     method: z.enum(WorkerMethod),
-    agentName: z.string().min(1),
-    resourceBudget: resourceBudgetSchema,
+    agent_name: z.string().min(1),
+    resource_budget: resourceBudgetSchema,
   }),
   catalogItemSchema.extend({
     host: z.literal(WorkerHost.ExternalHarness),
     harness: z.string().min(1),
-    resourceBudget: resourceBudgetSchema,
+    resource_budget: resourceBudgetSchema,
   }),
 ]);
 
 const emptyFields = z.strictObject({});
 const runtimeIdentityParams = z.strictObject({
-  runtimeIdentity: identitySchema("worker_instance"),
+  runtime_identity: identitySchema("worker_instance"),
 });
 const humanOperation = {
   service: WORKER_SERVICE_NAME,
@@ -676,7 +676,7 @@ export const workerOperations = {
     lifetime: OperationLifetime.Unary,
     id: "worker.execution.setup.get",
     method: HttpMethod.Get,
-    path: "/api/worker/execution/:executionId/setup",
+    path: "/api/worker/execution/:execution_id/setup",
     access: AccessPolicy.Client,
     requiresExecution: true,
     timeoutMs: HANDOVER_TIMEOUT_MS,
@@ -684,7 +684,7 @@ export const workerOperations = {
     body: false,
     status: HttpStatus.OK,
     input: z.strictObject({
-      params: z.strictObject({ executionId: identitySchema("execution") }),
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
       query: emptyFields,
       body: z.null(),
     }),
@@ -698,14 +698,14 @@ export const workerOperations = {
     lifetime: OperationLifetime.Unary,
     id: "worker.action.request",
     method: HttpMethod.Post,
-    path: "/api/worker/execution/:executionId/action/request",
+    path: "/api/worker/execution/:execution_id/action/request",
     access: AccessPolicy.Client,
     requiresExecution: true,
     timeoutMs: ACTION_REQUEST_TIMEOUT_MS,
     mutation: true,
     status: HttpStatus.OK,
     input: z.strictObject({
-      params: z.strictObject({ executionId: identitySchema("execution") }),
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
       query: emptyFields,
       body: z.null(),
     }),
@@ -731,7 +731,7 @@ export const workerOperations = {
     input: z.strictObject({
       params: emptyFields,
       query: emptyFields,
-      body: z.strictObject({ executionId: identitySchema("execution") }),
+      body: z.strictObject({ execution_id: identitySchema("execution") }),
     }),
     output: handoverEnvelopeSchema,
     description:
@@ -755,7 +755,7 @@ export const workerOperations = {
       params: emptyFields,
       query: emptyFields,
       body: handoverEnvelopeSchema.extend({
-        executionId: identitySchema("execution"),
+        execution_id: identitySchema("execution"),
       }),
     }),
     output: z.null(),
@@ -772,10 +772,10 @@ export const workerOperations = {
       params: emptyFields,
       query: z
         .strictObject({
-          projectId: identitySchema("project").optional(),
-          resourceIdentity: workerResourceIdentitySchema
+          project_id: identitySchema("project").optional(),
+          resource_identity: workerResourceIdentitySchema
             .optional()
-            .describe("Requires projectId when supplied."),
+            .describe("Requires project_id when supplied."),
           limit: z.coerce
             .number()
             .int()
@@ -786,11 +786,11 @@ export const workerOperations = {
         })
         .refine(
           (query) =>
-            query.resourceIdentity === undefined ||
-            query.projectId !== undefined,
-          { message: "resourceIdentity requires projectId" },
+            query.resource_identity === undefined ||
+            query.project_id !== undefined,
+          { message: "resource_identity requires project_id" },
         )
-        .meta({ dependentRequired: { resourceIdentity: ["projectId"] } }),
+        .meta({ dependentRequired: { resource_identity: ["project_id"] } }),
       body: z.null(),
     }),
     output: z.strictObject({
@@ -804,7 +804,7 @@ export const workerOperations = {
     ...humanOperation,
     id: "worker.instance.get",
     method: HttpMethod.Get,
-    path: "/api/worker/instance/:runtimeIdentity",
+    path: "/api/worker/instance/:runtime_identity",
     mutation: false,
     input: z.strictObject({
       params: runtimeIdentityParams,
@@ -845,11 +845,11 @@ export const workerOperations = {
     ...humanOperation,
     id: "worker.catalog.get",
     method: HttpMethod.Get,
-    path: "/api/worker/catalog/:workerName",
+    path: "/api/worker/catalog/:worker_name",
     mutation: false,
     body: false,
     input: z.strictObject({
-      params: z.strictObject({ workerName: z.string().min(1) }),
+      params: z.strictObject({ worker_name: z.string().min(1) }),
       query: emptyFields,
       body: z.null(),
     }),
@@ -878,7 +878,7 @@ export const workerOperations = {
     lifetime: OperationLifetime.Unary,
     id: "worker.instance.deregister",
     method: HttpMethod.Delete,
-    path: "/api/worker/instance/:runtimeIdentity",
+    path: "/api/worker/instance/:runtime_identity",
     access: AccessPolicy.Client,
     requiresRegistration: false,
     timeoutMs: 30000,
@@ -899,7 +899,7 @@ export const workerOperations = {
     lifetime: OperationLifetime.Unary,
     id: "worker.instance.resume",
     method: HttpMethod.Post,
-    path: "/api/worker/instance/:runtimeIdentity/resume",
+    path: "/api/worker/instance/:runtime_identity/resume",
     access: AccessPolicy.Human,
     timeoutMs: 30000,
     mutation: true,
@@ -928,9 +928,9 @@ export const workerOperations = {
     status: HttpStatus.OK,
     input: emptyInput,
     output: z.strictObject({
-      runtimeIdentity: identitySchema("worker_instance"),
-      resourceIdentity: workerResourceIdentitySchema,
-      workerName: z.string().min(1),
+      runtime_identity: identitySchema("worker_instance"),
+      resource_identity: workerResourceIdentitySchema,
+      worker_name: z.string().min(1),
     }),
     description:
       "Register a worker instance with a bearer machine JWT and an empty body. A client identity with a live registration receives that runtime identity with any key. A recorded replay after the registration ends answers 409 gateway.registration.stale. Admission and the binding instance count share one transaction.",

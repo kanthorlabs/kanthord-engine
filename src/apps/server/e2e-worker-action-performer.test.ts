@@ -244,10 +244,9 @@ async function setup(t: TestContext) {
     .version;
   const token = await fixture.machineToken(project.id, "harness", "Harness");
   const W = { ...H, KANTHORD_TOKEN: token };
-  const { runtimeIdentity } = await read<{ runtimeIdentity: string }>(
-    ["worker", "register"],
-    W,
-  );
+  const { runtime_identity: runtimeIdentity } = await read<{
+    runtime_identity: string;
+  }>(["worker", "register"], W);
   const pull = async (nodeId: string, attempt: number) => {
     const result = await write<{ kind: string; execution: ExecutionRecord }>(
       ["scheduler", "work", "pull"],
@@ -262,7 +261,11 @@ async function setup(t: TestContext) {
   const client = httpClient(workerOperations, fixture.endpoint, token);
   const request = (execution: ExecutionRecord) =>
     client["action.request"](
-      { params: { executionId: execution.executionId }, query: {}, body: null },
+      {
+        params: { execution_id: execution.executionId },
+        query: {},
+        body: null,
+      },
       { idempotencyKey: ulid() },
     );
   const context = (execution: ExecutionRecord) => ({
@@ -376,7 +379,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   let gWork1: Evidence, gWork2: Evidence, request1: Evidence;
   const pr42 = {
     kind: PlatformAddressKind.PullRequest,
-    resourceIdentity: h.gated.resource_identity,
+    resource_identity: h.gated.resource_identity,
     number: 42,
   };
 
@@ -425,10 +428,10 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       message: "Bad credentials",
     });
     const result = completed(await h.request(e2));
-    assert.equal(result.toolName, ACTION_REQUEST_TOOL_NAME);
+    assert.equal(result.tool_name, ACTION_REQUEST_TOOL_NAME);
     assert.deepEqual(result.items[0], {
       kind: ActionResultKind.FailedBeforeEffect,
-      action: { key: GATED_KEY, bindingId: h.gated.id },
+      action: { key: GATED_KEY, binding_id: h.gated.id },
       refusal: {
         class: RefusalClass.FinalRefusal,
         code: "repository.platform.github.final_refusal",
@@ -584,7 +587,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     });
     const expected = {
       kind: ActionResultKind.Uncertain,
-      action: { key: PUSHED_KEY, bindingId: h.pushed.id },
+      action: { key: PUSHED_KEY, binding_id: h.pushed.id },
       uncertainty: Uncertainty.Effect,
     };
     assert.deepEqual(completed(await h.request(e6)).items, [expected]);

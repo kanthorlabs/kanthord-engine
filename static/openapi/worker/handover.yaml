@@ -63,14 +63,14 @@ components:
         body:
           type: object
           properties:
-            executionId:
+            execution_id:
               type: string
               minLength: 36
               maxLength: 36
               pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: execution_ followed by a canonical 26-character uppercase ULID.
           required:
-            - executionId
+            - execution_id
           additionalProperties: false
       required:
         - params

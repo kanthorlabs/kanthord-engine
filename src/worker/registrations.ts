@@ -37,24 +37,25 @@ export function resumeRegistration(
       WorkerErrorCode.InstanceNotFound,
       "Instance not found.",
     );
-  if (row.endedAt === null) return false;
+  if (row.ended_at === null) return false;
   if (!schedulerClaims.runningExecutionOfRuntime(tx, runtimeIdentity, now))
     throw new OperationError(
       HttpStatus.Conflict,
       WorkerErrorCode.NoLiveExecution,
       "Instance has no running execution.",
     );
-  if (readLiveOfClient(tx, row.clientId))
+  if (readLiveOfClient(tx, row.client_id))
     throw new OperationError(
       HttpStatus.Conflict,
       WorkerErrorCode.ClientLive,
       "Client already holds a live registration.",
     );
-  const binding = workerBindingOf(tx, row.projectId, row.resourceIdentity);
+  const binding = workerBindingOf(tx, row.project_id, row.resource_identity);
   if (
     !binding ||
     binding.tombstone ||
-    countLive(tx, row.projectId, row.resourceIdentity) >= binding.instanceCount
+    countLive(tx, row.project_id, row.resource_identity) >=
+      binding.instance_count
   )
     throw new OperationError(
       HttpStatus.Conflict,
@@ -102,36 +103,36 @@ export class TableRegistrations implements WorkerRegistrations {
     assert.ok(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
     const row = readRow(tx, runtimeIdentity);
-    return row?.endedAt === null ? row : null;
+    return row?.ended_at === null ? row : null;
   }
   clientAttributionOf(
     tx: Transaction,
     runtimeIdentity: string,
-  ): { clientId: string; name: string } | null {
+  ): { client_id: string; name: string } | null {
     assert.ok(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
     const row = readRow(tx, runtimeIdentity);
-    return row ? { clientId: row.clientId, name: row.name } : null;
+    return row ? { client_id: row.client_id, name: row.name } : null;
   }
   register(
     tx: Transaction,
     client: VerifiedClient,
     now: number,
-  ): Registration & { workerName: string } {
+  ): Registration & { worker_name: string } {
     assert.ok(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
-    const previous = readLiveOfClient(tx, client.clientId);
+    const previous = readLiveOfClient(tx, client.client_id);
     const binding = this.workerBindingOf(
       tx,
-      client.projectId,
-      client.resourceIdentity,
+      client.project_id,
+      client.resource_identity,
     );
     if (
       !binding ||
       binding.tombstone ||
       (!previous &&
-        countLive(tx, client.projectId, client.resourceIdentity) >=
-          binding.instanceCount)
+        countLive(tx, client.project_id, client.resource_identity) >=
+          binding.instance_count)
     )
       throw new OperationError(
         HttpStatus.Conflict,
@@ -140,7 +141,7 @@ export class TableRegistrations implements WorkerRegistrations {
       );
     return {
       ...(previous ?? insertRegistration(tx, client, now)),
-      workerName: binding.workerName,
+      worker_name: binding.worker_name,
     };
   }
 }

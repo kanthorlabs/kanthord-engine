@@ -93,7 +93,7 @@ test("the Intake action fake reads failed keys back and never redispatches a ret
   };
   const address = {
     kind: "pull_request",
-    resourceIdentity: "repository:github:owner/repo",
+    resource_identity: "repository:github:owner/repo",
     number: 42,
   } as const;
   fake.performAnswers.push(failure);
@@ -131,7 +131,7 @@ test("scripted Intake check retains calls and isolates returned arrays", async (
     },
     address: {
       kind: "pull_request",
-      resourceIdentity: "repository:github:owner/repo",
+      resource_identity: "repository:github:owner/repo",
       number: 42,
     },
   } as const;

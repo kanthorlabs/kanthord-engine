@@ -56,7 +56,7 @@ export function requestEvidence(
       : PlatformAddressKind.BranchPush;
   if (
     body.address.kind !== kind ||
-    body.address.resourceIdentity !== binding.resourceIdentity
+    body.address.resource_identity !== binding.resourceIdentity
   )
     throw new OperationError(
       HttpStatus.BadRequest,

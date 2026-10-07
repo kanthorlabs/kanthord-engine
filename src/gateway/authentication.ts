@@ -69,9 +69,9 @@ export class Authentication {
     const registration = this.machines!.worker.findByClient(clientId);
     if (
       registration &&
-      (registration.clientId !== clientId ||
-        registration.resourceIdentity !== resolved.resource_identity ||
-        registration.projectId !== resolved.project_id)
+      (registration.client_id !== clientId ||
+        registration.resource_identity !== resolved.resource_identity ||
+        registration.project_id !== resolved.project_id)
     )
       throw unauthorized();
     return mintMachineIdentity(
@@ -83,7 +83,7 @@ export class Authentication {
         issuedAt,
       },
       jti,
-      registration?.runtimeIdentity,
+      registration?.runtime_identity,
     );
   }
 

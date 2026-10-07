@@ -51,7 +51,7 @@ test("repository identity and candidate repository must match", () => {
     attempt: 1,
     address: {
       kind: PlatformAddressKind.PullRequest,
-      resourceIdentity: RESOURCE,
+      resource_identity: RESOURCE,
       number: 42,
     },
   };

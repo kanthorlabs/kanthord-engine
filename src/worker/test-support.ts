@@ -35,7 +35,7 @@ export function scriptedModelRuntime(
     runtime.registerNativeProvider(provider.provider);
     return {
       runtime,
-      model: resolveModel(runtime, input.setup.effectiveConfiguration),
+      model: resolveModel(runtime, input.setup.effective_configuration),
     };
   };
 }
@@ -53,11 +53,11 @@ export function anthropicSetup(
   overrides: Partial<ExecutionSetup> = {},
 ): ExecutionSetup {
   const setup: ExecutionSetup = {
-    executionId: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    workerName: "general@1",
-    agentName: "swe@1",
-    credentialId: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    effectiveConfiguration: {
+    execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    worker_name: "general@1",
+    agent_name: "swe@1",
+    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    effective_configuration: {
       agent_provider: "default",
       provider: "anthropic",
       credential: "anthro-1",
@@ -65,12 +65,12 @@ export function anthropicSetup(
       reasoning_effort: "off",
     },
     metadata: null,
-    resourceBudget: { turns: 200, wallTimeMs: 7200000 },
+    resource_budget: { turns: 200, wall_time_ms: 7200000 },
     repositories: [],
     prompt: { final: SETUP_PROMPT },
     ...overrides,
   };
-  assert.ok(setup.credentialId);
-  assert.ok(setup.executionId);
+  assert.ok(setup.credential_id);
+  assert.ok(setup.execution_id);
   return setup;
 }

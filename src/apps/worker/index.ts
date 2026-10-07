@@ -191,7 +191,7 @@ export class Worker implements Service {
         if (this.registration) {
           const failure = await deregister(
             this.api!,
-            this.registration.runtimeIdentity,
+            this.registration.runtime_identity,
           );
           if (failure) throw failure;
           this.registration = undefined;

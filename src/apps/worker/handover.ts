@@ -65,7 +65,11 @@ export async function takeHandover(input: {
       await retryIndeterminate(
         (key) =>
           api.worker.handover(
-            { params: {}, query: {}, body: { executionId: claim.executionId } },
+            {
+              params: {},
+              query: {},
+              body: { execution_id: claim.executionId },
+            },
             { context, idempotencyKey: key },
           ),
         claim.expiredAt,
@@ -85,7 +89,7 @@ export async function takeHandover(input: {
               {
                 params: {},
                 query: {},
-                body: { executionId: claim.executionId, ...sealed },
+                body: { execution_id: claim.executionId, ...sealed },
               },
               { context, idempotencyKey: key },
             ),

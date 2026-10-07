@@ -54,7 +54,7 @@ export async function hostExecution(
         () =>
           input.api.worker["execution.setup.get"](
             {
-              params: { executionId: input.claim.executionId },
+              params: { execution_id: input.claim.executionId },
               query: {},
               body: null,
             },

@@ -293,7 +293,7 @@ async function setup(t: TestContext) {
   const general = machine(directory, projectId, "general-a", human);
   const spare = machine(directory, projectId, "general-b", human);
   const env = { ...human, KANTHORD_TOKEN: general.token };
-  const registration = await c.read<{ runtimeIdentity: string }>(
+  const registration = await c.read<{ runtime_identity: string }>(
     ["worker", "register"],
     env,
   );
@@ -302,7 +302,7 @@ async function setup(t: TestContext) {
       ["scheduler", "work", "pull"],
       {
         resourceIdentity: "worker:kanthord:general",
-        runtimeIdentity: registration.runtimeIdentity,
+        runtimeIdentity: registration.runtime_identity,
       },
       env,
     );
@@ -323,16 +323,20 @@ async function setup(t: TestContext) {
   const client = httpClient(workerOperations, fixture.endpoint, general.token);
   const handover = (executionId: string, key = ulid()) =>
     client.handover(
-      { params: {}, query: {}, body: { executionId } },
+      { params: {}, query: {}, body: { execution_id: executionId } },
       { idempotencyKey: key },
     );
   const report = (executionId: string, envelope: HandoverEnvelope) =>
     client.credential(
-      { params: {}, query: {}, body: { executionId, ...envelope } },
+      {
+        params: {},
+        query: {},
+        body: { execution_id: executionId, ...envelope },
+      },
       { idempotencyKey: ulid() },
     );
   const aad = (executionId: string) =>
-    handoverAad(executionId, registration.runtimeIdentity);
+    handoverAad(executionId, registration.runtime_identity);
   const open = (executionId: string, envelope: HandoverEnvelope) =>
     handoverPayloadSchema.parse(
       openEnvelope(keys.handover, aad(executionId), envelope),

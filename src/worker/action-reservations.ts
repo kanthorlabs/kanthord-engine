@@ -96,7 +96,13 @@ export class DispatchReservations {
     assert.ok(Number.isSafeInteger(attempt) && attempt >= FIRST_ATTEMPT);
     for (const entry of actions) {
       if (entry.resolution === ActionResolution.Unrequested) continue;
-      this.entries.delete(keyOf({ nodeId, attempt, action: entry.action }));
+      this.entries.delete(
+        keyOf({
+          nodeId,
+          attempt,
+          action: { key: entry.action.key, binding_id: entry.action.bindingId },
+        }),
+      );
     }
   }
 }

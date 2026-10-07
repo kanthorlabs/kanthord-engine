@@ -81,7 +81,7 @@ async function handover(executionId: string, command: Command): Promise<void> {
   requireToken(token, "cli.worker.handover.token_required");
   const key = resolveKey(options);
   const result = await httpClient(workerOperations, endpoint, token).handover(
-    { params: {}, query: {}, body: { executionId } },
+    { params: {}, query: {}, body: { execution_id: executionId } },
     { idempotencyKey: key },
   );
   if (result.type === OperationResultType.Indeterminate)
@@ -165,7 +165,7 @@ async function deregister(
   const result = await httpClient(workerOperations, endpoint, token)[
     "instance.deregister"
   ](
-    { params: { runtimeIdentity }, query: {}, body: null },
+    { params: { runtime_identity: runtimeIdentity }, query: {}, body: null },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -185,7 +185,7 @@ async function catalogGet(workerName: string, command: Command): Promise<void> {
   requireToken(token, "cli.worker.get.token_required");
   const result = await httpClient(workerOperations, endpoint, token)[
     "catalog.get"
-  ]({ params: { workerName }, query: {}, body: null });
+  ]({ params: { worker_name: workerName }, query: {}, body: null });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, "cli.worker.get.indeterminate"))}\n`,
   );
@@ -209,7 +209,7 @@ async function resume(
   const result = await httpClient(workerOperations, endpoint, token)[
     "instance.resume"
   ](
-    { params: { runtimeIdentity }, query: {}, body: null },
+    { params: { runtime_identity: runtimeIdentity }, query: {}, body: null },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -256,8 +256,8 @@ function instanceListQuery(options: Record<string, string | undefined>) {
       `limit must be at most ${LIST_LIMIT_MAX}`,
     );
   return {
-    projectId: options.project,
-    resourceIdentity:
+    project_id: options.project,
+    resource_identity:
       options.binding === undefined
         ? undefined
         : workerResourceIdentity(options.binding),
@@ -296,7 +296,7 @@ async function instanceGet(
   requireToken(token, "cli.worker.instance.get.token_required");
   const result = await httpClient(workerOperations, endpoint, token)[
     "instance.get"
-  ]({ params: { runtimeIdentity }, query: {}, body: null });
+  ]({ params: { runtime_identity: runtimeIdentity }, query: {}, body: null });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, "cli.worker.instance.get.indeterminate"))}\n`,
   );

@@ -17,15 +17,15 @@ export interface WorkerDeclaration {
   name: string;
   host: WorkerHost;
   method?: WorkerMethod;
-  agentName?: string;
+  agent_name?: string;
   harness?: string;
-  resourceBudget: { turns?: number; wallTimeMs: number };
-  declaredNodeStates: readonly string[];
-  requiredNodeFormat: readonly string[];
+  resource_budget: { turns?: number; wall_time_ms: number };
+  declared_node_states: readonly string[];
+  required_node_format: readonly string[];
 }
 
-const NATIVE_RESOURCE_BUDGET = { turns: 200, wallTimeMs: 7200000 };
-const EXTERNAL_RESOURCE_BUDGET = { wallTimeMs: 7200000 };
+const NATIVE_RESOURCE_BUDGET = { turns: 200, wall_time_ms: 7200000 };
+const EXTERNAL_RESOURCE_BUDGET = { wall_time_ms: 7200000 };
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -36,35 +36,35 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     name: "general@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Steps,
-    agentName: "swe@1",
-    resourceBudget: NATIVE_RESOURCE_BUDGET,
-    declaredNodeStates: ["Available"],
-    requiredNodeFormat: REQUIRED_NODE_FORMAT,
+    agent_name: "swe@1",
+    resource_budget: NATIVE_RESOURCE_BUDGET,
+    declared_node_states: ["Available"],
+    required_node_format: REQUIRED_NODE_FORMAT,
   },
   "reviewer@1": {
     name: "reviewer@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Evaluation,
-    agentName: "re@1",
-    resourceBudget: NATIVE_RESOURCE_BUDGET,
-    declaredNodeStates: ["Waiting", "External.Requested"],
-    requiredNodeFormat: REQUIRED_NODE_FORMAT,
+    agent_name: "re@1",
+    resource_budget: NATIVE_RESOURCE_BUDGET,
+    declared_node_states: ["Waiting", "External.Requested"],
+    required_node_format: REQUIRED_NODE_FORMAT,
   },
   "claude@1": {
     name: "claude@1",
     host: WorkerHost.ExternalHarness,
     harness: "claude-code",
-    resourceBudget: EXTERNAL_RESOURCE_BUDGET,
-    declaredNodeStates: ["Available", "Waiting", "External.Requested"],
-    requiredNodeFormat: REQUIRED_NODE_FORMAT,
+    resource_budget: EXTERNAL_RESOURCE_BUDGET,
+    declared_node_states: ["Available", "Waiting", "External.Requested"],
+    required_node_format: REQUIRED_NODE_FORMAT,
   },
   "opencode@1": {
     name: "opencode@1",
     host: WorkerHost.ExternalHarness,
     harness: "opencode",
-    resourceBudget: EXTERNAL_RESOURCE_BUDGET,
-    declaredNodeStates: ["Available", "Waiting", "External.Requested"],
-    requiredNodeFormat: REQUIRED_NODE_FORMAT,
+    resource_budget: EXTERNAL_RESOURCE_BUDGET,
+    declared_node_states: ["Available", "Waiting", "External.Requested"],
+    required_node_format: REQUIRED_NODE_FORMAT,
   },
 };
 
@@ -77,9 +77,9 @@ export function getWorkerDeclaration(
 
 export function agentsOfWorker(workerName: string): string[] {
   const declaration = getWorkerDeclaration(workerName);
-  if (declaration?.host !== WorkerHost.Kanthord || !declaration.agentName)
+  if (declaration?.host !== WorkerHost.Kanthord || !declaration.agent_name)
     return [];
-  return [declaration.agentName];
+  return [declaration.agent_name];
 }
 
 export function listWorkerDeclarations(limit: number, cursor: string | null) {
@@ -90,13 +90,13 @@ export function listWorkerDeclarations(limit: number, cursor: string | null) {
     .sort()
     .filter((name) => after === null || name > after);
   const items = names.slice(FIRST_ITEM, limit).map((name) => {
-    const { host, declaredNodeStates, requiredNodeFormat } =
+    const { host, declared_node_states, required_node_format } =
       WORKER_CATALOG[name]!;
     return {
       name,
       host,
-      declaredNodeStates: [...declaredNodeStates],
-      requiredNodeFormat: [...requiredNodeFormat],
+      declared_node_states: [...declared_node_states],
+      required_node_format: [...required_node_format],
     };
   });
   const nextCursor =

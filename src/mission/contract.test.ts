@@ -97,7 +97,7 @@ test("execution and evidence control inputs are strict and refuse forged actors"
         subject: REASON,
         address: {
           kind: "pull_request",
-          resourceIdentity: "repository:github:owner/repo",
+          resource_identity: "repository:github:owner/repo",
           number: 42,
         },
       },

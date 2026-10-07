@@ -161,7 +161,7 @@ async function fixture(t: TestContext) {
       subject: "PR",
       address: {
         kind: PlatformAddressKind.PullRequest,
-        resourceIdentity: RESOURCE,
+        resource_identity: RESOURCE,
         number: PULL_REQUEST_NUMBER,
       },
     },

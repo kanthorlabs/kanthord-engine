@@ -262,7 +262,7 @@ test(
     async function claim(binding: string) {
       const auth = machine(binding);
       const env = { ...human, KANTHORD_TOKEN: auth.token };
-      const registration = await read<{ runtimeIdentity: string }>(
+      const registration = await read<{ runtime_identity: string }>(
         ["worker", "register"],
         env,
       );
@@ -270,14 +270,14 @@ test(
         ["scheduler", "work", "pull"],
         {
           resourceIdentity: `worker:kanthord:${binding}`,
-          runtimeIdentity: registration.runtimeIdentity,
+          runtimeIdentity: registration.runtime_identity,
         },
         env,
       );
       assert.equal(result.kind, WorkPullKind.Claimed);
       return {
         ...auth,
-        ...registration,
+        runtimeIdentity: registration.runtime_identity,
         execution: result.execution,
         client: httpClient(workerOperations, f.endpoint, auth.token),
       };
@@ -310,7 +310,7 @@ test(
         await holder.client.handover({
           params: {},
           query: {},
-          body: { executionId: holder.execution.executionId },
+          body: { execution_id: holder.execution.executionId },
         }),
       );
       const keys = deriveHandoverKeys(holder.client_secret);
@@ -329,7 +329,7 @@ test(
       t.after(() => credentials.discard());
       const setup = completed(
         await holder.client["execution.setup.get"]({
-          params: { executionId: holder.execution.executionId },
+          params: { execution_id: holder.execution.executionId },
           query: {},
           body: null,
         }),
@@ -409,23 +409,23 @@ test(
     });
     const repository = runtimeX.setup.repositories[0]!;
     await t.test("E07.3 execution setup and foreign proof", async () => {
-      assert.deepEqual(runtimeX.setup.effectiveConfiguration, {
+      assert.deepEqual(runtimeX.setup.effective_configuration, {
         ...DEFAULTS,
         provider: "anthropic",
         credential: "anthro-1",
       });
       assert.equal(runtimeX.setup.metadata, null);
-      assert.deepEqual(runtimeX.setup.resourceBudget, {
+      assert.deepEqual(runtimeX.setup.resource_budget, {
         turns: 200,
-        wallTimeMs: 7200000,
+        wall_time_ms: 7200000,
       });
       assert.deepEqual(repository, {
-        bindingId: repository.bindingId,
+        binding_id: repository.binding_id,
         name: "repo",
         address: ADDRESS,
-        sshIdentity: FAKE_SSH_CREDENTIAL_BODY.metadata,
-        strategy: { baseBranch: "main" },
-        projectPrompt: PROJECT,
+        ssh_identity: FAKE_SSH_CREDENTIAL_BODY.metadata,
+        strategy: { base_branch: "main" },
+        project_prompt: PROJECT,
         working_layer: WORKING_LAYER_ALL_ON,
       });
       assert.ok(
@@ -433,9 +433,9 @@ test(
       );
       assert.ok(runtimeX.setup.prompt.final.includes(SWE_AGENT_PROMPT));
       assert.ok(!runtimeX.setup.prompt.final.includes(PROJECT));
-      assert.equal(runtimeX.setup.credentialId, runtimeX.item.credential_id);
+      assert.equal(runtimeX.setup.credential_id, runtimeX.item.credential_id);
       const refused = await x.client["execution.setup.get"]({
-        params: { executionId: y.execution.executionId },
+        params: { execution_id: y.execution.executionId },
         query: {},
         body: null,
       });
@@ -453,7 +453,7 @@ test(
     await t.test("E07.4 private node workspace", async () => {
       assert.equal(
         prepared.directory,
-        join(state, "workspaces", x.execution.nodeId, repository.bindingId),
+        join(state, "workspaces", x.execution.nodeId, repository.binding_id),
       );
       assert.equal(statSync(prepared.directory).mode & 0o777, PRIVATE_MODE);
       assert.equal(prepared.head, main);
@@ -557,7 +557,7 @@ test(
         commands,
         testedInput: {
           kind: "repository",
-          bindingId: repository.bindingId,
+          bindingId: repository.binding_id,
           commit: head,
         },
         deadline: agent.budget.wallDeadline(),
@@ -605,9 +605,9 @@ test(
       );
     });
     await t.test("E07.8 lab budget stops after one turn", async () => {
-      assert.deepEqual(runtimeY.setup.resourceBudget, {
+      assert.deepEqual(runtimeY.setup.resource_budget, {
         turns: SINGLE_TURN,
-        wallTimeMs: 600000,
+        wall_time_ms: 600000,
       });
       const lab = await root.prepareObjective({
         objectiveId: y.execution.nodeId,

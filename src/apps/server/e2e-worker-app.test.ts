@@ -475,20 +475,20 @@ test(
           entry.includes(READY) && (!previous || !entry.includes(previous)),
       );
       const record = JSON.parse(line);
-      assert.match(record.runtimeIdentity, /^worker_instance_/);
-      assert.equal(record.resourceIdentity, GENERAL_RESOURCE);
-      assert.equal(record.workerName, GENERAL_WORKER);
-      return record.runtimeIdentity as string;
+      assert.match(record.runtime_identity, /^worker_instance_/);
+      assert.equal(record.resource_identity, GENERAL_RESOURCE);
+      assert.equal(record.worker_name, GENERAL_WORKER);
+      return record.runtime_identity as string;
     };
     const first = spawnWorker(WORKER_ARGS, env);
     try {
       const identity = await ready(first);
       const list = await setup.read<{
-        items: { runtimeIdentity: string; registered: boolean }[];
+        items: { runtime_identity: string; registered: boolean }[];
       }>(["worker", "instance", "list", "--project", setup.projectId]);
       assert.ok(
         list.items.some(
-          (item) => item.runtimeIdentity === identity && item.registered,
+          (item) => item.runtime_identity === identity && item.registered,
         ),
       );
       first.kill("SIGTERM");

@@ -199,7 +199,11 @@ test("upload submits metadata then transfers bytes then completes without exposi
     api,
     context: background,
   };
-  assert.deepEqual(await uploadEvidence(input), result);
+  assert.deepEqual(await uploadEvidence(input), {
+    evidence_id: result.evidenceId,
+    asset_id: result.assetId,
+    uri: result.uri,
+  });
   assert.deepEqual(events, ["submit", "PUT", "complete"]);
   status = 500;
   await assert.rejects(uploadEvidence(input), (error: unknown) => {

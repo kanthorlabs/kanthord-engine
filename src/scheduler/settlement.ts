@@ -80,7 +80,7 @@ export function executionAttribution(
   );
   assert.ok(binding, "an execution retains its worker binding group");
   return {
-    clientId: attribution?.clientId ?? null,
+    clientId: attribution?.client_id ?? null,
     name: attribution?.name ?? null,
     workerName: binding.workerName,
   };

@@ -50,7 +50,7 @@ test("published native setup is an execution-scoped bodyless read", () => {
   assert.equal(fragment.pathItem.get.requestBody, undefined);
   assert.equal(operation.requiresExecution, true);
   const index = parse(readFileSync(openapiPath(), "utf8"));
-  assert.ok(index.paths["/api/worker/execution/{executionId}/setup"]);
+  assert.ok(index.paths["/api/worker/execution/{execution_id}/setup"]);
 });
 
 test("published action performer preserves its route and discriminated result classes", () => {
@@ -89,7 +89,7 @@ test("published handover operations preserve execution proof and bodyless report
     assert(workerOperations[name].requiresExecution);
     assert(
       fragment.components.schemas[`worker.${name}.Input`].properties.body
-        .properties.executionId,
+        .properties.execution_id,
     );
     if (name === reportName)
       assert.equal(
@@ -392,10 +392,10 @@ function assertInstanceOutput(schema: ResolvedSchema): void {
   const [base, host, registration, activity] = schema.allOf;
   assert.equal(base?.additionalProperties, false);
   assert.deepEqual(base?.required, [
-    "runtimeIdentity",
-    "projectId",
-    "resourceIdentity",
-    "workerName",
+    "runtime_identity",
+    "project_id",
+    "resource_identity",
+    "worker_name",
     "host",
     "activity",
     "draining",
@@ -410,17 +410,20 @@ function assertInstanceOutput(schema: ResolvedSchema): void {
   );
   assert.deepEqual(
     registration?.anyOf?.map((variant) => variant.required),
-    [["registered", "clientId", "name"], ["registered"]],
+    [["registered", "client_id", "name"], ["registered"]],
   );
   assert.deepEqual(
     activity?.anyOf?.map((variant) => variant.required),
-    [["activity", "executionId"], ["activity"]],
+    [["activity", "execution_id"], ["activity"]],
   );
   const second = 1;
   assert.deepEqual(host?.anyOf?.[second]?.properties.placement?.not, {});
-  assert.deepEqual(registration?.anyOf?.[second]?.properties.clientId?.not, {});
+  assert.deepEqual(
+    registration?.anyOf?.[second]?.properties.client_id?.not,
+    {},
+  );
   assert.deepEqual(registration?.anyOf?.[second]?.properties.name?.not, {});
-  assert.deepEqual(activity?.anyOf?.[second]?.properties.executionId?.not, {});
+  assert.deepEqual(activity?.anyOf?.[second]?.properties.execution_id?.not, {});
 }
 
 test("published Worker lists preserve optional limits, filter dependency and conditional records", async () => {
@@ -486,16 +489,16 @@ test("published Worker lists preserve optional limits, filter dependency and con
     fragment.components.schemas["worker.instance.list.Input"]!.properties
       .query!;
   assert.deepEqual(query.dependentRequired, {
-    resourceIdentity: ["projectId"],
+    resource_identity: ["project_id"],
   });
   assert.match(
-    query.properties.resourceIdentity!.description!,
-    /Requires projectId/,
+    query.properties.resource_identity!.description!,
+    /Requires project_id/,
   );
   const list = api.paths?.["/api/worker/instance"]?.get?.responses[
     HttpStatus.OK
   ] as unknown as ResolvedJsonResponse;
-  const get = api.paths?.["/api/worker/instance/{runtimeIdentity}"]?.get
+  const get = api.paths?.["/api/worker/instance/{runtime_identity}"]?.get
     ?.responses[HttpStatus.OK] as unknown as ResolvedJsonResponse;
   assertInstanceOutput(
     list.content["application/json"].schema.properties.items!.items!,
@@ -998,17 +1001,17 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     workerOperations["instance.list"].id,
   );
   assert.equal(
-    resolved.paths?.["/api/worker/instance/{runtimeIdentity}"]?.get
+    resolved.paths?.["/api/worker/instance/{runtime_identity}"]?.get
       ?.operationId,
     workerOperations["instance.get"].id,
   );
   assert.equal(
-    resolved.paths?.["/api/worker/instance/{runtimeIdentity}/resume"]?.post
+    resolved.paths?.["/api/worker/instance/{runtime_identity}/resume"]?.post
       ?.operationId,
     workerOperations["instance.resume"].id,
   );
   assert.equal(
-    resolved.paths?.["/api/worker/instance/{runtimeIdentity}"]?.delete
+    resolved.paths?.["/api/worker/instance/{runtime_identity}"]?.delete
       ?.operationId,
     workerOperations["instance.deregister"].id,
   );
@@ -1019,7 +1022,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   ]) {
     const published = resolved.paths?.[
       operation.path
-        .replace(":workerName", "{workerName}")
+        .replace(":worker_name", "{worker_name}")
         .replace(":agent_name", "{agent_name}")
     ]?.get as ResolvedOperation | undefined;
     assert.equal(published?.operationId, operation.id);
@@ -1353,12 +1356,12 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     ?.responses["200"] as unknown as {
     content: {
       "application/json": {
-        schema: { properties: { runtimeIdentity: { type: string } } };
+        schema: { properties: { runtime_identity: { type: string } } };
       };
     };
   };
   assert.equal(
-    authResponse.content["application/json"].schema.properties.runtimeIdentity
+    authResponse.content["application/json"].schema.properties.runtime_identity
       .type,
     STRING_SCHEMA_TYPE,
   );
@@ -1366,7 +1369,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     Object.keys(
       authResponse.content["application/json"].schema.properties,
     ).sort(),
-    ["resourceIdentity", "runtimeIdentity", "workerName"],
+    ["resource_identity", "runtime_identity", "worker_name"],
   );
   assert.equal(
     "requestBody" in resolved.paths!["/api/worker/register"]!.post!,

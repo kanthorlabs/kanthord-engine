@@ -294,7 +294,7 @@ test("evidence projects every address kind without exposing inline data or stora
       }),
       asset(AssetKind.Platform, {
         kind: RepositoryAction.PullRequest,
-        resourceIdentity: "repository:github:owner/repo",
+        resource_identity: "repository:github:owner/repo",
         number: FIRST_ATTEMPT,
       }),
     ]);

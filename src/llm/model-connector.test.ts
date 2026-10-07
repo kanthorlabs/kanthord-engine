@@ -27,8 +27,8 @@ async function createModelRuntime(input: {
   return connectorRuntime(await loadPi(), {
     credentials: input.credentials,
     handoverItem: input.handoverItem,
-    credentialId: input.setup.credentialId,
-    configuration: input.setup.effectiveConfiguration,
+    credentialId: input.setup.credential_id,
+    configuration: input.setup.effective_configuration,
     metadata: input.setup.metadata,
     signal: input.signal,
   });
@@ -38,15 +38,15 @@ function resolveModel(
   runtime: Awaited<ReturnType<typeof createModelRuntime>>,
   setup: ExecutionSetup,
 ) {
-  return connectorModel(runtime, setup.effectiveConfiguration);
+  return connectorModel(runtime, setup.effective_configuration);
 }
 
 const setup: ExecutionSetup = {
-  executionId: "execution",
-  workerName: "general@1",
-  agentName: "swe@1",
-  credentialId: "credential",
-  effectiveConfiguration: {
+  execution_id: "execution",
+  worker_name: "general@1",
+  agent_name: "swe@1",
+  credential_id: "credential",
+  effective_configuration: {
     agent_provider: "default",
     provider: "anthropic",
     credential: "anthro-1",
@@ -54,12 +54,12 @@ const setup: ExecutionSetup = {
     reasoning_effort: "off",
   },
   metadata: null,
-  resourceBudget: { turns: 200, wallTimeMs: 7200000 },
+  resource_budget: { turns: 200, wall_time_ms: 7200000 },
   repositories: [],
   prompt: { final: "setup prompt" },
 };
 const handoverItem = {
-  credential_id: setup.credentialId,
+  credential_id: setup.credential_id,
   provider_id: "anthropic",
 };
 
@@ -87,7 +87,7 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
   const runtime = await createModelRuntime(input);
   assert.equal(
     resolveModel(runtime, setup).id,
-    setup.effectiveConfiguration.model_identifier,
+    setup.effective_configuration.model_identifier,
   );
   assert.ok(
     JSON.stringify(await runtime.getAuth("anthropic")).includes(
@@ -110,7 +110,10 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
       () =>
         resolveModel(runtime, {
           ...setup,
-          effectiveConfiguration: { ...setup.effectiveConfiguration, ...patch },
+          effective_configuration: {
+            ...setup.effective_configuration,
+            ...patch,
+          },
         }),
       { code: WorkerErrorCode.RuntimeSetupRefused, details: { reason } },
     );
@@ -137,8 +140,8 @@ test("compatible models retain metadata and exact supported reasoning levels", a
   });
   const compatible: ExecutionSetup = {
     ...setup,
-    effectiveConfiguration: {
-      ...setup.effectiveConfiguration,
+    effective_configuration: {
+      ...setup.effective_configuration,
       provider: "openai-compatible",
       model_identifier: "basic",
     },
@@ -194,8 +197,8 @@ test("openrouter runs with the built-in pi provider and its credential", async (
   });
   const openrouter: ExecutionSetup = {
     ...setup,
-    effectiveConfiguration: {
-      ...setup.effectiveConfiguration,
+    effective_configuration: {
+      ...setup.effective_configuration,
       provider: "openrouter",
       model_identifier: "anthropic/claude-3-haiku",
     },
@@ -222,8 +225,8 @@ test("openrouter runs with the built-in pi provider and its credential", async (
     () =>
       resolveModel(runtime, {
         ...openrouter,
-        effectiveConfiguration: {
-          ...openrouter.effectiveConfiguration,
+        effective_configuration: {
+          ...openrouter.effective_configuration,
           model_identifier: "unknown",
         },
       }),
@@ -240,8 +243,8 @@ test("openai-codex resolves a built-in model against its OAuth credential", asyn
   });
   const codex: ExecutionSetup = {
     ...setup,
-    effectiveConfiguration: {
-      ...setup.effectiveConfiguration,
+    effective_configuration: {
+      ...setup.effective_configuration,
       provider: "openai-codex",
       model_identifier: "gpt-5.5",
     },
@@ -279,8 +282,8 @@ test("groq runs with the built-in pi provider and no metadata", async (t) => {
   });
   const groq: ExecutionSetup = {
     ...setup,
-    effectiveConfiguration: {
-      ...setup.effectiveConfiguration,
+    effective_configuration: {
+      ...setup.effective_configuration,
       provider: "groq",
       model_identifier: "llama-3.1-8b-instant",
     },
@@ -298,7 +301,7 @@ test("groq runs with the built-in pi provider and no metadata", async (t) => {
   });
   assert.equal(resolveModel(runtime, groq).provider, GROQ);
   assert.deepEqual(
-    metadataEnv(groq.effectiveConfiguration.provider, groq.metadata),
+    metadataEnv(groq.effective_configuration.provider, groq.metadata),
     {},
   );
 });
@@ -309,8 +312,8 @@ test("amazon-bedrock receives its metadata region as the credential env", async 
   });
   const bedrock: ExecutionSetup = {
     ...setup,
-    effectiveConfiguration: {
-      ...setup.effectiveConfiguration,
+    effective_configuration: {
+      ...setup.effective_configuration,
       provider: "amazon-bedrock",
       model_identifier: "amazon.nova-2-lite-v1:0",
     },

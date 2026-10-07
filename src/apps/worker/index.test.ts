@@ -25,16 +25,16 @@ import { testClaim } from "./test-support.ts";
 
 const STARTED_MESSAGE = "Worker application ready";
 const REGISTRATION = {
-  runtimeIdentity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-  resourceIdentity: "worker:kanthord:test",
-  workerName: "general@1",
+  runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  resource_identity: "worker:kanthord:test",
+  worker_name: "general@1",
 };
 const MISMATCH_VERSION = "0.0.0-mismatch";
 const MISMATCH_CODE = "worker.version.mismatch";
 const UNAVAILABLE_CODE = "worker.version.unavailable";
 const OPENAPI_PATH = "/api/openapi.yaml";
 const REGISTER_PATH = "/api/worker/register";
-const DEREGISTER_PATH = `/api/worker/instance/${REGISTRATION.runtimeIdentity}`;
+const DEREGISTER_PATH = `/api/worker/instance/${REGISTRATION.runtime_identity}`;
 const PULL_PATH = "/api/scheduler/work/pull";
 const AUTHORIZATION = "Bearer test-token";
 const CLIENT_SECRET_BYTES = 32;
@@ -108,7 +108,7 @@ async function fixture(
       response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
       response.end(
         JSON.stringify({
-          runtimeIdentity: REGISTRATION.runtimeIdentity,
+          runtime_identity: REGISTRATION.runtime_identity,
           registered: false,
         }),
       );
@@ -518,7 +518,7 @@ test("settled stop arms a watchdog during a stalled deregistration", async (t) =
   response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
   response.end(
     JSON.stringify({
-      runtimeIdentity: REGISTRATION.runtimeIdentity,
+      runtime_identity: REGISTRATION.runtime_identity,
       registered: false,
     }),
   );

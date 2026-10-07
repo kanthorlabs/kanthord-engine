@@ -347,7 +347,7 @@ test("worker handover validates locally and prints receipt metadata without the 
       `
     globalThis.fetch = async (_url, options) => {
       const assert = (await import('node:assert/strict')).default;
-      assert.deepEqual(JSON.parse(options.body), { executionId: ${JSON.stringify(executionId)} });
+      assert.deepEqual(JSON.parse(options.body), { execution_id: ${JSON.stringify(executionId)} });
       assert.equal(options.headers.get('Idempotency-Key'), ${JSON.stringify(key)});
       return Response.json({ nonce: 'secret-nonce', ciphertext: 'secret-ciphertext' });
     };

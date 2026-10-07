@@ -284,13 +284,13 @@ async function setup(t: TestContext) {
   });
   const machineToken = await fixture.machineToken(project.id, "harness");
   const W = { ...H, KANTHORD_TOKEN: machineToken };
-  const registration = await read<{ runtimeIdentity: string }>(
+  const registration = await read<{ runtime_identity: string }>(
     ["worker", "register"],
     W,
   );
   const pullBody = {
     resourceIdentity: binding("harness").resource_identity,
-    runtimeIdentity: registration.runtimeIdentity,
+    runtimeIdentity: registration.runtime_identity,
   };
   const pull = () => write<Pull>(["scheduler", "work", "pull"], pullBody, W);
   const api = httpClient(missionOperations, fixture.endpoint, machineToken);
@@ -713,7 +713,7 @@ test(
         subject: "pull request 42",
         address: {
           kind: "pull_request" as const,
-          resourceIdentity: h.binding("gated").resource_identity,
+          resource_identity: h.binding("gated").resource_identity,
           number: 42,
         },
       };

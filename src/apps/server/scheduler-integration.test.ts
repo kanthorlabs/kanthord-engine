@@ -251,13 +251,13 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
   const reviewerToken = await f.machineToken(projectId, "reviewer", "reviewer");
   const general = completed(
     await call(workerOperations.register, NO_INPUT, generalToken),
-  ).runtimeIdentity;
+  ).runtime_identity;
   const other = completed(
     await call(workerOperations.register, NO_INPUT, otherToken),
-  ).runtimeIdentity;
+  ).runtime_identity;
   const reviewer = completed(
     await call(workerOperations.register, NO_INPUT, reviewerToken),
-  ).runtimeIdentity;
+  ).runtime_identity;
   const pull = (
     runtimeIdentity = general,
     token = generalToken,
@@ -479,14 +479,14 @@ test("pull, registration resume and human pause settle an expired row before adm
   completed(
     await h.call(
       workerOperations["instance.deregister"],
-      { params: { runtimeIdentity: h.general }, query: {}, body: null },
+      { params: { runtime_identity: h.general }, query: {}, body: null },
       h.generalToken,
     ),
   );
   now = next.execution.expiredAt;
   refused(
     await h.call(workerOperations["instance.resume"], {
-      params: { runtimeIdentity: h.general },
+      params: { runtime_identity: h.general },
       query: {},
       body: null,
     }),

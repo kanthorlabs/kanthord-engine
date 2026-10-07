@@ -48,7 +48,7 @@ const EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const SPAWN_TIMEOUT = 10000;
 const JOURNEY_TIMEOUT = 120000;
 const TOKEN_DELAY = 1000;
-const BUDGET = { turns: 200, wallTimeMs: 7200000 };
+const BUDGET = { turns: 200, wall_time_ms: 7200000 };
 const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
@@ -252,14 +252,14 @@ test(
       );
       assert.equal(page.next_cursor, null);
       assert.equal(page.items[NATIVE_WORKER_INDEX]!.host, HOST);
-      assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.declaredNodeStates, [
+      assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.declared_node_states, [
         "Available",
       ]);
-      assert.deepEqual(page.items[REVIEWER_WORKER_INDEX]!.declaredNodeStates, [
-        "Waiting",
-        "External.Requested",
-      ]);
-      assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.requiredNodeFormat, [
+      assert.deepEqual(
+        page.items[REVIEWER_WORKER_INDEX]!.declared_node_states,
+        ["Waiting", "External.Requested"],
+      );
+      assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.required_node_format, [
         "name",
         "requirement",
         "criterion",
@@ -297,13 +297,13 @@ test(
       );
       assert.equal(native.host, HOST);
       assert.equal(native.method, METHOD);
-      assert.equal(native.agentName, AGENT);
-      assert.deepEqual(native.resourceBudget, BUDGET);
+      assert.equal(native.agent_name, AGENT);
+      assert.deepEqual(native.resource_budget, BUDGET);
       assert.equal("harness" in native, false);
       assert.equal(external.host, EXTERNAL_HOST);
       assert.equal(external.harness, HARNESS);
-      assert.deepEqual(external.resourceBudget, {
-        wallTimeMs: BUDGET.wallTimeMs,
+      assert.deepEqual(external.resource_budget, {
+        wall_time_ms: BUDGET.wall_time_ms,
       });
       assert.equal("method" in external, false);
     });
@@ -322,13 +322,13 @@ test(
     await t.test("E02.7 register A", async () => {
       ridA = success<Registration>(
         await kanthord(["worker", "register"], f.A),
-      ).runtimeIdentity;
+      ).runtime_identity;
       assert.ok(identitySchema("worker_instance").safeParse(ridA).success);
     });
     await t.test("E02.8 fresh registration key keeps identity", async () =>
       assert.equal(
         success<Registration>(await kanthord(["worker", "register"], f.A))
-          .runtimeIdentity,
+          .runtime_identity,
         ridA,
       ),
     );
@@ -346,16 +346,16 @@ test(
       assert.equal(page.next_cursor, null);
       record = page.items[0]!;
       assert.ok(
-        identitySchema("client_identity").safeParse(record.clientId).success,
+        identitySchema("client_identity").safeParse(record.client_id).success,
       );
       assert.deepEqual(record, {
-        runtimeIdentity: ridA,
-        projectId: f.projectId,
-        resourceIdentity: RESOURCE,
-        workerName: NATIVE,
+        runtime_identity: ridA,
+        project_id: f.projectId,
+        resource_identity: RESOURCE,
+        worker_name: NATIVE,
         host: HOST,
         placement: "worker",
-        clientId: record.clientId,
+        client_id: record.client_id,
         name: "worker-a",
         activity: InstanceActivity.Idle,
         draining: false,
@@ -389,7 +389,7 @@ test(
       const result = success<
         Registration & { registered: boolean; idempotency_key: string }
       >(await kanthord(["worker", "instance", "resume", ridA], f.H));
-      assert.equal(result.runtimeIdentity, ridA);
+      assert.equal(result.runtime_identity, ridA);
       assert.equal(result.registered, true);
       assert.ok(ulidSchema.safeParse(result.idempotency_key).success);
     });
@@ -411,7 +411,7 @@ test(
       ];
       const result = success(await kanthord(args, f.A));
       assert.deepEqual(result, {
-        runtimeIdentity: ridA,
+        runtime_identity: ridA,
         registered: false,
         idempotency_key: key,
       });
@@ -434,7 +434,7 @@ test(
     await t.test("E02.18 freed slot admits B and refuses A", async () => {
       ridB = success<Registration>(
         await kanthord(["worker", "register"], f.B),
-      ).runtimeIdentity;
+      ).runtime_identity;
       assert.notEqual(ridB, ridA);
       refusal(await kanthord(["worker", "register"], f.A), ErrorCode.Slot);
     });
@@ -459,7 +459,7 @@ test(
       );
       ridB2 = success<Registration>(
         await kanthord(["worker", "register"], f.B),
-      ).runtimeIdentity;
+      ).runtime_identity;
       assert.notEqual(ridB2, ridB);
     });
     await t.test("E02.21 old identity has no execution", async () =>
@@ -472,7 +472,7 @@ test(
       "E02.22 resume running execution on a second fixture",
       async (step) => {
         const second = await setup(step);
-        const { runtimeIdentity } = success<Registration>(
+        const { runtime_identity: runtimeIdentity } = success<Registration>(
           await kanthord(["worker", "register"], second.A),
         );
         second.fixture.store.transaction((tx) => {
@@ -497,7 +497,7 @@ test(
               binding.binding_id,
               RESOURCE,
               runtimeIdentity,
-              now + BUDGET.wallTimeMs,
+              now + BUDGET.wall_time_ms,
               "1234567890abcdef1234567890abcdef",
               "1234567890abcdef",
               now,
@@ -519,7 +519,7 @@ test(
         assert.equal(
           success<Registration>(
             await kanthord(["worker", "register"], second.A),
-          ).runtimeIdentity,
+          ).runtime_identity,
           runtimeIdentity,
         );
         const item = success<Instance>(
@@ -529,7 +529,7 @@ test(
           ),
         );
         assert.equal(item.activity, InstanceActivity.Executing);
-        assert.equal(item.executionId, EXECUTION);
+        assert.equal(item.execution_id, EXECUTION);
       },
     );
     await t.test("E02.23 tombstone refuses old JWT after rebind", async () => {
@@ -554,10 +554,10 @@ test(
         await kanthord(["worker", "register"], C),
       );
       assert.ok(
-        identitySchema("worker_instance").safeParse(item.runtimeIdentity)
+        identitySchema("worker_instance").safeParse(item.runtime_identity)
           .success,
       );
-      assert.notEqual(item.runtimeIdentity, ridB2);
+      assert.notEqual(item.runtime_identity, ridB2);
     });
   },
 );

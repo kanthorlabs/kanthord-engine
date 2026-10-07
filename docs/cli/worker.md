@@ -104,29 +104,29 @@ Worker and agent names and MCP session IDs retain their natural-key/protocol for
 Live registration and execution requirements appear per operation; registration
 and deregistration require no live registration.
 
-| Status | Command after `kanthord worker`               | Route                                               | Operation ID                 | Access / registration                                                             |
-| ------ | --------------------------------------------- | --------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
-| I      | `register`                                    | `POST /api/worker/register`                         | `worker.register`            | `client`; no live registration required                                           |
-| I      | `heartbeat [--token <jwt>]`                   | `POST /api/worker/heartbeat`                        | `worker.heartbeat`           | `client`; live registration                                                       |
-| I      | `handover <execution-id> [M] [--token <jwt>]` | `POST /api/worker/handover`                         | `worker.handover`            | `client`; live registration and live execution                                    |
-| I      | `list`                                        | `GET /api/worker/catalog`                           | `worker.catalog.list`        | `human`                                                                           |
-| I      | `get <worker-name>`                           | `GET /api/worker/catalog/:workerName`               | `worker.catalog.get`         | `human`                                                                           |
-| I      | `instance list`                               | `GET /api/worker/instance`                          | `worker.instance.list`       | `human`                                                                           |
-| I      | `instance get <runtime-identity>`             | `GET /api/worker/instance/:runtimeIdentity`         | `worker.instance.get`        | `human`                                                                           |
-| I      | `instance deregister <runtime-identity>`      | `DELETE /api/worker/instance/:runtimeIdentity`      | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
-| I      | `instance resume <runtime-identity>`          | `POST /api/worker/instance/:runtimeIdentity/resume` | `worker.instance.resume`     | `human`; mutation                                                                 |
+| Status | Command after `kanthord worker`               | Route                                                | Operation ID                 | Access / registration                                                             |
+| ------ | --------------------------------------------- | ---------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
+| I      | `register`                                    | `POST /api/worker/register`                          | `worker.register`            | `client`; no live registration required                                           |
+| I      | `heartbeat [--token <jwt>]`                   | `POST /api/worker/heartbeat`                         | `worker.heartbeat`           | `client`; live registration                                                       |
+| I      | `handover <execution-id> [M] [--token <jwt>]` | `POST /api/worker/handover`                          | `worker.handover`            | `client`; live registration and live execution                                    |
+| I      | `list`                                        | `GET /api/worker/catalog`                            | `worker.catalog.list`        | `human`                                                                           |
+| I      | `get <worker-name>`                           | `GET /api/worker/catalog/:worker_name`               | `worker.catalog.get`         | `human`                                                                           |
+| I      | `instance list`                               | `GET /api/worker/instance`                           | `worker.instance.list`       | `human`                                                                           |
+| I      | `instance get <runtime-identity>`             | `GET /api/worker/instance/:runtime_identity`         | `worker.instance.get`        | `human`                                                                           |
+| I      | `instance deregister <runtime-identity>`      | `DELETE /api/worker/instance/:runtime_identity`      | `worker.instance.deregister` | `client`; no live registration required; ownership by client, binding and project |
+| I      | `instance resume <runtime-identity>`          | `POST /api/worker/instance/:runtime_identity/resume` | `worker.instance.resume`     | `human`; mutation                                                                 |
 
 `credential` runs inside the `worker` application alone and is no CLI command.
-Its implemented operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `executionId`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204 with no HTTP body (`null` through the direct adapter). It is a mutation with a 30-second timeout and a 64 KiB body limit. The worker application caller is later Plan 09 work.
+Its implemented operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `execution_id`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204 with no HTTP body (`null` through the direct adapter). It is a mutation with a 30-second timeout and a 64 KiB body limit. The worker application caller is later Plan 09 work.
 Custody's [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) limits normalized `api_key` and `oauth` canonical JSON to 48,914 UTF-8 bytes so the compact encrypted report fits. The worker reports once at release even without a refresh. An oversized decrypted credential answers HTTP 400 `custody.handover.report_invalid` without an update; an oversized HTTP body still answers Gateway's 413 before Custody validation.
 
-The planned `worker.execution.setup.get` runs inside the `worker` application alone and is no CLI command. Its target route is `GET /api/worker/execution/:executionId/setup`, with `client` access and a live execution requirement. The [execution setup](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-execution-setup) rules its answer and its handover prerequisite.
+The planned `worker.execution.setup.get` runs inside the `worker` application alone and is no CLI command. Its target route is `GET /api/worker/execution/:execution_id/setup`, with `client` access and a live execution requirement. The [execution setup](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-execution-setup) rules its answer and its handover prerequisite.
 
 The answer holds `prompt` and `repositories`, among other fields.
 `prompt` is `{ final }`. `final` holds the system layer, the agent layer and the framing that the server composes, as [`agent get`](./agent.md#the-prompt-answer) with `--view final` answers them.
-Each item of `repositories` holds `{ bindingId, name, address, sshIdentity, strategy, projectPrompt, working_layer }`.
+Each item of `repositories` holds `{ binding_id, name, address, ssh_identity, strategy, project_prompt, working_layer }`.
 `working_layer` is the map of the booleans `agents_md`, `agents_local_md`, `claude_md`, `claude_local_md` and `project_prompt` of the pinned binding revision, with all five keys present.
-The worker application appends the working layer of each workspace. It reads the agent files whose switch is on and the `projectPrompt` when `project_prompt` is on.
+The worker application appends the working layer of each workspace. It reads the agent files whose switch is on and the project prompt when `project_prompt` is on.
 [Project](./project.md#binding-resource-and-complete-set-edits) rules the switches.
 
 The four human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
@@ -161,10 +161,10 @@ The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/do
 | `body`                   | Absent HTTP body; internal value `null`                                   | JSON `{}` is not an empty request body and is rejected. `--file` is not accepted.                  |
 
 The operation is a mutation, declares a `10,000 ms` timeout and a `40 KiB` body
-limit, and returns HTTP `200` with `{ "runtimeIdentity": "...", "resourceIdentity": "...", "workerName": "..." }`. The body limit
+limit, and returns HTTP `200` with `{ "runtime_identity": "...", "resource_identity": "...", "worker_name": "..." }`. The body limit
 does not permit a registration payload. The runtime identity is `worker_instance_<ulid>`.
 
-The CLI prints one JSON line with `runtimeIdentity`, `resourceIdentity`, `workerName` and `idempotency_key`, saves no configuration and prints no token.
+The CLI prints one JSON line with `runtime_identity`, `resource_identity`, `worker_name` and `idempotency_key`, saves no configuration and prints no token.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
 worker definition or human account. The credential comes from local `jwt generate`
 issuance described in [other commands](./other.md).
@@ -221,7 +221,7 @@ The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/doc
 kanthord worker [--endpoint <url>] handover <execution-id> [--token <jwt>] [--idempotency-key <key>]
 ```
 
-The command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and the body `{ executionId }`, which names the execution that the invocation chain proves. It is a secret mutation with `[M]`: a repeat of its key answers 409 without the envelope, and a lost answer takes a new key.
+The command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and the body `{ execution_id }`, which names the execution that the invocation chain proves. It is a secret mutation with `[M]`: a repeat of its key answers 409 without the envelope, and a lost answer takes a new key.
 The operation is implemented, requires a live execution and returns the strict AES-256-GCM envelope `{ nonce, ciphertext }` as canonical base64. It has a 30-second timeout and a 1 KiB body limit. Registration and execution proof precede replay lookup; the handler repeats execution liveness in its one write transaction before authorization, pinning and encryption.
 The command prints only `{ "received": true, "idempotency_key": "<key>" }` and never prints the envelope.
 The [credential handover](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-credential-handover) rules the application call after a claim and before inference.
@@ -241,7 +241,7 @@ shared types, requiredness, defaults and validation. HTTP `200` returns
 one page of worker summaries in ascending alphabetical order by exact name,
 under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination). Each item contains
 `name: WorkerName`, `host: "kanthord" | "external-harness"`,
-`declaredNodeStates: string[]` and `requiredNodeFormat: string[]`.
+`declared_node_states: string[]` and `required_node_format: string[]`.
 
 The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
@@ -265,23 +265,23 @@ kanthord worker get <worker-name>
 ```
 
 `worker-name` is required `WorkerName`, with no default, mapped to
-`params.workerName`; query is empty and body absent. Required token: human JWT.
+`params.worker_name`; query is empty and body absent. Required token: human JWT.
 HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
-- `method: "steps" | "evaluation"` and `agentName: AgentName` for a native worker.
-- `resourceBudget` for every worker, with a required positive safe integer
-  `wallTimeMs` and an optional positive safe integer `turns`.
+- `method: "steps" | "evaluation"` and `agent_name: AgentName` for a native worker.
+- `resource_budget` for every worker, with a required positive safe integer
+  `wall_time_ms` and an optional positive safe integer `turns`.
   `general@1` and `reviewer@1` default to
-  `{ turns: 200, wallTimeMs: 7200000 }`; `claude@1` and `opencode@1`
-  default to `{ wallTimeMs: 7200000 }`. Every worker binding may override the
+  `{ turns: 200, wall_time_ms: 7200000 }`; `claude@1` and `opencode@1`
+  default to `{ wall_time_ms: 7200000 }`. Every worker binding may override the
   default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
   defines a turn as one `turn_end` event of the pi agent loop and measures wall
   time from the execution's `createdAt`. After budget end, execution code
   checkpoints, pushes and releases, with cleanup bounded by `expiredAt`.
   An external harness must release before its `expiredAt`.
 
-Absent/inapplicable native fields other than `resourceBudget` are omitted for
+Absent/inapplicable native fields other than `resource_budget` are omitted for
 externally hosted workers. The result changes no registration, pool, project
 configuration or scheduling state.
 An unknown exact worker name returns `404 worker.catalog.not_found`.
@@ -306,11 +306,11 @@ tests until Plan 03 wires its implementation.
 kanthord worker instance list [--project <project-id>] [--binding <binding-name>] [--limit <count>] [--cursor <opaque>]
 ```
 
-| Input                                                                            | Requiredness / type / default                                                  | Mapping and validation                                                                                                             |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `--project <project-id>`                                                         | Optional `ProjectId`; omitted means all projects visible to the human          | `query.projectId`; retain and validate the declared prefix.                                                                        |
-| `--binding <binding-name>`                                                       | Optional binding name; omitted means all worker bindings in the selected scope | `query.resourceIdentity` as `worker:kanthord:<binding-name>`; requires `--project`, and the project must hold that worker binding. |
-| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags                                                        | Shared query mapping.                                                                                                              |
+| Input                                                                            | Requiredness / type / default                                                  | Mapping and validation                                                                                                              |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `--project <project-id>`                                                         | Optional `ProjectId`; omitted means all projects visible to the human          | `query.project_id`; retain and validate the declared prefix.                                                                        |
+| `--binding <binding-name>`                                                       | Optional binding name; omitted means all worker bindings in the selected scope | `query.resource_identity` as `worker:kanthord:<binding-name>`; requires `--project`, and the project must hold that worker binding. |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags                                                        | Shared query mapping.                                                                                                               |
 
 Required token: human JWT. Empty params, absent body. HTTP `200` returns
 one page of the instance records defined below in descending runtime-identity
@@ -326,22 +326,22 @@ kanthord worker instance get <runtime-identity>
 ```
 
 Required `runtime-identity: RuntimeIdentity`, no default; maps to
-`params.runtimeIdentity`. Required token: human JWT. Empty query, absent body.
+`params.runtime_identity`. Required token: human JWT. Empty query, absent body.
 HTTP `200` returns one instance record; unknown or ended instances return
 `404 worker.instance.not_found` rather than a historical execution record.
 
 The instance record contains:
 
-| Field                                                            | Type and presence                                                                                                                   |
-| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `runtimeIdentity`, `projectId`, `resourceIdentity`, `workerName` | Required identities/natural key of the instance and its owning binding.                                                             |
-| `host`                                                           | Required string, one of `kanthord`, `external-harness`.                                                                             |
-| `placement`                                                      | String, one of `server`, `worker`, for kanthord-hosted instances; omitted for external harnesses.                                   |
-| `clientId`, `name`                                               | Client identity using the declared `client_identity` prefix and display-name string, present for registered instances only. No JWT. |
-| `activity`                                                       | Required string, one of `idle`, `pulling`, `executing`, describing known server activity, not proof that a remote process is alive. |
-| `draining`                                                       | Required boolean; true when a server-hosted instance is scheduled to retire after its current execution.                            |
-| `executionId`                                                    | Present only while executing, naming the Scheduler execution record.                                                                |
-| `registered`                                                     | Required boolean; registration state, separate from execution claim state and physical process liveness.                            |
+| Field                                                                | Type and presence                                                                                                                   |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime_identity`, `project_id`, `resource_identity`, `worker_name` | Required identities/natural key of the instance and its owning binding.                                                             |
+| `host`                                                               | Required string, one of `kanthord`, `external-harness`.                                                                             |
+| `placement`                                                          | String, one of `server`, `worker`, for kanthord-hosted instances; omitted for external harnesses.                                   |
+| `client_id`, `name`                                                  | Client identity using the declared `client_identity` prefix and display-name string, present for registered instances only. No JWT. |
+| `activity`                                                           | Required string, one of `idle`, `pulling`, `executing`, describing known server activity, not proof that a remote process is alive. |
+| `draining`                                                           | Required boolean; true when a server-hosted instance is scheduled to retire after its current execution.                            |
+| `execution_id`                                                       | Present only while executing, naming the Scheduler execution record.                                                                |
+| `registered`                                                         | Required boolean; registration state, separate from execution claim state and physical process liveness.                            |
 
 Both commands are read-only. Durable execution and trace attribution are queried
 through Scheduler and Tracking. They do not infer a dead process from silence.
@@ -353,13 +353,13 @@ kanthord worker instance deregister <runtime-identity> [--idempotency-key <key>]
 ```
 
 Required `runtime-identity: RuntimeIdentity`, no default, maps to
-`params.runtimeIdentity`. Empty query and absent body. Required token: machine
+`params.runtime_identity`. Empty query and absent body. Required token: machine
 JWT. The shared mutation key applies. HTTP `200` returns
-`{ "runtimeIdentity": "...", "registered": false }`; the CLI adds its key.
+`{ "runtime_identity": "...", "registered": false }`; the CLI adds its key.
 
 The [deregistration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#deregistration)
 declares `worker.instance.deregister` as a `client` mutation at
-`DELETE /api/worker/instance/:runtimeIdentity`, with `unary` lifetime,
+`DELETE /api/worker/instance/:runtime_identity`, with `unary` lifetime,
 the default 30 s timeout and the default 10 MiB body limit. The explicit runtime
 identity prevents a delayed retry from ending a newer registration of the same
 client. The handler ends only the live registration whose runtime identity
@@ -394,13 +394,13 @@ kanthord worker instance resume <runtime-identity> [--idempotency-key <key>]
 ```
 
 Required `runtime-identity: RuntimeIdentity`, no default, maps to
-`params.runtimeIdentity`. Empty query and absent body. Required token: human
+`params.runtime_identity`. Empty query and absent body. Required token: human
 JWT. The shared mutation key applies. HTTP `200` returns
-`{ "runtimeIdentity": "...", "registered": true }`; the CLI adds its key.
+`{ "runtime_identity": "...", "registered": true }`; the CLI adds its key.
 
 The [resume contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#resume-of-a-registration)
 declares `worker.instance.resume` as a `human` mutation at
-`POST /api/worker/instance/:runtimeIdentity/resume`, with `unary` lifetime, the
+`POST /api/worker/instance/:runtime_identity/resume`, with `unary` lifetime, the
 default 30 s timeout and the default 10 MiB body limit. It reopens an ended
 registration only while that registration is the claimant of a live execution,
 and it takes the slot through the Project instance-count collaboration in the
@@ -423,22 +423,22 @@ execution identity, and the performer never dispatches an action twice.
 This revision projects no tool to a REST route and gives the CLI no command
 that calls a tool. Tools are reached through the MCP server.
 
-`worker.action.request` is an API-only `client` mutation at `POST /api/worker/execution/:executionId/action/request`, with `unary` lifetime, no body and a 900 s timeout. It requires a live execution and the admission of the action performer. The evaluation method of `reviewer@1` calls it, and it answers 200 with the action result below. It calls the action performer and not the MCP server.
+`worker.action.request` is an API-only `client` mutation at `POST /api/worker/execution/:execution_id/action/request`, with `unary` lifetime, no body and a 900 s timeout. It requires a live execution and the admission of the action performer. The evaluation method of `reviewer@1` calls it, and it answers 200 with the action result below. It calls the action performer and not the MCP server.
 
 ### Action performer results
 
 The operation and the action tool return this result, not CLI output:
 
-`{ toolName: "repository-action-request", items: ActionResultItem[] }`.
+`{ tool_name: "repository-action-request", items: ActionResultItem[] }`.
 `ActionResultItem` is discriminated on `kind`, with one value per return class:
 
 - `submitted` holds `evidence`, the request evidence that `mission.evidence.request` answers.
-- `awaiting-prerequisite` holds `action: { key, bindingId }`, the waiting action, and `prerequisite: { key, evidenceId }`, the requested action it follows and its request evidence.
-- `failed-before-effect` holds `action: { key, bindingId }` and `refusal: { class, code, message }`, where `class` is `confirmed_failure`, `retryable_refusal` or `final_refusal`. A final refusal declines the request before any write. `code` and `message` come from the connector that transported the request: the platform implementation for a platform action, the repository connector for a network git write.
-- `uncertain` holds `action: { key, bindingId }`, `uncertainty: "effect" | "recording" | "both"` and an optional `address`, present when the remote returned the address and the Mission submission stayed uncertain. An `unknown_outcome` result class produces `effect`.
+- `awaiting-prerequisite` holds `action: { key, binding_id }`, the waiting action, and `prerequisite: { key, evidence_id }`, the requested action it follows and its request evidence.
+- `failed-before-effect` holds `action: { key, binding_id }` and `refusal: { class, code, message }`, where `class` is `confirmed_failure`, `retryable_refusal` or `final_refusal`. A final refusal declines the request before any write. `code` and `message` come from the connector that transported the request: the platform implementation for a platform action, the repository connector for a network git write.
+- `uncertain` holds `action: { key, binding_id }`, `uncertainty: "effect" | "recording" | "both"` and an optional `address`, present when the remote returned the address and the Mission submission stayed uncertain. An `unknown_outcome` result class produces `effect`.
 
 The request evidence shape is the Mission `Evidence` record; the [action performer ruling of `worker-service.impl.md`](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#action-performer) declares the item shapes.
-`key` is the `FrozenAction.key` of the attempt, and `bindingId` is the repository binding of the action.
+`key` is the `FrozenAction.key` of the attempt, and `binding_id` is the repository binding of the action.
 The first version produces no `awaiting-prerequisite` item, because a repository strategy holds at most one action and its `follows` is null.
 The answer holds no release instruction, because [B9 items A3, W1, W4 and PR2](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#worker-and-project-services) own what follows a failure or an uncertainty.
 There is no default classification. An accepted tool result containing failure or uncertainty
@@ -478,7 +478,7 @@ stop end the session. A session identity alone authorizes nothing.
 Every authenticated MCP request renews the registration heartbeat.
 
 Before each `tools/call`, the MCP server runs the invocation chain's execution
-proof component with the required `executionId` argument. A failed proof returns
+proof component with the required `execution_id` argument. A failed proof returns
 a JSON-RPC error whose `data` holds the shared error envelope with
 `gateway.invocation.execution_proof_failed`. The tool receives the proven node,
 attempt and pinned revision, never caller-supplied values for them. A tool refusal
@@ -545,7 +545,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `worker.action_performer.claim_not_evaluation`            | The action performer runs under a steps claim.                                                                                                                                                                                    | worker.action.request (API only)                                              |
 | 409   | `worker.action_performer.assessment_not_current`          | The attempt holds no current passing assessment.                                                                                                                                                                                  | worker.action.request (API only)                                              |
 | 409   | `worker.action_performer.snapshot_absent`                 | The current passing assessment names no repository snapshot of the binding of the action.                                                                                                                                         | worker.action.request (API only)                                              |
-| 400   | `worker.instance.binding_unknown`                         | `resourceIdentity` names no current worker binding of `projectId`.                                                                                                                                                                | instance list                                                                 |
+| 400   | `worker.instance.binding_unknown`                         | `resource_identity` names no current worker binding of `project_id`.                                                                                                                                                              | instance list                                                                 |
 | 404   | `worker.catalog.not_found`                                | The worker name is absent from the catalog.                                                                                                                                                                                       | get                                                                           |
 | 404   | `worker.instance.not_found`                               | The runtime identity is unknown, ended, not owned or at the server placement.                                                                                                                                                     | instance get, instance deregister, instance resume                            |
 | 409   | `worker.instance.no_live_execution`                       | The registration is the claimant of no live execution.                                                                                                                                                                            | instance resume                                                               |

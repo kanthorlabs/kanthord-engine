@@ -45,25 +45,25 @@ test("B3 review bundle places all supporting assets beside repositories and remo
   for (const mode of ["success", "failure", "cancel"] as const) {
     const setup = anthropicSetup();
     const repository = {
-      bindingId: createIdentity("binding"),
+      binding_id: createIdentity("binding"),
       name: "repo",
       address: "git@github.com:owner/repo.git",
-      sshIdentity: {
+      ssh_identity: {
         host: "github.com",
         hostname: "github.com",
         port: 22,
         identity_file: "~/.ssh/id_test",
       },
-      strategy: { baseBranch: "main" },
-      projectPrompt: null,
+      strategy: { base_branch: "main" },
+      project_prompt: null,
       working_layer: WORKING_LAYER_ALL_ON,
     };
     setup.repositories = [
       repository,
-      { ...repository, bindingId: createIdentity("binding"), name: "other" },
+      { ...repository, binding_id: createIdentity("binding"), name: "other" },
     ];
     const claim = {
-      executionId: setup.executionId,
+      executionId: setup.execution_id,
       nodeId: createIdentity("node"),
       attempt: 1,
       pinnedRevision: 1,
@@ -178,7 +178,7 @@ test("B3 review bundle places all supporting assets beside repositories and remo
 test("evaluation places a produced report privately and preserves command order", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
-    executionId: setup.executionId,
+    executionId: setup.execution_id,
     nodeId: createIdentity("node"),
     attempt: 1,
     pinnedRevision: 1,

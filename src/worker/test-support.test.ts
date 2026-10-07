@@ -24,7 +24,7 @@ test("scripted provider replaces the builtin and records execution auth for each
     credentials,
     setup,
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     signal: new AbortController().signal,

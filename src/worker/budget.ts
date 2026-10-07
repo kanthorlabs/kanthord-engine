@@ -14,15 +14,15 @@ export class ExecutionBudget {
   constructor(input: {
     createdAt: number;
     expiredAt: number;
-    resourceBudget: { turns?: number; wallTimeMs: number };
+    resourceBudget: { turns?: number; wall_time_ms: number };
   }) {
     assert.ok(
       Number.isSafeInteger(input.createdAt) &&
         Number.isSafeInteger(input.expiredAt),
     );
     assert.ok(
-      Number.isSafeInteger(input.resourceBudget.wallTimeMs) &&
-        input.resourceBudget.wallTimeMs > BUDGET_FLOOR,
+      Number.isSafeInteger(input.resourceBudget.wall_time_ms) &&
+        input.resourceBudget.wall_time_ms > BUDGET_FLOOR,
     );
     assert.ok(
       input.resourceBudget.turns === undefined ||
@@ -30,7 +30,7 @@ export class ExecutionBudget {
           input.resourceBudget.turns > BUDGET_FLOOR),
     );
     this.deadline = Math.min(
-      input.createdAt + input.resourceBudget.wallTimeMs,
+      input.createdAt + input.resourceBudget.wall_time_ms,
       input.expiredAt,
     );
     this.expiredAt = input.expiredAt;

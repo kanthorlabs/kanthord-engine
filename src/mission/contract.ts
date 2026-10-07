@@ -737,12 +737,12 @@ export const objectAddressSchema = z.strictObject({
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(PlatformAddressKind.PullRequest),
-    resourceIdentity: textSchema,
+    resource_identity: textSchema,
     number: z.number().int().positive(),
   }),
   z.strictObject({
     kind: z.literal(PlatformAddressKind.BranchPush),
-    resourceIdentity: textSchema,
+    resource_identity: textSchema,
     branch: textSchema,
     commit: commitSchema,
   }),

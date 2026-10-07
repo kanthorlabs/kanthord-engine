@@ -79,7 +79,7 @@ function fixture(t: TestContext) {
     requirementKey: KEY,
     address: {
       kind: PlatformAddressKind.PullRequest,
-      resourceIdentity: RESOURCE,
+      resource_identity: RESOURCE,
       number: FIRST_ATTEMPT,
     },
   };
@@ -157,13 +157,13 @@ test("request admission rejects a steps claim, unknown action and mismatched pla
   const addresses: EvidenceRequest["address"][] = [
     {
       kind: PlatformAddressKind.BranchPush,
-      resourceIdentity: RESOURCE,
+      resource_identity: RESOURCE,
       branch: "main",
       commit: "a".repeat(40),
     },
     {
       kind: PlatformAddressKind.PullRequest,
-      resourceIdentity: "repository:github:foreign/repo",
+      resource_identity: "repository:github:foreign/repo",
       number: FIRST_ATTEMPT,
     },
   ];

@@ -24,7 +24,7 @@ export async function runStepsInitiative(
 ): Promise<ExecutionEnd> {
   const budget = new ExecutionBudget({
     ...input.claim,
-    resourceBudget: input.setup.resourceBudget,
+    resourceBudget: input.setup.resource_budget,
   });
   const { directory } = input.workspaces.prepareExecution({
     executionId: input.claim.executionId,

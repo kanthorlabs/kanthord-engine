@@ -85,7 +85,7 @@ async function fixture(
     hostTools,
     setup,
     claim: {
-      executionId: setup.executionId,
+      executionId: setup.execution_id,
       nodeId: NODE,
       createdAt: Date.now(),
       expiredAt: Date.now() + 60000,
@@ -94,7 +94,7 @@ async function fixture(
     method: options.method ?? WorkerMethod.Steps,
     credentials,
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     workspace,
@@ -130,17 +130,17 @@ function repositoryOf(
   projectPrompt: string | null = PROJECT_PROMPT,
 ) {
   return {
-    bindingId: createIdentity("binding"),
+    binding_id: createIdentity("binding"),
     name: "repo",
     address: "git@github.com:owner/repo.git",
-    sshIdentity: {
+    ssh_identity: {
       host: "github.com",
       hostname: "github.com",
       port: 22,
       identity_file: "~/.ssh/id_test",
     },
-    strategy: { baseBranch: "main" },
-    projectPrompt,
+    strategy: { base_branch: "main" },
+    project_prompt: projectPrompt,
     working_layer: { ...WORKING_LAYER_ALL_ON, ...workingLayer },
   };
 }
@@ -263,7 +263,7 @@ test("native reviewer refuses a scripted write tool", async (t) => {
       tool("write", { path: "forbidden.txt", content: CONTENT }),
       fauxAssistantMessage("done"),
     ],
-    { workerName: "reviewer@1", agentName: "re@1" },
+    { worker_name: "reviewer@1", agent_name: "re@1" },
   );
   await h.agent.prompt(WORK);
   assert.equal(existsSync(join(h.workspace, "forbidden.txt")), false);
@@ -278,8 +278,8 @@ test("native reviewer refuses a scripted write tool", async (t) => {
 
 test("host upload is declared only for the software agent and validates arguments", async (t) => {
   const result = {
-    evidenceId: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    assetId: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    evidence_id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    asset_id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     uri: "s3://test-bucket/a.txt",
   };
   const paths: string[] = [];
@@ -320,7 +320,7 @@ test("host upload is declared only for the software agent and validates argument
   const reviewer = await fixture(
     t,
     [tool("evidence-upload", { path: "c.txt" }), fauxAssistantMessage("done")],
-    { workerName: "reviewer@1", agentName: "re@1" },
+    { worker_name: "reviewer@1", agent_name: "re@1" },
     hostTools,
   );
   await reviewer.agent.prompt(WORK);
@@ -359,7 +359,7 @@ test("native turn budget aborts after the first tool turn", async (t) => {
       tool("write", { path: "two.txt", content: CONTENT }),
       fauxAssistantMessage("done"),
     ],
-    { resourceBudget: { turns: SINGLE_TURN_BUDGET, wallTimeMs: 60000 } },
+    { resource_budget: { turns: SINGLE_TURN_BUDGET, wall_time_ms: 60000 } },
   );
   await h.agent.prompt(WORK);
   assert.equal(h.provider.calls.length, SINGLE_CALL_COUNT);

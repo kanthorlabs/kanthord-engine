@@ -65,15 +65,15 @@ test("setup answers the system and agent prompt after its single snapshot and su
   t.after(() => store.close());
   const setup = anthropicSetup();
   const entry = {
-    agent: setup.agentName,
+    agent: setup.agent_name,
     agent_provider: "default",
-    model_identifier: setup.effectiveConfiguration.model_identifier,
+    model_identifier: setup.effective_configuration.model_identifier,
     reasoning_effort: "low",
   };
   const composed: string[] = [];
   let commits = 0;
   const claim = {
-    executionId: setup.executionId,
+    executionId: setup.execution_id,
     runtimeIdentity: createIdentity("worker_instance"),
     workerBindingId: createIdentity("binding"),
     nodeId: createIdentity("node"),
@@ -100,19 +100,19 @@ test("setup answers the system and agent prompt after its single snapshot and su
       },
     },
     workerBindingRowOf: () => ({
-      bindingId: claim.workerBindingId,
-      projectId: claim.projectId,
-      resourceIdentity: "worker:general@1",
+      binding_id: claim.workerBindingId,
+      project_id: claim.projectId,
+      resource_identity: "worker:general@1",
       tombstone: false,
       disabled: false,
-      workerName: setup.workerName,
+      worker_name: setup.worker_name,
       entries: [entry],
-      resourceBudget: null,
+      resource_budget: null,
     }),
     pinnedCredentialMetadata: () => ({
-      id: setup.credentialId,
-      name: setup.effectiveConfiguration.credential,
-      platform: setup.effectiveConfiguration.provider,
+      id: setup.credential_id,
+      name: setup.effective_configuration.credential,
+      platform: setup.effective_configuration.provider,
       metadata: null,
     }),
     repositoryBindingIdsOf: () => [],
@@ -135,7 +135,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       return {
         defaults: null,
         effective: {
-          ...setup.effectiveConfiguration,
+          ...setup.effective_configuration,
           reasoning_effort: entry.reasoning_effort,
         },
         valid: true,
@@ -145,7 +145,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   };
   const before = commits;
   const answer = await executionSetup(dependencies, worker, caller);
-  assert.deepEqual(composed, [setup.agentName]);
+  assert.deepEqual(composed, [setup.agent_name]);
   assert.deepEqual(answer.prompt, {
     final: systemPrompt(promptLayers, PromptConsumer.Worker),
   });
@@ -154,7 +154,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.ok(answer.prompt.final.includes(AGENT_TEXT));
   assert.ok(!answer.prompt.final.includes(WORKING_TEXT));
   assert.equal(
-    answer.effectiveConfiguration.reasoning_effort,
+    answer.effective_configuration.reasoning_effort,
     entry.reasoning_effort,
   );
   assert.equal(commits, before + 1);
@@ -181,13 +181,13 @@ test("setup answers the system and agent prompt after its single snapshot and su
       ...dependencies,
       repositoryBindingIdsOf: () => [bindingId],
       repositoryPolicyOf: () => ({
-        bindingId,
+        binding_id: bindingId,
         name: "repo",
         address: "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
-        sshCredential: SSH_CREDENTIAL,
-        baseBranch: "main",
-        projectPrompt: null,
-        workingLayer,
+        ssh_credential: SSH_CREDENTIAL,
+        base_branch: "main",
+        project_prompt: null,
+        working_layer: workingLayer,
       }),
       credentialMetadata: (_tx, name) =>
         name === SSH_CREDENTIAL
@@ -197,6 +197,6 @@ test("setup answers the system and agent prompt after its single snapshot and su
     worker,
     caller,
   );
-  assert.deepEqual(pinned.repositories[0]?.sshIdentity, sshIdentity);
+  assert.deepEqual(pinned.repositories[0]?.ssh_identity, sshIdentity);
   assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
 });

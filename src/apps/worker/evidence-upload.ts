@@ -262,8 +262,8 @@ export async function uploadEvidence(input: {
     );
     assert.equal(result.assetId, upload.assetId);
     return {
-      evidenceId: result.evidenceId,
-      assetId: result.assetId,
+      evidence_id: result.evidenceId,
+      asset_id: result.assetId,
       uri: result.uri,
     };
   } finally {

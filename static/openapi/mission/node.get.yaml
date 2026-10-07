@@ -501,7 +501,7 @@ components:
                                         kind:
                                           type: string
                                           const: pull_request
-                                        resourceIdentity:
+                                        resource_identity:
                                           type: string
                                           minLength: 1
                                         number:
@@ -510,7 +510,7 @@ components:
                                           maximum: 9007199254740991
                                       required:
                                         - kind
-                                        - resourceIdentity
+                                        - resource_identity
                                         - number
                                       additionalProperties: false
                                     - type: object
@@ -518,7 +518,7 @@ components:
                                         kind:
                                           type: string
                                           const: branch_push
-                                        resourceIdentity:
+                                        resource_identity:
                                           type: string
                                           minLength: 1
                                         branch:
@@ -529,7 +529,7 @@ components:
                                           pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
                                       required:
                                         - kind
-                                        - resourceIdentity
+                                        - resource_identity
                                         - branch
                                         - commit
                                       additionalProperties: false
@@ -1160,7 +1160,7 @@ components:
                                         kind:
                                           type: string
                                           const: pull_request
-                                        resourceIdentity:
+                                        resource_identity:
                                           type: string
                                           minLength: 1
                                         number:
@@ -1169,7 +1169,7 @@ components:
                                           maximum: 9007199254740991
                                       required:
                                         - kind
-                                        - resourceIdentity
+                                        - resource_identity
                                         - number
                                       additionalProperties: false
                                     - type: object
@@ -1177,7 +1177,7 @@ components:
                                         kind:
                                           type: string
                                           const: branch_push
-                                        resourceIdentity:
+                                        resource_identity:
                                           type: string
                                           minLength: 1
                                         branch:
@@ -1188,7 +1188,7 @@ components:
                                           pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
                                       required:
                                         - kind
-                                        - resourceIdentity
+                                        - resource_identity
                                         - branch
                                         - commit
                                       additionalProperties: false

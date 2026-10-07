@@ -27,7 +27,7 @@ export function operandsOf(
       HttpStatus.Conflict,
       WorkerErrorCode.SnapshotAbsent,
       "The assessment names no repository snapshot of the action binding.",
-      { requirementKey: entry.action.key },
+      { requirement_key: entry.action.key },
     );
   return {
     nodeBranch: nodeBranchOf(nodeId),

@@ -46,9 +46,9 @@ function harness(t: TestContext) {
     tombstone: false,
   });
   h.dependencies.declarations.declarationOf = () => ({
-    declaredNodeStates: [ClaimNodeState.Available],
-    requiredNodeFormat: Object.values(NodeFormatField),
-    resourceBudget: { wallTimeMs: 7200000 },
+    declared_node_states: [ClaimNodeState.Available],
+    required_node_format: Object.values(NodeFormatField),
+    resource_budget: { wall_time_ms: 7200000 },
   });
   h.dependencies.transitions.claim = (tx, nodeId) => {
     h.service.delete(tx, nodeId);

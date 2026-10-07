@@ -96,19 +96,19 @@ components:
                 enum:
                   - kanthord
                   - external-harness
-              declaredNodeStates:
+              declared_node_states:
                 type: array
                 items:
                   type: string
-              requiredNodeFormat:
+              required_node_format:
                 type: array
                 items:
                   type: string
             required:
               - name
               - host
-              - declaredNodeStates
-              - requiredNodeFormat
+              - declared_node_states
+              - required_node_format
             additionalProperties: false
         next_cursor:
           anyOf:

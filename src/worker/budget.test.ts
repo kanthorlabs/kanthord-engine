@@ -8,7 +8,7 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   const input = {
     createdAt: Date.now(),
     expiredAt: 20000,
-    resourceBudget: { turns: 2, wallTimeMs: 5000 },
+    resourceBudget: { turns: 2, wall_time_ms: 5000 },
   };
   const budget = new ExecutionBudget(input);
   const wallDeadline = 15000;
@@ -22,7 +22,7 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   assert.ok(agent.err());
   const uncapped = new ExecutionBudget({
     ...input,
-    resourceBudget: { wallTimeMs: 5000 },
+    resourceBudget: { wall_time_ms: 5000 },
   });
   uncapped.turnEnded();
   assert.equal(uncapped.exhausted(), false);
@@ -35,7 +35,7 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   assert.equal(
     new ExecutionBudget({
       ...input,
-      resourceBudget: { wallTimeMs: 50000 },
+      resourceBudget: { wall_time_ms: 50000 },
     }).wallDeadline(),
     input.expiredAt,
   );
@@ -49,7 +49,7 @@ test("remaining wall time measures monotonic elapsed time", (t) => {
   const budget = new ExecutionBudget({
     createdAt,
     expiredAt: createdAt + 10000,
-    resourceBudget: { wallTimeMs: 5000 },
+    resourceBudget: { wall_time_ms: 5000 },
   });
   const before = budget.remainingMs();
   now += 1000;

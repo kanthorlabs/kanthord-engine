@@ -46,5 +46,5 @@ export function sameRepository(
 ): boolean {
   assert.ok(candidate.evidenceId);
   assert.ok(resourceIdentity);
-  return candidate.address.resourceIdentity === resourceIdentity;
+  return candidate.address.resource_identity === resourceIdentity;
 }

@@ -26,7 +26,7 @@ export interface PullLoopInput {
 export async function pullLoop(
   input: PullLoopInput,
 ): Promise<Diagnostic | null> {
-  assert.ok(input.registration.runtimeIdentity);
+  assert.ok(input.registration.runtime_identity);
   assert.ok(input.api.scheduler.workPull);
   let registration = input.registration;
   while (!input.shutdown.err()) {
@@ -36,8 +36,8 @@ export async function pullLoop(
           params: {},
           query: {},
           body: {
-            resourceIdentity: registration.resourceIdentity,
-            runtimeIdentity: registration.runtimeIdentity,
+            resourceIdentity: registration.resource_identity,
+            runtimeIdentity: registration.runtime_identity,
           },
         },
         { idempotencyKey: ulid(), context: background },

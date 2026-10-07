@@ -32,33 +32,33 @@ export function instanceRecord(
   assert.ok(Number.isSafeInteger(now));
   const binding = dependencies.workerBindingOf(
     tx,
-    registration.projectId,
-    registration.resourceIdentity,
+    registration.project_id,
+    registration.resource_identity,
   );
   assert.ok(binding && !binding.tombstone);
-  const declaration = getWorkerDeclaration(binding.workerName);
+  const declaration = getWorkerDeclaration(binding.worker_name);
   assert.ok(declaration);
   const activity = dependencies.schedulerClaims.activityOf(
     tx,
-    registration.runtimeIdentity,
+    registration.runtime_identity,
     now,
   );
   if (activity.activity === InstanceActivity.Executing)
     assert.ok(activity.executionId);
   return instanceRecordSchema.parse({
-    runtimeIdentity: registration.runtimeIdentity,
-    projectId: registration.projectId,
-    resourceIdentity: registration.resourceIdentity,
-    workerName: binding.workerName,
+    runtime_identity: registration.runtime_identity,
+    project_id: registration.project_id,
+    resource_identity: registration.resource_identity,
+    worker_name: binding.worker_name,
     host: declaration.host,
     ...(declaration.host === WorkerHost.Kanthord
       ? { placement: InstancePlacement.Worker }
       : {}),
-    clientId: registration.clientId,
+    client_id: registration.client_id,
     name: registration.name,
     activity: activity.activity,
     ...(activity.activity === InstanceActivity.Executing
-      ? { executionId: activity.executionId }
+      ? { execution_id: activity.executionId }
       : {}),
     draining: false,
     registered: true,
@@ -90,12 +90,12 @@ export function listInstanceRecords(
 ): (typeof workerOperations)["instance.list"]["output"]["_output"] {
   assert.ok(tx.database.isTransaction);
   assert.ok(Number.isSafeInteger(now));
-  if (query.resourceIdentity !== undefined) {
-    assert.ok(query.projectId);
+  if (query.resource_identity !== undefined) {
+    assert.ok(query.project_id);
     const binding = dependencies.workerBindingOf(
       tx,
-      query.projectId,
-      query.resourceIdentity,
+      query.project_id,
+      query.resource_identity,
     );
     if (!binding || binding.tombstone)
       throw new OperationError(
@@ -116,7 +116,7 @@ export function listInstanceRecords(
     items,
     next_cursor:
       rows.length > query.limit
-        ? Buffer.from(items.at(-1)!.runtimeIdentity, "utf8").toString(
+        ? Buffer.from(items.at(-1)!.runtime_identity, "utf8").toString(
             "base64url",
           )
         : null,

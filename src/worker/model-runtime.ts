@@ -25,8 +25,8 @@ export function modelConnectorInput(
   return {
     credentials,
     handoverItem,
-    credentialId: setup.credentialId,
-    configuration: setup.effectiveConfiguration,
+    credentialId: setup.credential_id,
+    configuration: setup.effective_configuration,
     metadata: setup.metadata,
     signal,
   };

@@ -177,7 +177,7 @@ test("record mapping omits hosted attribution and keeps ended registration attri
     assert.equal(Object.hasOwn(hosted.claimant, "clientId"), false);
     assert.equal(Object.hasOwn(hosted.claimant, "name"), false);
     const attribution = {
-      clientId: createIdentity("client_identity"),
+      client_id: createIdentity("client_identity"),
       name: "ended worker",
     };
     const retained = executionRecord(
@@ -189,7 +189,7 @@ test("record mapping omits hosted attribution and keeps ended registration attri
       { ...row, endedAt: FIXTURE_NOW },
       FIXTURE_DEADLINE,
     );
-    assert.equal(retained.claimant.clientId, attribution.clientId);
+    assert.equal(retained.claimant.clientId, attribution.client_id);
     assert.equal(retained.claimant.name, attribution.name);
     assert.equal(retained.claimState, ClaimState.Finished);
   });

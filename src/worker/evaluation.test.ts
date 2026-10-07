@@ -26,7 +26,7 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
   ]) {
     const setup = anthropicSetup();
     const claim = {
-      executionId: setup.executionId,
+      executionId: setup.execution_id,
       nodeId: "node",
       attempt: 1,
       pinnedRevision: 1,
@@ -39,7 +39,7 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
       worker: {
         "action.request": async (input: unknown) => {
           assert.deepEqual(input, {
-            params: { executionId: claim.executionId },
+            params: { execution_id: claim.executionId },
             query: {},
             body: null,
           });
@@ -99,7 +99,7 @@ test("evaluation writes failed-verification assessments without inference and ga
   ]) {
     const setup = anthropicSetup({ repositories: [] });
     const claim = {
-      executionId: setup.executionId,
+      executionId: setup.execution_id,
       nodeId: createIdentity("node"),
       attempt: 1,
       pinnedRevision: 1,

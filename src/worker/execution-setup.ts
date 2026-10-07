@@ -36,7 +36,7 @@ export async function executionSetup(
   const nativeAgentName = dependencies.store.transaction((tx) => {
     const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
     assert.ok(row);
-    return worker.declarationOf(row.workerName)?.agentName;
+    return worker.declarationOf(row.worker_name)?.agent_name;
   });
   const layers = nativeAgentName
     ? await dependencies.agentPrompt.compose(nativeAgentName, caller.context)
@@ -45,9 +45,9 @@ export async function executionSetup(
     const now = Date.now();
     const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
     assert.ok(row);
-    const declaration = worker.declarationOf(row.workerName);
+    const declaration = worker.declarationOf(row.worker_name);
     assert.ok(declaration);
-    const agentName = declaration.agentName;
+    const agentName = declaration.agent_name;
     if (!agentName)
       throw new OperationError(
         HttpStatus.Conflict,
@@ -89,7 +89,7 @@ export async function executionSetup(
       : null;
     const view = worker.workerAgentView(
       tx,
-      row.workerName,
+      row.worker_name,
       agentName,
       entry,
       pinnedModels,
@@ -113,26 +113,26 @@ export async function executionSetup(
         const repository = dependencies.repositoryPolicyOf(tx, id);
         assert.ok(repository);
         return {
-          bindingId: repository.bindingId,
+          binding_id: repository.binding_id,
           name: repository.name,
           address: repository.address,
-          sshIdentity: sshIdentitySchema.parse(
-            dependencies.credentialMetadata(tx, repository.sshCredential)
+          ssh_identity: sshIdentitySchema.parse(
+            dependencies.credentialMetadata(tx, repository.ssh_credential)
               ?.metadata,
           ),
-          strategy: { baseBranch: repository.baseBranch },
-          projectPrompt: repository.projectPrompt,
-          working_layer: repository.workingLayer,
+          strategy: { base_branch: repository.base_branch },
+          project_prompt: repository.project_prompt,
+          working_layer: repository.working_layer,
         };
       });
     return executionSetupSchema.parse({
-      executionId: claim.executionId,
-      workerName: row.workerName,
-      agentName,
-      effectiveConfiguration: view.effective,
-      credentialId: record.id,
+      execution_id: claim.executionId,
+      worker_name: row.worker_name,
+      agent_name: agentName,
+      effective_configuration: view.effective,
+      credential_id: record.id,
       metadata: record.metadata,
-      resourceBudget: row.resourceBudget ?? declaration.resourceBudget,
+      resource_budget: row.resource_budget ?? declaration.resource_budget,
       repositories,
       prompt: { final: systemPrompt(layers, PromptConsumer.Worker) },
     });

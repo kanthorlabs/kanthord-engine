@@ -49,9 +49,9 @@ export function claimHarness(
   };
   h.dependencies.bindings.workerBindingOf = () => binding;
   h.dependencies.declarations.declarationOf = () => ({
-    declaredNodeStates: states,
-    requiredNodeFormat: Object.values(NodeFormatField),
-    resourceBudget: { wallTimeMs: WALL_TIME },
+    declared_node_states: states,
+    required_node_format: Object.values(NodeFormatField),
+    resource_budget: { wall_time_ms: WALL_TIME },
   });
   h.dependencies.transitions.claim = (
     tx,

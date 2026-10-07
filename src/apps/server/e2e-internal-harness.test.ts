@@ -338,7 +338,7 @@ test(
     });
     const pr42 = {
       kind: "pull_request" as const,
-      resourceIdentity: f.bindings.gated!.resource_identity,
+      resource_identity: f.bindings.gated!.resource_identity,
       number: 42,
     };
     f.actions.performAnswers.push(pr42);
@@ -372,27 +372,27 @@ test(
     const readyG = general.logs.find((line) => line.msg === READY)!;
     const readyR = review.logs.find((line) => line.msg === READY)!;
     const runtimes = [
-      String(readyR.runtimeIdentity),
-      String(readyG.runtimeIdentity),
+      String(readyR.runtime_identity),
+      String(readyG.runtime_identity),
     ];
     await t.test(
       "EI10.1 both workers register with their own binding",
       async () => {
-        assert.equal(readyG.workerName, GENERAL);
-        assert.equal(readyR.workerName, REVIEWER);
+        assert.equal(readyG.worker_name, GENERAL);
+        assert.equal(readyR.worker_name, REVIEWER);
         assert.equal(
-          readyG.resourceIdentity,
+          readyG.resource_identity,
           f.bindings.general!.resource_identity,
         );
         assert.equal(
-          readyR.resourceIdentity,
+          readyR.resource_identity,
           f.bindings.review!.resource_identity,
         );
         const page = await f.cli.read<
-          Page<{ runtimeIdentity: string; registered: boolean }>
+          Page<{ runtime_identity: string; registered: boolean }>
         >(["worker", "instance", "list", "--project", f.projectId]);
         assert.deepEqual(
-          page.items.map((item) => item.runtimeIdentity).sort(),
+          page.items.map((item) => item.runtime_identity).sort(),
           [...runtimes].sort(),
         );
         assert.ok(page.items.every((item) => item.registered));
@@ -645,8 +645,8 @@ test(
         );
         assert.ok(result && result.role === TOOL_RESULT && !result.isError);
         assert.deepEqual(Object.keys(result.details as object).sort(), [
-          "assetId",
-          "evidenceId",
+          "asset_id",
+          "evidence_id",
           "uri",
         ]);
         assert.match(

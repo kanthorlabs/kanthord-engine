@@ -26,27 +26,27 @@ const NATIVE = "general@1";
 const PLACEMENT = "worker";
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const BINDING = {
-  bindingId: "binding",
+  binding_id: "binding",
   name: "test_worker",
-  projectName: "test_project",
+  project_name: "test_project",
   revision: 1,
-  workerName: "general@1",
-  instanceCount: 3,
-  resourceBudget: null,
+  worker_name: "general@1",
+  instance_count: 3,
+  resource_budget: null,
   entries: [],
   tombstone: false,
 };
 
 test("instance output enforces host, registration and activity field presence", () => {
   const record = {
-    runtimeIdentity: createIdentity("worker_instance"),
-    projectId: PROJECT,
-    resourceIdentity: RESOURCE,
-    workerName: NATIVE,
+    runtime_identity: createIdentity("worker_instance"),
+    project_id: PROJECT,
+    resource_identity: RESOURCE,
+    worker_name: NATIVE,
     host: WorkerHost.Kanthord,
     placement: PLACEMENT,
     registered: true,
-    clientId: createIdentity("client_identity"),
+    client_id: createIdentity("client_identity"),
     name: "worker-a",
     activity: InstanceActivity.Idle,
     draining: false,
@@ -55,11 +55,11 @@ test("instance output enforces host, registration and activity field presence", 
   for (const change of [
     { placement: undefined },
     { host: WorkerHost.ExternalHarness },
-    { clientId: undefined },
+    { client_id: undefined },
     { name: undefined },
     { registered: false },
     { activity: InstanceActivity.Executing },
-    { executionId: createIdentity("execution") },
+    { execution_id: createIdentity("execution") },
   ])
     assert.equal(
       instanceRecordSchema.safeParse({ ...record, ...change }).success,
@@ -70,14 +70,14 @@ test("instance output enforces host, registration and activity field presence", 
     host: WorkerHost.ExternalHarness,
     placement: undefined,
     activity: InstanceActivity.Executing,
-    executionId: createIdentity("execution"),
+    execution_id: createIdentity("execution"),
   };
   assert.equal(instanceRecordSchema.safeParse(external).success, true);
   assert.equal(
     instanceRecordSchema.safeParse({
       ...record,
       registered: false,
-      clientId: undefined,
+      client_id: undefined,
       name: undefined,
     }).success,
     true,
@@ -97,9 +97,9 @@ test("instance records distinguish native/external placement and pure Scheduler 
     const registration = insertRegistration(
       tx,
       {
-        projectId: PROJECT,
-        resourceIdentity: RESOURCE,
-        clientId: createIdentity("client_identity"),
+        project_id: PROJECT,
+        resource_identity: RESOURCE,
+        client_id: createIdentity("client_identity"),
         name: "worker-a",
       },
       NOW,
@@ -111,7 +111,7 @@ test("instance records distinguish native/external placement and pure Scheduler 
         const record = instanceRecord(
           tx,
           {
-            workerBindingOf: () => ({ ...BINDING, workerName }),
+            workerBindingOf: () => ({ ...BINDING, worker_name: workerName }),
             schedulerClaims: {
               requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
               runningExecutionOfRuntime: () => {
@@ -119,7 +119,7 @@ test("instance records distinguish native/external placement and pure Scheduler 
               },
               activityOf: (transaction, runtimeIdentity, now) => {
                 assert.equal(transaction, tx);
-                assert.equal(runtimeIdentity, registration.runtimeIdentity);
+                assert.equal(runtimeIdentity, registration.runtime_identity);
                 assert.equal(now, NOW);
                 return { activity, executionId };
               },
@@ -128,12 +128,12 @@ test("instance records distinguish native/external placement and pure Scheduler 
           registration,
           NOW,
         );
-        assert.equal(record.runtimeIdentity, registration.runtimeIdentity);
+        assert.equal(record.runtime_identity, registration.runtime_identity);
         assert.equal(record.activity, activity);
         assert.equal(record.registered, true);
         assert.equal(record.draining, false);
         assert.equal(
-          "executionId" in record,
+          "execution_id" in record,
           activity === InstanceActivity.Executing,
         );
         const native = workerName === NATIVE;
@@ -165,9 +165,9 @@ test("instance inventory pages live rows descending with both filters and canoni
         insertRegistration(
           tx,
           {
-            projectId: PROJECT,
-            resourceIdentity,
-            clientId: createIdentity("client_identity"),
+            project_id: PROJECT,
+            resource_identity: resourceIdentity,
+            client_id: createIdentity("client_identity"),
             name: "worker",
           },
           NOW,
@@ -176,23 +176,23 @@ test("instance inventory pages live rows descending with both filters and canoni
     const otherProject = insertRegistration(
       tx,
       {
-        projectId: createIdentity("project"),
-        resourceIdentity: RESOURCE,
-        clientId: createIdentity("client_identity"),
+        project_id: createIdentity("project"),
+        resource_identity: RESOURCE,
+        client_id: createIdentity("client_identity"),
         name: "other",
       },
       NOW,
     );
     const limit = 1;
-    const query = { projectId: PROJECT, resourceIdentity: RESOURCE, limit };
+    const query = { project_id: PROJECT, resource_identity: RESOURCE, limit };
     const first = listInstanceRecords(tx, dependencies, query, NOW);
     const expected = rows
-      .filter((row) => row.resourceIdentity === RESOURCE)
-      .map((row) => row.runtimeIdentity)
+      .filter((row) => row.resource_identity === RESOURCE)
+      .map((row) => row.runtime_identity)
       .sort()
       .reverse();
     assert.deepEqual(
-      first.items.map((row) => row.runtimeIdentity),
+      first.items.map((row) => row.runtime_identity),
       expected.slice(0, limit),
     );
     assert.ok(first.next_cursor);
@@ -203,7 +203,7 @@ test("instance inventory pages live rows descending with both filters and canoni
       NOW,
     );
     assert.deepEqual(
-      second.items.map((row) => row.runtimeIdentity),
+      second.items.map((row) => row.runtime_identity),
       expected.slice(limit),
     );
     assert.equal(second.next_cursor, null);
@@ -212,12 +212,12 @@ test("instance inventory pages live rows descending with both filters and canoni
       listInstanceRecords(
         tx,
         dependencies,
-        { projectId: PROJECT, limit: allLimit },
+        { project_id: PROJECT, limit: allLimit },
         NOW,
       ).items.length,
       rows.length,
     );
-    endRegistration(tx, otherProject.runtimeIdentity, NOW);
+    endRegistration(tx, otherProject.runtime_identity, NOW);
     assert.equal(
       listInstanceRecords(tx, dependencies, { limit: allLimit }, NOW).items
         .length,
@@ -245,7 +245,7 @@ test("instance inventory pages live rows descending with both filters and canoni
     assert.equal(
       workerOperations["instance.list"].input.safeParse({
         params: {},
-        query: { resourceIdentity: RESOURCE },
+        query: { resource_identity: RESOURCE },
         body: null,
       }).success,
       false,

@@ -167,12 +167,12 @@ test("execution proof precedes reservation and replay and supplies only proven c
         findByClient: () =>
           registered
             ? {
-                runtimeIdentity: row.runtimeIdentity,
-                registeredAt: now,
-                clientId: identity.clientId,
+                runtime_identity: row.runtimeIdentity,
+                registered_at: now,
+                client_id: identity.clientId,
                 name: identity.name,
-                projectId: identity.projectId,
-                resourceIdentity: identity.resourceIdentity,
+                project_id: identity.projectId,
+                resource_identity: identity.resourceIdentity,
               }
             : undefined,
         heartbeat: () => {},

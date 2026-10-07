@@ -31,7 +31,7 @@ const keys = deriveHandoverKeys(options.clientSecret);
 const aad = handoverAad(options.executionId, options.runtimeIdentity);
 try {
   const handover = await client.handover(
-    { params: {}, query: {}, body: { executionId: options.executionId } },
+    { params: {}, query: {}, body: { execution_id: options.executionId } },
     { idempotencyKey: ulid() },
   );
   assert.ok(handover.type === OperationResultType.Completed);
@@ -45,7 +45,7 @@ try {
   let reportBytes: number | undefined;
   const view = executionCredentialStore(payload, async (report) => {
     const body = {
-      executionId: options.executionId,
+      execution_id: options.executionId,
       ...sealEnvelope(keys.report, aad, report),
     };
     reportBytes = Buffer.byteLength(JSON.stringify(body));

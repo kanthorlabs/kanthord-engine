@@ -49,7 +49,7 @@ async function finishObjective(
       );
     }
     await state.input.transport.proveSshIdentity(
-      state.input.setup.repositories[0]!.sshIdentity,
+      state.input.setup.repositories[0]!.ssh_identity,
       cleanup,
       remaining(),
     );
@@ -68,7 +68,7 @@ async function finishObjective(
             kind: "repository",
             address: {
               kind: "repository",
-              bindingId: state.input.setup.repositories[0]!.bindingId,
+              bindingId: state.input.setup.repositories[0]!.binding_id,
               commit: head,
             },
           },
@@ -200,7 +200,7 @@ export interface StepsState {
 export function prepareStepsWorkspace(input: StepsInput, run: ExecutionRun) {
   const repository = input.setup.repositories[0];
   assert.ok(repository);
-  assert.equal(input.claim.executionId, input.setup.executionId);
+  assert.equal(input.claim.executionId, input.setup.execution_id);
   return input.workspaces.prepareObjective({
     objectiveId: input.claim.nodeId,
     repository,
@@ -208,7 +208,7 @@ export function prepareStepsWorkspace(input: StepsInput, run: ExecutionRun) {
     context: run.operationContext,
     deadlineMs:
       Math.min(
-        input.claim.createdAt + input.setup.resourceBudget.wallTimeMs,
+        input.claim.createdAt + input.setup.resource_budget.wall_time_ms,
         input.claim.expiredAt,
       ) - Date.now(),
   });
@@ -228,7 +228,7 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
     commands: task.content.verifications,
     testedInput: {
       kind: "repository",
-      bindingId: state.input.setup.repositories[0]!.bindingId,
+      bindingId: state.input.setup.repositories[0]!.binding_id,
       commit: state.head,
     },
     deadline: state.agent.budget.wallDeadline(),

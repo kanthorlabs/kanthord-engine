@@ -122,10 +122,10 @@ function nativeAgent(
 export async function openNativeAgent(
   input: NativeAgentInput,
 ): Promise<NativeAgent> {
-  assert.equal(input.claim.executionId, input.setup.executionId);
+  assert.equal(input.claim.executionId, input.setup.execution_id);
   const budget = new ExecutionBudget({
     ...input.claim,
-    resourceBudget: input.setup.resourceBudget,
+    resourceBudget: input.setup.resource_budget,
   });
   const context = budget.agentContext(input.context);
   const bridge = abortSignal(context);
@@ -140,7 +140,7 @@ export async function openNativeAgent(
           await resolveRepositoryLayer({
             repository: {
               name: repository.name,
-              project_prompt: repository.projectPrompt,
+              project_prompt: repository.project_prompt,
               working_layer: repository.working_layer,
             },
             workspace:
@@ -165,11 +165,11 @@ export async function openNativeAgent(
       cwd: input.workspace,
       modelRuntime: runtime,
       model,
-      thinkingLevel: input.setup.effectiveConfiguration.reasoning_effort,
+      thinkingLevel: input.setup.effective_configuration.reasoning_effort,
       systemPrompt: input.setup.prompt.final,
       ...sessionTools(
         pi,
-        input.setup.agentName,
+        input.setup.agent_name,
         input.workspace,
         budget,
         input.hostTools,

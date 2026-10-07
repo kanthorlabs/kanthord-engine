@@ -18,10 +18,10 @@ import {
   isResultClass,
 } from "./action-classify.ts";
 
-const ref = { key: "repo.pull_request", bindingId: "binding" };
+const ref = { key: "repo.pull_request", binding_id: "binding" };
 const address = {
   kind: PlatformAddressKind.PullRequest,
-  resourceIdentity: "repository:github:owner/repo",
+  resource_identity: "repository:github:owner/repo",
   number: 42,
 };
 const refusal = {

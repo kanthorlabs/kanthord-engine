@@ -287,12 +287,12 @@ async function setup(t: TestContext, short = false) {
         ),
       };
   const general = (
-    await read<{ runtimeIdentity: string }>(["worker", "register"], G)
-  ).runtimeIdentity;
+    await read<{ runtime_identity: string }>(["worker", "register"], G)
+  ).runtime_identity;
   const reviewer = short
     ? NO_REVIEWER
-    : (await read<{ runtimeIdentity: string }>(["worker", "register"], R))
-        .runtimeIdentity;
+    : (await read<{ runtime_identity: string }>(["worker", "register"], R))
+        .runtime_identity;
   const generalPull = {
     resourceIdentity: "worker:kanthord:general",
     runtimeIdentity: general,

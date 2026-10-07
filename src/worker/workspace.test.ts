@@ -95,15 +95,15 @@ test("workspace preparation refreshes objective branches and creates disposable 
   const workspace = WorkspaceRoot.open(state);
   const objectiveId = createIdentity("node");
   const repository = {
-    bindingId: createIdentity("binding"),
+    binding_id: createIdentity("binding"),
     address: origin,
-    sshIdentity: {
+    ssh_identity: {
       host: "github.com",
       hostname: "github.com",
       port: 22,
       identity_file: "~/.ssh/id_test",
     },
-    strategy: { baseBranch: "main" },
+    strategy: { base_branch: "main" },
   };
   const common = { transport, context: background, deadlineMs: 10000 };
   const first = await workspace.prepareObjective({
@@ -143,7 +143,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
   });
   assert.equal(snapshot.head, pushed);
   workspace.release(snapshot.directory, WorkspaceKind.Execution);
-  const another = { ...repository, bindingId: createIdentity("binding") };
+  const another = { ...repository, binding_id: createIdentity("binding") };
   const initiative = await workspace.prepareInitiative({
     ...common,
     executionId: createIdentity("execution"),
@@ -151,9 +151,9 @@ test("workspace preparation refreshes objective branches and creates disposable 
   });
   assert.deepEqual(
     initiative.testedInput,
-    [repository, another].map(({ bindingId }) => ({
+    [repository, another].map(({ binding_id }) => ({
       kind: "repository",
-      bindingId,
+      bindingId: binding_id,
       commit: base,
     })),
   );
@@ -197,15 +197,15 @@ test("a drifted SSH identity stops every workspace preparation before its git op
     fetchAndCheckout: async () => assert.fail("The fetch must not run."),
   };
   const repository = {
-    bindingId: createIdentity("binding"),
+    binding_id: createIdentity("binding"),
     address: "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
-    sshIdentity: {
+    ssh_identity: {
       host: "kanthorlabs.github.com",
       hostname: "ssh.github.com",
       port: 443,
       identity_file: "~/.ssh/id_kanthorlabs",
     },
-    strategy: { baseBranch: "main" },
+    strategy: { base_branch: "main" },
   };
   const common = {
     transport: refusing,
@@ -237,5 +237,5 @@ test("a drifted SSH identity stops every workspace preparation before its git op
     }),
     (error) => error === drift,
   );
-  assert.deepEqual(proved, Array(3).fill(repository.sshIdentity.host));
+  assert.deepEqual(proved, Array(3).fill(repository.ssh_identity.host));
 });

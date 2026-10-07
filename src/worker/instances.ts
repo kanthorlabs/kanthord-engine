@@ -7,8 +7,8 @@ import type { Registration, VerifiedClient } from "./contract.ts";
 export const WORKER_INSTANCE_PREFIX = "worker_instance";
 const NO_ROWS = 0;
 export interface InstanceRow extends Registration {
-  registeredAt: number;
-  endedAt: number | null;
+  registered_at: number;
+  ended_at: number | null;
 }
 interface StoredRow {
   id: string;
@@ -24,13 +24,13 @@ function row(value: StoredRow): InstanceRow {
   assert.ok(value.id.startsWith(`${WORKER_INSTANCE_PREFIX}_`));
   assert.ok(Number.isSafeInteger(value.registered_at));
   return {
-    runtimeIdentity: value.id,
-    projectId: value.project_id,
-    resourceIdentity: value.resource_identity,
-    clientId: value.client_id,
+    runtime_identity: value.id,
+    project_id: value.project_id,
+    resource_identity: value.resource_identity,
+    client_id: value.client_id,
     name: value.client_name,
-    registeredAt: value.registered_at,
-    endedAt: value.ended_at,
+    registered_at: value.registered_at,
+    ended_at: value.ended_at,
   };
 }
 
@@ -103,13 +103,18 @@ export function insertRegistration(
     )
     .run(
       runtimeIdentity,
-      client.projectId,
-      client.resourceIdentity,
-      client.clientId,
+      client.project_id,
+      client.resource_identity,
+      client.client_id,
       client.name,
       now,
     );
-  return { ...client, runtimeIdentity, registeredAt: now, endedAt: null };
+  return {
+    ...client,
+    runtime_identity: runtimeIdentity,
+    registered_at: now,
+    ended_at: null,
+  };
 }
 
 export function endRegistration(
@@ -160,8 +165,8 @@ export function reopenRegistration(
 export function listLive(
   tx: Transaction,
   filter: {
-    projectId?: string;
-    resourceIdentity?: string;
+    project_id?: string;
+    resource_identity?: string;
     cursor?: string;
     limit: number;
   },
@@ -170,13 +175,13 @@ export function listLive(
   assert.ok(Number.isSafeInteger(filter.limit) && filter.limit > NO_ROWS);
   const clauses = ["ended_at IS NULL"];
   const values: SQLInputValue[] = [];
-  if (filter.projectId !== undefined) {
+  if (filter.project_id !== undefined) {
     clauses.push("project_id = ?");
-    values.push(filter.projectId);
+    values.push(filter.project_id);
   }
-  if (filter.resourceIdentity !== undefined) {
+  if (filter.resource_identity !== undefined) {
     clauses.push("resource_identity = ?");
-    values.push(filter.resourceIdentity);
+    values.push(filter.resource_identity);
   }
   if (filter.cursor !== undefined) {
     clauses.push("id < ?");

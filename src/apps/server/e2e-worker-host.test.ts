@@ -224,8 +224,8 @@ test(
         const refused = results[1]!;
         assert.ok(success.role === TOOL_RESULT && !success.isError);
         assert.deepEqual(Object.keys(success.details as object).sort(), [
-          "assetId",
-          "evidenceId",
+          "asset_id",
+          "evidence_id",
           "uri",
         ]);
         assert.match(
@@ -328,12 +328,14 @@ async function assertLive(
   );
   assert.equal(claim.claimState, ClaimState.Running);
   const list = await setup.read<{
-    items: { runtimeIdentity: string; registered: boolean }[];
+    items: { runtime_identity: string; registered: boolean }[];
   }>(["worker", "instance", "list", "--project", setup.projectId]);
-  const identity = logs.find((record) => record.msg === READY)!.runtimeIdentity;
+  const identity = logs.find(
+    (record) => record.msg === READY,
+  )!.runtime_identity;
   assert.ok(
     list.items.some(
-      (item) => item.runtimeIdentity === identity && item.registered,
+      (item) => item.runtime_identity === identity && item.registered,
     ),
   );
 }

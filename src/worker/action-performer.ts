@@ -138,7 +138,7 @@ export class ActionPerformer {
               ? action.reservation.held
               : await this.dispatch(caller, claim, action),
           );
-        return { toolName: ACTION_REQUEST_TOOL_NAME, items };
+        return { tool_name: ACTION_REQUEST_TOOL_NAME, items };
       } finally {
         for (const action of pending) {
           if ("owner" in action.reservation)
@@ -168,7 +168,10 @@ export class ActionPerformer {
       key: {
         nodeId: claim.nodeId,
         attempt: claim.attempt,
-        action: { key: entry.action.key, bindingId: entry.action.bindingId },
+        action: {
+          key: entry.action.key,
+          binding_id: entry.action.bindingId,
+        },
       },
     }));
     return prepared.map((action) => ({

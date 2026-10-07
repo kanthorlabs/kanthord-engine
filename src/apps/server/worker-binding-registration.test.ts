@@ -84,7 +84,7 @@ test("binding availability changes end real registrations atomically and count r
   version = enabled.data.binding_set_version;
   const next = await a.register(INPUT);
   assert.ok(next.type === OperationResultType.Completed);
-  assert.notEqual(next.data.runtimeIdentity, first.data.runtimeIdentity);
+  assert.notEqual(next.data.runtime_identity, first.data.runtime_identity);
   const removed = await write(null);
   assert.ok(removed.type === OperationResultType.Completed);
   assert.equal(f.worker.registrations.findByClient(clientA), undefined);

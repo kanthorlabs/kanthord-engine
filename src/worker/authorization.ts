@@ -32,15 +32,15 @@ export function authorizeModelInference(
   const row = dependencies.workerBindingRowOf(tx, execution.worker_binding_id);
   if (
     !row ||
-    row.projectId !== execution.project_id ||
-    row.projectId !== identity.projectId ||
-    row.resourceIdentity !== execution.resource_identity ||
-    row.resourceIdentity !== identity.resourceIdentity
+    row.project_id !== execution.project_id ||
+    row.project_id !== identity.projectId ||
+    row.resource_identity !== execution.resource_identity ||
+    row.resource_identity !== identity.resourceIdentity
   )
     refused(AuthorizationRefusal.BindingMismatch);
   if (row.tombstone) refused(AuthorizationRefusal.BindingRemoved);
   if (row.disabled) refused(AuthorizationRefusal.BindingDisabled);
-  const agent = worker.declarationOf(row.workerName)?.agentName;
+  const agent = worker.declarationOf(row.worker_name)?.agent_name;
   if (!agent) refused(AuthorizationRefusal.NoNativeAgent);
   const selected = row.entries.find((item) => item.agent === agent);
   const entry = selected
@@ -50,7 +50,7 @@ export function authorizeModelInference(
         reasoning_effort: selected.reasoning_effort,
       }
     : null;
-  const view = worker.workerAgentView(tx, row.workerName, agent, entry);
+  const view = worker.workerAgentView(tx, row.worker_name, agent, entry);
   assert.ok(view);
   if (!view.valid) {
     const issue = view.issues[0];

@@ -13,12 +13,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: runtimeIdentity
+      - name: runtime_identity
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/worker.instance.resume.Input/properties/params/prop\
-            erties/runtimeIdentity"
+            erties/runtime_identity"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     responses:
       "200":
@@ -55,7 +55,7 @@ components:
         params:
           type: object
           properties:
-            runtimeIdentity:
+            runtime_identity:
               type: string
               minLength: 42
               maxLength: 42
@@ -63,7 +63,7 @@ components:
               description: worker_instance_ followed by a canonical 26-character uppercase
                 ULID.
           required:
-            - runtimeIdentity
+            - runtime_identity
           additionalProperties: false
         query:
           type: object
@@ -79,7 +79,7 @@ components:
     worker.instance.resume.Output:
       type: object
       properties:
-        runtimeIdentity:
+        runtime_identity:
           type: string
           minLength: 42
           maxLength: 42
@@ -89,6 +89,6 @@ components:
           type: boolean
           const: true
       required:
-        - runtimeIdentity
+        - runtime_identity
         - registered
       additionalProperties: false

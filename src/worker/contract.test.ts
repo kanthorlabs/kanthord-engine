@@ -13,7 +13,7 @@ import {
 } from "./contract.ts";
 
 const ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-const action = { key: "gated.pull_request", bindingId: `binding_${ID}` };
+const action = { key: "gated.pull_request", binding_id: `binding_${ID}` };
 const refusal = {
   class: RefusalClass.FinalRefusal,
   code: "repository.platform.github.final_refusal",
@@ -27,7 +27,7 @@ test("action result accepts all four classes and retains Mission evidence", () =
     {
       kind: ActionResultKind.AwaitingPrerequisite,
       action,
-      prerequisite: { key: "earlier", evidenceId: `evidence_${ID}` },
+      prerequisite: { key: "earlier", evidence_id: `evidence_${ID}` },
     },
     { kind: ActionResultKind.FailedBeforeEffect, action, refusal },
     {
@@ -38,13 +38,13 @@ test("action result accepts all four classes and retains Mission evidence", () =
   ];
   assert.deepEqual(
     actionRequestResultSchema.parse({
-      toolName: ACTION_REQUEST_TOOL_NAME,
+      tool_name: ACTION_REQUEST_TOOL_NAME,
       items,
     }).items,
     items,
   );
   assert.equal(
-    actionRequestResultSchema.safeParse({ toolName: "other", items }).success,
+    actionRequestResultSchema.safeParse({ tool_name: "other", items }).success,
     false,
   );
 });
@@ -68,7 +68,7 @@ test("platform addresses require their complete kind-specific operands", () => {
   const resourceIdentity = "repository:github:owner/gated";
   const push = {
     kind: PlatformAddressKind.BranchPush,
-    resourceIdentity,
+    resource_identity: resourceIdentity,
     branch: "main",
   };
   assert.equal(platformAddressSchema.safeParse(push).success, false);
@@ -79,7 +79,7 @@ test("platform addresses require their complete kind-specific operands", () => {
   assert.equal(
     platformAddressSchema.safeParse({
       kind: PlatformAddressKind.PullRequest,
-      resourceIdentity,
+      resource_identity: resourceIdentity,
       number: 42,
     }).success,
     true,
@@ -87,7 +87,7 @@ test("platform addresses require their complete kind-specific operands", () => {
   assert.equal(
     platformAddressSchema.safeParse({
       kind: PlatformAddressKind.PullRequest,
-      resourceIdentity,
+      resource_identity: resourceIdentity,
       number: Number.MAX_SAFE_INTEGER + 1,
     }).success,
     false,

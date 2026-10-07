@@ -90,7 +90,7 @@ function fixture(t: TestContext, request = false) {
             request
               ? {
                   kind: PlatformAddressKind.PullRequest,
-                  resourceIdentity: "repository:github:owner/repo",
+                  resource_identity: "repository:github:owner/repo",
                   number: FIRST_ATTEMPT,
                 }
               : {

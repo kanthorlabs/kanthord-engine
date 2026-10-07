@@ -76,7 +76,7 @@ test("native session isolates filesystem discovery, settings and session persist
     credentials,
     setup,
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     signal: new AbortController().signal,

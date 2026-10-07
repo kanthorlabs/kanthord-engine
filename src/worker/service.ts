@@ -156,7 +156,7 @@ export class WorkerService implements Service {
     if (!this.startTask) {
       const live = this.dependencies.store.transaction(readAllLive);
       for (let index = 0; index < live.length; index++)
-        this.heartbeatClock.set(live[index]!.runtimeIdentity);
+        this.heartbeatClock.set(live[index]!.runtime_identity);
       this.startTask = Promise.resolve(null);
     }
     this.started = true;
@@ -219,7 +219,7 @@ export class WorkerService implements Service {
         endRegistration(tx, expired[index]!, now);
       return this.heartbeatClock
         .identities()
-        .filter((identity) => readRow(tx, identity)?.endedAt !== null);
+        .filter((identity) => readRow(tx, identity)?.ended_at !== null);
     });
     for (let index = 0; index < ended.length; index++)
       this.heartbeatClock.drop(ended[index]!);
@@ -246,22 +246,22 @@ export class WorkerService implements Service {
     if (!registration) return false;
     const binding = this.dependencies.workerBindingOf(
       tx,
-      registration.projectId,
-      registration.resourceIdentity,
+      registration.project_id,
+      registration.resource_identity,
     );
-    if (!binding || binding.tombstone || binding.instanceCount === NO_ITEMS)
+    if (!binding || binding.tombstone || binding.instance_count === NO_ITEMS)
       return false;
-    const declaration = getWorkerDeclaration(binding.workerName);
+    const declaration = getWorkerDeclaration(binding.worker_name);
     assert.ok(declaration);
     if (declaration.host === WorkerHost.ExternalHarness) return true;
-    const agents = agentsOfWorker(binding.workerName);
+    const agents = agentsOfWorker(binding.worker_name);
     assert.ok(agents.length > NO_ITEMS);
     for (let index = 0; index < agents.length; index++) {
       const agent = agents[index]!;
       const entry = binding.entries.find((item) => item.agent === agent);
       const view = this.workerAgentView(
         tx,
-        binding.workerName,
+        binding.worker_name,
         agent,
         entry ?? null,
       );
@@ -280,24 +280,22 @@ export class WorkerService implements Service {
   }> {
     assert.ok(tx.database.isTransaction);
     assert.equal(tx.database, this.dependencies.store.database);
-    return readAllLive(tx).map(
-      ({ projectId, resourceIdentity, runtimeIdentity }) => ({
-        projectId,
-        resourceIdentity,
-        runtimeIdentity,
-        capability: REGISTRATION_CAPABILITY,
-        check: async (context) => {
-          throwIfCancelled(context);
-          const window = this.dependencies.config.heartbeat_window;
-          assert.ok(Number.isSafeInteger(window) && window > NO_ITEMS);
-          assert.ok(runtimeIdentity);
-          const age = this.heartbeatClock.ageMs(runtimeIdentity);
-          return age !== null && age <= window * MILLISECONDS_PER_SECOND
-            ? ResourceStatus.Healthy
-            : ResourceStatus.Unhealthy;
-        },
-      }),
-    );
+    return readAllLive(tx).map((row) => ({
+      projectId: row.project_id,
+      resourceIdentity: row.resource_identity,
+      runtimeIdentity: row.runtime_identity,
+      capability: REGISTRATION_CAPABILITY,
+      check: async (context) => {
+        throwIfCancelled(context);
+        const window = this.dependencies.config.heartbeat_window;
+        assert.ok(Number.isSafeInteger(window) && window > NO_ITEMS);
+        assert.ok(row.runtime_identity);
+        const age = this.heartbeatClock.ageMs(row.runtime_identity);
+        return age !== null && age <= window * MILLISECONDS_PER_SECOND
+          ? ResourceStatus.Healthy
+          : ResourceStatus.Unhealthy;
+      },
+    }));
   }
 
   validateEntry(
@@ -326,7 +324,7 @@ export class WorkerService implements Service {
       assert.equal(binding.tombstone, false);
       entries.push({
         scope: HealthScope.Project,
-        project: binding.projectName,
+        project: binding.project_name,
         name: `${encodeURIComponent(binding.name)}/${encodeURIComponent(item.runtimeIdentity)}`,
         target: `${REGISTRATION_TARGET_KIND}:${item.runtimeIdentity}`,
         capability: item.capability,
@@ -364,7 +362,8 @@ export class WorkerService implements Service {
     const declaration = getWorkerDeclaration(workerName) ?? null;
     assert.ok(declaration === null || declaration.name === workerName);
     assert.ok(
-      declaration === null || declaration.resourceBudget.wallTimeMs > NO_ITEMS,
+      declaration === null ||
+        declaration.resource_budget.wall_time_ms > NO_ITEMS,
     );
     return declaration;
   }
@@ -379,7 +378,7 @@ export class WorkerService implements Service {
     );
     registry.register(workerOperations["catalog.get"], ({ params }, caller) =>
       caller.commit(() => {
-        const declaration = this.declarationOf(params.workerName);
+        const declaration = this.declarationOf(params.worker_name);
         if (declaration === null)
           throw new OperationError(
             HttpStatus.NotFound,
@@ -405,7 +404,7 @@ export class WorkerService implements Service {
       ({ params }, caller) => {
         const identity = caller.identity;
         assert.ok(isMachineIdentity(identity));
-        const { runtimeIdentity } = params;
+        const { runtime_identity: runtimeIdentity } = params;
         const result = caller.commit((tx) => {
           const now = Date.now();
           const row = this.registrations.liveRegistrationOf(
@@ -414,9 +413,9 @@ export class WorkerService implements Service {
           );
           if (
             !row ||
-            row.clientId !== identity.clientId ||
-            row.projectId !== identity.projectId ||
-            row.resourceIdentity !== identity.resourceIdentity
+            row.client_id !== identity.clientId ||
+            row.project_id !== identity.projectId ||
+            row.resource_identity !== identity.resourceIdentity
           )
             throw new OperationError(
               HttpStatus.NotFound,
@@ -424,7 +423,10 @@ export class WorkerService implements Service {
               "Instance not found.",
             );
           this.registrations.deregister(tx, runtimeIdentity, now);
-          return { runtimeIdentity, registered: false as const };
+          return {
+            runtime_identity: runtimeIdentity,
+            registered: false as const,
+          };
         });
         this.heartbeatClock.drop(runtimeIdentity);
         return result;
@@ -444,7 +446,7 @@ export class WorkerService implements Service {
       caller.commit((tx) => {
         const row = this.registrations.liveRegistrationOf(
           tx,
-          params.runtimeIdentity,
+          params.runtime_identity,
         );
         if (!row)
           throw new OperationError(
@@ -514,7 +516,7 @@ export class WorkerService implements Service {
     registry.register(
       workerOperations["instance.resume"],
       ({ params }, caller) => {
-        const { runtimeIdentity } = params;
+        const { runtime_identity: runtimeIdentity } = params;
         let reopened = false;
         const result = caller.commit((tx) => {
           reopened = resumeRegistration(
@@ -524,7 +526,10 @@ export class WorkerService implements Service {
             this.dependencies.schedulerClaims,
             this.dependencies.workerBindingOf,
           );
-          return { runtimeIdentity, registered: true as const };
+          return {
+            runtime_identity: runtimeIdentity,
+            registered: true as const,
+          };
         });
         if (reopened) this.heartbeatClock.set(runtimeIdentity);
         return result;
@@ -545,8 +550,8 @@ export class WorkerService implements Service {
           const result = workerOperations.register.output.safeParse(recorded);
           return (
             result.success &&
-            worker.findByClient(identity.clientId)?.runtimeIdentity ===
-              result.data.runtimeIdentity
+            worker.findByClient(identity.clientId)?.runtime_identity ===
+              result.data.runtime_identity
           );
         },
       },
@@ -561,28 +566,33 @@ export class WorkerService implements Service {
         const result = caller.commit((transaction) => {
           const registration = worker.register(
             transaction,
-            identity,
+            {
+              client_id: identity.clientId,
+              name: identity.name,
+              resource_identity: identity.resourceIdentity,
+              project_id: identity.projectId,
+            },
             Date.now(),
           );
-          assert.equal(registration.clientId, identity.clientId);
+          assert.equal(registration.client_id, identity.clientId);
           assert.equal(registration.name, identity.name);
-          assert.equal(registration.projectId, identity.projectId);
+          assert.equal(registration.project_id, identity.projectId);
           assert.equal(
-            registration.resourceIdentity,
+            registration.resource_identity,
             identity.resourceIdentity,
           );
-          const runtimeIdentity = registration.runtimeIdentity;
+          const runtimeIdentity = registration.runtime_identity;
           assert.ok(
             runtimeIdentity,
             "Registration must return a runtime identity.",
           );
           return {
-            runtimeIdentity,
-            resourceIdentity: identity.resourceIdentity,
-            workerName: registration.workerName,
+            runtime_identity: runtimeIdentity,
+            resource_identity: identity.resourceIdentity,
+            worker_name: registration.worker_name,
           };
         });
-        this.heartbeatClock.set(result.runtimeIdentity);
+        this.heartbeatClock.set(result.runtime_identity);
         return result;
       },
     );

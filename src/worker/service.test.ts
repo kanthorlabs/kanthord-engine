@@ -102,13 +102,13 @@ const fakeCollaborations = {
     },
   },
   workerBindingOf: () => ({
-    bindingId: "binding",
+    binding_id: "binding",
     name: "test_worker/%",
-    projectName: "test_project",
+    project_name: "test_project",
     revision: 1,
-    workerName: "claude@1",
-    instanceCount: 1,
-    resourceBudget: null,
+    worker_name: "claude@1",
+    instance_count: 1,
+    resource_budget: null,
     entries: [],
     tombstone: false,
   }),
@@ -166,7 +166,7 @@ test("action handler forwards only the proved claim and caller before its commit
     "jwt",
     execution.runtimeIdentity,
   );
-  const answer = { toolName: ACTION_REQUEST_TOOL_NAME, items: [] };
+  const answer = { tool_name: ACTION_REQUEST_TOOL_NAME, items: [] };
   const perform = t.mock.method(
     ActionPerformer.prototype,
     "perform",
@@ -180,7 +180,7 @@ test("action handler forwards only the proved claim and caller before its commit
     .get(workerOperations["action.request"].id)
     .handler(
       {
-        params: { executionId: createIdentity("execution") },
+        params: { execution_id: createIdentity("execution") },
         query: {},
         body: null,
       },
@@ -196,10 +196,16 @@ test("action handler forwards only the proved claim and caller before its commit
 });
 
 const client = {
-  clientId: "client",
+  client_id: "client",
   name: "worker",
-  resourceIdentity: "worker:kanthord:binding",
-  projectId: "project",
+  resource_identity: "worker:kanthord:binding",
+  project_id: "project",
+};
+const clientIdentity = {
+  clientId: client.client_id,
+  name: client.name,
+  resourceIdentity: client.resource_identity,
+  projectId: client.project_id,
 };
 
 test("Worker owns registrations, declares its handler, and joins lifecycle calls", async (t) => {
@@ -237,8 +243,8 @@ test("Worker owns registrations, declares its handler, and joins lifecycle calls
     );
     assert.deepEqual(
       {
-        ...worker.registrations.findByClient(client.clientId),
-        workerName: registration.workerName,
+        ...worker.registrations.findByClient(client.client_id),
+        worker_name: registration.worker_name,
       },
       registration,
     );
@@ -249,13 +255,16 @@ test("Worker owns registrations, declares its handler, and joins lifecycle calls
       registration,
     );
     store.transaction((tx) =>
-      endRegistration(tx, registration.runtimeIdentity, Date.now()),
+      endRegistration(tx, registration.runtime_identity, Date.now()),
     );
-    assert.equal(worker.registrations.findByClient(client.clientId), undefined);
+    assert.equal(
+      worker.registrations.findByClient(client.client_id),
+      undefined,
+    );
     const next = store.transaction((transaction) =>
       worker.registrations.register(transaction, client, Date.now()),
     );
-    assert.notEqual(next.runtimeIdentity, registration.runtimeIdentity);
+    assert.notEqual(next.runtime_identity, registration.runtime_identity);
   } finally {
     assert.equal(await worker.stop(), null);
   }
@@ -311,7 +320,7 @@ test("registration admission is idempotent, bounded by the latest slot count and
       assert.ok(tx.database.isTransaction);
       return {
         ...fakeCollaborations.workerBindingOf(),
-        instanceCount,
+        instance_count: instanceCount,
         tombstone,
       };
     },
@@ -321,7 +330,7 @@ test("registration admission is idempotent, bounded by the latest slot count and
   const none = 0;
   const identity = testMachineIdentity(
     {
-      ...client,
+      ...clientIdentity,
       clientId: createIdentity("client_identity"),
       issuedAt: Date.now(),
     },
@@ -332,10 +341,10 @@ test("registration admission is idempotent, bounded by the latest slot count and
   const input = { params: {}, query: {}, body: null };
   const first = handler(input, f.caller);
   const facts = workerOperations.register.output.parse(first);
-  assert.equal(facts.resourceIdentity, identity.resourceIdentity);
+  assert.equal(facts.resource_identity, identity.resourceIdentity);
   assert.equal(
-    facts.workerName,
-    fakeCollaborations.workerBindingOf().workerName,
+    facts.worker_name,
+    fakeCollaborations.workerBindingOf().worker_name,
   );
   assert.deepEqual(handler(input, f.caller), first);
   assert.equal(f.store.transaction(readAllLive).length, one);
@@ -392,7 +401,7 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
   const f = enablementFixture(t);
   const clientId = createIdentity("client_identity");
   f.caller.identity = testMachineIdentity(
-    { ...client, clientId, issuedAt: Date.now() },
+    { ...clientIdentity, clientId, issuedAt: Date.now() },
     "owner",
   );
   const register = f.registry.get(workerOperations.register.id).handler;
@@ -416,7 +425,7 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
     (error) => error === failure,
   );
   assert.ok(f.worker.registrations.findByClient(clientId));
-  assert.notEqual(f.worker.heartbeatClock.ageMs(first.runtimeIdentity), null);
+  assert.notEqual(f.worker.heartbeatClock.ageMs(first.runtime_identity), null);
   f.caller.commit = commit;
   const owner = f.caller.identity;
   for (const changed of [
@@ -436,27 +445,31 @@ test("deregistration owns its target, rolls back atomically and preserves a newe
   }
   f.caller.identity = owner;
   assert.deepEqual(deregister(input, f.caller), {
-    runtimeIdentity: first.runtimeIdentity,
+    runtime_identity: first.runtime_identity,
     registered: false,
   });
-  assert.equal(f.worker.heartbeatClock.ageMs(first.runtimeIdentity), null);
+  assert.equal(f.worker.heartbeatClock.ageMs(first.runtime_identity), null);
   assert.equal(f.worker.registrations.findByClient(clientId), undefined);
   const next = workerOperations.register.output.parse(
     register(empty, f.caller),
   );
-  assert.notEqual(next.runtimeIdentity, first.runtimeIdentity);
+  assert.notEqual(next.runtime_identity, first.runtime_identity);
   for (const runtimeIdentity of [
-    first.runtimeIdentity,
+    first.runtime_identity,
     createIdentity("worker_instance"),
   ])
     refuses(
-      () => deregister({ ...empty, params: { runtimeIdentity } }, f.caller),
+      () =>
+        deregister(
+          { ...empty, params: { runtime_identity: runtimeIdentity } },
+          f.caller,
+        ),
       WorkerErrorCode.InstanceNotFound,
       HttpStatus.NotFound,
     );
   assert.equal(
-    f.worker.registrations.findByClient(clientId)?.runtimeIdentity,
-    next.runtimeIdentity,
+    f.worker.registrations.findByClient(clientId)?.runtime_identity,
+    next.runtime_identity,
   );
 });
 
@@ -486,12 +499,12 @@ test("resume settles before admission, preserves live readings and reopens the s
   const row = f.store.transaction((tx) =>
     f.worker.registrations.register(tx, client, Date.now()),
   );
-  f.worker.heartbeatClock.set(row.runtimeIdentity);
+  f.worker.heartbeatClock.set(row.runtime_identity);
   const handler = f.registry.get(
     workerOperations["instance.resume"].id,
   ).handler;
   const input = {
-    params: { runtimeIdentity: row.runtimeIdentity },
+    params: { runtime_identity: row.runtime_identity },
     query: {},
     body: null,
   };
@@ -504,15 +517,15 @@ test("resume settles before admission, preserves live readings and reopens the s
       workerOperations["instance.resume"].output.parse(result);
       return result;
     });
-  const age = f.worker.heartbeatClock.ageMs(row.runtimeIdentity);
+  const age = f.worker.heartbeatClock.ageMs(row.runtime_identity);
   assert.deepEqual(handler(input, f.caller), {
-    runtimeIdentity: row.runtimeIdentity,
+    runtime_identity: row.runtime_identity,
     registered: true,
   });
   assert.deepEqual(calls, []);
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), age);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), age);
   f.store.transaction((tx) =>
-    f.worker.registrations.deregister(tx, row.runtimeIdentity, Date.now()),
+    f.worker.registrations.deregister(tx, row.runtime_identity, Date.now()),
   );
   running = false;
   refuses(
@@ -542,20 +555,23 @@ test("resume settles before admission, preserves live readings and reopens the s
     () => handler(input, f.caller),
     (error) => error === failure,
   );
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), age);
-  assert.equal(f.worker.registrations.findByClient(client.clientId), undefined);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), age);
+  assert.equal(
+    f.worker.registrations.findByClient(client.client_id),
+    undefined,
+  );
   f.caller.commit = commit;
   assert.deepEqual(handler(input, f.caller), {
-    runtimeIdentity: row.runtimeIdentity,
+    runtime_identity: row.runtime_identity,
     registered: true,
   });
   const renewedAge = 0;
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), renewedAge);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), renewedAge);
   assert.equal(
     f.store.transaction((tx) =>
       f.worker.registrations.register(tx, client, Date.now()),
-    ).runtimeIdentity,
-    row.runtimeIdentity,
+    ).runtime_identity,
+    row.runtime_identity,
   );
 });
 
@@ -576,7 +592,7 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
     f.worker.registrations.register(tx, client, Date.now()),
   );
   const input = {
-    params: { runtimeIdentity: row.runtimeIdentity },
+    params: { runtime_identity: row.runtime_identity },
     query: {},
     body: null,
   };
@@ -585,7 +601,7 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
       handler(
         {
           ...input,
-          params: { runtimeIdentity: createIdentity("worker_instance") },
+          params: { runtime_identity: createIdentity("worker_instance") },
         },
         f.caller,
       ),
@@ -593,7 +609,7 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
     HttpStatus.NotFound,
   );
   f.store.transaction((tx) =>
-    f.worker.registrations.deregister(tx, row.runtimeIdentity, Date.now()),
+    f.worker.registrations.deregister(tx, row.runtime_identity, Date.now()),
   );
   const next = f.store.transaction((tx) =>
     f.worker.registrations.register(tx, client, Date.now()),
@@ -604,12 +620,12 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
     HttpStatus.Conflict,
   );
   f.store.transaction((tx) =>
-    f.worker.registrations.deregister(tx, next.runtimeIdentity, Date.now()),
+    f.worker.registrations.deregister(tx, next.runtime_identity, Date.now()),
   );
   const other = f.store.transaction((tx) =>
     f.worker.registrations.register(
       tx,
-      { ...client, clientId: "other" },
+      { ...client, client_id: "other" },
       Date.now(),
     ),
   );
@@ -619,12 +635,12 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
     HttpStatus.Conflict,
   );
   f.store.transaction((tx) =>
-    f.worker.registrations.deregister(tx, other.runtimeIdentity, Date.now()),
+    f.worker.registrations.deregister(tx, other.runtime_identity, Date.now()),
   );
   for (const unavailable of [
     null,
     { ...fakeCollaborations.workerBindingOf(), tombstone: true },
-    { ...fakeCollaborations.workerBindingOf(), instanceCount: 0 },
+    { ...fakeCollaborations.workerBindingOf(), instance_count: 0 },
   ]) {
     binding = unavailable;
     refuses(
@@ -633,7 +649,10 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
       HttpStatus.Conflict,
     );
   }
-  assert.equal(f.worker.registrations.findByClient(client.clientId), undefined);
+  assert.equal(
+    f.worker.registrations.findByClient(client.client_id),
+    undefined,
+  );
 });
 
 test("start resets live heartbeats and sweep ends only expired rows while preserving reopened readings", async (t) => {
@@ -651,21 +670,24 @@ test("start resets live heartbeats and sweep ends only expired rows while preser
   );
   await f.worker.start();
   t.after(() => f.worker.stop());
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), zero);
   now += inside;
   f.worker.sweepRegistrations();
-  assert.ok(f.worker.registrations.findByClient(client.clientId));
-  f.worker.registrations.heartbeat(row.runtimeIdentity);
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  assert.ok(f.worker.registrations.findByClient(client.client_id));
+  f.worker.registrations.heartbeat(row.runtime_identity);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), zero);
   now += expired;
   f.worker.sweepRegistrations();
-  assert.equal(f.worker.registrations.findByClient(client.clientId), undefined);
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), null);
-  f.store.transaction((tx) => reopenRegistration(tx, row.runtimeIdentity));
-  f.worker.heartbeatClock.set(row.runtimeIdentity);
+  assert.equal(
+    f.worker.registrations.findByClient(client.client_id),
+    undefined,
+  );
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), null);
+  f.store.transaction((tx) => reopenRegistration(tx, row.runtime_identity));
+  f.worker.heartbeatClock.set(row.runtime_identity);
   f.worker.sweepRegistrations();
-  assert.ok(f.worker.registrations.findByClient(client.clientId));
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  assert.ok(f.worker.registrations.findByClient(client.client_id));
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), zero);
   const restarted = new WorkerService({
     config: WORKER_CONFIG,
     store: f.store,
@@ -673,8 +695,8 @@ test("start resets live heartbeats and sweep ends only expired rows while preser
     monotonicNow: () => now,
   });
   await restarted.start();
-  assert.equal(restarted.heartbeatClock.ageMs(row.runtimeIdentity), zero);
-  assert.ok(restarted.registrations.findByClient(client.clientId));
+  assert.equal(restarted.heartbeatClock.ageMs(row.runtime_identity), zero);
+  assert.ok(restarted.registrations.findByClient(client.client_id));
   await restarted.stop();
 });
 
@@ -731,37 +753,40 @@ test("ending a binding shares its caller transaction and leaves reopened heartbe
   );
   await f.worker.start();
   t.after(() => f.worker.stop());
-  const before = f.worker.heartbeatClock.ageMs(row.runtimeIdentity);
+  const before = f.worker.heartbeatClock.ageMs(row.runtime_identity);
   const failure = new Error("rollback binding end");
   assert.throws(
     () =>
       f.store.transaction((tx) => {
         f.worker.endRegistrations(
           tx,
-          client.projectId,
-          client.resourceIdentity,
+          client.project_id,
+          client.resource_identity,
           Date.now(),
         );
         throw failure;
       }),
     (error) => error === failure,
   );
-  assert.ok(f.worker.registrations.findByClient(client.clientId));
+  assert.ok(f.worker.registrations.findByClient(client.client_id));
   f.store.transaction((tx) =>
     f.worker.endRegistrations(
       tx,
-      client.projectId,
-      client.resourceIdentity,
+      client.project_id,
+      client.resource_identity,
       Date.now(),
     ),
   );
-  assert.equal(f.worker.registrations.findByClient(client.clientId), undefined);
-  assert.ok(f.worker.heartbeatClock.ageMs(row.runtimeIdentity)! >= before!);
-  f.store.transaction((tx) => reopenRegistration(tx, row.runtimeIdentity));
-  f.worker.heartbeatClock.set(row.runtimeIdentity);
+  assert.equal(
+    f.worker.registrations.findByClient(client.client_id),
+    undefined,
+  );
+  assert.ok(f.worker.heartbeatClock.ageMs(row.runtime_identity)! >= before!);
+  f.store.transaction((tx) => reopenRegistration(tx, row.runtime_identity));
+  f.worker.heartbeatClock.set(row.runtime_identity);
   f.worker.sweepRegistrations();
-  assert.notEqual(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), null);
-  assert.ok(f.worker.registrations.findByClient(client.clientId));
+  assert.notEqual(f.worker.heartbeatClock.ageMs(row.runtime_identity), null);
+  assert.ok(f.worker.registrations.findByClient(client.client_id));
 });
 
 test("registration reads retain ended attribution and observe the caller transaction without writes", (t) => {
@@ -770,29 +795,29 @@ test("registration reads retain ended attribution and observe the caller transac
   const row = f.store.transaction((tx) =>
     registrations.register(tx, client, Date.now()),
   );
-  const attribution = { clientId: client.clientId, name: client.name };
+  const attribution = { client_id: client.client_id, name: client.name };
   const failure = new Error("rollback registration end");
   assert.throws(
     () =>
       f.store.transaction((tx) => {
         assert.deepEqual(
           {
-            ...registrations.liveRegistrationOf(tx, row.runtimeIdentity),
-            workerName: row.workerName,
+            ...registrations.liveRegistrationOf(tx, row.runtime_identity),
+            worker_name: row.worker_name,
           },
           row,
         );
         assert.deepEqual(
-          registrations.clientAttributionOf(tx, row.runtimeIdentity),
+          registrations.clientAttributionOf(tx, row.runtime_identity),
           attribution,
         );
-        endRegistration(tx, row.runtimeIdentity, Date.now());
+        endRegistration(tx, row.runtime_identity, Date.now());
         assert.equal(
-          registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+          registrations.liveRegistrationOf(tx, row.runtime_identity),
           null,
         );
         assert.deepEqual(
-          registrations.clientAttributionOf(tx, row.runtimeIdentity),
+          registrations.clientAttributionOf(tx, row.runtime_identity),
           attribution,
         );
         throw failure;
@@ -802,12 +827,12 @@ test("registration reads retain ended attribution and observe the caller transac
   f.store.transaction((tx) => {
     assert.deepEqual(
       {
-        ...registrations.liveRegistrationOf(tx, row.runtimeIdentity),
-        workerName: row.workerName,
+        ...registrations.liveRegistrationOf(tx, row.runtime_identity),
+        worker_name: row.worker_name,
       },
       row,
     );
-    endRegistration(tx, row.runtimeIdentity, Date.now());
+    endRegistration(tx, row.runtime_identity, Date.now());
     const next = registrations.register(
       tx,
       { ...client, name: "renamed" },
@@ -815,24 +840,24 @@ test("registration reads retain ended attribution and observe the caller transac
     );
     const before = tx.database.prepare("SELECT total_changes() AS count").get();
     assert.equal(
-      registrations.liveRegistrationOf(tx, row.runtimeIdentity),
+      registrations.liveRegistrationOf(tx, row.runtime_identity),
       null,
     );
     assert.deepEqual(
       {
-        ...registrations.liveRegistrationOf(tx, next.runtimeIdentity),
-        workerName: next.workerName,
+        ...registrations.liveRegistrationOf(tx, next.runtime_identity),
+        worker_name: next.worker_name,
       },
       next,
     );
     assert.deepEqual(
-      registrations.clientAttributionOf(tx, row.runtimeIdentity),
+      registrations.clientAttributionOf(tx, row.runtime_identity),
       attribution,
     );
     assert.deepEqual(
-      registrations.clientAttributionOf(tx, next.runtimeIdentity),
+      registrations.clientAttributionOf(tx, next.runtime_identity),
       {
-        clientId: client.clientId,
+        client_id: client.client_id,
         name: "renamed",
       },
     );
@@ -875,8 +900,8 @@ test("external instance health reads current binding availability without config
     {
       workerBindingOf: (tx, projectId, resourceIdentity) => {
         assert.ok(tx.database.isTransaction);
-        assert.equal(projectId, client.projectId);
-        assert.equal(resourceIdentity, client.resourceIdentity);
+        assert.equal(projectId, client.project_id);
+        assert.equal(resourceIdentity, client.resource_identity);
         return binding;
       },
     },
@@ -895,19 +920,19 @@ test("external instance health reads current binding availability without config
   );
   const check = () =>
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, row.runtimeIdentity),
+      f.worker.instanceHealthcheck(tx, row.runtime_identity),
     );
   assert.equal(check(), true);
   binding = null;
   assert.equal(check(), false);
   binding = { ...fakeCollaborations.workerBindingOf(), tombstone: true };
   assert.equal(check(), false);
-  binding = { ...fakeCollaborations.workerBindingOf(), instanceCount: 0 };
+  binding = { ...fakeCollaborations.workerBindingOf(), instance_count: 0 };
   assert.equal(check(), false);
   binding = fakeCollaborations.workerBindingOf();
   assert.equal(check(), true);
   f.store.transaction((tx) =>
-    endRegistration(tx, row.runtimeIdentity, Date.now()),
+    endRegistration(tx, row.runtime_identity, Date.now()),
   );
   assert.equal(check(), false);
   assert.equal(
@@ -924,7 +949,7 @@ test("native instance health resolves the latest agent entry and enablement in t
     {
       workerBindingOf: () => ({
         ...fakeCollaborations.workerBindingOf(),
-        workerName: WORKER,
+        worker_name: WORKER,
         entries,
       }),
     },
@@ -944,7 +969,7 @@ test("native instance health resolves the latest agent entry and enablement in t
   );
   const check = () =>
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, row.runtimeIdentity),
+      f.worker.instanceHealthcheck(tx, row.runtime_identity),
     );
   assert.equal(check(), false);
   f.invokeAgent("enablement.put", putBody);
@@ -961,8 +986,8 @@ test("native instance health resolves the latest agent entry and enablement in t
   assert.throws(check, (error) => error === failure);
   failure = null;
   f.store.transaction((tx) => {
-    endRegistration(tx, row.runtimeIdentity, Date.now());
-    assert.equal(f.worker.instanceHealthcheck(tx, row.runtimeIdentity), false);
+    endRegistration(tx, row.runtime_identity, Date.now());
+    assert.equal(f.worker.instanceHealthcheck(tx, row.runtime_identity), false);
   });
 });
 
@@ -980,7 +1005,7 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
   await f.worker.start();
   t.after(() => f.worker.stop());
   const before = f.store.transaction((tx) => ({
-    row: readRow(tx, row.runtimeIdentity),
+    row: readRow(tx, row.runtime_identity),
     changes: tx.database.prepare("SELECT total_changes() AS count").get(),
   }));
   const [item] = f.store.transaction((tx) => f.worker.registrationChecks(tx));
@@ -992,9 +1017,9 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
     { ...entry, check: undefined },
     {
       scope: HealthScope.Project,
-      project: binding.projectName,
-      name: `${encodeURIComponent(binding.name)}/${encodeURIComponent(row.runtimeIdentity)}`,
-      target: `${REGISTRATION_TARGET_KIND}:${row.runtimeIdentity}`,
+      project: binding.project_name,
+      name: `${encodeURIComponent(binding.name)}/${encodeURIComponent(row.runtime_identity)}`,
+      target: `${REGISTRATION_TARGET_KIND}:${row.runtime_identity}`,
       capability: REGISTRATION_CAPABILITY,
       check: undefined,
     },
@@ -1002,9 +1027,9 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
   assert.deepEqual(
     { ...item, check: undefined },
     {
-      projectId: client.projectId,
-      resourceIdentity: client.resourceIdentity,
-      runtimeIdentity: row.runtimeIdentity,
+      projectId: client.project_id,
+      resourceIdentity: client.resource_identity,
+      runtimeIdentity: row.runtime_identity,
       capability: REGISTRATION_CAPABILITY,
       check: undefined,
     },
@@ -1021,10 +1046,13 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
         .check(background),
       expected,
     );
-    assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), age);
+    assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), age);
     f.store.transaction((tx) => {
-      assert.equal(f.worker.instanceHealthcheck(tx, row.runtimeIdentity), true);
-      assert.deepEqual(readRow(tx, row.runtimeIdentity), before.row);
+      assert.equal(
+        f.worker.instanceHealthcheck(tx, row.runtime_identity),
+        true,
+      );
+      assert.deepEqual(readRow(tx, row.runtime_identity), before.row);
       assert.deepEqual(
         tx.database.prepare("SELECT total_changes() AS count").get(),
         before.changes,
@@ -1037,11 +1065,11 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
     item.check(cancelled),
     (error) => error === cancelled.err(),
   );
-  f.worker.heartbeatClock.drop(row.runtimeIdentity);
+  f.worker.heartbeatClock.drop(row.runtime_identity);
   assert.equal(await item.check(background), ResourceStatus.Unhealthy);
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), null);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), null);
   f.worker.sweepRegistrations();
-  assert.ok(f.worker.registrations.findByClient(client.clientId));
+  assert.ok(f.worker.registrations.findByClient(client.client_id));
 });
 
 test("registration liveness stays separate from native configuration and excludes ended rows", async (t) => {
@@ -1049,7 +1077,7 @@ test("registration liveness stays separate from native configuration and exclude
     monotonicNow: () => 0,
     workerBindingOf: () => ({
       ...fakeCollaborations.workerBindingOf(),
-      workerName: WORKER,
+      worker_name: WORKER,
     }),
   });
   const row = f.store.transaction((tx) =>
@@ -1059,7 +1087,7 @@ test("registration liveness stays separate from native configuration and exclude
   t.after(() => f.worker.stop());
   assert.equal(
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, row.runtimeIdentity),
+      f.worker.instanceHealthcheck(tx, row.runtime_identity),
     ),
     false,
   );
@@ -1068,17 +1096,17 @@ test("registration liveness stays separate from native configuration and exclude
   assert.equal(await item.check(background), ResourceStatus.Healthy);
   assert.equal(
     f.store.transaction((tx) =>
-      f.worker.instanceHealthcheck(tx, row.runtimeIdentity),
+      f.worker.instanceHealthcheck(tx, row.runtime_identity),
     ),
     false,
   );
   f.store.transaction((tx) => {
-    endRegistration(tx, row.runtimeIdentity, Date.now());
+    endRegistration(tx, row.runtime_identity, Date.now());
     assert.deepEqual(f.worker.registrationChecks(tx), []);
     assert.deepEqual(f.worker.resourceInventory(tx), []);
   });
   const zero = 0;
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), zero);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), zero);
   assert.deepEqual(
     f.store.transaction((tx) => f.worker.registrationChecks(tx)),
     [],
@@ -1224,7 +1252,7 @@ test("handover handlers pass the proven execution and one transactional clock re
     },
   });
   const caller = { ...f.caller, identity, execution };
-  const body = { executionId: createIdentity("execution"), ...envelope };
+  const body = { execution_id: createIdentity("execution"), ...envelope };
   assert.deepEqual(
     f.registry
       .get(workerOperations.handover.id)
@@ -1276,10 +1304,10 @@ test("catalog pages supplied declarations once per commit and registrations add 
   assert.deepEqual(f.invoke("catalog.list", null, {}), before);
   assert.equal(f.commits(), expectedCommits);
   assert.deepEqual(Object.keys(before.items[0]!).sort(), [
-    "declaredNodeStates",
+    "declared_node_states",
     "host",
     "name",
-    "requiredNodeFormat",
+    "required_node_format",
   ]);
 });
 
@@ -1290,31 +1318,33 @@ test("instance reads commit once, retain heartbeat age and refuse ended identiti
       tx,
       {
         ...client,
-        clientId: createIdentity("client_identity"),
-        projectId: createIdentity("project"),
+        client_id: createIdentity("client_identity"),
+        project_id: createIdentity("project"),
       },
       Date.now(),
     ),
   );
-  f.worker.heartbeatClock.set(row.runtimeIdentity);
+  f.worker.heartbeatClock.set(row.runtime_identity);
   const before = f.store.transaction(readAllLive);
-  const age = f.worker.heartbeatClock.ageMs(row.runtimeIdentity);
+  const age = f.worker.heartbeatClock.ageMs(row.runtime_identity);
   const commits = f.commits();
   const record = f.invoke("instance.get", null, {
-    runtimeIdentity: row.runtimeIdentity,
+    runtime_identity: row.runtime_identity,
   });
   const page = f.invoke("instance.list", null, {});
   assert.deepEqual(page.items, [record]);
   const twoReads = 2;
   assert.equal(f.commits() - commits, twoReads);
   assert.deepEqual(f.store.transaction(readAllLive), before);
-  assert.equal(f.worker.heartbeatClock.ageMs(row.runtimeIdentity), age);
+  assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), age);
   f.store.transaction((tx) =>
-    f.worker.registrations.deregister(tx, row.runtimeIdentity, Date.now()),
+    f.worker.registrations.deregister(tx, row.runtime_identity, Date.now()),
   );
   refuses(
     () =>
-      f.invoke("instance.get", null, { runtimeIdentity: row.runtimeIdentity }),
+      f.invoke("instance.get", null, {
+        runtime_identity: row.runtime_identity,
+      }),
     WorkerErrorCode.InstanceNotFound,
     HttpStatus.NotFound,
   );
@@ -1322,21 +1352,24 @@ test("instance reads commit once, retain heartbeat age and refuse ended identiti
 
 test("catalog reads expose host-specific budgets and refuse unknown names and malformed cursors", (t) => {
   const f = enablementFixture(t);
-  const native = f.invoke("catalog.get", null, { workerName: WORKER });
+  const native = f.invoke("catalog.get", null, { worker_name: WORKER });
   assert.equal(native.host, WorkerHost.Kanthord);
   assert.ok("method" in native && native.method === WorkerMethod.Steps);
-  assert.ok("agentName" in native && native.agentName === AGENT);
+  assert.ok("agent_name" in native && native.agent_name === AGENT);
   assert.ok(!("harness" in native));
-  assert.deepEqual(native.resourceBudget, { turns: 200, wallTimeMs: 7200000 });
-  const external = f.invoke("catalog.get", null, { workerName: "claude@1" });
+  assert.deepEqual(native.resource_budget, {
+    turns: 200,
+    wall_time_ms: 7200000,
+  });
+  const external = f.invoke("catalog.get", null, { worker_name: "claude@1" });
   assert.equal(external.host, WorkerHost.ExternalHarness);
   assert.ok("harness" in external && external.harness === EXTERNAL_HARNESS);
-  assert.ok(!("method" in external) && !("agentName" in external));
-  assert.deepEqual(external.resourceBudget, { wallTimeMs: 7200000 });
+  assert.ok(!("method" in external) && !("agent_name" in external));
+  assert.deepEqual(external.resource_budget, { wall_time_ms: 7200000 });
   assert.deepEqual(f.worker.declarationOf(WORKER), native);
   assert.equal(f.worker.declarationOf(UNKNOWN), null);
   refuses(
-    () => f.invoke("catalog.get", null, { workerName: UNKNOWN }),
+    () => f.invoke("catalog.get", null, { worker_name: UNKNOWN }),
     WorkerErrorCode.CatalogNotFound,
     HttpStatus.NotFound,
   );
@@ -1357,7 +1390,7 @@ test("catalog reads expose host-specific budgets and refuse unknown names and ma
   assert.equal(
     workerOperations["catalog.get"].output.safeParse({
       ...native,
-      resourceBudget: { wallTimeMs: Number.MAX_SAFE_INTEGER + 1 },
+      resource_budget: { wall_time_ms: Number.MAX_SAFE_INTEGER + 1 },
     }).success,
     false,
   );

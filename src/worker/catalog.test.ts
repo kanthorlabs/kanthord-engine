@@ -30,35 +30,35 @@ test("static worker declarations", () => {
     name: "general@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Steps,
-    agentName: "swe@1",
-    resourceBudget: { turns: 200, wallTimeMs: 7200000 },
-    declaredNodeStates: ["Available"],
-    requiredNodeFormat,
+    agent_name: "swe@1",
+    resource_budget: { turns: 200, wall_time_ms: 7200000 },
+    declared_node_states: ["Available"],
+    required_node_format: requiredNodeFormat,
   });
   assert.deepEqual(getWorkerDeclaration("reviewer@1"), {
     name: "reviewer@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Evaluation,
-    agentName: "re@1",
-    resourceBudget: { turns: 200, wallTimeMs: 7200000 },
-    declaredNodeStates: ["Waiting", "External.Requested"],
-    requiredNodeFormat,
+    agent_name: "re@1",
+    resource_budget: { turns: 200, wall_time_ms: 7200000 },
+    declared_node_states: ["Waiting", "External.Requested"],
+    required_node_format: requiredNodeFormat,
   });
   assert.deepEqual(getWorkerDeclaration("claude@1"), {
     name: "claude@1",
     host: WorkerHost.ExternalHarness,
     harness: "claude-code",
-    resourceBudget: { wallTimeMs: 7200000 },
-    declaredNodeStates: ["Available", "Waiting", "External.Requested"],
-    requiredNodeFormat,
+    resource_budget: { wall_time_ms: 7200000 },
+    declared_node_states: ["Available", "Waiting", "External.Requested"],
+    required_node_format: requiredNodeFormat,
   });
   assert.deepEqual(getWorkerDeclaration("opencode@1"), {
     name: "opencode@1",
     host: WorkerHost.ExternalHarness,
     harness: "opencode",
-    resourceBudget: { wallTimeMs: 7200000 },
-    declaredNodeStates: ["Available", "Waiting", "External.Requested"],
-    requiredNodeFormat,
+    resource_budget: { wall_time_ms: 7200000 },
+    declared_node_states: ["Available", "Waiting", "External.Requested"],
+    required_node_format: requiredNodeFormat,
   });
 });
 

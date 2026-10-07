@@ -68,25 +68,25 @@ async function fixture(
   const bare = join(state, "origin.git");
   await git.clone(origin, bare, ["--bare"]);
   const setup = anthropicSetup();
-  if (turns) setup.resourceBudget.turns = turns;
+  if (turns) setup.resource_budget.turns = turns;
   setup.repositories = [
     {
-      bindingId: createIdentity("binding"),
+      binding_id: createIdentity("binding"),
       name: "repo",
       address: bare,
-      sshIdentity: {
+      ssh_identity: {
         host: "github.com",
         hostname: "github.com",
         port: 22,
         identity_file: "~/.ssh/id_test",
       },
-      strategy: { baseBranch: "main" },
-      projectPrompt: null,
+      strategy: { base_branch: "main" },
+      project_prompt: null,
       working_layer: WORKING_LAYER_ALL_ON,
     },
   ];
   const claim = {
-    executionId: setup.executionId,
+    executionId: setup.execution_id,
     nodeId: createIdentity("node"),
     attempt: 1,
     pinnedRevision: 1,
@@ -127,7 +127,7 @@ async function fixture(
     method: WorkerMethod.Steps,
     credentials,
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     workspace: workspace.directory,

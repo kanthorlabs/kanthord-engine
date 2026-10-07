@@ -32,11 +32,11 @@ test("host takes handover before setup and method, discards on every method end"
     credential: { type: "api_key", key: "test_host_key" },
   };
   const setup: ExecutionSetup = {
-    executionId: claim.executionId,
-    workerName: "general@1",
-    agentName: "swe@1",
-    credentialId: credential.credential_id,
-    effectiveConfiguration: {
+    execution_id: claim.executionId,
+    worker_name: "general@1",
+    agent_name: "swe@1",
+    credential_id: credential.credential_id,
+    effective_configuration: {
       agent_provider: "default",
       provider: "anthropic",
       credential: "anthro-1",
@@ -44,7 +44,7 @@ test("host takes handover before setup and method, discards on every method end"
       reasoning_effort: "off",
     },
     metadata: null,
-    resourceBudget: { turns: 200, wallTimeMs: 7200000 },
+    resource_budget: { turns: 200, wall_time_ms: 7200000 },
     repositories: [],
     prompt: { final: "setup prompt" },
   };

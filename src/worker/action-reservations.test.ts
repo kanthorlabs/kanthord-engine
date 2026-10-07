@@ -18,7 +18,7 @@ const SECOND_MUTEX_RESULT = 2;
 const key: ReservationKey = {
   nodeId: "node",
   attempt: FIRST_ATTEMPT,
-  action: { key: "repo.pull_request", bindingId: "binding" },
+  action: { key: "repo.pull_request", binding_id: "binding" },
 };
 const uncertain = {
   kind: ActionResultKind.Uncertain,
@@ -98,7 +98,8 @@ test("prune clears only requested actions in the same attempt", () => {
   reservations.acquire(key);
   reservations.acquire({ ...key, attempt: SECOND_ATTEMPT });
   const action = {
-    ...key.action,
+    key: key.action.key,
+    bindingId: key.action.binding_id,
     action: "pull_request",
     expectedEndState: "pull_request_merged",
     follows: null,

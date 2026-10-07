@@ -35,7 +35,7 @@ const DUAL_CALL_COUNT = 2;
 const RESOURCE = "repository:github:owner/repo";
 const PR = {
   kind: PlatformAddressKind.PullRequest,
-  resourceIdentity: RESOURCE,
+  resource_identity: RESOURCE,
   number: 42,
 };
 
@@ -214,7 +214,7 @@ test("admission reads one snapshot and no-action context calls no external seam"
   const h = harness(t);
   const transactions = t.mock.method(h.store, "transaction");
   assert.deepEqual(await h.perform(), {
-    toolName: ACTION_REQUEST_TOOL_NAME,
+    tool_name: ACTION_REQUEST_TOOL_NAME,
     items: [],
   });
   assert.equal(transactions.mock.callCount(), SINGLE_CALL_COUNT);
@@ -262,7 +262,7 @@ test("merge push records the address and commit returned by Intake", async (t) =
   h.entry.action.action = RepositoryAction.MergePush;
   const pushed = {
     kind: PlatformAddressKind.BranchPush,
-    resourceIdentity: RESOURCE,
+    resource_identity: RESOURCE,
     branch: "main",
     commit: "d".repeat(40),
   };
@@ -299,7 +299,7 @@ test("no-effect refusal releases the reservation for a later invocation", async 
   assert.deepEqual((await h.perform()).items, [
     {
       kind: ActionResultKind.FailedBeforeEffect,
-      action: { key: h.entry.action.key, bindingId: h.entry.action.bindingId },
+      action: { key: h.entry.action.key, binding_id: h.entry.action.bindingId },
       refusal,
     },
   ]);
@@ -324,7 +324,7 @@ test("refused or thrown recording retains the known address as recording uncerta
   });
   const expected = {
     kind: ActionResultKind.Uncertain,
-    action: { key: h.entry.action.key, bindingId: h.entry.action.bindingId },
+    action: { key: h.entry.action.key, binding_id: h.entry.action.bindingId },
     uncertainty: Uncertainty.Recording,
     address: PR,
   };
@@ -339,7 +339,7 @@ test("refused or thrown recording retains the known address as recording uncerta
       ...expected,
       action: {
         key: other.entry.action.key,
-        bindingId: other.entry.action.bindingId,
+        binding_id: other.entry.action.bindingId,
       },
     },
   ]);
@@ -443,7 +443,7 @@ test("merge push and foreign repository candidates never call read", async (t) =
   h.entry.action.action = RepositoryAction.PullRequest;
   h.entry.reuseCandidates[0]!.address = {
     ...PR,
-    resourceIdentity: "repository:github:other/repo",
+    resource_identity: "repository:github:other/repo",
   };
   await h.perform();
   assert.equal(h.performSpy.mock.calls[1]?.arguments[2]?.reusedAddress, null);

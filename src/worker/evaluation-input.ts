@@ -101,7 +101,7 @@ async function prepareWorkspace(
 ) {
   const repository = input.setup.repositories[0];
   const deadline = Math.min(
-    input.claim.createdAt + input.setup.resourceBudget.wallTimeMs,
+    input.claim.createdAt + input.setup.resource_budget.wall_time_ms,
     input.claim.expiredAt,
   );
   const common = {
@@ -111,7 +111,7 @@ async function prepareWorkspace(
     deadlineMs: deadline - Date.now(),
   };
   if (kind === NodeKind.Objective && repository) {
-    const snapshot = snapshotOf(evidence, repository.bindingId);
+    const snapshot = snapshotOf(evidence, repository.binding_id);
     if (snapshot) {
       const workspace = await input.workspaces.prepareSnapshot({
         ...common,
@@ -122,7 +122,7 @@ async function prepareWorkspace(
         directory: workspace.directory,
         testedInput: {
           kind: AssetKind.Repository,
-          bindingId: repository.bindingId,
+          bindingId: repository.binding_id,
           commit: snapshot.commit,
         },
         evidenceIds: [snapshot.evidenceId],
@@ -165,7 +165,7 @@ export async function prepareEvaluation(
         .map((asset) => ({ evidenceId: item.id, asset })),
     );
     const deadline = Math.min(
-      input.claim.createdAt + input.setup.resourceBudget.wallTimeMs,
+      input.claim.createdAt + input.setup.resource_budget.wall_time_ms,
       input.claim.expiredAt,
     );
     for (const { evidenceId, asset } of selected) {

@@ -228,7 +228,7 @@ async function setup(
   const token = await fixture.machineToken(projectId, "harness", "first");
   const runtimeIdentity = completed(
     await call(workerOperations.register, NO_INPUT, token),
-  ).runtimeIdentity;
+  ).runtime_identity;
   const pull = async () => {
     const result = completed(
       await call(
@@ -346,7 +346,11 @@ async function setup(
   const request = (transport = adapter, key = ulid(), auth = token) =>
     call(
       workerOperations["action.request"],
-      { params: { executionId: execution.executionId }, query: {}, body: null },
+      {
+        params: { execution_id: execution.executionId },
+        query: {},
+        body: null,
+      },
       auth,
       transport,
       key,
@@ -359,7 +363,7 @@ test("both adapters serialize one execution and replay the completed request", a
   const release = h.actions.hold();
   h.actions.performAnswers.push({
     kind: PlatformAddressKind.PullRequest,
-    resourceIdentity: "repository:github:owner/repo",
+    resource_identity: "repository:github:owner/repo",
     number: 42,
   });
   const key = ulid();

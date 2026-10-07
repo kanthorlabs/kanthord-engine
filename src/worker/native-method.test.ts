@@ -40,7 +40,7 @@ const NO_RELEASES = 0;
 test("S1 refusal aborts an active native session and records its stopped transcript exactly once", async (t) => {
   const setup = anthropicSetup();
   const claim = {
-    executionId: setup.executionId,
+    executionId: setup.execution_id,
     nodeId: createIdentity("node"),
     attempt: 1,
     pinnedRevision: 1,
@@ -76,7 +76,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     method: WorkerMethod.Steps,
     credentials: store,
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     workspace,
@@ -133,12 +133,12 @@ test("S1 refusal aborts an active native session and records its stopped transcr
 
 test("S1 native reviewer evaluates even when the attempt already contains an expected request", async (t) => {
   const setup = anthropicSetup({
-    workerName: "reviewer@1",
-    agentName: "re@1",
+    worker_name: "reviewer@1",
+    agent_name: "re@1",
     repositories: [],
   });
   const claim = {
-    executionId: setup.executionId,
+    executionId: setup.execution_id,
     nodeId: createIdentity("node"),
     attempt: 1,
     pinnedRevision: 1,
@@ -215,7 +215,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     clients,
     credentials: { store, release: async () => {} },
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     transport: {} as RepositoryTransport,
@@ -233,7 +233,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
 test("native entry runs an initiative report with the scripted provider", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
-    executionId: setup.executionId,
+    executionId: setup.execution_id,
     nodeId: createIdentity("node"),
     attempt: 1,
     pinnedRevision: 1,
@@ -280,7 +280,7 @@ test("native entry runs an initiative report with the scripted provider", async 
     clients,
     credentials: { store, release: async () => {} },
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     transport: {} as RepositoryTransport,

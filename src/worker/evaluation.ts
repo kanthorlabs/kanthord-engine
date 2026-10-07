@@ -98,7 +98,7 @@ export async function runEvaluation(
   try {
     const budget = new ExecutionBudget({
       ...input.claim,
-      resourceBudget: input.setup.resourceBudget,
+      resourceBudget: input.setup.resource_budget,
     });
     const verification = await runVerifications({
       directory: prepared.directory,

@@ -126,17 +126,17 @@ test(
       other.client_secret,
     );
     const registration = await cli.read<{
-      runtimeIdentity: string;
-      resourceIdentity: string;
-      workerName: string;
+      runtime_identity: string;
+      resource_identity: string;
+      worker_name: string;
       idempotency_key: string;
     }>(["worker", "register"], auth.token);
-    const runtime = registration.runtimeIdentity;
+    const runtime = registration.runtime_identity;
     const resource = bindings.bindings.harness!.resource_identity;
     await t.test("EX10.1 registration and capacity", async () => {
       assert.match(runtime, /^worker_instance_/);
-      assert.equal(registration.resourceIdentity, resource);
-      assert.equal(registration.workerName, WORKER);
+      assert.equal(registration.resource_identity, resource);
+      assert.equal(registration.worker_name, WORKER);
       assert.match(registration.idempotency_key, /^[0-9A-HJKMNP-TV-Z]{26}$/);
       await cli.refuses(
         ["worker", "register"],
@@ -202,10 +202,10 @@ test(
       assert.equal(first.execution.claimant.runtimeIdentity, runtime);
       const instance = await cli.read<{
         activity: string;
-        executionId: string;
+        execution_id: string;
       }>(["worker", "instance", "get", runtime]);
       assert.equal(instance.activity, InstanceActivity.Executing);
-      assert.equal(instance.executionId, first.execution.executionId);
+      assert.equal(instance.execution_id, first.execution.executionId);
     });
     await t.test(
       "EX10.4 external harness receives no inference credential",

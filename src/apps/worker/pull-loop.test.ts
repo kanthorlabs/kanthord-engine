@@ -7,9 +7,9 @@ import { pullLoop } from "./pull-loop.ts";
 import { testClaim } from "./test-support.ts";
 
 const REGISTRATION = {
-  runtimeIdentity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-  resourceIdentity: "worker:kanthord:test",
-  workerName: "general@1",
+  runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  resource_identity: "worker:kanthord:test",
+  worker_name: "general@1",
 };
 const ONCE = 1;
 test("claim admission precedes hosting even when shutdown races the pull", async (t) => {

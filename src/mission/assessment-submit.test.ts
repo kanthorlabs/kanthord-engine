@@ -287,7 +287,7 @@ test("nonpassing assessment closes into Blocked while preserving its unresolved 
       requirementKey: "repo.pull_request",
       address: {
         kind: PlatformAddressKind.PullRequest,
-        resourceIdentity: "repository:github:owner/repo",
+        resource_identity: "repository:github:owner/repo",
         number: FIRST_REVISION,
       },
     },

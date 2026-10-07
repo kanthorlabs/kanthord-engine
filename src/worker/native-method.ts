@@ -54,7 +54,7 @@ export async function runNativeExecution(
   let unlink: (() => void) | null = null;
   try {
     return await executionBoundary(run, async () => {
-      const method = getWorkerDeclaration(input.setup.workerName)?.method;
+      const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
       const kind = nodeKindOf(revision);

@@ -197,14 +197,14 @@ export interface InstanceRegistrations {
   clientAttributionOf(
     tx: Transaction,
     runtimeIdentity: string,
-  ): { clientId: string; name: string } | null;
+  ): { client_id: string; name: string } | null;
   instanceHealthcheck(tx: Transaction, runtimeIdentity: string): boolean;
 }
 export interface WorkerDeclarations {
   declarationOf(workerName: string): {
-    declaredNodeStates: readonly string[];
-    requiredNodeFormat: readonly string[];
-    resourceBudget: { wallTimeMs: number };
+    declared_node_states: readonly string[];
+    required_node_format: readonly string[];
+    resource_budget: { wall_time_ms: number };
   } | null;
 }
 export interface WorkerBindings {

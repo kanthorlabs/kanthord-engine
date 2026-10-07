@@ -77,7 +77,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     credentials,
     setup,
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     signal: new AbortController().signal,
@@ -159,7 +159,7 @@ test("two tool calls produce three counted turns with no absent project message"
     credentials,
     setup,
     handoverItem: {
-      credential_id: setup.credentialId,
+      credential_id: setup.credential_id,
       provider_id: "anthropic",
     },
     signal: new AbortController().signal,
@@ -297,7 +297,7 @@ for (const isSplitTurn of [false, true]) {
       credentials,
       setup,
       handoverItem: {
-        credential_id: setup.credentialId,
+        credential_id: setup.credential_id,
         provider_id: "anthropic",
       },
       signal: new AbortController().signal,

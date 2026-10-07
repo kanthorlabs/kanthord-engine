@@ -11,9 +11,9 @@ import type { WorkerApi } from "./api.ts";
 import { WorkerErrorCode } from "../../worker/contract.ts";
 
 export interface Registration {
-  runtimeIdentity: string;
-  resourceIdentity: string;
-  workerName: string;
+  runtime_identity: string;
+  resource_identity: string;
+  worker_name: string;
 }
 
 export const HEARTBEAT_INTERVAL_MS = 60000;
@@ -84,7 +84,7 @@ export async function deregister(
   assert.ok(runtimeIdentity);
   assert.ok(api.worker["instance.deregister"]);
   const result = await api.worker["instance.deregister"](
-    { params: { runtimeIdentity }, query: {}, body: null },
+    { params: { runtime_identity: runtimeIdentity }, query: {}, body: null },
     { idempotencyKey: ulid(), context: background },
   );
   if (result.type === OperationResultType.Completed) return null;

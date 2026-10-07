@@ -514,8 +514,8 @@ Output: operational JSON log records go to stderr. Startup prints no token and
 requires no terminal. Startup resolves the client configuration, checks
 `client_secret` for a canonical 32-byte base64 value, checks the server package
 version, registers the instance, and then
-logs one record `Worker application ready` with `runtimeIdentity`,
-`resourceIdentity` and `workerName`. A version mismatch refuses startup with both
+logs one record `Worker application ready` with `runtime_identity`,
+`resource_identity` and `worker_name`. A version mismatch refuses startup with both
 versions in the diagnostic. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
 

@@ -66,8 +66,8 @@ const COPILOT = "github-copilot";
 const LOGIN_COMPLETED = "completed";
 const LOGIN_PENDING = "pending";
 const LOGIN_POLL_LIMIT = 50;
-const MAX_REPORT_BYTES = 65533;
-const OVERSIZED_REPORT_BYTES = 65537;
+const MAX_REPORT_BYTES = 65534;
+const OVERSIZED_REPORT_BYTES = 65538;
 const CHILD_TIMEOUT_MS = 10000;
 const MAX_CHILD_BUFFER = 1024;
 const EMPTY_OUTPUT = "";
@@ -107,7 +107,7 @@ for (const adapter of ["direct", "http"] as const) {
   test(`${adapter} native setup reads pinned facts without secrets or new pins`, async (t) => {
     const h = await setup(t, adapter, undefined, { instanceCount: 2 });
     const input = {
-      params: { executionId: h.execution.executionId },
+      params: { execution_id: h.execution.executionId },
       query: {},
       body: null,
     };
@@ -123,26 +123,26 @@ for (const adapter of ["direct", "http"] as const) {
       .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
       .get(h.execution.executionId);
     const answer = completed(await read());
-    assert.equal(answer.credentialId, h.credentialId);
-    assert.deepEqual(answer.effectiveConfiguration, {
+    assert.equal(answer.credential_id, h.credentialId);
+    assert.deepEqual(answer.effective_configuration, {
       ...CONFIGURATION,
       provider: "anthropic",
       credential: "anthro-1",
     });
-    assert.deepEqual(answer.resourceBudget, {
+    assert.deepEqual(answer.resource_budget, {
       turns: 200,
-      wallTimeMs: 7200000,
+      wall_time_ms: 7200000,
     });
     assert.equal(answer.metadata, null);
     assert.ok(answer.prompt.final.endsWith(framing(PromptConsumer.Worker)));
     assert.ok(answer.prompt.final.includes(SWE_AGENT_PROMPT));
     assert.deepEqual(answer.repositories[0], {
-      bindingId: answer.repositories[0]!.bindingId,
+      binding_id: answer.repositories[0]!.binding_id,
       name: "repo",
       address: "git@github.com:owner/repo.git",
-      sshIdentity: FAKE_SSH_CREDENTIAL_BODY.metadata,
-      strategy: { baseBranch: "main" },
-      projectPrompt: "Follow repository conventions.",
+      ssh_identity: FAKE_SSH_CREDENTIAL_BODY.metadata,
+      strategy: { base_branch: "main" },
+      project_prompt: "Follow repository conventions.",
       working_layer: WORKING_LAYER_ALL_ON,
     });
     assert.deepEqual(
@@ -181,7 +181,7 @@ for (const adapter of ["direct", "http"] as const) {
   });
 
   test(`${adapter} native setup validates against rotated compatible metadata and binding budget`, async (t) => {
-    const resourceBudget = { turns: 3, wallTimeMs: 600000 };
+    const resourceBudget = { turns: 3, wall_time_ms: 600000 };
     const h = await setup(t, adapter, undefined, {
       compatible: true,
       noEntries: true,
@@ -192,14 +192,14 @@ for (const adapter of ["direct", "http"] as const) {
       h.call(
         workerOperations["execution.setup.get"],
         {
-          params: { executionId: h.execution.executionId },
+          params: { execution_id: h.execution.executionId },
           query: {},
           body: null,
         },
         h.token,
       );
     const before = completed(await read());
-    assert.deepEqual(before.resourceBudget, resourceBudget);
+    assert.deepEqual(before.resource_budget, resourceBudget);
     const newerModel = "new-model";
     completed(
       await h.call(llmOperations.rotate, {
@@ -264,7 +264,7 @@ for (const adapter of ["direct", "http"] as const) {
       await h.call(
         workerOperations["execution.setup.get"],
         {
-          params: { executionId: h.execution.executionId },
+          params: { execution_id: h.execution.executionId },
           query: {},
           body: null,
         },
@@ -347,7 +347,7 @@ async function setup(
     noEntries?: boolean;
     instanceCount?: number;
     workerName?: string;
-    resourceBudget?: { turns: number; wallTimeMs: number };
+    resourceBudget?: { turns: number; wall_time_ms: number };
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -500,7 +500,7 @@ async function setup(
               instance_count: setupOptions.instanceCount ?? 1,
               resource_budget: setupOptions.resourceBudget && {
                 turns: setupOptions.resourceBudget.turns,
-                wall_time_ms: setupOptions.resourceBudget.wallTimeMs,
+                wall_time_ms: setupOptions.resourceBudget.wall_time_ms,
               },
               entries:
                 setupOptions.workerName || setupOptions.noEntries
@@ -550,7 +550,7 @@ async function setup(
   const token = await f.machineToken(projectId, "general", "general-a");
   const runtimeIdentity = completed(
     await call(workerOperations.register, NO_INPUT, token),
-  ).runtimeIdentity;
+  ).runtime_identity;
   const pull = async () => {
     const result = completed(
       await call(
@@ -583,7 +583,7 @@ async function setup(
   ) =>
     call(
       workerOperations.handover,
-      { params: {}, query: {}, body: { executionId } },
+      { params: {}, query: {}, body: { execution_id: executionId } },
       auth,
       { idempotencyKey },
     );
@@ -598,7 +598,7 @@ async function setup(
         params: {},
         query: {},
         body: {
-          executionId,
+          execution_id: executionId,
           ...sealEnvelope(
             keys.report,
             handoverAad(executionId, runtimeIdentity),
@@ -732,7 +732,7 @@ for (const adapter of ["direct", "http"] as const) {
             {
               params: {},
               query: {},
-              body: { executionId, ...envelope },
+              body: { execution_id: executionId, ...envelope },
             },
             h.token,
             { idempotencyKey: ulid() },
@@ -798,7 +798,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
         : { ...maximum, access: maximum.access + "x" };
     const executionId = h.execution.executionId;
     const body = {
-      executionId,
+      execution_id: executionId,
       ...sealEnvelope(
         h.keys.report,
         handoverAad(executionId, h.runtimeIdentity),
@@ -987,7 +987,7 @@ for (const adapter of ["direct", "http"] as const) {
           {
             params: {},
             query: {},
-            body: { executionId: h.execution.executionId, ...envelope },
+            body: { execution_id: h.execution.executionId, ...envelope },
           },
           h.token,
         ),
@@ -995,7 +995,7 @@ for (const adapter of ["direct", "http"] as const) {
         INVALID_REPORT,
       );
     }
-    const extra = { executionId: h.execution.executionId, extra: true };
+    const extra = { execution_id: h.execution.executionId, extra: true };
     refused(
       await h.call(
         workerOperations.handover,

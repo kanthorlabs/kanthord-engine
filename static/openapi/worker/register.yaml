@@ -67,20 +67,20 @@ components:
     worker.register.Output:
       type: object
       properties:
-        runtimeIdentity:
+        runtime_identity:
           type: string
           minLength: 42
           maxLength: 42
           pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: worker_instance_ followed by a canonical 26-character uppercase ULID.
-        resourceIdentity:
+        resource_identity:
           type: string
           pattern: ^worker:kanthord:[a-z][a-z0-9-]{0,62}$
-        workerName:
+        worker_name:
           type: string
           minLength: 1
       required:
-        - runtimeIdentity
-        - resourceIdentity
-        - workerName
+        - runtime_identity
+        - resource_identity
+        - worker_name
       additionalProperties: false

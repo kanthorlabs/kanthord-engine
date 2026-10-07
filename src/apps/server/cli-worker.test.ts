@@ -77,7 +77,7 @@ test("deregistration CLI validates identity and token and returns replayable JSO
     env,
   );
   assert.equal(registered.code, ExitCode.Success, registered.stderr);
-  const { runtimeIdentity } = JSON.parse(registered.stdout);
+  const { runtime_identity: runtimeIdentity } = JSON.parse(registered.stdout);
   const absent = await command([...leaf, runtimeIdentity], env);
   assert.match(
     absent.stderr,
@@ -90,7 +90,7 @@ test("deregistration CLI validates identity and token and returns replayable JSO
   );
   assert.equal(ended.code, ExitCode.Success, ended.stderr);
   assert.deepEqual(JSON.parse(ended.stdout), {
-    runtimeIdentity,
+    runtime_identity: runtimeIdentity,
     registered: false,
     idempotency_key: key,
   });
@@ -150,7 +150,7 @@ test("resume CLI validates input and token and denies machine access", async (t)
     env,
   );
   assert.equal(registration.code, ExitCode.Success, registration.stderr);
-  const { runtimeIdentity } = JSON.parse(registration.stdout);
+  const { runtime_identity: runtimeIdentity } = JSON.parse(registration.stdout);
   const absent = await command([...leaf, runtimeIdentity], env);
   assert.equal(absent.code, ExitCode.Failure);
   assert.match(absent.stderr, /^cli.worker.instance.resume.token_required:/);
@@ -206,7 +206,7 @@ test("instance inspection CLI validates filters and identity and denies machine 
   assert.equal(page.code, ExitCode.Success, page.stderr);
   assert.deepEqual(JSON.parse(page.stdout), { items: [], next_cursor: null });
   const invalidQuery = await fixture.request(
-    "/api/worker/instance?resourceIdentity=worker:kanthord:general",
+    "/api/worker/instance?resource_identity=worker:kanthord:general",
     { headers: { Authorization: `Bearer ${fixture.token}` } },
   );
   const badRequest = 400;
@@ -259,17 +259,17 @@ test("worker catalog CLI gets native and external budgets and reports missing wo
   const native = await command(["worker", "get", "general@1"], env);
   assert.equal(native.code, ExitCode.Success, native.stderr);
   const declaration = JSON.parse(native.stdout);
-  assert.deepEqual(declaration.resourceBudget, {
+  assert.deepEqual(declaration.resource_budget, {
     turns: 200,
-    wallTimeMs: 7200000,
+    wall_time_ms: 7200000,
   });
   assert.equal(declaration.method, WorkerMethod.Steps);
-  assert.equal(declaration.agentName, NATIVE_AGENT);
+  assert.equal(declaration.agent_name, NATIVE_AGENT);
   assert.ok(!("harness" in declaration));
   const external = await command(["worker", "get", "claude@1"], env);
   assert.equal(external.code, ExitCode.Success, external.stderr);
   const harness = JSON.parse(external.stdout);
-  assert.deepEqual(harness.resourceBudget, { wallTimeMs: 7200000 });
+  assert.deepEqual(harness.resource_budget, { wall_time_ms: 7200000 });
   assert.equal(harness.harness, EXTERNAL_HARNESS);
   assert.ok(!("method" in harness));
   const missing = await command(["worker", "get", "tdd@1"], env);
@@ -357,15 +357,15 @@ test("worker register prints registration facts and key to redirected stdout and
     const response = JSON.parse(result.stdout);
     assert.deepEqual(Object.keys(response).sort(), [
       "idempotency_key",
-      "resourceIdentity",
-      "runtimeIdentity",
-      "workerName",
+      "resource_identity",
+      "runtime_identity",
+      "worker_name",
     ]);
     assert.equal(response.idempotency_key, key);
     assert.equal(
-      response.runtimeIdentity,
+      response.runtime_identity,
       machines.worker.findByClient(String(decode(token).payload.sub))
-        ?.runtimeIdentity,
+        ?.runtime_identity,
     );
     if (previous) assert.deepEqual(response, previous);
     previous = response;
@@ -436,9 +436,9 @@ test("worker registration resolves option over environment over file without rew
     assert.equal(result.code, ExitCode.Success, result.stderr);
     const response = JSON.parse(result.stdout);
     assert.equal(
-      response.runtimeIdentity,
+      response.runtime_identity,
       machines.worker.findByClient(String(decode(entry.token).payload.sub))
-        ?.runtimeIdentity,
+        ?.runtime_identity,
     );
     assert.match(response.idempotency_key, /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
     assert.ok(!result.stdout.includes(entry.token));

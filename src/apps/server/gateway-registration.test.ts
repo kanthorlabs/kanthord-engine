@@ -62,28 +62,31 @@ test("machine fake keeps attribution after a registration ends and a replacement
   t.after(() => store.close());
   const { worker } = fakeMachines();
   const client = {
-    clientId: "client",
+    client_id: "client",
     name: DISPLAY_NAME,
-    projectId: TEST_PROJECT_ID,
-    resourceIdentity: `worker:kanthord:${TEST_WORKER_BINDING}`,
+    project_id: TEST_PROJECT_ID,
+    resource_identity: `worker:kanthord:${TEST_WORKER_BINDING}`,
   };
   store.transaction((tx) => {
     const row = worker.register(tx, client, Date.now());
-    assert.deepEqual(worker.liveRegistrationOf(tx, row.runtimeIdentity), row);
-    worker.deregister(tx, row.runtimeIdentity, Date.now());
+    assert.deepEqual(worker.liveRegistrationOf(tx, row.runtime_identity), row);
+    worker.deregister(tx, row.runtime_identity, Date.now());
     const next = worker.register(
       tx,
       { ...client, name: "replacement" },
       Date.now(),
     );
-    assert.equal(worker.liveRegistrationOf(tx, row.runtimeIdentity), null);
-    assert.deepEqual(worker.liveRegistrationOf(tx, next.runtimeIdentity), next);
-    assert.deepEqual(worker.clientAttributionOf(tx, row.runtimeIdentity), {
-      clientId: client.clientId,
+    assert.equal(worker.liveRegistrationOf(tx, row.runtime_identity), null);
+    assert.deepEqual(
+      worker.liveRegistrationOf(tx, next.runtime_identity),
+      next,
+    );
+    assert.deepEqual(worker.clientAttributionOf(tx, row.runtime_identity), {
+      client_id: client.client_id,
       name: DISPLAY_NAME,
     });
-    assert.deepEqual(worker.clientAttributionOf(tx, next.runtimeIdentity), {
-      clientId: client.clientId,
+    assert.deepEqual(worker.clientAttributionOf(tx, next.runtime_identity), {
+      client_id: client.client_id,
       name: "replacement",
     });
     assert.equal(worker.liveRegistrationOf(tx, "unknown"), null);
@@ -133,7 +136,7 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
   assert.ok(registered.type === OperationResultType.Completed);
   const target = {
     ...input,
-    params: { runtimeIdentity: registered.data.runtimeIdentity },
+    params: { runtime_identity: registered.data.runtime_identity },
   };
   const identity = await f.gateway.authentication.authenticate(
     `Bearer ${f.machineJWT}`,
@@ -145,7 +148,7 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
   });
   assert.ok(ended.type === OperationResultType.Completed);
   assert.deepEqual(ended.data, {
-    runtimeIdentity: registered.data.runtimeIdentity,
+    runtime_identity: registered.data.runtime_identity,
     registered: false,
   });
   assert.deepEqual(
@@ -171,7 +174,7 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
   );
   const next = await f.client.register(input);
   assert.ok(next.type === OperationResultType.Completed);
-  assert.notEqual(next.data.runtimeIdentity, registered.data.runtimeIdentity);
+  assert.notEqual(next.data.runtime_identity, registered.data.runtime_identity);
   assert.deepEqual(
     await direct["instance.deregister"](target, {
       identity,
@@ -192,7 +195,7 @@ test("deregistration replays after ending while fresh keys refuse ended targets"
   assert.equal(f.machines.worker.registrations.size, SINGLE_REGISTRATION);
   const replacement = {
     ...input,
-    params: { runtimeIdentity: next.data.runtimeIdentity },
+    params: { runtime_identity: next.data.runtime_identity },
   };
   const nextKey = ulid();
   const directEnd = await direct["instance.deregister"](replacement, {
@@ -386,7 +389,7 @@ test("one live registration per client, live replay across adapters, and stale r
   assert.equal(first.type, OperationResultType.Completed);
   assert.ok(first.type === OperationResultType.Completed);
   assert.match(
-    first.data.runtimeIdentity,
+    first.data.runtime_identity,
     /^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
   );
   const retry = await fixture.client.register(input);
@@ -413,7 +416,7 @@ test("one live registration per client, live replay across adapters, and stale r
   );
   const next = await fixture.client.register(input);
   assert.ok(next.type === OperationResultType.Completed);
-  assert.notEqual(next.data.runtimeIdentity, first.data.runtimeIdentity);
+  assert.notEqual(next.data.runtime_identity, first.data.runtime_identity);
   assertFailure(
     await fixture.client.register(input, { idempotencyKey: key }),
     HttpStatus.Conflict,
@@ -468,7 +471,7 @@ test("work requires a live registration and machine JWTs never authorize human v
     projectId: TEST_PROJECT_ID,
     resourceIdentity: `worker:kanthord:${TEST_WORKER_BINDING}`,
     name: DISPLAY_NAME,
-    runtimeIdentity: registered.data.runtimeIdentity,
+    runtimeIdentity: registered.data.runtime_identity,
   });
   const human = await fixture.request("/api/auth/verify", {
     headers: { Authorization: `Bearer ${fixture.machineJWT}` },
@@ -486,7 +489,7 @@ test("work requires a live registration and machine JWTs never authorize human v
   fixture.store.transaction((tx) =>
     fixture.machines.worker.deregister(
       tx,
-      registered.data.runtimeIdentity,
+      registered.data.runtime_identity,
       Date.now(),
     ),
   );

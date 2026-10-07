@@ -50,7 +50,7 @@ function selectJob(
 ) {
   assert.ok(identity.runtimeIdentity);
   assert.ok(
-    declaration.requiredNodeFormat.every(
+    declaration.required_node_format.every(
       (field) => nodeFormatFieldSchema.safeParse(field).success,
     ),
   );
@@ -66,7 +66,7 @@ function selectJob(
     const claim = dependencies.transitions.claim(
       tx,
       nodeId,
-      declaration.declaredNodeStates,
+      declaration.declared_node_states,
       {
         kind: "execution",
         executionId,
@@ -106,7 +106,8 @@ function acquire(
   assert.ok(traceIdSchema.safeParse(trace.traceId).success);
   assert.ok(spanIdSchema.safeParse(trace.rootSpanId).success);
   const wallTimeMs =
-    binding.resourceBudget?.wallTimeMs ?? declaration.resourceBudget.wallTimeMs;
+    binding.resourceBudget?.wallTimeMs ??
+    declaration.resource_budget.wall_time_ms;
   const row: ExecutionRow = {
     executionId,
     projectId: identity.projectId,
@@ -155,7 +156,7 @@ export function claimOnce(
   );
   assert.ok(declaration, "a worker binding must name a declared worker");
   assert.ok(
-    declaration.requiredNodeFormat.every(
+    declaration.required_node_format.every(
       (field) => nodeFormatFieldSchema.safeParse(field).success,
     ),
   );

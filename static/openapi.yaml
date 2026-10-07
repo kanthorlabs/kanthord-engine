@@ -242,25 +242,25 @@ paths:
     $ref: ./openapi/workbench/session.get.yaml#/pathItem
   /api/workbench/session/{sessionId}/message:
     $ref: ./openapi/workbench/session.message.yaml#/pathItem
-  /api/worker/execution/{executionId}/action/request:
+  /api/worker/execution/{execution_id}/action/request:
     $ref: ./openapi/worker/action.request.yaml#/pathItem
-  /api/worker/catalog/{workerName}:
+  /api/worker/catalog/{worker_name}:
     $ref: ./openapi/worker/catalog.get.yaml#/pathItem
   /api/worker/catalog:
     $ref: ./openapi/worker/catalog.list.yaml#/pathItem
   /api/worker/credential:
     $ref: ./openapi/worker/credential.yaml#/pathItem
-  /api/worker/execution/{executionId}/setup:
+  /api/worker/execution/{execution_id}/setup:
     $ref: ./openapi/worker/execution.setup.get.yaml#/pathItem
   /api/worker/handover:
     $ref: ./openapi/worker/handover.yaml#/pathItem
   /api/worker/heartbeat:
     $ref: ./openapi/worker/heartbeat.yaml#/pathItem
-  /api/worker/instance/{runtimeIdentity}:
+  /api/worker/instance/{runtime_identity}:
     $ref: ./openapi/worker/instance.deregister.yaml#/pathItem
   /api/worker/instance:
     $ref: ./openapi/worker/instance.list.yaml#/pathItem
-  /api/worker/instance/{runtimeIdentity}/resume:
+  /api/worker/instance/{runtime_identity}/resume:
     $ref: ./openapi/worker/instance.resume.yaml#/pathItem
   /api/worker/register:
     $ref: ./openapi/worker/register.yaml#/pathItem

@@ -17,20 +17,20 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   const row: NonNullable<ReturnType<WorkerBindingRowOf>> = {
-    bindingId: createIdentity("binding"),
-    projectId: createIdentity("project"),
-    resourceIdentity: "worker:kanthord:worker",
-    workerName: "general@1",
+    binding_id: createIdentity("binding"),
+    project_id: createIdentity("project"),
+    resource_identity: "worker:kanthord:worker",
+    worker_name: "general@1",
     entries: [],
-    resourceBudget: null,
+    resource_budget: null,
     tombstone: false,
     disabled: false,
   };
   const identity = testMachineIdentity(
     {
       clientId: createIdentity("client_identity"),
-      projectId: row.projectId,
-      resourceIdentity: row.resourceIdentity,
+      projectId: row.project_id,
+      resourceIdentity: row.resource_identity,
       name: "test",
       issuedAt: 0,
     },
@@ -38,9 +38,9 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
   );
   const execution = {
     execution_id: createIdentity("execution"),
-    project_id: row.projectId,
-    worker_binding_id: row.bindingId,
-    resource_identity: row.resourceIdentity,
+    project_id: row.project_id,
+    worker_binding_id: row.binding_id,
+    resource_identity: row.resource_identity,
   };
   let valid = true;
   const issues = [{ path: ["agent"], code: AgentErrorCode.Unavailable }];
@@ -48,15 +48,15 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     store.transaction((tx) =>
       authorizeModelInference(
         {
-          workerBindingRowOf: (_tx, id) => (id === row.bindingId ? row : null),
+          workerBindingRowOf: (_tx, id) => (id === row.binding_id ? row : null),
         },
         {
-          declarationOf: () => getWorkerDeclaration(row.workerName) ?? null,
+          declarationOf: () => getWorkerDeclaration(row.worker_name) ?? null,
           workerAgentView: (_tx, worker, agent, entry) => {
-            assert.equal(worker, row.workerName);
+            assert.equal(worker, row.worker_name);
             assert.equal(
               agent,
-              getWorkerDeclaration(row.workerName)?.agentName,
+              getWorkerDeclaration(row.worker_name)?.agent_name,
             );
             return {
               valid,
@@ -109,12 +109,12 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     details: { reason: AuthorizationRefusal.BindingRemoved },
   });
   row.tombstone = false;
-  row.workerName = "claude@1";
+  row.worker_name = "claude@1";
   assert.throws(authorize, {
     code: WorkerErrorCode.AuthorizationRefused,
     details: { reason: AuthorizationRefusal.NoNativeAgent },
   });
-  row.workerName = "general@1";
+  row.worker_name = "general@1";
   valid = false;
   assert.throws(authorize, {
     status: HttpStatus.BadRequest,

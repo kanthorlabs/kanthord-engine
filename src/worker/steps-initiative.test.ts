@@ -52,7 +52,7 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
   for (const scenario of scenarios) {
     const setup = anthropicSetup();
     const claim = {
-      executionId: setup.executionId,
+      executionId: setup.execution_id,
       nodeId: createIdentity("node"),
       attempt: 1,
       pinnedRevision: 1,
@@ -147,10 +147,10 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
   for (const duringOpen of [false, true]) {
     const setup = anthropicSetup({
       repositories: [],
-      resourceBudget: { wallTimeMs: 100 },
+      resource_budget: { wall_time_ms: 100 },
     });
     const claim = {
-      executionId: setup.executionId,
+      executionId: setup.execution_id,
       nodeId: createIdentity("node"),
       attempt: 1,
       pinnedRevision: 1,

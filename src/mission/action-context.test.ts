@@ -22,7 +22,7 @@ const KEY = "repo.pull_request";
 const RESOURCE = "repository:github:owner/repo";
 const PR: PlatformAddress = {
   kind: PlatformAddressKind.PullRequest,
-  resourceIdentity: RESOURCE,
+  resource_identity: RESOURCE,
   number: 42,
 };
 
@@ -130,7 +130,7 @@ test("canonical duplicate addresses retain the newest earlier request", (t) => {
   h.next(SECOND_ATTEMPT);
   const id = h.request(SECOND_ATTEMPT, {
     number: 42,
-    resourceIdentity: RESOURCE,
+    resource_identity: RESOURCE,
     kind: PlatformAddressKind.PullRequest,
   });
   h.next(THIRD_ATTEMPT);
@@ -147,7 +147,7 @@ test("branch pushes are not reuse candidates", (t) => {
   const h = harness(t);
   h.request(FIRST_ATTEMPT, {
     kind: PlatformAddressKind.BranchPush,
-    resourceIdentity: RESOURCE,
+    resource_identity: RESOURCE,
     branch: "main",
     commit: "b".repeat(40),
   });

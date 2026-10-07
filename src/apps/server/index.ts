@@ -68,8 +68,6 @@ import {
   repositoryPolicyView,
   schedulerWorkerBinding,
   storageBindingView,
-  workerBindingRow,
-  workerWorkerBinding,
 } from "./project-ports.ts";
 import {
   WorkerService,
@@ -308,13 +306,9 @@ export function composeServices(options: {
     },
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>
-      workerWorkerBinding(
-        project.workerBindingOf(tx, projectId, resourceIdentity),
-      ),
-    workerBindingRowOf: (tx, id) =>
-      workerBindingRow(project.workerBindingRowOf(tx, id)),
-    repositoryPolicyOf: (tx, id) =>
-      repositoryPolicyView(project.repositoryPolicyOf(tx, id)),
+      project.workerBindingOf(tx, projectId, resourceIdentity),
+    workerBindingRowOf: (tx, id) => project.workerBindingRowOf(tx, id),
+    repositoryPolicyOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     repositoryBindingIdsOf: (tx, nodeId, revision) =>
       mission.repositoryBindingIdsOf(tx, nodeId, revision),
     pinnedCredentialMetadata: (tx, execution, name, now) =>

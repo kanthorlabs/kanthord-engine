@@ -4,11 +4,6 @@ import type {
   StorageBinding,
   WorkerBindingRow,
 } from "../../project/contract.ts";
-import type { ProjectService } from "../../project/index.ts";
-
-type WorkerRowView = NonNullable<
-  ReturnType<ProjectService["workerBindingRowOf"]>
->;
 
 export function schedulerWorkerBinding(row: WorkerBindingRow | null) {
   return row
@@ -20,47 +15,6 @@ export function schedulerWorkerBinding(row: WorkerBindingRow | null) {
           ? { wallTimeMs: row.resource_budget.wall_time_ms }
           : null,
         tombstone: row.tombstone,
-      }
-    : null;
-}
-
-export function workerWorkerBinding(row: WorkerBindingRow | null) {
-  return row
-    ? {
-        bindingId: row.binding_id,
-        name: row.name,
-        projectName: row.project_name,
-        revision: row.revision,
-        workerName: row.worker_name,
-        instanceCount: row.instance_count,
-        resourceBudget: row.resource_budget
-          ? {
-              turns: row.resource_budget.turns,
-              wallTimeMs: row.resource_budget.wall_time_ms,
-            }
-          : null,
-        entries: row.entries,
-        tombstone: row.tombstone,
-      }
-    : null;
-}
-
-export function workerBindingRow(row: WorkerRowView | null) {
-  return row
-    ? {
-        bindingId: row.binding_id,
-        projectId: row.project_id,
-        resourceIdentity: row.resource_identity,
-        tombstone: row.tombstone,
-        disabled: row.disabled,
-        workerName: row.worker_name,
-        entries: row.entries,
-        resourceBudget: row.resource_budget
-          ? {
-              turns: row.resource_budget.turns,
-              wallTimeMs: row.resource_budget.wall_time_ms,
-            }
-          : null,
       }
     : null;
 }
