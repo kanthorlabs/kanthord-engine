@@ -13,7 +13,7 @@ export class FacilityError extends Error {
 
 export function mintGrant(fields: Grant): Grant {
   assert(fields.credential.length);
-  assert(fields.execution.executionId.length);
+  assert(fields.execution.execution_id.length);
   const grant = Object.freeze({
     credential: fields.credential,
     platform: fields.platform,
@@ -28,11 +28,11 @@ export function mintGrant(fields: Grant): Grant {
 
 export function mintWorkbenchGrant(fields: WorkbenchGrant): WorkbenchGrant {
   assert(fields.credential.length);
-  assert(fields.sessionId.length);
+  assert(fields.session_id.length);
   const grant = Object.freeze({
     credential: fields.credential,
     platform: fields.platform,
-    sessionId: fields.sessionId,
+    session_id: fields.session_id,
   });
   grants.add(grant);
   return grant;
@@ -50,14 +50,14 @@ export function consumeGrant(grant: Grant): void {
 }
 
 export class MaterialBuffer implements Material {
-  readonly credentialId: string;
+  readonly credential_id: string;
   readonly platform: string;
   #bytes: Buffer | undefined;
 
   constructor(credentialId: string, platform: string, secret: unknown) {
     assert(credentialId.length);
     assert(platform.length);
-    this.credentialId = credentialId;
+    this.credential_id = credentialId;
     this.platform = platform;
     this.#bytes = Buffer.from(canonicalJSON(secret), "utf8");
   }

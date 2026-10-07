@@ -199,7 +199,7 @@ function validatedMetadata(
   entry: CredentialPlatform,
   value: unknown,
 ): Record<string, unknown> | null {
-  const schema = entry.metadataSchema;
+  const schema = entry.metadata_schema;
   if (schema === null) {
     if (value !== null) throw invalidInput();
     return null;
@@ -265,8 +265,8 @@ function answerForName(tx: Transaction, name: string): CredentialAnswer | null {
       id: row.id,
       revision: row.revision,
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
-      createdAt: row.created_at,
-      endedAt: row.ended_at,
+      created_at: row.created_at,
+      ended_at: row.ended_at,
     })),
   };
 }
@@ -361,7 +361,7 @@ export class CustodyComponent implements Service, CredentialRecords {
           CustodyErrorCode.NotFound,
           "Credential not found.",
         );
-      this.executions.pinCredential(tx, grant.execution.executionId, row.id);
+      this.executions.pinCredential(tx, grant.execution.execution_id, row.id);
       this.drainRevisions(tx, row.name, now);
     }
     if (row.platform !== grant.platform)
@@ -424,7 +424,7 @@ export class CustodyComponent implements Service, CredentialRecords {
 
   workbenchCredentials(input: WorkbenchCredentialsInput) {
     assert(Object.hasOwn(this.platforms, input.platform));
-    const shape = this.platforms[input.platform]!.secretShape;
+    const shape = this.platforms[input.platform]!.secret_shape;
     assert(shape === SecretShape.ApiKey || shape === SecretShape.OAuth);
     const grant = (tx: Transaction): WorkbenchGrant => {
       const requester = input.requester();
@@ -432,13 +432,13 @@ export class CustodyComponent implements Service, CredentialRecords {
       const { credential, platform } = input.authorize(
         tx,
         requester,
-        input.sessionId,
+        input.session_id,
       );
       if (platform !== input.platform) throw new FacilityError();
       return mintWorkbenchGrant({
         credential,
         platform,
-        sessionId: input.sessionId,
+        session_id: input.session_id,
       });
     };
     return workbenchCredentialStore({
@@ -464,7 +464,7 @@ export class CustodyComponent implements Service, CredentialRecords {
             tx,
             this.envelopeKey,
             {
-              credentialId: row.id,
+              credential_id: row.id,
               digest: digest(current),
               credential: piCredentialSchema.parse(next),
             },
@@ -496,9 +496,9 @@ export class CustodyComponent implements Service, CredentialRecords {
       );
       this.logger.info(
         {
-          executionId: row.executionId,
-          workerBindingId: row.workerBindingId,
-          credentialId: material.credentialId,
+          executionId: row.execution_id,
+          workerBindingId: row.worker_binding_id,
+          credentialId: material.credential_id,
         },
         "credential handover",
       );
@@ -528,7 +528,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
     const written = applyReport(tx, this.envelopeKey, report, this.platforms);
     this.logger.info(
-      { executionId: row.executionId, credentialId: report.credentialId },
+      { executionId: row.execution_id, credentialId: report.credential_id },
       written ? "credential report" : "credential report stale",
     );
   }
@@ -708,13 +708,13 @@ export class CustodyComponent implements Service, CredentialRecords {
         "Unsupported platform.",
       );
     const { probe } = entry;
-    if (probe === null || entry.secretShape === SecretShape.OAuth)
+    if (probe === null || entry.secret_shape === SecretShape.OAuth)
       throw new OperationError(
         HttpStatus.BadRequest,
         CustodyErrorCode.CheckUnsupported,
         "Unsupported credential check.",
       );
-    const parsedSecret = secretSchemas[entry.secretShape].safeParse(secret);
+    const parsedSecret = secretSchemas[entry.secret_shape].safeParse(secret);
     if (!parsedSecret.success) throw invalidInput();
     const parsedMetadata = validatedMetadata(entry, metadata);
     const deadline = new CancellationContext(
@@ -745,14 +745,14 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx: Transaction,
     credentialName: string,
   ): {
-    agentProviders: AgentProviderDependent[];
+    agent_providers: AgentProviderDependent[];
     bindings: BindingRevision[];
     inbounds: InboundDependent[];
   } {
     return {
-      agentProviders: this.agentProvidersDependentOn(tx, credentialName),
+      agent_providers: this.agentProvidersDependentOn(tx, credentialName),
       bindings: this.bindingsNaming(tx, credentialName).map(
-        ({ bindingId, projectId }) => ({ bindingId, projectId }),
+        ({ binding_id, project_id }) => ({ binding_id, project_id }),
       ),
       inbounds: this.inboundsNaming(tx, credentialName),
     };
@@ -773,17 +773,17 @@ export class CustodyComponent implements Service, CredentialRecords {
         CustodyErrorCode.UnsupportedPlatform,
         "Unsupported platform.",
       );
-    if (entry.secretShape === SecretShape.OAuth)
+    if (entry.secret_shape === SecretShape.OAuth)
       throw new OperationError(
         HttpStatus.BadRequest,
         CustodyErrorCode.UnsupportedEntry,
         "Unsupported credential entry.",
       );
     this.requireAvailableName(tx, name);
-    const parsedSecret = secretSchemas[entry.secretShape].safeParse(secret);
+    const parsedSecret = secretSchemas[entry.secret_shape].safeParse(secret);
     if (!parsedSecret.success) throw invalidInput();
     const next = validatedMetadata(entry, metadata);
-    set.checkMetadata?.(tx, {
+    set.check_metadata?.(tx, {
       name,
       platform,
       change: RevisionChange.Create,
@@ -832,7 +832,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     set: CredentialPlatformSet,
     query: CredentialListQuery,
   ): CredentialListAnswer {
-    const { platform, includeArchived, limit: requestedLimit, cursor } = query;
+    const {
+      platform,
+      include_archived: includeArchived,
+      limit: requestedLimit,
+      cursor,
+    } = query;
     const after = cursor === undefined ? "" : decodeCursor(cursor);
     const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
     const names = tx.database
@@ -911,14 +916,14 @@ export class CustodyComponent implements Service, CredentialRecords {
     refuseForeign(tx, set, credentialName);
     const row = requireLive(tx, credentialName, body.expected_revision);
     const entry = ownedPlatform(set, row.platform)!;
-    const secret = secretSchemas[entry.secretShape].safeParse(body.secret);
+    const secret = secretSchemas[entry.secret_shape].safeParse(body.secret);
     if (!secret.success) throw invalidInput();
     const current = parsedMetadata(row);
     const metadata = validatedMetadata(
       entry,
       body.metadata === undefined ? current : body.metadata,
     );
-    set.checkMetadata?.(tx, {
+    set.check_metadata?.(tx, {
       name: row.name,
       platform: row.platform,
       change: RevisionChange.Rotate,
@@ -944,7 +949,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     const row = requireLive(tx, credentialName, body.expected_revision);
     const entry = ownedPlatform(set, row.platform)!;
     const metadata = validatedMetadata(entry, body.metadata);
-    set.checkMetadata?.(tx, {
+    set.check_metadata?.(tx, {
       name: row.name,
       platform: row.platform,
       change: RevisionChange.Metadata,
@@ -1021,7 +1026,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     if (rowsForName(tx, credentialName).length === NO_ROWS) throw notFound();
     const dependents = this.credentialDependents(tx, credentialName);
     if (
-      dependents.agentProviders.length +
+      dependents.agent_providers.length +
         dependents.bindings.length +
         dependents.inbounds.length >
       NO_ROWS
@@ -1061,9 +1066,9 @@ export class CustodyComponent implements Service, CredentialRecords {
     now: number,
   ): string {
     const entry = ownedPlatform(set, platform);
-    assert.equal(entry?.secretShape, SecretShape.OAuth);
+    assert.equal(entry?.secret_shape, SecretShape.OAuth);
     this.requireAvailableName(tx, name);
-    const parsedSecret = secretSchemas[entry.secretShape].safeParse(secret);
+    const parsedSecret = secretSchemas[entry.secret_shape].safeParse(secret);
     if (!parsedSecret.success) throw invalidInput();
     const id = createIdentity(CREDENTIAL_PREFIX);
     const { nonce, ciphertext } = encrypt(

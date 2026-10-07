@@ -166,7 +166,7 @@ test("LLM_PROVIDERS holds exactly the platforms with a check and each declares i
     urls.push(url);
     return Response.json(MODEL_LIST);
   });
-  const metadata = { baseUrl: BASE_URL, models: [] };
+  const metadata = { base_url: BASE_URL, models: [] };
   for (const platform of [
     Platform.Anthropic,
     Platform.OpenAICompatible,

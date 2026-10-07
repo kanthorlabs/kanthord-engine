@@ -163,14 +163,14 @@ for (const adapter of ["direct", "http"] as const) {
     refused(await read(other), HttpStatus.Forbidden, PROOF_FAILED);
     completed(
       await h.call(llmOperations.rotate, {
-        params: { credentialName: "anthro-1" },
+        params: { credential_name: "anthro-1" },
         query: {},
         body: { expected_revision: FIRST_REVISION, secret: { key: ROTATED } },
       }),
     );
     completed(
       await h.call(llmOperations.revoke, {
-        params: { credentialName: "anthro-1", revision: FIRST_REVISION },
+        params: { credential_name: "anthro-1", revision: FIRST_REVISION },
         query: {},
         body: null,
       }),
@@ -203,13 +203,13 @@ for (const adapter of ["direct", "http"] as const) {
     const newerModel = "new-model";
     completed(
       await h.call(llmOperations.rotate, {
-        params: { credentialName: "anthro-1" },
+        params: { credential_name: "anthro-1" },
         query: {},
         body: {
           expected_revision: TWO_REVISIONS,
           secret: { key: ROTATED },
           metadata: {
-            baseUrl: "http://localhost:12345/v2",
+            base_url: "http://localhost:12345/v2",
             models: [{ id: CONFIGURATION.modelIdentifier }, { id: newerModel }],
           },
         },
@@ -324,7 +324,7 @@ async function loginCredential(
       assert.equal(state.state, LOGIN_COMPLETED);
       return completed(
         await client.get({
-          params: { credentialName: "anthro-1" },
+          params: { credential_name: "anthro-1" },
           query: {},
           body: null,
         }),
@@ -393,7 +393,7 @@ async function setup(
             platform,
             metadata: setupOptions.compatible
               ? {
-                  baseUrl: "http://localhost:12345/v1",
+                  base_url: "http://localhost:12345/v1",
                   models: [],
                 }
               : null,
@@ -407,16 +407,16 @@ async function setup(
   if (setupOptions.compatible)
     created = completed(
       await call(llmOperations.update_metadata, {
-        params: { credentialName: "anthro-1" },
+        params: { credential_name: "anthro-1" },
         query: {},
         body: {
           expected_revision: FIRST_REVISION,
           metadata: {
-            baseUrl: "http://localhost:12345/v1",
+            base_url: "http://localhost:12345/v1",
             models: [
               {
                 id: CONFIGURATION.modelIdentifier,
-                reasoningLevels: ["off", "low"],
+                reasoning_levels: ["off", "low"],
               },
             ],
           },
@@ -611,7 +611,7 @@ async function setup(
     );
   const read = () =>
     call(llmOperations.get, {
-      params: { credentialName: "anthro-1" },
+      params: { credential_name: "anthro-1" },
       query: {},
       body: null,
     });
@@ -714,7 +714,7 @@ for (const adapter of ["direct", "http"] as const) {
       const aad = handoverAad(executionId, h.runtimeIdentity);
       for (const surrogate of ["\ud800", "\udc00"]) {
         const report = {
-          credentialId: h.credentialId,
+          credential_id: h.credentialId,
           digest: digest(valid),
           credential: { ...valid, [field]: surrogate },
         };
@@ -797,7 +797,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
         h.keys.report,
         handoverAad(executionId, h.runtimeIdentity),
         {
-          credentialId: h.credentialId,
+          credential_id: h.credentialId,
           digest: digest(maximum),
           credential: oversized,
         },
@@ -851,7 +851,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
       );
       refused(
         await h.call(llmOperations.rotate, {
-          params: { credentialName: "anthro-1" },
+          params: { credential_name: "anthro-1" },
           query: {},
           body: {
             expected_revision: FIRST_REVISION,
@@ -878,8 +878,8 @@ for (const adapter of ["direct", "http"] as const) {
     const first = completed(await h.handover(h.execution.executionId, key));
     assert.deepEqual(h.open(first).items, [
       {
-        credentialId: h.credentialId,
-        providerId: "anthropic",
+        credential_id: h.credentialId,
+        provider_id: "anthropic",
         credential: { type: SecretShape.ApiKey, key: SECRET },
       },
     ]);
@@ -888,12 +888,12 @@ for (const adapter of ["direct", "http"] as const) {
     assert.equal(replay.status, HttpStatus.Conflict);
     assert.equal(JSON.stringify(replay).includes("ciphertext"), false);
     assert.equal(
-      h.open(completed(await h.handover())).items[0]!.credentialId,
+      h.open(completed(await h.handover())).items[0]!.credential_id,
       h.credentialId,
     );
     completed(
       await h.call(llmOperations.rotate, {
-        params: { credentialName: "anthro-1" },
+        params: { credential_name: "anthro-1" },
         query: {},
         body: {
           expected_revision: FIRST_REVISION,
@@ -902,10 +902,10 @@ for (const adapter of ["direct", "http"] as const) {
       }),
     );
     assert(
-      completed(await h.read()).revisions.every((row) => row.endedAt === null),
+      completed(await h.read()).revisions.every((row) => row.ended_at === null),
     );
     const refresh = {
-      credentialId: h.credentialId,
+      credential_id: h.credentialId,
       digest: digest({ type: SecretShape.ApiKey, key: SECRET }),
       credential: { type: SecretShape.ApiKey, key: REFRESHED },
     };
@@ -924,7 +924,7 @@ for (const adapter of ["direct", "http"] as const) {
     refused(
       await h.report({
         ...refresh,
-        credentialId: createIdentity("credential"),
+        credential_id: createIdentity("credential"),
       }),
       HttpStatus.BadRequest,
       INVALID_REPORT,
@@ -942,12 +942,12 @@ for (const adapter of ["direct", "http"] as const) {
     );
     refused(await h.report(refresh), HttpStatus.Forbidden, PROOF_FAILED);
     const read = completed(await h.read());
-    assert.notEqual(read.revisions[1]!.endedAt, null);
-    assert.equal(read.revisions[0]!.endedAt, null);
+    assert.notEqual(read.revisions[1]!.ended_at, null);
+    assert.equal(read.revisions[0]!.ended_at, null);
     const next = await h.pull();
     assert.equal(
       h.open(completed(await h.handover(next.executionId)), next.executionId)
-        .items[0]!.credentialId,
+        .items[0]!.credential_id,
       read.revisions[0]!.id,
     );
     for (const secret of [SECRET, REFRESHED, ROTATED])
@@ -967,7 +967,7 @@ for (const adapter of ["direct", "http"] as const) {
     completed(await h.handover(h.execution.executionId, key));
     const aad = handoverAad(h.execution.executionId, h.runtimeIdentity);
     const payload = {
-      credentialId: h.credentialId,
+      credential_id: h.credentialId,
       digest: digest({ type: SecretShape.ApiKey, key: SECRET }),
       credential: { type: SecretShape.ApiKey, key: REFRESHED },
     };

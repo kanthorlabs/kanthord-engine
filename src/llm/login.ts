@@ -60,7 +60,7 @@ export function loginMode(
       INVALID_INPUT,
       "Invalid input.",
     );
-  const modes = LLM_PLATFORMS[platform].loginModes;
+  const modes = LLM_PLATFORMS[platform].login_modes;
   const selected =
     modes.length === SINGLE_MODE
       ? modes[FIRST_MODE]

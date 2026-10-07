@@ -43,22 +43,22 @@ test("secret schemas reject unknown fields and blank key material", () => {
   );
   assert.equal(
     s3AccessKeySecretSchema.safeParse({
-      accessKeyId: " ",
-      secretAccessKey: "s",
+      access_key_id: " ",
+      secret_access_key: "s",
     }).success,
     false,
   );
   assert.equal(
     s3AccessKeySecretSchema.safeParse({
-      accessKeyId: "a",
-      secretAccessKey: " ",
+      access_key_id: "a",
+      secret_access_key: " ",
     }).success,
     false,
   );
   assert.equal(
     s3AccessKeySecretSchema.safeParse({
-      accessKeyId: "a",
-      secretAccessKey: "s",
+      access_key_id: "a",
+      secret_access_key: "s",
       sessionToken: "t",
     }).success,
     false,

@@ -308,7 +308,7 @@ is `unary` with `mutation: false`. It reads the agent provider named
 `{ items }`. Each item holds `modelIdentifier: string` and
 `reasoningEfforts: string[]`. A built-in platform lists its pi-ai models with the
 supported thinking levels of each model. An `openai-compatible` provider lists the
-approved models of its credential with their `reasoningLevels`. Every listed pair
+approved models of its credential with their `reasoning_levels`. Every listed pair
 passes the configuration validation. An absent catalog agent, enablement or
 provider answers a `404` code of the error table.
 

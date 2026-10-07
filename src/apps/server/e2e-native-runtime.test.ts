@@ -430,7 +430,7 @@ test(
       );
       assert.ok(runtimeX.setup.prompt.final.includes(SWE_AGENT_PROMPT));
       assert.ok(!runtimeX.setup.prompt.final.includes(PROJECT));
-      assert.equal(runtimeX.setup.credentialId, runtimeX.item.credentialId);
+      assert.equal(runtimeX.setup.credentialId, runtimeX.item.credential_id);
       const refused = await x.client["execution.setup.get"]({
         params: { executionId: y.execution.executionId },
         query: {},

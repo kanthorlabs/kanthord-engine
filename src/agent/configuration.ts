@@ -85,7 +85,7 @@ export function providerModels(
     .parse(item.provider);
   return getBuiltinModels(provider).map((model) => ({
     id: model.id,
-    reasoningLevels: getSupportedThinkingLevels(model),
+    reasoning_levels: getSupportedThinkingLevels(model),
   }));
 }
 
@@ -100,7 +100,7 @@ function modelLevels(
     ({ id }) => id === modelIdentifier,
   );
   if (!model) throw configurationError(agentName, AgentErrorCode.ModelUnknown);
-  return model.reasoningLevels;
+  return model.reasoning_levels;
 }
 
 export function validateEffectiveConfig(

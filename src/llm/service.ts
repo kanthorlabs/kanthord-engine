@@ -121,7 +121,7 @@ export class LlmComponent implements Service {
     this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
     this.platformSet = {
       platforms: LLM_PLATFORMS,
-      checkMetadata: (tx, revision) => this.checkMetadata(tx, revision),
+      check_metadata: (tx, revision) => this.checkMetadata(tx, revision),
     };
   }
 
@@ -145,14 +145,14 @@ export class LlmComponent implements Service {
       ),
     );
     registry.register(llmOperations.get, (input, caller) =>
-      caller.commit((tx) => this.get(tx, input.params.credentialName)),
+      caller.commit((tx) => this.get(tx, input.params.credential_name)),
     );
     registry.register(llmOperations.rotate, (input, caller) =>
       caller.commit((tx) =>
         this.records.rotate(
           tx,
           this.platformSet,
-          input.params.credentialName,
+          input.params.credential_name,
           input.body,
           humanIdentity(caller),
         ),
@@ -163,7 +163,7 @@ export class LlmComponent implements Service {
         this.records.updateMetadata(
           tx,
           this.platformSet,
-          input.params.credentialName,
+          input.params.credential_name,
           input.body,
           humanIdentity(caller),
         ),
@@ -174,20 +174,24 @@ export class LlmComponent implements Service {
         this.records.revoke(
           tx,
           this.platformSet,
-          input.params.credentialName,
+          input.params.credential_name,
           input.params.revision,
         ),
       ),
     );
     registry.register(llmOperations.archive, (input, caller) =>
       caller.commit((tx) =>
-        this.records.archive(tx, this.platformSet, input.params.credentialName),
+        this.records.archive(
+          tx,
+          this.platformSet,
+          input.params.credential_name,
+        ),
       ),
     );
     registry.register(llmOperations.verify, async (input, caller) => {
       const answer = await this.records.verify(
         this.platformSet,
-        input.params.credentialName,
+        input.params.credential_name,
         caller.context,
       );
       throwIfCancelled(caller.context);
@@ -292,7 +296,7 @@ export class LlmComponent implements Service {
     return {
       ...answer,
       agentProviders: this.agentProvidersDependentOn(tx, credentialName).map(
-        ({ agentName, providerName }) => ({
+        ({ agent_name: agentName, provider_name: providerName }) => ({
           agent: agentName,
           name: providerName,
         }),
@@ -310,7 +314,7 @@ export class LlmComponent implements Service {
     const current = openaiCompatibleMetadataSchema.parse(revision.current);
     if (
       revision.change === RevisionChange.Metadata &&
-      current.baseUrl !== next.baseUrl
+      current.base_url !== next.base_url
     )
       throw new OperationError(
         HttpStatus.Conflict,
@@ -372,7 +376,7 @@ export class LlmComponent implements Service {
         CredentialErrorCode.UnsupportedPlatform,
         "Unsupported platform.",
       );
-    if (LLM_PLATFORMS[platform].secretShape !== SecretShape.OAuth)
+    if (LLM_PLATFORMS[platform].secret_shape !== SecretShape.OAuth)
       throw new OperationError(
         HttpStatus.BadRequest,
         CredentialErrorCode.UnsupportedEntry,

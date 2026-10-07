@@ -48,9 +48,9 @@ function testPlatform(
   metadataSchema: z.ZodObject | null = null,
 ): CredentialPlatform {
   return {
-    secretShape,
-    loginModes: [],
-    metadataSchema,
+    secret_shape: secretShape,
+    login_modes: [],
+    metadata_schema: metadataSchema,
     capability: NO_CAPABILITY,
     probe: null,
   };
@@ -63,7 +63,7 @@ const TEST_SET: CredentialPlatformSet = {
     [TestPlatform.Metadata]: testPlatform(
       SecretShape.ApiKey,
       z.strictObject({
-        baseUrl: z.string(),
+        base_url: z.string(),
         models: z.array(z.strictObject({ id: z.string() })),
       }),
     ),
@@ -165,12 +165,12 @@ const inputs = [
     name: "openai",
     platform: TestPlatform.Metadata,
     secret: apiSecret,
-    metadata: { baseUrl: "https://example.com/v1", models: [] },
+    metadata: { base_url: "https://example.com/v1", models: [] },
   },
   {
     name: "storage",
     platform: TestPlatform.AccessKey,
-    secret: { accessKeyId: "id", secretAccessKey: secretValue },
+    secret: { access_key_id: "id", secret_access_key: secretValue },
     metadata: {
       endpoint: "https://example.com",
       bucket: "bucket",
@@ -604,17 +604,17 @@ test("rotation drains unpinned revisions while reads drain released pins", () =>
       expected_revision: FIRST_REVISION,
       secret: apiSecret,
     }) as CredentialAnswer;
-    assert(rotated.revisions.every((row) => row.endedAt === null));
+    assert(rotated.revisions.every((row) => row.ended_at === null));
     pins.clear();
     const read = f.get("github") as CredentialAnswer;
-    assert.notEqual(read.revisions[1]!.endedAt, null);
-    assert.equal(read.revisions[0]!.endedAt, null);
+    assert.notEqual(read.revisions[1]!.ended_at, null);
+    assert.equal(read.revisions[0]!.ended_at, null);
     const again = f.rotate("github", {
       expected_revision: NEXT_REVISION,
       secret: apiSecret,
     }) as CredentialAnswer;
-    assert.notEqual(again.revisions[1]!.endedAt, null);
-    assert.equal(again.revisions[0]!.endedAt, null);
+    assert.notEqual(again.revisions[1]!.ended_at, null);
+    assert.equal(again.revisions[0]!.ended_at, null);
     fails(
       () => f.revoke("github", NEXT_REVISION),
       HttpStatus.Conflict,
@@ -640,8 +640,8 @@ test("list drains every returned name and revoke drains other unpinned revisions
     pins.clear();
     const page = f.list() as { items: CredentialAnswer[] };
     for (const item of page.items) {
-      assert.notEqual(item.revisions[1]!.endedAt, null);
-      assert.equal(item.revisions[0]!.endedAt, null);
+      assert.notEqual(item.revisions[1]!.ended_at, null);
+      assert.equal(item.revisions[0]!.ended_at, null);
     }
     const current = f.get("github") as CredentialAnswer;
     pins.set(current.revisions[0]!.id, ["live-execution"]);
@@ -656,8 +656,8 @@ test("list drains every returned name and revoke drains other unpinned revisions
     });
     pins.clear();
     const revoked = f.revoke("github", THIRD_REVISION) as CredentialAnswer;
-    assert.equal(revoked.revisions[0]!.endedAt, null);
-    assert(revoked.revisions.slice(1).every((row) => row.endedAt !== null));
+    assert.equal(revoked.revisions[0]!.ended_at, null);
+    assert(revoked.revisions.slice(1).every((row) => row.ended_at !== null));
   } finally {
     f.store.close();
   }
@@ -677,10 +677,11 @@ test("pinned metadata retains a rotated revision without creating a pin and refu
         assert.equal(executionId, execution.executionId);
         assert.equal(runtimeIdentity, execution.runtimeIdentity);
         return {
-          ...execution,
-          projectId: createIdentity("project"),
-          workerBindingId: "binding-one",
-          resourceIdentity: "worker:kanthord:general",
+          execution_id: execution.executionId,
+          runtime_identity: execution.runtimeIdentity,
+          project_id: createIdentity("project"),
+          worker_binding_id: "binding-one",
+          resource_identity: "worker:kanthord:general",
           credentials,
         };
       },
@@ -721,23 +722,23 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
   const pins = new Map<string, string[]>();
   const credentials: string[] = [];
   const execution = {
-    executionId: "execution-one",
-    projectId: createIdentity("project"),
-    workerBindingId: "binding-one",
-    resourceIdentity: "worker:kanthord:general",
-    runtimeIdentity: createIdentity("worker_instance"),
+    execution_id: "execution-one",
+    project_id: createIdentity("project"),
+    worker_binding_id: "binding-one",
+    resource_identity: "worker:kanthord:general",
+    runtime_identity: createIdentity("worker_instance"),
     credentials,
   };
   const identity = testMachineIdentity(
     {
       clientId: createIdentity("client_identity"),
-      projectId: execution.projectId,
-      resourceIdentity: execution.resourceIdentity,
+      projectId: execution.project_id,
+      resourceIdentity: execution.resource_identity,
       name: "machine",
       issuedAt: 0,
     },
     "jti",
-    execution.runtimeIdentity,
+    execution.runtime_identity,
   );
   let platform: string = TestPlatform.Key;
   let refused = false;
@@ -749,8 +750,8 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
         return {
           credential: "github",
           platform,
-          providerId: platform,
-          agentProvider: "default",
+          provider_id: platform,
+          agent_provider: "default",
         };
       },
     },
@@ -774,7 +775,7 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
           () => f.component.release(tx, grant, Date.now()),
           FacilityError,
         );
-        return material.credentialId;
+        return material.credential_id;
       } finally {
         material.drop();
       }
@@ -799,7 +800,7 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
     fails(release, HttpStatus.Conflict, "credential.revision.revoked");
     credentials.length = 0;
     const latest = f.get("github") as CredentialAnswer;
-    execution.executionId = "execution-two";
+    execution.execution_id = "execution-two";
     assert.equal(release(), latest.revisions[0]!.id);
     noSecret(f.logs);
   } finally {
@@ -823,11 +824,11 @@ test("revoke ends only an older live revision", () => {
       "credential.revision.newest_live",
     );
     const answer = f.revoke("github", FIRST_REVISION) as {
-      revisions: { revision: number; endedAt: number | null }[];
+      revisions: { revision: number; ended_at: number | null }[];
     };
-    assert.equal(answer.revisions[0]!.endedAt, null);
+    assert.equal(answer.revisions[0]!.ended_at, null);
     assert.equal(answer.revisions[1]!.revision, FIRST_REVISION);
-    assert.ok(answer.revisions[1]!.endedAt !== null);
+    assert.ok(answer.revisions[1]!.ended_at !== null);
     noSecret(answer);
     fails(
       () => f.revoke("github", FIRST_REVISION),
@@ -923,12 +924,12 @@ test("credential metadata returns only nonsecret fields from the newest live rev
     const rotated = f.rotate("openai", {
       expected_revision: FIRST_REVISION,
       secret: apiSecret,
-      metadata: { baseUrl: ROTATED_BASE_URL, models: [] },
+      metadata: { base_url: ROTATED_BASE_URL, models: [] },
     }) as { revisions: { id: string }[] };
     const newest = f.store.transaction((tx) => metadata(tx, "openai"));
     assert.equal(newest?.id, rotated.revisions[0]!.id);
     assert.deepEqual(newest?.metadata, {
-      baseUrl: ROTATED_BASE_URL,
+      base_url: ROTATED_BASE_URL,
       models: [],
     });
     f.revoke("openai", FIRST_REVISION);
@@ -993,7 +994,7 @@ test("a name of another platform set answers not found on every read and write",
       fails(call, HttpStatus.NotFound, CREDENTIAL_NOT_FOUND_CODE);
     const names = (value: unknown) =>
       (value as { items: CredentialAnswer[] }).items.map(({ name }) => name);
-    assert.deepEqual(names(f.list({ includeArchived: "true" })), ["github"]);
+    assert.deepEqual(names(f.list({ include_archived: "true" })), ["github"]);
     assert.deepEqual(names(f.list({ platform: FOREIGN_PLATFORM })), []);
     assert.deepEqual(names(f.list({}, FOREIGN_SET)), ["foreign"]);
     assert.equal(
@@ -1006,10 +1007,10 @@ test("a name of another platform set answers not found on every read and write",
 });
 
 test("credentialDependents returns both injected collaborations' results", () => {
-  const agentProviders = [{ agentName: "agent", providerName: "provider" }];
-  const bindings = [{ bindingId: "binding", projectId: "project" }];
-  const namings = [{ ...bindings[0]!, projectName: "alpha", name: "repo" }];
-  const inbounds = [{ inboundId: "inbound" }];
+  const agentProviders = [{ agent_name: "agent", provider_name: "provider" }];
+  const bindings = [{ binding_id: "binding", project_id: "project" }];
+  const namings = [{ ...bindings[0]!, project_name: "alpha", name: "repo" }];
+  const inbounds = [{ inbound_id: "inbound" }];
   const calls: { tx: Transaction; name: string }[] = [];
   const f = fixture({
     agentProvidersDependentOn: (tx, name) => {
@@ -1028,7 +1029,7 @@ test("credentialDependents returns both injected collaborations' results", () =>
   try {
     f.store.transaction((tx) => {
       assert.deepEqual(f.component.credentialDependents(tx, "openai"), {
-        agentProviders,
+        agent_providers: agentProviders,
         bindings,
         inbounds,
       });
@@ -1063,19 +1064,19 @@ function inUseDetails(fn: () => unknown): unknown {
   return assert.fail("archive must refuse");
 }
 
-const NO_DEPENDENTS = { agentProviders: [], bindings: [], inbounds: [] };
-const AGENT_DEPENDENT = [{ agentName: "agent", providerName: "provider" }];
-const BINDING_DEPENDENT = [{ bindingId: "binding", projectId: "project" }];
+const NO_DEPENDENTS = { agent_providers: [], bindings: [], inbounds: [] };
+const AGENT_DEPENDENT = [{ agent_name: "agent", provider_name: "provider" }];
+const BINDING_DEPENDENT = [{ binding_id: "binding", project_id: "project" }];
 const BINDING_NAMING = [
-  { ...BINDING_DEPENDENT[0]!, projectName: "alpha", name: "repo" },
+  { ...BINDING_DEPENDENT[0]!, project_name: "alpha", name: "repo" },
 ];
-const INBOUND_DEPENDENT = [{ inboundId: "inbound" }];
+const INBOUND_DEPENDENT = [{ inbound_id: "inbound" }];
 
 for (const [kind, collaboration, dependents] of [
   [
     "agent provider",
     { agentProvidersDependentOn: () => AGENT_DEPENDENT },
-    { ...NO_DEPENDENTS, agentProviders: AGENT_DEPENDENT },
+    { ...NO_DEPENDENTS, agent_providers: AGENT_DEPENDENT },
   ],
   [
     "binding",
@@ -1094,7 +1095,7 @@ for (const [kind, collaboration, dependents] of [
       f.create(inputs[0]);
       assert.deepEqual(inUseDetails(archiveCall(f, "github")), dependents);
       const read = f.get("github") as CredentialAnswer;
-      assert(read.revisions.every((row) => row.endedAt === null));
+      assert(read.revisions.every((row) => row.ended_at === null));
     } finally {
       f.store.close();
     }
@@ -1114,7 +1115,7 @@ test("archive ends every live revision and keeps every row", () => {
     const archived = archiveCall(f, "github")() as CredentialAnswer;
     assert.equal(archived.name, GITHUB_NAME);
     assert.equal(archived.revisions.length, NEXT_REVISION);
-    assert(archived.revisions.every((row) => row.endedAt !== null));
+    assert(archived.revisions.every((row) => row.ended_at !== null));
     const read = f.get("github") as CredentialAnswer;
     assert.equal(read.revisions.length, NEXT_REVISION);
     noSecret(archived);
@@ -1194,7 +1195,7 @@ test("get answers an archived name unchanged", () => {
   try {
     const read = f.get("github") as CredentialAnswer;
     assert.equal(read.name, GITHUB_NAME);
-    assert(read.revisions.every((row) => row.endedAt !== null));
+    assert(read.revisions.every((row) => row.ended_at !== null));
   } finally {
     f.store.close();
   }
@@ -1210,15 +1211,15 @@ test("a rotation never archives a name", () => {
         expected_revision: read.revisions[0]!.revision,
         secret: apiSecret,
       }) as CredentialAnswer;
-      assert(answer.revisions.some((row) => row.endedAt === null));
-      assert.equal(answer.revisions[0]!.endedAt, null);
+      assert(answer.revisions.some((row) => row.ended_at === null));
+      assert.equal(answer.revisions[0]!.ended_at, null);
     }
   } finally {
     f.store.close();
   }
 });
 
-test("list leaves out an archived name unless includeArchived is true and pages correctly", () => {
+test("list leaves out an archived name unless include_archived is true and pages correctly", () => {
   const f = fixture();
   try {
     for (const input of [inputs[0], inputs[1], inputs[2]]) f.create(input);
@@ -1226,11 +1227,11 @@ test("list leaves out an archived name unless includeArchived is true and pages 
     const names = (value: unknown) =>
       (value as { items: CredentialAnswer[] }).items.map(({ name }) => name);
     assert.deepEqual(names(f.list()), ["github", "openai"]);
-    assert.deepEqual(names(f.list({ includeArchived: "false" })), [
+    assert.deepEqual(names(f.list({ include_archived: "false" })), [
       "github",
       "openai",
     ]);
-    assert.deepEqual(names(f.list({ includeArchived: "true" })), [
+    assert.deepEqual(names(f.list({ include_archived: "true" })), [
       "anthropic",
       "github",
       "openai",
@@ -1253,7 +1254,7 @@ test("list leaves out an archived name unless includeArchived is true and pages 
 
 test("archive checks every dependent in the transaction of the write", () => {
   const seen: Transaction[] = [];
-  const dependents: { inbounds: { inboundId: string }[] } = { inbounds: [] };
+  const dependents: { inbounds: { inbound_id: string }[] } = { inbounds: [] };
   const f = fixture({
     agentProvidersDependentOn: (tx) => {
       seen.push(tx);
@@ -1377,7 +1378,7 @@ test("check runs the probe of the platform on the parsed secret and metadata and
   const body = {
     platform: TestPlatform.Metadata,
     secret: apiSecret,
-    metadata: { baseUrl: "https://example.com/v1", models: [] },
+    metadata: { base_url: "https://example.com/v1", models: [] },
   };
   const answer = await f.component.check(set, body, new CancellationContext());
   assert.deepEqual(answer, {
@@ -1414,9 +1415,9 @@ test("check runs the probe of the platform on the parsed secret and metadata and
   );
   for (const invalid of [
     { ...body, secret: { key: "" } },
-    { ...body, secret: { accessKeyId: "id", secretAccessKey: "s" } },
+    { ...body, secret: { access_key_id: "id", secret_access_key: "s" } },
     { ...body, metadata: null },
-    { ...body, metadata: { baseUrl: "https://example.com/v1" } },
+    { ...body, metadata: { base_url: "https://example.com/v1" } },
   ])
     await assert.rejects(
       f.component.check(set, invalid, new CancellationContext()),

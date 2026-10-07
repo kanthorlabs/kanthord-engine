@@ -75,7 +75,10 @@ test("native session isolates filesystem discovery, settings and session persist
   const { runtime, model } = await scriptedModelRuntime(provider)({
     credentials,
     setup,
-    handoverItem: { credentialId: setup.credentialId, providerId: "anthropic" },
+    handoverItem: {
+      credential_id: setup.credentialId,
+      provider_id: "anthropic",
+    },
     signal: new AbortController().signal,
   });
   const session = await openSession({

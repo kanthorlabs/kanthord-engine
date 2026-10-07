@@ -37,10 +37,18 @@ const METADATA = {
 const S3_BODY = {
   name: "evidence",
   platform: "s3",
-  secret: { accessKeyId: ACCESS_KEY_ID, secretAccessKey: SECRET },
+  secret: { access_key_id: ACCESS_KEY_ID, secret_access_key: SECRET },
   metadata: METADATA,
 };
 const BINDINGS = [
+  {
+    binding_id: "binding_one",
+    project_id: "project_one",
+    project_name: "alpha",
+    name: "evidence",
+  },
+];
+const BINDINGS_ANSWER = [
   {
     bindingId: "binding_one",
     projectId: "project_one",
@@ -115,9 +123,9 @@ test("platform list answers s3 alone", (t) => {
       items: [
         {
           platform: "s3",
-          secretShape: SecretShape.S3AccessKey,
-          loginModes: [],
-          metadataFields: ["endpoint", "bucket", "region"],
+          secret_shape: SecretShape.S3AccessKey,
+          login_modes: [],
+          metadata_fields: ["endpoint", "bucket", "region"],
           verifiable: true,
         },
       ],
@@ -140,13 +148,13 @@ test("create refuses a platform of another component and get lists the bindings 
     );
   f.invoke(storageOperations.create, { params: {}, query: {}, body: S3_BODY });
   const answer = f.invoke(storageOperations.get, {
-    params: { credentialName: S3_BODY.name },
+    params: { credential_name: S3_BODY.name },
     query: {},
     body: null,
   }) as CredentialAnswer & { bindings: unknown };
   assert.equal(answer.revisions.length, FIRST_REVISION);
   assert.deepEqual(answer.revisions[0]!.metadata, METADATA);
-  assert.deepEqual(answer.bindings, BINDINGS);
+  assert.deepEqual(answer.bindings, BINDINGS_ANSWER);
   assert.ok(!JSON.stringify(answer).includes(SECRET));
 });
 
@@ -168,7 +176,7 @@ test("a name of another component answers not found and the inventory heads the 
   fails(
     () =>
       f.invoke(storageOperations.get, {
-        params: { credentialName: "github" },
+        params: { credential_name: "github" },
         query: {},
         body: null,
       }),
@@ -178,7 +186,7 @@ test("a name of another component answers not found and the inventory heads the 
   fails(
     () =>
       f.invoke(storageOperations.update_metadata, {
-        params: { credentialName: "github" },
+        params: { credential_name: "github" },
         query: {},
         body: { expected_revision: FIRST_REVISION, metadata: null },
       }),
@@ -315,7 +323,7 @@ test("check refuses a platform of another component, invalid input and a body wi
       UNSUPPORTED_PLATFORM_CODE,
     );
   for (const body of [
-    { ...CHECK_BODY, secret: { accessKeyId: ACCESS_KEY_ID } },
+    { ...CHECK_BODY, secret: { access_key_id: ACCESS_KEY_ID } },
     { ...CHECK_BODY, secret: { key: SECRET } },
     { ...CHECK_BODY, metadata: null },
     { ...CHECK_BODY, metadata: { ...METADATA, endpoint: "not a url" } },
@@ -353,11 +361,11 @@ test("check takes no mutation key and the credential name check is refused", (t)
   );
 });
 
-const VERIFY_PATH = "/api/storage/credential/:credentialName/verify";
+const VERIFY_PATH = "/api/storage/credential/:credential_name/verify";
 const ARCHIVED_CODE = "credential.credential.archived";
 
 function verifyInput(credentialName: string) {
-  return { params: { credentialName }, query: {}, body: null };
+  return { params: { credential_name: credentialName }, query: {}, body: null };
 }
 
 function credentialRows(f: ReturnType<typeof fixture>): string {
@@ -486,7 +494,7 @@ test("verify takes no body and no mutation key", () => {
   assert.equal(storageOperations.verify.access, AccessPolicy.Human);
   assert.throws(() =>
     storageOperations.verify.input.parse({
-      params: { credentialName: S3_BODY.name },
+      params: { credential_name: S3_BODY.name },
       query: {},
       body: {},
     }),

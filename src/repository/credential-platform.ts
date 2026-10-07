@@ -68,17 +68,17 @@ export const REPOSITORY_PLATFORMS: Readonly<
   Record<Platform, CredentialPlatform>
 > = {
   [Platform.GitHub]: {
-    secretShape: SecretShape.ApiKey,
-    loginModes: [],
-    metadataSchema: null,
+    secret_shape: SecretShape.ApiKey,
+    login_modes: [],
+    metadata_schema: null,
     capability: CAPABILITY_RATE_LIMIT_READ,
     probe: (secret, _metadata, context, observe) =>
       probeGitHub(apiKeySecretSchema.parse(secret).key, context, observe),
   },
   [Platform.Ssh]: {
-    secretShape: SecretShape.None,
-    loginModes: [],
-    metadataSchema: sshPinSchema,
+    secret_shape: SecretShape.None,
+    login_modes: [],
+    metadata_schema: sshPinSchema,
     capability: CAPABILITY_SSH_IDENTITY,
     probe: (_secret, metadata, context, observe) =>
       probeSsh(metadata, context, observe),

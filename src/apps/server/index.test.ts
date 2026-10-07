@@ -110,7 +110,7 @@ test("composed Custody and Worker share credential and enablement collaborations
       name: CREDENTIAL_NAME,
       platform: PROVIDER_KIND,
       metadata: {
-        baseUrl: BASE_URL,
+        base_url: BASE_URL,
         models: [],
       },
       secret: { key: "composition-secret" },
@@ -119,7 +119,7 @@ test("composed Custody and Worker share credential and enablement collaborations
   assert.equal(created.status, HttpStatus.OK, await created.text());
   const updated = await fixture.request(
     llmOperations.update_metadata.path.replace(
-      ":credentialName",
+      ":credential_name",
       CREDENTIAL_NAME,
     ),
     {
@@ -128,8 +128,8 @@ test("composed Custody and Worker share credential and enablement collaborations
       body: JSON.stringify({
         expected_revision: FIRST_REVISION,
         metadata: {
-          baseUrl: BASE_URL,
-          models: [{ id: MODEL_NAME, reasoningLevels: [REASONING_LEVEL] }],
+          base_url: BASE_URL,
+          models: [{ id: MODEL_NAME, reasoning_levels: [REASONING_LEVEL] }],
         },
       }),
     },
@@ -161,8 +161,8 @@ test("composed Custody and Worker share credential and enablement collaborations
     assert.deepEqual(
       fixture.custody.credentialDependents(tx, CREDENTIAL_NAME),
       {
-        agentProviders: [
-          { agentName: AGENT_NAME, providerName: PROVIDER_NAME },
+        agent_providers: [
+          { agent_name: AGENT_NAME, provider_name: PROVIDER_NAME },
         ],
         bindings: [],
         inbounds: [],

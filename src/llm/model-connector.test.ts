@@ -20,7 +20,7 @@ import { Platform } from "./platforms.ts";
 
 async function createModelRuntime(input: {
   setup: ExecutionSetup;
-  handoverItem: { credentialId: string; providerId: string };
+  handoverItem: { credential_id: string; provider_id: string };
   credentials: CredentialStore;
   signal: AbortSignal;
 }) {
@@ -59,8 +59,8 @@ const setup: ExecutionSetup = {
   prompt: { final: "setup prompt" },
 };
 const handoverItem = {
-  credentialId: setup.credentialId,
-  providerId: "anthropic",
+  credential_id: setup.credentialId,
+  provider_id: "anthropic",
 };
 
 test("runtime pins credentials, resolves models, and rejects unsupported configuration without network", async (t) => {
@@ -118,14 +118,14 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
   await assert.rejects(
     createModelRuntime({
       ...input,
-      handoverItem: { ...handoverItem, providerId: "foreign" },
+      handoverItem: { ...handoverItem, provider_id: "foreign" },
     }),
     { details: { reason: SetupRefusal.CredentialAbsent } },
   );
   await assert.rejects(
     createModelRuntime({
       ...input,
-      handoverItem: { ...handoverItem, credentialId: "foreign" },
+      handoverItem: { ...handoverItem, credential_id: "foreign" },
     }),
     { details: { reason: SetupRefusal.CredentialRevisionMismatch } },
   );
@@ -143,21 +143,21 @@ test("compatible models retain metadata and exact supported reasoning levels", a
       modelIdentifier: "basic",
     },
     metadata: {
-      baseUrl: "https://example.invalid/v1",
+      base_url: "https://example.invalid/v1",
       models: [
         { id: "basic" },
         {
           id: "reasoner",
-          contextWindow: 50000,
-          maxTokens: 2000,
-          reasoningLevels: ["off", "high", "max"],
+          context_window: 50000,
+          max_tokens: 2000,
+          reasoning_levels: ["off", "high", "max"],
         },
       ],
     },
   };
   const runtime = await createModelRuntime({
     setup: compatible,
-    handoverItem: { ...handoverItem, providerId: "openai-compatible" },
+    handoverItem: { ...handoverItem, provider_id: "openai-compatible" },
     credentials: new InMemoryCredentialStore(),
     signal: new AbortController().signal,
   });
@@ -178,7 +178,7 @@ test("compatible models retain metadata and exact supported reasoning levels", a
     ],
   );
   for (const model of models) {
-    assert.equal(model.baseUrl, compatible.metadata!.baseUrl);
+    assert.equal(model.baseUrl, compatible.metadata!.base_url);
     assert.deepEqual(model.cost, {
       input: 0,
       output: 0,
@@ -207,7 +207,7 @@ test("openrouter runs with the built-in pi provider and its credential", async (
   }));
   const runtime = await createModelRuntime({
     setup: openrouter,
-    handoverItem: { ...handoverItem, providerId: "openrouter" },
+    handoverItem: { ...handoverItem, provider_id: "openrouter" },
     credentials,
     signal: new AbortController().signal,
   });
@@ -255,7 +255,7 @@ test("openai-codex resolves a built-in model against its OAuth credential", asyn
   }));
   const runtime = await createModelRuntime({
     setup: codex,
-    handoverItem: { ...handoverItem, providerId: "openai-codex" },
+    handoverItem: { ...handoverItem, provider_id: "openai-codex" },
     credentials,
     signal: new AbortController().signal,
   });
@@ -292,7 +292,7 @@ test("groq runs with the built-in pi provider and no metadata", async (t) => {
   }));
   const runtime = await createModelRuntime({
     setup: groq,
-    handoverItem: { ...handoverItem, providerId: "groq" },
+    handoverItem: { ...handoverItem, provider_id: "groq" },
     credentials,
     signal: new AbortController().signal,
   });
@@ -323,7 +323,7 @@ test("amazon-bedrock receives its metadata region as the credential env", async 
   }));
   const runtime = await createModelRuntime({
     setup: bedrock,
-    handoverItem: { ...handoverItem, providerId: "amazon-bedrock" },
+    handoverItem: { ...handoverItem, provider_id: "amazon-bedrock" },
     credentials,
     signal: new AbortController().signal,
   });

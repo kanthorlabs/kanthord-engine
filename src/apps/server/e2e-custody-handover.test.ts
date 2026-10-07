@@ -368,12 +368,12 @@ test(
     let C2: string;
     let X2: string;
     const R1 = {
-      credentialId: C1,
+      credential_id: C1,
       digest: digest(credential(FIRST)),
       credential: credential(REFRESHED),
     };
     const R2 = {
-      credentialId: C1,
+      credential_id: C1,
       digest: digest(credential(REFRESHED)),
       credential: credential(NEXT),
     };
@@ -407,8 +407,8 @@ test(
         assert.deepEqual(h.open(X, envelope), {
           items: [
             {
-              credentialId: C1,
-              providerId: PROVIDER,
+              credential_id: C1,
+              provider_id: PROVIDER,
               credential: credential(FIRST),
             },
           ],
@@ -444,7 +444,7 @@ test(
         assert.equal(replay.status, HttpStatus.Conflict);
         assert.ok(!JSON.stringify(replay).includes("ciphertext"));
         assert.equal(
-          h.open(X, completed(await h.handover(X))).items[0]?.credentialId,
+          h.open(X, completed(await h.handover(X))).items[0]?.credential_id,
           C1,
         );
       },
@@ -463,7 +463,7 @@ test(
           NAME,
         ]);
         assert.deepEqual(
-          stored.revisions.map((row) => [row.revision, row.endedAt]),
+          stored.revisions.map((row) => [row.revision, row.ended_at]),
           [
             [SECOND_REVISION, null],
             [FIRST_REVISION, null],
@@ -471,8 +471,8 @@ test(
         );
         C2 = stored.revisions[0]!.id;
         assert.deepEqual(h.open(X, completed(await h.handover(X))).items[0], {
-          credentialId: C1,
-          providerId: PROVIDER,
+          credential_id: C1,
+          provider_id: PROVIDER,
           credential: credential(FIRST),
         });
       },
@@ -504,7 +504,7 @@ test(
         const envelopes = [
           sealEnvelope(h.keys.handover, h.aad(X), R2),
           { nonce: h.seal(X, R2).nonce, ciphertext: "AAAA" },
-          h.seal(X, { ...R2, credentialId: C2 }),
+          h.seal(X, { ...R2, credential_id: C2 }),
           h.seal(X, {
             ...R2,
             credential: {
@@ -573,8 +573,8 @@ test(
           "get",
           NAME,
         ]);
-        assert.equal(stored.revisions[0]?.endedAt, null);
-        assert.equal(typeof stored.revisions[1]?.endedAt, NUMBER_TYPE);
+        assert.equal(stored.revisions[0]?.ended_at, null);
+        assert.equal(typeof stored.revisions[1]?.ended_at, NUMBER_TYPE);
         await h.refuses(
           ["worker", "handover", X],
           "credential.revision.revoked",
@@ -584,7 +584,7 @@ test(
           await h.report(
             X,
             h.seal(X, {
-              credentialId: C1,
+              credential_id: C1,
               digest: digest(credential(NEXT)),
               credential: credential(LAST),
             }),
@@ -652,7 +652,7 @@ test(
         assert.deepEqual(
           stored.revisions
             .slice(0, SECOND_REVISION)
-            .map((row) => [row.revision, row.endedAt]),
+            .map((row) => [row.revision, row.ended_at]),
           [
             [THIRD_CREDENTIAL_REVISION, null],
             [SECOND_REVISION, null],
@@ -675,8 +675,8 @@ test(
           NAME,
         ]);
         assert.equal(stored.revisions[0]?.revision, THIRD_CREDENTIAL_REVISION);
-        assert.equal(stored.revisions[0]?.endedAt, null);
-        assert.equal(typeof stored.revisions[1]?.endedAt, NUMBER_TYPE);
+        assert.equal(stored.revisions[0]?.ended_at, null);
+        assert.equal(typeof stored.revisions[1]?.ended_at, NUMBER_TYPE);
       },
     );
     await t.test(

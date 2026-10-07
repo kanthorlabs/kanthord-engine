@@ -43,16 +43,16 @@ function platformSet(calls: ProbeCall[]): CredentialPlatformSet {
   return {
     platforms: {
       [PROBED_PLATFORM]: {
-        secretShape: SecretShape.ApiKey,
-        loginModes: [],
-        metadataSchema: z.strictObject({ endpoint: z.url() }),
+        secret_shape: SecretShape.ApiKey,
+        login_modes: [],
+        metadata_schema: z.strictObject({ endpoint: z.url() }),
         capability: PROBED_CAPABILITY,
         probe,
       },
       [UNPROBED_PLATFORM]: {
-        secretShape: SecretShape.ApiKey,
-        loginModes: [],
-        metadataSchema: null,
+        secret_shape: SecretShape.ApiKey,
+        login_modes: [],
+        metadata_schema: null,
         capability: UNPROBED_CAPABILITY,
         probe: null,
       },

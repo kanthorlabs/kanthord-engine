@@ -11,11 +11,11 @@ const FIELDS = {
   credential: "anthro-1",
   platform: "anthropic",
   execution: {
-    executionId: "execution-one",
-    projectId: "project-one",
-    workerBindingId: "binding-one",
-    resourceIdentity: "worker:kanthord:general",
-    runtimeIdentity: "runtime-one",
+    execution_id: "execution-one",
+    project_id: "project-one",
+    worker_binding_id: "binding-one",
+    resource_identity: "worker:kanthord:general",
+    runtime_identity: "runtime-one",
     credentials: [] as string[],
   },
 };

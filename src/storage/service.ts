@@ -52,14 +52,14 @@ export class StorageComponent {
       caller.commit((tx) => this.records.list(tx, PLATFORM_SET, input.query)),
     );
     registry.register(storageOperations.get, (input, caller) =>
-      caller.commit((tx) => this.get(tx, input.params.credentialName)),
+      caller.commit((tx) => this.get(tx, input.params.credential_name)),
     );
     registry.register(storageOperations.rotate, (input, caller) =>
       caller.commit((tx) =>
         this.records.rotate(
           tx,
           PLATFORM_SET,
-          input.params.credentialName,
+          input.params.credential_name,
           input.body,
           humanIdentity(caller),
         ),
@@ -70,7 +70,7 @@ export class StorageComponent {
         this.records.updateMetadata(
           tx,
           PLATFORM_SET,
-          input.params.credentialName,
+          input.params.credential_name,
           input.body,
           humanIdentity(caller),
         ),
@@ -81,20 +81,20 @@ export class StorageComponent {
         this.records.revoke(
           tx,
           PLATFORM_SET,
-          input.params.credentialName,
+          input.params.credential_name,
           input.params.revision,
         ),
       ),
     );
     registry.register(storageOperations.archive, (input, caller) =>
       caller.commit((tx) =>
-        this.records.archive(tx, PLATFORM_SET, input.params.credentialName),
+        this.records.archive(tx, PLATFORM_SET, input.params.credential_name),
       ),
     );
     registry.register(storageOperations.verify, async (input, caller) => {
       const answer = await this.records.verify(
         PLATFORM_SET,
-        input.params.credentialName,
+        input.params.credential_name,
         caller.context,
       );
       throwIfCancelled(caller.context);
@@ -123,7 +123,12 @@ export class StorageComponent {
     return {
       ...answer,
       bindings: this.bindingsNaming(tx, credentialName).map(
-        ({ projectId, projectName, bindingId, name }) => ({
+        ({
+          project_id: projectId,
+          project_name: projectName,
+          binding_id: bindingId,
+          name,
+        }) => ({
           projectId,
           projectName,
           bindingId,

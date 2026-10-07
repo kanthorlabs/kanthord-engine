@@ -21,20 +21,20 @@ export function authorizeModelInference(
   tx: Transaction,
   identity: MachineIdentity,
   execution: {
-    executionId: string;
-    projectId: string;
-    workerBindingId: string;
-    resourceIdentity: string;
+    execution_id: string;
+    project_id: string;
+    worker_binding_id: string;
+    resource_identity: string;
   },
 ) {
   assert.ok(tx.database.isTransaction);
-  assert.ok(execution.executionId);
-  const row = dependencies.workerBindingRowOf(tx, execution.workerBindingId);
+  assert.ok(execution.execution_id);
+  const row = dependencies.workerBindingRowOf(tx, execution.worker_binding_id);
   if (
     !row ||
-    row.projectId !== execution.projectId ||
+    row.projectId !== execution.project_id ||
     row.projectId !== identity.projectId ||
-    row.resourceIdentity !== execution.resourceIdentity ||
+    row.resourceIdentity !== execution.resource_identity ||
     row.resourceIdentity !== identity.resourceIdentity
   )
     refused(AuthorizationRefusal.BindingMismatch);
@@ -66,7 +66,7 @@ export function authorizeModelInference(
   return {
     credential: view.effective.credential,
     platform: view.effective.provider,
-    providerId: view.effective.provider,
-    agentProvider: view.effective.agentProvider,
+    provider_id: view.effective.provider,
+    agent_provider: view.effective.agentProvider,
   };
 }

@@ -145,8 +145,8 @@ export type AgentEnablement = {
 };
 
 export type AgentProviderDependent = {
-  agentName: string;
-  providerName: string;
+  agent_name: string;
+  provider_name: string;
 };
 
 export type AgentDependentBinding = {
@@ -175,7 +175,7 @@ export type CustodySuitability = (
 
 export type ApprovedModel = {
   id: string;
-  reasoningLevels: readonly string[];
+  reasoning_levels: readonly string[];
 };
 
 export type ApprovedModelsFn = (

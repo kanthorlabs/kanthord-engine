@@ -191,7 +191,17 @@ export function composeServices(options: {
       ...STORAGE_PLATFORMS,
     },
     executions: {
-      requireRunning: (...args) => scheduler.requireRunning(...args),
+      requireRunning: (...args) => {
+        const row = scheduler.requireRunning(...args);
+        return {
+          execution_id: row.executionId,
+          project_id: row.projectId,
+          worker_binding_id: row.workerBindingId,
+          resource_identity: row.resourceIdentity,
+          runtime_identity: row.runtimeIdentity,
+          credentials: row.credentials,
+        };
+      },
       pinCredential: (...args) => scheduler.pinCredential(...args),
       liveExecutionsPinning: (...args) =>
         scheduler.liveExecutionsPinning(...args),

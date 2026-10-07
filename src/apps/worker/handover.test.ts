@@ -15,8 +15,8 @@ import { testClaim } from "./test-support.ts";
 const SECRET = Buffer.alloc(32, 5).toString("base64");
 const CREDENTIAL = { type: "api_key" as const, key: "test_handover_key" };
 const ITEM = {
-  credentialId: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-  providerId: "anthropic",
+  credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  provider_id: "anthropic",
   credential: CREDENTIAL,
 };
 const ONCE = 1;
@@ -69,10 +69,10 @@ test("handover retries a lost answer with a fresh key and reports refresh and re
   const result = await pending;
   assert.equal(new Set(requestKeys).size, requestKeys.length);
   assert.deepEqual(
-    await result.credentials.store.read(ITEM.providerId),
+    await result.credentials.store.read(ITEM.provider_id),
     CREDENTIAL,
   );
-  await result.credentials.store.modify(ITEM.providerId, async () => ({
+  await result.credentials.store.modify(ITEM.provider_id, async () => ({
     type: "api_key",
     key: "test_refreshed_key",
   }));
@@ -81,7 +81,10 @@ test("handover retries a lost answer with a fresh key and reports refresh and re
   const twice = 2;
   assert.equal(reports.length, twice);
   result.credentials.discard();
-  assert.equal(await result.credentials.store.read(ITEM.providerId), undefined);
+  assert.equal(
+    await result.credentials.store.read(ITEM.provider_id),
+    undefined,
+  );
 });
 
 test("another client secret refuses handover without exposing material", async (t) => {

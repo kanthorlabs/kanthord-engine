@@ -80,7 +80,7 @@ async function list(group: CredentialGroup, command: Command): Promise<void> {
     params: {},
     query: {
       ...(options.platform !== undefined ? { platform: options.platform } : {}),
-      includeArchived: options.includeArchived ? QUERY_TRUE : QUERY_FALSE,
+      include_archived: options.includeArchived ? QUERY_TRUE : QUERY_FALSE,
       limit,
       ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
     },
@@ -99,7 +99,7 @@ async function get(
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(token, credentialCode(group, GET, TOKEN_REQUIRED));
   const result = await httpClient(group.operations, endpoint, token).get({
-    params: { credentialName },
+    params: { credential_name: credentialName },
     query: {},
     body: null,
   });
@@ -116,7 +116,7 @@ async function verify(
   const { endpoint, token } = resolveClient(command.optsWithGlobals());
   requireToken(token, credentialCode(group, VERIFY, TOKEN_REQUIRED));
   const result = await httpClient(group.operations, endpoint, token).verify({
-    params: { credentialName },
+    params: { credential_name: credentialName },
     query: {},
     body: null,
   });
@@ -176,7 +176,7 @@ async function rotate(
   const key = resolveKey(options);
   const body = readJsonFileAs(options.file, credentialRotateBodySchema, true);
   const result = await httpClient(group.operations, endpoint, token).rotate(
-    { params: { credentialName }, query: {}, body },
+    { params: { credential_name: credentialName }, query: {}, body },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -207,7 +207,7 @@ async function updateMetadata(
     endpoint,
     token,
   ).update_metadata(
-    { params: { credentialName }, query: {}, body },
+    { params: { credential_name: credentialName }, query: {}, body },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -235,7 +235,11 @@ async function revoke(
   requireToken(token, credentialCode(group, REVOKE, TOKEN_REQUIRED));
   const key = resolveKey(options);
   const result = await httpClient(group.operations, endpoint, token).revoke(
-    { params: { credentialName, revision: rev }, query: {}, body: null },
+    {
+      params: { credential_name: credentialName, revision: rev },
+      query: {},
+      body: null,
+    },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(
@@ -258,7 +262,7 @@ async function archive(
   requireToken(token, credentialCode(group, ARCHIVE, TOKEN_REQUIRED));
   const key = resolveKey(options);
   const result = await httpClient(group.operations, endpoint, token).archive(
-    { params: { credentialName }, query: {}, body: null },
+    { params: { credential_name: credentialName }, query: {}, body: null },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(

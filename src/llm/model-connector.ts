@@ -51,7 +51,7 @@ export type ModelConfiguration = {
 };
 export interface ModelConnectorInput {
   credentials: CredentialStore;
-  handoverItem: { credentialId: string; providerId: string };
+  handoverItem: { credential_id: string; provider_id: string };
   credentialId: string;
   configuration: ModelConfiguration;
   metadata: unknown;
@@ -80,7 +80,7 @@ function compatibleProvider(input: ModelConnectorInput) {
   const metadata = openaiCompatibleMetadataSchema.parse(input.metadata);
   assert.equal(configuration.provider, Platform.OpenAICompatible);
   const models: Model<Api>[] = metadata.models.map((item) => {
-    const levels = item.reasoningLevels ?? MODEL_DEFAULT_REASONING_LEVELS;
+    const levels = item.reasoning_levels ?? MODEL_DEFAULT_REASONING_LEVELS;
     const thinkingLevelMap: ThinkingLevelMap = Object.fromEntries(
       Object.values(ReasoningLevel).map((level) => [
         level,
@@ -92,19 +92,19 @@ function compatibleProvider(input: ModelConnectorInput) {
       name: item.id,
       api: "openai-responses",
       provider: Platform.OpenAICompatible,
-      baseUrl: metadata.baseUrl,
+      baseUrl: metadata.base_url,
       reasoning: levels.some((level) => level !== ReasoningLevel.Off),
       thinkingLevelMap,
       input: ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: item.contextWindow ?? MODEL_DEFAULT_CONTEXT_WINDOW,
-      maxTokens: item.maxTokens ?? MODEL_DEFAULT_MAX_TOKENS,
+      contextWindow: item.context_window ?? MODEL_DEFAULT_CONTEXT_WINDOW,
+      maxTokens: item.max_tokens ?? MODEL_DEFAULT_MAX_TOKENS,
     };
   });
   return createProvider({
     id: Platform.OpenAICompatible,
     name: configuration.agentProvider,
-    baseUrl: metadata.baseUrl,
+    baseUrl: metadata.base_url,
     auth: {
       apiKey: envApiKeyAuth(`${configuration.agentProvider} API key`, []),
     },
@@ -153,9 +153,9 @@ export async function createModelRuntime(
   const { credentials, handoverItem, configuration, signal } = input;
   assert.ok(credentials);
   assert.ok(signal);
-  if (handoverItem.providerId !== configuration.provider)
+  if (handoverItem.provider_id !== configuration.provider)
     refuse(SetupRefusal.CredentialAbsent);
-  if (handoverItem.credentialId !== input.credentialId)
+  if (handoverItem.credential_id !== input.credentialId)
     refuse(SetupRefusal.CredentialRevisionMismatch);
   const runtime = await pi.ModelRuntime.create({
     credentials: withMetadataEnv(

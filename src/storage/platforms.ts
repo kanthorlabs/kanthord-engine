@@ -23,13 +23,15 @@ export const s3MetadataSchema = z.strictObject({
 export const STORAGE_PLATFORMS: Readonly<Record<Platform, CredentialPlatform>> =
   {
     [Platform.S3]: {
-      secretShape: SecretShape.S3AccessKey,
-      loginModes: [],
-      metadataSchema: s3MetadataSchema,
+      secret_shape: SecretShape.S3AccessKey,
+      login_modes: [],
+      metadata_schema: s3MetadataSchema,
       capability: CAPABILITY_BUCKET_HEAD,
       probe: (secret, metadata, context, observe) => {
-        const { accessKeyId, secretAccessKey } =
-          s3AccessKeySecretSchema.parse(secret);
+        const {
+          access_key_id: accessKeyId,
+          secret_access_key: secretAccessKey,
+        } = s3AccessKeySecretSchema.parse(secret);
         const { endpoint, bucket, region } = s3MetadataSchema.parse(metadata);
         return probeS3(
           accessKeyId,

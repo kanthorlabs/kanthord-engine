@@ -990,7 +990,7 @@ test("the agent provider set holds openai-compatible and every pi-ai built-in pr
 
 test("openai-compatible approved models establish models and reasoning levels, including an explicit empty set", (t) => {
   let models: ApprovedModel[] | null = [
-    { id: MODEL, reasoningLevels: [DEFAULT_REASONING] },
+    { id: MODEL, reasoning_levels: [DEFAULT_REASONING] },
   ];
   const f = enablementFixture(t, { approvedModels: () => models });
   const customBody = {
@@ -1007,7 +1007,7 @@ test("openai-compatible approved models establish models and reasoning levels, i
       }),
     AgentErrorCode.ReasoningUnsupported,
   );
-  models = [{ id: MODEL, reasoningLevels: [] }];
+  models = [{ id: MODEL, reasoning_levels: [] }];
   refuses(
     () => f.invoke("enablement.put", customBody),
     AgentErrorCode.ReasoningUnsupported,
@@ -1019,9 +1019,9 @@ test("openai-compatible approved models establish models and reasoning levels, i
       AgentErrorCode.ModelUnknown,
     );
   }
-  models = [{ id: MODEL, reasoningLevels: [DEFAULT_REASONING] }];
+  models = [{ id: MODEL, reasoning_levels: [DEFAULT_REASONING] }];
   assert.equal(f.invoke("enablement.put", customBody).revision, FIRST_REVISION);
-  models = [{ id: MODEL, reasoningLevels: ["high"] }];
+  models = [{ id: MODEL, reasoning_levels: ["high"] }];
   assert.equal(
     f.invoke("enablement.put", {
       ...customBody,
@@ -1052,7 +1052,7 @@ test("null credential records permit no model; malformed metadata propagates in 
     () => f.invoke("enablement.put", customBody),
     AgentErrorCode.ModelUnknown,
   );
-  models = [{ id: MODEL, reasoningLevels: [DEFAULT_REASONING] }];
+  models = [{ id: MODEL, reasoning_levels: [DEFAULT_REASONING] }];
   f.invoke("enablement.put", customBody);
   broken = true;
   for (const action of [
@@ -1170,8 +1170,8 @@ test("Agent collaborations report provider and effective model dependencies with
     assert.deepEqual(
       f.agent.agentProvidersDependentOn(tx, provider.credential),
       [
-        { agentName: OTHER_AGENT, providerName: provider.name },
-        { agentName: AGENT, providerName: provider.name },
+        { agent_name: OTHER_AGENT, provider_name: provider.name },
+        { agent_name: AGENT, provider_name: provider.name },
       ],
     );
     const dependent = f.agent.enablementsDependentOnModel(
@@ -1311,8 +1311,8 @@ test("model list answers the built-in catalog of the provider with its supported
 
 test("model list answers the approved models and reasoning levels of an openai-compatible credential", (t) => {
   let models: ApprovedModel[] | null = [
-    { id: MODEL, reasoningLevels: [DEFAULT_REASONING, "high"] },
-    { id: "plain", reasoningLevels: [] },
+    { id: MODEL, reasoning_levels: [DEFAULT_REASONING, "high"] },
+    { id: "plain", reasoning_levels: [] },
   ];
   const requested: string[] = [];
   const f = enablementFixture(t, {
@@ -1366,7 +1366,7 @@ test("model list refuses an unknown agent, an absent enablement and an absent pr
 const CREDENTIAL_MODEL_LIST = "model.list";
 
 test("credential model list answers the models of a credential before any enablement", (t) => {
-  const approved = [{ id: MODEL, reasoningLevels: [DEFAULT_REASONING] }];
+  const approved = [{ id: MODEL, reasoning_levels: [DEFAULT_REASONING] }];
   const requested: string[] = [];
   const f = enablementFixture(t, {
     approvedModels: (_tx, credential) => {
@@ -1424,8 +1424,8 @@ test("credential model list refuses a credential that does not suit the provider
 
 test("every listed model and reasoning effort passes the configuration validation", (t) => {
   const approved = [
-    { id: MODEL, reasoningLevels: [DEFAULT_REASONING, "low", "high"] },
-    { id: "plain", reasoningLevels: [DEFAULT_REASONING] },
+    { id: MODEL, reasoning_levels: [DEFAULT_REASONING, "low", "high"] },
+    { id: "plain", reasoning_levels: [DEFAULT_REASONING] },
   ];
   const f = enablementFixture(t, { approvedModels: () => approved });
   const custom = {

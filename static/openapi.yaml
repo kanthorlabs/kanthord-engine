@@ -36,13 +36,13 @@ paths:
     $ref: ./openapi/gateway/openapiFile.yaml#/pathItem
   /api/auth/verify:
     $ref: ./openapi/gateway/verify.yaml#/pathItem
-  /api/llm/credential/{credentialName}/archive:
+  /api/llm/credential/{credential_name}/archive:
     $ref: ./openapi/llm/credential.archive.yaml#/pathItem
   /api/llm/credential/check:
     $ref: ./openapi/llm/credential.check.yaml#/pathItem
   /api/llm/credential:
     $ref: ./openapi/llm/credential.create.yaml#/pathItem
-  /api/llm/credential/{credentialName}:
+  /api/llm/credential/{credential_name}:
     $ref: ./openapi/llm/credential.get.yaml#/pathItem
   /api/llm/credential/login:
     $ref: ./openapi/llm/credential.login.yaml#/pathItem
@@ -52,13 +52,13 @@ paths:
     $ref: ./openapi/llm/credential.login_status.yaml#/pathItem
   /api/llm/credential/platform:
     $ref: ./openapi/llm/credential.platform_list.yaml#/pathItem
-  /api/llm/credential/{credentialName}/revision/{revision}/revoke:
+  /api/llm/credential/{credential_name}/revision/{revision}/revoke:
     $ref: ./openapi/llm/credential.revoke.yaml#/pathItem
-  /api/llm/credential/{credentialName}/revision:
+  /api/llm/credential/{credential_name}/revision:
     $ref: ./openapi/llm/credential.rotate.yaml#/pathItem
-  /api/llm/credential/{credentialName}/metadata:
+  /api/llm/credential/{credential_name}/metadata:
     $ref: ./openapi/llm/credential.update_metadata.yaml#/pathItem
-  /api/llm/credential/{credentialName}/verify:
+  /api/llm/credential/{credential_name}/verify:
     $ref: ./openapi/llm/credential.verify.yaml#/pathItem
   /api/llm/provider/check:
     $ref: ./openapi/llm/provider.check.yaml#/pathItem
@@ -176,25 +176,25 @@ paths:
     $ref: ./openapi/project/create.yaml#/pathItem
   /api/project/{projectId}:
     $ref: ./openapi/project/get.yaml#/pathItem
-  /api/repository/credential/{credentialName}/archive:
+  /api/repository/credential/{credential_name}/archive:
     $ref: ./openapi/repository/credential.archive.yaml#/pathItem
   /api/repository/credential/check:
     $ref: ./openapi/repository/credential.check.yaml#/pathItem
   /api/repository/credential:
     $ref: ./openapi/repository/credential.create.yaml#/pathItem
-  /api/repository/credential/{credentialName}:
+  /api/repository/credential/{credential_name}:
     $ref: ./openapi/repository/credential.get.yaml#/pathItem
   /api/repository/credential/platform:
     $ref: ./openapi/repository/credential.platform_list.yaml#/pathItem
-  /api/repository/credential/{credentialName}/revision/{revision}/revoke:
+  /api/repository/credential/{credential_name}/revision/{revision}/revoke:
     $ref: ./openapi/repository/credential.revoke.yaml#/pathItem
-  /api/repository/credential/{credentialName}/revision:
+  /api/repository/credential/{credential_name}/revision:
     $ref: ./openapi/repository/credential.rotate.yaml#/pathItem
   /api/repository/credential/ssh/discover:
     $ref: ./openapi/repository/credential.ssh_discover.yaml#/pathItem
-  /api/repository/credential/{credentialName}/metadata:
+  /api/repository/credential/{credential_name}/metadata:
     $ref: ./openapi/repository/credential.update_metadata.yaml#/pathItem
-  /api/repository/credential/{credentialName}/verify:
+  /api/repository/credential/{credential_name}/verify:
     $ref: ./openapi/repository/credential.verify.yaml#/pathItem
   /api/scheduler/claim/{executionId}:
     $ref: ./openapi/scheduler/claim.get.yaml#/pathItem
@@ -210,23 +210,23 @@ paths:
     $ref: ./openapi/scheduler/queue.peek.yaml#/pathItem
   /api/scheduler/work/pull:
     $ref: ./openapi/scheduler/work.pull.yaml#/pathItem
-  /api/storage/credential/{credentialName}/archive:
+  /api/storage/credential/{credential_name}/archive:
     $ref: ./openapi/storage/credential.archive.yaml#/pathItem
   /api/storage/credential/check:
     $ref: ./openapi/storage/credential.check.yaml#/pathItem
   /api/storage/credential:
     $ref: ./openapi/storage/credential.create.yaml#/pathItem
-  /api/storage/credential/{credentialName}:
+  /api/storage/credential/{credential_name}:
     $ref: ./openapi/storage/credential.get.yaml#/pathItem
   /api/storage/credential/platform:
     $ref: ./openapi/storage/credential.platform_list.yaml#/pathItem
-  /api/storage/credential/{credentialName}/revision/{revision}/revoke:
+  /api/storage/credential/{credential_name}/revision/{revision}/revoke:
     $ref: ./openapi/storage/credential.revoke.yaml#/pathItem
-  /api/storage/credential/{credentialName}/revision:
+  /api/storage/credential/{credential_name}/revision:
     $ref: ./openapi/storage/credential.rotate.yaml#/pathItem
-  /api/storage/credential/{credentialName}/metadata:
+  /api/storage/credential/{credential_name}/metadata:
     $ref: ./openapi/storage/credential.update_metadata.yaml#/pathItem
-  /api/storage/credential/{credentialName}/verify:
+  /api/storage/credential/{credential_name}/verify:
     $ref: ./openapi/storage/credential.verify.yaml#/pathItem
   /api/workbench/session/{sessionId}/abort:
     $ref: ./openapi/workbench/session.abort.yaml#/pathItem

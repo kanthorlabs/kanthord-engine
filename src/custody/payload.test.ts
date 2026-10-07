@@ -40,8 +40,8 @@ test("credential shapes round trip and normalization drops provider extensions",
 });
 
 test("handover and report contracts refuse extra keys, wrong identities and digests", () => {
-  const item = { credentialId: ID, providerId: "anthropic", credential: KEY };
-  const report = { credentialId: ID, digest: digest(KEY), credential: KEY };
+  const item = { credential_id: ID, provider_id: "anthropic", credential: KEY };
+  const report = { credential_id: ID, digest: digest(KEY), credential: KEY };
   assert.deepEqual(handoverPayloadSchema.parse({ items: [item] }), {
     items: [item],
   });
@@ -55,7 +55,9 @@ test("handover and report contracts refuse extra keys, wrong identities and dige
   );
   assert.throws(() =>
     handoverPayloadSchema.parse({
-      items: [{ ...item, credentialId: ID.replace("credential", "execution") }],
+      items: [
+        { ...item, credential_id: ID.replace("credential", "execution") },
+      ],
     }),
   );
   assert.throws(() => refreshReportSchema.parse({ ...report, extra: true }));
@@ -66,17 +68,17 @@ test("handover and report contracts refuse extra keys, wrong identities and dige
 
 test("a refresh report with extra OAuth fields normalizes before validation", () => {
   const report = {
-    credentialId: ID,
+    credential_id: ID,
     digest: digest(OAUTH),
     credential: { ...OAUTH, accountId: "account" },
   };
   assert.throws(() => refreshReportSchema.parse(report));
   assert.deepEqual(refreshReportSchema.parse(dropExtraOAuthFields(report)), {
-    credentialId: ID,
+    credential_id: ID,
     digest: digest(OAUTH),
     credential: OAUTH,
   });
   assert.equal(dropExtraOAuthFields(null), null);
-  const apiReport = { credentialId: ID, digest: "x", credential: KEY };
+  const apiReport = { credential_id: ID, digest: "x", credential: KEY };
   assert.equal(dropExtraOAuthFields(apiReport), apiReport);
 });

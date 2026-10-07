@@ -76,7 +76,10 @@ test("pinned prompt layers survive compaction and all model calls retain their o
   const { runtime, model } = await scriptedModelRuntime(provider)({
     credentials,
     setup,
-    handoverItem: { credentialId: setup.credentialId, providerId: "anthropic" },
+    handoverItem: {
+      credential_id: setup.credentialId,
+      provider_id: "anthropic",
+    },
     signal: new AbortController().signal,
   });
   const session = await openSession({
@@ -155,7 +158,10 @@ test("two tool calls produce three counted turns with no absent project message"
   const { runtime, model } = await scriptedModelRuntime(provider)({
     credentials,
     setup,
-    handoverItem: { credentialId: setup.credentialId, providerId: "anthropic" },
+    handoverItem: {
+      credential_id: setup.credentialId,
+      provider_id: "anthropic",
+    },
     signal: new AbortController().signal,
   });
   const session = await openSession({
@@ -291,8 +297,8 @@ for (const isSplitTurn of [false, true]) {
       credentials,
       setup,
       handoverItem: {
-        credentialId: setup.credentialId,
-        providerId: "anthropic",
+        credential_id: setup.credentialId,
+        provider_id: "anthropic",
       },
       signal: new AbortController().signal,
     });

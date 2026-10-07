@@ -333,7 +333,7 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
   const credential = file(directory, "openai-cred.json", {
     name: OPENAI_CREDENTIAL,
     platform: OPENAI,
-    metadata: { baseUrl: BASE_URL, models: [] },
+    metadata: { base_url: BASE_URL, models: [] },
     secret: SECRET,
   });
   const createdCredential = success<CredentialResult>(
@@ -343,7 +343,7 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
   const metadata = (name: string, expectedRevision: number, models: string[]) =>
     file(directory, name, {
       expected_revision: expectedRevision,
-      metadata: { baseUrl: BASE_URL, models: models.map((id) => ({ id })) },
+      metadata: { base_url: BASE_URL, models: models.map((id) => ({ id })) },
     });
   const twoModels = metadata(
     "meta-two-models.json",

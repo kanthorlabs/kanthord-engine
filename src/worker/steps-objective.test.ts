@@ -126,7 +126,10 @@ async function fixture(
     nodeKind: NodeKind.Objective,
     method: WorkerMethod.Steps,
     credentials,
-    handoverItem: { credentialId: setup.credentialId, providerId: "anthropic" },
+    handoverItem: {
+      credential_id: setup.credentialId,
+      provider_id: "anthropic",
+    },
     workspace: workspace.directory,
     hostHome: temporary(t),
     modelRuntimeFactory: scriptedModelRuntime(provider),

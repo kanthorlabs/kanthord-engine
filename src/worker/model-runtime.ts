@@ -10,7 +10,7 @@ import { loadPi } from "../agent/pi.ts";
 
 export interface ModelRuntimeInput {
   credentials: CredentialStore;
-  handoverItem: { credentialId: string; providerId: string };
+  handoverItem: { credential_id: string; provider_id: string };
   setup: ExecutionSetup;
   signal: AbortSignal;
 }

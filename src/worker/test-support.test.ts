@@ -23,7 +23,10 @@ test("scripted provider replaces the builtin and records execution auth for each
   const { runtime, model } = await scriptedModelRuntime(provider)({
     credentials,
     setup,
-    handoverItem: { credentialId: setup.credentialId, providerId: "anthropic" },
+    handoverItem: {
+      credential_id: setup.credentialId,
+      provider_id: "anthropic",
+    },
     signal: new AbortController().signal,
   });
   for (const expected of ["first", "second"]) {

@@ -35,9 +35,9 @@ const TEST_PLATFORM = "key-platform";
 const TEST_SET: CredentialPlatformSet = {
   platforms: {
     [TEST_PLATFORM]: {
-      secretShape: SecretShape.ApiKey,
-      loginModes: [],
-      metadataSchema: null,
+      secret_shape: SecretShape.ApiKey,
+      login_modes: [],
+      metadata_schema: null,
       capability: "none",
       probe: null,
     },
@@ -60,23 +60,23 @@ function fixture(t: TestContext) {
     },
   );
   const row: CustodyExecution = {
-    executionId: createIdentity("execution"),
-    projectId: createIdentity("project"),
-    workerBindingId: createIdentity("binding"),
-    resourceIdentity: "worker:kanthord:general",
-    runtimeIdentity: createIdentity("worker_instance"),
+    execution_id: createIdentity("execution"),
+    project_id: createIdentity("project"),
+    worker_binding_id: createIdentity("binding"),
+    resource_identity: "worker:kanthord:general",
+    runtime_identity: createIdentity("worker_instance"),
     credentials: [],
   };
   const identity = testMachineIdentity(
     {
       clientId: createIdentity("client_identity"),
-      projectId: row.projectId,
-      resourceIdentity: row.resourceIdentity,
+      projectId: row.project_id,
+      resourceIdentity: row.resource_identity,
       name: "machine",
       issuedAt: 0,
     },
     "jti",
-    row.runtimeIdentity,
+    row.runtime_identity,
   );
   let running = true;
   let authorized = true;
@@ -92,8 +92,8 @@ function fixture(t: TestContext) {
     executions: {
       requireRunning: (tx, executionId, runtimeIdentity) => {
         assert(tx.database.isTransaction);
-        assert.equal(executionId, row.executionId);
-        assert.equal(runtimeIdentity, row.runtimeIdentity);
+        assert.equal(executionId, row.execution_id);
+        assert.equal(runtimeIdentity, row.runtime_identity);
         if (!running)
           throw new OperationError(
             HttpStatus.Conflict,
@@ -106,7 +106,7 @@ function fixture(t: TestContext) {
         row.credentials.push(credentialId);
       },
       liveExecutionsPinning: (_tx, id) =>
-        row.credentials.includes(id) ? [row.executionId] : [],
+        row.credentials.includes(id) ? [row.execution_id] : [],
     },
     authorization: {
       authorizeModelInference: () => {
@@ -119,8 +119,8 @@ function fixture(t: TestContext) {
         return {
           credential: "anthro-1",
           platform: TEST_PLATFORM,
-          providerId: TEST_PLATFORM,
-          agentProvider: "default",
+          provider_id: TEST_PLATFORM,
+          agent_provider: "default",
         };
       },
     },
@@ -140,14 +140,22 @@ function fixture(t: TestContext) {
   );
   const credentialId = created.revisions[0]!.id;
   const keys = deriveHandoverKeys(SECRET);
-  const aad = handoverAad(row.executionId, row.runtimeIdentity);
+  const aad = handoverAad(row.execution_id, row.runtime_identity);
+  const claim = {
+    executionId: row.execution_id,
+    runtimeIdentity: row.runtime_identity,
+  };
   const handover = () =>
-    store.transaction((tx) => component.handover(tx, identity, row, NOW));
+    store.transaction((tx) => component.handover(tx, identity, claim, NOW));
   const report = (envelope: ReturnType<typeof sealEnvelope>) =>
     store.transaction((tx) =>
-      component.report(tx, identity, row, envelope, NOW),
+      component.report(tx, identity, claim, envelope, NOW),
     );
-  const refresh = { credentialId, digest: digest(FIRST), credential: SECOND };
+  const refresh = {
+    credential_id: credentialId,
+    digest: digest(FIRST),
+    credential: SECOND,
+  };
   return {
     store,
     logs,
@@ -175,8 +183,8 @@ test("handover and refresh reports preserve a single pinned revision and sanitiz
     {
       items: [
         {
-          credentialId: f.credentialId,
-          providerId: TEST_PLATFORM,
+          credential_id: f.credentialId,
+          provider_id: TEST_PLATFORM,
           credential: FIRST,
         },
       ],
@@ -190,7 +198,7 @@ test("handover and refresh reports preserve a single pinned revision and sanitiz
     () =>
       openEnvelope(
         f.keys.handover,
-        handoverAad("other", f.row.runtimeIdentity),
+        handoverAad("other", f.row.runtime_identity),
         first,
       ),
     HandoverOpenError,
@@ -214,7 +222,7 @@ test("handover and refresh reports preserve a single pinned revision and sanitiz
     const record = f.logs
       .map((line) => JSON.parse(line))
       .find((line) => line.msg === message);
-    assert.equal(record.executionId, f.row.executionId);
+    assert.equal(record.executionId, f.row.execution_id);
     assert.equal(record.credentialId, f.credentialId);
   }
   for (const value of [FIRST.key, SECOND.key])
@@ -229,7 +237,7 @@ test("reports refuse authentication, schema, pin and revision failures without m
     { nonce: "AAAA", ciphertext: "AAAA" },
     sealEnvelope(f.keys.report, f.aad, {
       ...f.refresh,
-      credentialId: createIdentity("credential"),
+      credential_id: createIdentity("credential"),
     }),
     sealEnvelope(f.keys.report, f.aad, { ...f.refresh, digest: "malformed" }),
     sealEnvelope(f.keys.report, f.aad, {

@@ -63,18 +63,18 @@ export const MODEL_DEFAULT_REASONING_LEVELS: readonly ReasoningLevel[] = [
 export const approvedModelSchema = z
   .strictObject({
     id: z.string().min(1).refine(isNonblank),
-    contextWindow: z.number().int().positive().optional(),
-    maxTokens: z.number().int().positive().optional(),
-    reasoningLevels: z.array(z.enum(ReasoningLevel)).optional(),
+    context_window: z.number().int().positive().optional(),
+    max_tokens: z.number().int().positive().optional(),
+    reasoning_levels: z.array(z.enum(ReasoningLevel)).optional(),
   })
   .refine((model) => {
-    const contextWindow = model.contextWindow ?? MODEL_DEFAULT_CONTEXT_WINDOW;
-    const maxTokens = model.maxTokens ?? MODEL_DEFAULT_MAX_TOKENS;
+    const contextWindow = model.context_window ?? MODEL_DEFAULT_CONTEXT_WINDOW;
+    const maxTokens = model.max_tokens ?? MODEL_DEFAULT_MAX_TOKENS;
     return maxTokens <= contextWindow;
   });
 
 export const openaiCompatibleMetadataSchema = z.strictObject({
-  baseUrl: z.string().regex(/^https?:\/\/[^?#]+[^?#/]$/),
+  base_url: z.string().regex(/^https?:\/\/[^?#]+[^?#/]$/),
   models: z
     .array(approvedModelSchema)
     .refine(
@@ -105,9 +105,9 @@ const NO_LOGIN_MODES: readonly LoginSessionMode[] = [];
 
 export type ApprovedModel = {
   id: string;
-  contextWindow: number;
-  maxTokens: number;
-  reasoningLevels: readonly ReasoningLevel[];
+  context_window: number;
+  max_tokens: number;
+  reasoning_levels: readonly ReasoningLevel[];
 };
 
 export function approvedModels(
@@ -117,9 +117,9 @@ export function approvedModels(
   if (platform !== Platform.OpenAICompatible || metadata === null) return null;
   return openaiCompatibleMetadataSchema.parse(metadata).models.map((model) => ({
     id: model.id,
-    contextWindow: model.contextWindow ?? MODEL_DEFAULT_CONTEXT_WINDOW,
-    maxTokens: model.maxTokens ?? MODEL_DEFAULT_MAX_TOKENS,
-    reasoningLevels: model.reasoningLevels ?? MODEL_DEFAULT_REASONING_LEVELS,
+    context_window: model.context_window ?? MODEL_DEFAULT_CONTEXT_WINDOW,
+    max_tokens: model.max_tokens ?? MODEL_DEFAULT_MAX_TOKENS,
+    reasoning_levels: model.reasoning_levels ?? MODEL_DEFAULT_REASONING_LEVELS,
   }));
 }
 
@@ -147,7 +147,7 @@ export const LLM_PROVIDERS: Readonly<Partial<Record<Platform, LlmProvider>>> = {
     check: (secret, metadata, context, observe) =>
       checkOpenAICompatible(
         apiKeySecretSchema.parse(secret).key,
-        openaiCompatibleMetadataSchema.parse(metadata).baseUrl,
+        openaiCompatibleMetadataSchema.parse(metadata).base_url,
         context,
         observe,
       ),
@@ -186,9 +186,9 @@ function apiKey(
   capability = CAPABILITY_NONE,
 ): CredentialPlatform {
   return {
-    secretShape: SecretShape.ApiKey,
-    loginModes: NO_LOGIN_MODES,
-    metadataSchema,
+    secret_shape: SecretShape.ApiKey,
+    login_modes: NO_LOGIN_MODES,
+    metadata_schema: metadataSchema,
     capability,
     probe: providerProbe(platform),
   };
@@ -200,9 +200,9 @@ function oauth(
   capability: string,
 ): CredentialPlatform {
   return {
-    secretShape: SecretShape.OAuth,
-    loginModes,
-    metadataSchema: null,
+    secret_shape: SecretShape.OAuth,
+    login_modes: loginModes,
+    metadata_schema: null,
     capability,
     probe: providerProbe(platform),
   };

@@ -27,7 +27,7 @@ export const LoginSessionMode = {
 export type LoginSessionMode =
   (typeof LoginSessionMode)[keyof typeof LoginSessionMode];
 export const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
-export const EXECUTION_CREDENTIAL_MAX_BYTES = 48915;
+export const EXECUTION_CREDENTIAL_MAX_BYTES = 48914;
 export const piCredentialSchema = z
   .discriminatedUnion("type", [
     z.strictObject({
@@ -58,14 +58,14 @@ export const piCredentialSchema = z
 export const handoverPayloadSchema = z.strictObject({
   items: z.array(
     z.strictObject({
-      credentialId: identitySchema("credential"),
-      providerId: z.string().min(1),
+      credential_id: identitySchema("credential"),
+      provider_id: z.string().min(1),
       credential: piCredentialSchema,
     }),
   ),
 });
 export const refreshReportSchema = z.strictObject({
-  credentialId: identitySchema("credential"),
+  credential_id: identitySchema("credential"),
   digest: z.string().regex(SHA256_HEX_PATTERN),
   credential: piCredentialSchema,
 });
@@ -73,11 +73,11 @@ export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
 export type CustodyExecution = {
-  executionId: string;
-  projectId: string;
-  workerBindingId: string;
-  resourceIdentity: string;
-  runtimeIdentity: string;
+  execution_id: string;
+  project_id: string;
+  worker_binding_id: string;
+  resource_identity: string;
+  runtime_identity: string;
   credentials: string[];
 };
 export interface CustodyExecutions {
@@ -97,8 +97,8 @@ export interface CustodyExecutions {
 export type ModelInferenceAuthorization = {
   credential: string;
   platform: string;
-  providerId: string;
-  agentProvider: string;
+  provider_id: string;
+  agent_provider: string;
 };
 export interface CustodyAuthorization {
   /** Supplied by Worker, which owns inference authorization through the claim's worker binding. */
@@ -106,10 +106,10 @@ export interface CustodyAuthorization {
     tx: Transaction,
     identity: MachineIdentity,
     execution: {
-      executionId: string;
-      projectId: string;
-      workerBindingId: string;
-      resourceIdentity: string;
+      execution_id: string;
+      project_id: string;
+      worker_binding_id: string;
+      resource_identity: string;
     },
   ): ModelInferenceAuthorization;
 }
@@ -124,7 +124,7 @@ export type WorkbenchAuthorizeFn = (
   sessionId: string,
 ) => WorkbenchAuthorization;
 export type WorkbenchCredentialsInput = {
-  sessionId: string;
+  session_id: string;
   platform: string;
   requester: () => HumanIdentity | undefined;
   authorize: WorkbenchAuthorizeFn;
@@ -135,7 +135,7 @@ export type WorkbenchCredentialsFn = (
 export type WorkbenchGrant = Readonly<{
   credential: string;
   platform: string;
-  sessionId: string;
+  session_id: string;
 }>;
 
 export type Grant = Readonly<{
@@ -146,7 +146,7 @@ export type Grant = Readonly<{
   >;
 }>;
 export type Material = {
-  readonly credentialId: string;
+  readonly credential_id: string;
   readonly platform: string;
   value(): unknown;
   drop(): void;
@@ -177,19 +177,19 @@ export type CredentialMetadataFn = (
 ) => CredentialMetadata | null;
 
 export type AgentProviderDependent = {
-  agentName: string;
-  providerName: string;
+  agent_name: string;
+  provider_name: string;
 };
 export type BindingRevision = {
-  bindingId: string;
-  projectId: string;
+  binding_id: string;
+  project_id: string;
 };
 export type BindingNaming = BindingRevision & {
-  projectName: string;
+  project_name: string;
   name: string;
 };
 export type InboundDependent = {
-  inboundId: string;
+  inbound_id: string;
 };
 export type AgentProvidersDependentOnFn = (
   tx: Transaction,
@@ -232,8 +232,8 @@ export const oauthSecretSchema = z
         .success,
   );
 export const s3AccessKeySecretSchema = z.strictObject({
-  accessKeyId: z.string().min(1).refine(isNonblank),
-  secretAccessKey: z.string().min(1).refine(isNonblank),
+  access_key_id: z.string().min(1).refine(isNonblank),
+  secret_access_key: z.string().min(1).refine(isNonblank),
 });
 export const noneSecretSchema = z.strictObject({});
 export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
@@ -250,9 +250,9 @@ export type PlatformProbe = (
   observe?: ResourceObserver,
 ) => Promise<ResourceStatusValue>;
 export type CredentialPlatform = {
-  secretShape: SecretShape;
-  loginModes: readonly LoginSessionMode[];
-  metadataSchema: z.ZodObject | null;
+  secret_shape: SecretShape;
+  login_modes: readonly LoginSessionMode[];
+  metadata_schema: z.ZodObject | null;
   capability: string;
   probe: PlatformProbe | null;
 };
@@ -278,14 +278,14 @@ export type MetadataRevision = {
 };
 export type CredentialPlatformSet = {
   platforms: CredentialPlatforms;
-  checkMetadata?: (tx: Transaction, revision: MetadataRevision) => void;
+  check_metadata?: (tx: Transaction, revision: MetadataRevision) => void;
 };
 
 export const credentialParamsSchema = z.strictObject({
-  credentialName: z.string().min(1),
+  credential_name: z.string().min(1),
 });
 export const credentialRevisionParamsSchema = z.strictObject({
-  credentialName: z.string().min(1),
+  credential_name: z.string().min(1),
   revision: z.coerce.number().int().positive(),
 });
 export const credentialCreateSchema = z.strictObject({
@@ -308,7 +308,7 @@ export const credentialUpdateMetadataBodySchema = z.strictObject({
 });
 export const credentialListQuerySchema = z.strictObject({
   platform: z.string().optional(),
-  includeArchived: z.enum(["true", "false"]).default("false").optional(),
+  include_archived: z.enum(["true", "false"]).default("false").optional(),
   limit: z.coerce.number().int().positive().max(LIST_LIMIT_MAX).optional(),
   cursor: z.string().min(1).optional(),
 });
@@ -324,8 +324,8 @@ export const credentialRevisionAnswerSchema = z.strictObject({
   id: z.string(),
   revision: z.number().int().positive(),
   metadata: z.record(z.string(), z.unknown()).nullable(),
-  createdAt: z.number().int(),
-  endedAt: z.number().int().nullable(),
+  created_at: z.number().int(),
+  ended_at: z.number().int().nullable(),
 });
 export const credentialAnswerSchema = z.strictObject({
   name: z.string(),
@@ -349,9 +349,9 @@ export const credentialPlatformListAnswerSchema = z.strictObject({
   items: z.array(
     z.strictObject({
       platform: z.string(),
-      secretShape: z.enum(SecretShape),
-      loginModes: z.array(z.enum(LoginSessionMode)),
-      metadataFields: z.array(z.string()),
+      secret_shape: z.enum(SecretShape),
+      login_modes: z.array(z.enum(LoginSessionMode)),
+      metadata_fields: z.array(z.string()),
       verifiable: z.boolean(),
     }),
   ),
@@ -371,12 +371,12 @@ export function credentialPlatformList(
   return {
     items: Object.entries(platforms).map(([platform, entry]) => ({
       platform,
-      secretShape: entry.secretShape,
-      loginModes: [...entry.loginModes],
-      metadataFields:
-        entry.metadataSchema === null
+      secret_shape: entry.secret_shape,
+      login_modes: [...entry.login_modes],
+      metadata_fields:
+        entry.metadata_schema === null
           ? []
-          : Object.entries(entry.metadataSchema.shape)
+          : Object.entries(entry.metadata_schema.shape)
               .filter(([, field]) => field._zod.def.type === STRING_FIELD_TYPE)
               .map(([name]) => name),
       verifiable: entry.probe !== null,

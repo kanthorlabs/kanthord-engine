@@ -61,20 +61,20 @@ Each synopsis follows `kanthord storage credential`. All ten commands have `[R]`
 `human` access; five mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/storage/credential` prefix.
 
-| #   | Synopsis after `kanthord storage credential`              | HTTP route                                                               | Operation ID                         | Access/status        |
-| --- | --------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------ | -------------------- |
-| 1   | `create --file <path> [M] [R]`                            | `POST /api/storage/credential`                                           | `storage.credential.create`          | `human`; implemented |
-| 2   | `list [--platform <platform>] [L] [R]`                    | `GET /api/storage/credential`                                            | `storage.credential.list`            | `human`; implemented |
-| 3   | `get <credential-name> [R]`                               | `GET /api/storage/credential/:credentialName`                            | `storage.credential.get`             | `human`; implemented |
-| 4   | `rotate <credential-name> --file <path> [M] [R]`          | `POST /api/storage/credential/:credentialName/revision`                  | `storage.credential.rotate`          | `human`; implemented |
-| 5   | `update-metadata <credential-name> --file <path> [M] [R]` | `PUT /api/storage/credential/:credentialName/metadata`                   | `storage.credential.update_metadata` | `human`; implemented |
-| 6   | `revoke <credential-name> <revision> [M] [R]`             | `POST /api/storage/credential/:credentialName/revision/:revision/revoke` | `storage.credential.revoke`          | `human`; implemented |
-| 7   | `archive <credential-name> [M] [R]`                       | `POST /api/storage/credential/:credentialName/archive`                   | `storage.credential.archive`         | `human`; implemented |
-| 8   | `platforms [R]`                                           | `GET /api/storage/credential/platform`                                   | `storage.credential.platform_list`   | `human`; implemented |
-| 9   | `check --file <path> [R]`                                 | `POST /api/storage/credential/check`                                     | `storage.credential.check`           | `human`; implemented |
-| 10  | `verify <credential-name> [R]`                            | `POST /api/storage/credential/:credentialName/verify`                    | `storage.credential.verify`          | `human`; implemented |
+| #   | Synopsis after `kanthord storage credential`              | HTTP route                                                                | Operation ID                         | Access/status        |
+| --- | --------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------ | -------------------- |
+| 1   | `create --file <path> [M] [R]`                            | `POST /api/storage/credential`                                            | `storage.credential.create`          | `human`; implemented |
+| 2   | `list [--platform <platform>] [L] [R]`                    | `GET /api/storage/credential`                                             | `storage.credential.list`            | `human`; implemented |
+| 3   | `get <credential-name> [R]`                               | `GET /api/storage/credential/:credential_name`                            | `storage.credential.get`             | `human`; implemented |
+| 4   | `rotate <credential-name> --file <path> [M] [R]`          | `POST /api/storage/credential/:credential_name/revision`                  | `storage.credential.rotate`          | `human`; implemented |
+| 5   | `update-metadata <credential-name> --file <path> [M] [R]` | `PUT /api/storage/credential/:credential_name/metadata`                   | `storage.credential.update_metadata` | `human`; implemented |
+| 6   | `revoke <credential-name> <revision> [M] [R]`             | `POST /api/storage/credential/:credential_name/revision/:revision/revoke` | `storage.credential.revoke`          | `human`; implemented |
+| 7   | `archive <credential-name> [M] [R]`                       | `POST /api/storage/credential/:credential_name/archive`                   | `storage.credential.archive`         | `human`; implemented |
+| 8   | `platforms [R]`                                           | `GET /api/storage/credential/platform`                                    | `storage.credential.platform_list`   | `human`; implemented |
+| 9   | `check --file <path> [R]`                                 | `POST /api/storage/credential/check`                                      | `storage.credential.check`           | `human`; implemented |
+| 10  | `verify <credential-name> [R]`                            | `POST /api/storage/credential/:credential_name/verify`                    | `storage.credential.verify`          | `human`; implemented |
 
-The static `/api/storage/credential/platform` and `/api/storage/credential/check` paths take precedence over `/:credentialName`, so custody refuses the names `login`, `platform` and `check`.
+The static `/api/storage/credential/platform` and `/api/storage/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`.
 These routes have no project identity.
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
@@ -83,8 +83,8 @@ A `create` with a platform of another component answers `400 credential.platform
 ## Record and platform schemas
 
 A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
-A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `createdAt: Timestamp`
-and `endedAt: Timestamp | null`. No answer holds `secret`.
+A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `created_at: Timestamp`
+and `ended_at: Timestamp | null`. No answer holds `secret`.
 `platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/storage.impl.md#platform-validators): `s3`. [`platforms`](#platforms) answers the set.
 Each platform holds exactly one secret shape from `s3_access_key`.
 The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) excludes `s3_access_key`.
@@ -113,7 +113,7 @@ fields have no default:
 - `platform`: a platform of the Storage component, `s3`.
 - `metadata`: the platform schema above, with explicit `null` for no metadata.
 - `secret`: a closed object of the secret shape of the platform. For `s3_access_key`, required nonempty
-  strings `{ accessKeyId, secretAccessKey }`; a session token is invalid.
+  strings `{ access_key_id, secret_access_key }`; a session token is invalid.
 
 Custody validates the local schema and makes no remote call. HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
@@ -124,7 +124,7 @@ that identity, never the submitted secret.
 ## `list`
 
 No positional arguments and no body. The optional filter maps to query `platform`.
-The optional `--include-archived` flag maps to query `includeArchived`, a boolean that defaults to `false`. Without it, the list leaves out an archived name.
+The optional `--include-archived` flag maps to query `include_archived`, a boolean that defaults to `false`. Without it, the list leaves out an archived name.
 It is single-use with no default filter. The platform enum is defined above.
 `limit` and optional `cursor` use the shared pagination contract.
 HTTP `200` returns one credential answer for each name of this component in `items`, in ascending name
@@ -134,10 +134,10 @@ The CLI fetches no further page implicitly. Custody drains unpinned older live r
 ## `platforms`
 
 No positional arguments, no body and no pagination. HTTP `200` returns
-`{ items: [{ platform, secretShape, loginModes, metadataFields, verifiable }] }`,
+`{ items: [{ platform, secret_shape, login_modes, metadata_fields, verifiable }] }`,
 the platforms of the platform table of this component.
-`loginModes` is `[]` for a
-platform whose secret shape is not `oauth`. `metadataFields` names the required
+`login_modes` is `[]` for a
+platform whose secret shape is not `oauth`. `metadata_fields` names the required
 string fields of the metadata. `verifiable` is `true` when the platform validation
 makes a remote call. The command answers only the shared error codes.
 
@@ -169,8 +169,8 @@ A platform of another component answers `400 credential.platform.unsupported`.
 kanthord storage credential verify <credential-name> [R]
 ```
 
-The [record verify](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-record-verify) declares `storage.credential.verify`, a read under `human` access, at `POST /api/storage/credential/:credentialName/verify`.
-The required `CredentialName` maps to `params.credentialName`. Query is empty and body absent. The command takes no mutation key and rejects `--idempotency-key`.
+The [record verify](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-record-verify) declares `storage.credential.verify`, a read under `human` access, at `POST /api/storage/credential/:credential_name/verify`.
+The required `CredentialName` maps to `params.credential_name`. Query is empty and body absent. The command takes no mutation key and rejects `--idempotency-key`.
 It checks one stored record and stores no result.
 The `s3` check sends a `HeadBucket` request with the stored key and the metadata.
 The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown`.
@@ -187,13 +187,13 @@ An unknown name, or a name of another component, answers `404 credential.credent
 
 ## `get <credential-name>`
 
-The required `CredentialName` has no default and maps to `params.credentialName`.
+The required `CredentialName` has no default and maps to `params.credential_name`.
 Query is empty and body absent. HTTP `200` returns one credential answer with the added list `bindings`;
 an unknown name, or a name of another component, answers `404 credential.credential.not_found`. The read transaction first drains unpinned older live revisions of that name.
 
 ## `rotate <credential-name>`
 
-The required `CredentialName` maps to `params.credentialName`; query is empty.
+The required `CredentialName` maps to `params.credential_name`; query is empty.
 The required file supplies `{ expected_revision, secret }` and an optional `metadata`. `expected_revision` is the newest live revision that the human read. The secret shape of the
 platform determines its closed secret schema. `s3_access_key` uses the create schema.
 The file has no
@@ -209,7 +209,7 @@ This command does not rotate `master_key`.
 
 ## `update-metadata <credential-name>`
 
-The required `CredentialName` maps to `params.credentialName`; query is empty.
+The required `CredentialName` maps to `params.credential_name`; query is empty.
 The required file supplies exactly `{ expected_revision, metadata }`, with the newest live revision that the human read and a complete replacement that
 matches the platform schema. It accepts no secret or platform change.
 The edit inserts the next revision with the secret of the newest live revision, and the older revisions stay live until custody drains them or a human revokes them. HTTP `200` returns
@@ -217,16 +217,16 @@ the credential answer. The `s3` metadata `{ endpoint, bucket, region }` is alway
 
 ## `archive <credential-name>`
 
-The required `CredentialName` maps to `params.credentialName`. Query is empty and body absent.
+The required `CredentialName` maps to `params.credential_name`. Query is empty and body absent.
 The archive checks every dependent in one transaction: every agent provider, every binding revision that `bindingsNaming` answers and every inbound that `inboundsNaming` answers.
-A dependent refuses the archive with `409 credential.credential.in_use`, and `error.details` lists the dependents as `{ agentProviders: [{ agentName, providerName }], bindings: [{ bindingId, projectId }], inbounds: [{ inboundId }] }`.
+A dependent refuses the archive with `409 credential.credential.in_use`, and `error.details` lists the dependents as `{ agent_providers: [{ agent_name, provider_name }], bindings: [{ binding_id, project_id }], inbounds: [{ inbound_id }] }`.
 Without a dependent, the archive sets `ended_at` on every live revision of the name and keeps the rows, because an execution record references them.
 A name with no live revision is archived. An archive is final: an archived name refuses `rotate`, `update-metadata` and `archive` with `409 credential.credential.archived`, and the name stays taken.
 HTTP `200` returns the credential answer with every revision ended. An unknown name answers `404 credential.credential.not_found`.
 
 ## `revoke <credential-name> <revision>`
 
-The required `CredentialName` maps to `params.credentialName`, and the required
+The required `CredentialName` maps to `params.credential_name`, and the required
 `Revision` maps to `params.revision`. Query is empty and body absent.
 The revoke ends that revision at once, and every execution that pins it is refused
 at its next use of the credential. A revoke of the newest live revision answers
@@ -237,22 +237,22 @@ at its next use of the credential. A revoke of the newest live revision answers
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                             | Condition                                                                                      | Commands                                                               |
-| ----- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| 404   | `credential.credential.not_found`                | The credential does not exist, or its platform is not a platform of the Storage component.     | get, rotate, update-metadata, revoke, archive, verify, worker handover |
-| local | `cli.storage.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                      | revoke                                                                 |
-| 400   | `credential.input.invalid`                       | Secret or metadata validation fails, or the name is reserved.                                  | create, rotate, update-metadata, check                                 |
-| 409   | `credential.name.conflict`                       | A credential already has this name; details identify the holder.                               | create                                                                 |
-| 400   | `credential.platform.mismatch`                   | The requested platform differs from the stored platform.                                       | binding apply (custody collaboration), worker handover                 |
-| 400   | `credential.platform.unsupported`                | The platform is not a platform of the Storage component.                                       | create, check                                                          |
-| 400   | `credential.check.unsupported`                   | The platform has `verifiable: false` or the secret shape `oauth`.                              | check, verify                                                          |
-| 409   | `credential.revision.conflict`                   | The expected revision is stale.                                                                | rotate, update-metadata                                                |
-| 409   | `credential.revision.ended`                      | The revision is already ended, by a revoke or by a drain.                                      | revoke                                                                 |
-| 409   | `credential.revision.newest_live`                | The revoke names the newest live revision.                                                     | revoke                                                                 |
-| 409   | `credential.credential.in_use`                   | A dependent names the credential; `details` holds `agentProviders`, `bindings` and `inbounds`. | archive                                                                |
-| 409   | `credential.credential.archived`                 | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive, verify                               |
-| 404   | `credential.revision.not_found`                  | The revision does not exist.                                                                   | revoke                                                                 |
-| 409   | `credential.revision.revoked`                    | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                          |
+| HTTP  | Code                                             | Condition                                                                                       | Commands                                                               |
+| ----- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 404   | `credential.credential.not_found`                | The credential does not exist, or its platform is not a platform of the Storage component.      | get, rotate, update-metadata, revoke, archive, verify, worker handover |
+| local | `cli.storage.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                       | revoke                                                                 |
+| 400   | `credential.input.invalid`                       | Secret or metadata validation fails, or the name is reserved.                                   | create, rotate, update-metadata, check                                 |
+| 409   | `credential.name.conflict`                       | A credential already has this name; details identify the holder.                                | create                                                                 |
+| 400   | `credential.platform.mismatch`                   | The requested platform differs from the stored platform.                                        | binding apply (custody collaboration), worker handover                 |
+| 400   | `credential.platform.unsupported`                | The platform is not a platform of the Storage component.                                        | create, check                                                          |
+| 400   | `credential.check.unsupported`                   | The platform has `verifiable: false` or the secret shape `oauth`.                               | check, verify                                                          |
+| 409   | `credential.revision.conflict`                   | The expected revision is stale.                                                                 | rotate, update-metadata                                                |
+| 409   | `credential.revision.ended`                      | The revision is already ended, by a revoke or by a drain.                                       | revoke                                                                 |
+| 409   | `credential.revision.newest_live`                | The revoke names the newest live revision.                                                      | revoke                                                                 |
+| 409   | `credential.credential.in_use`                   | A dependent names the credential; `details` holds `agent_providers`, `bindings` and `inbounds`. | archive                                                                |
+| 409   | `credential.credential.archived`                 | The credential is archived; an archive is final.                                                | rotate, update-metadata, archive, verify                               |
+| 404   | `credential.revision.not_found`                  | The revision does not exist.                                                                    | revoke                                                                 |
+| 409   | `credential.revision.revoked`                    | A pinned use names a revoked revision.                                                          | worker handover, worker credential (API only)                          |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 

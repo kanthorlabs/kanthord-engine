@@ -89,8 +89,8 @@ export async function workerAcceptance(t: TestContext, host = false) {
       platform: "s3",
       metadata: storage,
       secret: {
-        accessKeyId: "test_access_key",
-        secretAccessKey: "test_secret_key",
+        access_key_id: "test_access_key",
+        secret_access_key: "test_secret_key",
       },
     });
   const project = await read<{ id: string }>([

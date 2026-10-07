@@ -189,7 +189,7 @@ test("credential dependents exclude tombstones and retain provider names", () =>
       Date.now(),
     );
     assert.deepEqual(agentProvidersDependentOn(tx, "secret"), [
-      { agentName: "alpha", providerName: "primary" },
+      { agent_name: "alpha", provider_name: "primary" },
     ]);
     assert.deepEqual(agentProvidersDependentOn(tx, "absent"), []);
   });

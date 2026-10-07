@@ -342,7 +342,7 @@ test("E07.1 credential create and get return the same secret-free record", async
   assert.ok(created.revisions[0]);
   assert.ok(created.revisions[0].id.startsWith(CREDENTIAL_PREFIX));
   assert.equal(created.revisions[0].revision, FIRST_REVISION);
-  assert.equal(created.revisions[0].endedAt, null);
+  assert.equal(created.revisions[0].ended_at, null);
   const read = success<CredentialAnswer>(
     await kanthord(["llm", "credential", "get", CREDENTIAL], fixture.env),
   );
@@ -464,12 +464,12 @@ test("E07.5 mission initiative creation queues the created node", async (t) => {
 test("E07.6 custody refuses removing a model used by an enablement", async (t) => {
   const fixture = await setup(t);
   await createCredential(fixture, COMPAT_CREDENTIAL, OPENAI_COMPATIBLE, {
-    baseUrl: BASE_URL,
+    base_url: BASE_URL,
     models: [],
   });
   const add = file(fixture.directory, "add-model.json", {
     expected_revision: FIRST_REVISION,
-    metadata: { baseUrl: BASE_URL, models: [{ id: GPT }] },
+    metadata: { base_url: BASE_URL, models: [{ id: GPT }] },
   });
   const updated = success<CredentialAnswer>(
     await kanthord(
@@ -499,7 +499,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
   assert.equal(put.defaultConfiguration.modelIdentifier, GPT);
   const remove = file(fixture.directory, "remove-model.json", {
     expected_revision: SECOND_REVISION,
-    metadata: { baseUrl: BASE_URL, models: [] },
+    metadata: { base_url: BASE_URL, models: [] },
   });
   refusal(
     await kanthord(
@@ -523,12 +523,12 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
   );
   assert.deepEqual(read.revisions[0], updated.revisions[0]);
   assert.ok(read.revisions[1]);
-  assert.notEqual(read.revisions[1].endedAt, null);
+  assert.notEqual(read.revisions[1].ended_at, null);
   assert.deepEqual(read, {
     ...updated,
     revisions: updated.revisions.map((revision, index) => ({
       ...revision,
-      endedAt: read.revisions[index]!.endedAt,
+      ended_at: read.revisions[index]!.ended_at,
     })),
     agentProviders: [{ agent: AGENT, name: DEFAULT_PROVIDER }],
   });

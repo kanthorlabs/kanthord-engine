@@ -94,7 +94,7 @@ const inputs = [
     name: "openai",
     platform: Platform.OpenAICompatible,
     secret: apiSecret,
-    metadata: { baseUrl: "https://example.com/v1", models: [] },
+    metadata: { base_url: "https://example.com/v1", models: [] },
   },
 ];
 
@@ -171,7 +171,7 @@ function fixture(
     invoke(llmOperations.create, { params: {}, query: {}, body });
   const get = (name: string) =>
     invoke(llmOperations.get, {
-      params: { credentialName: name },
+      params: { credential_name: name },
       query: {},
       body: null,
     });
@@ -179,25 +179,25 @@ function fixture(
     invoke(llmOperations.list, { params: {}, query, body: null });
   const rotate = (name: string, body: unknown) =>
     invoke(llmOperations.rotate, {
-      params: { credentialName: name },
+      params: { credential_name: name },
       query: {},
       body,
     });
   const updateMetadata = (name: string, body: unknown) =>
     invoke(llmOperations.update_metadata, {
-      params: { credentialName: name },
+      params: { credential_name: name },
       query: {},
       body,
     });
   const revoke = (name: string, revision: number) =>
     invoke(llmOperations.revoke, {
-      params: { credentialName: name, revision },
+      params: { credential_name: name, revision },
       query: {},
       body: null,
     });
   const archive = (name: string) =>
     invoke(llmOperations.archive, {
-      params: { credentialName: name },
+      params: { credential_name: name },
       query: {},
       body: null,
     });
@@ -343,7 +343,7 @@ test("a name of another component answers not found and stays out of the list", 
       fails(call, HttpStatus.NotFound, CREDENTIAL_NOT_FOUND_CODE);
     assert.deepEqual(
       (
-        f.list({ includeArchived: "true" }) as { items: CredentialAnswer[] }
+        f.list({ include_archived: "true" }) as { items: CredentialAnswer[] }
       ).items.map(({ name }) => name),
       ["anthropic"],
     );
@@ -362,7 +362,7 @@ test("get lists the agent providers that name the credential", () => {
     agentProvidersDependentOn: (tx, name) => {
       assert.ok(tx.database.isTransaction);
       calls.push(name);
-      return [{ agentName: "swe@1", providerName: "default" }];
+      return [{ agent_name: "swe@1", provider_name: "default" }];
     },
   });
   try {
@@ -389,11 +389,11 @@ test("rotation of an openai-compatible credential may set a new base URL", () =>
       expected_revision: FIRST_REVISION,
       secret: apiSecret,
       metadata: {
-        baseUrl: ROTATED_BASE_URL,
+        base_url: ROTATED_BASE_URL,
         models: [{ id: "new" }],
       },
-    }) as { revisions: { id: string; metadata: { baseUrl: string } }[] };
-    assert.equal(changed.revisions[0]!.metadata.baseUrl, ROTATED_BASE_URL);
+    }) as { revisions: { id: string; metadata: { base_url: string } }[] };
+    assert.equal(changed.revisions[0]!.metadata.base_url, ROTATED_BASE_URL);
     noSecret(changed);
   } finally {
     f.store.close();
@@ -470,7 +470,7 @@ test("metadata edits re-encrypt under new identity and enforce base URL and revi
       () =>
         f.updateMetadata("openai", {
           expected_revision: NEXT_REVISION,
-          metadata: { ...metadata, baseUrl: ROTATED_BASE_URL },
+          metadata: { ...metadata, base_url: ROTATED_BASE_URL },
         }),
       HttpStatus.Conflict,
       BASE_URL_FIXED_CODE,
@@ -514,8 +514,8 @@ test("a repeated approved model id answers invalid input at create, rotate and u
   const f = fixture();
   try {
     const duplicated = {
-      baseUrl: "https://example.com/v1",
-      models: [{ id: "same" }, { id: "same", maxTokens: 1000 }],
+      base_url: "https://example.com/v1",
+      models: [{ id: "same" }, { id: "same", max_tokens: 1000 }],
     };
     fails(
       () => f.create({ ...inputs[1], name: "dup", metadata: duplicated }),
@@ -564,7 +564,7 @@ test("openrouter takes an api key with null metadata and differs from openai-com
           name: "router-meta",
           platform: Platform.OpenRouter,
           secret: apiSecret,
-          metadata: { baseUrl: "https://example.com/v1", models: [] },
+          metadata: { base_url: "https://example.com/v1", models: [] },
         }),
       HttpStatus.BadRequest,
       INVALID_INPUT_CODE,
@@ -607,16 +607,16 @@ for (const mode of Object.values(RemovalMode)) {
     });
     try {
       f.create(inputs[1]);
-      const baseUrl = (inputs[1]!.metadata as { baseUrl: string }).baseUrl;
+      const baseUrl = (inputs[1]!.metadata as { base_url: string }).base_url;
       const existing = {
-        baseUrl,
+        base_url: baseUrl,
         models: [{ id: REMOVED_MODEL }, { id: KEPT_MODEL }],
       };
       f.updateMetadata("openai", {
         expected_revision: FIRST_REVISION,
         metadata: existing,
       });
-      const next = { baseUrl, models: [{ id: KEPT_MODEL }] };
+      const next = { base_url: baseUrl, models: [{ id: KEPT_MODEL }] };
       const change = () =>
         mode === RemovalMode.Rotation
           ? f.rotate("openai", {
@@ -1379,22 +1379,22 @@ test("platform list answers the LLM platform table", (t) => {
   assert.equal(byPlatform.has("s3"), false);
   assert.deepEqual(byPlatform.get(Platform.OpenAICodex), {
     platform: Platform.OpenAICodex,
-    secretShape: SecretShape.OAuth,
-    loginModes: ["browser", "device"],
-    metadataFields: [],
+    secret_shape: SecretShape.OAuth,
+    login_modes: ["browser", "device"],
+    metadata_fields: [],
     verifiable: true,
   });
-  assert.deepEqual(byPlatform.get(Platform.GitHubCopilot)?.loginModes, [
+  assert.deepEqual(byPlatform.get(Platform.GitHubCopilot)?.login_modes, [
     "device",
   ]);
-  assert.deepEqual(byPlatform.get(Platform.OpenAICompatible)?.metadataFields, [
-    "baseUrl",
+  assert.deepEqual(byPlatform.get(Platform.OpenAICompatible)?.metadata_fields, [
+    "base_url",
   ]);
   assert.deepEqual(byPlatform.get(Platform.CloudflareAIGateway), {
     platform: Platform.CloudflareAIGateway,
-    secretShape: SecretShape.ApiKey,
-    loginModes: [],
-    metadataFields: ["account_id", "gateway_id"],
+    secret_shape: SecretShape.ApiKey,
+    login_modes: [],
+    metadata_fields: ["account_id", "gateway_id"],
     verifiable: false,
   });
   assert.equal(byPlatform.get(Platform.OpenAI)?.verifiable, true);
@@ -1422,7 +1422,7 @@ test("create accepts a plain api_key record for groq and refuses metadata", (t) 
       f.create({
         name: GROQ,
         platform: GROQ,
-        secret: { accessKeyId: "id", secretAccessKey: secretValue },
+        secret: { access_key_id: "id", secret_access_key: secretValue },
         metadata: null,
       }),
     HttpStatus.BadRequest,
@@ -1529,7 +1529,7 @@ const healthCredentials = [
   {
     name: "compatible",
     platform: Platform.OpenAICompatible,
-    metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+    metadata: { base_url: HEALTH_BASE_URL, models: [] },
     capability: "model-list read",
     url: `${HEALTH_BASE_URL}/models`,
   },
@@ -1722,7 +1722,7 @@ test("provider check answers the connection and model list of an LLM credential 
     name: "compatible",
     platform: Platform.OpenAICompatible,
     secret: { key: HEALTH_SECRET },
-    metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+    metadata: { base_url: HEALTH_BASE_URL, models: [] },
   });
   const requests: { url: unknown; signal: unknown }[] = [];
   t.mock.method(
@@ -1810,13 +1810,13 @@ test("approved models answer the openai-compatible metadata models with defaults
     name: "compatible",
     platform: Platform.OpenAICompatible,
     secret: { key: HEALTH_SECRET },
-    metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+    metadata: { base_url: HEALTH_BASE_URL, models: [] },
   });
   f.updateMetadata("compatible", {
     expected_revision: FIRST_REVISION,
     metadata: {
-      baseUrl: HEALTH_BASE_URL,
-      models: [{ id: KEPT_MODEL, reasoningLevels: ["high"] }],
+      base_url: HEALTH_BASE_URL,
+      models: [{ id: KEPT_MODEL, reasoning_levels: ["high"] }],
     },
   });
   f.create({
@@ -1834,9 +1834,9 @@ test("approved models answer the openai-compatible metadata models with defaults
     [
       {
         id: KEPT_MODEL,
-        contextWindow: 128000,
-        maxTokens: 16384,
-        reasoningLevels: ["high"],
+        context_window: 128000,
+        max_tokens: 16384,
+        reasoning_levels: ["high"],
       },
     ],
     null,
@@ -1899,7 +1899,7 @@ test("check answers healthy, unhealthy and unknown through the LLM provider with
     await f.credentialCheck({
       platform: Platform.OpenAICompatible,
       secret: { key: HEALTH_SECRET },
-      metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+      metadata: { base_url: HEALTH_BASE_URL, models: [] },
     }),
     { status: "unknown", capability: CAPABILITY_MODEL_LIST_READ },
   );
@@ -1935,7 +1935,7 @@ test("check refuses an OAuth platform, a platform without a check, a platform of
     {
       platform: Platform.OpenAICompatible,
       secret: key,
-      metadata: { baseUrl: HEALTH_BASE_URL, models: "none" },
+      metadata: { base_url: HEALTH_BASE_URL, models: "none" },
     },
   ])
     await failsAsync(
@@ -1967,12 +1967,12 @@ test("check takes no mutation key", () => {
   assert.equal(llmOperations.check.path, CHECK_PATH);
 });
 
-const VERIFY_PATH = "/api/llm/credential/:credentialName/verify";
+const VERIFY_PATH = "/api/llm/credential/:credential_name/verify";
 const ARCHIVED_CODE = "credential.credential.archived";
 
 const credentialVerify = (f: ReturnType<typeof fixture>, name: string) =>
   f.invoke(llmOperations.verify, {
-    params: { credentialName: name },
+    params: { credential_name: name },
     query: {},
     body: null,
   }) as Promise<typeof llmOperations.verify.output._output>;
@@ -2030,7 +2030,7 @@ test("verify answers unknown when the request throws", async (t) => {
     name: "compatible",
     platform: Platform.OpenAICompatible,
     secret: { key: HEALTH_SECRET },
-    metadata: { baseUrl: HEALTH_BASE_URL, models: [] },
+    metadata: { base_url: HEALTH_BASE_URL, models: [] },
   });
   t.mock.method(globalThis, "fetch", async () => {
     throw new Error(`failed with ${HEALTH_SECRET}`);
@@ -2100,7 +2100,7 @@ test("verify takes no body and no mutation key", () => {
   assert.equal(llmOperations.verify.access, AccessPolicy.Human);
   assert.throws(() =>
     llmOperations.verify.input.parse({
-      params: { credentialName: "anthropic" },
+      params: { credential_name: "anthropic" },
       query: {},
       body: {},
     }),

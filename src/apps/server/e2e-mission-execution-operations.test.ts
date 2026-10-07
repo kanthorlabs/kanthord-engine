@@ -173,7 +173,10 @@ async function setup(t: TestContext) {
       bucket: "evidence",
       region: "eu-central-1",
     },
-    secret: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: "example-secret" },
+    secret: {
+      access_key_id: "AKIAEXAMPLE",
+      secret_access_key: "example-secret",
+    },
   });
   const repository = (name: string, gated: boolean) => ({
     kind: "repository",

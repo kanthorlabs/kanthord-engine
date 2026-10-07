@@ -218,7 +218,7 @@ test(
 test("E01.9 updating metadata adds a model in a secret-free revision", async (t) => {
   const { directory, env } = await setup(t);
   const file = createFile(directory, OPENAI_COMPATIBLE, {
-    baseUrl: BASE_URL,
+    base_url: BASE_URL,
     models: [],
   });
   success(await kanthord([...LLM, "create", "--file", file], env));
@@ -227,7 +227,7 @@ test("E01.9 updating metadata adds a model in a secret-free revision", async (t)
     metadata,
     JSON.stringify({
       expected_revision: FIRST_REVISION,
-      metadata: { baseUrl: BASE_URL, models: [{ id: MODEL_ID }] },
+      metadata: { base_url: BASE_URL, models: [{ id: MODEL_ID }] },
     }),
   );
   success(
@@ -261,8 +261,8 @@ test("E01.10 a rotation drains an unpinned revision 1", async (t) => {
   );
   assert.ok(first);
   assert.ok(second);
-  assert.notEqual(first.endedAt, null);
-  assert.equal(second.endedAt, null);
+  assert.notEqual(first.ended_at, null);
+  assert.equal(second.ended_at, null);
   refusal(
     await kanthord(
       [...REPOSITORY, "revoke", NAME, String(FIRST_REVISION)],
@@ -367,10 +367,10 @@ test("archive ends every revision of an unused credential and refuses a repeat a
   );
   assert.equal(archived.name, NAME);
   assert.equal(archived.revisions.length, FIRST_REVISION);
-  assert.notEqual(archived.revisions[0]!.endedAt, null);
+  assert.notEqual(archived.revisions[0]!.ended_at, null);
   const read = success(await kanthord([...REPOSITORY, "get", NAME], env));
   assert.equal(read.revisions.length, FIRST_REVISION);
-  assert.notEqual(read.revisions[0]!.endedAt, null);
+  assert.notEqual(read.revisions[0]!.ended_at, null);
   refusal(
     await kanthord([...REPOSITORY, "archive", "missing"], env),
     "credential.credential.not_found",

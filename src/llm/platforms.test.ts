@@ -84,7 +84,7 @@ const VERIFIABLE_PLATFORMS: Platform[] = [
   Platform.OpencodeGo,
 ];
 const METADATA_FIELDS: Partial<Record<Platform, string[]>> = {
-  [Platform.OpenAICompatible]: ["baseUrl"],
+  [Platform.OpenAICompatible]: ["base_url"],
   [Platform.AmazonBedrock]: ["region"],
   [Platform.GoogleVertex]: ["project", "location"],
   [Platform.AzureOpenAIResponses]: ["resource_name"],
@@ -112,14 +112,14 @@ test("the platform list fixes secret shape, login modes, metadata fields and ver
   for (const item of items) {
     const platform = item.platform as Platform;
     assert.equal(
-      item.secretShape,
+      item.secret_shape,
       platform === Platform.GitHubCopilot || platform === Platform.OpenAICodex
         ? SecretShape.OAuth
         : SecretShape.ApiKey,
       platform,
     );
     assert.deepEqual(
-      item.loginModes,
+      item.login_modes,
       platform === Platform.GitHubCopilot
         ? [LoginSessionMode.Device]
         : platform === Platform.OpenAICodex
@@ -128,12 +128,12 @@ test("the platform list fixes secret shape, login modes, metadata fields and ver
       platform,
     );
     assert.deepEqual(
-      item.metadataFields,
+      item.metadata_fields,
       METADATA_FIELDS[platform] ?? [],
       platform,
     );
     assert.equal(
-      LLM_PLATFORMS[platform].metadataSchema === null,
+      LLM_PLATFORMS[platform].metadata_schema === null,
       METADATA_FIELDS[platform] === undefined,
       platform,
     );
@@ -157,7 +157,7 @@ test("the platform list fixes secret shape, login modes, metadata fields and ver
 test("secret schema is selected for every platform", () => {
   for (const [platform, entry] of Object.entries(LLM_PLATFORMS))
     assert.equal(
-      secretSchemas[entry.secretShape],
+      secretSchemas[entry.secret_shape],
       platform === Platform.GitHubCopilot || platform === Platform.OpenAICodex
         ? oauthSecretSchema
         : apiKeySecretSchema,
@@ -165,82 +165,86 @@ test("secret schema is selected for every platform", () => {
     );
 });
 
-test("openai-compatible metadata requires baseUrl and models", () => {
+test("openai-compatible metadata requires base_url and models", () => {
   assert.equal(
     openaiCompatibleMetadataSchema.safeParse({ models: [] }).success,
     false,
   );
   assert.equal(
-    openaiCompatibleMetadataSchema.safeParse({ baseUrl }).success,
+    openaiCompatibleMetadataSchema.safeParse({ base_url: baseUrl }).success,
     false,
   );
   assert.deepEqual(
-    openaiCompatibleMetadataSchema.parse({ baseUrl, models: [] }),
+    openaiCompatibleMetadataSchema.parse({ base_url: baseUrl, models: [] }),
     {
-      baseUrl,
+      base_url: baseUrl,
       models: [],
     },
   );
   assert.equal(
     openaiCompatibleMetadataSchema.safeParse({
-      baseUrl,
+      base_url: baseUrl,
       models: [],
       extra: true,
     }).success,
     false,
   );
   assert.equal(
-    LLM_PLATFORMS[Platform.OpenAICompatible].metadataSchema,
+    LLM_PLATFORMS[Platform.OpenAICompatible].metadata_schema,
     openaiCompatibleMetadataSchema,
   );
 });
 
-test("openai-compatible baseUrl refuses query, fragment and trailing slash", () => {
+test("openai-compatible base_url refuses query, fragment and trailing slash", () => {
   for (const invalid of [
     `${baseUrl}?key=value`,
     `${baseUrl}#fragment`,
     `${baseUrl}/`,
   ]) {
     assert.equal(
-      openaiCompatibleMetadataSchema.safeParse({ baseUrl: invalid, models: [] })
-        .success,
+      openaiCompatibleMetadataSchema.safeParse({
+        base_url: invalid,
+        models: [],
+      }).success,
       false,
     );
   }
 });
 
-test("model defaults permit id alone and constrain maxTokens after defaults", () => {
+test("model defaults permit id alone and constrain max_tokens after defaults", () => {
   assert.deepEqual(approvedModelSchema.parse({ id: "model" }), { id: "model" });
   assert.deepEqual(
-    openaiCompatibleMetadataSchema.parse({ baseUrl, models: [{ id: "model" }] })
-      .models,
+    openaiCompatibleMetadataSchema.parse({
+      base_url: baseUrl,
+      models: [{ id: "model" }],
+    }).models,
     [{ id: "model" }],
   );
   assert.deepEqual(MODEL_DEFAULT_REASONING_LEVELS, [ReasoningLevel.Off]);
   assert.equal(
     approvedModelSchema.safeParse({
       id: "model",
-      contextWindow: 32,
-      maxTokens: 32,
+      context_window: 32,
+      max_tokens: 32,
     }).success,
     true,
   );
   assert.equal(
     approvedModelSchema.safeParse({
       id: "model",
-      contextWindow: 32,
-      maxTokens: 33,
+      context_window: 32,
+      max_tokens: 33,
     }).success,
     false,
   );
   assert.equal(
-    approvedModelSchema.safeParse({ id: "model", contextWindow: 1 }).success,
+    approvedModelSchema.safeParse({ id: "model", context_window: 1 }).success,
     false,
   );
   assert.equal(
     approvedModelSchema.safeParse({
       id: "model",
-      maxTokens: MODEL_DEFAULT_CONTEXT_WINDOW + 1,
+      max_tokens: MODEL_DEFAULT_CONTEXT_WINDOW + 1,
     }).success,
     false,
   );
@@ -248,13 +252,15 @@ test("model defaults permit id alone and constrain maxTokens after defaults", ()
   assert.equal(
     approvedModelSchema.safeParse({
       id: "model",
-      reasoningLevels: [ReasoningLevel.High],
+      reasoning_levels: [ReasoningLevel.High],
     }).success,
     true,
   );
   assert.equal(
-    approvedModelSchema.safeParse({ id: "model", reasoningLevels: ["invalid"] })
-      .success,
+    approvedModelSchema.safeParse({
+      id: "model",
+      reasoning_levels: ["invalid"],
+    }).success,
     false,
   );
   assert.equal(
@@ -264,12 +270,12 @@ test("model defaults permit id alone and constrain maxTokens after defaults", ()
 });
 
 test("only the platforms with metadata fields have metadata schemas", () => {
-  assert.equal(LLM_PLATFORMS.groq.metadataSchema, null);
-  assert.equal(LLM_PLATFORMS[Platform.OpenAI].metadataSchema, null);
-  assert.equal(LLM_PLATFORMS[Platform.GitHubCopilot].metadataSchema, null);
-  assert.equal(LLM_PLATFORMS[Platform.Anthropic].metadataSchema, null);
-  assert.equal(LLM_PLATFORMS[Platform.OpenRouter].metadataSchema, null);
-  assert.equal(LLM_PLATFORMS[Platform.OpenAICodex].metadataSchema, null);
+  assert.equal(LLM_PLATFORMS.groq.metadata_schema, null);
+  assert.equal(LLM_PLATFORMS[Platform.OpenAI].metadata_schema, null);
+  assert.equal(LLM_PLATFORMS[Platform.GitHubCopilot].metadata_schema, null);
+  assert.equal(LLM_PLATFORMS[Platform.Anthropic].metadata_schema, null);
+  assert.equal(LLM_PLATFORMS[Platform.OpenRouter].metadata_schema, null);
+  assert.equal(LLM_PLATFORMS[Platform.OpenAICodex].metadata_schema, null);
 });
 
 const llmMetadataSchemas: {
@@ -313,29 +319,29 @@ test("approved models answer openai-compatible metadata models with the defaults
   const CONTEXT_WINDOW = 64000;
   const MAX_TOKENS = 4096;
   const metadata = {
-    baseUrl: "https://models.example/v1",
+    base_url: "https://models.example/v1",
     models: [
       { id: "plain" },
       {
         id: "tuned",
-        contextWindow: CONTEXT_WINDOW,
-        maxTokens: MAX_TOKENS,
-        reasoningLevels: [ReasoningLevel.High],
+        context_window: CONTEXT_WINDOW,
+        max_tokens: MAX_TOKENS,
+        reasoning_levels: [ReasoningLevel.High],
       },
     ],
   };
   assert.deepEqual(approvedModels(Platform.OpenAICompatible, metadata), [
     {
       id: "plain",
-      contextWindow: MODEL_DEFAULT_CONTEXT_WINDOW,
-      maxTokens: MODEL_DEFAULT_MAX_TOKENS,
-      reasoningLevels: MODEL_DEFAULT_REASONING_LEVELS,
+      context_window: MODEL_DEFAULT_CONTEXT_WINDOW,
+      max_tokens: MODEL_DEFAULT_MAX_TOKENS,
+      reasoning_levels: MODEL_DEFAULT_REASONING_LEVELS,
     },
     {
       id: "tuned",
-      contextWindow: CONTEXT_WINDOW,
-      maxTokens: MAX_TOKENS,
-      reasoningLevels: [ReasoningLevel.High],
+      context_window: CONTEXT_WINDOW,
+      max_tokens: MAX_TOKENS,
+      reasoning_levels: [ReasoningLevel.High],
     },
   ]);
   assert.equal(approvedModels(Platform.OpenAICompatible, null), null);

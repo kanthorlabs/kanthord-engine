@@ -106,8 +106,8 @@ export async function takeHandover(input: {
         },
       },
       handoverItem: {
-        credentialId: item.credentialId,
-        providerId: item.providerId,
+        credential_id: item.credential_id,
+        provider_id: item.provider_id,
       },
     };
   } catch (error) {

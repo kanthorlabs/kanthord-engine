@@ -198,7 +198,7 @@ export function agentProvidersDependentOn(
   return liveEnablements(tx).flatMap((row) =>
     row.agentProviders
       .filter((item) => item.credential === credentialName)
-      .map((item) => ({ agentName: row.agentName, providerName: item.name })),
+      .map((item) => ({ agent_name: row.agentName, provider_name: item.name })),
   );
 }
 

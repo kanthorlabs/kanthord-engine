@@ -477,7 +477,7 @@ test("the workbench credential view exposes only the credential of the configure
   const session = await createSession(fixture);
   let requester: typeof identity | undefined = identity;
   const view = fixture.custody.workbenchCredentials({
-    sessionId: session.id,
+    session_id: session.id,
     platform: ANTHROPIC,
     requester: () => requester,
     authorize: (tx, human, sessionId) =>
@@ -514,7 +514,7 @@ test("the workbench credential view exposes only the credential of the configure
   await assert.rejects(view.read(ANTHROPIC));
   requester = identity;
   const other = fixture.custody.workbenchCredentials({
-    sessionId: "workbench_session_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    session_id: "workbench_session_01ARZ3NDEKTSV4RRFFQ69G5FAV",
     platform: ANTHROPIC,
     requester: () => requester,
     authorize: (tx, human, sessionId) =>

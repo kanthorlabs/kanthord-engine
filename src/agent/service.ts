@@ -562,10 +562,10 @@ export class AgentComponent {
   ) {
     return {
       items: providerModels(this.dependencies, tx, item).map(
-        ({ id, reasoningLevels }) =>
+        ({ id, reasoning_levels }) =>
           agentModelSchema.parse({
             modelIdentifier: id,
-            reasoningEfforts: reasoningLevels,
+            reasoningEfforts: reasoning_levels,
           }),
       ),
     };

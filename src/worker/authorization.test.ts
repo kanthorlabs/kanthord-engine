@@ -37,10 +37,10 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     "jti",
   );
   const execution = {
-    executionId: createIdentity("execution"),
-    projectId: row.projectId,
-    workerBindingId: row.bindingId,
-    resourceIdentity: row.resourceIdentity,
+    execution_id: createIdentity("execution"),
+    project_id: row.projectId,
+    worker_binding_id: row.bindingId,
+    resource_identity: row.resourceIdentity,
   };
   let valid = true;
   const issues = [{ path: ["agent"], code: AgentErrorCode.Unavailable }];
@@ -82,15 +82,15 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
   assert.deepEqual(authorize(), {
     credential: "anthro-1",
     platform: "anthropic",
-    providerId: "anthropic",
-    agentProvider: "default",
+    provider_id: "anthropic",
+    agent_provider: "default",
   });
   row.entries = [{ agent: "swe@1", agentProvider: "override" }];
-  assert.equal(authorize().agentProvider, row.entries[0]!.agentProvider);
+  assert.equal(authorize().agent_provider, row.entries[0]!.agentProvider);
   for (const change of [
-    { workerBindingId: "absent" },
-    { projectId: "other" },
-    { resourceIdentity: "other" },
+    { worker_binding_id: "absent" },
+    { project_id: "other" },
+    { resource_identity: "other" },
   ])
     assert.throws(() => authorize(change), {
       status: HttpStatus.Forbidden,

@@ -45,20 +45,20 @@ export function sealMaterial(
   const keys = deriveHandoverKeys(secret);
   try {
     assert(Object.hasOwn(platforms, material.platform));
-    const shape = platforms[material.platform]!.secretShape;
-    assert(material.credentialId.length);
+    const shape = platforms[material.platform]!.secret_shape;
+    assert(material.credential_id.length);
     const payload = {
       items: [
         {
-          credentialId: material.credentialId,
-          providerId: material.platform,
+          credential_id: material.credential_id,
+          provider_id: material.platform,
           credential: credentialOfSecret(shape, material.value()),
         },
       ],
     };
     return sealEnvelope(
       keys.handover,
-      handoverAad(execution.executionId, execution.runtimeIdentity),
+      handoverAad(execution.execution_id, execution.runtime_identity),
       payload,
     );
   } finally {
@@ -77,7 +77,7 @@ export function openReport(
   try {
     value = openEnvelope(
       keys.report,
-      handoverAad(execution.executionId, execution.runtimeIdentity),
+      handoverAad(execution.execution_id, execution.runtime_identity),
       envelope,
     );
   } catch (error) {
@@ -90,7 +90,7 @@ export function openReport(
   const parsed = refreshReportSchema.safeParse(dropExtraOAuthFields(value));
   if (
     !parsed.success ||
-    !execution.credentials.includes(parsed.data.credentialId)
+    !execution.credentials.includes(parsed.data.credential_id)
   )
     throw invalidReport();
   return parsed.data;
@@ -107,7 +107,7 @@ export function applyReport(
     .prepare(
       "SELECT id, platform, ended_at, nonce, ciphertext FROM credential WHERE id = ?",
     )
-    .get(report.credentialId) as
+    .get(report.credential_id) as
     | {
         id: string;
         platform: string;
@@ -124,7 +124,7 @@ export function applyReport(
       "The pinned credential revision is revoked.",
     );
   const shape = Object.hasOwn(platforms, row.platform)
-    ? platforms[row.platform]!.secretShape
+    ? platforms[row.platform]!.secret_shape
     : undefined;
   if (shape === undefined || shape !== report.credential.type)
     throw invalidReport();

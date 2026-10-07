@@ -63,7 +63,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
         },
       );
       const payload = (credential: Credential) => ({
-        items: [{ credentialId: ID, providerId: PROVIDER, credential }],
+        items: [{ credential_id: ID, provider_id: PROVIDER, credential }],
       });
       assert.throws(() =>
         executionCredentialStore(payload(oversized), async () => {}),
@@ -92,7 +92,10 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
 }
 
 test("storage access keys are outside the execution credential budget", () => {
-  const secret = { accessKeyId: "id", secretAccessKey: "x".repeat(NEXT_BYTE) };
+  const secret = {
+    access_key_id: "id",
+    secret_access_key: "x".repeat(NEXT_BYTE),
+  };
   assert.ok(s3AccessKeySecretSchema.safeParse(secret).success);
   assert.equal(
     piCredentialSchema.safeParse({ type: SecretShape.S3AccessKey, ...secret })
@@ -119,7 +122,9 @@ for (const field of ["key", "refresh", "access"] as const) {
     const reports: RefreshReport[] = [];
     const view = executionCredentialStore(
       {
-        items: [{ credentialId: ID, providerId: PROVIDER, credential: valid }],
+        items: [
+          { credential_id: ID, provider_id: PROVIDER, credential: valid },
+        ],
       },
       async (report) => {
         reports.push(report);

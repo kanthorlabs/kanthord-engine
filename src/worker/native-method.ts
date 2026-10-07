@@ -36,7 +36,7 @@ export interface NativeExecutionInput {
   setup: ExecutionSetup;
   clients: MethodClients;
   credentials: { store: CredentialStore; release(): Promise<void> };
-  handoverItem: { credentialId: string; providerId: string };
+  handoverItem: { credential_id: string; provider_id: string };
   transport: RepositoryTransport;
   workspaces: WorkspaceRoot;
   hostHome: string;

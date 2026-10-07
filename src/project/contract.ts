@@ -369,9 +369,9 @@ export type AgentDependentBinding = {
   entry: WorkerEntry | null;
 };
 export type BindingNaming = {
-  bindingId: string;
-  projectId: string;
-  projectName: string;
+  binding_id: string;
+  project_id: string;
+  project_name: string;
   name: string;
 };
 export type BindingChange = {

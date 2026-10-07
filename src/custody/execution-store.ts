@@ -40,8 +40,8 @@ class ExecutionCredentialView implements ExecutionCredentials {
     assert.equal(parsed.items.length, EXECUTION_CREDENTIAL_COUNT);
     const item = parsed.items[0];
     assert(item);
-    this.#credentialId = item.credentialId;
-    this.#providerId = item.providerId;
+    this.#credentialId = item.credential_id;
+    this.#providerId = item.provider_id;
     this.#current = normalizeCredential(item.credential);
     this.#reported = normalizeCredential(item.credential);
     this.#report = report;
@@ -68,7 +68,7 @@ class ExecutionCredentialView implements ExecutionCredentials {
     const credential = piCredentialSchema.parse(this.#live());
     assert(this.#reported);
     await this.#report({
-      credentialId: this.#credentialId,
+      credential_id: this.#credentialId,
       digest: digest(this.#reported),
       credential,
     });

@@ -102,7 +102,7 @@ export class RepositoryCredentials {
       caller.commit((tx) => this.records.list(tx, PLATFORM_SET, input.query)),
     );
     registry.register(repositoryOperations.get, (input, caller) =>
-      caller.commit((tx) => this.get(tx, input.params.credentialName)),
+      caller.commit((tx) => this.get(tx, input.params.credential_name)),
     );
     registry.register(repositoryOperations.rotate, (input, caller) => {
       const commit = () =>
@@ -110,12 +110,12 @@ export class RepositoryCredentials {
           this.records.rotate(
             tx,
             PLATFORM_SET,
-            input.params.credentialName,
+            input.params.credential_name,
             input.body,
             humanIdentity(caller),
           ),
         );
-      const current = this.sshMetadataOf(input.params.credentialName);
+      const current = this.sshMetadataOf(input.params.credential_name);
       return current === null
         ? commit()
         : this.afterSshProof(
@@ -130,12 +130,12 @@ export class RepositoryCredentials {
           this.records.updateMetadata(
             tx,
             PLATFORM_SET,
-            input.params.credentialName,
+            input.params.credential_name,
             input.body,
             humanIdentity(caller),
           ),
         );
-      return this.sshMetadataOf(input.params.credentialName) === null
+      return this.sshMetadataOf(input.params.credential_name) === null
         ? commit()
         : this.afterSshProof(input.body.metadata, caller.context, commit);
     });
@@ -147,20 +147,20 @@ export class RepositoryCredentials {
         this.records.revoke(
           tx,
           PLATFORM_SET,
-          input.params.credentialName,
+          input.params.credential_name,
           input.params.revision,
         ),
       ),
     );
     registry.register(repositoryOperations.archive, (input, caller) =>
       caller.commit((tx) =>
-        this.records.archive(tx, PLATFORM_SET, input.params.credentialName),
+        this.records.archive(tx, PLATFORM_SET, input.params.credential_name),
       ),
     );
     registry.register(repositoryOperations.verify, async (input, caller) => {
       const answer = await this.records.verify(
         PLATFORM_SET,
-        input.params.credentialName,
+        input.params.credential_name,
         caller.context,
       );
       throwIfCancelled(caller.context);
@@ -285,7 +285,7 @@ export class RepositoryCredentials {
         ...(cursor === undefined ? {} : { cursor }),
       });
       for (const item of page.items) {
-        const live = item.revisions.find(({ endedAt }) => endedAt === null);
+        const live = item.revisions.find(({ ended_at }) => ended_at === null);
         const pin = sshPinSchema.safeParse(live?.metadata);
         if (pin.success) hosts.add(pin.data.host);
       }
@@ -302,7 +302,12 @@ export class RepositoryCredentials {
     return {
       ...answer,
       bindings: this.bindingsNaming(tx, credentialName).map(
-        ({ projectId, projectName, bindingId, name }) => ({
+        ({
+          project_id: projectId,
+          project_name: projectName,
+          binding_id: bindingId,
+          name,
+        }) => ({
           projectId,
           projectName,
           bindingId,

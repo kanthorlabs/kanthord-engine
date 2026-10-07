@@ -161,8 +161,8 @@ async function setupInternal(t: TestContext) {
     platform: "s3",
     metadata: storage,
     secret: {
-      accessKeyId: "test_journey_access",
-      secretAccessKey: "test_journey_secret",
+      access_key_id: "test_journey_access",
+      secret_access_key: "test_journey_secret",
     },
   });
   cli.secrets.push("test_journey_access", "test_journey_secret");

@@ -41,7 +41,7 @@ export interface NativeAgentInput {
   nodeKind: NodeKind;
   method: WorkerMethod;
   credentials: CredentialStore;
-  handoverItem: { credentialId: string; providerId: string };
+  handoverItem: { credential_id: string; provider_id: string };
   workspace: string;
   hostHome: string;
   modelRuntimeFactory: ModelRuntimeFactory;

@@ -27,15 +27,15 @@ test("host takes handover before setup and method, discards on every method end"
   const claim = testClaim();
   const events: string[] = [];
   const credential = {
-    credentialId: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    providerId: "anthropic",
+    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    provider_id: "anthropic",
     credential: { type: "api_key", key: "test_host_key" },
   };
   const setup: ExecutionSetup = {
     executionId: claim.executionId,
     workerName: "general@1",
     agentName: "swe@1",
-    credentialId: credential.credentialId,
+    credentialId: credential.credential_id,
     effectiveConfiguration: {
       agentProvider: "default",
       provider: "anthropic",
@@ -89,7 +89,7 @@ test("host takes handover before setup and method, discards on every method end"
     null,
   );
   assert.deepEqual(events, ["handover", "setup", "method"]);
-  assert.equal(await stored!.store.read(credential.providerId), undefined);
+  assert.equal(await stored!.store.read(credential.provider_id), undefined);
   const expected = "system.operation.unknown";
   assert.equal(
     (
@@ -100,7 +100,7 @@ test("host takes handover before setup and method, discards on every method end"
     )?.code,
     expected,
   );
-  assert.equal(await stored!.store.read(credential.providerId), undefined);
+  assert.equal(await stored!.store.read(credential.provider_id), undefined);
   const workspace = temporary(t);
   await writeFile(join(workspace, "a.txt"), "test evidence");
   t.mock.method(

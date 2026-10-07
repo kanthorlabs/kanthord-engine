@@ -317,7 +317,7 @@ export class WorkbenchService implements Service {
     let agent: AgentSession | undefined;
     try {
       const credentials = this.dependencies.workbenchCredentials({
-        sessionId: session.id,
+        session_id: session.id,
         platform: resolved.provider,
         requester: () => session.requester,
         authorize: (tx, requester, sessionId) =>
@@ -327,8 +327,8 @@ export class WorkbenchService implements Service {
         (this.dependencies.modelRuntimeFactory ?? defaultModelRuntimeFactory)({
           credentials,
           handoverItem: {
-            credentialId: resolved.credentialId,
-            providerId: resolved.provider,
+            credential_id: resolved.credentialId,
+            provider_id: resolved.provider,
           },
           credentialId: resolved.credentialId,
           configuration: {

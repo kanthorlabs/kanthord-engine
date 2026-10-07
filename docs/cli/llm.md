@@ -63,23 +63,23 @@ Each synopsis follows `kanthord llm credential`. All thirteen commands have `[R]
 `human` access; seven mutations have `[M]`, and one list has `[L]`.
 All paths below are implemented routes under the ruled `/api/llm/credential` prefix.
 
-| #   | Synopsis after `kanthord llm credential`                          | HTTP route                                                           | Operation ID                     | Access/status        |
-| --- | ----------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------- | -------------------- |
-| 1   | `create --file <path> [M] [R]`                                    | `POST /api/llm/credential`                                           | `llm.credential.create`          | `human`; implemented |
-| 2   | `list [--platform <platform>] [L] [R]`                            | `GET /api/llm/credential`                                            | `llm.credential.list`            | `human`; implemented |
-| 3   | `get <credential-name> [R]`                                       | `GET /api/llm/credential/:credentialName`                            | `llm.credential.get`             | `human`; implemented |
-| 4   | `rotate <credential-name> --file <path> [M] [R]`                  | `POST /api/llm/credential/:credentialName/revision`                  | `llm.credential.rotate`          | `human`; implemented |
-| 5   | `update-metadata <credential-name> --file <path> [M] [R]`         | `PUT /api/llm/credential/:credentialName/metadata`                   | `llm.credential.update_metadata` | `human`; implemented |
-| 6   | `login <platform> [--mode browser\|device] --name <name> [M] [R]` | `POST /api/llm/credential/login`                                     | `llm.credential.login`           | `human`; implemented |
-| 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/llm/credential/login/:sessionId/code`                     | `llm.credential.login_code`      | `human`; implemented |
-| 8   | `login-status <session> [R]`                                      | `GET /api/llm/credential/login/:sessionId`                           | `llm.credential.login_status`    | `human`; implemented |
-| 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/llm/credential/:credentialName/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented |
-| 10  | `archive <credential-name> [M] [R]`                               | `POST /api/llm/credential/:credentialName/archive`                   | `llm.credential.archive`         | `human`; implemented |
-| 11  | `platforms [R]`                                                   | `GET /api/llm/credential/platform`                                   | `llm.credential.platform_list`   | `human`; implemented |
-| 12  | `check --file <path> [R]`                                         | `POST /api/llm/credential/check`                                     | `llm.credential.check`           | `human`; implemented |
-| 13  | `verify <credential-name> [R]`                                    | `POST /api/llm/credential/:credentialName/verify`                    | `llm.credential.verify`          | `human`; implemented |
+| #   | Synopsis after `kanthord llm credential`                          | HTTP route                                                            | Operation ID                     | Access/status        |
+| --- | ----------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- | -------------------- |
+| 1   | `create --file <path> [M] [R]`                                    | `POST /api/llm/credential`                                            | `llm.credential.create`          | `human`; implemented |
+| 2   | `list [--platform <platform>] [L] [R]`                            | `GET /api/llm/credential`                                             | `llm.credential.list`            | `human`; implemented |
+| 3   | `get <credential-name> [R]`                                       | `GET /api/llm/credential/:credential_name`                            | `llm.credential.get`             | `human`; implemented |
+| 4   | `rotate <credential-name> --file <path> [M] [R]`                  | `POST /api/llm/credential/:credential_name/revision`                  | `llm.credential.rotate`          | `human`; implemented |
+| 5   | `update-metadata <credential-name> --file <path> [M] [R]`         | `PUT /api/llm/credential/:credential_name/metadata`                   | `llm.credential.update_metadata` | `human`; implemented |
+| 6   | `login <platform> [--mode browser\|device] --name <name> [M] [R]` | `POST /api/llm/credential/login`                                      | `llm.credential.login`           | `human`; implemented |
+| 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/llm/credential/login/:sessionId/code`                      | `llm.credential.login_code`      | `human`; implemented |
+| 8   | `login-status <session> [R]`                                      | `GET /api/llm/credential/login/:sessionId`                            | `llm.credential.login_status`    | `human`; implemented |
+| 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/llm/credential/:credential_name/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented |
+| 10  | `archive <credential-name> [M] [R]`                               | `POST /api/llm/credential/:credential_name/archive`                   | `llm.credential.archive`         | `human`; implemented |
+| 11  | `platforms [R]`                                                   | `GET /api/llm/credential/platform`                                    | `llm.credential.platform_list`   | `human`; implemented |
+| 12  | `check --file <path> [R]`                                         | `POST /api/llm/credential/check`                                      | `llm.credential.check`           | `human`; implemented |
+| 13  | `verify <credential-name> [R]`                                    | `POST /api/llm/credential/:credential_name/verify`                    | `llm.credential.verify`          | `human`; implemented |
 
-The static `/api/llm/credential/login`, `/api/llm/credential/platform` and `/api/llm/credential/check` paths take precedence over `/:credentialName`, so custody refuses the names `login`, `platform` and `check`.
+The static `/api/llm/credential/login`, `/api/llm/credential/platform` and `/api/llm/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`.
 These routes have no project identity.
 
 The [`provider check`](#provider-check) is a server-wide read under `human` access with the `[R]` flags.
@@ -95,11 +95,11 @@ A `create` with a platform of another component answers `400 credential.platform
 ## Record and platform schemas
 
 A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
-A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `createdAt: Timestamp`
-and `endedAt: Timestamp | null`. No answer holds `secret`.
+A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `created_at: Timestamp`
+and `ended_at: Timestamp | null`. No answer holds `secret`.
 `platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators): `openai-compatible` and every `KnownProvider` of pi-ai 0.86.0. [`platforms`](#platforms) answers the set.
 Each platform holds exactly one secret shape from `api_key | oauth`.
-The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) bounds `api_key` and `oauth` to 48,915 UTF-8 bytes of normalized canonical pi-ai credential JSON, including type, structure and escaping. Creation and rotation reject an oversized value with HTTP 400 `credential.input.invalid` before writing. Oversized OAuth login material follows the sanitized failed-session path and stores nothing.
+The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) bounds `api_key` and `oauth` to 48,914 UTF-8 bytes of normalized canonical pi-ai credential JSON, including type, structure and escaping. Creation and rotation reject an oversized value with HTTP 400 `credential.input.invalid` before writing. Oversized OAuth login material follows the sanitized failed-session path and stores nothing.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators)
 fix the secret shape and the metadata of each platform:
 
@@ -108,7 +108,7 @@ fix the secret shape and the metadata of each platform:
 | `github-copilot`         | `oauth`      | None; wire value `null`.               |
 | `openai-codex`           | `oauth`      | None; wire value `null`.               |
 | `anthropic`              | `api_key`    | None; wire value `null`.               |
-| `openai-compatible`      | `api_key`    | Required `{ baseUrl, models }`.        |
+| `openai-compatible`      | `api_key`    | Required `{ base_url, models }`.       |
 | `openrouter`             | `api_key`    | None; wire value `null`.               |
 | `openai`                 | `api_key`    | None; wire value `null`.               |
 | `amazon-bedrock`         | `api_key`    | Required `{ region }`.                 |
@@ -122,15 +122,15 @@ fix the secret shape and the metadata of each platform:
 
 For `openai-compatible`:
 
-- `baseUrl` is required, uses `https` or `http`, and has no query, no fragment and no trailing slash.
+- `base_url` is required, uses `https` or `http`, and has no query, no fragment and no trailing slash.
   It is fixed for the life of the revision. A rotation can set a different endpoint; a metadata edit cannot.
 - `models` is required and starts as `[]` at creation. A human adds approved
   models through a metadata revision after `llm provider check`.
-- Each model has a required `id` and optional `contextWindow`, `maxTokens` and
-  `reasoningLevels`. `id` is a nonblank string, unique inside `models`. An omitted value takes the pi 0.86.0
-  default: `contextWindow` `128000`, `maxTokens` `16384`, `reasoningLevels` `["off"]`.
-  Both limits are positive integers, and `maxTokens` is at most `contextWindow`.
-- `reasoningLevels` is an array of established levels from `off`, `minimal`,
+- Each model has a required `id` and optional `context_window`, `max_tokens` and
+  `reasoning_levels`. `id` is a nonblank string, unique inside `models`. An omitted value takes the pi 0.86.0
+  default: `context_window` `128000`, `max_tokens` `16384`, `reasoning_levels` `["off"]`.
+  Both limits are positive integers, and `max_tokens` is at most `context_window`.
+- `reasoning_levels` is an array of established levels from `off`, `minimal`,
   `low`, `medium`, `high`, `xhigh`, `max`. An omitted list supplies only `off`.
 - A model cannot be removed while a default configuration or entry names it.
   The refusal lists the dependents. The dependency check and metadata update
@@ -161,7 +161,7 @@ that identity, never the submitted secret.
 ## `list`
 
 No positional arguments and no body. The optional filter maps to query `platform`.
-The optional `--include-archived` flag maps to query `includeArchived`, a boolean that defaults to `false`. Without it, the list leaves out an archived name.
+The optional `--include-archived` flag maps to query `include_archived`, a boolean that defaults to `false`. Without it, the list leaves out an archived name.
 It is single-use with no default filter. The platform enum is defined above.
 `limit` and optional `cursor` use the shared pagination contract.
 HTTP `200` returns one credential answer for each name of this component in `items`, in ascending name
@@ -171,10 +171,10 @@ The CLI fetches no further page implicitly. Custody drains unpinned older live r
 ## `platforms`
 
 No positional arguments, no body and no pagination. HTTP `200` returns
-`{ items: [{ platform, secretShape, loginModes, metadataFields, verifiable }] }`,
+`{ items: [{ platform, secret_shape, login_modes, metadata_fields, verifiable }] }`,
 the platforms of the platform table of this component.
-`loginModes` is `[]` for a
-platform whose secret shape is not `oauth`. `metadataFields` names the required
+`login_modes` is `[]` for a
+platform whose secret shape is not `oauth`. `metadata_fields` names the required
 string fields of the metadata. `verifiable` is `true` exactly for a platform with an [LLM provider](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-llm-provider). The command answers only the shared error codes.
 
 ## `check`
@@ -205,8 +205,8 @@ A platform of another component answers `400 credential.platform.unsupported`.
 kanthord llm credential verify <credential-name> [R]
 ```
 
-The [record verify](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-record-verify) declares `llm.credential.verify`, a read under `human` access, at `POST /api/llm/credential/:credentialName/verify`.
-The required `CredentialName` maps to `params.credentialName`. Query is empty and body absent. The command takes no mutation key and rejects `--idempotency-key`.
+The [record verify](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-record-verify) declares `llm.credential.verify`, a read under `human` access, at `POST /api/llm/credential/:credential_name/verify`.
+The required `CredentialName` maps to `params.credential_name`. Query is empty and body absent. The command takes no mutation key and rejects `--idempotency-key`.
 It checks one stored record and stores no result.
 The check runs through the LLM provider of the platform, and the connection maps to the status as the healthcheck does.
 The component releases the newest live revision of the record, runs the same platform check as the health report with a 10 s deadline, and drops the material after the call. A check that exceeds its deadline answers `unknown`.
@@ -223,13 +223,13 @@ An unknown name, or a name of another component, answers `404 credential.credent
 
 ## `get <credential-name>`
 
-The required `CredentialName` has no default and maps to `params.credentialName`.
+The required `CredentialName` has no default and maps to `params.credential_name`.
 Query is empty and body absent. HTTP `200` returns one credential answer with the added list `agentProviders` of `{ agent, name }`;
 an unknown name, or a name of another component, answers `404 credential.credential.not_found`. The read transaction first drains unpinned older live revisions of that name.
 
 ## `rotate <credential-name>`
 
-The required `CredentialName` maps to `params.credentialName`; query is empty.
+The required `CredentialName` maps to `params.credential_name`; query is empty.
 The required file supplies `{ expected_revision, secret }` and an optional `metadata`. `expected_revision` is the newest live revision that the human read. The secret shape of the
 platform determines its closed secret schema. `api_key` uses the create schema.
 An OAuth secret is `{ refresh, access, expires }`, the pi-ai credential shape;
@@ -239,7 +239,7 @@ name, platform or identity override.
 
 Rotation adds the next revision under the same name and, in the same transaction, drains every older live revision that no live execution pins.
 An absent `metadata` copies the metadata of the newest live revision. A supplied `metadata`
-matches the platform schema, can set a new `openai-compatible.baseUrl`, and keeps every model
+matches the platform schema, can set a new `openai-compatible.base_url`, and keeps every model
 that a default or an entry names. Rotation makes no remote call and commits in one transaction.
 It changes no binding revision. HTTP `200` returns the credential answer
 without the secret.
@@ -248,26 +248,26 @@ This command does not rotate `master_key`.
 
 ## `update-metadata <credential-name>`
 
-The required `CredentialName` maps to `params.credentialName`; query is empty.
+The required `CredentialName` maps to `params.credential_name`; query is empty.
 The required file supplies exactly `{ expected_revision, metadata }`, with the newest live revision that the human read and a complete replacement that
 matches the platform schema. It accepts no secret or platform change.
 The edit inserts the next revision with the secret of the newest live revision, and the older revisions stay live until custody drains them or a human revokes them. HTTP `200` returns
-the credential answer. An `openai-compatible.baseUrl` change fails with `409 llm.metadata.base_url_fixed`; a rotation sets a new one.
+the credential answer. An `openai-compatible.base_url` change fails with `409 llm.metadata.base_url_fixed`; a rotation sets a new one.
 Removal of a model used by a default or entry fails with `409 llm.metadata.model_in_use` and lists its dependents;
 the check and update are atomic. No remote probe supplies approval.
 
 ## `archive <credential-name>`
 
-The required `CredentialName` maps to `params.credentialName`. Query is empty and body absent.
+The required `CredentialName` maps to `params.credential_name`. Query is empty and body absent.
 The archive checks every dependent in one transaction: every agent provider, every binding revision that `bindingsNaming` answers and every inbound that `inboundsNaming` answers.
-A dependent refuses the archive with `409 credential.credential.in_use`, and `error.details` lists the dependents as `{ agentProviders: [{ agentName, providerName }], bindings: [{ bindingId, projectId }], inbounds: [{ inboundId }] }`.
+A dependent refuses the archive with `409 credential.credential.in_use`, and `error.details` lists the dependents as `{ agent_providers: [{ agent_name, provider_name }], bindings: [{ binding_id, project_id }], inbounds: [{ inbound_id }] }`.
 Without a dependent, the archive sets `ended_at` on every live revision of the name and keeps the rows, because an execution record references them.
 A name with no live revision is archived. An archive is final: an archived name refuses `rotate`, `update-metadata` and `archive` with `409 credential.credential.archived`, and the name stays taken.
 HTTP `200` returns the credential answer with every revision ended. An unknown name answers `404 credential.credential.not_found`.
 
 ## `revoke <credential-name> <revision>`
 
-The required `CredentialName` maps to `params.credentialName`, and the required
+The required `CredentialName` maps to `params.credential_name`, and the required
 `Revision` maps to `params.revision`. Query is empty and body absent.
 The revoke ends that revision at once, and every execution that pins it is refused
 at its next use of the credential. A revoke of the newest live revision answers
@@ -352,34 +352,34 @@ The `openai-codex` check and the `opencode-go` check make a model call; the `ope
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                         | Condition                                                                                      | Commands                                                               |
-| ----- | -------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| 409   | `credential.login.value_not_awaited`         | The session does not await a code.                                                             | login-code                                                             |
-| 409   | `credential.login.pending`                   | Another login is pending for this platform and human.                                          | login                                                                  |
-| 404   | `credential.login.not_found`                 | The login session does not exist.                                                              | login-code, login-status                                               |
-| 400   | `credential.login.mode_unsupported`          | The platform does not support the selected login mode.                                         | login                                                                  |
-| 404   | `credential.credential.not_found`            | The credential does not exist, or its platform is not an LLM platform.                         | get, rotate, update-metadata, revoke, archive, verify, worker handover |
-| local | `cli.llm.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.                                          | login                                                                  |
-| local | `cli.llm.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                      | revoke                                                                 |
-| 400   | `credential.entry.unsupported`               | The platform does not support this entry method.                                               | create, login                                                          |
-| 400   | `credential.input.invalid`                   | Secret or metadata validation fails, including the byte budget, or the name is reserved.       | create, rotate, update-metadata, login, login-code, check              |
-| 409   | `llm.metadata.base_url_fixed`                | The edit changes `baseUrl` outside rotation.                                                   | update-metadata                                                        |
-| 409   | `llm.metadata.model_in_use`                  | A removed model has dependent defaults or entries. Details: `{ models: [{ model, agents }] }`. | update-metadata, rotate                                                |
-| 409   | `credential.name.conflict`                   | A credential already has this name; details identify the holder.                               | create, login                                                          |
-| 400   | `credential.platform.mismatch`               | The requested platform differs from the stored platform.                                       | agent enablement put (custody collaboration), worker handover          |
-| 400   | `credential.platform.unsupported`            | The platform is not an LLM platform.                                                           | create, login, check                                                   |
-| 400   | `credential.check.unsupported`               | The platform has `verifiable: false` or the secret shape `oauth`.                              | check, verify                                                          |
-| 409   | `credential.revision.conflict`               | The expected revision is stale.                                                                | rotate, update-metadata                                                |
-| 409   | `credential.revision.ended`                  | The revision is already ended, by a revoke or by a drain.                                      | revoke                                                                 |
-| 409   | `credential.revision.newest_live`            | The revoke names the newest live revision.                                                     | revoke                                                                 |
-| 409   | `credential.credential.in_use`               | A dependent names the credential; `details` holds `agentProviders`, `bindings` and `inbounds`. | archive                                                                |
-| 409   | `credential.credential.archived`             | The credential is archived; an archive is final.                                               | rotate, update-metadata, archive, verify                               |
-| 404   | `credential.revision.not_found`              | The revision does not exist.                                                                   | revoke                                                                 |
-| local | `llm.lifecycle.stopped`                      | The LLM component cannot accept a login or restart after shutdown.                             | login, serve server                                                    |
-| 400   | `llm.provider.invalid_input`                 | The provider check input fails validation.                                                     | provider check                                                         |
-| 400   | `llm.provider.check_unsupported`             | The platform of the credential has no LLM provider.                                            | provider check                                                         |
-| 404   | `llm.provider.credential_not_found`          | The credential does not exist, or its platform belongs to another component.                   | provider check                                                         |
-| 409   | `credential.revision.revoked`                | A pinned use names a revoked revision.                                                         | worker handover, worker credential (API only)                          |
+| HTTP  | Code                                         | Condition                                                                                       | Commands                                                               |
+| ----- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 409   | `credential.login.value_not_awaited`         | The session does not await a code.                                                              | login-code                                                             |
+| 409   | `credential.login.pending`                   | Another login is pending for this platform and human.                                           | login                                                                  |
+| 404   | `credential.login.not_found`                 | The login session does not exist.                                                               | login-code, login-status                                               |
+| 400   | `credential.login.mode_unsupported`          | The platform does not support the selected login mode.                                          | login                                                                  |
+| 404   | `credential.credential.not_found`            | The credential does not exist, or its platform is not an LLM platform.                          | get, rotate, update-metadata, revoke, archive, verify, worker handover |
+| local | `cli.llm.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.                                           | login                                                                  |
+| local | `cli.llm.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                       | revoke                                                                 |
+| 400   | `credential.entry.unsupported`               | The platform does not support this entry method.                                                | create, login                                                          |
+| 400   | `credential.input.invalid`                   | Secret or metadata validation fails, including the byte budget, or the name is reserved.        | create, rotate, update-metadata, login, login-code, check              |
+| 409   | `llm.metadata.base_url_fixed`                | The edit changes `base_url` outside rotation.                                                   | update-metadata                                                        |
+| 409   | `llm.metadata.model_in_use`                  | A removed model has dependent defaults or entries. Details: `{ models: [{ model, agents }] }`.  | update-metadata, rotate                                                |
+| 409   | `credential.name.conflict`                   | A credential already has this name; details identify the holder.                                | create, login                                                          |
+| 400   | `credential.platform.mismatch`               | The requested platform differs from the stored platform.                                        | agent enablement put (custody collaboration), worker handover          |
+| 400   | `credential.platform.unsupported`            | The platform is not an LLM platform.                                                            | create, login, check                                                   |
+| 400   | `credential.check.unsupported`               | The platform has `verifiable: false` or the secret shape `oauth`.                               | check, verify                                                          |
+| 409   | `credential.revision.conflict`               | The expected revision is stale.                                                                 | rotate, update-metadata                                                |
+| 409   | `credential.revision.ended`                  | The revision is already ended, by a revoke or by a drain.                                       | revoke                                                                 |
+| 409   | `credential.revision.newest_live`            | The revoke names the newest live revision.                                                      | revoke                                                                 |
+| 409   | `credential.credential.in_use`               | A dependent names the credential; `details` holds `agent_providers`, `bindings` and `inbounds`. | archive                                                                |
+| 409   | `credential.credential.archived`             | The credential is archived; an archive is final.                                                | rotate, update-metadata, archive, verify                               |
+| 404   | `credential.revision.not_found`              | The revision does not exist.                                                                    | revoke                                                                 |
+| local | `llm.lifecycle.stopped`                      | The LLM component cannot accept a login or restart after shutdown.                              | login, serve server                                                    |
+| 400   | `llm.provider.invalid_input`                 | The provider check input fails validation.                                                      | provider check                                                         |
+| 400   | `llm.provider.check_unsupported`             | The platform of the credential has no LLM provider.                                             | provider check                                                         |
+| 404   | `llm.provider.credential_not_found`          | The credential does not exist, or its platform belongs to another component.                    | provider check                                                         |
+| 409   | `credential.revision.revoked`                | A pinned use names a revoked revision.                                                          | worker handover, worker credential (API only)                          |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 

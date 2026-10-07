@@ -14,7 +14,9 @@ const FIRST = { type: SecretShape.ApiKey, key: "first" };
 const SECOND = { type: SecretShape.ApiKey, key: "second" };
 const THIRD = { type: SecretShape.ApiKey, key: "third" };
 const payload = () => ({
-  items: [{ credentialId: ID, providerId: PROVIDER, credential: { ...FIRST } }],
+  items: [
+    { credential_id: ID, provider_id: PROVIDER, credential: { ...FIRST } },
+  ],
 });
 
 test("execution views isolate material and report only changed normalized credentials", async () => {
@@ -46,12 +48,12 @@ test("execution views isolate material and report only changed normalized creden
     }),
   ]);
   assert.deepEqual(reports, [
-    { credentialId: ID, digest: digest(FIRST), credential: SECOND },
-    { credentialId: ID, digest: digest(SECOND), credential: THIRD },
+    { credential_id: ID, digest: digest(FIRST), credential: SECOND },
+    { credential_id: ID, digest: digest(SECOND), credential: THIRD },
   ]);
   await view.release();
   assert.deepEqual(reports.at(-1), {
-    credentialId: ID,
+    credential_id: ID,
     digest: digest(THIRD),
     credential: THIRD,
   });
@@ -77,7 +79,7 @@ test("report failure propagates and retains the last acknowledged digest for ret
   reject = false;
   await view.release();
   assert.deepEqual(reports, [
-    { credentialId: ID, digest: digest(FIRST), credential: SECOND },
+    { credential_id: ID, digest: digest(FIRST), credential: SECOND },
   ]);
   await assert.rejects(view.store.delete(PROVIDER), ExecutionStoreError);
   await assert.rejects(

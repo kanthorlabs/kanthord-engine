@@ -848,13 +848,13 @@ export class ProjectService implements Service, ProjectBindings {
           this.liveNodesPinning(tx, binding.id).length > EMPTY_LENGTH,
       )
       .map(({ binding }) => ({
-        bindingId: binding.id,
-        projectId: binding.projectId,
-        projectName: requireProject(tx, binding.projectId).name,
+        binding_id: binding.id,
+        project_id: binding.projectId,
+        project_name: requireProject(tx, binding.projectId).name,
         name: binding.name,
       }));
     assert.equal(
-      new Set(dependents.map(({ bindingId }) => bindingId)).size,
+      new Set(dependents.map(({ binding_id }) => binding_id)).size,
       dependents.length,
     );
     return dependents;

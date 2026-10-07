@@ -2616,25 +2616,25 @@ test("bindingsNaming finds exact credential keys at any depth across projects an
     }).bindings[STORAGE_NAME]!;
     const results = f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL);
     assert.deepEqual(
-      new Set(results.map(({ bindingId }) => bindingId)),
+      new Set(results.map(({ binding_id }) => binding_id)),
       new Set([repository.id, storage.id]),
     );
     assert.equal(results.length, TWO_CALLS);
     assert.deepEqual(
-      results.find(({ bindingId }) => bindingId === repository.id),
+      results.find(({ binding_id }) => binding_id === repository.id),
       {
-        bindingId: repository.id,
-        projectId: first.id,
-        projectName: PROJECT_NAME,
+        binding_id: repository.id,
+        project_id: first.id,
+        project_name: PROJECT_NAME,
         name: REPOSITORY_NAME,
       },
     );
     assert.deepEqual(
-      results.find(({ bindingId }) => bindingId === storage.id),
+      results.find(({ binding_id }) => binding_id === storage.id),
       {
-        bindingId: storage.id,
-        projectId: second.id,
-        projectName: OTHER_NAME,
+        binding_id: storage.id,
+        project_id: second.id,
+        project_name: OTHER_NAME,
         name: STORAGE_NAME,
       },
     );
@@ -2676,7 +2676,7 @@ test("bindingsNaming checks only matching older live revisions and frees depende
       new Set(
         f.project
           .bindingsNaming(tx, REPOSITORY_CREDENTIAL)
-          .map(({ bindingId }) => bindingId),
+          .map(({ binding_id }) => binding_id),
       ),
       new Set([original.id, latest.id]),
     );
@@ -2685,9 +2685,9 @@ test("bindingsNaming checks only matching older live revisions and frees depende
     pinned.clear();
     assert.deepEqual(f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL), [
       {
-        bindingId: latest.id,
-        projectId: project.id,
-        projectName: PROJECT_NAME,
+        binding_id: latest.id,
+        project_id: project.id,
+        project_name: PROJECT_NAME,
         name: REPOSITORY_NAME,
       },
     ]);
@@ -2716,9 +2716,9 @@ test("bindingsNaming excludes tombstones and earlier pins even after the group i
     }).bindings[REPOSITORY_NAME]!;
     assert.deepEqual(f.project.bindingsNaming(tx, REPOSITORY_CREDENTIAL), [
       {
-        bindingId: rebound.id,
-        projectId: first.id,
-        projectName: PROJECT_NAME,
+        binding_id: rebound.id,
+        project_id: first.id,
+        project_name: PROJECT_NAME,
         name: REPOSITORY_NAME,
       },
     ]);

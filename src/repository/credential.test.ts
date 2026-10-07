@@ -47,6 +47,14 @@ const UNSUPPORTED_PLATFORM_CODE = "credential.platform.unsupported";
 const NOT_FOUND_CODE = "credential.credential.not_found";
 const BINDINGS = [
   {
+    binding_id: "binding_one",
+    project_id: "project_one",
+    project_name: "alpha",
+    name: "repo",
+  },
+];
+const BINDINGS_ANSWER = [
+  {
     bindingId: "binding_one",
     projectId: "project_one",
     projectName: "alpha",
@@ -154,16 +162,16 @@ test("platform list answers github and ssh", (t) => {
       items: [
         {
           platform: "github",
-          secretShape: SecretShape.ApiKey,
-          loginModes: [],
-          metadataFields: [],
+          secret_shape: SecretShape.ApiKey,
+          login_modes: [],
+          metadata_fields: [],
           verifiable: true,
         },
         {
           platform: "ssh",
-          secretShape: SecretShape.None,
-          loginModes: [],
-          metadataFields: ["host", "hostname", "identity_file"],
+          secret_shape: SecretShape.None,
+          login_modes: [],
+          metadata_fields: ["host", "hostname", "identity_file"],
           verifiable: true,
         },
       ],
@@ -200,12 +208,12 @@ test("create refuses a platform of another component and get lists the bindings 
     },
   });
   const answer = f.invoke(repositoryOperations.get, {
-    params: { credentialName: "github" },
+    params: { credential_name: "github" },
     query: {},
     body: null,
   }) as CredentialAnswer & { bindings: unknown };
   assert.equal(answer.revisions.length, FIRST_REVISION);
-  assert.deepEqual(answer.bindings, BINDINGS);
+  assert.deepEqual(answer.bindings, BINDINGS_ANSWER);
   assert.deepEqual(f.namings, ["github"]);
   assert.ok(!JSON.stringify(answer).includes(SECRET));
 });
@@ -226,11 +234,11 @@ test("a name of another component answers not found and the inventory holds only
     ),
   );
   for (const [operation, params] of [
-    [repositoryOperations.get, { credentialName: "anthropic" }],
-    [repositoryOperations.archive, { credentialName: "anthropic" }],
+    [repositoryOperations.get, { credential_name: "anthropic" }],
+    [repositoryOperations.archive, { credential_name: "anthropic" }],
     [
       repositoryOperations.revoke,
-      { credentialName: "anthropic", revision: FIRST_REVISION },
+      { credential_name: "anthropic", revision: FIRST_REVISION },
     ],
   ] as const)
     fails(
@@ -414,12 +422,12 @@ test("check takes no mutation key and the credential name check is refused", (t)
   );
 });
 
-const VERIFY_PATH = "/api/repository/credential/:credentialName/verify";
+const VERIFY_PATH = "/api/repository/credential/:credential_name/verify";
 const ARCHIVED_CODE = "credential.credential.archived";
 const REPOSITORY_NAME = "repo";
 
 function verifyInput(credentialName: string) {
-  return { params: { credentialName }, query: {}, body: null };
+  return { params: { credential_name: credentialName }, query: {}, body: null };
 }
 
 function credentialRows(f: ReturnType<typeof fixture>): string {
@@ -549,7 +557,7 @@ test("verify takes no body and no mutation key", () => {
   assert.equal(repositoryOperations.verify.access, AccessPolicy.Human);
   assert.throws(() =>
     repositoryOperations.verify.input.parse({
-      params: { credentialName: REPOSITORY_NAME },
+      params: { credential_name: REPOSITORY_NAME },
       query: {},
       body: {},
     }),
@@ -634,7 +642,7 @@ test("an ssh record pins the resolved identity and refuses an ambiguous or drift
     { host: ALIAS, keys: ["hostname", "port"] },
   );
   const repinned = (await f.invoke(repositoryOperations.update_metadata, {
-    params: { credentialName: "kanthorlabs-ssh" },
+    params: { credential_name: "kanthorlabs-ssh" },
     query: {},
     body: {
       expected_revision: FIRST_REVISION,
@@ -644,7 +652,7 @@ test("an ssh record pins the resolved identity and refuses an ambiguous or drift
   assert.equal(repinned.revisions[0]?.revision, FIRST_REVISION + ONE_CALL);
   await rejectsWith(
     f.invoke(repositoryOperations.rotate, {
-      params: { credentialName: "kanthorlabs-ssh" },
+      params: { credential_name: "kanthorlabs-ssh" },
       query: {},
       body: {
         expected_revision: FIRST_REVISION + ONE_CALL,

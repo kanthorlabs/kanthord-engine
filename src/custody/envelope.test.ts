@@ -19,8 +19,8 @@ for (const [shape, value] of Object.entries({
   api_key: { key: "secret-value" },
   oauth: { refresh: "refresh-token", access: "access-token", expires: 12345 },
   s3_access_key: {
-    accessKeyId: "access-key-id",
-    secretAccessKey: "secret-access-key",
+    access_key_id: "access-key-id",
+    secret_access_key: "secret-access-key",
   },
 })) {
   test(`${shape} secret round-trips`, () => {
