@@ -36,7 +36,7 @@ const createPromptTable: Migration = (database) => {
       agent_name TEXT NOT NULL,
       switches TEXT NOT NULL,
       custom_text TEXT NOT NULL,
-      version INTEGER NOT NULL,
+      revision INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX agent_prompt_scope_agent_name ON agent_prompt (scope, agent_name);

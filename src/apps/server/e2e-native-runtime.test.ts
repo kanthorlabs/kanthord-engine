@@ -41,6 +41,9 @@ import {
   type RepositoryTransport,
 } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
+import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
+import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
+import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
 import {
   WorkspaceRoot,
   WorkspaceKind,
@@ -79,7 +82,8 @@ const NO_OUTPUT = "";
 const SECRET = "test_e2e-runtime-secret";
 const GLOBAL = "Every answer is short.";
 const PROJECT = "The work product is TypeScript.";
-const HOSTILE = "WORKSPACE_AGENT_FILE_MUST_NOT_WIN";
+const REPOSITORY_OWNER = "repository binding repo";
+const WORKSPACE_FILE = "Workspace agent file text.";
 const ADDRESS = "git@github.com:owner/repo.git";
 const SWE = "swe@1";
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
@@ -287,7 +291,7 @@ test(
     await git.init(false, ["--initial-branch=main"]);
     await git.addConfig("user.name", "Runtime Test");
     await git.addConfig("user.email", "runtime@example.invalid");
-    writeFileSync(join(seed, "AGENTS.md"), HOSTILE);
+    writeFileSync(join(seed, "AGENTS.md"), WORKSPACE_FILE);
     await git.add("AGENTS.md");
     await git.commit("initial");
     const main = (await git.revparse(["HEAD"])).trim();
@@ -419,8 +423,13 @@ test(
         sshIdentity: FAKE_SSH_CREDENTIAL_BODY.metadata,
         strategy: { baseBranch: "main" },
         projectPrompt: PROJECT,
+        working_layer: WORKING_LAYER_ALL_ON,
       });
-      assert.deepEqual(runtimeX.setup.globalPrompt, { state: "absent" });
+      assert.ok(
+        runtimeX.setup.prompt.final.startsWith(framing(PromptConsumer.Worker)),
+      );
+      assert.ok(runtimeX.setup.prompt.final.includes(SWE_AGENT_PROMPT));
+      assert.ok(!runtimeX.setup.prompt.final.includes(PROJECT));
       assert.equal(runtimeX.setup.credentialId, runtimeX.item.credentialId);
       const refused = await x.client["execution.setup.get"]({
         params: { executionId: y.execution.executionId },
@@ -500,7 +509,9 @@ test(
             ),
           );
           const text = JSON.stringify(call.messages);
-          assert.ok(text.indexOf(GLOBAL) < text.indexOf(PROJECT));
+          assert.ok(text.indexOf(WORKSPACE_FILE) < text.indexOf(PROJECT));
+          assert.equal(text.includes(GLOBAL), false);
+          assert.equal(call.systemPrompt?.includes(GLOBAL), false);
           assert.ok(
             text.indexOf(PROJECT) <
               text.indexOf(
@@ -518,23 +529,15 @@ test(
               ),
             ),
           );
-          assert.equal(text.includes(HOSTILE), false);
         }
-        assert.ok(
-          agent.composition.selected.some(
-            ({ path }) => path === join(hostHome, ".agents/AGENTS.md"),
-          ),
+        assert.deepEqual(
+          agent.composition.selected.map(({ path }) => path),
+          [join(prepared.directory, "AGENTS.md"), null],
         );
         assert.ok(
-          agent.composition.selected.some(({ source }) =>
-            source.includes("repo"),
+          agent.composition.selected.every(
+            ({ owner }) => owner === REPOSITORY_OWNER,
           ),
-        );
-        assert.equal(
-          agent.composition.selected.some(({ path }) =>
-            path?.startsWith(prepared.directory),
-          ),
-          false,
         );
       },
     );

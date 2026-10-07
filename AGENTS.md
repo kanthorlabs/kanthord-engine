@@ -147,7 +147,7 @@ engine/
 │   │   ├── registrations.ts    # Capacity admission, live-registration lookup, and client attribution
 │   │   ├── heartbeat.ts        # Monotonic readings, renewal, and expiry selection
 │   │   ├── instance-record.ts  # Live runtime projection, activity, filters, and pagination
-│   │   ├── config.ts           # Heartbeat window and global prompt configuration fragment
+│   │   ├── config.ts           # Heartbeat window configuration fragment
 │   │   ├── catalog.ts          # Static worker declarations
 │   │   ├── action-performer.ts # Claim admission, dispatch, reuse and request evidence
 │   │   ├── action-reservations.ts # Execution mutex and owner-held uncertain dispatches

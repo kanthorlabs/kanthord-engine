@@ -1,9 +1,8 @@
 import type { Schema } from "convict";
-import { isNumber, isString } from "../kernel/values.ts";
+import { isNumber } from "../kernel/values.ts";
 
 export interface WorkerConfig {
   heartbeatWindow: number;
-  globalPrompt: string;
 }
 
 const DEFAULT_HEARTBEAT_WINDOW = 300;
@@ -21,12 +20,5 @@ export const workerConfigSchema: Schema<WorkerConfig> = {
         throw new Error("expected a positive safe integer");
     },
     default: DEFAULT_HEARTBEAT_WINDOW,
-  },
-  globalPrompt: {
-    doc: "Global prompt Markdown path; empty is absent and - disables the layer.",
-    format(value: unknown) {
-      if (!isString(value)) throw new Error("expected a string");
-    },
-    default: "",
   },
 };

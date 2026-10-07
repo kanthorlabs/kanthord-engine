@@ -12,12 +12,12 @@ type DatabaseRow = {
   agent_name: string;
   switches: string;
   custom_text: string;
-  version: number;
+  revision: number;
 };
 
 const AGENT_PROMPT_PREFIX = "agent_prompt";
-const ABSENT_VERSION = 0;
-const FIRST_VERSION = 1;
+const ABSENT_REVISION = 0;
+const FIRST_REVISION = 1;
 const SYSTEM_AGENT_NAME = "";
 
 function allOn(scope: PromptScope): Record<string, boolean> {
@@ -31,7 +31,7 @@ export function promptSettings(
 ): PromptSettings {
   const row = tx.database
     .prepare(
-      `SELECT scope, agent_name, switches, custom_text, version
+      `SELECT scope, agent_name, switches, custom_text, revision
        FROM agent_prompt WHERE scope = ? AND agent_name = ?`,
     )
     .get(scope, agentName) as DatabaseRow | undefined;
@@ -41,28 +41,28 @@ export function promptSettings(
       agentName,
       switches: allOn(scope),
       customText: "",
-      version: ABSENT_VERSION,
+      revision: ABSENT_REVISION,
     };
   return {
     scope,
     agentName,
     switches: { ...allOn(scope), ...JSON.parse(row.switches) },
     customText: row.custom_text,
-    version: row.version,
+    revision: row.revision,
   };
 }
 
 export function savePromptSettings(
   tx: Transaction,
-  settings: Omit<PromptSettings, "version">,
-  version: number,
+  settings: Omit<PromptSettings, "revision">,
+  revision: number,
 ): PromptSettings {
   const now = Date.now();
-  if (version === ABSENT_VERSION)
+  if (revision === ABSENT_REVISION)
     tx.database
       .prepare(
         `INSERT INTO agent_prompt
-         (id, scope, agent_name, switches, custom_text, version, updated_at)
+         (id, scope, agent_name, switches, custom_text, revision, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
@@ -71,19 +71,19 @@ export function savePromptSettings(
         settings.agentName,
         canonicalJSON(settings.switches),
         settings.customText,
-        FIRST_VERSION,
+        FIRST_REVISION,
         now,
       );
   else
     tx.database
       .prepare(
-        `UPDATE agent_prompt SET switches = ?, custom_text = ?, version = ?, updated_at = ?
+        `UPDATE agent_prompt SET switches = ?, custom_text = ?, revision = ?, updated_at = ?
          WHERE scope = ? AND agent_name = ?`,
       )
       .run(
         canonicalJSON(settings.switches),
         settings.customText,
-        version + FIRST_VERSION,
+        revision + FIRST_REVISION,
         now,
         settings.scope,
         settings.agentName,

@@ -10,7 +10,7 @@ import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Evidence } from "../mission/contract.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { anthropicSetup } from "./test-support.ts";
+import { anthropicSetup, WORKING_LAYER_ALL_ON } from "./test-support.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
 import { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
@@ -56,6 +56,7 @@ test("B3 review bundle places all supporting assets beside repositories and remo
       },
       strategy: { baseBranch: "main" },
       projectPrompt: null,
+      working_layer: WORKING_LAYER_ALL_ON,
     };
     setup.repositories = [
       repository,

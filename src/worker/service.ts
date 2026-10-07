@@ -59,6 +59,7 @@ import {
 } from "./catalog.ts";
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
 import { instanceRecord, listInstanceRecords } from "./instance-record.ts";
+import type { ResolvedLayer } from "../agent/prompt-layers.ts";
 import type { WorkerConfig } from "./config.ts";
 import {
   HeartbeatClock,
@@ -89,6 +90,9 @@ export interface Dependencies {
   evidenceRequests: EvidenceRequests;
   custodyHandover: CustodyHandover;
   config: WorkerConfig;
+  agentPrompt: {
+    compose(agentName: string, context: Context): Promise<ResolvedLayer[]>;
+  };
   store: Store;
   workerBindingOf: WorkerBindingOf;
   workerBindingRowOf: WorkerBindingRowOf;
@@ -96,7 +100,6 @@ export interface Dependencies {
   repositoryBindingIdsOf: RepositoryBindingIdsOf;
   pinnedCredentialMetadata: PinnedCredentialMetadataFn;
   credentialMetadata: CredentialMetadataOf;
-  dataDirectory: string;
   monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;
   agentConfiguration: AgentConfiguration;

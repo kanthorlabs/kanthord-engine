@@ -18,6 +18,7 @@ import {
   fauxToolCall,
   scriptedProvider,
   scriptedModelRuntime,
+  WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -81,6 +82,7 @@ async function fixture(
       },
       strategy: { baseBranch: "main" },
       projectPrompt: null,
+      working_layer: WORKING_LAYER_ALL_ON,
     },
   ];
   const claim = {

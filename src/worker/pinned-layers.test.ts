@@ -13,8 +13,12 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
-import { WorkerMethod } from "./catalog.ts";
-import { composePrompt, renderWorkPrompt } from "../agent/prompt-composer.ts";
+import {
+  layerText,
+  PromptLayer,
+  renderWorkPrompt,
+} from "../agent/prompt-composer.ts";
+import { framing, PromptConsumer } from "../agent/prompt-render.ts";
 import { openSession } from "../agent/agent-session.ts";
 import { loadPi } from "../agent/pi.ts";
 import { countTurns, pinnedLayers } from "../agent/pinned-layers.ts";
@@ -26,25 +30,22 @@ import {
   scriptedProvider,
 } from "./test-support.ts";
 
+function composedPrompt(first: string, second: string) {
+  const layer = (text: string) =>
+    layerText(PromptLayer.WorkingLayer, "owner", "source", text);
+  return {
+    systemPrompt: [
+      framing(PromptConsumer.Worker),
+      getAgentDeclaration("swe@1")!.agentPrompt,
+    ].join("\n"),
+    layers: { global: layer(first), project: layer(second) },
+  };
+}
+
 test("pinned prompt layers survive compaction and all model calls retain their obligations", async (t) => {
   const expectedKey = "scripted";
   const cwd = temporary(t);
-  const composed = await composePrompt(
-    {
-      workerName: "general@1",
-      agent: getAgentDeclaration("swe@1")!,
-      method: WorkerMethod.Steps,
-      hostHome: cwd,
-      workspace: cwd,
-      globalPrompt: {
-        state: "present",
-        path: "operator",
-        text: "GLOBAL_MARKER",
-      },
-      repository: { name: "repository", projectPrompt: "PROJECT_MARKER" },
-    },
-    background,
-  );
+  const composed = composedPrompt("GLOBAL_MARKER", "PROJECT_MARKER");
   const work = renderWorkPrompt({
     nodeId: "node",
     revision: 1,
@@ -252,21 +253,9 @@ for (const isSplitTurn of [false, true]) {
     const historySummary = "history summary result";
     const prefixSummary = "prefix summary result";
     const cwd = temporary(t);
-    const composed = await composePrompt(
-      {
-        workerName: "general@1",
-        agent: getAgentDeclaration("swe@1")!,
-        method: WorkerMethod.Steps,
-        globalPrompt: {
-          state: "present",
-          path: "operator",
-          text: "complete global source",
-        },
-        repository: { name: "repo", projectPrompt: "complete project source" },
-        hostHome: cwd,
-        workspace: cwd,
-      },
-      background,
+    const composed = composedPrompt(
+      "complete global source",
+      "complete project source",
     );
     const work = renderWorkPrompt({
       nodeId: "node",

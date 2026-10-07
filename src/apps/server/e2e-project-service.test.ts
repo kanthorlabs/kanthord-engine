@@ -74,6 +74,13 @@ const REPOSITORY: BindingSet["bindings"][string] = {
     sshCredential: "github-ssh",
     strategy: { baseBranch: BASE_BRANCH },
     credential: REPOSITORY_PLATFORM,
+    working_layer: {
+      agents_md: true,
+      agents_local_md: true,
+      claude_md: true,
+      claude_local_md: true,
+      project_prompt: true,
+    },
   },
 };
 const WORKER_BINDING = {

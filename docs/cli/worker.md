@@ -32,7 +32,7 @@ are implemented and wired to Project authorization and Scheduler execution pins.
 The `handover` CLI leaf is implemented with its published validation code.
 
 The [Worker configuration fragment](../../src/worker/config.ts) declares
-`heartbeatWindow` and `globalPrompt`. The catalog, report-only instance
+`heartbeatWindow`. The catalog, report-only instance
 healthcheck collaboration and registration heartbeat lifecycle are implemented.
 Native agent loops, server-placement pools, prompt consumption, repository
 actions and MCP remain later runtime work. The service probe reports

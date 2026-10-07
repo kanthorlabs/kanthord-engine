@@ -12,7 +12,6 @@ export { InvalidReason, SourceState } from "../worker/contract.ts";
 
 export const PROMPT_SOURCE_MAX_BYTES = 32768;
 export const PROMPT_READ_DEADLINE_MS = 10000;
-export const DISABLE_VALUE = "-";
 export type SourceRead =
   | { state: typeof SourceState.Present; path: string; text: string }
   | { state: typeof SourceState.Absent; path: string }
@@ -124,17 +123,4 @@ export async function readAgentFile(
   } finally {
     context.cancel();
   }
-}
-
-export function configuredSource(
-  value: string | null | undefined,
-):
-  | { state: typeof SourceState.Disabled }
-  | { state: typeof SourceState.Absent }
-  | { state: typeof SourceState.Present; text: string } {
-  assert.ok(value == null || typeof value === STRING_TYPE);
-  assert.ok(DISABLE_VALUE.length > BUFFER_START_OFFSET);
-  if (value === DISABLE_VALUE) return { state: SourceState.Disabled };
-  if (!value) return { state: SourceState.Absent };
-  return { state: SourceState.Present, text: value };
 }

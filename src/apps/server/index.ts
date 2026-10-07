@@ -232,6 +232,7 @@ export function composeServices(options: {
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
     providerCapability: (tx, name) => llm.providerCapability(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
+    repositoryWorkingOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     toolDeclarations: (name) => toolDeclarations(name),
   });
   const repositoryCredentials = new RepositoryCredentials({
@@ -264,6 +265,9 @@ export function composeServices(options: {
       report: (...args) => custody.report(...args),
     },
     config: options.config.worker,
+    agentPrompt: {
+      compose: (name, context) => agent.composePrompt(name, context),
+    },
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>
       project.workerBindingOf(tx, projectId, resourceIdentity),
@@ -274,7 +278,6 @@ export function composeServices(options: {
     pinnedCredentialMetadata: (tx, execution, name, now) =>
       custody.pinnedCredentialMetadata(tx, execution, name, now),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
-    dataDirectory: directories(process.env).data,
     schedulerClaims: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
       runningExecutionOfRuntime: (...args) =>

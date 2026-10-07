@@ -23,6 +23,18 @@ pathItem:
         required: false
         schema:
           $ref: "#/components/schemas/agent.get.Input/properties/query/properties/view"
+      - name: projectId
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/agent.get.Input/properties/query/properties/project\
+            Id"
+      - name: bindingId
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/agent.get.Input/properties/query/properties/binding\
+            Id"
     responses:
       "200":
         description: Completed result
@@ -71,6 +83,12 @@ components:
               type: string
               enum:
                 - final
+            projectId:
+              type: string
+              minLength: 1
+            bindingId:
+              type: string
+              minLength: 1
           additionalProperties: false
         body:
           type: "null"

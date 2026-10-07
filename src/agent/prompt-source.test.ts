@@ -5,7 +5,6 @@ import { test } from "node:test";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
-  configuredSource,
   InvalidReason,
   PROMPT_SOURCE_MAX_BYTES,
   readAgentFile,
@@ -87,15 +86,5 @@ test("workspace links stay contained and host links can leave their location", a
     state: SourceState.Invalid,
     path: inside,
     reason: InvalidReason.Deadline,
-  });
-});
-
-test("configured sources distinguish disabled, absent and literal content", () => {
-  assert.deepEqual(configuredSource("-"), { state: SourceState.Disabled });
-  for (const value of ["", undefined, null])
-    assert.deepEqual(configuredSource(value), { state: SourceState.Absent });
-  assert.deepEqual(configuredSource("text"), {
-    state: SourceState.Present,
-    text: "text",
   });
 });

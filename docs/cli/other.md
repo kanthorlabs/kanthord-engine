@@ -309,8 +309,7 @@ bindings or option overrides for server field values. `KANTHORD_ENDPOINT` does
 not change `gateway.bind` or `gateway.port`. Configuration is read at startup,
 and an edit takes effect on the next start. **Target requirement:** a relative
 path-valued field inside the configuration resolves against the data directory.
-`worker.globalPrompt` declares such a field; reading and resolving its file
-belongs to the later prompt-consumption implementation (Plan 07).
+`agent.prompt.systemFile` and `agent.prompt.agentDirectory` declare such fields.
 
 Reads require a user-owned regular `0600` file and a user-owned `0700` containing
 directory. Exact modes are checked, including rejection of special bits and
@@ -354,9 +353,6 @@ The implemented fields are:
 
 - `worker.heartbeatWindow`: optional positive safe integer in seconds, default
   `300`. A 30-second sweep ends expired registrations.
-- `worker.globalPrompt`: optional string, default `""`. Empty means absent;
-  `-` disables the layer. Other values name a Markdown file. This release
-  validates the field type; Plan 07 owns consuming the file.
 
 - `scheduler.releaseReserve`: optional positive safe integer in seconds, default
   `600`. A claim adds this reserve after its effective worker wall time.

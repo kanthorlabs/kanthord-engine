@@ -26,7 +26,6 @@ export const SourceState = {
   Present: "present",
   Absent: "absent",
   Invalid: "invalid",
-  Disabled: "disabled",
 } as const;
 export const InvalidReason = {
   TooLarge: "too_large",
@@ -359,6 +358,7 @@ export type RepositoryPolicyOf = (
   sshCredential: string;
   baseBranch: string;
   projectPrompt: string | null;
+  workingLayer: WorkingLayer;
 } | null;
 
 export type RepositoryBindingIdsOf = (
@@ -603,20 +603,14 @@ const resourceBudgetSchema = z.strictObject({
   wallTimeMs: z.number().int().positive(),
   turns: z.number().int().positive().optional(),
 });
-export const globalPromptSourceSchema = z.discriminatedUnion("state", [
-  z.strictObject({ state: z.literal(SourceState.Absent) }),
-  z.strictObject({ state: z.literal(SourceState.Disabled) }),
-  z.strictObject({
-    state: z.literal(SourceState.Present),
-    path: z.string(),
-    text: z.string(),
-  }),
-  z.strictObject({
-    state: z.literal(SourceState.Invalid),
-    path: z.string(),
-    reason: z.enum(InvalidReason),
-  }),
-]);
+export const workingLayerSchema = z.strictObject({
+  agents_md: z.boolean(),
+  agents_local_md: z.boolean(),
+  claude_md: z.boolean(),
+  claude_local_md: z.boolean(),
+  project_prompt: z.boolean(),
+});
+export type WorkingLayer = z.infer<typeof workingLayerSchema>;
 export const sshIdentitySchema = z.strictObject({
   host: z.string().min(1),
   hostname: z.string().min(1),
@@ -644,9 +638,10 @@ export const executionSetupSchema = z.strictObject({
       sshIdentity: sshIdentitySchema,
       strategy: z.strictObject({ baseBranch: z.string() }),
       projectPrompt: z.string().nullable(),
+      working_layer: workingLayerSchema,
     }),
   ),
-  globalPrompt: globalPromptSourceSchema,
+  prompt: z.strictObject({ final: z.string() }),
 });
 export const catalogEntrySchema = z.discriminatedUnion("host", [
   catalogItemSchema.extend({

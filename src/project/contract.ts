@@ -125,6 +125,28 @@ export function isNonblank(s: string): boolean {
   return s.trim().length > EMPTY_LENGTH;
 }
 
+export const WorkingLayerSwitch = {
+  AgentsMd: "agents_md",
+  AgentsLocalMd: "agents_local_md",
+  ClaudeMd: "claude_md",
+  ClaudeLocalMd: "claude_local_md",
+  ProjectPrompt: "project_prompt",
+} as const;
+export const workingLayerSchema = z
+  .strictObject(
+    Object.fromEntries(
+      Object.values(WorkingLayerSwitch).map((name) => [
+        name,
+        z.boolean().default(true),
+      ]),
+    ) as Record<
+      (typeof WorkingLayerSwitch)[keyof typeof WorkingLayerSwitch],
+      z.ZodDefault<z.ZodBoolean>
+    >,
+  )
+  .prefault({});
+export type WorkingLayer = z.output<typeof workingLayerSchema>;
+
 export const repositoryConfigSchema = z.strictObject({
   available: z.boolean(),
   platform: z.enum(RepositoryPlatform),
@@ -147,6 +169,7 @@ export const repositoryConfigSchema = z.strictObject({
   sshCredential: z.string().min(1),
   credential: z.string().min(1).optional(),
   projectPrompt: z.string().optional(),
+  working_layer: workingLayerSchema,
 });
 export const workerConfigSchema = z.strictObject({
   worker: z.string().min(1),
@@ -391,6 +414,7 @@ export type RepositoryPolicy = {
   baseBranch: string;
   action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
   projectPrompt: string | null;
+  workingLayer: WorkingLayer;
 };
 
 const emptyFields = z.strictObject({});

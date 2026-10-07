@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { NodeKind, openNativeAgent } from "./native-agent.ts";
 import {
@@ -21,6 +29,8 @@ import {
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
+  SETUP_PROMPT,
+  WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 
 const SECRET = "test_native-scripted-key";
@@ -30,7 +40,8 @@ const TRANSCRIPT_LENGTH_BEFORE = 3;
 const SINGLE_TURN_BUDGET = 1;
 const SINGLE_CALL_COUNT = 1;
 const CONTENT = "written";
-const OPERATOR_PATH = "operator";
+const PROJECT_PROMPT = "project prompt text";
+const HOME_TEXT = "home file text";
 const TOOL_RESULT = "toolResult";
 const START_POLLS = 100;
 const JUDGED = "judged";
@@ -53,10 +64,15 @@ async function fixture(
   script: Parameters<typeof scriptedProvider>[0],
   overrides: Partial<ExecutionSetup> = {},
   hostTools: HostTools = unusedHostTools,
+  options: {
+    method?: WorkerMethod;
+    prepare?: (workspace: string, hostHome: string) => void;
+  } = {},
 ) {
   const setup = anthropicSetup(overrides);
   const workspace = temporary(t);
   const hostHome = temporary(t);
+  options.prepare?.(workspace, hostHome);
   const provider = scriptedProvider(script);
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("anthropic", async () => ({
@@ -75,7 +91,7 @@ async function fixture(
       expiredAt: Date.now() + 60000,
     },
     nodeKind: NodeKind.Objective,
-    method: WorkerMethod.Steps,
+    method: options.method ?? WorkerMethod.Steps,
     credentials,
     handoverItem: { credentialId: setup.credentialId, providerId: "anthropic" },
     workspace,
@@ -88,29 +104,153 @@ async function fixture(
 }
 
 test("native software agent writes and runs bounded bash with execution credentials", async (t) => {
-  const h = await fixture(
-    t,
-    [
-      tool("write", { path: "written.txt", content: CONTENT }),
-      tool("bash", { command: "printf shell > shell.txt" }),
-      fauxAssistantMessage("done"),
-    ],
-    {
-      globalPrompt: {
-        state: "present",
-        path: "operator",
-        text: "global instruction",
-      },
-    },
-  );
+  const h = await fixture(t, [
+    tool("write", { path: "written.txt", content: CONTENT }),
+    tool("bash", { command: "printf shell > shell.txt" }),
+    fauxAssistantMessage("done"),
+  ]);
   await h.agent.prompt(WORK);
   assert.equal(readFileSync(join(h.workspace, "written.txt"), "utf8"), CONTENT);
   assert.ok(existsSync(join(h.workspace, "shell.txt")));
   assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
   assert.ok(h.provider.calls.every(({ apiKey }) => apiKey === SECRET));
   assert.ok(
-    h.agent.composition.selected.some(({ path }) => path === OPERATOR_PATH),
+    h.provider.calls.every(({ systemPrompt }) =>
+      systemPrompt?.includes(SETUP_PROMPT),
+    ),
   );
+  assert.deepEqual(h.agent.composition, { selected: [], rejected: [] });
+});
+
+function repositoryOf(
+  workingLayer: Partial<typeof WORKING_LAYER_ALL_ON>,
+  projectPrompt: string | null = PROJECT_PROMPT,
+) {
+  return {
+    bindingId: createIdentity("binding"),
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    sshIdentity: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_test",
+    },
+    strategy: { baseBranch: "main" },
+    projectPrompt,
+    working_layer: { ...WORKING_LAYER_ALL_ON, ...workingLayer },
+  };
+}
+
+const WORKSPACE_FILES = [
+  ["AGENTS.md", "agents text"],
+  ["AGENTS.local.md", "agents local text"],
+  ["CLAUDE.md", "claude text"],
+  ["CLAUDE.local.md", "claude local text"],
+] as const;
+
+function writeFiles(workspace: string, hostHome: string) {
+  for (const [name, text] of WORKSPACE_FILES)
+    writeFileSync(join(workspace, name), text);
+  mkdirSync(join(hostHome, ".agents"));
+  writeFileSync(join(hostHome, ".agents/AGENTS.md"), HOME_TEXT);
+}
+
+const callText = (h: Awaited<ReturnType<typeof fixture>>) =>
+  JSON.stringify(h.provider.calls.map(({ messages }) => messages));
+
+test("native agent composes only the switched-on workspace files and the project prompt", async (t) => {
+  const h = await fixture(
+    t,
+    [fauxAssistantMessage("done")],
+    {
+      repositories: [
+        repositoryOf({ agents_local_md: false, claude_md: false }),
+      ],
+    },
+    unusedHostTools,
+    { prepare: writeFiles },
+  );
+  await h.agent.prompt(WORK);
+  const text = callText(h);
+  assert.ok(text.includes("agents text"));
+  assert.ok(text.includes("claude local text"));
+  assert.ok(text.includes(PROJECT_PROMPT));
+  assert.ok(!text.includes("agents local text"));
+  assert.ok(!text.includes('"claude text'));
+  assert.ok(!text.includes(HOME_TEXT));
+  assert.ok(
+    h.provider.calls.every(
+      ({ systemPrompt }) => !systemPrompt?.includes(HOME_TEXT),
+    ),
+  );
+  assert.deepEqual(
+    h.agent.composition.selected.map(({ source }) => source),
+    [
+      `file ${join(h.workspace, "AGENTS.md")}`,
+      `file ${join(h.workspace, "CLAUDE.local.md")}`,
+      "database project prompt",
+    ],
+  );
+  assert.ok(
+    h.agent.composition.selected.every(({ digest }) =>
+      /^[a-f0-9]{64}$/.test(digest),
+    ),
+  );
+});
+
+test("native agent rejects a working file that leaves the workspace and records the reason", async (t) => {
+  const h = await fixture(
+    t,
+    [fauxAssistantMessage("done")],
+    { repositories: [repositoryOf({}, null)] },
+    unusedHostTools,
+    {
+      prepare: (workspace, hostHome) => {
+        writeFiles(workspace, hostHome);
+        rmSync(join(workspace, "AGENTS.md"));
+        symlinkSync(
+          join(hostHome, ".agents/AGENTS.md"),
+          join(workspace, "AGENTS.md"),
+        );
+      },
+    },
+  );
+  await h.agent.prompt(WORK);
+  assert.deepEqual(
+    h.agent.composition.rejected.map(({ reason }) => reason),
+    ["outside_workspace"],
+  );
+  assert.ok(!callText(h).includes(HOME_TEXT));
+});
+
+test("an evaluation takes the project prompt only and reads no workspace file", async (t) => {
+  const h = await fixture(
+    t,
+    [fauxAssistantMessage("done")],
+    { repositories: [repositoryOf({})] },
+    unusedHostTools,
+    {
+      method: WorkerMethod.Evaluation,
+      prepare: (workspace, hostHome) => {
+        writeFiles(workspace, hostHome);
+        rmSync(join(workspace, "CLAUDE.md"));
+        symlinkSync(
+          join(hostHome, ".agents/AGENTS.md"),
+          join(workspace, "CLAUDE.md"),
+        );
+      },
+    },
+  );
+  await h.agent.prompt(WORK);
+  const text = callText(h);
+  assert.ok(text.includes(PROJECT_PROMPT));
+  for (const [, content] of WORKSPACE_FILES) assert.ok(!text.includes(content));
+  assert.deepEqual(
+    h.agent.composition.selected.map(({ source }) => source),
+    ["database project prompt"],
+  );
+  assert.deepEqual(h.agent.composition.rejected, []);
 });
 
 test("native reviewer refuses a scripted write tool", async (t) => {

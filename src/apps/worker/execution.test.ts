@@ -46,7 +46,7 @@ test("host takes handover before setup and method, discards on every method end"
     metadata: null,
     resourceBudget: { turns: 200, wallTimeMs: 7200000 },
     repositories: [],
-    globalPrompt: { state: "absent" },
+    prompt: { final: "setup prompt" },
   };
   t.mock.method(api.worker, "handover", async () => {
     events.push("handover");

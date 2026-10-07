@@ -40,6 +40,15 @@ export function scriptedModelRuntime(
   };
 }
 
+export const SETUP_PROMPT = "setup prompt";
+export const WORKING_LAYER_ALL_ON = {
+  agents_md: true,
+  agents_local_md: true,
+  claude_md: true,
+  claude_local_md: true,
+  project_prompt: true,
+};
+
 export function anthropicSetup(
   overrides: Partial<ExecutionSetup> = {},
 ): ExecutionSetup {
@@ -58,7 +67,7 @@ export function anthropicSetup(
     metadata: null,
     resourceBudget: { turns: 200, wallTimeMs: 7200000 },
     repositories: [],
-    globalPrompt: { state: "absent" },
+    prompt: { final: SETUP_PROMPT },
     ...overrides,
   };
   assert.ok(setup.credentialId);

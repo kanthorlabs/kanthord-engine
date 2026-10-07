@@ -10,6 +10,7 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { WorkingLayer } from "../project/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
 export const ENABLEMENT_MAX_BODY_BYTES = 64 * 1024;
@@ -99,7 +100,7 @@ export const AgentErrorCode = {
   ModelUnknown: "agent.configuration.model_unknown",
   ReasoningUnsupported: "agent.configuration.reasoning_effort_unsupported",
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
-  PromptVersionConflict: "agent.prompt.version_conflict",
+  PromptRevisionConflict: "agent.prompt.revision_conflict",
   PromptTooLarge: "agent.prompt.too_large",
   PromptAgentLayerEmpty: "agent.prompt.agent_layer_empty",
 } as const;
@@ -178,6 +179,16 @@ export type ProviderCapabilityFn = (
   tx: Transaction,
   credentialName: string,
 ) => string;
+
+export type RepositoryWorkingOf = (
+  tx: Transaction,
+  bindingId: string,
+) => {
+  projectId: string;
+  name: string;
+  projectPrompt: string | null;
+  workingLayer: WorkingLayer;
+} | null;
 
 export type EntriesOfAgent = (
   tx: Transaction,
@@ -293,7 +304,7 @@ export const promptSettingsSchema = z.strictObject({
   agentName: z.string(),
   switches: z.record(z.string(), z.boolean()),
   customText: z.string(),
-  version: z.number().int().nonnegative(),
+  revision: z.number().int().nonnegative(),
 });
 export type PromptSettings = z.infer<typeof promptSettingsSchema>;
 
@@ -303,7 +314,7 @@ const promptSwitchNames = [
 const promptTarget = {
   scope: z.enum(PromptScope),
   agentName: z.string().min(1).optional(),
-  expectedVersion: z.number().int().positive().optional(),
+  expectedRevision: z.number().int().positive().optional(),
 };
 
 function checkPromptTarget(
@@ -392,7 +403,20 @@ export const agentOperations = {
     body: false,
     input: z.strictObject({
       params: agentParams,
-      query: z.strictObject({ view: z.enum(PromptView).optional() }),
+      query: z
+        .strictObject({
+          view: z.enum(PromptView).optional(),
+          projectId: z.string().min(1).optional(),
+          bindingId: z.string().min(1).optional(),
+        })
+        .refine(
+          ({ projectId, bindingId }) =>
+            (projectId === undefined) === (bindingId === undefined),
+          {
+            path: ["bindingId"],
+            message: "The queries projectId and bindingId go together.",
+          },
+        ),
       body: z.null(),
     }),
     output: agentDeclarationSchema,
@@ -519,7 +543,7 @@ export const agentOperations = {
     }),
     output: promptSettingsSchema,
     description:
-      "Replace the custom text of one prompt scope at its expected version.",
+      "Replace the custom text of one prompt scope at its expected revision.",
   },
   "prompt.switch": {
     ...enablementMutation,
@@ -539,6 +563,6 @@ export const agentOperations = {
         .superRefine(checkPromptTarget),
     }),
     output: promptSettingsSchema,
-    description: "Set one switch of one prompt scope at its expected version.",
+    description: "Set one switch of one prompt scope at its expected revision.",
   },
 } as const satisfies Record<string, Operation>;

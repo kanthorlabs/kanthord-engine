@@ -4,7 +4,7 @@ pathItem:
     operationId: agent.prompt.switch
     tags:
       - agent
-    description: Set one switch of one prompt scope at its expected version.
+    description: Set one switch of one prompt scope at its expected revision.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -71,7 +71,7 @@ components:
             agentName:
               type: string
               minLength: 1
-            expectedVersion:
+            expectedRevision:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
@@ -118,7 +118,7 @@ components:
             type: boolean
         customText:
           type: string
-        version:
+        revision:
           type: integer
           minimum: 0
           maximum: 9007199254740991
@@ -127,5 +127,5 @@ components:
         - agentName
         - switches
         - customText
-        - version
+        - revision
       additionalProperties: false

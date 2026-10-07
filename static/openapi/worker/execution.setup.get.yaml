@@ -244,6 +244,26 @@ components:
                 anyOf:
                   - type: string
                   - type: "null"
+              working_layer:
+                type: object
+                properties:
+                  agents_md:
+                    type: boolean
+                  agents_local_md:
+                    type: boolean
+                  claude_md:
+                    type: boolean
+                  claude_local_md:
+                    type: boolean
+                  project_prompt:
+                    type: boolean
+                required:
+                  - agents_md
+                  - agents_local_md
+                  - claude_md
+                  - claude_local_md
+                  - project_prompt
+                additionalProperties: false
             required:
               - bindingId
               - name
@@ -251,61 +271,16 @@ components:
               - sshIdentity
               - strategy
               - projectPrompt
+              - working_layer
             additionalProperties: false
-        globalPrompt:
-          oneOf:
-            - type: object
-              properties:
-                state:
-                  type: string
-                  const: absent
-              required:
-                - state
-              additionalProperties: false
-            - type: object
-              properties:
-                state:
-                  type: string
-                  const: disabled
-              required:
-                - state
-              additionalProperties: false
-            - type: object
-              properties:
-                state:
-                  type: string
-                  const: present
-                path:
-                  type: string
-                text:
-                  type: string
-              required:
-                - state
-                - path
-                - text
-              additionalProperties: false
-            - type: object
-              properties:
-                state:
-                  type: string
-                  const: invalid
-                path:
-                  type: string
-                reason:
-                  type: string
-                  enum:
-                    - too_large
-                    - not_utf8
-                    - control_character
-                    - not_regular_file
-                    - outside_workspace
-                    - deadline
-                    - unreadable
-              required:
-                - state
-                - path
-                - reason
-              additionalProperties: false
+        prompt:
+          type: object
+          properties:
+            final:
+              type: string
+          required:
+            - final
+          additionalProperties: false
       required:
         - executionId
         - workerName
@@ -315,5 +290,5 @@ components:
         - metadata
         - resourceBudget
         - repositories
-        - globalPrompt
+        - prompt
       additionalProperties: false

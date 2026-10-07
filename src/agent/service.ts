@@ -42,6 +42,7 @@ import {
   type EntriesOfAgent,
   type ProviderCapabilityFn,
   type ProviderHealthCheckFn,
+  type RepositoryWorkingOf,
   type ToolDeclarationsFn,
 } from "./contract.ts";
 import {
@@ -55,9 +56,11 @@ import {
   type EnablementRow,
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
+import { ProjectErrorCode } from "../project/contract.ts";
 import {
   resolveLayers,
   type PromptSettingsSet,
+  type RepositoryWorking,
   type ResolvedLayer,
 } from "./prompt-layers.ts";
 import { finalPrompt, PromptConsumer } from "./prompt-render.ts";
@@ -65,7 +68,7 @@ import { finalPrompt, PromptConsumer } from "./prompt-render.ts";
 const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
 const HEALTH_PAGE_SIZE = 100;
-const ABSENT_VERSION = 0;
+const ABSENT_REVISION = 0;
 
 function wireRecord(row: EnablementRow) {
   return agentEnablementSchema.parse({
@@ -157,18 +160,18 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
 type PromptTarget = {
   scope: PromptScope;
   agentName?: string | undefined;
-  expectedVersion?: number | undefined;
+  expectedRevision?: number | undefined;
 };
 
 function currentPrompt(tx: Transaction, target: PromptTarget): PromptSettings {
   const agentName = target.agentName ?? "";
   if (target.scope !== PromptScope.System) requireAgent(agentName);
   const current = promptSettings(tx, target.scope, agentName);
-  if ((target.expectedVersion ?? ABSENT_VERSION) !== current.version)
+  if ((target.expectedRevision ?? ABSENT_REVISION) !== current.revision)
     throw new OperationError(
       HttpStatus.Conflict,
-      AgentErrorCode.PromptVersionConflict,
-      "Prompt settings version conflict.",
+      AgentErrorCode.PromptRevisionConflict,
+      "Prompt settings revision conflict.",
       { scope: target.scope, agentName, current },
     );
   return current;
@@ -190,7 +193,7 @@ function putPrompt(
     savePromptSettings(
       tx,
       { ...current, customText: body.customText },
-      current.version,
+      current.revision,
     ),
   );
 }
@@ -212,7 +215,7 @@ function switchPrompt(
       { scope: body.scope, agentName: current.agentName, switch: body.switch },
     );
   return promptSettingsSchema.parse(
-    savePromptSettings(tx, { ...current, switches }, current.version),
+    savePromptSettings(tx, { ...current, switches }, current.revision),
   );
 }
 
@@ -240,6 +243,7 @@ export interface Dependencies {
   custodySuitability: CustodySuitability;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
+  repositoryWorkingOf: RepositoryWorkingOf;
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -647,7 +651,28 @@ export class AgentComponent {
     return [...matches.values()];
   }
 
-  composePrompt(agentName: string, context: Context): Promise<ResolvedLayer[]> {
+  private repositoryWorking(
+    projectId: string,
+    bindingId: string,
+  ): RepositoryWorking {
+    const repository = this.dependencies.store.transaction((tx) =>
+      this.dependencies.repositoryWorkingOf(tx, bindingId),
+    );
+    if (repository?.projectId !== projectId)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        ProjectErrorCode.BindingNotFound,
+        "Repository binding not found.",
+        { projectId, bindingId },
+      );
+    return repository;
+  }
+
+  composePrompt(
+    agentName: string,
+    context: Context,
+    repository: RepositoryWorking | null = null,
+  ): Promise<ResolvedLayer[]> {
     const agent = getAgentDeclaration(agentName);
     assert.ok(agent);
     const settings: PromptSettingsSet = this.dependencies.store.transaction(
@@ -666,6 +691,7 @@ export class AgentComponent {
       dataDirectory,
       hostHome: this.dependencies.hostHome ?? homedir(),
       workingDirectory: workbenchDirectory(agentName),
+      repository,
       context,
     });
   }
@@ -690,11 +716,19 @@ export class AgentComponent {
           params.agentName,
         );
         assert.equal(declaration.agentName, params.agentName);
+        const repository =
+          query.bindingId === undefined || query.projectId === undefined
+            ? null
+            : this.repositoryWorking(query.projectId, query.bindingId);
         const layers = await this.composePrompt(
           params.agentName,
           caller.context,
+          repository,
         );
-        const final = finalPrompt(layers, PromptConsumer.Workbench);
+        const final = finalPrompt(
+          layers,
+          repository ? PromptConsumer.Worker : PromptConsumer.Workbench,
+        );
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agentName);
           return {

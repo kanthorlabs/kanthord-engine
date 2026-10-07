@@ -17,6 +17,7 @@ import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest } from "./prompt-composer.ts";
 import {
   resolveLayers,
+  resolveRepositoryLayer,
   type LayerInput,
   type PromptSettingsSet,
   type ResolvedLayer,
@@ -48,6 +49,7 @@ const AGENTS_PATH = "~/.agents/AGENTS.md";
 const AGENT_FILE_TEXT = "agent file text";
 const WORKING_LAYER = "working layer";
 const RECORD_REJECTED_COUNT = 4;
+const ONE_REJECTION = 1;
 const AGENT = "swe@1";
 const declaration = getAgentDeclaration(AGENT)!;
 
@@ -63,7 +65,7 @@ function settings(
       PROMPT_SWITCHES[scope].map((name) => [name, !off.includes(name)]),
     ),
     customText,
-    version: 1,
+    revision: 1,
   };
 }
 
@@ -352,4 +354,129 @@ test("working files read in order and the framing states the precedence", async 
   const final = finalPrompt(layers, PromptConsumer.Workbench);
   assert.ok(final.includes("CLAUDE.local.md"));
   assert.ok(!final.includes(f.home));
+});
+
+test("an off file source answers the path that is known without a read", async (t) => {
+  const f = fixture(t);
+  const off = {
+    system: ["host_file"],
+    agent: ["agent_file"],
+    working: ["agents_md", "claude_local_md"],
+  };
+  const discovery = await resolveLayers(
+    f.input({
+      settings: settingsSet({}, off),
+      agentDirectory: join(f.home, "agents"),
+    }),
+  );
+  const discovered = source(discovery, "system", "host_file");
+  assert.equal(discovered.state, PromptSourceState.Off);
+  assert.equal(discovered.path, null);
+  const agentFile = source(discovery, "agent", "agent_file");
+  assert.equal(agentFile.state, PromptSourceState.Off);
+  assert.equal(agentFile.path, `~/agents/${AGENT}.md`);
+  const agentsMd = source(discovery, "working", "agents_md");
+  assert.equal(agentsMd.state, PromptSourceState.Off);
+  assert.equal(agentsMd.path, join(f.working, "AGENTS.md"));
+  assert.equal(
+    source(discovery, "working", "claude_local_md").path,
+    join(f.working, "CLAUDE.local.md"),
+  );
+  assert.equal(source(discovery, "working", "custom").path, null);
+  const configured = await resolveLayers(
+    f.input({ settings: settingsSet({}, off), systemFile: "system.md" }),
+  );
+  assert.equal(
+    source(configured, "system", "host_file").path,
+    join(f.data, "system.md"),
+  );
+  const unset = await resolveLayers(
+    f.input({ settings: settingsSet({}, off) }),
+  );
+  assert.equal(source(unset, "agent", "agent_file").path, null);
+});
+
+const ALL_ON = {
+  agents_md: true,
+  agents_local_md: true,
+  claude_md: true,
+  claude_local_md: true,
+  project_prompt: true,
+};
+
+test("a repository working layer reads the switched-on workspace files and the project prompt", async (t) => {
+  const f = fixture(t);
+  for (const name of ["AGENTS.md", "AGENTS.local.md", "CLAUDE.md"])
+    writeFileSync(join(f.working, name), name);
+  const layer = await resolveRepositoryLayer({
+    repository: {
+      name: "repo",
+      projectPrompt: "project text",
+      workingLayer: { ...ALL_ON, agents_local_md: false },
+    },
+    workspace: f.working,
+    hostHome: f.home,
+    context: background,
+  });
+  assert.deepEqual(
+    layer.sources.map(({ source, state }) => [source, state]),
+    [
+      ["agents_md", PromptSourceState.Present],
+      ["agents_local_md", PromptSourceState.Off],
+      ["claude_md", PromptSourceState.Present],
+      ["claude_local_md", PromptSourceState.Absent],
+      ["project_prompt", PromptSourceState.Present],
+    ],
+  );
+  assert.deepEqual(
+    workingTexts([layer]).map(({ text }) => text),
+    ["AGENTS.md", "CLAUDE.md", "project text"],
+  );
+  const record = compositionRecord([layer]);
+  assert.deepEqual(
+    record.selected.map(({ source }) => source),
+    [
+      `file ${join(f.working, "AGENTS.md")}`,
+      `file ${join(f.working, "CLAUDE.md")}`,
+      "database project prompt",
+    ],
+  );
+  assert.equal(record.selected[2]!.digest, digest("project text"));
+});
+
+test("a repository working layer without a workspace reads no file", async (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.working, "AGENTS.md"), "never read");
+  const layer = await resolveRepositoryLayer({
+    repository: { name: "repo", projectPrompt: "", workingLayer: ALL_ON },
+    workspace: null,
+    hostHome: f.home,
+    context: background,
+  });
+  assert.deepEqual(
+    layer.sources.map(({ state }) => state),
+    [
+      PromptSourceState.Deferred,
+      PromptSourceState.Deferred,
+      PromptSourceState.Deferred,
+      PromptSourceState.Deferred,
+      PromptSourceState.Absent,
+    ],
+  );
+  assert.deepEqual(workingTexts([layer]), []);
+});
+
+test("a repository working layer rejects a workspace link that leaves the workspace", async (t) => {
+  const f = fixture(t);
+  const outside = join(f.root, "outside.md");
+  writeFileSync(outside, "outside");
+  symlinkSync(outside, join(f.working, "AGENTS.md"));
+  const layer = await resolveRepositoryLayer({
+    repository: { name: "repo", projectPrompt: null, workingLayer: ALL_ON },
+    workspace: f.working,
+    hostHome: f.home,
+    context: background,
+  });
+  assert.equal(layer.sources[0]!.state, PromptSourceState.Invalid);
+  assert.equal(compositionRecord([layer]).rejected.length, ONE_REJECTION);
 });

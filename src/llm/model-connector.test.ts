@@ -56,7 +56,7 @@ const setup: ExecutionSetup = {
   metadata: null,
   resourceBudget: { turns: 200, wallTimeMs: 7200000 },
   repositories: [],
-  globalPrompt: { state: "absent" },
+  prompt: { final: "setup prompt" },
 };
 const handoverItem = {
   credentialId: setup.credentialId,

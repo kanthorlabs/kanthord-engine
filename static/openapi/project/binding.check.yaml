@@ -142,12 +142,33 @@ components:
                   minLength: 1
                 projectPrompt:
                   type: string
+                working_layer:
+                  type: object
+                  properties:
+                    agents_md:
+                      default: true
+                      type: boolean
+                    agents_local_md:
+                      default: true
+                      type: boolean
+                    claude_md:
+                      default: true
+                      type: boolean
+                    claude_local_md:
+                      default: true
+                      type: boolean
+                    project_prompt:
+                      default: true
+                      type: boolean
+                  required: []
+                  additionalProperties: false
               required:
                 - available
                 - platform
                 - address
                 - strategy
                 - sshCredential
+                - working_layer
               additionalProperties: false
           required:
             - kind

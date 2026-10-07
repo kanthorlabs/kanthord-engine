@@ -858,6 +858,8 @@ const REVISION_THREE = 3;
 const TWO_CALLS = 2;
 const ONE_BYTE_OVER = 1;
 const UTF8 = "utf8";
+const FIRST_REVISION = 1;
+const SECOND_REVISION = 2;
 const CUSTOM_ISSUE = "custom";
 const FULFILLED = "fulfilled";
 const REJECTED = "rejected";
@@ -876,6 +878,13 @@ function repositoryBinding(
       strategy: { baseBranch: "main" },
       sshCredential: sshCredentialOf(address),
       credential: REPOSITORY_CREDENTIAL,
+      working_layer: {
+        agents_md: true,
+        agents_local_md: true,
+        claude_md: true,
+        claude_local_md: true,
+        project_prompt: true,
+      },
     },
   };
 }
@@ -1435,6 +1444,14 @@ test("an SSH credential of another host is refused with ssh_host_mismatch before
 
 const GITLAB_IDENTITY = "repository:gitlab:acme/api";
 
+function withoutWorkingLayer<T extends { working_layer?: unknown }>(
+  config: T,
+): Omit<T, "working_layer"> {
+  const copy: Partial<T> = { ...config };
+  delete copy.working_layer;
+  return copy as Omit<T, "working_layer">;
+}
+
 function withoutCredential<T extends { credential?: string }>(
   config: T,
 ): Omit<T, "credential"> {
@@ -1475,6 +1492,45 @@ test("the credential is optional and pull_request requires it", async (t) => {
   );
   assert.ok(
     !f.custody.some(({ platform }) => platform === REPOSITORY_PLATFORM),
+  );
+});
+
+test("a write stores the full working layer map and a switch change revises the binding", async (t) => {
+  const f = writeFixture(t);
+  const config = withoutWorkingLayer(repositoryBinding().config);
+  const allOn = {
+    agents_md: true,
+    agents_local_md: true,
+    claude_md: true,
+    claude_local_md: true,
+    project_prompt: true,
+  };
+  const first = await f.write({
+    [REPOSITORY_NAME]: {
+      kind: BindingKind.Repository,
+      config,
+    } as Bindings[string],
+  });
+  assert.deepEqual(
+    repositoryConfigSchema.parse(first.bindings[REPOSITORY_NAME]?.config)
+      .working_layer,
+    allOn,
+  );
+  assert.equal(first.bindings[REPOSITORY_NAME]?.revision, FIRST_REVISION);
+  const second = await f.write(
+    {
+      [REPOSITORY_NAME]: {
+        kind: BindingKind.Repository,
+        config: { ...config, working_layer: { agents_local_md: false } },
+      } as Bindings[string],
+    },
+    first.bindingSetVersion,
+  );
+  assert.equal(second.bindings[REPOSITORY_NAME]?.revision, SECOND_REVISION);
+  assert.deepEqual(
+    (second.bindings[REPOSITORY_NAME]?.config as { working_layer: unknown })
+      .working_layer,
+    { ...allOn, agents_local_md: false },
   );
 });
 
@@ -2945,11 +3001,80 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       baseBranch: original.config.strategy.baseBranch,
       action: GitHubAction.PullRequest,
       projectPrompt,
+      workingLayer: original.config.working_layer,
     });
     const latest = f.project.repositoryPolicyOf(tx, later.id);
     assert.equal(latest?.action, GitHubAction.MergePush);
     assert.equal(latest?.baseBranch, baseBranch);
   });
+});
+
+test("a working layer switch change inserts the next binding revision and the policy keeps the pinned map", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const original = repositoryBinding();
+    const pinned = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: original,
+    }).bindings[REPOSITORY_NAME]!;
+    const switched = {
+      ...original,
+      config: {
+        ...original.config,
+        working_layer: {
+          ...original.config.working_layer,
+          claude_md: false,
+          project_prompt: false,
+        },
+      },
+    };
+    const later = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: switched,
+    }).bindings[REPOSITORY_NAME]!;
+    assert.equal(later.revision, pinned.revision + 1);
+    assert.deepEqual(
+      f.project.repositoryPolicyOf(tx, pinned.id)?.workingLayer,
+      {
+        agents_md: true,
+        agents_local_md: true,
+        claude_md: true,
+        claude_local_md: true,
+        project_prompt: true,
+      },
+    );
+    assert.deepEqual(f.project.repositoryPolicyOf(tx, later.id)?.workingLayer, {
+      agents_md: true,
+      agents_local_md: true,
+      claude_md: false,
+      claude_local_md: true,
+      project_prompt: false,
+    });
+  });
+});
+
+test("a repository config without working_layer parses with every switch on and a partial map fills the rest", () => {
+  const config = withoutWorkingLayer(repositoryBinding().config);
+  const allOn = {
+    agents_md: true,
+    agents_local_md: true,
+    claude_md: true,
+    claude_local_md: true,
+    project_prompt: true,
+  };
+  assert.deepEqual(repositoryConfigSchema.parse(config).working_layer, allOn);
+  assert.deepEqual(
+    repositoryConfigSchema.parse({
+      ...config,
+      working_layer: { agents_md: false },
+    }).working_layer,
+    { ...allOn, agents_md: false },
+  );
+  assert.throws(() =>
+    repositoryConfigSchema.parse({
+      ...config,
+      working_layer: { agents: false },
+    }),
+  );
 });
 
 test("repositoryPolicyOf answers null for an absent or nonrepository binding", (t) => {

@@ -49,7 +49,11 @@ import {
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 
 const fakeCollaborations = {
-  dataDirectory: "/unused",
+  agentPrompt: {
+    compose: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
   workerBindingRowOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
@@ -133,11 +137,12 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   custodySuitability: () => {},
   approvedModels: () => null,
   entriesOfAgent: () => [],
+  repositoryWorkingOf: () => null,
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => [],
 };
-const WORKER_CONFIG = { heartbeatWindow: 300, globalPrompt: "" };
+const WORKER_CONFIG = { heartbeatWindow: 300 };
 
 test("action handler forwards only the proved claim and caller before its commit", async (t) => {
   const f = enablementFixture(t);

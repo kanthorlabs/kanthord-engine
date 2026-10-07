@@ -106,8 +106,7 @@ An external worker declares no agent and needs no enablement. An unknown agent
 name returns `404 agent.catalog.not_found`. Catalog prompt changes require a
 new worker version. An enablement default change creates a revision.
 This command neither composes the prompt of an execution nor
-reads a local `AGENTS.md`/`CLAUDE.md`. The [Worker configuration](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration) declares `worker.globalPrompt`.
-Each global prompt source and project prompt source holds at most 32768 UTF-8 bytes under the [Worker implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md).
+reads a local `AGENTS.md`/`CLAUDE.md`. Each prompt source holds at most 32768 UTF-8 bytes under the [Worker implementation](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md).
 
 ## Agent enablement record
 

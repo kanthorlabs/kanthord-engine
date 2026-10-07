@@ -1,14 +1,9 @@
 import { HostTool } from "../worker/contract.ts";
-import {
-  BASE_PROMPT,
-  RE_AGENT_PROMPT,
-  SWE_AGENT_PROMPT,
-} from "./prompt-assets.ts";
+import { RE_AGENT_PROMPT, SWE_AGENT_PROMPT } from "./prompt-assets.ts";
 
 export interface AgentDeclaration {
   agentName: string;
   overridableFields: readonly string[];
-  basePrompt?: string;
   agentPrompt: string;
   tools: readonly BuiltinTool[];
   hostTools: readonly HostTool[];
@@ -28,7 +23,6 @@ export type BuiltinTool = (typeof BuiltinTool)[keyof typeof BuiltinTool];
 export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
   "swe@1": {
     agentName: "swe@1",
-    basePrompt: BASE_PROMPT,
     agentPrompt: SWE_AGENT_PROMPT,
     hostTools: [HostTool.EvidenceUpload],
     tools: [
@@ -44,7 +38,6 @@ export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
   },
   "re@1": {
     agentName: "re@1",
-    basePrompt: BASE_PROMPT,
     agentPrompt: RE_AGENT_PROMPT,
     hostTools: [],
     tools: [

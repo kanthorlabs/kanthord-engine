@@ -9,16 +9,16 @@ import {
 } from "../kernel/context.ts";
 import {
   type ExecutionSetup,
-  type WorkerMethod,
+  WorkerMethod,
   type HostTools,
 } from "./contract.ts";
 import { ExecutionBudget } from "./budget.ts";
-import {
-  composePrompt,
-  type CompositionRecord,
-  type WorkPrompt,
+import type {
+  CompositionRecord,
+  WorkPrompt,
 } from "../agent/prompt-composer.ts";
-import { getAgentDeclaration } from "../agent/catalog.ts";
+import { resolveRepositoryLayer } from "../agent/prompt-layers.ts";
+import { compositionRecord, workingTexts } from "../agent/prompt-render.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { countTurns, pinnedLayers } from "../agent/pinned-layers.ts";
 import { loadPi } from "../agent/pi.ts";
@@ -131,23 +131,25 @@ export async function openNativeAgent(
   const bridge = abortSignal(context);
   let session: AgentSession | undefined;
   try {
-    const agent = getAgentDeclaration(input.setup.agentName);
-    assert.ok(agent);
-    const composed = await composePrompt(
-      {
-        workerName: input.setup.workerName,
-        agent,
-        method: input.method,
-        globalPrompt: input.setup.globalPrompt,
-        hostHome: input.hostHome,
-        repository:
-          input.nodeKind === NodeKind.Objective
-            ? (input.setup.repositories[0] ?? null)
-            : null,
-        workspace: input.workspace,
-      },
-      context,
-    );
+    const repository =
+      input.nodeKind === NodeKind.Objective
+        ? (input.setup.repositories[0] ?? null)
+        : null;
+    const layers = repository
+      ? [
+          await resolveRepositoryLayer({
+            repository: {
+              name: repository.name,
+              projectPrompt: repository.projectPrompt,
+              workingLayer: repository.working_layer,
+            },
+            workspace:
+              input.method === WorkerMethod.Evaluation ? null : input.workspace,
+            hostHome: input.hostHome,
+            context,
+          }),
+        ]
+      : [];
     const { runtime, model } = await withDeadline(
       input.modelRuntimeFactory({
         credentials: input.credentials,
@@ -157,17 +159,14 @@ export async function openNativeAgent(
       }),
       context,
     );
-    const pins = pinnedLayers([
-      composed.layers.global,
-      composed.layers.project,
-    ]);
+    const pins = pinnedLayers(workingTexts(layers));
     const pi = await withDeadline(loadPi(), context);
     session = await openSession({
       cwd: input.workspace,
       modelRuntime: runtime,
       model,
       thinkingLevel: input.setup.effectiveConfiguration.reasoningEffort,
-      systemPrompt: composed.systemPrompt,
+      systemPrompt: input.setup.prompt.final,
       ...sessionTools(
         pi,
         input.setup.agentName,
@@ -179,12 +178,12 @@ export async function openNativeAgent(
       hooks: [pins.hook],
       context,
     });
-    pins.pinInference(session, composed.systemPrompt);
+    pins.pinInference(session, input.setup.prompt.final);
     return nativeAgent(
       session,
       pins,
       budget,
-      composed.record,
+      compositionRecord(layers),
       context,
       bridge.dispose,
     );

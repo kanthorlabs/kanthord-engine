@@ -117,7 +117,7 @@ test("agent migration creates the prompt settings schema", () => {
         { name: "agent_name", type: "TEXT", notnull: 1, pk: 0 },
         { name: "switches", type: "TEXT", notnull: 1, pk: 0 },
         { name: "custom_text", type: "TEXT", notnull: 1, pk: 0 },
-        { name: "version", type: "INTEGER", notnull: 1, pk: 0 },
+        { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
         { name: "updated_at", type: "INTEGER", notnull: 1, pk: 0 },
       ],
     );

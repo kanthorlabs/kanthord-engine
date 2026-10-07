@@ -33,6 +33,9 @@ import {
   type ClientOptions,
 } from "../../kernel/operation.ts";
 import { HttpStatus } from "../../kernel/http.ts";
+import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
+import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
+import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
 import {
@@ -131,7 +134,8 @@ for (const adapter of ["direct", "http"] as const) {
       wallTimeMs: 7200000,
     });
     assert.equal(answer.metadata, null);
-    assert.deepEqual(answer.globalPrompt, { state: "absent" });
+    assert.ok(answer.prompt.final.startsWith(framing(PromptConsumer.Worker)));
+    assert.ok(answer.prompt.final.includes(SWE_AGENT_PROMPT));
     assert.deepEqual(answer.repositories[0], {
       bindingId: answer.repositories[0]!.bindingId,
       name: "repo",
@@ -139,6 +143,7 @@ for (const adapter of ["direct", "http"] as const) {
       sshIdentity: FAKE_SSH_CREDENTIAL_BODY.metadata,
       strategy: { baseBranch: "main" },
       projectPrompt: "Follow repository conventions.",
+      working_layer: WORKING_LAYER_ALL_ON,
     });
     assert.deepEqual(
       h.f.store.database

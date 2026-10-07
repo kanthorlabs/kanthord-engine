@@ -33,7 +33,6 @@ const DEFAULT_IDEMPOTENCY_TTL = 86400;
 const DEFAULT_CONSECUTIVE_LOSS_LIMIT = 3;
 const DEFAULT_TEXT_MAX_BYTES = 32768;
 const DEFAULT_HEARTBEAT_WINDOW = 300;
-const DEFAULT_GLOBAL_PROMPT = "";
 const DEFAULT_RELEASE_RESERVE = 600;
 const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
@@ -52,17 +51,13 @@ test("service fragments preserve the existing YAML field set", () => {
     "scheduler",
     "worker",
   ]);
-  assert.deepEqual(Object.keys(config.worker).sort(), [
-    "globalPrompt",
-    "heartbeatWindow",
-  ]);
+  assert.deepEqual(Object.keys(config.worker), ["heartbeatWindow"]);
   assert.deepEqual(Object.keys(config.scheduler), ["releaseReserve"]);
   assert.deepEqual(initial.scheduler, {
     releaseReserve: DEFAULT_RELEASE_RESERVE,
   });
   assert.deepEqual(initial.worker, {
     heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
-    globalPrompt: DEFAULT_GLOBAL_PROMPT,
   });
   assert.deepEqual(Object.keys(config.mission).sort(), [
     "consecutiveLossLimit",
@@ -82,25 +77,17 @@ test("service fragments preserve the existing YAML field set", () => {
   ]);
 });
 
-test("worker configuration defaults, path strings and strict validation", () => {
+test("worker configuration defaults and strict validation", () => {
   const masterKey = randomBytes(32).toString("base64");
   assert.deepEqual(configuration({ masterKey }).getProperties().worker, {
     heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
-    globalPrompt: DEFAULT_GLOBAL_PROMPT,
   });
-  for (const globalPrompt of ["prompts/global.md", "-", "./-"])
-    assert.equal(
-      configuration({ masterKey, worker: { globalPrompt } }).getProperties()
-        .worker.globalPrompt,
-      globalPrompt,
-    );
   for (const worker of [
     { heartbeatWindow: 0 },
     { heartbeatWindow: -1 },
     { heartbeatWindow: 1.5 },
     { heartbeatWindow: Number.MAX_SAFE_INTEGER + 1 },
-    { globalPrompt: null },
-    { globalPrompt: 1 },
+    { globalPrompt: "prompts/global.md" },
     { unknown: true },
   ]) {
     assert.throws(
@@ -152,7 +139,6 @@ test("config init emits Worker and Scheduler fields", (t) => {
   assert.equal(result.status, ExitCode.Success);
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).worker, {
     heartbeatWindow: DEFAULT_HEARTBEAT_WINDOW,
-    globalPrompt: DEFAULT_GLOBAL_PROMPT,
   });
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).scheduler, {
     releaseReserve: DEFAULT_RELEASE_RESERVE,

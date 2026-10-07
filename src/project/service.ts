@@ -972,6 +972,7 @@ export class ProjectService implements Service, ProjectBindings {
       baseBranch: config.strategy.baseBranch,
       action: config.strategy.action?.name ?? null,
       projectPrompt: config.projectPrompt ?? null,
+      workingLayer: config.working_layer,
     };
   }
   workerBindingOf(

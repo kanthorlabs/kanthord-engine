@@ -1,24 +1,65 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { test } from "node:test";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { Store } from "../kernel/store.ts";
-import { temporary } from "../kernel/test-support.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
-import { PROMPT_SOURCE_MAX_BYTES } from "../agent/prompt-source.ts";
-import { anthropicSetup } from "./test-support.ts";
+import {
+  PromptLayerKind,
+  PromptOrigin,
+  PromptSourceState,
+} from "../agent/contract.ts";
+import { PromptLayer } from "../agent/prompt-composer.ts";
+import type { ResolvedLayer } from "../agent/prompt-layers.ts";
+import {
+  framing,
+  PromptConsumer,
+  systemPrompt,
+} from "../agent/prompt-render.ts";
+import { anthropicSetup, WORKING_LAYER_ALL_ON } from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
+const SYSTEM_TEXT = "system layer text";
+const AGENT_TEXT = "agent layer text";
+const WORKING_TEXT = "working layer text";
 
-test("setup resolves configured global files before its single snapshot and supports a pinned entry", async (t) => {
-  const dataDirectory = temporary(t);
+function layerOf(
+  layer: PromptLayerKind,
+  name: PromptLayer,
+  text: string,
+): ResolvedLayer {
+  return {
+    layer,
+    name,
+    sources: [
+      {
+        source: "custom",
+        origin: PromptOrigin.Database,
+        path: null,
+        enabled: true,
+        state: PromptSourceState.Present,
+        reason: null,
+        digest: "0".repeat(64),
+        text,
+        owner: "owner",
+        label: "label",
+      },
+    ],
+  };
+}
+
+const promptLayers = [
+  layerOf(PromptLayerKind.System, PromptLayer.SystemLayer, SYSTEM_TEXT),
+  layerOf(PromptLayerKind.Agent, PromptLayer.AgentLayer, AGENT_TEXT),
+  layerOf(PromptLayerKind.Working, PromptLayer.WorkingLayer, WORKING_TEXT),
+];
+
+test("setup answers the system and agent prompt after its single snapshot and supports a pinned entry", async (t) => {
   const store = new Store(":memory:");
   t.after(() => store.close());
   const setup = anthropicSetup();
@@ -28,7 +69,7 @@ test("setup resolves configured global files before its single snapshot and supp
     modelIdentifier: setup.effectiveConfiguration.modelIdentifier,
     reasoningEffort: "low",
   };
-  const config = { globalPrompt: "", heartbeatWindow: 60000 };
+  const composed: string[] = [];
   let commits = 0;
   const claim = {
     executionId: setup.executionId,
@@ -50,8 +91,13 @@ test("setup resolves configured global files before its single snapshot and supp
     },
   };
   const dependencies = {
-    config,
-    dataDirectory,
+    store,
+    agentPrompt: {
+      compose: async (agentName: string) => {
+        composed.push(agentName);
+        return promptLayers;
+      },
+    },
     workerBindingRowOf: () => ({
       bindingId: claim.workerBindingId,
       projectId: claim.projectId,
@@ -96,50 +142,21 @@ test("setup resolves configured global files before its single snapshot and supp
       };
     },
   };
-  writeFileSync(join(dataDirectory, "-"), "literal dash file");
-  writeFileSync(join(dataDirectory, "prompt.md"), "configured global");
-  writeFileSync(
-    join(dataDirectory, "large.md"),
-    "x".repeat(PROMPT_SOURCE_MAX_BYTES + 1),
+  const before = commits;
+  const answer = await executionSetup(dependencies, worker, caller);
+  assert.deepEqual(composed, [setup.agentName]);
+  assert.deepEqual(answer.prompt, {
+    final: systemPrompt(promptLayers, PromptConsumer.Worker),
+  });
+  assert.ok(answer.prompt.final.startsWith(framing(PromptConsumer.Worker)));
+  assert.ok(answer.prompt.final.includes(SYSTEM_TEXT));
+  assert.ok(answer.prompt.final.includes(AGENT_TEXT));
+  assert.ok(!answer.prompt.final.includes(WORKING_TEXT));
+  assert.equal(
+    answer.effectiveConfiguration.reasoningEffort,
+    entry.reasoningEffort,
   );
-  for (const [value, expected] of [
-    ["", { state: "absent" }],
-    ["-", { state: "disabled" }],
-    [
-      "./-",
-      {
-        state: "present",
-        path: join(dataDirectory, "-"),
-        text: "literal dash file",
-      },
-    ],
-    [
-      "prompt.md",
-      {
-        state: "present",
-        path: join(dataDirectory, "prompt.md"),
-        text: "configured global",
-      },
-    ],
-    [
-      "large.md",
-      {
-        state: "invalid",
-        path: join(dataDirectory, "large.md"),
-        reason: "too_large",
-      },
-    ],
-  ] as const) {
-    config.globalPrompt = value;
-    const before = commits;
-    const answer = await executionSetup(dependencies, worker, caller);
-    assert.deepEqual(answer.globalPrompt, expected);
-    assert.equal(
-      answer.effectiveConfiguration.reasoningEffort,
-      entry.reasoningEffort,
-    );
-    assert.equal(commits, before + 1);
-  }
+  assert.equal(commits, before + 1);
   await assert.rejects(
     executionSetup(
       dependencies,
@@ -151,6 +168,7 @@ test("setup resolves configured global files before its single snapshot and supp
       error.code === WorkerErrorCode.ExecutionNoNativeAgent,
   );
   const bindingId = createIdentity("binding");
+  const workingLayer = { ...WORKING_LAYER_ALL_ON, claude_md: false };
   const sshIdentity = {
     host: "kanthorlabs.github.com",
     hostname: "ssh.github.com",
@@ -168,6 +186,7 @@ test("setup resolves configured global files before its single snapshot and supp
         sshCredential: SSH_CREDENTIAL,
         baseBranch: "main",
         projectPrompt: null,
+        workingLayer,
       }),
       credentialMetadata: (_tx, name) =>
         name === SSH_CREDENTIAL
@@ -178,4 +197,5 @@ test("setup resolves configured global files before its single snapshot and supp
     caller,
   );
   assert.deepEqual(pinned.repositories[0]?.sshIdentity, sshIdentity);
+  assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
 });

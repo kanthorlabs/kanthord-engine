@@ -328,7 +328,8 @@ Common to every `config`:
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
 - `sshCredential`: **required**, one `CredentialName` of platform `ssh`; no default. Its `host` equals the host of `address`, else the write fails with `project.bindings.repository.ssh_host_mismatch`. It pins the identity that git uses through the SSH configuration of the host.
 - `credential`: **optional**, one `CredentialName` of platform `github`; absent by default. A git-only platform refuses it with `project.bindings.repository.action_unsupported`. It serves every platform action of the Intake Service and the check of a request evidence. The action `pull_request` requires it, else the write fails with `project.bindings.repository.credential_required`.
-- `projectPrompt`: **optional**, string, absent by default. Absence or an empty string contributes no binding-provided prompt to Worker prompt composition. The exact value `-` disables the project prompt layer, and the composer reads no agent file of the workspace.
+- `projectPrompt`: **optional**, string, absent by default. Absence or an empty string is an absent source and contributes no binding-provided prompt to Worker prompt composition.
+- `working_layer`: **optional**, object of the booleans `agents_md`, `agents_local_md`, `claude_md`, `claude_local_md` and `project_prompt`. A missing object or key means the switch is on, and the binding stores the full map. A switch change is a binding revision.
 - The project prompt holds at most 32768 UTF-8 bytes. A larger value refuses the write with `project.bindings.repository.project_prompt_too_large`.
 - The JSON file holds the prompt text, not a client-side path.
 

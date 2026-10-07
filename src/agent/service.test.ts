@@ -12,6 +12,7 @@ import { AgentComponent, type Dependencies } from "./service.ts";
 import {
   agentOperations,
   AgentErrorCode,
+  PromptOrigin,
   PromptScope,
   PromptSourceState,
   PROMPT_SWITCHES,
@@ -39,10 +40,14 @@ import { HealthScope, ResourceStatus } from "../kernel/health.ts";
 import { Store, IN_MEMORY_DATABASE } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { CodedError, OperationError } from "../kernel/errors.ts";
+import { ProjectErrorCode } from "../project/contract.ts";
+import { framing, PromptConsumer } from "./prompt-render.ts";
 
 const PROVIDER_CAPABILITY = "model-list read";
 const DEFAULT_REASONING = "off";
 const WORKING_PATH = "~/working/AGENTS.md";
+const CLAUDE_FILE = "CLAUDE.md";
+const PROJECT_TEXT = "project prompt text";
 const WORKING_TEXT = "workbench directory text";
 const CUSTOM_TEXT = "custom workbench text";
 const AGENT = "swe@1";
@@ -78,6 +83,7 @@ const fakeCollaborations: Omit<Dependencies, "store"> = {
   custodySuitability: () => {},
   approvedModels: () => null,
   entriesOfAgent: () => [],
+  repositoryWorkingOf: () => null,
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => TOOLS,
@@ -214,6 +220,118 @@ test("agent read answers the layers, the working layer of the workbench and the 
   const final = await read({ view: "final" });
   assert.equal(final.prompt.layers, undefined);
   assert.equal(final.prompt.final, answer.prompt.final);
+});
+
+test("agent read with a repository binding answers its working layer and the worker framing", async (t) => {
+  const root = temporary(t);
+  const allOn = {
+    agents_md: true,
+    agents_local_md: true,
+    claude_md: true,
+    claude_local_md: true,
+    project_prompt: true,
+  };
+  const policies: Record<
+    string,
+    {
+      projectId: string;
+      projectPrompt: string | null;
+      workingLayer: typeof allOn;
+    }
+  > = {
+    "binding-on": {
+      projectId: "project-a",
+      projectPrompt: PROJECT_TEXT,
+      workingLayer: allOn,
+    },
+    "binding-empty": {
+      projectId: "project-a",
+      projectPrompt: "",
+      workingLayer: allOn,
+    },
+    "binding-off": {
+      projectId: "project-a",
+      projectPrompt: PROJECT_TEXT,
+      workingLayer: { ...allOn, claude_md: false, project_prompt: false },
+    },
+  };
+  const f = enablementFixture(t, {
+    dataDirectory: root,
+    hostHome: root,
+    repositoryWorkingOf: (_, id) =>
+      policies[id] ? { name: "repo", ...policies[id] } : null,
+  });
+  const operation = agentOperations.get;
+  const read = async (query: Record<string, unknown>) =>
+    operation.output.parse(
+      await f.registry.get(operation.id).handler(
+        operation.input.parse({
+          params: { agentName: AGENT },
+          query,
+          body: null,
+        }),
+        f.caller,
+      ),
+    );
+  const working = async (bindingId: string) => {
+    const answer = await read({ projectId: "project-a", bindingId });
+    return { answer, sources: answer.prompt.layers![2]!.sources };
+  };
+  const on = await working("binding-on");
+  assert.deepEqual(
+    on.sources.map(({ source }) => source),
+    [
+      "agents_md",
+      "agents_local_md",
+      "claude_md",
+      "claude_local_md",
+      "project_prompt",
+    ],
+  );
+  assert.deepEqual(
+    on.sources
+      .slice(0, 4)
+      .map(({ state, origin, path, text }) => [state, origin, path, text]),
+    ["AGENTS.md", "AGENTS.local.md", "CLAUDE.md", "CLAUDE.local.md"].map(
+      (name) => [PromptSourceState.Deferred, "file", name, null],
+    ),
+  );
+  const prompt = on.sources[4]!;
+  assert.equal(prompt.origin, PromptOrigin.Database);
+  assert.equal(prompt.state, PromptSourceState.Present);
+  assert.equal(prompt.text, PROJECT_TEXT);
+  assert.ok(on.answer.prompt.final.startsWith(framing(PromptConsumer.Worker)));
+  assert.ok(on.answer.prompt.final.includes(PROJECT_TEXT));
+  assert.ok(!on.answer.prompt.final.includes("deferred"));
+  const empty = await working("binding-empty");
+  assert.equal(empty.sources[4]!.state, PromptSourceState.Absent);
+  const off = await working("binding-off");
+  assert.equal(off.sources[2]!.state, PromptSourceState.Off);
+  assert.equal(off.sources[2]!.path, CLAUDE_FILE);
+  assert.equal(off.sources[4]!.state, PromptSourceState.Off);
+  assert.ok(!off.answer.prompt.final.includes(PROJECT_TEXT));
+  await assert.rejects(
+    read({ projectId: "project-b", bindingId: "binding-on" }),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.NotFound &&
+      error.code === ProjectErrorCode.BindingNotFound,
+  );
+  await assert.rejects(
+    read({ projectId: "project-a", bindingId: "binding-missing" }),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === ProjectErrorCode.BindingNotFound,
+  );
+  for (const query of [{ projectId: "project-a" }, { bindingId: "binding-on" }])
+    assert.equal(
+      operation.input.safeParse({
+        params: { agentName: AGENT },
+        query,
+        body: null,
+      }).success,
+      false,
+    );
 });
 
 test("agent declaration read exposes prompts, tools and current enablement without writes", async (t) => {
@@ -1306,12 +1424,12 @@ test("prompt settings of an absent row answer every switch on and an empty text"
         agentName: "agentName" in target ? target.agentName : "",
         switches: allOn(target.scope),
         customText: "",
-        version: 0,
+        revision: 0,
       },
     );
 });
 
-test("prompt writes create the row at version one and replace it at the expected version", (t) => {
+test("prompt writes create the row at revision one and replace it at the expected revision", (t) => {
   const f = enablementFixture(t);
   for (const target of PROMPT_TARGETS) {
     const agentName = "agentName" in target ? target.agentName : "";
@@ -1325,58 +1443,58 @@ test("prompt writes create the row at version one and replace it at the expected
       agentName,
       switches: allOn(target.scope),
       customText: "one",
-      version: 1,
+      revision: 1,
     });
     const switched = f.invoke(
       "prompt.switch",
-      { ...target, expectedVersion: 1, switch: "custom", enabled: false },
+      { ...target, expectedRevision: 1, switch: "custom", enabled: false },
       {},
     );
     assert.deepEqual(switched, {
       ...created,
       switches: { ...allOn(target.scope), custom: false },
-      version: 2,
+      revision: 2,
     });
     const replaced = f.invoke(
       "prompt.put",
-      { ...target, expectedVersion: 2, customText: "two" },
+      { ...target, expectedRevision: 2, customText: "two" },
       {},
     );
     assert.deepEqual(
-      [replaced.customText, replaced.version],
+      [replaced.customText, replaced.revision],
       ["two", THIRD_REVISION],
     );
     assert.deepEqual(replaced.switches, switched.switches);
   }
 });
 
-test("a second prompt write at one expected version answers a conflict with the current row", (t) => {
+test("a second prompt write at one expected revision answers a conflict with the current row", (t) => {
   const f = enablementFixture(t);
   const target = { scope: PromptScope.Agent, agentName: AGENT };
   const first = f.invoke("prompt.put", { ...target, customText: "a" }, {});
   f.invoke(
     "prompt.put",
-    { ...target, expectedVersion: 1, customText: "b" },
+    { ...target, expectedRevision: 1, customText: "b" },
     {},
   );
   refuses(
     () =>
       f.invoke(
         "prompt.put",
-        { ...target, expectedVersion: 1, customText: "c" },
+        { ...target, expectedRevision: 1, customText: "c" },
         {},
       ),
-    AgentErrorCode.PromptVersionConflict,
+    AgentErrorCode.PromptRevisionConflict,
     HttpStatus.Conflict,
     {
       scope: target.scope,
       agentName: AGENT,
-      current: { ...first, customText: "b", version: 2 },
+      current: { ...first, customText: "b", revision: 2 },
     },
   );
   refuses(
     () => f.invoke("prompt.put", { ...target, customText: "d" }, {}),
-    AgentErrorCode.PromptVersionConflict,
+    AgentErrorCode.PromptRevisionConflict,
     HttpStatus.Conflict,
   );
   refuses(
@@ -1385,13 +1503,13 @@ test("a second prompt write at one expected version answers a conflict with the 
         "prompt.switch",
         {
           scope: PromptScope.System,
-          expectedVersion: 1,
+          expectedRevision: 1,
           switch: "base",
           enabled: false,
         },
         {},
       ),
-    AgentErrorCode.PromptVersionConflict,
+    AgentErrorCode.PromptRevisionConflict,
     HttpStatus.Conflict,
   );
 });
@@ -1413,24 +1531,24 @@ test("prompt writes refuse an oversized text, an empty agent layer and an unknow
       "prompt.put",
       { ...target, customText: "\u00e9".repeat(PROMPT_TEXT_MAX_BYTES / 2) },
       {},
-    ).version,
+    ).revision,
     FIRST_REVISION,
   );
   f.invoke(
     "prompt.switch",
-    { ...target, expectedVersion: 1, switch: "agent_file", enabled: false },
+    { ...target, expectedRevision: 1, switch: "agent_file", enabled: false },
     {},
   );
   f.invoke(
     "prompt.switch",
-    { ...target, expectedVersion: 2, switch: "shipped", enabled: false },
+    { ...target, expectedRevision: 2, switch: "shipped", enabled: false },
     {},
   );
   refuses(
     () =>
       f.invoke(
         "prompt.switch",
-        { ...target, expectedVersion: 3, switch: "custom", enabled: false },
+        { ...target, expectedRevision: 3, switch: "custom", enabled: false },
         {},
       ),
     AgentErrorCode.PromptAgentLayerEmpty,

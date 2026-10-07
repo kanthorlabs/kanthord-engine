@@ -12,7 +12,7 @@ import {
   type CredentialMetadataRecord,
   type ExecutionSetup,
 } from "./contract.ts";
-import { resolveGlobalPrompt } from "../agent/prompt-composer.ts";
+import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 
 const FIRST_ISSUE_INDEX = 0;
@@ -20,8 +20,8 @@ const FIRST_ISSUE_INDEX = 0;
 export async function executionSetup(
   dependencies: Pick<
     Dependencies,
-    | "config"
-    | "dataDirectory"
+    | "agentPrompt"
+    | "store"
     | "workerBindingRowOf"
     | "pinnedCredentialMetadata"
     | "credentialMetadata"
@@ -31,14 +31,17 @@ export async function executionSetup(
   worker: Pick<WorkerService, "declarationOf" | "workerAgentView">,
   caller: CallerContext,
 ): Promise<ExecutionSetup> {
-  const globalPrompt = await resolveGlobalPrompt(
-    dependencies.config.globalPrompt,
-    dependencies.dataDirectory,
-    caller.context,
-  );
+  const claim = caller.execution;
+  assert.ok(claim);
+  const nativeAgentName = dependencies.store.transaction((tx) => {
+    const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
+    assert.ok(row);
+    return worker.declarationOf(row.workerName)?.agentName;
+  });
+  const layers = nativeAgentName
+    ? await dependencies.agentPrompt.compose(nativeAgentName, caller.context)
+    : [];
   return caller.commit((tx) => {
-    const claim = caller.execution;
-    assert.ok(claim);
     const now = Date.now();
     const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
     assert.ok(row);
@@ -119,6 +122,7 @@ export async function executionSetup(
           ),
           strategy: { baseBranch: repository.baseBranch },
           projectPrompt: repository.projectPrompt,
+          working_layer: repository.workingLayer,
         };
       });
     return executionSetupSchema.parse({
@@ -130,7 +134,7 @@ export async function executionSetup(
       metadata: record.metadata,
       resourceBudget: row.resourceBudget ?? declaration.resourceBudget,
       repositories,
-      globalPrompt,
+      prompt: { final: systemPrompt(layers, PromptConsumer.Worker) },
     });
   });
 }
