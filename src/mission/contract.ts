@@ -780,6 +780,33 @@ export const frozenActionSchema = z.strictObject({
   configuration: z.strictObject({ base_branch: textSchema }),
 });
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
+export type PullRequestAddress = Extract<
+  PlatformAddress,
+  { kind: typeof PlatformAddressKind.PullRequest }
+>;
+export type RepositoryFacts = {
+  binding_id: string;
+  address: string;
+  resource_identity: string;
+  base_branch: string;
+};
+export type ActionFacts = {
+  frozen_action: FrozenAction;
+  repository: RepositoryFacts;
+  snapshot_commit: string;
+  reused_address: PullRequestAddress | null;
+};
+export type RequestFacts = {
+  frozen_action: FrozenAction;
+  address: PlatformAddress;
+  repository: RepositoryFacts;
+};
+export type Authorized<F> = {
+  credential: string | null;
+  platform: string;
+  project_id: string;
+  facts: F;
+};
 export type ActionContext = {
   state: NodeState;
   current_assessment: {

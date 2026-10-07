@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { isHumanIdentity } from "../kernel/caller.ts";
+import {
+  isHumanIdentity,
+  type CallerIdentity,
+  type MachineIdentity,
+} from "../kernel/caller.ts";
 import {
   background,
   CancellationContext,
@@ -8,7 +12,11 @@ import {
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
-import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
+import type {
+  CallerContext,
+  ExecutionClaim,
+  OperationRegistry,
+} from "../kernel/operation.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -57,7 +65,12 @@ import {
 } from "./execution-read.ts";
 import { claim, release, loss } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
-import { authorizeAction, authorizeRequest } from "./authorization.ts";
+import {
+  authorizeAction,
+  authorizeFrozenAction,
+  authorizeRequest,
+  authorizeRequestEvidence,
+} from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
 import {
   attemptPage,
@@ -826,6 +839,28 @@ export class MissionService
     key: string,
   ) {
     return authorizeAction(tx, this.dependencies, claim, key);
+  }
+  authorizeFrozenAction(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    input: { key: string; commit: string; reusedEvidenceId: string | null },
+  ) {
+    return authorizeFrozenAction(tx, this.dependencies, identity, claim, input);
+  }
+  authorizeRequestEvidence(
+    tx: Transaction,
+    identity: CallerIdentity,
+    evidenceId: string,
+    claim: ExecutionClaim | null,
+  ) {
+    return authorizeRequestEvidence(
+      tx,
+      this.dependencies,
+      identity,
+      evidenceId,
+      claim,
+    );
   }
 
   repositoryBindingIdsOf(

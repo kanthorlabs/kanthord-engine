@@ -130,7 +130,7 @@ export default tseslint.config(
                 { to: applicationEntry("apps-worker") },
                 {
                   to: element("service", {
-                    captured: { name: "worker" },
+                    captured: { name: "{worker,mission}" },
                     fileInternalPath: "test-support.ts",
                   }),
                 },

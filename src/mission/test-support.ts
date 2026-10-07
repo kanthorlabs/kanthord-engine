@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 import type { z } from "zod";
 import type { CallerIdentity } from "../kernel/caller.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
@@ -18,6 +19,11 @@ import {
   NodeState,
   RevisionWrite,
   type HumanAct,
+  AssessmentResult,
+  AssetKind,
+  PlatformAddressKind,
+  RepositoryAction,
+  type PlatformAddress,
 } from "./contract.ts";
 import {
   insertMission,
@@ -28,7 +34,11 @@ import {
 } from "./store.ts";
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, type Dependencies } from "./service.ts";
-import { openAttempt } from "./record-store.ts";
+import {
+  insertAssessment,
+  insertEvidence,
+  openAttempt,
+} from "./record-store.ts";
 import { getRevision } from "./node-read.ts";
 
 const CONSECUTIVE_LOSS_LIMIT = 3;
@@ -312,5 +322,104 @@ export function missionHarness(
     calls,
     invoke,
     commits: () => commits,
+  };
+}
+
+export const ASSESSED_COMMIT = "a".repeat(40);
+export const HARNESS_PLATFORM = "github";
+export const HARNESS_CREDENTIAL = "github";
+export const HARNESS_ACTION_KEY = "repo.pull_request";
+
+export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
+  const h = evidenceHarness(t, identity);
+  const resourceIdentity = "repository:github:owner/repo";
+  const policy = {
+    binding_id: h.repositoryId,
+    project_id: h.project_id,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: HARNESS_PLATFORM,
+    ssh_credential: "github-ssh",
+    credential: HARNESS_CREDENTIAL,
+    base_branch: "main",
+    action: RepositoryAction.PullRequest as RepositoryAction,
+    project_prompt: null,
+  };
+  h.dependencies.bindings.repositoryPolicyOf = () => ({ ...policy });
+  const assess = (
+    result: AssessmentResult = AssessmentResult.Success,
+    commit: string = ASSESSED_COMMIT,
+  ) =>
+    h.store.transaction((tx) =>
+      insertAssessment(tx, {
+        id: createIdentity("assessment"),
+        node_id: h.node_id,
+        attempt: h.claim.attempt,
+        result,
+        rationale: "Reviewed",
+        evidence_ids: "[]",
+        child_outcome_ids: "[]",
+        tested_input: canonicalJSON({
+          kind: AssetKind.Repository,
+          binding_id: h.repositoryId,
+          commit,
+        }),
+        execution_id: h.claim.executionId,
+        actor: null,
+        node_revision: FIRST_REVISION,
+        created_at: FIXTURE_TIME,
+      }),
+    );
+  const pullRequest: PlatformAddress = {
+    kind: PlatformAddressKind.PullRequest,
+    resource_identity: resourceIdentity,
+    number: 42,
+  };
+  const request = (
+    address: PlatformAddress = pullRequest,
+    nodeId: string = h.node_id,
+    key: string = `repo.${policy.action}`,
+  ) => {
+    const id = createIdentity("evidence");
+    h.store.transaction((tx) =>
+      insertEvidence(
+        tx,
+        {
+          id,
+          node_id: nodeId,
+          attempt: h.claim.attempt,
+          subject: key,
+          requirement_key: key,
+          end_state: null,
+          verification: null,
+          provenance: canonicalJSON(h.executionActor),
+          created_at: FIXTURE_TIME,
+        },
+        [
+          {
+            id: createIdentity("asset"),
+            evidence_id: id,
+            kind: AssetKind.Platform,
+            content: canonicalJSON(address),
+            published_at: FIXTURE_TIME,
+            expired_at: null,
+          },
+        ],
+      ),
+    );
+    return id;
+  };
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  assert.equal(h.node().state, NodeState.Evaluating);
+  assert.equal(policy.project_id, h.claim.projectId);
+  return {
+    ...h,
+    policy,
+    assess,
+    request,
+    pullRequest,
+    resourceIdentity,
   };
 }
