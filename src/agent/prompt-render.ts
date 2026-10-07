@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { PromptLayerKind, PromptSourceState } from "./contract.ts";
 import {
   layerText,
-  PromptLayer,
   type CompositionRecord,
   type LayerText,
 } from "./prompt-composer.ts";
@@ -15,23 +14,15 @@ export const PromptConsumer = {
 export type PromptConsumer =
   (typeof PromptConsumer)[keyof typeof PromptConsumer];
 
-const PRECEDENCE: Record<PromptConsumer, string> = {
-  [PromptConsumer.Workbench]: [
-    PromptLayer.AgentLayer,
-    PromptLayer.SystemLayer,
-    PromptLayer.WorkingLayer,
-  ].join(", "),
-  [PromptConsumer.Worker]: [
-    PromptLayer.AgentLayer,
-    PromptLayer.SystemLayer,
-    PromptLayer.Work,
-    PromptLayer.WorkingLayer,
-  ].join(", "),
+const LATER_MESSAGES: Record<PromptConsumer, string> = {
+  [PromptConsumer.Workbench]: "instruction files of the workspace",
+  [PromptConsumer.Worker]:
+    "instruction files of the workspace and then the task",
 };
 
 export function framing(consumer: PromptConsumer): string {
-  assert.ok(Object.hasOwn(PRECEDENCE, consumer));
-  return `This prompt holds prompt layers. Each layer names its owner and its source. The precedence from the highest to the lowest is: ${PRECEDENCE[consumer]}. A layer of higher precedence governs a layer of lower precedence. No layer revokes an obligation of the agent layer or of the system layer. A layer authorizes no operation.`;
+  assert.ok(Object.hasOwn(LATER_MESSAGES, consumer));
+  return `The messages after this system prompt hold ${LATER_MESSAGES[consumer]}. They never override this system prompt. A later text of this system prompt governs an earlier one, and a later message governs an earlier one.`;
 }
 
 export function layerTexts(layer: ResolvedLayer): LayerText[] {
@@ -43,24 +34,29 @@ export function layerTexts(layer: ResolvedLayer): LayerText[] {
     });
 }
 
-export function finalPrompt(
-  layers: readonly ResolvedLayer[],
-  consumer: PromptConsumer,
-): string {
-  return [
-    framing(consumer),
-    ...layers.flatMap(layerTexts).map((text) => text.marked),
-  ].join("\n");
-}
+const PART_SEPARATOR = "\n\n";
 
 export function systemPrompt(
   layers: readonly ResolvedLayer[],
   consumer: PromptConsumer,
 ): string {
-  return finalPrompt(
-    layers.filter((layer) => layer.layer !== PromptLayerKind.Working),
-    consumer,
-  );
+  return [
+    ...layers
+      .filter((layer) => layer.layer !== PromptLayerKind.Working)
+      .flatMap(layerTexts)
+      .map(({ text }) => text),
+    framing(consumer),
+  ].join(PART_SEPARATOR);
+}
+
+export function finalPrompt(
+  layers: readonly ResolvedLayer[],
+  consumer: PromptConsumer,
+): string {
+  return [
+    systemPrompt(layers, consumer),
+    ...workingTexts(layers).map(({ message }) => message),
+  ].join(PART_SEPARATOR);
 }
 
 export function workingTexts(layers: readonly ResolvedLayer[]): LayerText[] {

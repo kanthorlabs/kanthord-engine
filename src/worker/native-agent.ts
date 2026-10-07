@@ -85,7 +85,7 @@ function nativeAgent(
       assert.ok(session);
       throwIfCancelled(context);
       pins.setWork(work);
-      await session.prompt(work.marked, { expandPromptTemplates: false });
+      await session.prompt(work.text, { expandPromptTemplates: false });
       await session.waitForIdle();
     },
     async abort() {

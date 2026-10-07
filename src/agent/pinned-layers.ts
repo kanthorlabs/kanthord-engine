@@ -26,8 +26,8 @@ export function pinnedLayers(layers: readonly (LayerText | null)[]): {
   const hook = pinnedLayersHook(() => ({
     layers: layers
       .filter((layer) => layer !== null)
-      .map((layer) => layer.marked),
-    work: work?.marked ?? null,
+      .map((layer) => layer.message),
+    work: work?.text ?? null,
   }));
   return {
     hook,
@@ -42,7 +42,7 @@ export function pinnedLayers(layers: readonly (LayerText | null)[]): {
           pinContext(
             context,
             systemPrompt,
-            [...layers.map((layer) => layer?.marked), work?.marked].filter(
+            [...layers.map((layer) => layer?.message), work?.text].filter(
               (text) => text !== undefined,
             ),
           ),

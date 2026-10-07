@@ -148,7 +148,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.deepEqual(answer.prompt, {
     final: systemPrompt(promptLayers, PromptConsumer.Worker),
   });
-  assert.ok(answer.prompt.final.startsWith(framing(PromptConsumer.Worker)));
+  assert.ok(answer.prompt.final.endsWith(framing(PromptConsumer.Worker)));
   assert.ok(answer.prompt.final.includes(SYSTEM_TEXT));
   assert.ok(answer.prompt.final.includes(AGENT_TEXT));
   assert.ok(!answer.prompt.final.includes(WORKING_TEXT));

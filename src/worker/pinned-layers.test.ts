@@ -98,7 +98,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     turns++;
   });
   t.after(unsubscribe);
-  await session.prompt(work.marked);
+  await session.prompt(work.text);
   await session.prompt("second request");
   await session.compact();
   await session.prompt("continue");
@@ -111,19 +111,19 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     assert.match(text, /WORK_MARKER/);
     assert.ok(call.systemPrompt?.includes(composed.systemPrompt));
     const userRole = "user";
-    for (const marked of [
-      composed.layers.global!.marked,
-      composed.layers.project!.marked,
-      work.marked,
+    for (const pinned of [
+      composed.layers.global!.message,
+      composed.layers.project!.message,
+      work.text,
     ]) {
       assert.deepEqual(
         call.messages
           .filter(
             (entry) =>
-              entry.role === userRole && contentText(entry.content) === marked,
+              entry.role === userRole && contentText(entry.content) === pinned,
           )
           .map((entry) => contentText(entry.content)),
-        [marked],
+        [pinned],
       );
     }
     assert.ok(
@@ -202,12 +202,12 @@ test("inference pin preserves stream arguments and later system updates across w
     temperature: 0.3,
   };
   for (const name of ["first", "second"]) {
-    const work = { text: name, marked: `<work>${name}</work>`, digest: name };
+    const work = { text: `<work>${name}</work>`, digest: name };
     pins.setWork(work);
     const context = normalizeContext({
       systemPrompt: "summarize only",
       messages: [
-        { role: "user", content: `quoted ${work.marked}`, timestamp: 1 },
+        { role: "user", content: `quoted ${work.text}`, timestamp: 1 },
         { role: "system", content: "later patch", timestamp: 2 },
       ],
     });
@@ -225,14 +225,14 @@ test("inference pin preserves stream arguments and later system updates across w
         [
           systemPrompt,
           "summarize only",
-          work.marked,
-          `quoted ${work.marked}`,
+          work.text,
+          `quoted ${work.text}`,
           "later patch",
         ],
       );
       assert.deepEqual(
         context.messages.map((entry) => contentText(entry.content)),
-        ["summarize only", `quoted ${work.marked}`, "later patch"],
+        ["summarize only", `quoted ${work.text}`, "later patch"],
       );
     }
   }
@@ -338,7 +338,7 @@ for (const isSplitTurn of [false, true]) {
           ? [
               {
                 role: USER,
-                content: `prefix request quoting ${work.marked}`,
+                content: `prefix request quoting ${work.text}`,
                 timestamp: INITIAL_ATTEMPT,
               },
               fauxAssistantMessage("prefix response"),
@@ -409,9 +409,7 @@ for (const isSplitTurn of [false, true]) {
         .map((message) => contentText(message.content))
         .join("\n");
       assert.match(prefixRequest, /This is the PREFIX of a turn/);
-      assert.ok(
-        prefixRequest.includes(`prefix request quoting ${work.marked}`),
-      );
+      assert.ok(prefixRequest.includes(`prefix request quoting ${work.text}`));
     }
     for (const [index, call] of provider.calls.entries()) {
       assert.equal(call.apiKey, key);
@@ -438,9 +436,9 @@ for (const isSplitTurn of [false, true]) {
           .filter((message) => message.role === USER)
           .map((message) => contentText(message.content)),
         [
-          composed.layers.global!.marked,
-          composed.layers.project!.marked,
-          work.marked,
+          composed.layers.global!.message,
+          composed.layers.project!.message,
+          work.text,
           ...original.messages
             .filter((message) => message.role === USER)
             .map((message) => contentText(message.content)),

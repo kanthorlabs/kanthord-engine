@@ -397,7 +397,7 @@ test("native instructions preserve pinned work and expose copied transcript and 
   const call = h.provider.calls.at(-1)!;
   const messages = JSON.stringify(call.messages);
   assert.equal(
-    messages.split(JSON.stringify(WORK.marked).slice(1, -1)).length - 1,
+    messages.split(JSON.stringify(WORK.text).slice(1, -1)).length - 1,
     SINGLE_CALL_COUNT,
   );
   assert.deepEqual(call.messages.at(-1)?.content, [

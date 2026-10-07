@@ -37,6 +37,7 @@ import {
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
 import { gatewayFixture } from "./test-support.ts";
+import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 
 const AGENT = "swe@1";
 const ANTHROPIC = "anthropic";
@@ -657,9 +658,7 @@ test("a message runs the agent while a long poll follows the run to its end", as
   assert.ok(call.systemPrompt?.includes(BASE_PROMPT));
   assert.ok(call.systemPrompt?.includes(SWE_AGENT_PROMPT));
   assert.ok(!call.systemPrompt?.includes(WORKBENCH_PROMPT));
-  assert.ok(
-    call.systemPrompt?.includes("agent layer, system layer, working layer"),
-  );
+  assert.ok(call.systemPrompt?.includes(framing(PromptConsumer.Workbench)));
   assert.ok(JSON.stringify(call.messages).includes("## Human interlocutor"));
   assert.equal(call.apiKey, PRIMARY_KEY);
 });

@@ -426,7 +426,7 @@ test(
         working_layer: WORKING_LAYER_ALL_ON,
       });
       assert.ok(
-        runtimeX.setup.prompt.final.startsWith(framing(PromptConsumer.Worker)),
+        runtimeX.setup.prompt.final.endsWith(framing(PromptConsumer.Worker)),
       );
       assert.ok(runtimeX.setup.prompt.final.includes(SWE_AGENT_PROMPT));
       assert.ok(!runtimeX.setup.prompt.final.includes(PROJECT));
@@ -490,7 +490,7 @@ test(
         for (const call of provider.calls) {
           assert.equal(call.apiKey, SECRET);
           assert.ok(
-            call.systemPrompt?.includes("This prompt holds prompt layers."),
+            call.systemPrompt?.includes(framing(PromptConsumer.Worker)),
           );
           assert.ok(
             call.systemPrompt?.includes(
@@ -515,7 +515,7 @@ test(
           assert.ok(
             text.indexOf(PROJECT) <
               text.indexOf(
-                JSON.stringify(work.marked).slice(
+                JSON.stringify(work.text).slice(
                   BRACKET_TRIM_OFFSET,
                   -BRACKET_TRIM_OFFSET,
                 ),
@@ -523,7 +523,7 @@ test(
           );
           assert.ok(
             text.includes(
-              JSON.stringify(work.marked).slice(
+              JSON.stringify(work.text).slice(
                 BRACKET_TRIM_OFFSET,
                 -BRACKET_TRIM_OFFSET,
               ),

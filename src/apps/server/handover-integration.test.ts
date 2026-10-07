@@ -134,7 +134,7 @@ for (const adapter of ["direct", "http"] as const) {
       wallTimeMs: 7200000,
     });
     assert.equal(answer.metadata, null);
-    assert.ok(answer.prompt.final.startsWith(framing(PromptConsumer.Worker)));
+    assert.ok(answer.prompt.final.endsWith(framing(PromptConsumer.Worker)));
     assert.ok(answer.prompt.final.includes(SWE_AGENT_PROMPT));
     assert.deepEqual(answer.repositories[0], {
       bindingId: answer.repositories[0]!.bindingId,

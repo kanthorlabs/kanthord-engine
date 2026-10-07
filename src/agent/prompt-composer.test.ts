@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderWorkPrompt } from "./prompt-composer.ts";
 
-test("work prompts retain commands and exact text with pinned ownership", () => {
+test("work prompts retain commands and exact text with no tag", () => {
   const work = renderWorkPrompt({
     nodeId: "node",
     revision: 3,
@@ -14,6 +14,6 @@ test("work prompts retain commands and exact text with pinned ownership", () => 
     },
   });
   assert.match(work.text, /1\. first\n2\. second$/);
-  assert.match(work.marked, /owner="node revision 3 of node"/);
+  assert.ok(work.text.startsWith("# unit\n"));
   assert.match(work.digest, /^[a-f0-9]{64}$/);
 });

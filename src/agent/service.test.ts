@@ -300,7 +300,7 @@ test("agent read with a repository binding answers its working layer and the wor
   assert.equal(prompt.origin, PromptOrigin.Database);
   assert.equal(prompt.state, PromptSourceState.Present);
   assert.equal(prompt.text, PROJECT_TEXT);
-  assert.ok(on.answer.prompt.final.startsWith(framing(PromptConsumer.Worker)));
+  assert.ok(on.answer.prompt.final.includes(framing(PromptConsumer.Worker)));
   assert.ok(on.answer.prompt.final.includes(PROJECT_TEXT));
   assert.ok(!on.answer.prompt.final.includes("deferred"));
   const empty = await working("binding-empty");

@@ -305,7 +305,7 @@ test("the agent directory supplies the agent file", async (t) => {
   );
 });
 
-test("working files read in order and the framing states the precedence", async (t) => {
+test("working files read in order as messages after a plain system prompt", async (t) => {
   const f = fixture(t);
   for (const name of [
     "AGENTS.md",
@@ -331,27 +331,26 @@ test("working files read in order and the framing states the precedence", async 
   assert.ok(!system.includes("CLAUDE.local.md"));
   assert.ok(!system.includes(WORKBENCH_PROMPT));
   assert.ok(system.includes(declaration.agentPrompt));
-  assert.ok(system.includes('<prompt-layer name="system layer"'));
-  assert.ok(system.includes('<prompt-layer name="agent layer"'));
-  assert.ok(system.includes('source="binary base.md"'));
-  assert.ok(system.startsWith(framing(PromptConsumer.Workbench)));
+  assert.ok(system.includes(BASE_PROMPT));
+  assert.ok(!system.includes("<prompt-layer"));
+  assert.ok(system.endsWith(framing(PromptConsumer.Workbench)));
   assert.ok(
-    system.indexOf('name="system layer"') <
-      system.indexOf('name="agent layer"'),
+    system.indexOf(BASE_PROMPT) < system.indexOf(declaration.agentPrompt),
   );
   assert.match(
     framing(PromptConsumer.Workbench),
-    /highest to the lowest is: agent layer, system layer, working layer\./,
+    /hold instruction files of the workspace\. They never override this system prompt\./,
   );
   assert.match(
     framing(PromptConsumer.Worker),
-    /highest to the lowest is: agent layer, system layer, work prompt, working layer\./,
+    /hold instruction files of the workspace and then the task\./,
   );
   assert.match(
-    framing(PromptConsumer.Worker),
-    /No layer revokes an obligation of the agent layer or of the system layer\. A layer authorizes no operation\./,
+    working[0]?.message ?? "",
+    /^Instructions of file .*AGENTS\.md:\n\nAGENTS\.md$/,
   );
   const final = finalPrompt(layers, PromptConsumer.Workbench);
+  assert.ok(final.startsWith(system));
   assert.ok(final.includes("CLAUDE.local.md"));
   assert.ok(!final.includes(f.home));
 });

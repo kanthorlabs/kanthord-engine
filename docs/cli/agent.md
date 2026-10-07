@@ -134,7 +134,7 @@ Each source holds the following fields:
 | `digest`     | The digest of the text when `state` is `present`, else `null`.                                                                                       |
 | `text`       | The text of the source when `state` is `present`, else `null`.                                                                                       |
 
-`final` holds the framing, then the text of every `present` source, in reading order.
+`final` holds the system prompt that ends with the framing, then the message of every `present` source of the working layer, in reading order.
 With `--view final`, `layers` is absent.
 
 ```sh

@@ -14,7 +14,7 @@ export interface LayerText {
   owner: string;
   source: string;
   text: string;
-  marked: string;
+  message: string;
 }
 export interface CompositionRecord {
   selected: {
@@ -33,7 +33,6 @@ export interface CompositionRecord {
 }
 export interface WorkPrompt {
   text: string;
-  marked: string;
   digest: string;
 }
 export function digest(text: string): string {
@@ -51,18 +50,12 @@ export function layerText(
 ): LayerText {
   assert.ok(owner);
   assert.ok(source);
-  const escape = (value: string) =>
-    value
-      .replaceAll("&", "&amp;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
   return {
     layer,
     owner,
     source,
     text,
-    marked: `<prompt-layer name="${layer}" owner="${escape(owner)}" source="${escape(source)}">\n${text}\n</prompt-layer>`,
+    message: `Instructions of ${source}:\n\n${text}`,
   };
 }
 
@@ -80,14 +73,5 @@ export function renderWorkPrompt(unit: {
   assert.ok(Number.isSafeInteger(unit.revision));
   const { name, requirement, criterion, verifications } = unit.content;
   const text = `# ${name}\n\n## Requirement\n\n${requirement}\n\n## Criterion\n\n${criterion}\n\n## Verifications\n\n${verifications.map((command, index) => `${index + 1}. ${command}`).join("\n")}`;
-  return {
-    text,
-    marked: layerText(
-      PromptLayer.Work,
-      `node revision ${unit.revision} of ${unit.nodeId}`,
-      `pinned node revision ${unit.revision}`,
-      text,
-    ).marked,
-    digest: digest(text),
-  };
+  return { text, digest: digest(text) };
 }
