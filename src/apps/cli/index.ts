@@ -7,6 +7,7 @@ import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { workbenchOperations } from "../../workbench/contract.ts";
+import { intakeOperations } from "../../intake/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError } from "commander";
 import { dirname } from "node:path";
@@ -254,6 +255,7 @@ const apiOperations = [
   ...Object.values(projectOperations),
   ...Object.values(missionOperations),
   ...Object.values(workbenchOperations),
+  ...Object.values(intakeOperations),
 ];
 const allOperationIds = apiOperations.map((operation) => operation.id);
 assert.equal(

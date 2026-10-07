@@ -1,12 +1,22 @@
 import { z } from "zod";
+import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
+import {
+  AccessPolicy,
+  OperationLifetime,
+  StoreName,
+} from "../kernel/operation.ts";
 
 export const INTAKE_SERVICE_NAME = "intake";
 export const INBOUND_ID_PREFIX = "inbound";
 export const INBOUND_EVENT_ID_PREFIX = "inbound_event";
 export const OUTBOUND_REQUEST_ID_PREFIX = "outbound_request";
 
+export const INTAKE_OPERATION_TIMEOUT_MS = 30000;
+export const OUTBOUND_LIST_LIMIT_DEFAULT = 100;
+export const OUTBOUND_LIST_LIMIT_MIN = 1;
+export const OUTBOUND_LIST_LIMIT_MAX = 1000;
 export const POLL_INTERVAL_MS = 60000;
 export const PRESIGN_LIFETIME_S = 3600;
 export const PENDING_EVENT_LIMIT = 10000;
@@ -18,6 +28,11 @@ export const PLATFORM_CALL_DEADLINE_MS = 30000;
 export const GIT_WRITE_DEADLINE_MS = 540000;
 export const ACTION_PERFORM_TIMEOUT_MS = 600000;
 export const ADMISSION_CONCURRENCY = 1;
+
+export const IntakeErrorCode = {
+  CursorInvalid: "system.pagination.cursor_invalid",
+  OutboundRequestNotFound: "intake.outbound.request.not_found",
+} as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
 export const InboundPlatform = { GitHub: "github" } as const;
@@ -85,3 +100,65 @@ export type OutboundRequestStateValue = z.infer<
 export type OutboundOperationValue = z.infer<typeof outboundOperationSchema>;
 export type ResultClassValue = z.infer<typeof resultClassSchema>;
 export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
+
+const baseOperation = {
+  service: INTAKE_SERVICE_NAME,
+  store: StoreName.Operational,
+  lifetime: OperationLifetime.Unary,
+  access: AccessPolicy.Human,
+  timeoutMs: INTAKE_OPERATION_TIMEOUT_MS,
+  status: HttpStatus.OK,
+} as const;
+const readOperation = {
+  ...baseOperation,
+  mutation: false,
+  body: false,
+} as const;
+const readInput = <P extends z.ZodType, Q extends z.ZodType>(
+  params: P,
+  query: Q,
+) => z.strictObject({ params, query, body: z.null() });
+
+export const intakeOperations = {
+  "outbound.request.list": {
+    ...readOperation,
+    id: "intake.outbound.request.list",
+    method: HttpMethod.Get,
+    path: "/api/intake/outbound",
+    input: readInput(
+      z.strictObject({}),
+      z.strictObject({
+        project_id: identitySchema("project").optional(),
+        state: outboundRequestStateSchema.optional(),
+        operation: outboundOperationSchema.optional(),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(OUTBOUND_LIST_LIMIT_MIN)
+          .max(OUTBOUND_LIST_LIMIT_MAX)
+          .default(OUTBOUND_LIST_LIMIT_DEFAULT)
+          .optional(),
+        cursor: z.string().optional(),
+      }),
+    ),
+    output: z.strictObject({
+      items: z.array(outboundRequestSchema),
+      next_cursor: z.string().nullable(),
+    }),
+    description: "List outbound requests, newest first.",
+  },
+  "outbound.request.get": {
+    ...readOperation,
+    id: "intake.outbound.request.get",
+    method: HttpMethod.Get,
+    path: "/api/intake/outbound/:outbound_request_id",
+    input: readInput(
+      z.strictObject({
+        outbound_request_id: identitySchema(OUTBOUND_REQUEST_ID_PREFIX),
+      }),
+      z.strictObject({}),
+    ),
+    output: outboundRequestSchema,
+    description: "Get one outbound request.",
+  },
+} as const;

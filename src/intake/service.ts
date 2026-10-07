@@ -15,7 +15,8 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { INTAKE_SERVICE_NAME } from "./contract.ts";
+import { INTAKE_SERVICE_NAME, intakeOperations } from "./contract.ts";
+import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
 
 export interface Dependencies {
@@ -39,7 +40,15 @@ export class IntakeService implements Service {
   }
 
   declare(registry: OperationRegistry): void {
-    assert.ok(registry);
+    registry.register(
+      intakeOperations["outbound.request.list"],
+      ({ query }, caller) => caller.commit((tx) => listOutbound(tx, query)),
+    );
+    registry.register(
+      intakeOperations["outbound.request.get"],
+      ({ params }, caller) =>
+        caller.commit((tx) => getOutbound(tx, params.outbound_request_id)),
+    );
   }
 
   start(): Promise<Error | null> {

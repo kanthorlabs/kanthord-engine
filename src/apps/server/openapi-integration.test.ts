@@ -25,6 +25,7 @@ import {
   missionSchema,
 } from "../../mission/contract.ts";
 import { workbenchOperations } from "../../workbench/contract.ts";
+import { intakeOperations } from "../../intake/contract.ts";
 import {
   openapiPath,
   emitOpenAPI,
@@ -366,6 +367,7 @@ const OPERATION_PREFIXES = [
   "project.",
   "mission.",
   "workbench.",
+  "intake.",
 ];
 const BEARER_SECURITY = [{ bearerAuth: [] }];
 const LIVENESS_PATH = "/api/liveness";
@@ -527,6 +529,7 @@ const apiOperations = [
   ...Object.values(projectOperations),
   ...Object.values(missionOperations),
   ...Object.values(workbenchOperations),
+  ...Object.values(intakeOperations),
 ];
 const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["gateway.liveness", AccessPolicy.Public],
@@ -676,8 +679,10 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["workbench.session.abort", AccessPolicy.Human],
   ["workbench.session.events", AccessPolicy.Human],
   ["workbench.session.approve", AccessPolicy.Human],
+  ["intake.outbound.request.list", AccessPolicy.Human],
+  ["intake.outbound.request.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 147;
+const OPERATION_COUNT = 149;
 
 test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();
@@ -1387,4 +1392,16 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     const response = await fixture.request(path);
     assert.ok([400, 404].includes(response.status), path);
   }
+});
+
+test("published outbound request reads are human unary routes", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const list = resolved.paths?.["/api/intake/outbound"]?.get as
+    ResolvedOperation | undefined;
+  const get = resolved.paths?.["/api/intake/outbound/{outbound_request_id}"]
+    ?.get as ResolvedOperation | undefined;
+  assert.equal(list?.operationId, intakeOperations["outbound.request.list"].id);
+  assert.equal(list?.["x-access-policy"], AccessPolicy.Human);
+  assert.equal(get?.operationId, intakeOperations["outbound.request.get"].id);
+  assert.equal(get?.["x-access-policy"], AccessPolicy.Human);
 });
