@@ -96,6 +96,12 @@ const PROVIDER_REMOVE_INDETERMINATE =
   "cli.agent.enablement.provider.remove.indeterminate";
 const MODEL_LIST_INDETERMINATE =
   "cli.agent.enablement.provider.model.list.indeterminate";
+const CREDENTIAL_MODEL_LIST_TOKEN_REQUIRED =
+  "cli.agent.model.list.token_required";
+const CREDENTIAL_MODEL_LIST_INDETERMINATE =
+  "cli.agent.model.list.indeterminate";
+const CREDENTIAL_MODEL_LIST_INVALID_PROVIDER =
+  "cli.agent.model.list.invalid_provider";
 const ENABLE_INVALID_REVISION = "cli.agent.enablement.enable.invalid_revision";
 const DISABLE_INVALID_REVISION =
   "cli.agent.enablement.disable.invalid_revision";
@@ -395,6 +401,28 @@ async function providerModelList(
   );
 }
 
+async function credentialModelList(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const provider = agentProviderKindSchema.safeParse(options.provider);
+  if (!provider.success)
+    throw new Diagnostic(
+      CREDENTIAL_MODEL_LIST_INVALID_PROVIDER,
+      "the provider is not an agent provider kind",
+    );
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, CREDENTIAL_MODEL_LIST_TOKEN_REQUIRED);
+  const result = await httpClient(agentOperations, endpoint, token)[
+    "model.list"
+  ]({
+    params: {},
+    query: { provider: provider.data, credential: options.credential },
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, CREDENTIAL_MODEL_LIST_INDETERMINATE))}\n`,
+  );
+}
+
 export function addAgentCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -427,6 +455,24 @@ export function addAgentCommand(program: Command): void {
       agentGet(agentName, command),
     );
   agent.action(() => agent.help());
+  const model = agent
+    .command(MODEL)
+    .description("Inspect the models of a credential");
+  model.action(() => model.help());
+  model
+    .command(LIST)
+    .description("List the models of a credential as JSON")
+    .requiredOption(
+      "--provider <provider>",
+      "Agent provider kind",
+      singleUse("--provider"),
+    )
+    .requiredOption(
+      "--credential <credential>",
+      "Credential name",
+      singleUse("--credential"),
+    )
+    .action((_options, command: Command) => credentialModelList(command));
   const prompt = agent
     .command(PROMPT)
     .description("Manage the prompt settings");
@@ -572,11 +618,11 @@ export function addAgentCommand(program: Command): void {
       (agentName: string, providerName: string, _options, command: Command) =>
         providerRemove(agentName, providerName, command),
     );
-  const model = provider
+  const providerModel = provider
     .command(MODEL)
     .description("Inspect the models of a provider");
-  model.action(() => model.help());
-  model
+  providerModel.action(() => providerModel.help());
+  providerModel
     .command(LIST)
     .description("List the models of a provider as JSON")
     .argument("<agent-name>", "Agent name")

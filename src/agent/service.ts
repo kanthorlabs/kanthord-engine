@@ -517,6 +517,34 @@ export class AgentComponent {
     );
     if (!item)
       throw configurationError(agentName, AgentErrorCode.ProviderNotFound);
+    return this.modelItems(tx, item);
+  }
+
+  private listCredentialModels(
+    tx: Transaction,
+    item: { provider: string; credential: string },
+  ) {
+    try {
+      this.dependencies.custodySuitability(tx, {
+        credential: item.credential,
+        platform: item.provider,
+      });
+    } catch (error) {
+      if (!(error instanceof OperationError)) throw error;
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        AgentErrorCode.CredentialUnsuitable,
+        "The credential does not suit the agent provider kind.",
+        { provider: item.provider, credential: item.credential },
+      );
+    }
+    return this.modelItems(tx, item);
+  }
+
+  private modelItems(
+    tx: Transaction,
+    item: { provider: string; credential: string },
+  ) {
     return {
       items: providerModels(this.dependencies, tx, item).map(
         ({ id, reasoningLevels }) =>
@@ -815,6 +843,9 @@ export class AgentComponent {
         caller.commit((tx) =>
           this.listModels(tx, params.agentName, params.providerName),
         ),
+    );
+    registry.register(agentOperations["model.list"], ({ query }, caller) =>
+      caller.commit((tx) => this.listCredentialModels(tx, query)),
     );
   }
 }

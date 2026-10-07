@@ -528,6 +528,25 @@ export const agentOperations = {
     description:
       "List the models and reasoning efforts of one agent provider of an agent enablement.",
   },
+  "model.list": {
+    ...enablementOperation,
+    id: "agent.model.list",
+    method: HttpMethod.Get,
+    path: "/api/agent/model",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z.strictObject({
+        provider: agentProviderKindSchema,
+        credential: z.string().min(1),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({ items: z.array(agentModelSchema) }),
+    description:
+      "List the models and reasoning efforts of one credential for one agent provider kind, before an enablement names it.",
+  },
   "prompt.put": {
     ...enablementMutation,
     id: "agent.prompt.put",

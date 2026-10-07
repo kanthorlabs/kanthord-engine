@@ -1362,6 +1362,65 @@ test("model list refuses an unknown agent, an absent enablement and an absent pr
   );
 });
 
+const CREDENTIAL_MODEL_LIST = "model.list";
+
+test("credential model list answers the models of a credential before any enablement", (t) => {
+  const approved = [{ id: MODEL, reasoningLevels: [DEFAULT_REASONING] }];
+  const requested: string[] = [];
+  const f = enablementFixture(t, {
+    approvedModels: (_tx, credential) => {
+      requested.push(credential);
+      return approved;
+    },
+  });
+  const builtin = f.invoke(
+    CREDENTIAL_MODEL_LIST,
+    null,
+    {},
+    { provider: AgentProviderKind.Anthropic, credential: provider.credential },
+  );
+  assert.deepEqual(
+    builtin.items.map(({ modelIdentifier }) => modelIdentifier),
+    getBuiltinModels(AgentProviderKind.Anthropic).map(({ id }) => id),
+  );
+  assert.deepEqual(requested, []);
+  const compatible = f.invoke(
+    CREDENTIAL_MODEL_LIST,
+    null,
+    {},
+    { provider: AgentProviderKind.OpenaiCompatible, credential: "gateway" },
+  );
+  assert.deepEqual(compatible.items, [
+    { modelIdentifier: MODEL, reasoningEfforts: [DEFAULT_REASONING] },
+  ]);
+  assert.deepEqual(requested, ["gateway"]);
+});
+
+test("credential model list refuses a credential that does not suit the provider kind", (t) => {
+  const f = enablementFixture(t, {
+    custodySuitability: () => {
+      throw new OperationError(
+        HttpStatus.NotFound,
+        "credential.credential.not_found",
+        "The credential is absent.",
+      );
+    },
+  });
+  const query = {
+    provider: AgentProviderKind.Anthropic,
+    credential: provider.credential,
+  };
+  refuses(
+    () => f.invoke(CREDENTIAL_MODEL_LIST, null, {}, query),
+    AgentErrorCode.CredentialUnsuitable,
+    HttpStatus.BadRequest,
+    query,
+  );
+  assert.throws(() =>
+    f.invoke(CREDENTIAL_MODEL_LIST, null, {}, { ...query, provider: "github" }),
+  );
+});
+
 test("every listed model and reasoning effort passes the configuration validation", (t) => {
   const approved = [
     { id: MODEL, reasoningLevels: [DEFAULT_REASONING, "low", "high"] },

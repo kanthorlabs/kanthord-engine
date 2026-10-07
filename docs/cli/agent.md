@@ -1,6 +1,6 @@
 # Agent CLI specification
 
-This specification for `kanthord agent` contains **13 command leaves: 12 implemented and 1 proposed**.
+This specification for `kanthord agent` contains **14 command leaves: 13 implemented and 1 proposed**.
 
 See the [CLI index](./README.md) for shared conventions.
 Agent entries of a worker binding belong to [Project](./project.md).
@@ -40,6 +40,7 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 | I      | `enablement provider add <agent-name> --file <path> [M] [R]`                                                                  | `POST /api/agent/enablement/:agentName/provider`                    | `agent.enablement.provider.add`        | `human` |
 | I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]`                              | `DELETE /api/agent/enablement/:agentName/provider/:providerName`    | `agent.enablement.provider.remove`     | `human` |
 | I      | `enablement provider model list <agent-name> <provider-name>`                                                                 | `GET /api/agent/enablement/:agentName/provider/:providerName/model` | `agent.enablement.provider.model.list` | `human` |
+| I      | `model list --provider <provider> --credential <credential>`                                                                  | `GET /api/agent/model`                                              | `agent.model.list`                     | `human` |
 | I      | `prompt put --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --file <path> [M]`                        | `PUT /api/agent/prompt`                                             | `agent.prompt.put`                     | `human` |
 | I      | `prompt switch --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --switch <source> (--on \| --off) [M]` | `POST /api/agent/prompt/switch`                                     | `agent.prompt.switch`                  | `human` |
 
@@ -294,6 +295,17 @@ approved models of its credential with their `reasoningLevels`. Every listed pai
 passes the configuration validation. An absent catalog agent, enablement or
 provider answers a `404` code of the error table.
 
+### `model list --provider <provider> --credential <credential>`
+
+Uses no positional argument and no body. Required token: human JWT. The
+[credential model list](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.impl.md#model-list)
+is `unary` with `mutation: false`. The query holds `provider`, an agent provider
+kind, and `credential`, a credential name. It needs no enablement. The dashboard
+fills the model picker of a new enablement from it. HTTP `200` returns `{ items }`
+with the item shape and the sources of `enablement provider model list`. A
+credential that does not suit the provider kind answers `400`
+`agent.configuration.credential_unsuitable`.
+
 ## Agent provider healthcheck
 
 Each agent provider has a report-only [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.impl.md#agent-provider-healthcheck).
@@ -331,11 +343,14 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.agent.prompt.switch.state_required`                  | The command holds none or both of `--on` and `--off`.                                       | agent prompt switch                                                                                                                                                                                            |
 | local | `cli.agent.enablement.provider.model.list.token_required` | No option, environment variable or `cli.yaml` supplies a token.                             | agent enablement provider model list                                                                                                                                                                           |
 | local | `cli.agent.enablement.provider.model.list.indeterminate`  | The read result is indeterminate.                                                           | agent enablement provider model list                                                                                                                                                                           |
+| local | `cli.agent.model.list.token_required`                     | No option, environment variable or `cli.yaml` supplies a token.                             | agent model list                                                                                                                                                                                               |
+| local | `cli.agent.model.list.indeterminate`                      | The read result is indeterminate.                                                           | agent model list                                                                                                                                                                                               |
+| local | `cli.agent.model.list.invalid_provider`                   | The `--provider` value is not an agent provider kind.                                       | agent model list                                                                                                                                                                                               |
 | local | `cli.agent.enablement.disable.invalid_revision`           | The `<expected-revision>` argument is not a positive safe integer.                          | agent enablement disable                                                                                                                                                                                       |
 | local | `cli.agent.enablement.enable.invalid_revision`            | The `<expected-revision>` argument is not a positive safe integer.                          | agent enablement enable                                                                                                                                                                                        |
 | local | `cli.agent.enablement.provider.remove.invalid_revision`   | The `<expected-revision>` argument is not a positive safe integer.                          | agent enablement provider remove                                                                                                                                                                               |
 | local | `cli.agent.enablement.remove.invalid_revision`            | The `<expected-revision>` argument is not a positive safe integer.                          | agent enablement remove                                                                                                                                                                                        |
-| 400   | `agent.configuration.credential_unsuitable`               | The selected credential is not suitable for the provider.                                   | binding apply, agent enablement put, agent enablement provider add, handover, worker.execution.setup.get (API only)                                                                                            |
+| 400   | `agent.configuration.credential_unsuitable`               | The selected credential is not suitable for the provider.                                   | binding apply, agent enablement put, agent enablement provider add, agent model list, handover, worker.execution.setup.get (API only)                                                                          |
 | 400   | `agent.configuration.invalid`                             | A worker or entry configuration fails shape validation.                                     | binding apply, agent enablement put, handover, worker.execution.setup.get (API only)                                                                                                                           |
 | 400   | `agent.configuration.model_unknown`                       | The selected model is absent from the catalog.                                              | agent enablement put, binding apply, handover, worker.execution.setup.get (API only)                                                                                                                           |
 | 400   | `agent.configuration.override_not_allowed`                | An entry overrides a forbidden field.                                                       | binding apply, handover, worker.execution.setup.get (API only)                                                                                                                                                 |

@@ -1,0 +1,154 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: agent.model.list
+    tags:
+      - agent
+    description: List the models and reasoning efforts of one credential for one
+      agent provider kind, before an enablement names it.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: provider
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/agent.model.list.Input/properties/query/properties/\
+            provider"
+      - name: credential
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/agent.model.list.Input/properties/query/properties/\
+            credential"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/agent.model.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    agent.model.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            provider:
+              type: string
+              enum:
+                - openai-compatible
+                - amazon-bedrock
+                - ant-ling
+                - anthropic
+                - azure-openai-responses
+                - baseten
+                - cerebras
+                - cloudflare-ai-gateway
+                - cloudflare-workers-ai
+                - deepseek
+                - fireworks
+                - github-copilot
+                - google
+                - google-vertex
+                - groq
+                - huggingface
+                - kimi-coding
+                - minimax
+                - minimax-cn
+                - mistral
+                - moonshotai
+                - moonshotai-cn
+                - nvidia
+                - openai
+                - openai-codex
+                - opencode
+                - opencode-go
+                - openrouter
+                - qwen-token-plan
+                - qwen-token-plan-cn
+                - qwen-token-plan-individual
+                - radius
+                - together
+                - vercel-ai-gateway
+                - xai
+                - xiaomi
+                - xiaomi-token-plan-ams
+                - xiaomi-token-plan-cn
+                - xiaomi-token-plan-sgp
+                - zai
+                - zai-coding-cn
+            credential:
+              type: string
+              minLength: 1
+          required:
+            - provider
+            - credential
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    agent.model.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              modelIdentifier:
+                type: string
+                minLength: 1
+              reasoningEfforts:
+                type: array
+                items:
+                  type: string
+                  enum:
+                    - off
+                    - minimal
+                    - low
+                    - medium
+                    - high
+                    - xhigh
+                    - max
+            required:
+              - modelIdentifier
+              - reasoningEfforts
+            additionalProperties: false
+      required:
+        - items
+      additionalProperties: false

@@ -76,7 +76,7 @@ export function validateProvider(
 export function providerModels(
   dependencies: ConfigurationDependencies,
   tx: Transaction,
-  item: AgentProviderItem,
+  item: Pick<AgentProviderItem, "provider" | "credential">,
 ): ApprovedModel[] {
   if (item.provider === AgentProviderKind.OpenaiCompatible)
     return [...(dependencies.approvedModels(tx, item.credential) ?? [])];
