@@ -28,6 +28,7 @@ export const OWNER_STORAGE = "storage";
 export const OWNER_AGENT = "agent";
 export const OWNER_WORKER = "worker";
 export const OWNER_PROJECT = "project";
+export const OWNER_INTAKE = "intake";
 
 export type InventoryOwner =
   | typeof OWNER_LLM
@@ -35,7 +36,8 @@ export type InventoryOwner =
   | typeof OWNER_STORAGE
   | typeof OWNER_AGENT
   | typeof OWNER_WORKER
-  | typeof OWNER_PROJECT;
+  | typeof OWNER_PROJECT
+  | typeof OWNER_INTAKE;
 export interface ResourceInventories {
   llm: (tx: Transaction) => ResourceEntry[];
   repository: (tx: Transaction) => ResourceEntry[];
@@ -43,6 +45,7 @@ export interface ResourceInventories {
   agent: (tx: Transaction) => ResourceEntry[];
   worker: (tx: Transaction) => ResourceEntry[];
   project: (tx: Transaction) => ResourceEntry[];
+  intake: (tx: Transaction) => ResourceEntry[];
 }
 export interface InventorySnapshot {
   entries: { owner: InventoryOwner; entry: ResourceEntry }[];

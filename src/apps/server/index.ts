@@ -416,6 +416,9 @@ export function composeServices(options: {
           project:
             options.inventoryOverrides?.project ??
             ((tx) => project.resourceInventory(tx)),
+          intake:
+            options.inventoryOverrides?.intake ??
+            ((tx) => intake.resourceInventory(tx)),
         }),
       ),
     options.logger,
