@@ -62,6 +62,9 @@ import {
   collectInventories,
 } from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
+import { IntakeService, intakeMigrations } from "../../intake/index.ts";
+import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
+import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   WorkerService,
   workerMigrations,
@@ -346,6 +349,13 @@ export function composeServices(options: {
     health: options.health,
     bindings: options.bindings,
   });
+  const intakeIdentity = mintServiceIdentity(INTAKE_SERVICE_NAME);
+  const intake = new IntakeService({
+    store: options.store,
+    logger: options.logger,
+    health: options.health,
+    identity: intakeIdentity,
+  });
   const workbench = new WorkbenchService({
     store: options.store,
     stateDirectory: options.stateDirectory,
@@ -374,6 +384,7 @@ export function composeServices(options: {
   worker.declare(registry);
   mission.declare(registry);
   project.declare(registry);
+  intake.declare(registry);
   workbench.declare(registry);
   const gateway = new GatewayService({
     config: options.config.gateway,
@@ -420,6 +431,7 @@ export function composeServices(options: {
     storage,
     mission,
     project,
+    intake,
     worker,
     workbench,
     gateway,
@@ -491,6 +503,7 @@ export class Server implements Service {
         { service: "worker", migrations: workerMigrations },
         { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
         { service: "project", migrations: projectMigrations },
+        { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
         { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
       ]);
       throwIfCancelled(this.shutdown);
@@ -501,6 +514,7 @@ export class Server implements Service {
         worker,
         mission,
         project,
+        intake,
         workbench,
         gateway,
         invocation,
@@ -521,6 +535,7 @@ export class Server implements Service {
         worker,
         mission,
         project,
+        intake,
         workbench,
         gateway,
       ];

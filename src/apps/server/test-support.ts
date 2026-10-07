@@ -25,6 +25,8 @@ import { Store } from "../../kernel/store.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
 import { projectMigrations } from "../../project/index.ts";
 import { missionMigrations } from "../../mission/index.ts";
+import { intakeMigrations } from "../../intake/index.ts";
+import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import {
   MISSION_SERVICE_NAME,
   type IntakeStorage,
@@ -68,6 +70,7 @@ export const domainHealth = {
   project: { bindings: 200 },
   worker: { registrations: 200 },
   mission: { operations: 200 },
+  intake: { events: 200 },
 };
 
 export function toolStubs(t: TestContext): string {
@@ -516,6 +519,7 @@ export async function gatewayFixture(
     { service: "worker", migrations: workerMigrations },
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
     { service: "project", migrations: projectMigrations },
+    { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
     { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
   ]);
   const logs: string[] = [];
@@ -524,6 +528,7 @@ export async function gatewayFixture(
     custody,
     gateway,
     project,
+    intake,
     worker,
     mission,
     workbench,
@@ -555,17 +560,25 @@ export async function gatewayFixture(
     const failures: Error[] = [];
     try {
       const quiescence = await Promise.all(
-        [scheduler, custody, worker, mission, project, workbench, gateway].map(
-          (service) => service.quiesce(),
-        ),
+        [
+          scheduler,
+          custody,
+          worker,
+          mission,
+          project,
+          intake,
+          workbench,
+          gateway,
+        ].map((service) => service.quiesce()),
       );
       failures.push(...quiescence.filter((error) => error !== null));
-      await gateway.drain();
+      await Promise.all([intake.drain(), gateway.drain()]);
       const invocationError = await invocation.stop();
       if (invocationError) failures.push(invocationError);
       for (const service of [
         gateway,
         workbench,
+        intake,
         project,
         mission,
         worker,
@@ -587,6 +600,7 @@ export async function gatewayFixture(
     worker,
     mission,
     project,
+    intake,
     workbench,
     gateway,
   ]) {
@@ -601,6 +615,7 @@ export async function gatewayFixture(
   return {
     repoConnector,
     project,
+    intake,
     scheduler,
     worker,
     custody,

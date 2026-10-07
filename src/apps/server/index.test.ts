@@ -29,6 +29,8 @@ import { agentOperations } from "../../agent/contract.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
+import { IntakeService } from "../../intake/index.ts";
+import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 import { HttpStatus } from "../../kernel/http.ts";
@@ -82,6 +84,16 @@ test("composition starts all six services and registers the real repository tool
     assert.deepEqual(body.services[name], checks, name);
   assert.equal(body.services.gateway?.listener, HealthStatus.Healthy);
   assert.deepEqual(await fixture.mission.healthcheck(), domainHealth.mission);
+});
+
+test("composed services hold Intake and start its probe", async (t) => {
+  const health = new HealthRegistry();
+  const fixture = await gatewayFixture(t, { health });
+  assert.ok(fixture.intake instanceof IntakeService);
+  const checks = await health.check();
+  assert.deepEqual(checks[INTAKE_SERVICE_NAME], {
+    events: HealthStatus.Healthy,
+  });
 });
 
 test("injected repository connector skips the tool gate and probe", async (t) => {
@@ -291,6 +303,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
       worker: { registrations: 200 },
       mission: { operations: 200 },
       project: { bindings: 200 },
+      intake: { events: 200 },
       gateway: {
         listener: 200,
         authentication: 200,
@@ -447,7 +460,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
   reopened.close();
 });
 
-test("server quiesces concurrently, drains with direct calls available, joins the chain and releases in reverse order", (t) => {
+test("server quiesces concurrently, drains Intake with direct calls available, joins the chain and releases Intake between Gateway and Project", (t) => {
   const paths = layout(temporary(t));
   const result = spawnSync(
     process.execPath,
@@ -462,6 +475,7 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     import { MissionService } from ${JSON.stringify(new URL("../../mission/index.ts", import.meta.url).href)};
     import { ProjectService } from ${JSON.stringify(new URL("../../project/index.ts", import.meta.url).href)};
     import { WorkerService } from ${JSON.stringify(new URL("../../worker/index.ts", import.meta.url).href)};
+    import { IntakeService } from ${JSON.stringify(new URL("../../intake/index.ts", import.meta.url).href)};
     import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
     import { Store } from ${JSON.stringify(new URL("../../kernel/store.ts", import.meta.url).href)};
     import { OperationalLog } from ${JSON.stringify(new URL("../../kernel/log.ts", import.meta.url).href)};
@@ -471,7 +485,7 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     let quiesced = 0;
     const signalled = new Set();
     const released = new Set();
-    const services = [['scheduler', SchedulerService], ['custody', CustodyComponent], ['worker', WorkerService], ['mission', MissionService], ['project', ProjectService], ['gateway', GatewayService]];
+    const services = [['scheduler', SchedulerService], ['custody', CustodyComponent], ['worker', WorkerService], ['mission', MissionService], ['project', ProjectService], ['intake', IntakeService], ['gateway', GatewayService]];
     const serviceCount = services.length;
     for (const [name, type] of services) {
       const start = type.prototype.start;
@@ -518,12 +532,12 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     OperationalLog.prototype.close = function() { events.push('log'); return closeLog.call(this); };
     assert.equal(await server.start(), null);
     assert.equal(await server.stop(), null);
-    assert.deepEqual([...new Set(events.filter(event => event.startsWith('start-')))], ['start-scheduler', 'start-custody', 'start-worker', 'start-mission', 'start-project', 'start-gateway']);
+    assert.deepEqual([...new Set(events.filter(event => event.startsWith('start-')))], ['start-scheduler', 'start-custody', 'start-worker', 'start-mission', 'start-project', 'start-intake', 'start-gateway']);
     const shutdown = events.filter(event => !event.startsWith('start-'));
     const drainEnd = serviceCount + serviceCount;
-    assert.deepEqual(shutdown.slice(0, serviceCount), ['quiesce-scheduler', 'quiesce-custody', 'quiesce-worker', 'quiesce-mission', 'quiesce-project', 'quiesce-gateway']);
-    assert.deepEqual(shutdown.slice(serviceCount, drainEnd).sort(), ['drain-custody', 'drain-gateway', 'drain-mission', 'drain-project', 'drain-scheduler', 'drain-worker']);
-    assert.deepEqual(shutdown.slice(drainEnd), ['stop-gateway', 'stop-project', 'stop-mission', 'stop-worker', 'stop-custody', 'stop-scheduler', 'store', 'log']);
+    assert.deepEqual(shutdown.slice(0, serviceCount), ['quiesce-scheduler', 'quiesce-custody', 'quiesce-worker', 'quiesce-mission', 'quiesce-project', 'quiesce-intake', 'quiesce-gateway']);
+    assert.deepEqual(shutdown.slice(serviceCount, drainEnd).sort(), ['drain-custody', 'drain-gateway', 'drain-intake', 'drain-mission', 'drain-project', 'drain-scheduler', 'drain-worker']);
+    assert.deepEqual(shutdown.slice(drainEnd), ['stop-gateway', 'stop-intake', 'stop-project', 'stop-mission', 'stop-worker', 'stop-custody', 'stop-scheduler', 'store', 'log']);
   `,
     ],
     { env: paths.env, encoding: "utf8", timeout: 15000 },
