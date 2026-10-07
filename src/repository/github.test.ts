@@ -9,13 +9,21 @@ import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
 import { ResultClass, type ResultClassValue } from "../intake/contract.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
+  CURSOR_INVALID_CODE,
+  CURSOR_PAGE_SIZE_MISMATCH_CODE,
   CallKind,
+  CheckEndState,
   DispatchPhase,
   GITHUB_API_VERSION,
   GitHubPlatform,
   GitHubTargetKind,
+  ExpectedEndState,
   classify,
+  decodeCursor,
+  encodeCursor,
   repositoryOf,
   type GitHubCall,
   type GitHubRequest,
@@ -59,14 +67,20 @@ type Handler = (
 interface Platform {
   baseUrl: string;
   requests: IncomingMessage[];
+  bodies: string[];
 }
 
 async function platform(t: TestContext, handler: Handler): Promise<Platform> {
   const requests: IncomingMessage[] = [];
+  const bodies: string[] = [];
   const server = createServer((request, response) => {
     requests.push(request);
-    request.resume();
-    request.once("end", () => handler(request, response, requests.length));
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.once("end", () => {
+      bodies.push(Buffer.concat(chunks).toString("utf8"));
+      handler(request, response, requests.length);
+    });
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -75,7 +89,7 @@ async function platform(t: TestContext, handler: Handler): Promise<Platform> {
     server.close();
   });
   const { port } = server.address() as AddressInfo;
-  return { baseUrl: `http://127.0.0.1:${port}`, requests };
+  return { baseUrl: `http://127.0.0.1:${port}`, requests, bodies };
 }
 
 function answer(
@@ -370,4 +384,254 @@ test("the token reaches no failure and no log record", async (t) => {
     assert.equal(String(!result.ok && result.message).includes(TOKEN), false);
   }
   assert.equal(JSON.stringify(records).includes(TOKEN), false);
+});
+
+const PULL_REQUEST_BODY = {
+  number: 7,
+  state: "open",
+  merged: false,
+  merge_commit_sha: null,
+  head: { ref: "kanthord/node" },
+  labels: [{ name: "kept" }],
+};
+const REVIEW_COMMENTS = [
+  { id: 1, body: "first", path: "a.ts" },
+  { id: 2, body: "second", path: "b.ts" },
+];
+const NEXT_LINK =
+  '<https://api.github.com/repositories/1/pulls/7/comments?page=2>; rel="next", <https://api.github.com/repositories/1/pulls/7/comments?page=3>; rel="last"';
+const PREVIOUS_LINK =
+  '<https://api.github.com/repositories/1/pulls/7/comments?page=1>; rel="prev"';
+const PULL_REQUESTS_PATH = "/repos/octo/widgets/pulls";
+const REVIEW_COMMENTS_PATH = "/repos/octo/widgets/pulls/7/comments";
+const HEAD_BRANCH = "kanthord/node";
+const BASE_BRANCH = "main";
+const QUALIFIED_HEAD = "octo:kanthord/node";
+const OPEN_STATE = "open";
+const FIRST_PAGE = 1;
+const CREATE_AND_LIST_REQUESTS = 2;
+const MERGE_COMMIT = "0123456789abcdef0123456789abcdef01234567";
+const COMMENT_LIMIT = 50;
+const OTHER_COMMENT_LIMIT = 20;
+const SECOND_PAGE = 2;
+const DEFAULT_PAGE_SIZE = 100;
+
+function query(request: IncomingMessage | undefined): URLSearchParams {
+  return new URL(String(request?.url), "http://localhost").searchParams;
+}
+
+test("createPullRequest posts head, base and title and answers the number", async (t) => {
+  const server = await platform(t, answer(201, { number: 12, id: 99 }));
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.createPullRequest(call(), TARGET, {
+    head: HEAD_BRANCH,
+    base: BASE_BRANCH,
+    title: "change",
+  });
+  assert.deepEqual(result, { ok: true, value: { number: 12 } });
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  assert.equal(server.requests[0]?.method, HttpMethod.Post);
+  assert.equal(server.requests[0]?.url, PULL_REQUESTS_PATH);
+  assert.deepEqual(JSON.parse(String(server.bodies[0])), {
+    head: HEAD_BRANCH,
+    base: BASE_BRANCH,
+    title: "change",
+  });
+});
+
+test("createPullRequest answers the class of a refused write", async (t) => {
+  const server = await platform(t, answer(422, { message: "exists" }));
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.createPullRequest(call(), TARGET, {
+    head: HEAD_BRANCH,
+    base: BASE_BRANCH,
+    title: "change",
+  });
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  assert.equal(!result.ok && result.class, ResultClass.FinalRefusal);
+});
+
+test("openPullRequests lists the open pull requests of the head into the base", async (t) => {
+  const server = await platform(
+    t,
+    answer(200, [{ number: 7, title: "a" }, { number: 9 }]),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.openPullRequests(call(), TARGET, {
+    head: HEAD_BRANCH,
+    base: BASE_BRANCH,
+  });
+  assert.deepEqual(result, { ok: true, value: [7, 9] });
+  const [request] = server.requests;
+  assert.equal(request?.method, HttpMethod.Get);
+  assert.equal(
+    new URL(String(request?.url), "http://localhost").pathname,
+    PULL_REQUESTS_PATH,
+  );
+  const parameters = query(request);
+  assert.equal(parameters.get("state"), OPEN_STATE);
+  assert.equal(parameters.get("head"), QUALIFIED_HEAD);
+  assert.equal(parameters.get("base"), BASE_BRANCH);
+});
+
+test("getPullRequest answers the body unchanged", async (t) => {
+  const server = await platform(t, answer(200, PULL_REQUEST_BODY));
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.getPullRequest(call(), TARGET, { number: 7 });
+  assert.deepEqual(result, { ok: true, value: PULL_REQUEST_BODY });
+  assert.equal(server.requests[0]?.url, PULL_REQUEST_PATH);
+});
+
+test("listReviewComments answers the body unchanged and a next cursor from the Link header", async (t) => {
+  const server = await platform(t, (request, response, count) => {
+    const headers: Record<string, string> =
+      count === SINGLE_REQUEST ? { link: NEXT_LINK } : { link: PREVIOUS_LINK };
+    answer(200, REVIEW_COMMENTS, headers)(request, response, count);
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const first = await github.listReviewComments(call(), TARGET, { number: 7 });
+  assert.equal(first.ok, true);
+  assert.deepEqual(first.ok && first.value.body, REVIEW_COMMENTS);
+  const nextCursor = first.ok ? first.value.next_cursor : null;
+  assert.ok(nextCursor !== null);
+  assert.deepEqual(decodeCursor(nextCursor), {
+    page: SECOND_PAGE,
+    per_page: DEFAULT_PAGE_SIZE,
+  });
+  assert.equal(
+    query(server.requests[0]).get("per_page"),
+    String(DEFAULT_PAGE_SIZE),
+  );
+  assert.equal(query(server.requests[0]).get("page"), String(FIRST_PAGE));
+  assert.equal(
+    new URL(String(server.requests[0]?.url), "http://localhost").pathname,
+    REVIEW_COMMENTS_PATH,
+  );
+  const second = await github.listReviewComments(call(), TARGET, {
+    number: 7,
+    cursor: nextCursor,
+  });
+  assert.deepEqual(second, {
+    ok: true,
+    value: { body: REVIEW_COMMENTS, next_cursor: null },
+  });
+  assert.equal(query(server.requests[1]).get("page"), String(SECOND_PAGE));
+});
+
+test("listReviewComments maps limit to per_page and keeps it in the cursor", async (t) => {
+  const server = await platform(t, answer(200, [], { link: NEXT_LINK }));
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listReviewComments(call(), TARGET, {
+    number: 7,
+    limit: COMMENT_LIMIT,
+  });
+  assert.equal(
+    query(server.requests[0]).get("per_page"),
+    String(COMMENT_LIMIT),
+  );
+  assert.ok(result.ok && result.value.next_cursor !== null);
+  assert.deepEqual(decodeCursor(result.value.next_cursor), {
+    page: SECOND_PAGE,
+    per_page: COMMENT_LIMIT,
+  });
+});
+
+test("listReviewComments refuses a limit that differs from its cursor", async (t) => {
+  const server = await platform(t, answer(200, []));
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const cursor = encodeCursor({ page: SECOND_PAGE, per_page: COMMENT_LIMIT });
+  await assert.rejects(
+    github.listReviewComments(call(), TARGET, {
+      number: 7,
+      limit: OTHER_COMMENT_LIMIT,
+      cursor,
+    }),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      error.code === CURSOR_PAGE_SIZE_MISMATCH_CODE,
+  );
+  assert.equal(server.requests.length, NO_REQUEST);
+  const same = await github.listReviewComments(call(), TARGET, {
+    number: 7,
+    limit: COMMENT_LIMIT,
+    cursor,
+  });
+  assert.equal(same.ok, true);
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+});
+
+test("listReviewComments refuses a malformed cursor", async (t) => {
+  const server = await platform(t, answer(200, []));
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const malformed = [
+    "not a cursor",
+    Buffer.from("{", "utf8").toString("base64url"),
+    Buffer.from('{"page":0,"per_page":10}', "utf8").toString("base64url"),
+    Buffer.from('{"per_page":10,"page":1}', "utf8").toString("base64url"),
+    Buffer.from('{"page":1,"per_page":101}', "utf8").toString("base64url"),
+  ];
+  for (const cursor of malformed) {
+    await assert.rejects(
+      github.listReviewComments(call(), TARGET, { number: 7, cursor }),
+      (error: unknown) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.BadRequest &&
+        error.code === CURSOR_INVALID_CODE,
+    );
+  }
+  assert.equal(server.requests.length, NO_REQUEST);
+});
+
+test("foldPullRequest folds the three states of a pull request", () => {
+  const github = new GitHubPlatform();
+  const merged = ExpectedEndState.PullRequestMerged;
+  assert.deepEqual(
+    github.foldPullRequest(
+      {
+        ...PULL_REQUEST_BODY,
+        state: "closed",
+        merged: true,
+        merge_commit_sha: MERGE_COMMIT,
+      },
+      merged,
+    ),
+    { end_state: CheckEndState.Expected, landed_commits: [MERGE_COMMIT] },
+  );
+  assert.deepEqual(
+    github.foldPullRequest(
+      { ...PULL_REQUEST_BODY, state: "closed", merge_commit_sha: MERGE_COMMIT },
+      merged,
+    ),
+    { end_state: CheckEndState.Other, landed_commits: [] },
+  );
+  assert.deepEqual(github.foldPullRequest(PULL_REQUEST_BODY, merged), {
+    end_state: CheckEndState.None,
+    landed_commits: [],
+  });
+  assert.throws(() =>
+    github.foldPullRequest(
+      PULL_REQUEST_BODY,
+      ExpectedEndState.BaseBranchPushed,
+    ),
+  );
+  assert.throws(() => github.foldPullRequest({ number: 7 }, merged));
+});
+
+test("an unexpected success body answers the class of a lost answer", async (t) => {
+  const server = await platform(t, answer(201, { id: 99 }));
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const created = await github.createPullRequest(call(), TARGET, {
+    head: HEAD_BRANCH,
+    base: BASE_BRANCH,
+    title: "change",
+  });
+  assert.equal(!created.ok && created.class, ResultClass.UnknownOutcome);
+  assert.equal(!created.ok && created.status, null);
+  const listed = await github.openPullRequests(call(), TARGET, {
+    head: HEAD_BRANCH,
+    base: BASE_BRANCH,
+  });
+  assert.equal(!listed.ok && listed.class, ResultClass.RetryableRefusal);
+  assert.equal(server.requests.length, CREATE_AND_LIST_REQUESTS);
 });

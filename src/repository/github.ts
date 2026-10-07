@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Octokit, RequestError } from "octokit";
+import { z } from "zod";
 import { ResultClass, type ResultClassValue } from "../intake/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
+import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { isString } from "../kernel/values.ts";
 
 export const GITHUB_API_BASE_URL = "https://api.github.com";
@@ -11,6 +14,19 @@ export const GITHUB_API_VERSION = "2022-11-28";
 export const GITHUB_RESULT_CODE_PREFIX = "repository.platform.github.";
 export const READ_RETRY_DELAY_MS = 250;
 export const READ_ATTEMPT_LIMIT = 240;
+export const REVIEW_COMMENT_LIMIT_DEFAULT = 100;
+export const REVIEW_COMMENT_LIMIT_MIN = 1;
+export const REVIEW_COMMENT_LIMIT_MAX = 100;
+export const CURSOR_PAGE_SIZE_MISMATCH_CODE =
+  "repository.platform.github.cursor_page_size_mismatch";
+export const CURSOR_INVALID_CODE = "system.pagination.cursor_invalid";
+const FIRST_PAGE = 1;
+const NEXT_PAGE_STEP = 1;
+const CURSOR_ENCODING = "base64url";
+const TEXT_ENCODING = "utf8";
+const PULL_REQUEST_STATE_OPEN = "open";
+const MIN_PULL_REQUEST_NUMBER = 1;
+const NEXT_LINK_PATTERN = /<[^>]*>\s*;\s*rel="next"/;
 const API_VERSION_HEADER = "x-github-api-version";
 const RATE_LIMIT_REMAINING_HEADER = "x-ratelimit-remaining";
 const RATE_LIMIT_EXHAUSTED = "0";
@@ -80,12 +96,61 @@ export interface GitHubRequest {
   parameters: Record<string, unknown>;
 }
 
+export const CheckEndState = {
+  Expected: "expected",
+  Other: "other",
+  None: "none",
+} as const;
+export type CheckEndState = (typeof CheckEndState)[keyof typeof CheckEndState];
+
+export const ExpectedEndState = {
+  PullRequestMerged: "pull_request_merged",
+  BaseBranchPushed: "base_branch_pushed",
+} as const;
+export type ExpectedEndState =
+  (typeof ExpectedEndState)[keyof typeof ExpectedEndState];
+
+export interface CheckFold {
+  end_state: CheckEndState;
+  landed_commits: string[];
+}
+
+export interface ReviewCommentPage {
+  body: unknown;
+  next_cursor: string | null;
+}
+
+export interface ReviewCommentQuery {
+  number: number;
+  limit?: number;
+  cursor?: string;
+}
+
+const cursorSchema = z.strictObject({
+  page: z.int().min(FIRST_PAGE).max(Number.MAX_SAFE_INTEGER),
+  per_page: z.int().min(REVIEW_COMMENT_LIMIT_MIN).max(REVIEW_COMMENT_LIMIT_MAX),
+});
+type Cursor = z.infer<typeof cursorSchema>;
+
+const createdPullRequestSchema = z.looseObject({ number: z.int() });
+const pullRequestListSchema = z.array(z.looseObject({ number: z.int() }));
+const pullRequestStateSchema = z.looseObject({
+  state: z.string(),
+  merged: z.boolean(),
+  merge_commit_sha: z.string().nullable(),
+});
+
 export interface GitHubOptions {
   baseUrl?: string;
 }
 
+interface Exchange {
+  data: unknown;
+  link: string | null;
+}
+
 type Attempt =
-  | { ok: true; value: unknown }
+  | { ok: true; value: Exchange }
   | { ok: false; error: unknown; phase: DispatchPhase };
 
 export function repositoryOf(target: GitHubTarget): GitHubRepository {
@@ -194,6 +259,86 @@ function isTransportError(error: unknown): boolean {
   return !(error instanceof RequestError) || error.response === undefined;
 }
 
+function unreadableBody(kind: CallKind): GitHubFailure {
+  assert.ok(Object.values(CallKind).includes(kind));
+  const answer = failure(
+    transportClass(DispatchPhase.AfterDispatch, kind),
+    null,
+    "the GitHub answer holds an unexpected body",
+  );
+  assert.ok(!answer.ok);
+  return answer;
+}
+
+function invalidCursor(): never {
+  throw new OperationError(
+    HttpStatus.BadRequest,
+    CURSOR_INVALID_CODE,
+    "Cursor is invalid.",
+  );
+}
+
+export function encodeCursor(cursor: Cursor): string {
+  assert.ok(cursorSchema.safeParse(cursor).success);
+  const encoded = Buffer.from(canonicalJSON(cursor), TEXT_ENCODING).toString(
+    CURSOR_ENCODING,
+  );
+  assert.deepEqual(decodeCursor(encoded), cursor);
+  return encoded;
+}
+
+export function decodeCursor(cursor: string): Cursor {
+  const text = Buffer.from(cursor, CURSOR_ENCODING).toString(TEXT_ENCODING);
+  if (Buffer.from(text, TEXT_ENCODING).toString(CURSOR_ENCODING) !== cursor) {
+    invalidCursor();
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    invalidCursor();
+  }
+  const parsed = cursorSchema.safeParse(value);
+  if (!parsed.success || canonicalJSON(parsed.data) !== text) {
+    invalidCursor();
+  }
+  return parsed.data;
+}
+
+export function reviewCommentPage(query: ReviewCommentQuery): Cursor {
+  assert.ok(Number.isInteger(query.number));
+  assert.ok(
+    query.limit === undefined ||
+      (Number.isInteger(query.limit) &&
+        query.limit >= REVIEW_COMMENT_LIMIT_MIN &&
+        query.limit <= REVIEW_COMMENT_LIMIT_MAX),
+  );
+  if (query.cursor === undefined) {
+    return {
+      page: FIRST_PAGE,
+      per_page: query.limit ?? REVIEW_COMMENT_LIMIT_DEFAULT,
+    };
+  }
+  const cursor = decodeCursor(query.cursor);
+  if (query.limit !== undefined && query.limit !== cursor.per_page) {
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      CURSOR_PAGE_SIZE_MISMATCH_CODE,
+      "The limit differs from the page size of the cursor.",
+      { limit: query.limit, per_page: cursor.per_page },
+    );
+  }
+  return cursor;
+}
+
+export function hasNextLink(link: string | null): boolean {
+  assert.ok(link === null || isString(link));
+  return (
+    link !== null &&
+    link.split(",").some((part) => NEXT_LINK_PATTERN.test(part))
+  );
+}
+
 export class GitHubPlatform {
   readonly #baseUrl: string;
 
@@ -207,6 +352,126 @@ export class GitHubPlatform {
     target: GitHubTarget,
     request: GitHubRequest,
   ): Promise<GitHubAnswer<unknown>> {
+    const answer = await this.#exchange(call, target, request);
+    return answer.ok ? { ok: true, value: answer.value.data } : answer;
+  }
+
+  async createPullRequest(
+    call: GitHubCall,
+    target: GitHubTarget,
+    pullRequest: { head: string; base: string; title: string },
+  ): Promise<GitHubAnswer<{ number: number }>> {
+    assert.ok(pullRequest.head.length >= MIN_SEGMENT_LENGTH);
+    assert.ok(pullRequest.base.length >= MIN_SEGMENT_LENGTH);
+    const answer = await this.send(call, target, {
+      kind: CallKind.Write,
+      route: "POST /repos/{owner}/{repo}/pulls",
+      parameters: { ...pullRequest },
+    });
+    if (!answer.ok) {
+      return answer;
+    }
+    const created = createdPullRequestSchema.safeParse(answer.value);
+    return created.success
+      ? { ok: true, value: { number: created.data.number } }
+      : unreadableBody(CallKind.Write);
+  }
+
+  async openPullRequests(
+    call: GitHubCall,
+    target: GitHubTarget,
+    branches: { head: string; base: string },
+  ): Promise<GitHubAnswer<number[]>> {
+    assert.ok(branches.head.length >= MIN_SEGMENT_LENGTH);
+    assert.ok(branches.base.length >= MIN_SEGMENT_LENGTH);
+    const { owner } = repositoryOf(target);
+    const answer = await this.send(call, target, {
+      kind: CallKind.Read,
+      route: "GET /repos/{owner}/{repo}/pulls",
+      parameters: {
+        state: PULL_REQUEST_STATE_OPEN,
+        head: `${owner}:${branches.head}`,
+        base: branches.base,
+      },
+    });
+    if (!answer.ok) {
+      return answer;
+    }
+    const listed = pullRequestListSchema.safeParse(answer.value);
+    return listed.success
+      ? {
+          ok: true,
+          value: listed.data.map((pullRequest) => pullRequest.number),
+        }
+      : unreadableBody(CallKind.Read);
+  }
+
+  async getPullRequest(
+    call: GitHubCall,
+    target: GitHubTarget,
+    pullRequest: { number: number },
+  ): Promise<GitHubAnswer<unknown>> {
+    assert.ok(Number.isInteger(pullRequest.number));
+    assert.ok(pullRequest.number >= MIN_PULL_REQUEST_NUMBER);
+    return this.send(call, target, {
+      kind: CallKind.Read,
+      route: "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+      parameters: { pull_number: pullRequest.number },
+    });
+  }
+
+  async listReviewComments(
+    call: GitHubCall,
+    target: GitHubTarget,
+    query: ReviewCommentQuery,
+  ): Promise<GitHubAnswer<ReviewCommentPage>> {
+    assert.ok(query.number >= MIN_PULL_REQUEST_NUMBER);
+    const page = reviewCommentPage(query);
+    const answer = await this.#exchange(call, target, {
+      kind: CallKind.Read,
+      route: "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments",
+      parameters: {
+        pull_number: query.number,
+        per_page: page.per_page,
+        page: page.page,
+      },
+    });
+    if (!answer.ok) {
+      return answer;
+    }
+    const next = hasNextLink(answer.value.link)
+      ? encodeCursor({ ...page, page: page.page + NEXT_PAGE_STEP })
+      : null;
+    return { ok: true, value: { body: answer.value.data, next_cursor: next } };
+  }
+
+  foldPullRequest(
+    body: unknown,
+    expectedEndState: ExpectedEndState,
+  ): CheckFold {
+    assert.equal(expectedEndState, ExpectedEndState.PullRequestMerged);
+    const pullRequest = pullRequestStateSchema.parse(body);
+    if (pullRequest.merged) {
+      assert.ok(pullRequest.merge_commit_sha !== null);
+      return {
+        end_state: CheckEndState.Expected,
+        landed_commits: [pullRequest.merge_commit_sha],
+      };
+    }
+    return {
+      end_state:
+        pullRequest.state === PULL_REQUEST_STATE_OPEN
+          ? CheckEndState.None
+          : CheckEndState.Other,
+      landed_commits: [],
+    };
+  }
+
+  async #exchange(
+    call: GitHubCall,
+    target: GitHubTarget,
+    request: GitHubRequest,
+  ): Promise<GitHubAnswer<Exchange>> {
     assert.ok(call.token.length >= MIN_TOKEN_LENGTH);
     assert.ok(Number.isFinite(call.deadlineAt));
     const repository = repositoryOf(target);
@@ -223,7 +488,7 @@ export class GitHubPlatform {
     call: GitHubCall,
     repository: GitHubRepository,
     request: GitHubRequest,
-  ): Promise<GitHubAnswer<unknown>> {
+  ): Promise<GitHubAnswer<Exchange>> {
     let attempt: Attempt = await this.#attempt(call, repository, request);
     for (let count = 1; count < READ_ATTEMPT_LIMIT; count += 1) {
       if (attempt.ok || !isTransportError(attempt.error)) {
@@ -271,7 +536,11 @@ export class GitHubPlatform {
         headers: { [API_VERSION_HEADER]: GITHUB_API_VERSION },
         request: { signal },
       });
-      return { ok: true, value: response.data };
+      const link = response.headers.link;
+      return {
+        ok: true,
+        value: { data: response.data, link: isString(link) ? link : null },
+      };
     } catch (error) {
       if (!(error instanceof RequestError) && !signal.aborted) {
         throw error;
