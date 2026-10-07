@@ -8,7 +8,7 @@ import {
 } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import type { HealthRegistry, ResourceEntry } from "../kernel/health.ts";
-import type { OperationRegistry } from "../kernel/operation.ts";
+import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -16,6 +16,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { INTAKE_SERVICE_NAME } from "./contract.ts";
+import { runOutbound, type OutboundRun } from "./outbound.ts";
 
 export interface Dependencies {
   store: Store;
@@ -31,6 +32,7 @@ export class IntakeService implements Service {
   private stopTask?: Promise<Error | null>;
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
+  private readonly outboundInFlight = new Set<string>();
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -59,6 +61,21 @@ export class IntakeService implements Service {
     );
     this.started = true;
     return null;
+  }
+
+  runOutbound<TBody>(
+    caller: CallerContext,
+    request: OutboundRun<TBody>,
+  ): Promise<TBody> {
+    return runOutbound(
+      {
+        store: this.dependencies.store,
+        logger: this.dependencies.logger,
+        inFlight: this.outboundInFlight,
+      },
+      caller,
+      request,
+    );
   }
 
   quiesce(): Promise<Error | null> {
