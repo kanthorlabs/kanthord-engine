@@ -10,6 +10,9 @@ import {
   cloneSnapshot,
   fetchAndCheckout,
   pushNodeBranch,
+  mergePushFresh,
+  pushSnapshotFresh,
+  landedOn,
 } from "./connector.ts";
 import type { SshIdentity, SshPin } from "./ssh-identity.ts";
 import { proveSshPin } from "./credential-platform.ts";
@@ -20,6 +23,20 @@ export {
   type CredentialDependencies,
 } from "./credential.ts";
 export { REPOSITORY_PLATFORMS } from "./credential-platform.ts";
+export {
+  foldBranchPush,
+  GitStage,
+  GitWriteError,
+  type BranchCommitInput,
+  type Landing,
+  type MergePushInput,
+} from "./connector.ts";
+
+export interface GitWriter {
+  mergePushFresh: typeof mergePushFresh;
+  pushSnapshotFresh: typeof pushSnapshotFresh;
+  landedOn: typeof landedOn;
+}
 
 export const platformImplementations = {
   [RepositoryPlatform.GitHub]: GitHubPlatform,
@@ -29,11 +46,14 @@ export interface Dependencies {
   health?: HealthRegistry;
 }
 
-export class RepositoryComponent {
+export class RepositoryComponent implements GitWriter {
   clone = clone;
   cloneSnapshot = cloneSnapshot;
   fetchAndCheckout = fetchAndCheckout;
   pushNodeBranch = pushNodeBranch;
+  mergePushFresh = mergePushFresh;
+  pushSnapshotFresh = pushSnapshotFresh;
+  landedOn = landedOn;
   constructor(dependencies: Dependencies = {}) {
     checkRepositoryTools();
     dependencies.health?.register("repository", (context) =>
