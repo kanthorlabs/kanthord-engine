@@ -53,11 +53,16 @@ import {
   type CustodyAuthorization,
   type CustodyExecution,
   type Grant,
+  GrantKind,
+  type GrantOf,
+  type GrantRequest,
+  type MissionAuthorization,
   type Material,
   piCredentialSchema,
   type WorkbenchCredentialsInput,
   type WorkbenchGrant,
 } from "./contract.ts";
+import type { ExecutionClaim } from "../kernel/operation.ts";
 import {
   consumeGrant,
   consumeWorkbenchGrant,
@@ -82,6 +87,7 @@ import { isReservedName, validateNameForm } from "./names.ts";
 export interface Dependencies {
   executions: CustodyExecutions;
   authorization: CustodyAuthorization;
+  missionAuthorization: MissionAuthorization;
   clientSecret: (clientId: string) => string;
   store: Store;
   platforms: CredentialPlatforms;
@@ -306,11 +312,13 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly inboundsNaming: InboundsNamingFn;
   private readonly executions: CustodyExecutions;
   private readonly authorization: CustodyAuthorization;
+  private readonly missionAuthorization: MissionAuthorization;
   private readonly clientSecret: (clientId: string) => string;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
     this.authorization = dependencies.authorization;
+    this.missionAuthorization = dependencies.missionAuthorization;
     this.clientSecret = dependencies.clientSecret;
     this.store = dependencies.store;
     this.platforms = dependencies.platforms;
@@ -328,42 +336,94 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx: Transaction,
     identity: MachineIdentity,
     execution: CustodyExecution,
+    now: number,
+  ): Grant {
+    return this.authorizeOperation(
+      tx,
+      { kind: GrantKind.ModelInference, identity, execution },
+      now,
+    );
+  }
+
+  authorizeOperation<R extends GrantRequest>(
+    tx: Transaction,
+    request: R,
+    now: number,
+  ): GrantOf<R["kind"]>;
+  authorizeOperation(
+    tx: Transaction,
+    request: GrantRequest,
+    now: number,
   ): Grant {
     assert(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
-    const { credential, platform } = this.authorization.authorizeModelInference(
+    if (request.kind === GrantKind.ModelInference) {
+      const { credential, platform, provider_id, agent_provider } =
+        this.authorization.authorizeModelInference(
+          tx,
+          request.identity,
+          request.execution,
+        );
+      return mintGrant({
+        kind: request.kind,
+        credential,
+        platform,
+        project_id: request.execution.project_id,
+        execution: request.execution,
+        facts: { provider_id, agent_provider },
+      });
+    }
+    const execution =
+      request.claim === null
+        ? null
+        : this.claimedExecution(tx, request.claim, now);
+    if (request.kind === GrantKind.FrozenAction) {
+      const { key, commit, reusedEvidenceId } = request;
+      const authorized = this.missionAuthorization.frozenAction(
+        tx,
+        request.identity,
+        request.claim,
+        { key, commit, reusedEvidenceId },
+      );
+      return mintGrant({ kind: request.kind, execution, ...authorized });
+    }
+    const authorized = this.missionAuthorization.requestEvidence(
       tx,
-      identity,
-      execution,
+      request.identity,
+      request.evidenceId,
+      request.claim,
     );
-    return mintGrant({ credential, platform, execution });
+    return mintGrant({ kind: request.kind, execution, ...authorized });
+  }
+
+  private claimedExecution(
+    tx: Transaction,
+    claim: ExecutionClaim,
+    now: number,
+  ): CustodyExecution {
+    const row = this.executions.requireRunning(
+      tx,
+      claim.executionId,
+      claim.runtimeIdentity,
+      now,
+    );
+    assert.equal(row.execution_id, claim.executionId);
+    assert.equal(row.runtime_identity, claim.runtimeIdentity);
+    if (
+      row.project_id !== claim.projectId ||
+      row.worker_binding_id !== claim.workerBindingId
+    )
+      throw new FacilityError();
+    return row;
   }
 
   release(tx: Transaction, grant: Grant, now: number): Material {
     assert(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
+    if (grant.credential === null) throw new FacilityError();
     consumeGrant(grant);
-    const rows = rowsForName(tx, grant.credential);
-    let row = rows.find((candidate) =>
-      grant.execution.credentials.includes(candidate.id),
-    );
-    if (row && row.ended_at !== null)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        CustodyErrorCode.RevisionRevoked,
-        "The pinned credential revision is revoked.",
-      );
-    if (!row) {
-      row = rows.find((candidate) => candidate.ended_at === null);
-      if (!row)
-        throw new OperationError(
-          HttpStatus.NotFound,
-          CustodyErrorCode.NotFound,
-          "Credential not found.",
-        );
-      this.executions.pinCredential(tx, grant.execution.execution_id, row.id);
-      this.drainRevisions(tx, row.name, now);
-    }
+    const row = this.releasedRow(tx, grant.credential, grant.execution);
+    this.drainRevisions(tx, row.name, now);
     if (row.platform !== grant.platform)
       throw new OperationError(
         HttpStatus.BadRequest,
@@ -385,6 +445,41 @@ export class CustodyComponent implements Service, CredentialRecords {
         encrypted.ciphertext,
       ),
     );
+  }
+
+  consume(grant: Grant): void {
+    if (grant.credential !== null) throw new FacilityError();
+    consumeGrant(grant);
+  }
+
+  private releasedRow(
+    tx: Transaction,
+    credential: string,
+    execution: Grant["execution"],
+  ) {
+    assert(credential.length);
+    const rows = rowsForName(tx, credential);
+    const pinned = execution
+      ? rows.find((candidate) => execution.credentials.includes(candidate.id))
+      : undefined;
+    if (pinned && pinned.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionRevoked,
+        "The pinned credential revision is revoked.",
+      );
+    if (pinned) return pinned;
+    const live = rows.find((candidate) => candidate.ended_at === null);
+    if (!live)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        CustodyErrorCode.NotFound,
+        "Credential not found.",
+      );
+    if (execution)
+      this.executions.pinCredential(tx, execution.execution_id, live.id);
+    assert.equal(live.name, credential);
+    return live;
   }
 
   private workbenchRow(tx: Transaction, grant: WorkbenchGrant): LiveRow {
@@ -486,7 +581,11 @@ export class CustodyComponent implements Service, CredentialRecords {
       execution.runtimeIdentity,
       now,
     );
-    const material = this.release(tx, this.authorize(tx, identity, row), now);
+    const material = this.release(
+      tx,
+      this.authorize(tx, identity, row, now),
+      now,
+    );
     try {
       const envelope = sealMaterial(
         this.clientSecret(identity.clientId),

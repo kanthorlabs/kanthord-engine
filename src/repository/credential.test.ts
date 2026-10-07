@@ -86,6 +86,10 @@ function fixture(
       liveExecutionsPinning: () => [],
     },
     authorization: { authorizeModelInference: unexpected },
+    missionAuthorization: {
+      frozenAction: unexpected,
+      requestEvidence: unexpected,
+    },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
     platforms: { ...LLM_PLATFORMS, ...REPOSITORY_PLATFORMS },

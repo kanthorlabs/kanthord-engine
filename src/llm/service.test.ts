@@ -124,6 +124,10 @@ function fixture(
       liveExecutionsPinning: () => [],
     },
     authorization: { authorizeModelInference: unexpectedCollaboration },
+    missionAuthorization: {
+      frozenAction: unexpectedCollaboration,
+      requestEvidence: unexpectedCollaboration,
+    },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
     platforms: {

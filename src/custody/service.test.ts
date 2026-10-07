@@ -30,7 +30,14 @@ import { CustodyComponent, type Dependencies } from "./service.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { FacilityError } from "./facility.ts";
+import { FacilityError, grantFacts } from "./facility.ts";
+import {
+  GrantKind,
+  type ActionFacts,
+  type CustodyExecution,
+  type Grant,
+} from "./contract.ts";
+import type { ExecutionClaim } from "../kernel/operation.ts";
 import { EXECUTION_CREDENTIAL_MAX_BYTES } from "./contract.ts";
 
 const TestPlatform = {
@@ -146,6 +153,10 @@ const unusedExecutionDependencies = {
     liveExecutionsPinning: () => [],
   },
   authorization: { authorizeModelInference: unexpectedCollaboration },
+  missionAuthorization: {
+    frozenAction: unexpectedCollaboration,
+    requestEvidence: unexpectedCollaboration,
+  },
   clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
 };
 const inputs = [
@@ -186,6 +197,7 @@ function fixture(
     inboundsNaming?: InboundsNamingFn;
     pins?: Map<string, string[]>;
     authorization?: Dependencies["authorization"];
+    missionAuthorization?: Dependencies["missionAuthorization"];
     executions?: Dependencies["executions"];
   } = {},
 ) {
@@ -203,6 +215,9 @@ function fixture(
     ...unusedExecutionDependencies,
     authorization:
       collaborations.authorization ?? unusedExecutionDependencies.authorization,
+    missionAuthorization:
+      collaborations.missionAuthorization ??
+      unusedExecutionDependencies.missionAuthorization,
     executions: collaborations.executions ?? {
       requireRunning: unexpectedCollaboration,
       pinCredential: (_tx, executionId, credentialId) => {
@@ -767,7 +782,7 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
   });
   const release = () =>
     f.store.transaction((tx) => {
-      const grant = f.component.authorize(tx, identity, execution);
+      const grant = f.component.authorize(tx, identity, execution, Date.now());
       const material = f.component.release(tx, grant, Date.now());
       try {
         assert.deepEqual(material.value(), apiSecret);
@@ -805,6 +820,253 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
     noSecret(f.logs);
   } finally {
     f.store.close();
+  }
+});
+
+const EVIDENCE_ID = createIdentity("evidence");
+
+function missionGrantFixture() {
+  const pins = new Map<string, string[]>();
+  const row: CustodyExecution = {
+    execution_id: createIdentity("execution"),
+    project_id: createIdentity("project"),
+    worker_binding_id: createIdentity("binding"),
+    resource_identity: "worker:kanthord:general",
+    runtime_identity: createIdentity("worker_instance"),
+    credentials: [],
+  };
+  const claim: ExecutionClaim = {
+    executionId: row.execution_id,
+    projectId: row.project_id,
+    nodeId: createIdentity("node"),
+    attempt: FIRST_REVISION,
+    pinnedRevision: FIRST_REVISION,
+    runtimeIdentity: row.runtime_identity,
+    workerBindingId: row.worker_binding_id,
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      projectId: row.project_id,
+      resourceIdentity: row.resource_identity,
+      name: "machine",
+      issuedAt: 0,
+    },
+    "jti",
+    row.runtime_identity,
+  );
+  const facts = { frozen_action: { key: "open" } } as unknown as ActionFacts;
+  const state = {
+    credential: "github" as string | null,
+    refused: false,
+    claimRow: { ...row },
+  };
+  const answer = () => {
+    if (state.refused) throw new Error("mission authorization refused");
+    return {
+      credential: state.credential,
+      platform: TestPlatform.Key,
+      project_id: row.project_id,
+      facts,
+    };
+  };
+  const f = fixture({
+    pins,
+    missionAuthorization: {
+      frozenAction: (tx, _identity, received) => {
+        assert(tx.database.isTransaction);
+        assert.equal(received, claim);
+        return answer();
+      },
+      requestEvidence: (tx, _identity, evidenceId) => {
+        assert(tx.database.isTransaction);
+        assert.equal(evidenceId, EVIDENCE_ID);
+        return { ...answer(), facts: facts as never };
+      },
+    },
+    executions: {
+      requireRunning: (_tx, executionId, runtimeIdentity) => {
+        assert.equal(executionId, claim.executionId);
+        assert.equal(runtimeIdentity, claim.runtimeIdentity);
+        return { ...state.claimRow, credentials: [...row.credentials] };
+      },
+      pinCredential: (_tx, executionId, credentialId) => {
+        assert.equal(executionId, row.execution_id);
+        row.credentials.push(credentialId);
+        pins.set(credentialId, [executionId]);
+      },
+      liveExecutionsPinning: (_tx, credentialId) =>
+        pins.get(credentialId) ?? [],
+    },
+  });
+  const frozenAction = (tx: Transaction) =>
+    f.component.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.FrozenAction,
+        identity,
+        claim,
+        key: "open",
+        commit: "a".repeat(40),
+        reusedEvidenceId: null,
+      },
+      Date.now(),
+    );
+  const requestEvidence = (tx: Transaction) =>
+    f.component.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.RequestEvidence,
+        identity,
+        evidenceId: EVIDENCE_ID,
+        claim: null,
+      },
+      Date.now(),
+    );
+  const releaseId = (grant: Grant, tx: Transaction) => {
+    const material = f.component.release(tx, grant, Date.now());
+    try {
+      assert.deepEqual(material.value(), apiSecret);
+      return material.credential_id;
+    } finally {
+      material.drop();
+    }
+  };
+  return { f, row, state, facts, frozenAction, requestEvidence, releaseId };
+}
+
+test("a grant under a claim pins once and reads the pin after a rotation", () => {
+  const m = missionGrantFixture();
+  try {
+    const created = m.f.create(inputs[0]) as CredentialAnswer;
+    const first = created.revisions[0]!.id;
+    const id = () =>
+      m.f.store.transaction((tx) => {
+        const grant = m.frozenAction(tx);
+        assert.equal(grant.execution?.execution_id, m.row.execution_id);
+        return m.releaseId(grant, tx);
+      });
+    assert.equal(id(), first);
+    assert.deepEqual(m.row.credentials, [first]);
+    m.f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    });
+    assert.equal(id(), first);
+    assert.deepEqual(m.row.credentials, [first]);
+  } finally {
+    m.f.store.close();
+  }
+});
+
+test("a grant without an execution pins nothing and releases the newest live revision", () => {
+  const m = missionGrantFixture();
+  try {
+    m.f.create(inputs[0]);
+    const rotated = m.f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    }) as CredentialAnswer;
+    const released = m.f.store.transaction((tx) => {
+      const grant = m.requestEvidence(tx);
+      assert.equal(grant.execution, null);
+      assert.deepEqual(grantFacts(grant), {
+        project_id: m.row.project_id,
+        credential: "github",
+        facts: m.facts,
+      });
+      return m.releaseId(grant, tx);
+    });
+    assert.equal(released, rotated.revisions[0]!.id);
+    assert.deepEqual(m.row.credentials, []);
+    const ended = (m.f.get("github") as CredentialAnswer).revisions.filter(
+      ({ ended_at }) => ended_at !== null,
+    );
+    assert.equal(ended.length, FIRST_REVISION);
+  } finally {
+    m.f.store.close();
+  }
+});
+
+test("a claim whose execution row differs refuses before the mission authorization", () => {
+  const m = missionGrantFixture();
+  try {
+    m.f.create(inputs[0]);
+    for (const change of [
+      { project_id: createIdentity("project") },
+      { worker_binding_id: createIdentity("binding") },
+    ]) {
+      m.state.claimRow = { ...m.row, ...change };
+      m.state.refused = true;
+      assert.throws(
+        () => m.f.store.transaction((tx) => m.frozenAction(tx)),
+        FacilityError,
+      );
+    }
+    assert.deepEqual(m.row.credentials, []);
+  } finally {
+    m.f.store.close();
+  }
+});
+
+test("release and consume match the credential of the grant and refuse a consumed or fabricated grant", () => {
+  const m = missionGrantFixture();
+  try {
+    m.f.create(inputs[0]);
+    m.f.store.transaction((tx) => {
+      const credentialed = m.frozenAction(tx);
+      assert.throws(() => m.f.component.consume(credentialed), FacilityError);
+      m.releaseId(credentialed, tx);
+      assert.throws(
+        () => m.f.component.release(tx, credentialed, Date.now()),
+        FacilityError,
+      );
+      assert.throws(
+        () =>
+          m.f.component.release(
+            tx,
+            Object.freeze({ ...credentialed }),
+            Date.now(),
+          ),
+        FacilityError,
+      );
+      assert.equal(grantFacts(credentialed).credential, inputs[0]!.name);
+    });
+    m.state.credential = null;
+    m.f.store.transaction((tx) => {
+      const credentialless = m.frozenAction(tx);
+      assert.throws(
+        () => m.f.component.release(tx, credentialless, Date.now()),
+        FacilityError,
+      );
+      m.f.component.consume(credentialless);
+      assert.throws(() => m.f.component.consume(credentialless), FacilityError);
+      assert.throws(
+        () => m.f.component.consume(Object.freeze({ ...credentialless })),
+        FacilityError,
+      );
+      assert.equal(grantFacts(credentialless).project_id, m.row.project_id);
+    });
+    assert.equal(m.row.credentials.length, FIRST_REVISION);
+  } finally {
+    m.f.store.close();
+  }
+});
+
+test("a refusal of the mission authorization reaches no pin and no material", () => {
+  const m = missionGrantFixture();
+  try {
+    m.f.create(inputs[0]);
+    m.state.refused = true;
+    for (const authorize of [m.frozenAction, m.requestEvidence])
+      assert.throws(
+        () => m.f.store.transaction((tx) => authorize(tx)),
+        /mission authorization refused/,
+      );
+    assert.deepEqual(m.row.credentials, []);
+    noSecret(m.f.logs);
+  } finally {
+    m.f.store.close();
   }
 });
 

@@ -83,6 +83,14 @@ function fixture(t: TestContext) {
         throw new Error("UNEXPECTED_COLLABORATION");
       },
     },
+    missionAuthorization: {
+      frozenAction: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      requestEvidence: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+    },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
     platforms: {},

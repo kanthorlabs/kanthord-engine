@@ -124,6 +124,14 @@ function fixture(t: TestContext) {
         };
       },
     },
+    missionAuthorization: {
+      frozenAction: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      requestEvidence: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+    },
   });
   const created = store.transaction((tx) =>
     component.create(

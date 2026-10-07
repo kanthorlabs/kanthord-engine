@@ -203,6 +203,10 @@ export function composeServices(options: {
       authorizeModelInference: (...args) =>
         worker.authorizeModelInference(...args),
     },
+    missionAuthorization: {
+      frozenAction: (...args) => mission.authorizeFrozenAction(...args),
+      requestEvidence: (...args) => mission.authorizeRequestEvidence(...args),
+    },
     clientSecret: (clientId) =>
       deriveClientSecret(options.config.master_key, clientId),
     store: options.store,

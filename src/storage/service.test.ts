@@ -73,6 +73,10 @@ function fixture(t: TestContext, logger: Logger = pino({ enabled: false })) {
       liveExecutionsPinning: () => [],
     },
     authorization: { authorizeModelInference: unexpected },
+    missionAuthorization: {
+      frozenAction: unexpected,
+      requestEvidence: unexpected,
+    },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
     platforms: { ...REPOSITORY_PLATFORMS, ...STORAGE_PLATFORMS },

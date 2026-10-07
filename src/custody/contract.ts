@@ -2,8 +2,13 @@ import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CredentialStore } from "@earendil-works/pi-ai";
-import type { HumanIdentity, MachineIdentity } from "../kernel/caller.ts";
+import type {
+  CallerIdentity,
+  HumanIdentity,
+  MachineIdentity,
+} from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
+import type { ExecutionClaim } from "../kernel/operation.ts";
 import {
   ResourceStatus,
   type ResourceCheck,
@@ -138,12 +143,116 @@ export type WorkbenchGrant = Readonly<{
   session_id: string;
 }>;
 
-export type Grant = Readonly<{
-  credential: string;
+export type FrozenActionFacts = {
+  key: string;
+  binding_id: string;
+  action: string;
+  expected_end_state: string;
+  follows: string | null;
+  configuration: { base_branch: string };
+};
+export type PullRequestAddressFacts = {
+  kind: "pull_request";
+  resource_identity: string;
+  number: number;
+};
+export type PlatformAddressFacts =
+  | PullRequestAddressFacts
+  | {
+      kind: "branch_push";
+      resource_identity: string;
+      branch: string;
+      commit: string;
+    };
+export type RepositoryFacts = {
+  binding_id: string;
+  address: string;
+  resource_identity: string;
+  base_branch: string;
+};
+export type ActionFacts = {
+  frozen_action: FrozenActionFacts;
+  repository: RepositoryFacts;
+  snapshot_commit: string;
+  reused_address: PullRequestAddressFacts | null;
+};
+export type RequestFacts = {
+  frozen_action: FrozenActionFacts;
+  address: PlatformAddressFacts;
+  repository: RepositoryFacts;
+};
+export type Authorized<F> = {
+  credential: string | null;
   platform: string;
-  execution: Readonly<
-    Omit<CustodyExecution, "credentials"> & { credentials: readonly string[] }
-  >;
+  project_id: string;
+  facts: F;
+};
+export interface MissionAuthorization {
+  frozenAction(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    input: { key: string; commit: string; reusedEvidenceId: string | null },
+  ): Authorized<ActionFacts>;
+  requestEvidence(
+    tx: Transaction,
+    identity: CallerIdentity,
+    evidenceId: string,
+    claim: ExecutionClaim | null,
+  ): Authorized<RequestFacts>;
+}
+
+export const GrantKind = {
+  ModelInference: "model_inference",
+  FrozenAction: "frozen_action",
+  RequestEvidence: "request_evidence",
+} as const;
+export type GrantKind = (typeof GrantKind)[keyof typeof GrantKind];
+export type GrantRequest =
+  | {
+      kind: typeof GrantKind.ModelInference;
+      identity: MachineIdentity;
+      execution: CustodyExecution;
+    }
+  | {
+      kind: typeof GrantKind.FrozenAction;
+      identity: MachineIdentity;
+      claim: ExecutionClaim;
+      key: string;
+      commit: string;
+      reusedEvidenceId: string | null;
+    }
+  | {
+      kind: typeof GrantKind.RequestEvidence;
+      identity: CallerIdentity;
+      evidenceId: string;
+      claim: ExecutionClaim | null;
+    };
+export type ModelInferenceFacts = {
+  provider_id: string;
+  agent_provider: string;
+};
+type GrantFactsOfKind = {
+  [GrantKind.ModelInference]: ModelInferenceFacts;
+  [GrantKind.FrozenAction]: ActionFacts;
+  [GrantKind.RequestEvidence]: RequestFacts;
+};
+export type GrantExecution = Readonly<
+  Omit<CustodyExecution, "credentials"> & { credentials: readonly string[] }
+>;
+export type GrantOf<K extends GrantKind> = Readonly<{
+  kind: K;
+  credential: string | null;
+  platform: string;
+  project_id: string;
+  execution: GrantExecution | null;
+  facts: Readonly<GrantFactsOfKind[K]>;
+}>;
+export type Grant = { [K in GrantKind]: GrantOf<K> }[GrantKind];
+export type GrantFacts<G extends Grant = Grant> = Readonly<{
+  project_id: string;
+  credential: string | null;
+  facts: G["facts"];
 }>;
 export type Material = {
   readonly credential_id: string;
