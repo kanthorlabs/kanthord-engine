@@ -26,6 +26,7 @@ import { AccessPolicy, OperationLifetime } from "../kernel/operation.ts";
 import { KANTHORD_AUTH_USERNAME } from "./local.ts";
 import { CancellationContext } from "../kernel/context.ts";
 import { HealthStatus } from "../kernel/service.ts";
+import { compareRouteSpecificity } from "./service.ts";
 
 const HUMAN_USERNAME = "ulrich";
 const SINGLE_EXECUTION_COUNT = 1;
@@ -759,4 +760,19 @@ test("HTTP authentication precedes body framing and schema validation", async (t
       refusals[index],
     );
   }
+});
+
+test("a static path segment registers before a parameter segment at the same position", () => {
+  const paths = [
+    "/api/agent/:agentName",
+    "/api/agent/prompt",
+    "/api/agent/model",
+    "/api/agent/enablement/:agentName",
+  ];
+  assert.deepEqual([...paths].sort(compareRouteSpecificity), [
+    "/api/agent/prompt",
+    "/api/agent/model",
+    "/api/agent/enablement/:agentName",
+    "/api/agent/:agentName",
+  ]);
 });

@@ -54,6 +54,20 @@ export interface GatewayDependencies {
   health?: HealthRegistry;
 }
 
+const PARAMETER_PREFIX = ":";
+
+export function compareRouteSpecificity(left: string, right: string): number {
+  const leftParts = left.split("/");
+  const rightParts = right.split("/");
+  const length = Math.min(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index++) {
+    const leftParameter = leftParts[index]!.startsWith(PARAMETER_PREFIX);
+    const rightParameter = rightParts[index]!.startsWith(PARAMETER_PREFIX);
+    if (leftParameter !== rightParameter) return leftParameter ? 1 : -1;
+  }
+  return 0;
+}
+
 export class GatewayService implements Service {
   readonly app: Hono<{ Bindings: HttpBindings }>;
   readonly registry: OperationRegistry;
@@ -374,7 +388,9 @@ export class GatewayService implements Service {
   }
 
   private registerRoutes(): void {
-    for (const { operation } of this.registry.all()) {
+    for (const { operation } of [...this.registry.all()].sort((left, right) =>
+      compareRouteSpecificity(left.operation.path, right.operation.path),
+    )) {
       const maxSize =
         operation.maxBodyBytes ??
         (operation.path.startsWith("/api/auth/")

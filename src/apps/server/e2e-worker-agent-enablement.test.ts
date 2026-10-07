@@ -542,3 +542,14 @@ test("E03.17 credential model list answers over HTTP before any enablement", asy
   );
   assert.ok(answer.items.some((item) => item.modelIdentifier === SONNET));
 });
+
+test("E03.18 prompt read answers over HTTP beside the agent name path", async (t) => {
+  const fixture = await setup(t);
+  const answer = success<{ scope: string; system_layer: string | null }>(
+    await kanthord(
+      ["agent", "prompt", "get", "--scope", "agent", "--agent", AGENT],
+      fixture.env,
+    ),
+  );
+  assert.deepEqual([answer.scope, answer.system_layer], ["agent", "inherit"]);
+});
