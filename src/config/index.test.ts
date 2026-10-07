@@ -127,6 +127,9 @@ test("agent prompt configuration defaults to empty paths and accepts strings", (
     { agent_directory: null },
     { host_file: 1 },
     { host_file: null },
+    { host_file: "off" },
+    { host_file: "no" },
+    { host_file: "false" },
     { x: "" },
   ])
     assert.throws(

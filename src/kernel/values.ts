@@ -16,6 +16,10 @@ export function isNumber(value: unknown): value is number {
   return typeof value === ValueType.Number;
 }
 
+export function isBoolean(value: unknown): value is boolean {
+  return typeof value === ValueType.Boolean;
+}
+
 export function isObject(value: unknown): value is object {
   return value !== null && typeof value === ValueType.Object;
 }
