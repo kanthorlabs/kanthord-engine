@@ -5,11 +5,10 @@ import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { CodedError } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
-import { Store } from "../kernel/store.ts";
+import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { INTAKE_SERVICE_NAME } from "./contract.ts";
 import { IntakeService } from "./index.ts";
 
-const IN_MEMORY_DATABASE = ":memory:";
 const STOPPED_CODE = "intake.lifecycle.stopped";
 
 function identity(service: string): ServiceIdentity {
