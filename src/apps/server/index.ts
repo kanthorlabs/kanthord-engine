@@ -83,6 +83,8 @@ import {
   RepositoryComponent,
   RepositoryCredentials,
   REPOSITORY_PLATFORMS,
+  platformImplementations,
+  type GitWriter,
 } from "../../repository/index.ts";
 import { LlmComponent, LLM_PLATFORMS } from "../../llm/index.ts";
 import { StorageComponent, STORAGE_PLATFORMS } from "../../storage/index.ts";
@@ -103,6 +105,8 @@ export function composeServices(options: {
   logger: Logger;
   health: HealthRegistry;
   repositoryConnector?: RepositoryConnector;
+  github?: { baseUrl: string };
+  repositoryTransport?: GitWriter;
   oauthProviders?: ConstructorParameters<
     typeof LlmComponent
   >[0]["oauthProviders"];
@@ -121,6 +125,12 @@ export function composeServices(options: {
   const repoConnector =
     options.repositoryConnector ??
     new RepositoryComponent({ health: options.health });
+  const github = new platformImplementations.github(options.github);
+  const gitWriter: GitWriter =
+    options.repositoryTransport ??
+    (repoConnector instanceof RepositoryComponent
+      ? repoConnector
+      : new RepositoryComponent());
   const envelopeKey = deriveEnvelopeKey(options.config.master_key);
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
@@ -445,6 +455,8 @@ export function composeServices(options: {
     invocation,
     registry,
     repoConnector,
+    github,
+    gitWriter,
   };
 }
 

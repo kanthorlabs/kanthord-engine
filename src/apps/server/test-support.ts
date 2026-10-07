@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { simpleGit } from "simple-git";
 import { join } from "node:path";
 import { stringify } from "yaml";
 import { Worker, type WorkerOptions } from "../worker/index.ts";
@@ -39,6 +40,9 @@ import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { composeServices } from "./index.ts";
+import { RepositoryComponent, type GitWriter } from "../../repository/index.ts";
+import { GITHUB_API_VERSION } from "../../repository/github.ts";
+import type { RepositoryTransport } from "../../worker/index.ts";
 import {
   AccessPolicy,
   emptyInput,
@@ -513,6 +517,10 @@ export async function gatewayFixture(
     repositoryConnector?: Parameters<
       typeof composeServices
     >[0]["repositoryConnector"];
+    github?: Parameters<typeof composeServices>[0]["github"];
+    repositoryTransport?: Parameters<
+      typeof composeServices
+    >[0]["repositoryTransport"];
     machines?: MachineDependencies;
     inventoryOverrides?: Parameters<
       typeof composeServices
@@ -557,6 +565,8 @@ export async function gatewayFixture(
     workbench,
     invocation,
     repoConnector,
+    github,
+    gitWriter,
   } = composeServices({
     config,
     store,
@@ -565,6 +575,8 @@ export async function gatewayFixture(
     registry: options.registry,
     health: options.health ?? new HealthRegistry(),
     repositoryConnector: options.repositoryConnector,
+    github: options.github,
+    repositoryTransport: options.repositoryTransport,
     oauthProviders: options.oauthProviders,
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
@@ -637,6 +649,8 @@ export async function gatewayFixture(
     fetch(endpoint + path, init);
   return {
     repoConnector,
+    github,
+    gitWriter,
     project,
     intake,
     scheduler,
@@ -669,4 +683,357 @@ export async function gatewayFixture(
     accountId: KANTHORD_AUTH_USERNAME,
     logs,
   };
+}
+
+const GITHUB_VERSION_HEADER = "x-github-api-version";
+const GITHUB_BODY_MAX = 1024 ** 2;
+const GITHUB_PULL_ROUTE =
+  /^\/repos\/([^/]+)\/([^/]+)\/pulls(?:\/([1-9][0-9]*)(\/comments)?)?$/;
+const GITHUB_TOKEN_SCHEME = /^(?:token|bearer) /i;
+const GITHUB_MERGE_SHA = /^[a-f0-9]{40}$/;
+const GITHUB_NOT_FOUND = { message: "Not Found" };
+const GITHUB_SCRIPTED_FAILURE = { message: "scripted failure" };
+const GITHUB_FIRST_PULL_NUMBER = 1;
+const GITHUB_NEXT_PULL_STEP = 1;
+const GITHUB_CREATED_STATUS = 201;
+const GITHUB_EMPTY_BODY = "";
+const GITHUB_MIN_SEGMENT_LENGTH = 1;
+
+export const FakePullState = {
+  Open: "open",
+  Closed: "closed",
+} as const;
+export type FakePullState = (typeof FakePullState)[keyof typeof FakePullState];
+
+export interface FakePullRequest {
+  owner: string;
+  repo: string;
+  number: number;
+  title: string;
+  head: string;
+  base: string;
+  state: FakePullState;
+  merged: boolean;
+  merge_commit_sha: string | null;
+}
+
+export interface FakeGitHubCall {
+  method: string;
+  path: string;
+  body: unknown;
+  token: string | null;
+}
+
+interface FakeGitHubState {
+  pulls: FakePullRequest[];
+  calls: FakeGitHubCall[];
+  next: { status: number; body: unknown } | null;
+  failPulls: number | null;
+  dropNext: boolean;
+  gate: Promise<void> | null;
+}
+
+interface FakeGitHubAnswer {
+  status: number;
+  body: unknown;
+}
+
+const createPullSchema = z.looseObject({
+  head: z.string().min(GITHUB_MIN_SEGMENT_LENGTH),
+  base: z.string().min(GITHUB_MIN_SEGMENT_LENGTH),
+  title: z.string(),
+});
+
+async function readGitHubBody(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    assert.ok(size <= GITHUB_BODY_MAX);
+    chunks.push(Buffer.from(chunk));
+  }
+  const text = Buffer.concat(chunks).toString("utf8");
+  return text === GITHUB_EMPTY_BODY ? null : (JSON.parse(text) as unknown);
+}
+
+function gitHubToken(request: IncomingMessage): string | null {
+  const authorization = request.headers.authorization;
+  if (authorization === undefined) return null;
+  assert.match(authorization, GITHUB_TOKEN_SCHEME);
+  return authorization.replace(GITHUB_TOKEN_SCHEME, "");
+}
+
+function pullBody(pull: FakePullRequest) {
+  assert.ok(pull.number >= GITHUB_FIRST_PULL_NUMBER);
+  assert.ok(pull.merged === (pull.merge_commit_sha !== null));
+  return {
+    number: pull.number,
+    title: pull.title,
+    state: pull.state,
+    merged: pull.merged,
+    merge_commit_sha: pull.merge_commit_sha,
+    head: { ref: pull.head, label: `${pull.owner}:${pull.head}` },
+    base: { ref: pull.base },
+  };
+}
+
+function createPull(
+  state: FakeGitHubState,
+  owner: string,
+  repo: string,
+  body: unknown,
+): FakeGitHubAnswer {
+  const input = createPullSchema.parse(body);
+  const pull: FakePullRequest = {
+    owner,
+    repo,
+    number: state.pulls.length + GITHUB_NEXT_PULL_STEP,
+    title: input.title,
+    head: input.head,
+    base: input.base,
+    state: FakePullState.Open,
+    merged: false,
+    merge_commit_sha: null,
+  };
+  state.pulls.push(pull);
+  assert.equal(state.pulls.at(-1), pull);
+  return { status: GITHUB_CREATED_STATUS, body: pullBody(pull) };
+}
+
+function listPulls(
+  state: FakeGitHubState,
+  owner: string,
+  repo: string,
+  query: URLSearchParams,
+): FakeGitHubAnswer {
+  assert.ok(owner.length >= GITHUB_MIN_SEGMENT_LENGTH);
+  assert.ok(repo.length >= GITHUB_MIN_SEGMENT_LENGTH);
+  const listed = state.pulls.filter(
+    (pull) =>
+      pull.owner === owner &&
+      pull.repo === repo &&
+      (!query.has("state") || query.get("state") === pull.state) &&
+      (!query.has("head") || query.get("head") === `${owner}:${pull.head}`) &&
+      (!query.has("base") || query.get("base") === pull.base),
+  );
+  return { status: HttpStatus.OK, body: listed.map(pullBody) };
+}
+
+function routePull(
+  state: FakeGitHubState,
+  method: string,
+  url: URL,
+  body: unknown,
+): FakeGitHubAnswer {
+  const route = GITHUB_PULL_ROUTE.exec(url.pathname);
+  if (!route) return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
+  const [, owner, repo, number, comments] = route;
+  assert.ok(owner && repo);
+  if (number === undefined) {
+    return method === HttpMethod.Post
+      ? createPull(state, owner, repo, body)
+      : listPulls(state, owner, repo, url.searchParams);
+  }
+  const pull = state.pulls.find(
+    (item) =>
+      item.owner === owner && item.repo === repo && item.number === +number,
+  );
+  if (!pull || method !== HttpMethod.Get)
+    return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
+  return { status: HttpStatus.OK, body: comments ? [] : pullBody(pull) };
+}
+
+function replyGitHub(response: ServerResponse, answer: FakeGitHubAnswer) {
+  assert.ok(Number.isInteger(answer.status));
+  assert.ok(!response.headersSent);
+  response
+    .writeHead(answer.status, { "content-type": "application/json" })
+    .end(JSON.stringify(answer.body));
+}
+
+async function gitHubRequest(
+  state: FakeGitHubState,
+  request: IncomingMessage,
+  response: ServerResponse,
+) {
+  assert.ok(request.url && request.method);
+  assert.equal(request.headers[GITHUB_VERSION_HEADER], GITHUB_API_VERSION);
+  const body = await readGitHubBody(request);
+  const method = request.method;
+  state.calls.push({
+    method,
+    path: request.url,
+    body,
+    token: gitHubToken(request),
+  });
+  if (state.gate) await state.gate;
+  const scripted = state.next;
+  if (scripted) {
+    state.next = null;
+    return replyGitHub(response, scripted);
+  }
+  if (method === HttpMethod.Get && state.failPulls !== null)
+    return replyGitHub(response, {
+      status: state.failPulls,
+      body: GITHUB_SCRIPTED_FAILURE,
+    });
+  const answer = routePull(
+    state,
+    method,
+    new URL(request.url, "http://127.0.0.1"),
+    body,
+  );
+  if (method !== HttpMethod.Get && state.dropNext) {
+    state.dropNext = false;
+    response.destroy();
+    return;
+  }
+  replyGitHub(response, answer);
+}
+
+function changePull(state: FakeGitHubState, number: number): FakePullRequest {
+  const pull = state.pulls.find((item) => item.number === number);
+  assert.ok(pull, "Unknown fake pull request");
+  assert.equal(pull.state, FakePullState.Open);
+  return pull;
+}
+
+export async function fakeGitHub(t: TestContext) {
+  const state: FakeGitHubState = {
+    pulls: [],
+    calls: [],
+    next: null,
+    failPulls: null,
+    dropNext: false,
+    gate: null,
+  };
+  const failures: unknown[] = [];
+  let releaseGate = () => {};
+  const server = createServer((request, response) => {
+    void gitHubRequest(state, request, response).catch((error: unknown) => {
+      failures.push(error);
+      response.destroy(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    });
+  });
+  t.after(async () => {
+    releaseGate();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    if (failures.length)
+      throw new AggregateError(failures, "Fake GitHub failed.");
+  });
+  server.listen(EPHEMERAL_PORT, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && !isString(address));
+  assert.ok(address.port > EPHEMERAL_PORT);
+  return {
+    endpoint: `http://127.0.0.1:${address.port}`,
+    pulls: state.pulls as readonly FakePullRequest[],
+    calls: state.calls as readonly FakeGitHubCall[],
+    merge(number: number, sha: string): void {
+      assert.match(sha, GITHUB_MERGE_SHA);
+      const pull = changePull(state, number);
+      pull.state = FakePullState.Closed;
+      pull.merged = true;
+      pull.merge_commit_sha = sha;
+    },
+    close(number: number): void {
+      changePull(state, number).state = FakePullState.Closed;
+    },
+    respondNext(status: number, body: unknown): void {
+      assert.ok(Number.isInteger(status));
+      assert.equal(state.next, null);
+      state.next = { status, body };
+    },
+    failPulls(status: number | null): void {
+      assert.ok(status === null || Number.isInteger(status));
+      state.failPulls = status;
+    },
+    dropNextAfterApply(): void {
+      assert.equal(state.dropNext, false);
+      state.dropNext = true;
+    },
+    hold(): () => void {
+      assert.equal(state.gate, null);
+      const gate = Promise.withResolvers<void>();
+      state.gate = gate.promise;
+      releaseGate = () => {
+        state.gate = null;
+        gate.resolve();
+      };
+      return releaseGate;
+    },
+  };
+}
+
+const MAIN_REF = "refs/heads/main";
+
+export async function bareRepository(t: TestContext, name: string) {
+  const root = temporary(t);
+  const bare = join(root, `${name}.git`);
+  const seed = join(root, "seed");
+  mkdirSync(bare);
+  await simpleGit(bare).init(true, ["--initial-branch=main"]);
+  await simpleGit().clone(bare, seed);
+  const git = simpleGit(seed);
+  await git.addConfig("user.name", "Test Journey");
+  await git.addConfig("user.email", "test_journey@example.invalid");
+  writeFileSync(join(seed, "README.md"), "test_journey repository\n");
+  await git.add("README.md");
+  await git.commit("initial");
+  await git.push("origin", "main");
+  const head = (await git.revparse(["HEAD"])).trim();
+  assert.match(head, /^[a-f0-9]{40}$/);
+  assert.equal(await remoteHead(bare, MAIN_REF), head);
+  return { bare, head };
+}
+
+export function mappedTransport(
+  addresses: Record<string, string>,
+): RepositoryTransport & GitWriter {
+  const connector = new RepositoryComponent();
+  function mapped(address: string) {
+    assert.ok(Object.hasOwn(addresses, address), "Unmapped repository address");
+    assert.ok(addresses[address]);
+    return addresses[address]!;
+  }
+  return {
+    proveSshIdentity: async () => {},
+    clone: (address, ...args) => connector.clone(mapped(address), ...args),
+    cloneSnapshot: (address, ...args) =>
+      connector.cloneSnapshot(mapped(address), ...args),
+    fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
+    pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
+    mergePushFresh: (input, ...args) =>
+      connector.mergePushFresh(
+        { ...input, address: mapped(input.address) },
+        ...args,
+      ),
+    pushSnapshotFresh: (input, ...args) =>
+      connector.pushSnapshotFresh(
+        { ...input, address: mapped(input.address) },
+        ...args,
+      ),
+    landedOn: (input, ...args) =>
+      connector.landedOn({ ...input, address: mapped(input.address) }, ...args),
+  };
+}
+
+export async function remoteHead(
+  bare: string,
+  ref: string,
+): Promise<string | null> {
+  assert.ok(bare.startsWith("/"));
+  assert.ok(ref.startsWith("refs/heads/"));
+  const output = (await simpleGit().raw(["ls-remote", bare, ref])).trim();
+  if (!output) return null;
+  const [head, found] = output.split(/\s+/);
+  assert.equal(found, ref);
+  assert.match(head!, /^[a-f0-9]{40}$/);
+  return head!;
 }
