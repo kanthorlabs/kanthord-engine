@@ -17,18 +17,18 @@ function byteLength(text: string): number {
 }
 
 function cutMessage(message: string): string {
-  assert(message.isWellFormed(), "Message must be well-formed Unicode.");
+  const wellFormed = message.toWellFormed();
   assert(Number.isInteger(ERROR_MESSAGE_MAX_BYTES), "Bound must be integer.");
-  if (byteLength(message) <= ERROR_MESSAGE_MAX_BYTES) return message;
+  if (byteLength(wellFormed) <= ERROR_MESSAGE_MAX_BYTES) return wellFormed;
   let bytes = 0;
   let end = 0;
-  for (const point of message) {
+  for (const point of wellFormed) {
     const next = bytes + byteLength(point);
     if (next > ERROR_MESSAGE_MAX_BYTES) break;
     bytes = next;
     end += point.length;
   }
-  return message.slice(0, end);
+  return wellFormed.slice(0, end);
 }
 
 function parseStored(current: string | null): ErrorItem[] {

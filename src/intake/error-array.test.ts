@@ -10,6 +10,9 @@ const FIRST_CREATED_AT = 5;
 const FILL_COUNT = 200;
 const NEWEST_CODE = "newest";
 const BIG_CODE = "big";
+const LONE_SURROGATE_JSON = '"bad \\ud800"';
+const REPLACED_MESSAGE = "bad \uFFFD";
+const SINGLE_ITEM = 1;
 
 function item(code: string, message: string, created_at = 1): ErrorItem {
   return { code, message, created_at };
@@ -83,6 +86,17 @@ test("a message cuts on a code point at the byte bound", () => {
   assert(bytes(stored.message) <= ERROR_MESSAGE_MAX_BYTES);
   assert(stored.message.isWellFormed());
   assert.equal(bytes(stored.message), 1 + 4 * 255);
+});
+
+test("a message with a lone surrogate is stored well-formed", () => {
+  const message = JSON.parse(LONE_SURROGATE_JSON) as string;
+  assert(!message.isWellFormed());
+  const answer = appendError(null, item("e", message));
+  const stored = JSON.parse(answer) as ErrorItem[];
+  assert.equal(stored.length, SINGLE_ITEM);
+  const [first] = stored as [ErrorItem];
+  assert(first.message.isWellFormed());
+  assert.equal(first.message, REPLACED_MESSAGE);
 });
 
 test("an escaping-heavy message fits the array bound", () => {
