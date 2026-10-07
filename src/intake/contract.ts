@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { identitySchema } from "../kernel/identity.ts";
+import { timestamp } from "../kernel/json.ts";
 
 export const INTAKE_SERVICE_NAME = "intake";
 export const INBOUND_ID_PREFIX = "inbound";
@@ -39,6 +41,12 @@ export const OutboundOperation = {
   GitMergePush: "git.merge_push",
   S3DeleteObject: "s3.delete_object",
 } as const;
+export const ResultClass = {
+  ConfirmedFailure: "confirmed_failure",
+  RetryableRefusal: "retryable_refusal",
+  FinalRefusal: "final_refusal",
+  UnknownOutcome: "unknown_outcome",
+} as const;
 
 export const inboundKindSchema = z.enum(InboundKind);
 export const inboundPlatformSchema = z.enum(InboundPlatform);
@@ -46,6 +54,26 @@ export const consumerSchema = z.enum(Consumer);
 export const inboundEventStateSchema = z.enum(InboundEventState);
 export const outboundRequestStateSchema = z.enum(OutboundRequestState);
 export const outboundOperationSchema = z.enum(OutboundOperation);
+export const resultClassSchema = z.enum(ResultClass);
+
+export const outboundRequestSchema = z.strictObject({
+  id: identitySchema(OUTBOUND_REQUEST_ID_PREFIX),
+  project_id: identitySchema("project"),
+  operation: outboundOperationSchema,
+  request_key: z.string().min(1),
+  state: outboundRequestStateSchema,
+  result: z.unknown().nullable(),
+  error: z
+    .array(
+      z.strictObject({
+        code: z.string(),
+        message: z.string(),
+        created_at: timestamp,
+      }),
+    )
+    .nullable(),
+  created_at: timestamp,
+});
 
 export type InboundKindValue = z.infer<typeof inboundKindSchema>;
 export type InboundPlatformValue = z.infer<typeof inboundPlatformSchema>;
@@ -55,3 +83,5 @@ export type OutboundRequestStateValue = z.infer<
   typeof outboundRequestStateSchema
 >;
 export type OutboundOperationValue = z.infer<typeof outboundOperationSchema>;
+export type ResultClassValue = z.infer<typeof resultClassSchema>;
+export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
