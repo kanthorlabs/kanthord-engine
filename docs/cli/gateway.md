@@ -40,7 +40,7 @@ kanthord gateway [--endpoint <url>] verify [--token <jwt>] [-h|--help]
 
 The inherited `--endpoint` option also works after `verify`.
 The command resolves the endpoint and token through the client configuration precedence.
-`--token` overrides the environment and operator-supplied client file; `--endpoint` selects the target server.
+`--token` overrides `KANTHORD_TOKEN` and `cli.yaml`; `--endpoint` selects the target server.
 An invocation without a resolved token receives HTTP 401.
 
 ### Arguments, options, and defaults

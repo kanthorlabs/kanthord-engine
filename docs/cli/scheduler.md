@@ -37,7 +37,8 @@ declarations and execution hosting. Project owns bindings, configured counts,
 resource authorization and delivery verification.
 
 The public surface has **8 remote commands**: six read operations
-and two mutations. Group/resource help is local and calls no operation.
+and two mutations. Seven are implemented; the read `eligibility get` is
+declared only. Group/resource help is local and calls no operation.
 
 ## Shared input, output and access rules
 
@@ -128,6 +129,9 @@ zero. Help exits zero. Input, authentication, authorization and operation
 failures exit nonzero with a diagnostic. An indeterminate result also exits
 nonzero. For a mutation, the diagnostic supplies the retry key without claiming
 that no effect occurred. For a read, it instructs the user to retry the command.
+For `execution release`, the diagnostic instead tells the user to run
+`kanthord scheduler execution get <execution-id>` before any retry, because a
+retry after a committed release fails the execution proof.
 Tokens and delivery verification material never appear in these outputs.
 
 Every list result is `{ "items": [...], "next_cursor": null | string }`:

@@ -73,7 +73,7 @@ All paths below are implemented routes under the ruled `/api/repository/credenti
 | 8   | `platforms [R]`                                           | `GET /api/repository/credential/platform`                                    | `repository.credential.platform_list`   | `human`; implemented |
 | 9   | `check --file <path> [R]`                                 | `POST /api/repository/credential/check`                                      | `repository.credential.check`           | `human`; implemented |
 | 10  | `verify <credential-name> [R]`                            | `POST /api/repository/credential/:credential_name/verify`                    | `repository.credential.verify`          | `human`; implemented |
-| 11  | `ssh-discover [R]`                                        | `GET /api/repository/credential/ssh/discover`                                | `repository.credential.ssh_discover`    | `human`; proposed    |
+| 11  | `ssh-discover [R]`                                        | `GET /api/repository/credential/ssh/discover`                                | `repository.credential.ssh_discover`    | `human`; implemented |
 
 The static `/api/repository/credential/platform`, `/api/repository/credential/check` and `/api/repository/credential/ssh/discover` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform`, `check` and `ssh`.
 These routes have no project identity.
@@ -102,6 +102,7 @@ Create, rotate and update-metadata of an `ssh` record run `ssh -G` and compare t
 
 - A resolution with `identitiesonly` other than `yes`, or with a number of `identityfile` lines other than 1, answers `400 repository.credential.ssh_identity_ambiguous`.
 - A resolved value that differs from the metadata answers `400 repository.credential.ssh_drift`. `details` names each differing key.
+- An `ssh -G` run that fails or exceeds its deadline answers `422 repository.credential.ssh_resolve_failed`. `details` holds the `host`.
 
 `get` adds `bindings` to the credential answer: the list of `{ project_id, project_name, binding_id, name }` of every binding revision that names the credential and that is a dependent. The Project Service answers that read.
 
@@ -124,12 +125,12 @@ Custody validates the local schema and makes no remote call. HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
 creation. A taken name answers `409 credential.name.conflict`, with the identity
 of its newest revision in `error.details`, including a retry after restart. The CLI prints
-that identity, never the submitted secret.
+the code and the HTTP status, not that identity, and never the submitted secret.
 
 ## `list`
 
 No positional arguments and no body. The optional filter maps to query `platform`.
-The optional `--include-archived` flag maps to query `include_archived`, a boolean that defaults to `false`. Without it, the list leaves out an archived name.
+The optional `--include-archived` flag maps to query `include_archived`, the string `true` or `false` with default `false`. Without it, the list leaves out an archived name.
 It is single-use with no default filter. The platform enum is defined above.
 `limit` and optional `cursor` use the shared pagination contract.
 HTTP `200` returns one credential answer for each name of this component in `items`, in ascending name
@@ -270,11 +271,12 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.revision.newest_live`                   | The revoke names the newest live revision.                                                      | revoke                                                                 |
 | 409   | `credential.credential.in_use`                      | A dependent names the credential; `details` holds `agent_providers`, `bindings` and `inbounds`. | archive                                                                |
 | 409   | `credential.credential.archived`                    | The credential is archived; an archive is final.                                                | rotate, update-metadata, archive, verify                               |
-| 404   | `credential.revision.not_found`                     | The revision does not exist.                                                                    | revoke                                                                 |
+| 404   | `credential.revision.not_found`                     | The revision does not exist, or the credential name is unknown.                                 | revoke                                                                 |
 | 409   | `credential.revision.revoked`                       | A pinned use names a revoked revision.                                                          | worker handover, worker credential (API only)                          |
 | 400   | `repository.credential.ssh_identity_ambiguous`      | The SSH host resolves without `identitiesonly yes` or without exactly one `identityfile`.       | create, rotate, update-metadata, binding apply, ssh-discover (reason)  |
 | 400   | `repository.credential.ssh_drift`                   | `ssh -G` resolves values that differ from the metadata; details name each differing key.        | create, rotate, update-metadata, binding apply                         |
 | 422   | `repository.credential.ssh_config_unreadable`       | The server cannot read `~/.ssh/config`.                                                         | ssh-discover                                                           |
+| 422   | `repository.credential.ssh_resolve_failed`          | `ssh -G` fails for the host or exceeds its deadline; details hold the `host`.                   | create, rotate, update-metadata                                        |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.
 

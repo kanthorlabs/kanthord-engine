@@ -49,11 +49,12 @@ owning pages in the [index](./README.md).
 ### Closed root names and option scope
 
 **Implemented and target requirement:** the three global root names are
-`config`, `serve`, and `jwt`. The six service root names are `project`, `mission`,
+`config`, `serve`, and `jwt`. The four component root names are `llm`, `repository`,
+`storage`, and `agent`. The six service root names are `project`, `mission`,
 `scheduler`, `worker`, `tracking`, and `gateway`. These are disjoint, closed sets.
 `server` and the application form of `worker` are operands of `serve`, never new
-root commands. `cli` is not a `serve` operand. Current `project`, `mission`,
-`scheduler`, and `tracking` groups expose help only.
+root commands. `cli` is not a `serve` operand. The current `tracking` group
+exposes help only.
 
 - [`--config`](./common-flags.md#--config) selects server configuration only
   where the local command declares it; service commands reject it.
@@ -178,7 +179,12 @@ The worker application uses the same
 
 **Implemented:** `runCLI` uses exit `0` for success and `1` for handled failures.
 Commander help exits `0`; parsing failures exit nonzero. A caught CLI or domain
-failure writes a diagnostic to stderr. Coded diagnostics use the owning
+failure writes a diagnostic to stderr. A declared remote failure of a mutation
+prints `<code>: request failed (HTTP <status>); idempotency key <key>.`, and a
+declared remote failure of a read prints `<code>: request failed (HTTP <status>).`
+`gateway verify`, `worker register` and `worker handover` put the command name
+before `request failed`. The CLI does not print the remote message, details or
+request ID. Coded diagnostics use the owning
 `cli`, `system`, or service namespace; Commander syntax diagnostics are not a
 uniform JSON envelope. The launcher rejects unsupported Node.js versions with
 one stderr line and a nonzero exit before loading the application. The supported
@@ -733,7 +739,8 @@ The [`--help`](./common-flags.md#--help) reference defines the implemented
 parser option and its no-work behavior. Command-specific forms are:
 
 - `kanthord -h` or `kanthord --help`: print root help to stdout and exit `0`.
-  List exactly the three global names and six service groups. There is no
+  List exactly the three global names, four component groups and six service
+  groups. There is no
   top-level `help` command; `kanthord help` currently fails as excess input.
 - `kanthord` with no command: print root help to stdout and exit `1`; start no
   application. This differs deliberately from an explicit help request.

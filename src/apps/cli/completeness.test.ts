@@ -18,7 +18,7 @@ const PAGE_INVENTORIES = {
   repository: "## Command inventory",
   storage: "## Command inventory",
   agent: "## Command inventory",
-  project: "## Proposed command inventory and synopsis",
+  project: "## Command inventory and synopsis",
   mission: "## Target command inventory and synopsis",
   scheduler: "## Command inventory and operation mapping",
   worker: "## Command inventory",
