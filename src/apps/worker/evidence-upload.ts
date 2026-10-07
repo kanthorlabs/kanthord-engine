@@ -217,7 +217,7 @@ export async function uploadEvidence(input: {
   context: Context;
 }): Promise<UploadResult> {
   const { claim, api } = input;
-  const context = new CancellationContext(input.context, claim.expiredAt);
+  const context = new CancellationContext(input.context, claim.expired_at);
   let file: Awaited<ReturnType<typeof open>> | undefined;
   try {
     throwIfCancelled(context);
@@ -225,14 +225,14 @@ export async function uploadEvidence(input: {
     const metadata = await hashEvidence(file, context);
     throwIfCancelled(context);
     const execution = {
-      executionId: claim.executionId,
+      execution_id: claim.execution_id,
       attempt: claim.attempt,
-      nodeRevision: claim.pinnedRevision,
+      node_revision: claim.pinned_revision,
     };
     const submitted = completed(
       await api.mission["evidence.submit"](
         {
-          params: { nodeId: claim.nodeId },
+          params: { node_id: claim.node_id },
           query: {},
           body: {
             ...execution,
@@ -241,7 +241,7 @@ export async function uploadEvidence(input: {
               {
                 kind: "object",
                 size: metadata.size,
-                mediaType: OBJECT_MEDIA_TYPE,
+                media_type: OBJECT_MEDIA_TYPE,
                 sha256: metadata.sha256,
               },
             ],
@@ -253,17 +253,17 @@ export async function uploadEvidence(input: {
     const singleUpload = 1;
     assert.equal(submitted.uploads.length, singleUpload);
     const upload = submitted.uploads[0]!;
-    await transfer(file, upload.putUrl, upload.headers, context);
+    await transfer(file, upload.put_url, upload.headers, context);
     const result = completed(
       await api.mission["evidence.asset.complete"](
-        { params: { assetId: upload.assetId }, query: {}, body: execution },
+        { params: { asset_id: upload.asset_id }, query: {}, body: execution },
         { context, idempotencyKey: ulid() },
       ),
     );
-    assert.equal(result.assetId, upload.assetId);
+    assert.equal(result.asset_id, upload.asset_id);
     return {
-      evidence_id: result.evidenceId,
-      asset_id: result.assetId,
+      evidence_id: result.evidence_id,
+      asset_id: result.asset_id,
       uri: result.uri,
     };
   } finally {

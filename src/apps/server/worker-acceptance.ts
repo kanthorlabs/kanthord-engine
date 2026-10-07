@@ -184,7 +184,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
   return {
     fixture,
     human,
-    projectId: project.id,
+    project_id: project.id,
     bindings: bindingSet.bindings,
     read,
     write,

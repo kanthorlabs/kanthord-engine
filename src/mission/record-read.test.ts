@@ -54,25 +54,25 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
   const bindings: MissionBindings = {
     ...h.dependencies.bindings,
     getBindingRevision: () => ({
-      bindingId,
-      projectId,
+      binding_id: bindingId,
+      project_id: projectId,
       name: "repo",
-      resourceIdentity: "repository:github:owner/repo",
+      resource_identity: "repository:github:owner/repo",
       revision: FIRST_ATTEMPT,
       tombstone: false,
       disabled: false,
     }),
     repositoryPolicyOf: () => ({
-      bindingId,
-      projectId,
+      binding_id: bindingId,
+      project_id: projectId,
       name: "repo",
       address: "git@github.com:owner/repo.git",
       platform: "github",
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       credential: "github",
-      baseBranch: "main",
+      base_branch: "main",
       action,
-      projectPrompt: null,
+      project_prompt: null,
     }),
   };
   h.store.transaction((tx) => {
@@ -94,8 +94,8 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
         canonicalJSON([bindingId]),
         canonicalJSON({
           write: RevisionWrite.NodeCreate,
-          previousRevision: null,
-          changedFields: [],
+          previous_revision: null,
+          changed_fields: [],
         }),
         canonicalJSON(ACTOR),
         NOW,
@@ -112,7 +112,7 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
     provenance: canonicalJSON(ACTOR),
     created_at: NOW,
   });
-  return { ...h, nodeId, bindings, bindingId, evidence };
+  return { ...h, node_id: nodeId, bindings, binding_id: bindingId, evidence };
 }
 
 for (const example of [
@@ -176,14 +176,14 @@ for (const example of [
   test(`closing event ${example.event} derives from basis and policy after a request delete`, (t) => {
     const h = fixture(t, example.action);
     h.store.transaction((tx) => {
-      const attempt = openAttempt(tx, h.nodeId, FIRST_ATTEMPT, ACTOR, NOW);
+      const attempt = openAttempt(tx, h.node_id, FIRST_ATTEMPT, ACTOR, NOW);
       const first = h.evidence();
       const second = h.evidence(REQUEST_KEY);
       insertEvidence(tx, first, []);
       insertEvidence(tx, second, []);
       const assessment = insertAssessment(tx, {
         id: createIdentity("assessment"),
-        node_id: h.nodeId,
+        node_id: h.node_id,
         attempt: FIRST_ATTEMPT,
         result: example.result,
         rationale: "Reviewed",
@@ -197,26 +197,26 @@ for (const example of [
       });
       const outcome = insertOutcome(tx, {
         id: createIdentity("outcome"),
-        node_id: h.nodeId,
+        node_id: h.node_id,
         assessment_id: assessment.id,
         result: example.outcome,
         evidence_ids: canonicalJSON([first.id, second.id]),
         created_at: NOW,
       });
-      setNodeState(tx, h.nodeId, example.state);
+      setNodeState(tx, h.node_id, example.state);
       const before = outcomeRecord(tx, h.bindings, outcome);
-      assert.equal(before.closingEvent, example.event);
-      assert.deepEqual(before.evidenceIds, [first.id, second.id].sort());
+      assert.equal(before.closing_event, example.event);
+      assert.deepEqual(before.evidence_ids, [first.id, second.id].sort());
       assert.equal(before.attempt, FIRST_ATTEMPT);
-      assert.equal(before.nodeRevision, FIRST_ATTEMPT);
-      assert.deepEqual(attemptRecord(tx, h.bindings, attempt).outcomeIds, [
+      assert.equal(before.node_revision, FIRST_ATTEMPT);
+      assert.deepEqual(attemptRecord(tx, h.bindings, attempt).outcome_ids, [
         outcome.id,
       ]);
       tx.database
         .prepare("DELETE FROM mission_evidence WHERE id = ?")
         .run(second.id);
       assert.equal(
-        outcomeRecord(tx, h.bindings, outcome).closingEvent,
+        outcomeRecord(tx, h.bindings, outcome).closing_event,
         example.event,
       );
     });
@@ -228,7 +228,7 @@ test("blocked node projection includes its attempt-zero human outcome and no req
   h.store.transaction((tx) => {
     const assessment = insertAssessment(tx, {
       id: createIdentity("assessment"),
-      node_id: h.nodeId,
+      node_id: h.node_id,
       attempt: NO_ATTEMPT,
       result: AssessmentResult.Undetermined,
       rationale: "Held",
@@ -242,23 +242,23 @@ test("blocked node projection includes its attempt-zero human outcome and no req
     });
     const outcome = insertOutcome(tx, {
       id: createIdentity("outcome"),
-      node_id: h.nodeId,
+      node_id: h.node_id,
       result: assessment.result,
       assessment_id: assessment.id,
       evidence_ids: "[]",
       created_at: NOW,
     });
-    setNodeState(tx, h.nodeId, NodeState.Blocked);
-    const row = readNode(tx, h.nodeId)!;
+    setNodeState(tx, h.node_id, NodeState.Blocked);
+    const row = readNode(tx, h.node_id)!;
     const context = blockedContextOf(tx, h.bindings, row);
     assert.equal(context.outcome.id, outcome.id);
     assert.equal(context.outcome.attempt, NO_ATTEMPT);
     assert.deepEqual(context.requests, []);
     const node = nodeSchema.parse(nodeRecord(tx, row, h.bindings));
     assert.ok(node.kind !== NodeKind.Task);
-    assert.deepEqual(node.blockedContext, context);
+    assert.deepEqual(node.blocked_context, context);
     assert.deepEqual(
-      externalActionRecords(tx, h.bindings, h.nodeId, NO_ATTEMPT),
+      externalActionRecords(tx, h.bindings, h.node_id, NO_ATTEMPT),
       [],
     );
   });
@@ -267,7 +267,7 @@ test("blocked node projection includes its attempt-zero human outcome and no req
 test("evidence projects every address kind without exposing inline data or storage-only names", (t) => {
   const h = fixture(t, RepositoryAction.PullRequest);
   h.store.transaction((tx) => {
-    openAttempt(tx, h.nodeId, FIRST_ATTEMPT, ACTOR, NOW);
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, ACTOR, NOW);
     const row = h.evidence(REQUEST_KEY);
     const asset = (kind: AssetKind, content: unknown): AssetRow => ({
       id: createIdentity("evidence_asset"),
@@ -278,19 +278,19 @@ test("evidence projects every address kind without exposing inline data or stora
       expired_at: null,
     });
     insertEvidence(tx, row, [
-      asset(AssetKind.Repository, { bindingId: h.bindingId, commit: SHA }),
+      asset(AssetKind.Repository, { binding_id: h.binding_id, commit: SHA }),
       asset(AssetKind.Produced, {
         sha256: SHA256,
         data: "YQ==",
-        mediaType: MEDIA,
+        media_type: MEDIA,
       }),
       asset(AssetKind.Object, {
         location: LOCATION,
-        objectVersion: VERSION,
+        object_version: VERSION,
         sha256: SHA256,
-        storageBindingId: h.bindingId,
+        storage_binding_id: h.binding_id,
         size: FIRST_ATTEMPT,
-        mediaType: MEDIA,
+        media_type: MEDIA,
       }),
       asset(AssetKind.Platform, {
         kind: RepositoryAction.PullRequest,
@@ -299,13 +299,13 @@ test("evidence projects every address kind without exposing inline data or stora
       }),
     ]);
     const evidence = evidenceRecord(tx, readEvidence(tx, row.id)!);
-    assert.equal(evidence.requirementKey, REQUEST_KEY);
-    assert.equal("endState" in evidence, false);
+    assert.equal(evidence.requirement_key, REQUEST_KEY);
+    assert.equal("end_state" in evidence, false);
     assert.equal("verification" in evidence, false);
     assert.deepEqual(
       evidence.assets.find((item) => item.kind === AssetKind.Repository)
         ?.address,
-      { kind: AssetKind.Repository, bindingId: h.bindingId, commit: SHA },
+      { kind: AssetKind.Repository, binding_id: h.binding_id, commit: SHA },
     );
     assert.deepEqual(
       evidence.assets.find((item) => item.kind === AssetKind.Produced)?.address,
@@ -321,13 +321,13 @@ test("evidence projects every address kind without exposing inline data or stora
       },
     );
     assert.equal(
-      externalActionRecords(tx, h.bindings, h.nodeId, FIRST_ATTEMPT)[0]
+      externalActionRecords(tx, h.bindings, h.node_id, FIRST_ATTEMPT)[0]
         ?.resolution,
       Resolution.Unresolved,
     );
     assert.equal(
-      externalActionRecords(tx, h.bindings, h.nodeId, FIRST_ATTEMPT)[0]
-        ?.requestEvidenceId,
+      externalActionRecords(tx, h.bindings, h.node_id, FIRST_ATTEMPT)[0]
+        ?.request_evidence_id,
       row.id,
     );
   });

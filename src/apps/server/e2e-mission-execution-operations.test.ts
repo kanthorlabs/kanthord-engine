@@ -79,9 +79,9 @@ const CONTENT = {
 const PASS = [
   {
     command: "true",
-    exitCode: SUCCESSFUL_EXIT_CODE,
+    exit_code: SUCCESSFUL_EXIT_CODE,
     signal: null,
-    timedOut: false,
+    timed_out: false,
   },
 ];
 type Page<T> = { items: T[]; next_cursor: string | null };
@@ -110,8 +110,8 @@ async function setup(t: TestContext) {
     standIns: {
       intakeStorage: sinkStorage(sink),
       intakeCheck: scriptedCheck({
-        endState: CheckEndState.Expected,
-        landedCommits: [LANDED],
+        end_state: CheckEndState.Expected,
+        landed_commits: [LANDED],
       }),
     },
   });
@@ -246,13 +246,13 @@ async function setup(t: TestContext) {
           bindings: names.map((name) => binding(name).id),
         },
         reason: "plan",
-        expectedMissionVersion: version,
+        expected_mission_version: version,
         ...(parentId
-          ? { parentId, expectedParentRevision: FIRST_REVISION }
+          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
           : {}),
       },
     );
-    return result.revisions[FIRST_ITEM_INDEX]!.nodeId;
+    return result.revisions[FIRST_ITEM_INDEX]!.node_id;
   };
   const initiative = await create(
     "initiative-1.md",
@@ -276,11 +276,11 @@ async function setup(t: TestContext) {
   );
   await write(["mission", "node", "priority", "set", objectiveA], {
     value: PRIMARY_PRIORITY,
-    expectedMissionVersion: POST_PLANNING_MISSION_VERSION,
+    expected_mission_version: POST_PLANNING_MISSION_VERSION,
   });
   await write(["mission", "node", "priority", "set", objectiveB], {
     value: SECONDARY_PRIORITY,
-    expectedMissionVersion: POST_PLANNING_MISSION_VERSION,
+    expected_mission_version: POST_PLANNING_MISSION_VERSION,
   });
   const machineToken = await fixture.machineToken(project.id, "harness");
   const W = { ...H, KANTHORD_TOKEN: machineToken };
@@ -289,8 +289,8 @@ async function setup(t: TestContext) {
     W,
   );
   const pullBody = {
-    resourceIdentity: binding("harness").resource_identity,
-    runtimeIdentity: registration.runtime_identity,
+    resource_identity: binding("harness").resource_identity,
+    runtime_identity: registration.runtime_identity,
   };
   const pull = () => write<Pull>(["scheduler", "work", "pull"], pullBody, W);
   const api = httpClient(missionOperations, fixture.endpoint, machineToken);
@@ -332,13 +332,13 @@ test(
     let landedEvidenceId = UNSET_ID;
     let gatedOutcome!: Outcome;
     const ctx = (executionId: string) => ({
-      executionId,
+      execution_id: executionId,
       attempt: FIRST_ATTEMPT,
-      nodeRevision: FIRST_REVISION,
+      node_revision: FIRST_REVISION,
     });
     const address = (gated = false) => ({
       kind: AssetKind.Repository,
-      bindingId: h.binding(gated ? "gated" : "repo").id,
+      binding_id: h.binding(gated ? "gated" : "repo").id,
       commit: COMMIT,
     });
     const workBody = (executionId: string, gated = false) => ({
@@ -350,7 +350,7 @@ test(
       ...ctx(e1),
       subject: "recording",
       assets: [
-        { kind: AssetKind.Object, size: OBJECT_SIZE_BYTES, mediaType: MEDIA },
+        { kind: AssetKind.Object, size: OBJECT_SIZE_BYTES, media_type: MEDIA },
       ],
     });
     const runBody = (
@@ -363,12 +363,12 @@ test(
       assets: [
         {
           kind: AssetKind.Produced,
-          content: { mediaType: MEDIA, encoding: "base64", data: "b2s=" },
+          content: { media_type: MEDIA, encoding: "base64", data: "b2s=" },
         },
       ],
       verification: {
-        testedInput: address(gated),
-        results: PASS.map((result) => ({ ...result, exitCode })),
+        tested_input: address(gated),
+        results: PASS.map((result) => ({ ...result, exit_code: exitCode })),
       },
     });
     const assessment = (
@@ -377,18 +377,18 @@ test(
       gated = false,
     ) => ({
       ...ctx(executionId),
-      evidenceIds,
-      childOutcomeIds: [],
+      evidence_ids: evidenceIds,
+      child_outcome_ids: [],
       result: AssessmentResult.Success,
       rationale: "met",
-      testedInput: address(gated),
+      tested_input: address(gated),
     });
     const node = (nodeId: string) =>
       h.read<Node>(["mission", "node", "get", nodeId]);
     const release = (executionId: string) =>
       h.write(
         ["scheduler", "execution", "release", executionId],
-        { furtherWork: false },
+        { further_work: false },
         h.W,
       );
     const badWrite = (args: string[], body: unknown, code: string, env = h.W) =>
@@ -396,10 +396,10 @@ test(
     await t.test("E04.1 claim objective A", async () => {
       const answer = await h.pull();
       assert.equal(answer.kind, WorkPullKind.Claimed);
-      assert.equal(answer.execution.nodeId, h.objectiveA);
+      assert.equal(answer.execution.node_id, h.objectiveA);
       assert.equal(answer.execution.attempt, FIRST_ATTEMPT);
-      assert.equal(answer.execution.pinnedRevision, FIRST_REVISION);
-      e1 = answer.execution.executionId;
+      assert.equal(answer.execution.pinned_revision, FIRST_REVISION);
+      e1 = answer.execution.execution_id;
     });
     await t.test("E04.2 pinned revision and above-pin refusal", async () => {
       const revision = await h.read<Revision>(
@@ -428,11 +428,11 @@ test(
         h.W,
       );
       assert.equal(work.evidence.provenance.kind, ActorKind.Execution);
-      assert.ok("executionId" in work.evidence.provenance);
-      assert.equal(work.evidence.provenance.executionId, e1);
+      assert.ok("execution_id" in work.evidence.provenance);
+      assert.equal(work.evidence.provenance.execution_id, e1);
       assert.equal(work.evidence.attempt, FIRST_ATTEMPT);
       assert.equal(
-        typeof work.evidence.assets[FIRST_ITEM_INDEX]!.publishedAt,
+        typeof work.evidence.assets[FIRST_ITEM_INDEX]!.published_at,
         NUMBER_TYPE,
       );
       assert.deepEqual(work.uploads, []);
@@ -454,17 +454,20 @@ test(
     await t.test("E04.6 host object submission", async () => {
       object = completed(
         await h.api["evidence.submit"]({
-          params: { nodeId: h.objectiveA },
+          params: { node_id: h.objectiveA },
           query: {},
           body: objectBody(),
         }),
       );
       assert.ok(
-        object.uploads[FIRST_ITEM_INDEX]!.putUrl.startsWith(h.sink.endpoint),
+        object.uploads[FIRST_ITEM_INDEX]!.put_url.startsWith(h.sink.endpoint),
       );
-      assert.equal(object.evidence.assets[FIRST_ITEM_INDEX]!.publishedAt, null);
       assert.equal(
-        typeof object.evidence.assets[FIRST_ITEM_INDEX]!.expiredAt,
+        object.evidence.assets[FIRST_ITEM_INDEX]!.published_at,
+        null,
+      );
+      assert.equal(
+        typeof object.evidence.assets[FIRST_ITEM_INDEX]!.expired_at,
         NUMBER_TYPE,
       );
     });
@@ -492,9 +495,9 @@ test(
     });
     await t.test("E04.10 evaluation claim", async () => {
       const answer = await h.pull();
-      assert.equal(answer.execution.nodeId, h.objectiveA);
+      assert.equal(answer.execution.node_id, h.objectiveA);
       assert.equal(answer.execution.attempt, FIRST_ATTEMPT);
-      e2 = answer.execution.executionId;
+      e2 = answer.execution.execution_id;
     });
     await t.test("E04.11 passing verification evidence", async () => {
       run = await h.write<Submission>(
@@ -503,7 +506,7 @@ test(
         h.W,
       );
       assert.equal(
-        run.evidence.verification!.results[FIRST_ITEM_INDEX]!.exitCode,
+        run.evidence.verification!.results[FIRST_ITEM_INDEX]!.exit_code,
         SUCCESSFUL_EXIT_CODE,
       );
     });
@@ -528,7 +531,7 @@ test(
     });
     await t.test("E04.14 PUT and complete", async () => {
       const upload = object.uploads[FIRST_ITEM_INDEX]!;
-      const put = await fetch(upload.putUrl, {
+      const put = await fetch(upload.put_url, {
         method: "PUT",
         headers: upload.headers,
         body: TEXT,
@@ -537,7 +540,7 @@ test(
       await put.arrayBuffer();
       const answer = completed(
         await h.api["evidence.asset.complete"]({
-          params: { assetId: upload.assetId },
+          params: { asset_id: upload.asset_id },
           query: {},
           body: ctx(e2),
         }),
@@ -550,7 +553,7 @@ test(
         object.evidence.id,
       ]);
       assert.equal(
-        typeof evidence.assets[FIRST_ITEM_INDEX]!.publishedAt,
+        typeof evidence.assets[FIRST_ITEM_INDEX]!.published_at,
         NUMBER_TYPE,
       );
     });
@@ -560,12 +563,12 @@ test(
         const assetId = object.evidence.assets[FIRST_ITEM_INDEX]!.id;
         const answer = await h.read<{
           size: number;
-          mediaType: string;
-          getUrl: string;
+          media_type: string;
+          get_url: string;
         }>(["mission", "evidence", "asset", "content", "get", assetId]);
         assert.equal(answer.size, OBJECT_SIZE_BYTES);
-        assert.equal(answer.mediaType, MEDIA);
-        const response = await fetch(answer.getUrl);
+        assert.equal(answer.media_type, MEDIA);
+        const response = await fetch(answer.get_url);
         assert.equal(response.status, HttpStatus.OK);
         assert.equal(await response.text(), TEXT);
         await h.refuses(
@@ -606,24 +609,27 @@ test(
       assert.equal(answer.assessment.actor.kind, ActorKind.Execution);
       assert.ok("currency" in answer.assessment);
       assert.ok(answer.assessment.currency?.current);
-      assert.equal(answer.assessment.workerVersion, WORKER);
+      assert.equal(answer.assessment.worker_version, WORKER);
       assert.ok("state" in answer.node);
       assert.equal(answer.node.state, NodeState.Completed);
       assert.equal(answer.outcome?.result, AssessmentResult.Success);
-      assert.equal(answer.outcome?.closingEvent, ClosingEvent.AssessmentPassed);
+      assert.equal(
+        answer.outcome?.closing_event,
+        ClosingEvent.AssessmentPassed,
+      );
       assert.equal(answer.outcome?.attempt, FIRST_ATTEMPT);
     });
     await t.test(
       "E04.18 finished claim rejects further execution acts",
       async () => {
-        const claim = await h.read<{ claimState: string }>(
+        const claim = await h.read<{ claim_state: string }>(
           ["scheduler", "claim", "get", e2],
           h.W,
         );
-        assert.equal(claim.claimState, ClaimState.Finished);
+        assert.equal(claim.claim_state, ClaimState.Finished);
         await badWrite(
           ["scheduler", "execution", "release", e2],
-          { furtherWork: false },
+          { further_work: false },
           "gateway.invocation.execution_proof_failed",
         );
         await h.refuses(
@@ -650,8 +656,8 @@ test(
         h.objectiveA,
         String(FIRST_ATTEMPT),
       ]);
-      assert.equal(typeof attempt.closedAt, NUMBER_TYPE);
-      assert.equal(attempt.outcomeIds.length, SINGLE_ITEM_COUNT);
+      assert.equal(typeof attempt.closed_at, NUMBER_TYPE);
+      assert.equal(attempt.outcome_ids.length, SINGLE_ITEM_COUNT);
     });
     await t.test("E04.20 forced delete validation and removal", async () => {
       const args = [
@@ -681,8 +687,8 @@ test(
     });
     await t.test("E04.21 work on gated objective B", async () => {
       const answer = await h.pull();
-      assert.equal(answer.execution.nodeId, h.objectiveB);
-      e3 = answer.execution.executionId;
+      assert.equal(answer.execution.node_id, h.objectiveB);
+      e3 = answer.execution.execution_id;
       await h.write<Submission>(
         ["mission", "evidence", "submit", h.objectiveB],
         workBody(e3, true),
@@ -691,7 +697,7 @@ test(
       await release(e3);
     });
     await t.test("E04.22 gated pass keeps evaluation live", async () => {
-      e4 = (await h.pull()).execution.executionId;
+      e4 = (await h.pull()).execution.execution_id;
       gatedRun = await h.write<Submission>(
         ["mission", "evidence", "submit", h.objectiveB],
         runBody(e4, true),
@@ -709,7 +715,7 @@ test(
     await t.test("E04.23 action request and duplicate refusal", async () => {
       const body = {
         ...ctx(e4),
-        requirementKey: "gated.pull_request",
+        requirement_key: "gated.pull_request",
         subject: "pull request 42",
         address: {
           kind: "pull_request" as const,
@@ -719,16 +725,16 @@ test(
       };
       request = completed(
         await h.api["evidence.request"]({
-          params: { nodeId: h.objectiveB },
+          params: { node_id: h.objectiveB },
           query: {},
           body,
         }),
       );
-      assert.equal(request.requirementKey, body.requirementKey);
+      assert.equal(request.requirement_key, body.requirement_key);
       assert.equal(request.assets.length, SINGLE_ITEM_COUNT);
       assert.equal(request.assets[FIRST_ITEM_INDEX]!.kind, AssetKind.Platform);
       const duplicate = await h.api["evidence.request"]({
-        params: { nodeId: h.objectiveB },
+        params: { node_id: h.objectiveB },
         query: {},
         body,
       });
@@ -740,7 +746,7 @@ test(
     await t.test("E04.24 release to external wait", async () => {
       await release(e4);
       const page = await h.read<
-        Page<{ resolution: string; requestEvidenceId: string }>
+        Page<{ resolution: string; request_evidence_id: string }>
       >([
         "mission",
         "external-action",
@@ -753,7 +759,10 @@ test(
         page.items[FIRST_ITEM_INDEX]!.resolution,
         Resolution.Unresolved,
       );
-      assert.equal(page.items[FIRST_ITEM_INDEX]!.requestEvidenceId, request.id);
+      assert.equal(
+        page.items[FIRST_ITEM_INDEX]!.request_evidence_id,
+        request.id,
+      );
     });
     await t.test("E04.25 request content and deletion refusals", async () => {
       await h.refuses(
@@ -796,7 +805,7 @@ test(
         results: { resolution: string }[];
         failures: unknown[];
       }>(["mission", "node", "check", h.objectiveB], {
-        expectedMissionVersion: POST_PLANNING_MISSION_VERSION,
+        expected_mission_version: POST_PLANNING_MISSION_VERSION,
       });
       assert.equal(
         answer.results[FIRST_ITEM_INDEX]!.resolution,
@@ -813,11 +822,11 @@ test(
         h.objectiveB,
       ]);
       assert.equal(
-        outcomes.items[FIRST_ITEM_INDEX]!.closingEvent,
+        outcomes.items[FIRST_ITEM_INDEX]!.closing_event,
         ClosingEvent.ExternalSuccess,
       );
       assert.equal(
-        outcomes.items[FIRST_ITEM_INDEX]!.evidenceIds.length,
+        outcomes.items[FIRST_ITEM_INDEX]!.evidence_ids.length,
         PAIR_COUNT,
       );
       gatedOutcome = outcomes.items[FIRST_ITEM_INDEX]!;
@@ -839,7 +848,7 @@ test(
       assert.equal(landed.length, SINGLE_ITEM_COUNT);
       landedEvidenceId = landed[FIRST_ITEM_INDEX]!.id;
       assert.deepEqual(
-        [...gatedOutcome.evidenceIds].sort(),
+        [...gatedOutcome.evidence_ids].sort(),
         [gatedRun.evidence.id, landedEvidenceId].sort(),
       );
       const asset = landed[FIRST_ITEM_INDEX]!.assets[FIRST_ITEM_INDEX]!;
@@ -847,7 +856,7 @@ test(
       assert.equal(asset.address.commit, LANDED);
       await badWrite(
         ["mission", "node", "check", h.objectiveB],
-        { expectedMissionVersion: POST_PLANNING_MISSION_VERSION },
+        { expected_mission_version: POST_PLANNING_MISSION_VERSION },
         "mission.node.no_unresolved_request",
         h.H,
       );
@@ -856,16 +865,16 @@ test(
       "E04.28 initiative reads its outcome-pinned objective context",
       async () => {
         const answer = await h.pull();
-        assert.equal(answer.execution.nodeId, h.initiative);
-        e5 = answer.execution.executionId;
-        const objectives = await h.read<Page<{ visibleRevision: number }>>(
+        assert.equal(answer.execution.node_id, h.initiative);
+        e5 = answer.execution.execution_id;
+        const objectives = await h.read<Page<{ visible_revision: number }>>(
           ["mission", "execution", "objective", "list", e5],
           h.W,
         );
         assert.equal(objectives.items.length, PAIR_COUNT);
         assert.ok(
           objectives.items.every(
-            (item) => item.visibleRevision === FIRST_REVISION,
+            (item) => item.visible_revision === FIRST_REVISION,
           ),
         );
         const outcomes = await h.read<Page<Outcome>>(

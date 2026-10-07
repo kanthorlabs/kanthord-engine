@@ -127,7 +127,7 @@ export function validateNodeContent(
   }
 }
 
-export type ResolvedBinding = { bindingId: string; resourceIdentity: string };
+export type ResolvedBinding = { binding_id: string; resource_identity: string };
 
 function invalidBindings(
   details: Record<string, string | number> | null = null,
@@ -141,7 +141,7 @@ function invalidBindings(
 }
 
 export function bindingKind(resolved: ResolvedBinding): BindingKind {
-  const prefix = resolved.resourceIdentity.split(
+  const prefix = resolved.resource_identity.split(
     RESOURCE_KIND_SEPARATOR,
     SPLIT_FIRST_PART_LIMIT,
   )[RESOURCE_KIND_SEGMENT];
@@ -172,6 +172,6 @@ export function checkBindingRuleTable(
     const count = counts[binding];
     const range = bindingRules[kind][binding];
     if (count < range.min || count > range.max)
-      invalidBindings({ kind, bindingKind: binding, count });
+      invalidBindings({ kind, binding_kind: binding, count });
   }
 }

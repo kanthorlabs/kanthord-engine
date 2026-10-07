@@ -12,11 +12,11 @@ import { ClaimState } from "../scheduler/contract.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
-  "executionId" | "attempt" | "nodeRevision"
+  "execution_id" | "attempt" | "node_revision"
 >;
 type AssessmentBody = Omit<
   Parameters<MethodClients["mission"]["assessment.submit"]>[0]["body"],
-  "executionId" | "attempt" | "nodeRevision"
+  "execution_id" | "attempt" | "node_revision"
 >;
 
 export const EndReason = {
@@ -48,13 +48,13 @@ const FORBIDDEN = 403;
 const CONFLICT = 409;
 
 export interface MethodClaim {
-  executionId: string;
-  nodeId: string;
+  execution_id: string;
+  node_id: string;
   attempt: number;
-  pinnedRevision: number;
-  createdAt: number;
-  expiredAt: number;
-  traceId: string;
+  pinned_revision: number;
+  created_at: number;
+  expired_at: number;
+  trace_id: string;
 }
 
 export function isExecutionEnd(result: OperationResult<unknown>): boolean {
@@ -91,22 +91,22 @@ export class ExecutionRun {
     credentials: { release(): Promise<void> };
     context: Context;
   }) {
-    assert.ok(input.claim.executionId);
-    assert.ok(input.claim.nodeId);
+    assert.ok(input.claim.execution_id);
+    assert.ok(input.claim.node_id);
     this.claim = input.claim;
     this.clients = input.clients;
     this.credentials = input.credentials;
     this.operationContext = new CancellationContext(
       input.context,
-      input.claim.expiredAt,
+      input.claim.expired_at,
     );
   }
 
   context() {
     return {
-      executionId: this.claim.executionId,
+      execution_id: this.claim.execution_id,
       attempt: this.claim.attempt,
-      nodeRevision: this.claim.pinnedRevision,
+      node_revision: this.claim.pinned_revision,
     };
   }
 
@@ -171,7 +171,11 @@ export class ExecutionRun {
   async submitEvidence(nodeId: string, body: EvidenceBody) {
     const answer = await this.call((options) =>
       this.clients.mission["evidence.submit"](
-        { params: { nodeId }, query: {}, body: { ...body, ...this.context() } },
+        {
+          params: { node_id: nodeId },
+          query: {},
+          body: { ...body, ...this.context() },
+        },
         options,
       ),
     );
@@ -182,7 +186,11 @@ export class ExecutionRun {
     await this.settleCredentials();
     return this.call((options) =>
       this.clients.mission["assessment.submit"](
-        { params: { nodeId }, query: {}, body: { ...body, ...this.context() } },
+        {
+          params: { node_id: nodeId },
+          query: {},
+          body: { ...body, ...this.context() },
+        },
         options,
       ),
     );
@@ -192,7 +200,7 @@ export class ExecutionRun {
     const answer = await this.call((options) =>
       this.clients.worker["action.request"](
         {
-          params: { execution_id: this.claim.executionId },
+          params: { execution_id: this.claim.execution_id },
           query: {},
           body: null,
         },
@@ -207,9 +215,9 @@ export class ExecutionRun {
     await this.call(async (options) => {
       const result = await this.clients.scheduler.executionRelease(
         {
-          params: { executionId: this.claim.executionId },
+          params: { execution_id: this.claim.execution_id },
           query: {},
-          body: { furtherWork },
+          body: { further_work: furtherWork },
         },
         options,
       );
@@ -217,21 +225,21 @@ export class ExecutionRun {
       const claim = await this.call((readOptions) =>
         this.clients.scheduler.claimGet(
           {
-            params: { executionId: this.claim.executionId },
+            params: { execution_id: this.claim.execution_id },
             query: {},
             body: null,
           },
           readOptions,
         ),
       );
-      if (claim.claimState !== ClaimState.Finished)
+      if (claim.claim_state !== ClaimState.Finished)
         return this.stop(EndReason.OperationFailed);
       return {
         type: OperationResultType.Completed,
         status: 200,
         data: {
-          executionId: this.claim.executionId,
-          endedAt: claim.endedAt!,
+          execution_id: this.claim.execution_id,
+          ended_at: claim.ended_at!,
         },
       };
     });

@@ -29,23 +29,23 @@ export function claimHarness(
     {
       clientId: createIdentity("client_identity"),
       name: "worker",
-      projectId: row.projectId,
-      resourceIdentity: row.resourceIdentity,
+      projectId: row.project_id,
+      resourceIdentity: row.resource_identity,
       issuedAt: FIXTURE_NOW,
     },
     "claim",
-    row.runtimeIdentity,
+    row.runtime_identity,
   );
   const pull = {
-    resourceIdentity: row.resourceIdentity,
-    runtimeIdentity: row.runtimeIdentity,
+    resource_identity: row.resource_identity,
+    runtime_identity: row.runtime_identity,
   };
   const binding = {
-    bindingId: row.workerBindingId,
-    workerName: "general@1",
-    instanceCount: 1,
+    binding_id: row.worker_binding_id,
+    worker_name: "general@1",
+    instance_count: 1,
     tombstone: false,
-    resourceBudget: null as { wallTimeMs: number } | null,
+    resource_budget: null as { wall_time_ms: number } | null,
   };
   h.dependencies.bindings.workerBindingOf = () => binding;
   h.dependencies.declarations.declarationOf = () => ({
@@ -67,9 +67,9 @@ export function claimHarness(
     h.service.delete(tx, nodeId);
     return {
       kind: "claim",
-      projectId: row.projectId,
+      project_id: row.project_id,
       attempt: 1,
-      nodeRevision: PIN,
+      node_revision: PIN,
     };
   };
   const claim = (now = FIXTURE_NOW) =>
@@ -82,16 +82,16 @@ export function claimHarness(
 test("claim pins binding, attempt, revision, trace and the fixed effective deadline", (t) => {
   const h = claimHarness(t);
   h.store.transaction((tx) =>
-    h.service.insert(tx, h.row.nodeId, h.row.projectId, 0),
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
   );
   const first = h.claim();
   assert.equal(first.outcome, ClaimOutcome.Claimed);
-  assert.equal(first.row!.expiredAt, FIXTURE_NOW + WALL_TIME + RESERVE_MS);
-  assert.equal(first.row!.pinnedRevision, PIN);
-  assert.equal(first.row!.workerBindingId, h.binding.bindingId);
+  assert.equal(first.row!.expired_at, FIXTURE_NOW + WALL_TIME + RESERVE_MS);
+  assert.equal(first.row!.pinned_revision, PIN);
+  assert.equal(first.row!.worker_binding_id, h.binding.binding_id);
   assert.deepEqual(first.row!.credentials, []);
   assert.equal(Object.hasOwn(first.row!, "kind"), false);
-  h.binding.resourceBudget = { wallTimeMs: 1 };
+  h.binding.resource_budget = { wall_time_ms: 1 };
   h.dependencies.config.release_reserve = 1;
   const repeat = h.claim();
   assert.equal(repeat.outcome, ClaimOutcome.Running);
@@ -100,11 +100,11 @@ test("claim pins binding, attempt, revision, trace and the fixed effective deadl
     h.calls.filter((call) => call.method === CLAIM_METHOD).length,
     ONE_CALL,
   );
-  h.store.transaction((tx) => h.service.revoke(tx, h.row.nodeId, FIXTURE_NOW));
+  h.store.transaction((tx) => h.service.revoke(tx, h.row.node_id, FIXTURE_NOW));
   h.store.transaction((tx) =>
-    h.service.insert(tx, h.row.nodeId, h.row.projectId, 0),
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
   );
-  assert.equal(h.claim().row!.expiredAt, FIXTURE_NOW + 1001);
+  assert.equal(h.claim().row!.expired_at, FIXTURE_NOW + 1001);
 });
 
 test("selection preserves priority and age while skipping a stale job", (t) => {
@@ -126,7 +126,7 @@ test("selection preserves priority and age while skipping a stale job", (t) => {
     for (let i = 0; i < nodes.length; i++)
       tx.database
         .prepare("INSERT INTO scheduler_job VALUES (?, ?, ?, ?)")
-        .run(jobs[i]!, h.row.projectId, nodes[i]!, i === FIRST_JOB ? 0 : 1);
+        .run(jobs[i]!, h.row.project_id, nodes[i]!, i === FIRST_JOB ? 0 : 1);
   });
   const visited: string[] = [];
   h.dependencies.transitions.claim = (tx, nodeId, states) => {
@@ -139,19 +139,19 @@ test("selection preserves priority and age while skipping a stale job", (t) => {
     h.service.delete(tx, nodeId);
     return {
       kind: "evaluation",
-      projectId: h.row.projectId,
+      project_id: h.row.project_id,
       attempt: 1,
-      nodeRevision: PIN,
+      node_revision: PIN,
     };
   };
-  assert.equal(h.claim().row!.nodeId, nodes[2]);
+  assert.equal(h.claim().row!.node_id, nodes[2]);
   assert.deepEqual(visited, [nodes[1], nodes[2]]);
 });
 
 test("health, tombstones, zero counts and occupied binding counts refuse admission", (t) => {
   const h = claimHarness(t);
   h.store.transaction((tx) =>
-    h.service.insert(tx, h.row.nodeId, h.row.projectId, 0),
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
   );
   h.dependencies.registrations.instanceHealthcheck = () => false;
   assert.equal(h.claim().outcome, ClaimOutcome.Refused);
@@ -159,11 +159,11 @@ test("health, tombstones, zero counts and occupied binding counts refuse admissi
   h.binding.tombstone = true;
   assert.equal(h.claim().outcome, ClaimOutcome.None);
   h.binding.tombstone = false;
-  h.binding.instanceCount = 0;
+  h.binding.instance_count = 0;
   assert.equal(h.claim().outcome, ClaimOutcome.None);
-  h.binding.instanceCount = 1;
+  h.binding.instance_count = 1;
   h.store.transaction((tx) =>
-    insertExecution(tx, executionFixture({ projectId: h.row.projectId })),
+    insertExecution(tx, executionFixture({ project_id: h.row.project_id })),
   );
   assert.equal(h.claim().outcome, ClaimOutcome.None);
   assert.deepEqual(
@@ -178,24 +178,25 @@ test("runtime and node expiry settle before admission; rollback undoes all claim
   h.dependencies.transitions.loss = (tx, nodeId, count, now) => {
     assert.equal(count, ONE_CALL);
     assert.equal(now, FIXTURE_DEADLINE);
-    h.service.insert(tx, nodeId, h.row.projectId, 0);
+    h.service.insert(tx, nodeId, h.row.project_id, 0);
   };
   const next = h.claim(FIXTURE_DEADLINE);
   assert.equal(next.settled, true);
   assert.equal(next.outcome, ClaimOutcome.Claimed);
-  assert.notEqual(next.row!.executionId, h.row.executionId);
+  assert.notEqual(next.row!.execution_id, h.row.execution_id);
   assert.equal(
-    h.store.transaction((tx) => readExecution(tx, h.row.executionId))?.endedAt,
+    h.store.transaction((tx) => readExecution(tx, h.row.execution_id))
+      ?.ended_at,
     FIXTURE_DEADLINE,
   );
   const fresh = claimHarness(t);
   const expired = executionFixture({
-    projectId: fresh.row.projectId,
-    nodeId: fresh.row.nodeId,
+    project_id: fresh.row.project_id,
+    node_id: fresh.row.node_id,
   });
   fresh.store.transaction((tx) => {
     insertExecution(tx, expired);
-    fresh.service.insert(tx, expired.nodeId, expired.projectId, 0);
+    fresh.service.insert(tx, expired.node_id, expired.project_id, 0);
   });
   const failure = new Error("probe rollback");
   assert.throws(
@@ -215,7 +216,7 @@ test("runtime and node expiry settle before admission; rollback undoes all claim
     failure,
   );
   assert.deepEqual(
-    fresh.store.transaction((tx) => readExecution(tx, expired.executionId)),
+    fresh.store.transaction((tx) => readExecution(tx, expired.execution_id)),
     expired,
   );
   assert.equal(fresh.claim(FIXTURE_DEADLINE).outcome, ClaimOutcome.Claimed);

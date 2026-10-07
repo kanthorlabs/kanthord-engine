@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: missionId
+      - name: mission_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.import.preview.Input/properties/params/prop\
-            erties/missionId"
+            erties/mission_id"
     requestBody:
       required: true
       content:
@@ -59,14 +59,14 @@ components:
         params:
           type: object
           properties:
-            missionId:
+            mission_id:
               type: string
               minLength: 34
               maxLength: 34
               pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: mission_ followed by a canonical 26-character uppercase ULID.
           required:
-            - missionId
+            - mission_id
           additionalProperties: false
         query:
           type: object
@@ -79,13 +79,13 @@ components:
                 format:
                   type: string
                   const: markdown
-                missionId:
+                mission_id:
                   type: string
                   minLength: 34
                   maxLength: 34
                   pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                   description: mission_ followed by a canonical 26-character uppercase ULID.
-                missionVersion:
+                mission_version:
                   type: integer
                   exclusiveMinimum: 0
                   maximum: 9007199254740991
@@ -108,8 +108,8 @@ components:
                     additionalProperties: false
               required:
                 - format
-                - missionId
-                - missionVersion
+                - mission_id
+                - mission_version
                 - reason
                 - files
               additionalProperties: false
@@ -118,13 +118,13 @@ components:
                 format:
                   type: string
                   const: json
-                missionId:
+                mission_id:
                   type: string
                   minLength: 34
                   maxLength: 34
                   pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                   description: mission_ followed by a canonical 26-character uppercase ULID.
-                missionVersion:
+                mission_version:
                   type: integer
                   exclusiveMinimum: 0
                   maximum: 9007199254740991
@@ -173,7 +173,7 @@ components:
                       parent:
                         type: string
                         minLength: 1
-                      dependsOn:
+                      depends_on:
                         type: array
                         items:
                           type: string
@@ -189,8 +189,8 @@ components:
                     additionalProperties: false
               required:
                 - format
-                - missionId
-                - missionVersion
+                - mission_id
+                - mission_version
                 - reason
                 - entries
               additionalProperties: false
@@ -202,17 +202,17 @@ components:
     mission.import.preview.Output:
       type: object
       properties:
-        missionId:
+        mission_id:
           type: string
           minLength: 34
           maxLength: 34
           pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: mission_ followed by a canonical 26-character uppercase ULID.
-        expectedMissionVersion:
+        expected_mission_version:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
-        previewDigest:
+        preview_digest:
           type: string
           pattern: ^[0-9a-f]{64}$
         creates:
@@ -236,7 +236,7 @@ components:
             maxLength: 31
             pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
             description: node_ followed by a canonical 26-character uppercase ULID.
-        removedEdges:
+        removed_edges:
           type: array
           items:
             oneOf:
@@ -245,13 +245,13 @@ components:
                   kind:
                     type: string
                     const: containment
-                  parentId:
+                  parent_id:
                     type: string
                     minLength: 31
                     maxLength: 31
                     pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: node_ followed by a canonical 26-character uppercase ULID.
-                  childId:
+                  child_id:
                     type: string
                     minLength: 31
                     maxLength: 31
@@ -259,21 +259,21 @@ components:
                     description: node_ followed by a canonical 26-character uppercase ULID.
                 required:
                   - kind
-                  - parentId
-                  - childId
+                  - parent_id
+                  - child_id
                 additionalProperties: false
               - type: object
                 properties:
                   kind:
                     type: string
                     const: dependency
-                  dependentId:
+                  dependent_id:
                     type: string
                     minLength: 31
                     maxLength: 31
                     pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: node_ followed by a canonical 26-character uppercase ULID.
-                  dependsOnId:
+                  depends_on_id:
                     type: string
                     minLength: 31
                     maxLength: 31
@@ -281,10 +281,10 @@ components:
                     description: node_ followed by a canonical 26-character uppercase ULID.
                 required:
                   - kind
-                  - dependentId
-                  - dependsOnId
+                  - dependent_id
+                  - depends_on_id
                 additionalProperties: false
-        noOps:
+        no_ops:
           type: array
           items:
             type: string
@@ -305,7 +305,7 @@ components:
                 anyOf:
                   - type: string
                   - type: "null"
-              nodeId:
+              node_id:
                 anyOf:
                   - type: string
                     minLength: 31
@@ -321,17 +321,17 @@ components:
               - code
               - message
               - filename
-              - nodeId
+              - node_id
               - details
             additionalProperties: false
       required:
-        - missionId
-        - expectedMissionVersion
-        - previewDigest
+        - mission_id
+        - expected_mission_version
+        - preview_digest
         - creates
         - updates
         - retirements
-        - removedEdges
-        - noOps
+        - removed_edges
+        - no_ops
         - violations
       additionalProperties: false

@@ -115,8 +115,8 @@ async function setupInternal(t: TestContext) {
   const sink = await objectSink(t);
   const actions = scriptedActions();
   const check = scriptedCheck({
-    endState: "expected",
-    landedCommits: ["c".repeat(40)],
+    end_state: "expected",
+    landed_commits: ["c".repeat(40)],
   });
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
@@ -264,7 +264,7 @@ async function setupInternal(t: TestContext) {
     ]);
     await cli.write(["mission", "node", "priority", "set", nodeId], {
       value,
-      expectedMissionVersion: mission.version,
+      expected_mission_version: mission.version,
     });
   }
   const issue = (bindingName: string) =>
@@ -288,7 +288,7 @@ async function setupInternal(t: TestContext) {
   return {
     fixture,
     cli,
-    projectId: project.id,
+    project_id: project.id,
     bindings: bindingSet.bindings,
     objective,
     gated,
@@ -317,10 +317,10 @@ async function finishedExecutions(
   ]);
   assert.equal(page.items.length, TWO_ITEMS);
   assert.ok(
-    page.items.every((item) => item.claimState === ClaimState.Finished),
+    page.items.every((item) => item.claim_state === ClaimState.Finished),
   );
   assert.deepEqual(
-    page.items.map((item) => item.claimant.runtimeIdentity),
+    page.items.map((item) => item.claimant.runtime_identity),
     runtimes,
   );
 }
@@ -390,7 +390,7 @@ test(
         );
         const page = await f.cli.read<
           Page<{ runtime_identity: string; registered: boolean }>
-        >(["worker", "instance", "list", "--project", f.projectId]);
+        >(["worker", "instance", "list", "--project", f.project_id]);
         assert.deepEqual(
           page.items.map((item) => item.runtime_identity).sort(),
           [...runtimes].sort(),
@@ -403,7 +403,7 @@ test(
       "EI10.2 objective publishes object and checkpoint, reviewer verifies",
       async () => {
         await waitForNode(f.cli, f.objective, NodeState.Completed);
-        await finishedExecutions(f.cli, f.projectId, f.objective, runtimes);
+        await finishedExecutions(f.cli, f.project_id, f.objective, runtimes);
         const evidence = await f.cli.read<Page<Evidence>>([
           "mission",
           "evidence",
@@ -419,8 +419,8 @@ test(
         const asset = uploaded.assets[0]!;
         assert.ok(asset.kind === AssetKind.Object);
         assert.equal(asset.size, FILE_SIZE);
-        assert.equal(asset.mediaType, MEDIA_TYPE);
-        assert.ok(Number.isFinite(asset.publishedAt));
+        assert.equal(asset.media_type, MEDIA_TYPE);
+        assert.ok(Number.isFinite(asset.published_at));
         const head = await remoteHead(
           repo.bare,
           `refs/heads/kanthord/${f.objective}`,
@@ -433,23 +433,25 @@ test(
         assert.ok(workAsset.kind === AssetKind.Repository);
         assert.deepEqual(workAsset.address, {
           kind: AssetKind.Repository,
-          bindingId: f.bindings.repo!.id,
+          binding_id: f.bindings.repo!.id,
           commit: head,
         });
         const verification = evidence.items.find((item) => item.verification)!;
         assert.deepEqual(
-          verification.verification!.results.map(({ command, exitCode }) => ({
-            command,
-            exitCode,
-          })),
+          verification.verification!.results.map(
+            ({ command, exit_code: exitCode }) => ({
+              command,
+              exit_code: exitCode,
+            }),
+          ),
           [
-            { command: "test -f hello.txt", exitCode: 0 },
-            { command: "grep -q hello hello.txt", exitCode: 0 },
+            { command: "test -f hello.txt", exit_code: 0 },
+            { command: "grep -q hello hello.txt", exit_code: 0 },
           ],
         );
-        assert.deepEqual(verification.verification!.testedInput, {
+        assert.deepEqual(verification.verification!.tested_input, {
           kind: "repository",
-          bindingId: f.bindings.repo!.id,
+          binding_id: f.bindings.repo!.id,
           commit: head,
         });
         const assessments = await f.cli.read<Page<Assessment>>([
@@ -460,9 +462,9 @@ test(
         ]);
         assert.equal(assessments.items.length, SINGLE_ITEM);
         assert.equal(assessments.items[0]!.result, AssessmentResult.Success);
-        assert.equal(assessments.items[0]!.workerVersion, REVIEWER);
+        assert.equal(assessments.items[0]!.worker_version, REVIEWER);
         assert.deepEqual(
-          [...assessments.items[0]!.evidenceIds].sort(),
+          [...assessments.items[0]!.evidence_ids].sort(),
           [uploaded.id, work.id, verification.id].sort(),
         );
         const outcomes = await f.cli.read<Page<Outcome>>([
@@ -474,7 +476,7 @@ test(
         assert.equal(outcomes.items.length, SINGLE_ITEM);
         assert.equal(outcomes.items[0]!.result, AssessmentResult.Success);
         assert.equal(
-          outcomes.items[0]!.closingEvent,
+          outcomes.items[0]!.closing_event,
           ClosingEvent.AssessmentPassed,
         );
         outcomeA = outcomes.items[0]!.id;
@@ -505,12 +507,12 @@ test(
         assert.ok(work.kind === AssetKind.Repository);
         assert.deepEqual(work.address, {
           kind: AssetKind.Repository,
-          bindingId: f.bindings.gated!.id,
+          binding_id: f.bindings.gated!.id,
           commit: head,
         });
         assert.ok(evidence.items.some((item) => item.verification));
         const request = evidence.items.find(
-          (item) => item.requirementKey === REQUIREMENT,
+          (item) => item.requirement_key === REQUIREMENT,
         )!;
         const asset = request.assets[0]!;
         assert.ok(asset.kind === AssetKind.Platform);
@@ -540,12 +542,12 @@ test(
         const mission = await f.cli.read<{ version: number }>([
           "mission",
           "get",
-          f.projectId,
+          f.project_id,
         ]);
         const checked = await f.cli.write<{
           results: { resolution: string }[];
         }>(["mission", "node", "check", f.gated], {
-          expectedMissionVersion: mission.version,
+          expected_mission_version: mission.version,
         });
         assert.equal(checked.results[0]!.resolution, EXPECTED_END);
         const outcomes = await f.cli.read<Page<Outcome>>([
@@ -555,7 +557,7 @@ test(
           f.gated,
         ]);
         assert.equal(
-          outcomes.items[0]!.closingEvent,
+          outcomes.items[0]!.closing_event,
           ClosingEvent.ExternalSuccess,
         );
         outcomeC = outcomes.items[0]!.id;
@@ -566,7 +568,7 @@ test(
       "EI10.5 initiative report and assessment reference both current outcomes",
       async () => {
         await waitForNode(f.cli, f.initiative, NodeState.Completed);
-        await finishedExecutions(f.cli, f.projectId, f.initiative, runtimes);
+        await finishedExecutions(f.cli, f.project_id, f.initiative, runtimes);
         const evidence = await f.cli.read<Page<Evidence>>([
           "mission",
           "evidence",
@@ -579,7 +581,7 @@ test(
         const report = evidence.items.find((item) => !item.verification)!;
         const asset = report.assets[0]!;
         assert.ok(asset.kind === AssetKind.Produced);
-        const content = await f.cli.read<{ data: string; mediaType: string }>([
+        const content = await f.cli.read<{ data: string; media_type: string }>([
           "mission",
           "evidence",
           "asset",
@@ -587,35 +589,35 @@ test(
           "get",
           asset.id,
         ]);
-        assert.equal(content.mediaType, MARKDOWN);
+        assert.equal(content.media_type, MARKDOWN);
         assert.equal(Buffer.from(content.data, "base64").toString(), REPORT);
         const verification = evidence.items.find(
           (item) => item.verification,
         )!.verification!;
         assert.deepEqual(
-          verification.results.map(({ command, exitCode }) => ({
+          verification.results.map(({ command, exit_code: exitCode }) => ({
             command,
-            exitCode,
+            exit_code: exitCode,
           })),
-          [{ command: "true", exitCode: 0 }],
+          [{ command: "true", exit_code: 0 }],
         );
-        assert.ok(Array.isArray(verification.testedInput));
+        assert.ok(Array.isArray(verification.tested_input));
         assert.deepEqual(
-          [...verification.testedInput].sort((a, b) =>
-            a.bindingId.localeCompare(b.bindingId),
+          [...verification.tested_input].sort((a, b) =>
+            a.binding_id.localeCompare(b.binding_id),
           ),
           [
             {
               kind: "repository",
-              bindingId: f.bindings.repo!.id,
+              binding_id: f.bindings.repo!.id,
               commit: repo.head,
             },
             {
               kind: "repository",
-              bindingId: f.bindings.gated!.id,
+              binding_id: f.bindings.gated!.id,
               commit: gatedRepo.head,
             },
-          ].sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
+          ].sort((a, b) => a.binding_id.localeCompare(b.binding_id)),
         );
         const assessments = await f.cli.read<Page<Assessment>>([
           "mission",
@@ -626,7 +628,7 @@ test(
         assert.equal(assessments.items.length, SINGLE_ITEM);
         assert.equal(assessments.items[0]!.result, AssessmentResult.Success);
         assert.deepEqual(
-          [...assessments.items[0]!.childOutcomeIds].sort(),
+          [...assessments.items[0]!.child_outcome_ids].sort(),
           [outcomeA, outcomeC].sort(),
         );
       },
@@ -655,7 +657,7 @@ test(
         );
         const text = JSON.stringify(messages);
         for (const privateValue of [
-          "putUrl",
+          "put_url",
           f.sink.endpoint,
           "X-Amz",
           ...f.cli.secrets,
@@ -682,7 +684,7 @@ test(
               "instance",
               "list",
               "--project",
-              f.projectId,
+              f.project_id,
             ])
           ).items,
           [],
@@ -693,7 +695,7 @@ test(
               "scheduler",
               "queue",
               "list",
-              f.projectId,
+              f.project_id,
             ])
           ).items,
           [],

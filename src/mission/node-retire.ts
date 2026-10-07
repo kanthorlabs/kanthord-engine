@@ -93,7 +93,7 @@ function checkRetirement(tx: Transaction, node: NodeRow): void {
       HttpStatus.Conflict,
       MissionErrorCode.RetireRefused,
       "Node cannot be retired.",
-      { nodeId: checked.id, state: checked.state, attempt: checked.attempt },
+      { node_id: checked.id, state: checked.state, attempt: checked.attempt },
     );
 }
 
@@ -108,7 +108,7 @@ function removedDependencies(
   );
   const removed: DependencyEdge[] = [];
   for (const edge of readDependencies(tx, missionId)) {
-    if (!ids.has(edge.dependsOn) || ids.has(edge.dependent)) continue;
+    if (!ids.has(edge.depends_on) || ids.has(edge.dependent)) continue;
     const dependent = nodes.get(edge.dependent);
     assert.ok(dependent, "Dependency source exists in its mission.");
     assert.equal(
@@ -119,8 +119,8 @@ function removedDependencies(
     if (isTerminal(dependent.state)) continue;
     removed.push({
       kind: EdgeKind.Dependency,
-      dependentId: edge.dependent,
-      dependsOnId: edge.dependsOn,
+      dependent_id: edge.dependent,
+      depends_on_id: edge.depends_on,
     });
   }
   if (!force && removed.length)
@@ -130,7 +130,7 @@ function removedDependencies(
       "Node has nonterminal dependents.",
       {
         dependents: [
-          ...new Set(removed.map((edge) => edge.dependentId)),
+          ...new Set(removed.map((edge) => edge.dependent_id)),
         ].sort(),
       },
     );
@@ -159,13 +159,13 @@ export function planRetirement(
     force,
   );
   const preview = {
-    nodeId: node.id,
+    node_id: node.id,
     force,
-    missionVersion: mission.version,
-    retiredNodeIds,
-    removedEdges,
+    mission_version: mission.version,
+    retired_node_ids: retiredNodeIds,
+    removed_edges: removedEdges,
   };
-  return { ...preview, previewDigest: digest(preview) };
+  return { ...preview, preview_digest: digest(preview) };
 }
 
 function retireTasks(
@@ -187,17 +187,17 @@ function retireTasks(
     revision: previous.revision + COUNTER_INCREMENT,
     reason,
     actor,
-    createdAt: now,
-    pinnedByAttempts: [],
+    created_at: now,
+    pinned_by_attempts: [],
     tasks: previous.tasks.filter((task) => !retiredIds.has(task.id)),
     change: {
       write: RevisionWrite.NodeRetire,
-      previousRevision: previous.revision,
-      changedFields: [TASKS_FIELD],
+      previous_revision: previous.revision,
+      changed_fields: [TASKS_FIELD],
       tasks: retired.map((task) => ({
         id: task.id,
         change: TaskChange.Retired,
-        changedFields: [],
+        changed_fields: [],
       })),
     },
   };
@@ -247,29 +247,29 @@ export function retireNode(
   const mission = requireMission(
     tx,
     node.mission_id,
-    body.expectedMissionVersion,
+    body.expected_mission_version,
   );
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   const plan = planRetirement(tx, node, body.force);
-  if (body.previewDigest !== plan.previewDigest)
+  if (body.preview_digest !== plan.preview_digest)
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.RetireMismatch,
       "Retirement preview changed.",
     );
   const before = claimableMap(tx, mission.id, bindings);
-  for (const edge of plan.removedEdges) {
+  for (const edge of plan.removed_edges) {
     assert.equal(
       edge.kind,
       EdgeKind.Dependency,
       "Retirement removes only dependency edges.",
     );
     if (edge.kind === EdgeKind.Dependency)
-      deleteDependency(tx, edge.dependentId, edge.dependsOnId);
+      deleteDependency(tx, edge.dependent_id, edge.depends_on_id);
   }
   const revisions = retireRows(
     tx,
-    new Set(plan.retiredNodeIds),
+    new Set(plan.retired_node_ids),
     body.reason,
     actor,
   );
@@ -278,7 +278,7 @@ export function retireNode(
     tx,
     workQueue,
     mission.id,
-    mission.projectId,
+    mission.project_id,
     before,
     bindings,
   );
@@ -288,16 +288,20 @@ export function retireNode(
     mission.version + COUNTER_INCREMENT,
     "Retirement increments mission once.",
   );
-  assert.equal(plan.nodeId, node.id, "Applied plan belongs to the named node.");
+  assert.equal(
+    plan.node_id,
+    node.id,
+    "Applied plan belongs to the named node.",
+  );
   return {
-    missionVersion,
+    mission_version: missionVersion,
     revisions,
-    retiredNodeIds: plan.retiredNodeIds,
-    addedEdges: [],
-    removedEdges: plan.removedEdges,
-    openAttemptsUnchanged: openAttemptsOf(
+    retired_node_ids: plan.retired_node_ids,
+    added_edges: [],
+    removed_edges: plan.removed_edges,
+    open_attempts_unchanged: openAttemptsOf(
       tx,
-      revisions.map((revision) => revision.nodeId),
+      revisions.map((revision) => revision.node_id),
     ),
   };
 }

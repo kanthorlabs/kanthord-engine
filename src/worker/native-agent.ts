@@ -33,10 +33,10 @@ export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind];
 export interface NativeAgentInput {
   setup: ExecutionSetup;
   claim: {
-    executionId: string;
-    nodeId: string;
-    createdAt: number;
-    expiredAt: number;
+    execution_id: string;
+    node_id: string;
+    created_at: number;
+    expired_at: number;
   };
   nodeKind: NodeKind;
   method: WorkerMethod;
@@ -122,10 +122,10 @@ function nativeAgent(
 export async function openNativeAgent(
   input: NativeAgentInput,
 ): Promise<NativeAgent> {
-  assert.equal(input.claim.executionId, input.setup.execution_id);
+  assert.equal(input.claim.execution_id, input.setup.execution_id);
   const budget = new ExecutionBudget({
     ...input.claim,
-    resourceBudget: input.setup.resource_budget,
+    resource_budget: input.setup.resource_budget,
   });
   const context = budget.agentContext(input.context);
   const bridge = abortSignal(context);

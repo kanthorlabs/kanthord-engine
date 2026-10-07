@@ -14,7 +14,7 @@ import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 import { readRequests, readAssets } from "./record-store.ts";
 import { readNode } from "./store.ts";
 
-type Candidate = ActionContext["actions"][number]["reuseCandidates"][number];
+type Candidate = ActionContext["actions"][number]["reuse_candidates"][number];
 const MINIMUM_ATTEMPT = 0;
 const EMPTY_KEY_LENGTH = 0;
 const FIRST_ATTEMPT = 1;
@@ -36,7 +36,7 @@ function candidatesOf(
       readAssets(tx, request.id)
         .filter((asset) => asset.kind === AssetKind.Platform)
         .map((asset) => ({
-          evidenceId: request.id,
+          evidence_id: request.id,
           attempt: earlier,
           address: platformAddressSchema.parse(JSON.parse(asset.content)),
         })),
@@ -67,29 +67,29 @@ export function actionContextOf(
   );
   return {
     state: node.state,
-    currentAssessment:
+    current_assessment:
       assessment === null
         ? null
         : {
             result: assessment.result,
-            testedInput: testedInputSchema.parse(
+            tested_input: testedInputSchema.parse(
               JSON.parse(assessment.tested_input!),
             ),
           },
     actions: states.map(({ action, resolution, request }) => {
       const binding = dependencies.bindings.getBindingRevision(
         tx,
-        action.bindingId,
+        action.binding_id,
       );
       assert.ok(binding);
-      assert.equal(binding.bindingId, action.bindingId);
+      assert.equal(binding.binding_id, action.binding_id);
       return {
         action,
-        resourceIdentity: binding.resourceIdentity,
+        resource_identity: binding.resource_identity,
         resolution,
-        requestEvidenceId: request?.id ?? null,
+        request_evidence_id: request?.id ?? null,
         eligible: eligible.has(action.key),
-        reuseCandidates: candidatesOf(tx, nodeId, attempt, action.key),
+        reuse_candidates: candidatesOf(tx, nodeId, attempt, action.key),
       };
     }),
   };

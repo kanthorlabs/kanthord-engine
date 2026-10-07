@@ -86,7 +86,7 @@ const bindings: MissionBindings = {
   resolveBinding: (_tx, projectId, name) => {
     assert.equal(projectId, PROJECT_ID);
     return name === REPOSITORY
-      ? { bindingId: BINDING_ID, resourceIdentity: "repository:example" }
+      ? { binding_id: BINDING_ID, resource_identity: "repository:example" }
       : null;
   },
   resolveBindingIdentity: () =>
@@ -114,7 +114,7 @@ function entry(
     filename,
     kind: NodeKind.Initiative,
     ...structuredClone(content),
-    dependsOn: [],
+    depends_on: [],
     ...extra,
   };
 }
@@ -125,8 +125,8 @@ function snapshot(
 ): ImportSnapshot {
   return {
     format: ImportFormat.Json,
-    missionId,
-    missionVersion: VERSION,
+    mission_id: missionId,
+    mission_version: VERSION,
     reason: REASON,
     entries,
   };
@@ -166,16 +166,16 @@ function seed(
       created_at: CREATED_AT,
     });
   for (const item of entries) {
-    for (const name of item.dependsOn)
+    for (const name of item.depends_on)
       insertDependency(tx, mission.id, item.id, ids.get(name)!);
     if (item.kind === NodeKind.Task) continue;
     insertRevision(tx, {
-      nodeId: item.id,
+      node_id: item.id,
       filename: item.filename,
       revision: VERSION,
       reason: REASON,
       actor,
-      createdAt: CREATED_AT,
+      created_at: CREATED_AT,
       content: contentOf(item, true),
       ...(item.kind === NodeKind.Objective
         ? {
@@ -190,10 +190,10 @@ function seed(
         : {}),
       change: {
         write: RevisionWrite.Import,
-        previousRevision: null,
-        changedFields: [],
+        previous_revision: null,
+        changed_fields: [],
       },
-      pinnedByAttempts: [],
+      pinned_by_attempts: [],
     });
   }
   return entries;
@@ -207,7 +207,7 @@ function fixture(t: TestContext, inputs = [entry()]) {
   ]);
   const mission = store.transaction((tx) => ({
     id: insertMission(tx, PROJECT_ID, CREATED_AT),
-    projectId: PROJECT_ID,
+    project_id: PROJECT_ID,
     version: VERSION,
   }));
   const entries = store.transaction((tx) => seed(tx, mission, inputs));
@@ -254,8 +254,8 @@ test("Markdown is parsed and JSON content bypasses Markdown grammar", () => {
   const result = normalizeImportSnapshot(
     {
       format: ImportFormat.Markdown,
-      missionId: MISSION_ID,
-      missionVersion: VERSION,
+      mission_id: MISSION_ID,
+      mission_version: VERSION,
       reason: REASON,
       files: [{ filename: "a.md", content: markdown }],
     },
@@ -277,8 +277,8 @@ test("malformed Markdown preserves parser details and omits the refused file", (
   const result = normalizeImportSnapshot(
     {
       format: ImportFormat.Markdown,
-      missionId: MISSION_ID,
-      missionVersion: VERSION,
+      mission_id: MISSION_ID,
+      mission_version: VERSION,
       reason: REASON,
       files: [{ filename: "broken.md", content: "not a plan" }],
     },
@@ -306,13 +306,13 @@ test("import wire schemas accept malformed nonempty names but node writes remain
   const json = snapshot([
     entry(INVALID_FILENAME, {
       parent: INVALID_FILENAME,
-      dependsOn: [INVALID_FILENAME],
+      depends_on: [INVALID_FILENAME],
     }),
   ]);
   const md = {
     format: ImportFormat.Markdown,
-    missionId: MISSION_ID,
-    missionVersion: VERSION,
+    mission_id: MISSION_ID,
+    mission_version: VERSION,
     reason: REASON,
     files: [{ filename: INVALID_FILENAME, content: markdown }],
   };
@@ -321,8 +321,8 @@ test("import wire schemas accept malformed nonempty names but node writes remain
     assert.ok(
       importApplySchema.safeParse({
         ...value,
-        previewDigest: "a".repeat(64),
-        confirmedRetirements: [],
+        preview_digest: "a".repeat(64),
+        confirmed_retirements: [],
       }).success,
     );
   }
@@ -333,7 +333,7 @@ test("import wire schemas accept malformed nonempty names but node writes remain
       kind: NodeKind.Initiative,
       content,
       reason: REASON,
-      expectedMissionVersion: VERSION,
+      expected_mission_version: VERSION,
     }).success,
   );
   assert.ok(!importSnapshotSchema.safeParse(snapshot([entry("")])).success);
@@ -376,18 +376,18 @@ test("body mission mismatch has no file or node locator", () => {
     TEXT_MAX_BYTES,
   );
   assert.deepEqual(
-    result.violations.map(({ code, filename, nodeId, details }) => ({
+    result.violations.map(({ code, filename, node_id, details }) => ({
       code,
       filename,
-      nodeId,
+      node_id,
       details,
     })),
     [
       {
         code: MissionErrorCode.MissionMismatch,
         filename: null,
-        nodeId: null,
-        details: { missionId: OTHER_MISSION_ID },
+        node_id: null,
+        details: { mission_id: OTHER_MISSION_ID },
       },
     ],
   );
@@ -424,7 +424,7 @@ for (const [label, patch, reason] of [
   ["objective without parent", { kind: NodeKind.Objective }, "parent_required"],
   [
     "task without parent",
-    { kind: NodeKind.Task, dependsOn: undefined },
+    { kind: NodeKind.Task, depends_on: undefined },
     "parent_required",
   ],
   [
@@ -434,7 +434,7 @@ for (const [label, patch, reason] of [
   ],
   [
     "repeated dependency",
-    { dependsOn: ["a.md", "a.md"] },
+    { depends_on: ["a.md", "a.md"] },
     "depends_on_repeated",
   ],
   [
@@ -444,7 +444,7 @@ for (const [label, patch, reason] of [
   ],
   [
     "malformed dependency",
-    { dependsOn: [INVALID_FILENAME] },
+    { depends_on: [INVALID_FILENAME] },
     "reference_invalid",
   ],
 ] satisfies Array<[string, Partial<ImportEntry>, string]>) {
@@ -470,8 +470,8 @@ test("Markdown task's normalized empty dependencies are not a forbidden input fi
   const result = normalizeImportSnapshot(
     {
       format: ImportFormat.Markdown,
-      missionId: MISSION_ID,
-      missionVersion: VERSION,
+      mission_id: MISSION_ID,
+      mission_version: VERSION,
       reason: REASON,
       files: [{ filename: "task.md", content: task }],
     },
@@ -479,15 +479,15 @@ test("Markdown task's normalized empty dependencies are not a forbidden input fi
     TEXT_MAX_BYTES,
   );
   assert.deepEqual(result.violations, []);
-  assert.deepEqual(result.entries[FIRST_ENTRY_INDEX]?.dependsOn, []);
+  assert.deepEqual(result.entries[FIRST_ENTRY_INDEX]?.depends_on, []);
 });
 
 test("stage one collects violations from every file, including duplicate refused files", () => {
   const result = normalizeImportSnapshot(
     {
       format: ImportFormat.Markdown,
-      missionId: OTHER_MISSION_ID,
-      missionVersion: VERSION,
+      mission_id: OTHER_MISSION_ID,
+      mission_version: VERSION,
       reason: REASON,
       files: [
         { filename: INVALID_FILENAME, content: "bad" },
@@ -552,9 +552,9 @@ test("unknown identity is a violation, never a create", (t) => {
     [
       result.creates,
       result.updates,
-      result.noOps,
+      result.no_ops,
       result.retirements,
-      result.removedEdges,
+      result.removed_edges,
     ],
     [[], [], [], [], []],
   );
@@ -608,7 +608,7 @@ test("duplicate id and kind changes are collected", (t) => {
     {
       id: existing.id,
       kind: NodeKind.Objective,
-      currentKind: NodeKind.Initiative,
+      current_kind: NodeKind.Initiative,
     },
   );
 });
@@ -619,7 +619,7 @@ test("unresolved parent and dependencies identify the submitted references", (t)
     entry("o.md", {
       kind: NodeKind.Objective,
       parent: "missing-parent.md",
-      dependsOn: ["missing-dep.md"],
+      depends_on: ["missing-dep.md"],
       bindings: [REPOSITORY],
     }),
   ]);
@@ -637,7 +637,7 @@ test("unresolved parent and dependencies identify the submitted references", (t)
       },
       {
         code: MissionErrorCode.UnresolvedReference,
-        details: { reference: "dependsOn", name: "missing-dep.md" },
+        details: { reference: "depends_on", name: "missing-dep.md" },
         filename: "o.md",
       },
     ],
@@ -646,7 +646,7 @@ test("unresolved parent and dependencies identify the submitted references", (t)
 
 test("references cannot resolve against current filenames outside the submitted set", (t) => {
   const { resolve } = fixture(t);
-  const result = resolve([entry("new.md", { dependsOn: ["a.md"] })]);
+  const result = resolve([entry("new.md", { depends_on: ["a.md"] })]);
   assert.deepEqual(
     result.violations.map((value) => value.code),
     [MissionErrorCode.UnresolvedReference],
@@ -662,7 +662,7 @@ test("wrong-kind parents and task dependency targets are rejected", (t) => {
         parent: "a.md",
       }),
       "b.md",
-      { dependsOn: ["t.md"] },
+      { depends_on: ["t.md"] },
     ),
   );
   assert.deepEqual(
@@ -672,7 +672,7 @@ test("wrong-kind parents and task dependency targets are rejected", (t) => {
   assert.deepEqual(
     result.violations.map((value) => value.details),
     [
-      { reference: "dependsOn", name: "t.md" },
+      { reference: "depends_on", name: "t.md" },
       { reference: "parent", name: "p.md" },
       { reference: "parent", name: "a.md" },
     ],
@@ -696,7 +696,7 @@ test("binding resolution collects every missing name and applies the kind rule t
       { binding: "also-missing" },
       {
         kind: NodeKind.Initiative,
-        bindingKind: "repository",
+        binding_kind: "repository",
         count: BINDING_COUNT,
       },
     ],
@@ -737,28 +737,28 @@ test("binding collaborator operation errors become violations but unexpected fai
 
 test("closure detects a cycle inherited from an initiative dependency on its objective", (t) => {
   const { resolve } = fixture(t, []);
-  const result = resolve(change(hierarchy(), "a.md", { dependsOn: ["o.md"] }));
+  const result = resolve(change(hierarchy(), "a.md", { depends_on: ["o.md"] }));
   assert.deepEqual(
-    result.violations.map(({ code, filename, nodeId }) => ({
+    result.violations.map(({ code, filename, node_id }) => ({
       code,
       filename,
-      nodeId,
+      node_id,
     })),
-    [{ code: MissionErrorCode.Cycle, filename: null, nodeId: null }],
+    [{ code: MissionErrorCode.Cycle, filename: null, node_id: null }],
   );
   assert.deepEqual(result.creates, []);
 });
 
 test("import rejects an objective depending on its own initiative without creates", (t) => {
   const { resolve } = fixture(t, []);
-  const result = resolve(change(hierarchy(), "o.md", { dependsOn: ["a.md"] }));
+  const result = resolve(change(hierarchy(), "o.md", { depends_on: ["a.md"] }));
   assert.deepEqual(
-    result.violations.map(({ code, filename, nodeId }) => ({
+    result.violations.map(({ code, filename, node_id }) => ({
       code,
       filename,
-      nodeId,
+      node_id,
     })),
-    [{ code: MissionErrorCode.Cycle, filename: null, nodeId: null }],
+    [{ code: MissionErrorCode.Cycle, filename: null, node_id: null }],
   );
   assert.deepEqual(result.creates, []);
 });
@@ -766,8 +766,8 @@ test("import rejects an objective depending on its own initiative without create
 test("direct dependency cycles are rejected", (t) => {
   const { resolve } = fixture(t, []);
   const result = resolve([
-    entry("a.md", { dependsOn: ["b.md"] }),
-    entry("b.md", { dependsOn: ["a.md"] }),
+    entry("a.md", { depends_on: ["b.md"] }),
+    entry("b.md", { depends_on: ["a.md"] }),
   ]);
   assert.deepEqual(
     result.violations.map((value) => value.code),
@@ -782,15 +782,15 @@ test("unchanged hierarchy, including tasks and terminal nodes, is entirely noOps
     .run(NodeState.Completed, entries[FIRST_ENTRY_INDEX]!.id!);
   const result = resolve();
   assert.deepEqual(result.violations, []);
-  assert.deepEqual(result.noOps, entries.map((value) => value.id!).sort());
+  assert.deepEqual(result.no_ops, entries.map((value) => value.id!).sort());
   assert.deepEqual(
-    [result.creates, result.updates, result.retirements, result.removedEdges],
+    [result.creates, result.updates, result.retirements, result.removed_edges],
     [[], [], [], []],
   );
   assert.deepEqual(
-    result.resolvedEntries.find(
+    result.resolved_entries.find(
       (value) => value.entry.filename === OBJECTIVE_FILENAME,
-    )?.bindingIds,
+    )?.binding_ids,
     [BINDING_ID],
   );
 });
@@ -802,7 +802,7 @@ for (const [label, filename, patch] of [
   ["verifications", "a.md", { verifications: ["echo changed"] }],
   ["filename", "b.md", { filename: "renamed.md" }],
   ["parent", "o.md", { parent: "b.md" }],
-  ["dependsOn", "b.md", { dependsOn: ["a.md"] }],
+  ["depends_on", "b.md", { depends_on: ["a.md"] }],
   ["task content", "t.md", { name: "Changed task" }],
   ["task parent", "t.md", { parent: "p.md" }],
 ] satisfies Array<[string, string, Partial<NormalizedEntry>]>) {
@@ -825,16 +825,16 @@ test("binding names compare as resolved revision identities", (t) => {
   const same = resolve(aliased, {
     ...bindings,
     resolveBinding: () => ({
-      bindingId: BINDING_ID,
-      resourceIdentity: "repository:example",
+      binding_id: BINDING_ID,
+      resource_identity: "repository:example",
     }),
   });
   assert.deepEqual(same.updates, []);
   const changed = resolve(entries, {
     ...bindings,
     resolveBinding: () => ({
-      bindingId: NEXT_BINDING_ID,
-      resourceIdentity: "repository:example",
+      binding_id: NEXT_BINDING_ID,
+      resource_identity: "repository:example",
     }),
   });
   assert.deepEqual(
@@ -848,11 +848,11 @@ test("dependency order is ignored while verification order remains content", (t)
     entry("a.md"),
     entry("b.md"),
     entry("c.md", {
-      dependsOn: ["a.md", "b.md"],
+      depends_on: ["a.md", "b.md"],
       verifications: ["first", "second"],
     }),
   ]);
-  const reordered = change(entries, "c.md", { dependsOn: ["b.md", "a.md"] });
+  const reordered = change(entries, "c.md", { depends_on: ["b.md", "a.md"] });
   assert.deepEqual(resolve(reordered).updates, []);
   assert.deepEqual(
     resolve(change(reordered, "c.md", { verifications: ["second", "first"] }))
@@ -876,7 +876,7 @@ test("empty set retires every current node but excludes already retired nodes", 
       .sort(),
   );
   assert.deepEqual(result.violations, []);
-  assert.ok(!result.currentNodes.has(retiredId));
+  assert.ok(!result.current_nodes.has(retiredId));
 });
 
 test("same filename without identity creates a new node and retires the old node", (t) => {
@@ -885,8 +885,11 @@ test("same filename without identity creates a new node and retires the old node
   assert.deepEqual(result.creates, ["a.md"]);
   assert.deepEqual(result.retirements, [entries[FIRST_ENTRY_INDEX]!.id]);
   assert.deepEqual(result.updates, []);
-  assert.equal(result.resolvedEntries[FIRST_ENTRY_INDEX]?.key, TEMPORARY_A_KEY);
-  assert.equal(result.resolvedEntries[FIRST_ENTRY_INDEX]?.current, null);
+  assert.equal(
+    result.resolved_entries[FIRST_ENTRY_INDEX]?.key,
+    TEMPORARY_A_KEY,
+  );
+  assert.equal(result.resolved_entries[FIRST_ENTRY_INDEX]?.current, null);
 });
 
 test("filename replacement does not retire an identity retained under a new filename", (t) => {
@@ -907,7 +910,7 @@ test("new parent keys, current rows and resulting dependency sets are exposed wi
   const input = [
     ...change(entries, "o.md", {
       parent: created.filename,
-      dependsOn: ["b.md"],
+      depends_on: ["b.md"],
     }),
     created,
   ];
@@ -916,13 +919,16 @@ test("new parent keys, current rows and resulting dependency sets are exposed wi
     .get();
   const result = resolve(input);
   const objective = item(entries, "o.md");
-  assert.equal(result.parentMap.get(objective.id!), `file:${created.filename}`);
+  assert.equal(
+    result.parent_map.get(objective.id!),
+    `file:${created.filename}`,
+  );
   assert.deepEqual(
     result.dependencies.get(objective.id!),
     new Set([item(entries, "b.md").id]),
   );
   assert.equal(
-    result.currentNodes.get(objective.id!)?.parent_id,
+    result.current_nodes.get(objective.id!)?.parent_id,
     item(entries, "a.md").id,
   );
   assert.deepEqual(
@@ -933,7 +939,7 @@ test("new parent keys, current rows and resulting dependency sets are exposed wi
 });
 
 test("removedEdges contains dropped containment and dependency edges in stable order", (t) => {
-  const base = change(hierarchy(), "b.md", { dependsOn: ["a.md"] });
+  const base = change(hierarchy(), "b.md", { depends_on: ["a.md"] });
   const { entries, resolve } = fixture(t, base);
   const a = item(entries, "a.md").id!;
   const b = item(entries, "b.md").id!;
@@ -947,15 +953,15 @@ test("removedEdges contains dropped containment and dependency edges in stable o
         { parent: "b.md" },
       ),
       "b.md",
-      { dependsOn: [] },
+      { depends_on: [] },
     ),
   );
-  assert.deepEqual(result.removedEdges, [
+  assert.deepEqual(result.removed_edges, [
     ...[
-      { kind: EdgeKind.Containment, parentId: a, childId: o },
-      { kind: EdgeKind.Containment, parentId: o, childId: task },
-    ].sort((left, right) => left.parentId.localeCompare(right.parentId)),
-    { kind: EdgeKind.Dependency, dependentId: b, dependsOnId: a },
+      { kind: EdgeKind.Containment, parent_id: a, child_id: o },
+      { kind: EdgeKind.Containment, parent_id: o, child_id: task },
+    ].sort((left, right) => left.parent_id.localeCompare(right.parent_id)),
+    { kind: EdgeKind.Dependency, dependent_id: b, depends_on_id: a },
   ]);
   assert.deepEqual(result.retirements, [task]);
 });
@@ -963,15 +969,15 @@ test("removedEdges contains dropped containment and dependency edges in stable o
 test("retiring an endpoint removes incoming dependencies, and same-name replacement drops identity edges", (t) => {
   const { entries, resolve } = fixture(t, [
     entry("a.md"),
-    entry("b.md", { dependsOn: ["a.md"] }),
+    entry("b.md", { depends_on: ["a.md"] }),
   ]);
   const result = resolve([entry("a.md"), item(entries, "b.md")]);
   assert.deepEqual(result.updates, [item(entries, "b.md").id]);
-  assert.deepEqual(result.removedEdges, [
+  assert.deepEqual(result.removed_edges, [
     {
       kind: EdgeKind.Dependency,
-      dependentId: item(entries, "b.md").id,
-      dependsOnId: item(entries, "a.md").id,
+      dependent_id: item(entries, "b.md").id,
+      depends_on_id: item(entries, "a.md").id,
     },
   ]);
 });
@@ -993,8 +999,8 @@ test("digest is canonical, input-order independent, nonmutating and retirement-s
   assert.equal(
     actual,
     digest({
-      missionId: MISSION_ID,
-      missionVersion: VERSION,
+      mission_id: MISSION_ID,
+      mission_version: VERSION,
       entries: [...entries].reverse(),
       retirements: [...retired].sort(),
     }),
@@ -1059,7 +1065,7 @@ const CONDITION_CASES: Array<{
   {
     label:
       "dependency-only changes use live-claim admission instead of the import condition",
-    transform: (entries) => change(entries, "b.md", { dependsOn: ["a.md"] }),
+    transform: (entries) => change(entries, "b.md", { depends_on: ["a.md"] }),
     checked: [],
   },
   {
@@ -1137,7 +1143,7 @@ for (const scenario of CONDITION_CASES) {
       checkImportCondition(tx, resolved),
     );
     assert.deepEqual(
-      violations.map((value) => value.nodeId),
+      violations.map((value) => value.node_id),
       scenario.checked.map((filename) => item(entries, filename).id!).sort(),
     );
     for (const value of violations) {
@@ -1168,16 +1174,16 @@ for (const state of [NodeState.Completed, NodeState.Discarded]) {
         checkImportCondition(tx, resolved),
       );
       assert.deepEqual(
-        violations.map(({ code, nodeId, details }) => ({
+        violations.map(({ code, node_id, details }) => ({
           code,
-          nodeId,
+          node_id,
           details,
         })),
         [
           {
             code: MissionErrorCode.TerminalChange,
-            nodeId: id,
-            details: { nodeId: id },
+            node_id: id,
+            details: { node_id: id },
           },
         ],
       );
@@ -1220,7 +1226,7 @@ test("prepared import exposes the resolved state without resolving bindings twic
   const { store, mission, entries } = fixture(t, hierarchy());
   let resolutions = INITIAL_RESOLUTION_COUNT;
   const wireEntries = entries.map((value) =>
-    value.kind === NodeKind.Task ? { ...value, dependsOn: undefined } : value,
+    value.kind === NodeKind.Task ? { ...value, depends_on: undefined } : value,
   );
   const prepared = store.transaction((tx) =>
     prepareImport(
@@ -1244,6 +1250,6 @@ test("prepared import exposes the resolved state without resolving bindings twic
   );
   assert.ok(prepared.resolved);
   assert.deepEqual(prepared.preview.violations, []);
-  assert.equal(prepared.preview.noOps, prepared.resolved.noOps);
-  assert.equal(prepared.resolved.resolvedEntries.length, entries.length);
+  assert.equal(prepared.preview.no_ops, prepared.resolved.no_ops);
+  assert.equal(prepared.resolved.resolved_entries.length, entries.length);
 });

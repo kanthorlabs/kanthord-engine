@@ -47,7 +47,7 @@ const VALIDATION = "gateway.request.validation_failed";
 test("repository commits require complete lowercase SHA-1 or SHA-256 values", () => {
   const base = {
     kind: AssetKind.Repository,
-    bindingId: createIdentity("binding"),
+    binding_id: createIdentity("binding"),
   };
   for (const commit of [COMMIT, "b".repeat(64)])
     assert.ok(repositoryAddressSchema.safeParse({ ...base, commit }).success);
@@ -65,10 +65,10 @@ test("content checks pinned objective bindings and distinct current initiative r
   const otherId = createIdentity("binding");
   const storageId = createIdentity("binding");
   h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
-    bindingId: id,
-    projectId: h.projectId,
+    binding_id: id,
+    project_id: h.project_id,
     name: id,
-    resourceIdentity:
+    resource_identity:
       id === storageId
         ? "storage:s3:bucket"
         : id === otherId
@@ -79,15 +79,15 @@ test("content checks pinned objective bindings and distinct current initiative r
     disabled: false,
   });
   h.store.transaction((tx) => {
-    const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
-    const initiative = readNode(tx, h.nodeId)!;
+    const revision = getRevision(tx, h.node_id, FIRST_REVISION);
+    const initiative = readNode(tx, h.node_id)!;
     assert.deepEqual(
-      h.service.repositoryBindingIdsOf(tx, h.nodeId, FIRST_REVISION),
+      h.service.repositoryBindingIdsOf(tx, h.node_id, FIRST_REVISION),
       [],
     );
     const address = {
       kind: AssetKind.Repository,
-      bindingId,
+      binding_id: bindingId,
       commit: COMMIT,
     } as const;
     requireTestedInput(tx, h.dependencies.bindings, initiative, revision, {
@@ -111,15 +111,15 @@ test("content checks pinned objective bindings and distinct current initiative r
       children.push(nodeId);
       insertNode(tx, {
         id: nodeId,
-        mission_id: h.missionId,
+        mission_id: h.mission_id,
         kind: NodeKind.Objective,
         filename: `${nodeId}.md`,
-        parent_id: h.nodeId,
+        parent_id: h.node_id,
         created_at: NOW,
       });
       const childRevision: Revision = {
         ...revision,
-        nodeId,
+        node_id: nodeId,
         content: { ...revision.content, bindings: [id, storageId] },
         tasks: [],
       };
@@ -137,7 +137,7 @@ test("content checks pinned objective bindings and distinct current initiative r
       const child = readNode(tx, nodeId)!;
       assert.equal(
         repositoryBindingOf(tx, h.dependencies.bindings, childRevision)
-          ?.bindingId,
+          ?.binding_id,
         id,
       );
       assert.equal(
@@ -149,7 +149,7 @@ test("content checks pinned objective bindings and distinct current initiative r
         h.dependencies.bindings,
         child,
         childRevision,
-        { ...address, bindingId: id },
+        { ...address, binding_id: id },
       );
       assert.throws(
         () =>
@@ -158,7 +158,7 @@ test("content checks pinned objective bindings and distinct current initiative r
             h.dependencies.bindings,
             child,
             childRevision,
-            { ...address, bindingId: storageId },
+            { ...address, binding_id: storageId },
           ),
         (error) =>
           error instanceof OperationError &&
@@ -177,12 +177,12 @@ test("content checks pinned objective bindings and distinct current initiative r
       );
     }
     assert.deepEqual(
-      h.service.repositoryBindingIdsOf(tx, h.nodeId, FIRST_REVISION),
+      h.service.repositoryBindingIdsOf(tx, h.node_id, FIRST_REVISION),
       [laterId, otherId],
     );
     requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
       address,
-      { ...address, bindingId: otherId },
+      { ...address, binding_id: otherId },
     ]);
     assert.throws(
       () =>
@@ -222,7 +222,7 @@ test("content checks pinned objective bindings and distinct current initiative r
 test("produced bytes have canonical base64, an exact decoded limit and the decoded digest", () => {
   const decoded = Buffer.alloc(INLINE_BYTES_MAX);
   const content = producedContent({
-    mediaType: "application/octet-stream",
+    media_type: "application/octet-stream",
     data: decoded.toString("base64"),
   });
   assert.equal(
@@ -232,7 +232,7 @@ test("produced bytes have canonical base64, an exact decoded limit and the decod
   assert.throws(
     () =>
       producedContent({
-        mediaType: content.mediaType,
+        media_type: content.media_type,
         data: Buffer.alloc(INLINE_BYTES_MAX + BYTE_OVERFLOW).toString("base64"),
       }),
     (error) =>
@@ -241,15 +241,15 @@ test("produced bytes have canonical base64, an exact decoded limit and the decod
   );
   for (const data of ["Zg", "Zg==\n", "Zh==", "???"])
     assert.throws(
-      () => producedContent({ mediaType: content.mediaType, data }),
+      () => producedContent({ media_type: content.media_type, data }),
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
 });
 
 test("object locations preserve the pinned prefix and enforce bucket ownership", () => {
   const binding: StorageBinding = {
-    bindingId: createIdentity("binding"),
-    projectId: createIdentity("project"),
+    binding_id: createIdentity("binding"),
+    project_id: createIdentity("project"),
     endpoint: "https://storage.example",
     bucket: "bucket",
     region: "region",
@@ -262,7 +262,7 @@ test("object locations preserve the pinned prefix and enforce bucket ownership",
   const assetId = createIdentity("asset");
   const key = objectKey(
     binding,
-    binding.projectId,
+    binding.project_id,
     missionId,
     nodeId,
     FIRST_REVISION,
@@ -270,7 +270,7 @@ test("object locations preserve the pinned prefix and enforce bucket ownership",
   );
   assert.equal(
     key,
-    `prefix/${binding.projectId}/${missionId}/${nodeId}/1/${assetId}`,
+    `prefix/${binding.project_id}/${missionId}/${nodeId}/1/${assetId}`,
   );
   const location = objectLocation(binding, key);
   assert.equal(location, `s3://bucket/${key}`);
@@ -281,8 +281,8 @@ test("object locations preserve the pinned prefix and enforce bucket ownership",
 test("verification coverage compares command multisets including pinned tasks", (t) => {
   const h = executionHarness(t, IDENTITY);
   h.store.transaction((tx) => {
-    const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
-    const node = { ...readNode(tx, h.nodeId)!, kind: NodeKind.Objective };
+    const revision = getRevision(tx, h.node_id, FIRST_REVISION);
+    const node = { ...readNode(tx, h.node_id)!, kind: NodeKind.Objective };
     revision.tasks = [
       {
         id: createIdentity("node"),
@@ -294,12 +294,12 @@ test("verification coverage compares command multisets including pinned tasks", 
     assert.deepEqual(expected, ["true", "task", "true"]);
     const result = (command: string, exitCode = SUCCESS_EXIT_CODE) => ({
       command,
-      exitCode,
+      exit_code: exitCode,
       signal: null,
-      timedOut: false,
+      timed_out: false,
     });
     const verification: Verification = {
-      testedInput: { kind: AssetKind.Produced, sha256: "b".repeat(64) },
+      tested_input: { kind: AssetKind.Produced, sha256: "b".repeat(64) },
       results: [result("task"), result("true"), result("true")],
     };
     assert.ok(verificationPasses(verification, expected));

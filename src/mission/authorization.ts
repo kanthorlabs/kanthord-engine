@@ -61,11 +61,11 @@ export function authorizeClaim(
   );
   if (
     !live ||
-    live.executionId !== claim.executionId ||
-    live.runtimeIdentity !== claim.runtimeIdentity
+    live.execution_id !== claim.executionId ||
+    live.runtime_identity !== claim.runtimeIdentity
   )
     authorizationRefused(AuthorizationRefusal.ClaimNotLive);
-  if (claim.nodeId !== nodeId || live.pinnedRevision !== claim.pinnedRevision)
+  if (claim.nodeId !== nodeId || live.pinned_revision !== claim.pinnedRevision)
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
   const attempt = readOpenAttempt(tx, nodeId);
   if (
@@ -95,7 +95,7 @@ export function authorizeAction(
     attempt.node_revision,
   ).find((item) => item.key === key);
   if (!action) authorizationRefused(AuthorizationRefusal.NodeMismatch);
-  authorizeBinding(tx, dependencies.bindings, action.bindingId);
+  authorizeBinding(tx, dependencies.bindings, action.binding_id);
   return action;
 }
 
@@ -105,9 +105,9 @@ export function authorizeStorage(
   bindingId: string,
 ) {
   const revision = authorizeBinding(tx, bindings, bindingId);
-  const binding = bindings.storageBindingOf(tx, revision.bindingId);
+  const binding = bindings.storageBindingOf(tx, revision.binding_id);
   assert.ok(binding);
-  assert.equal(binding.projectId, revision.projectId);
+  assert.equal(binding.project_id, revision.project_id);
   return binding;
 }
 
@@ -132,6 +132,6 @@ export function authorizeRequest(
     attempt.node_revision,
   ).find((item) => item.key === evidence.requirement_key);
   assert.ok(action);
-  authorizeBinding(tx, dependencies.bindings, action.bindingId);
+  authorizeBinding(tx, dependencies.bindings, action.binding_id);
   return action;
 }

@@ -42,7 +42,7 @@ function requireTarget(
   bindings: MissionBindings,
 ): BindingRevision {
   const target = bindings.getBindingRevision(tx, bindingId);
-  if (target === null || target.projectId !== mission.projectId)
+  if (target === null || target.project_id !== mission.project_id)
     throw new OperationError(
       HttpStatus.NotFound,
       MissionErrorCode.BindingNotFound,
@@ -61,7 +61,7 @@ function requireTarget(
       "Binding is disabled.",
     );
   assert.equal(
-    target.bindingId,
+    target.binding_id,
     bindingId,
     "Target must be the requested pin.",
   );
@@ -77,7 +77,7 @@ function mismatch(nodeId: string, bindingId: string): never {
     HttpStatus.Conflict,
     MissionErrorCode.BindingMismatch,
     "Node does not pin an earlier or equal revision of this binding.",
-    { nodeId, bindingId },
+    { node_id: nodeId, binding_id: bindingId },
   );
 }
 
@@ -86,11 +86,11 @@ function candidates(
   missionId: string,
   body: Rebind,
 ): NodeRow[] {
-  if (body.nodeId === undefined)
+  if (body.node_id === undefined)
     return readMissionNodes(tx, missionId).filter(
       (node) => node.kind !== NodeKind.Task,
     );
-  const node = requireNode(tx, body.nodeId);
+  const node = requireNode(tx, body.node_id);
   if (node.mission_id !== missionId)
     throw new OperationError(
       HttpStatus.NotFound,
@@ -99,8 +99,8 @@ function candidates(
     );
   requireActive(node);
   requireNonterminal(node);
-  if (node.kind === NodeKind.Task) mismatch(node.id, body.bindingId);
-  assert.equal(node.id, body.nodeId, "Candidate must be the requested node.");
+  if (node.kind === NodeKind.Task) mismatch(node.id, body.binding_id);
+  assert.equal(node.id, body.node_id, "Candidate must be the requested node.");
   assert.ok(node.state, "Candidate must be runnable.");
   return [node];
 }
@@ -122,17 +122,18 @@ function replacement(
     const stored = bindings.getBindingRevision(tx, id);
     if (
       stored === null ||
-      stored.projectId !== target.projectId ||
-      stored.resourceIdentity !== target.resourceIdentity ||
+      stored.project_id !== target.project_id ||
+      stored.resource_identity !== target.resource_identity ||
       stored.revision > target.revision
     )
       return id;
     matched = true;
     if (stored.revision === target.revision) return id;
     changed = true;
-    return body.bindingId;
+    return body.binding_id;
   });
-  if (body.nodeId !== undefined && !matched) mismatch(node.id, body.bindingId);
+  if (body.node_id !== undefined && !matched)
+    mismatch(node.id, body.binding_id);
   return { previous, pins, changed };
 }
 
@@ -144,19 +145,19 @@ function reboundRevision(
   actor: HumanActor,
 ): Revision {
   assert.notEqual(node.kind, NodeKind.Task, "Tasks own no binding pins.");
-  assert.equal(previous.nodeId, node.id, "Revision must belong to candidate.");
+  assert.equal(previous.node_id, node.id, "Revision must belong to candidate.");
   return {
     ...previous,
     revision: previous.revision + REVISION_INCREMENT,
     content: { ...previous.content, bindings: pins },
     reason: body.reason,
     actor,
-    createdAt: Date.now(),
-    pinnedByAttempts: [],
+    created_at: Date.now(),
+    pinned_by_attempts: [],
     change: {
       write: RevisionWrite.NodeRebind,
-      previousRevision: previous.revision,
-      changedFields: [ContentField.Bindings],
+      previous_revision: previous.revision,
+      changed_fields: [ContentField.Bindings],
       ...(node.kind === NodeKind.Objective ? { tasks: [] } : {}),
     },
   };
@@ -170,9 +171,9 @@ export function rebindNodes(
   bindings: MissionBindings,
   textMaxBytes: number,
 ): RebindResult {
-  const mission = requireMission(tx, missionId, body.expectedMissionVersion);
+  const mission = requireMission(tx, missionId, body.expected_mission_version);
   validateText(REASON_FIELD, body.reason, textMaxBytes);
-  const target = requireTarget(tx, mission, body.bindingId, bindings);
+  const target = requireTarget(tx, mission, body.binding_id, bindings);
   const revisions: Revision[] = [];
   const skipped: RebindResult["skipped"] = [];
   const nodes = candidates(tx, missionId, body);
@@ -214,15 +215,15 @@ export function rebindNodes(
     "Rebind increments mission once only when content changes.",
   );
   return {
-    nodeChange: {
-      missionVersion,
+    node_change: {
+      mission_version: missionVersion,
       revisions,
-      retiredNodeIds: [],
-      addedEdges: [],
-      removedEdges: [],
-      openAttemptsUnchanged: openAttemptsOf(
+      retired_node_ids: [],
+      added_edges: [],
+      removed_edges: [],
+      open_attempts_unchanged: openAttemptsOf(
         tx,
-        revisions.map((revision) => revision.nodeId),
+        revisions.map((revision) => revision.node_id),
       ),
     },
     skipped,

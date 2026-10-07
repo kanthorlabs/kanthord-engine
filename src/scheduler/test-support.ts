@@ -23,24 +23,24 @@ export function executionFixture(
   overrides: Partial<ExecutionRow> = {},
 ): ExecutionRow {
   const row = {
-    executionId: createIdentity("execution"),
-    projectId: createIdentity("project"),
-    nodeId: createIdentity("node"),
-    workerBindingId: createIdentity("binding"),
-    resourceIdentity: "worker:kanthord:general",
-    runtimeIdentity: createIdentity("worker_instance"),
+    execution_id: createIdentity("execution"),
+    project_id: createIdentity("project"),
+    node_id: createIdentity("node"),
+    worker_binding_id: createIdentity("binding"),
+    resource_identity: "worker:kanthord:general",
+    runtime_identity: createIdentity("worker_instance"),
     attempt: 1,
-    pinnedRevision: 1,
+    pinned_revision: 1,
     credentials: [],
-    expiredAt: FIXTURE_DEADLINE,
-    traceId: FIXTURE_TRACE_ID,
-    rootSpanId: FIXTURE_SPAN_ID,
-    createdAt: FIXTURE_NOW,
-    endedAt: null,
+    expired_at: FIXTURE_DEADLINE,
+    trace_id: FIXTURE_TRACE_ID,
+    root_span_id: FIXTURE_SPAN_ID,
+    created_at: FIXTURE_NOW,
+    ended_at: null,
     ...overrides,
   };
   assert.ok(row.attempt > NO_REVISION);
-  assert.ok(row.pinnedRevision > NO_REVISION);
+  assert.ok(row.pinned_revision > NO_REVISION);
   return row;
 }
 
@@ -93,7 +93,7 @@ export function schedulerHarness(
     traceIdentity: {
       mint: () => {
         record("mint", []);
-        return { traceId: FIXTURE_TRACE_ID, rootSpanId: FIXTURE_SPAN_ID };
+        return { trace_id: FIXTURE_TRACE_ID, root_span_id: FIXTURE_SPAN_ID };
       },
     },
     ...overrides,

@@ -91,9 +91,9 @@ export function currencyOf(tx: Transaction, row: AssessmentRow): Currency {
   if (!orderSelected) reasons.push(CurrencyReason.Order);
   return {
     current: own.contextMatches && own.authorityAdmits && orderSelected,
-    contextMatches: own.contextMatches,
-    authorityAdmits: own.authorityAdmits,
-    orderSelected,
+    context_matches: own.contextMatches,
+    authority_admits: own.authorityAdmits,
+    order_selected: orderSelected,
     reasons,
   };
 }

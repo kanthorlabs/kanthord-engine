@@ -45,8 +45,8 @@ export function executionHarness(t: TestContext, identity: CallerIdentity) {
   const h = controlHarness(t, identity);
   const claim: ExecutionClaim = {
     executionId: createIdentity("execution"),
-    projectId: h.projectId,
-    nodeId: h.nodeId,
+    projectId: h.project_id,
+    nodeId: h.node_id,
     attempt: FIRST_REVISION,
     pinnedRevision: FIRST_REVISION,
     runtimeIdentity: createIdentity("worker_instance"),
@@ -54,25 +54,30 @@ export function executionHarness(t: TestContext, identity: CallerIdentity) {
   };
   const actor = {
     kind: ActorKind.Execution,
-    executionId: claim.executionId,
-    clientId: createIdentity("client_identity"),
+    execution_id: claim.executionId,
+    client_id: createIdentity("client_identity"),
     name: "Harness",
   } as const;
-  h.dependencies.schedulerClaims.liveExecutionOf = () => claim;
+  h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+    execution_id: claim.executionId,
+    runtime_identity: claim.runtimeIdentity,
+    attempt: claim.attempt,
+    pinned_revision: claim.pinnedRevision,
+  });
   h.dependencies.executionAttribution.of = () => ({
-    clientId: actor.clientId,
+    client_id: actor.client_id,
     name: actor.name,
-    workerName: "claude@1",
+    worker_name: "claude@1",
   });
   h.caller.execution = claim;
   h.store.transaction((tx) => {
-    openAttempt(tx, h.nodeId, FIRST_REVISION, actor, FIXTURE_TIME);
-    setNodeState(tx, h.nodeId, NodeState.Executing);
+    openAttempt(tx, h.node_id, FIRST_REVISION, actor, FIXTURE_TIME);
+    setNodeState(tx, h.node_id, NodeState.Executing);
   });
   const context = {
-    executionId: claim.executionId,
+    execution_id: claim.executionId,
     attempt: claim.attempt,
-    nodeRevision: claim.pinnedRevision,
+    node_revision: claim.pinnedRevision,
   };
   assert.equal(h.node().attempt, claim.attempt);
   assert.equal(h.node().state, NodeState.Executing);
@@ -85,8 +90,8 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
   const repositoryId = createIdentity("binding");
   const storageId = createIdentity("binding");
   const storage = {
-    bindingId: storageId,
-    projectId: h.projectId,
+    binding_id: storageId,
+    project_id: h.project_id,
     endpoint: "https://storage.example",
     bucket: "bucket",
     region: "region",
@@ -95,10 +100,10 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
     available: true,
   };
   h.dependencies.bindings.getBindingRevision = (_tx, bindingId) => ({
-    bindingId,
-    projectId: h.projectId,
+    binding_id: bindingId,
+    project_id: h.project_id,
     name: bindingId === repositoryId ? "repo" : "storage",
-    resourceIdentity:
+    resource_identity:
       bindingId === repositoryId
         ? "repository:github:owner/repo"
         : "storage:s3:bucket",
@@ -110,16 +115,16 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
   h.store.transaction((tx) => {
     insertNode(tx, {
       id: nodeId,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Objective,
       filename: "objective.md",
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       created_at: FIXTURE_TIME,
     });
-    const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
+    const revision = getRevision(tx, h.node_id, FIRST_REVISION);
     insertRevision(tx, {
       ...revision,
-      nodeId,
+      node_id: nodeId,
       filename: "objective.md",
       content: { ...revision.content, bindings: [repositoryId, storageId] },
       tasks: [],
@@ -131,7 +136,7 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
   const node = () => h.store.transaction((tx) => readNode(tx, nodeId)!);
   assert.equal(node().kind, NodeKind.Objective);
   assert.equal(node().attempt, h.claim.attempt);
-  return { ...h, nodeId, node, repositoryId, storageId, storage };
+  return { ...h, node_id: nodeId, node, repositoryId, storageId, storage };
 }
 
 export function controlHarness(
@@ -154,12 +159,12 @@ export function controlHarness(
       created_at: FIXTURE_TIME,
     });
     insertRevision(tx, {
-      nodeId,
+      node_id: nodeId,
       revision: FIRST_REVISION,
       filename: "initiative.md",
       reason: "plan",
       actor,
-      createdAt: FIXTURE_TIME,
+      created_at: FIXTURE_TIME,
       content: {
         name: "Name",
         requirement: "Requirement",
@@ -169,10 +174,10 @@ export function controlHarness(
       },
       change: {
         write: RevisionWrite.NodeCreate,
-        previousRevision: null,
-        changedFields: [],
+        previous_revision: null,
+        changed_fields: [],
       },
-      pinnedByAttempts: [],
+      pinned_by_attempts: [],
     });
     setNodeState(tx, nodeId, NodeState.Available);
     return missionId;
@@ -182,12 +187,20 @@ export function controlHarness(
     attempt = 0,
   ): HumanAct => ({
     reason: "Hold",
-    expectedMissionVersion: FIRST_REVISION,
-    expectedState: state,
-    expectedAttempt: attempt,
+    expected_mission_version: FIRST_REVISION,
+    expected_state: state,
+    expected_attempt: attempt,
   });
   const node = () => h.store.transaction((tx) => readNode(tx, nodeId)!);
-  return { ...h, actor, projectId, nodeId, missionId, body, node };
+  return {
+    ...h,
+    actor,
+    project_id: projectId,
+    node_id: nodeId,
+    mission_id: missionId,
+    body,
+    node,
+  };
 }
 
 export function missionHarness(

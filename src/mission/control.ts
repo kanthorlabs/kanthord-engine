@@ -48,7 +48,7 @@ export function requireRunnable(node: NodeRow): void {
       HttpStatus.BadRequest,
       ControlError.Task,
       "Task nodes have no controls or execution records.",
-      { nodeId: node.id },
+      { node_id: node.id },
     );
   assert.ok(node.state);
   assert.ok(node.attempt !== null);
@@ -92,14 +92,14 @@ export function admitControl(
   const mission = requireMission(
     tx,
     initial.mission_id,
-    body.expectedMissionVersion,
+    body.expected_mission_version,
   );
   dependencies.schedulerClaims.settle(tx, nodeId, now);
   const node = requireNode(tx, nodeId);
   requireNonterminal(node);
   if (
-    node.state !== body.expectedState ||
-    node.attempt !== body.expectedAttempt
+    node.state !== body.expected_state ||
+    node.attempt !== body.expected_attempt
   )
     stateConflict(node);
   requireControlState(node, admitted);
@@ -124,7 +124,7 @@ export function requireNoUnresolvedAction(
       HttpStatus.Conflict,
       ControlError.Unresolved,
       "The attempt has unresolved external actions.",
-      { requirementKeys },
+      { requirement_keys: requirementKeys },
     );
 }
 
@@ -204,7 +204,7 @@ export function transition(
     tx,
     dependencies.workQueue,
     mission.id,
-    mission.projectId,
+    mission.project_id,
     before,
     dependencies.bindings,
   );
@@ -234,7 +234,7 @@ export function controlResult(
         ? null
         : outcomeRecord(tx, dependencies.bindings, outcome),
     actor,
-    acceptedAt: now,
+    accepted_at: now,
   };
 }
 

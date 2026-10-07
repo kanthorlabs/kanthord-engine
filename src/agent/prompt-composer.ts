@@ -60,7 +60,7 @@ export function layerText(
 }
 
 export function renderWorkPrompt(unit: {
-  nodeId: string;
+  node_id: string;
   revision: number;
   content: {
     name: string;
@@ -69,7 +69,7 @@ export function renderWorkPrompt(unit: {
     verifications: string[];
   };
 }): WorkPrompt {
-  assert.ok(unit.nodeId);
+  assert.ok(unit.node_id);
   assert.ok(Number.isSafeInteger(unit.revision));
   const { name, requirement, criterion, verifications } = unit.content;
   const text = `# ${name}\n\n## Requirement\n\n${requirement}\n\n## Criterion\n\n${criterion}\n\n## Verifications\n\n${verifications.map((command, index) => `${index + 1}. ${command}`).join("\n")}`;

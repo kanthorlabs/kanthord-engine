@@ -47,7 +47,7 @@ const START_POLLS = 100;
 const JUDGED = "judged";
 const TRANSCRIPT_MESSAGES = 5;
 const WORK = renderWorkPrompt({
-  nodeId: NODE,
+  node_id: NODE,
   revision: 1,
   content: {
     name: "work",
@@ -85,10 +85,10 @@ async function fixture(
     hostTools,
     setup,
     claim: {
-      executionId: setup.execution_id,
-      nodeId: NODE,
-      createdAt: Date.now(),
-      expiredAt: Date.now() + 60000,
+      execution_id: setup.execution_id,
+      node_id: NODE,
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
     },
     nodeKind: NodeKind.Objective,
     method: options.method ?? WorkerMethod.Steps,

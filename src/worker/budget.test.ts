@@ -6,9 +6,9 @@ import { ExecutionBudget } from "./budget.ts";
 test("budget bounds wall time, counts turns and keeps cleanup until execution expiry", (t) => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10000 });
   const input = {
-    createdAt: Date.now(),
-    expiredAt: 20000,
-    resourceBudget: { turns: 2, wall_time_ms: 5000 },
+    created_at: Date.now(),
+    expired_at: 20000,
+    resource_budget: { turns: 2, wall_time_ms: 5000 },
   };
   const budget = new ExecutionBudget(input);
   const wallDeadline = 15000;
@@ -22,7 +22,7 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   assert.ok(agent.err());
   const uncapped = new ExecutionBudget({
     ...input,
-    resourceBudget: { wall_time_ms: 5000 },
+    resource_budget: { wall_time_ms: 5000 },
   });
   uncapped.turnEnded();
   assert.equal(uncapped.exhausted(), false);
@@ -35,9 +35,9 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   assert.equal(
     new ExecutionBudget({
       ...input,
-      resourceBudget: { wall_time_ms: 50000 },
+      resource_budget: { wall_time_ms: 50000 },
     }).wallDeadline(),
-    input.expiredAt,
+    input.expired_at,
   );
 });
 
@@ -47,9 +47,9 @@ test("remaining wall time measures monotonic elapsed time", (t) => {
   t.mock.method(performance, "now", () => now);
   const createdAt = Date.now();
   const budget = new ExecutionBudget({
-    createdAt,
-    expiredAt: createdAt + 10000,
-    resourceBudget: { wall_time_ms: 5000 },
+    created_at: createdAt,
+    expired_at: createdAt + 10000,
+    resource_budget: { wall_time_ms: 5000 },
   });
   const before = budget.remainingMs();
   now += 1000;

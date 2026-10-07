@@ -117,7 +117,7 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     runningExecutionOfRuntime: () => null,
-    activityOf: () => ({ activity: InstanceActivity.Idle, executionId: null }),
+    activityOf: () => ({ activity: InstanceActivity.Idle, execution_id: null }),
   },
   agentConfiguration: {
     validateEntry: () => {
@@ -488,7 +488,7 @@ test("resume settles before admission, preserves live readings and reopens the s
         assert.ok(tx.database.isTransaction);
         assert.ok(runtimeIdentity && Number.isSafeInteger(time));
         calls.push("settle");
-        return running ? { executionId: "execution" } : null;
+        return running ? { execution_id: "execution" } : null;
       },
     },
     workerBindingOf: () => {
@@ -582,7 +582,7 @@ test("resume refuses unknown identities, occupied clients, full slots, tombstone
     workerBindingOf: () => binding,
     schedulerClaims: {
       ...fakeCollaborations.schedulerClaims,
-      runningExecutionOfRuntime: () => ({ executionId: "execution" }),
+      runningExecutionOfRuntime: () => ({ execution_id: "execution" }),
     },
   });
   const handler = f.registry.get(

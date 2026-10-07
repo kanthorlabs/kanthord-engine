@@ -68,9 +68,9 @@ test("child environment removes provider keys and bash timeout stays below the b
   };
   const now = Date.now();
   const budget = new ExecutionBudget({
-    createdAt: now,
-    expiredAt: now + 10000,
-    resourceBudget: { wall_time_ms: 5000 },
+    created_at: now,
+    expired_at: now + 10000,
+    resource_budget: { wall_time_ms: 5000 },
   });
   const cwd = temporary(t);
   sessionTools(mockPi, "swe@1", cwd, budget, unusedHostTools);
@@ -86,9 +86,9 @@ test("child environment removes provider keys and bash timeout stays below the b
   });
   assert.equal(captured!.exposeSessionEnvironment, false);
   const ended = new ExecutionBudget({
-    createdAt: now - 10000,
-    expiredAt: now + 10000,
-    resourceBudget: { wall_time_ms: 1 },
+    created_at: now - 10000,
+    expired_at: now + 10000,
+    resource_budget: { wall_time_ms: 1 },
   });
   sessionTools(mockPi, "swe@1", cwd, ended, unusedHostTools);
   await assert.rejects(

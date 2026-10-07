@@ -160,8 +160,8 @@ test("each Text field uses its configured UTF-8 byte limit", () => {
 });
 
 const resolved = (kind: string, index: number): ResolvedBinding => ({
-  bindingId: `binding-${index}`,
-  resourceIdentity: `${kind}:resource-${index}`,
+  binding_id: `binding-${index}`,
+  resource_identity: `${kind}:resource-${index}`,
 });
 
 const rules = [
@@ -250,7 +250,7 @@ for (const rule of rules) {
             ...requiredRepository,
             ...make(count),
           ]),
-        { kind: rule.kind, bindingKind: rule.binding, count },
+        { kind: rule.kind, binding_kind: rule.binding, count },
       );
     }
   });

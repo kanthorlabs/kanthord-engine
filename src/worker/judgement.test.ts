@@ -38,28 +38,37 @@ test("failed and unrun rationale names the command and cause", () => {
   const cases: [Verification["results"], string][] = [
     [[], "was not run."],
     [
-      [{ command: "check", exitCode: 2, signal: null, timedOut: false }],
+      [{ command: "check", exit_code: 2, signal: null, timed_out: false }],
       "failed with exit code 2.",
     ],
     [
       [
         {
           command: "check",
-          exitCode: null,
+          exit_code: null,
           signal: "SIGKILL",
-          timedOut: false,
+          timed_out: false,
         },
       ],
       "was ended by signal SIGKILL.",
     ],
     [
-      [{ command: "check", exitCode: null, signal: "SIGKILL", timedOut: true }],
+      [
+        {
+          command: "check",
+          exit_code: null,
+          signal: "SIGKILL",
+          timed_out: true,
+        },
+      ],
       "reached its deadline.",
     ],
   ];
   for (const [results, cause] of cases)
     assert.equal(
-      failedVerificationRationale({ testedInput, results }, ["check"]),
+      failedVerificationRationale({ tested_input: testedInput, results }, [
+        "check",
+      ]),
       `Verification 1 \`check\` ${cause}`,
     );
   const instruction = evaluationInstruction({
@@ -76,7 +85,7 @@ test("failed and unrun rationale names the command and cause", () => {
         },
       },
     ],
-    testedInput,
+    tested_input: testedInput,
     evidence: [],
   });
   assert.match(instruction, /distinct criterion/);

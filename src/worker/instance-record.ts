@@ -44,7 +44,7 @@ export function instanceRecord(
     now,
   );
   if (activity.activity === InstanceActivity.Executing)
-    assert.ok(activity.executionId);
+    assert.ok(activity.execution_id);
   return instanceRecordSchema.parse({
     runtime_identity: registration.runtime_identity,
     project_id: registration.project_id,
@@ -58,7 +58,7 @@ export function instanceRecord(
     name: registration.name,
     activity: activity.activity,
     ...(activity.activity === InstanceActivity.Executing
-      ? { execution_id: activity.executionId }
+      ? { execution_id: activity.execution_id }
       : {}),
     draining: false,
     registered: true,

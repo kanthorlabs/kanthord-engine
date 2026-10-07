@@ -54,21 +54,21 @@ export function attemptRecord(
   row: AttemptRow,
 ): Attempt {
   return attemptSchema.parse({
-    nodeId: row.node_id,
+    node_id: row.node_id,
     attempt: row.attempt,
-    nodeRevision: row.node_revision,
-    requiredExternalActions: requiredActionsOf(
+    node_revision: row.node_revision,
+    required_external_actions: requiredActionsOf(
       tx,
       bindings,
       row.node_id,
       row.node_revision,
     ),
-    openedAt: row.opened_at,
-    closedAt: row.closed_at,
-    outcomeIds: readOutcomesOfAttempt(tx, row.node_id, row.attempt).map(
+    opened_at: row.opened_at,
+    closed_at: row.closed_at,
+    outcome_ids: readOutcomesOfAttempt(tx, row.node_id, row.attempt).map(
       (outcome) => outcome.id,
     ),
-    openedBy: actorSchema.parse(JSON.parse(row.opened_by)),
+    opened_by: actorSchema.parse(JSON.parse(row.opened_by)),
   });
 }
 
@@ -77,8 +77,8 @@ function assetRecord(row: AssetRow): EvidenceAsset {
   const base = {
     id: row.id,
     kind: row.kind,
-    publishedAt: row.published_at,
-    expiredAt: row.expired_at,
+    published_at: row.published_at,
+    expired_at: row.expired_at,
   };
   if (row.kind === AssetKind.Platform)
     return evidenceAssetSchema.parse({ ...base, address: content });
@@ -87,7 +87,7 @@ function assetRecord(row: AssetRow): EvidenceAsset {
       ...base,
       address: {
         kind: row.kind,
-        bindingId: content.bindingId,
+        binding_id: content.binding_id,
         commit: content.commit,
       },
     });
@@ -99,15 +99,15 @@ function assetRecord(row: AssetRow): EvidenceAsset {
   assert.equal(row.kind, AssetKind.Object);
   return evidenceAssetSchema.parse({
     ...base,
-    storageBindingId: content.storageBindingId,
+    storage_binding_id: content.storage_binding_id,
     size: content.size,
-    mediaType: content.mediaType,
+    media_type: content.media_type,
     address: {
       kind: row.kind,
       location: content.location,
-      ...(content.objectVersion === undefined
+      ...(content.object_version === undefined
         ? {}
-        : { version: content.objectVersion }),
+        : { version: content.object_version }),
       ...(content.sha256 === undefined ? {} : { sha256: content.sha256 }),
     },
   });
@@ -116,16 +116,16 @@ function assetRecord(row: AssetRow): EvidenceAsset {
 export function evidenceRecord(tx: Transaction, row: EvidenceRow): Evidence {
   return evidenceSchema.parse({
     id: row.id,
-    nodeId: row.node_id,
+    node_id: row.node_id,
     attempt: row.attempt,
     subject: row.subject,
     assets: readAssets(tx, row.id).map(assetRecord),
     provenance: actorSchema.parse(JSON.parse(row.provenance)),
-    createdAt: row.created_at,
+    created_at: row.created_at,
     ...(row.requirement_key === null
       ? {}
-      : { requirementKey: row.requirement_key }),
-    ...(row.end_state === null ? {} : { endState: row.end_state }),
+      : { requirement_key: row.requirement_key }),
+    ...(row.end_state === null ? {} : { end_state: row.end_state }),
     ...(row.verification === null
       ? {}
       : {
@@ -178,19 +178,19 @@ export function outcomeRecord(
   assert.equal(assessment.node_id, row.node_id);
   return outcomeSchema.parse({
     id: row.id,
-    nodeId: row.node_id,
+    node_id: row.node_id,
     attempt: assessment.attempt,
-    nodeRevision: assessment.node_revision,
-    closingEvent: closingEvent(tx, bindings, row, assessment),
+    node_revision: assessment.node_revision,
+    closing_event: closingEvent(tx, bindings, row, assessment),
     result: row.result,
-    assessmentId: row.assessment_id,
-    evidenceIds: [
+    assessment_id: row.assessment_id,
+    evidence_ids: [
       ...new Set([
         ...stringSet.parse(JSON.parse(row.evidence_ids)),
         ...stringSet.parse(JSON.parse(assessment.evidence_ids)),
       ]),
     ].sort(),
-    createdAt: row.created_at,
+    created_at: row.created_at,
   });
 }
 
@@ -203,11 +203,11 @@ export function externalActionRecords(
   if (attempt === NO_ATTEMPT) return [];
   return actionStatesOf(tx, bindings, nodeId, attempt).map(
     ({ action, request, resolution }) => ({
-      nodeId,
+      node_id: nodeId,
       attempt,
       action,
       requested: request !== null,
-      requestEvidenceId: request?.id ?? null,
+      request_evidence_id: request?.id ?? null,
       resolution,
     }),
   );
@@ -250,16 +250,16 @@ export function assessmentRecord(
   ].sort();
   const base = {
     id: row.id,
-    nodeId: row.node_id,
-    executionId: row.execution_id,
+    node_id: row.node_id,
+    execution_id: row.execution_id,
     attempt: row.attempt,
-    nodeRevision: row.node_revision,
-    evidenceIds: stringSet.parse(JSON.parse(row.evidence_ids)),
-    childOutcomeIds,
-    childNodeIds,
+    node_revision: row.node_revision,
+    evidence_ids: stringSet.parse(JSON.parse(row.evidence_ids)),
+    child_outcome_ids: childOutcomeIds,
+    child_node_ids: childNodeIds,
     result: row.result,
     rationale: row.rationale,
-    createdAt: row.created_at,
+    created_at: row.created_at,
   };
   if (row.execution_id === null) {
     assert.ok(row.actor !== null);
@@ -268,9 +268,9 @@ export function assessmentRecord(
     return assessmentSchema.parse({
       ...base,
       actor,
-      testedInput: null,
+      tested_input: null,
       currency: null,
-      workerVersion: null,
+      worker_version: null,
     });
   }
   const attribution = dependencies.executionAttribution.of(
@@ -283,15 +283,15 @@ export function assessmentRecord(
     ...base,
     actor: {
       kind: ActorKind.Execution,
-      executionId: row.execution_id,
-      clientId: attribution.clientId,
+      execution_id: row.execution_id,
+      client_id: attribution.client_id,
       name: attribution.name,
     },
-    testedInput:
+    tested_input:
       row.tested_input === null
         ? null
         : testedInputSchema.parse(JSON.parse(row.tested_input)),
     currency: currencyOf(tx, row),
-    workerVersion: attribution.workerName,
+    worker_version: attribution.worker_name,
   });
 }

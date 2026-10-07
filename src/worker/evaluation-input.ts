@@ -16,13 +16,13 @@ import type { TestedInput } from "./verification.ts";
 
 export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
   const candidates = evidence
-    .filter((item) => !item.verification && !item.requirementKey)
+    .filter((item) => !item.verification && !item.requirement_key)
     .toSorted((a, b) => b.id.localeCompare(a.id));
   for (const item of candidates) {
     const asset = item.assets.find(
       (asset) =>
         asset.kind === AssetKind.Repository &&
-        asset.address.bindingId === bindingId,
+        asset.address.binding_id === bindingId,
     );
     if (asset?.kind === AssetKind.Repository)
       return { evidenceId: item.id, commit: asset.address.commit };
@@ -32,7 +32,7 @@ export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
 
 export function placedOf(evidence: readonly Evidence[]) {
   const candidates = evidence
-    .filter((item) => !item.verification && !item.requirementKey)
+    .filter((item) => !item.verification && !item.requirement_key)
     .toSorted((a, b) => b.id.localeCompare(a.id));
   for (const item of candidates) {
     const asset = item.assets.find(
@@ -58,8 +58,8 @@ async function placeAsset(
     run.clients.mission["execution.evidence.asset.content.get"](
       {
         params: {
-          executionId: run.claim.executionId,
-          assetId: asset.id,
+          execution_id: run.claim.execution_id,
+          asset_id: asset.id,
         },
         query: {},
         body: null,
@@ -73,7 +73,7 @@ async function placeAsset(
     let bytes: Buffer;
     if ("data" in content) bytes = Buffer.from(content.data, "base64");
     else {
-      const response = await fetch(content.getUrl, { signal: bridge.signal });
+      const response = await fetch(content.get_url, { signal: bridge.signal });
       if (!response.ok) {
         await response.body?.cancel();
         return run.stop(EndReason.OperationFailed);
@@ -101,11 +101,11 @@ async function prepareWorkspace(
 ) {
   const repository = input.setup.repositories[0];
   const deadline = Math.min(
-    input.claim.createdAt + input.setup.resource_budget.wall_time_ms,
-    input.claim.expiredAt,
+    input.claim.created_at + input.setup.resource_budget.wall_time_ms,
+    input.claim.expired_at,
   );
   const common = {
-    executionId: input.claim.executionId,
+    executionId: input.claim.execution_id,
     transport: input.transport,
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
@@ -120,9 +120,9 @@ async function prepareWorkspace(
       });
       return {
         directory: workspace.directory,
-        testedInput: {
+        tested_input: {
           kind: AssetKind.Repository,
-          bindingId: repository.binding_id,
+          binding_id: repository.binding_id,
           commit: snapshot.commit,
         },
         evidenceIds: [snapshot.evidenceId],
@@ -135,7 +135,7 @@ async function prepareWorkspace(
           ...common,
           repositories: input.setup.repositories,
         })
-      : { ...input.workspaces.prepareExecution(common), testedInput: null };
+      : { ...input.workspaces.prepareExecution(common), tested_input: null };
   return { ...workspace, evidenceIds: [] as string[] };
 }
 
@@ -148,12 +148,12 @@ export async function prepareEvaluation(
   const workspace = await prepareWorkspace(input, run, kind, evidence);
   try {
     const testedInput: TestedInput | undefined =
-      workspace.testedInput ?? placedOf(evidence)?.asset.address;
+      workspace.tested_input ?? placedOf(evidence)?.asset.address;
     if (!testedInput) return run.stop(EndReason.OperationFailed);
     const evidenceIds = new Set(workspace.evidenceIds);
     const assets: { evidenceId: string; assetId: string; path: string }[] = [];
     const support = evidence.filter(
-      (item) => !item.verification && !item.requirementKey,
+      (item) => !item.verification && !item.requirement_key,
     );
     const selected = support.flatMap((item) =>
       item.assets
@@ -165,8 +165,8 @@ export async function prepareEvaluation(
         .map((asset) => ({ evidenceId: item.id, asset })),
     );
     const deadline = Math.min(
-      input.claim.createdAt + input.setup.resource_budget.wall_time_ms,
-      input.claim.expiredAt,
+      input.claim.created_at + input.setup.resource_budget.wall_time_ms,
+      input.claim.expired_at,
     );
     for (const { evidenceId, asset } of selected) {
       const path = await placeAsset(workspace.directory, run, asset, deadline);
@@ -175,7 +175,7 @@ export async function prepareEvaluation(
     }
     return {
       directory: workspace.directory,
-      testedInput,
+      tested_input: testedInput,
       evidenceIds: [...evidenceIds],
       reviewBundle: {
         evidence: evidence.filter((item) => evidenceIds.has(item.id)),

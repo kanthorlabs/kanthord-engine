@@ -24,10 +24,10 @@ export async function runStepsInitiative(
 ): Promise<ExecutionEnd> {
   const budget = new ExecutionBudget({
     ...input.claim,
-    resourceBudget: input.setup.resource_budget,
+    resource_budget: input.setup.resource_budget,
   });
   const { directory } = input.workspaces.prepareExecution({
-    executionId: input.claim.executionId,
+    executionId: input.claim.execution_id,
   });
   try {
     const current = await readObjectives(run);
@@ -36,8 +36,8 @@ export async function runStepsInitiative(
     const agent = await openAgent(directory);
     if (agent.budget.exhausted()) return await run.release(true);
     const work = renderWorkPrompt({
-      nodeId: input.claim.nodeId,
-      revision: input.claim.pinnedRevision,
+      node_id: input.claim.node_id,
+      revision: input.claim.pinned_revision,
       content: revision.content,
     });
     await agent.instruct(
@@ -49,13 +49,13 @@ export async function runStepsInitiative(
     if (!report?.trim()) run.stop(EndReason.ReportAbsent);
     if (!allTerminal((await readObjectives(run)).objectives))
       return await run.release(true);
-    await run.submitEvidence(input.claim.nodeId, {
+    await run.submitEvidence(input.claim.node_id, {
       subject: REPORT_SUBJECT,
       assets: [
         {
           kind: "produced",
           content: {
-            mediaType: REPORT_MEDIA_TYPE,
+            media_type: REPORT_MEDIA_TYPE,
             encoding: "base64",
             data: Buffer.from(report, "utf8").toString("base64"),
           },

@@ -54,7 +54,7 @@ const EXTRA_ROW = 1;
 const CURSOR_SEPARATOR = "|";
 const QUEUE_CURSOR_PARTS = 2;
 
-type QueueCursor = { priority: number; jobId: string };
+type QueueCursor = { priority: number; job_id: string };
 
 type JobRow = {
   id: string;
@@ -65,9 +65,9 @@ type JobRow = {
 
 function toJob(row: JobRow): Job {
   return {
-    jobId: row.id,
-    projectId: row.project_id,
-    nodeId: row.node_id,
+    job_id: row.id,
+    project_id: row.project_id,
+    node_id: row.node_id,
     priority: row.priority,
   };
 }
@@ -96,7 +96,7 @@ function invalidCursor(): never {
 
 function encodeQueueCursor(job: Job): string {
   return Buffer.from(
-    `${job.priority}${CURSOR_SEPARATOR}${job.jobId}`,
+    `${job.priority}${CURSOR_SEPARATOR}${job.job_id}`,
     TEXT_ENCODING,
   ).toString(CURSOR_ENCODING);
 }
@@ -115,7 +115,7 @@ function decodeQueueCursor(cursor: string): QueueCursor {
     !identitySchema(JOB_IDENTITY_PREFIX).safeParse(jobId).success
   )
     invalidCursor();
-  return { priority, jobId };
+  return { priority, job_id: jobId };
 }
 
 export interface Dependencies {
@@ -172,13 +172,13 @@ export class SchedulerService implements Service, WorkQueue {
   }
   activityOf(tx: Transaction, runtimeIdentity: string, now: number) {
     const row = readUnendedOfRuntime(tx, runtimeIdentity);
-    if (row && now < row.expiredAt)
-      return { activity: "executing" as const, executionId: row.executionId };
+    if (row && now < row.expired_at)
+      return { activity: "executing" as const, execution_id: row.execution_id };
     return {
       activity: this.pulling(runtimeIdentity)
         ? ("pulling" as const)
         : ("idle" as const),
-      executionId: null,
+      execution_id: null,
     };
   }
   executionOf(executionId: string) {
@@ -263,10 +263,10 @@ export class SchedulerService implements Service, WorkQueue {
       this.queueList(input, caller),
     );
     registry.register(schedulerOperations.claimGet, (input, caller) =>
-      claimGet(this.dependencies, input.params.executionId, caller),
+      claimGet(this.dependencies, input.params.execution_id, caller),
     );
     registry.register(schedulerOperations.executionGet, (input, caller) =>
-      executionGet(this.dependencies, input.params.executionId, caller),
+      executionGet(this.dependencies, input.params.execution_id, caller),
     );
     registry.register(schedulerOperations.executionList, (input, caller) =>
       executionList(
@@ -281,8 +281,8 @@ export class SchedulerService implements Service, WorkQueue {
     registry.register(schedulerOperations.executionRelease, (input, caller) =>
       release(
         this.dependencies,
-        input.params.executionId,
-        input.body.furtherWork,
+        input.params.execution_id,
+        input.body.further_work,
         caller,
         (projectId) => this.wake(projectId),
       ),
@@ -307,7 +307,7 @@ export class SchedulerService implements Service, WorkQueue {
     input: typeof schedulerOperations.queueList.input._output,
     caller: CallerContext,
   ): typeof schedulerOperations.queueList.output._output {
-    const { projectId } = input.params;
+    const { project_id: projectId } = input.params;
     const limit = input.query.limit ?? QUEUE_LIST_LIMIT_DEFAULT;
     const after =
       input.query.cursor === undefined
@@ -329,7 +329,7 @@ export class SchedulerService implements Service, WorkQueue {
                 projectId,
                 after.priority,
                 after.priority,
-                after.jobId,
+                after.job_id,
                 limit + EXTRA_ROW,
               );
       const items = (rows as JobRow[]).slice(FIRST_ROW, limit).map(toJob);
@@ -348,7 +348,7 @@ export class SchedulerService implements Service, WorkQueue {
         .prepare(
           "SELECT id, project_id, node_id, priority FROM scheduler_job WHERE project_id = ? ORDER BY priority DESC, id ASC LIMIT 1",
         )
-        .get(input.params.projectId) as JobRow | undefined;
+        .get(input.params.project_id) as JobRow | undefined;
       return { job: row ? toJob(row) : null };
     });
   }
@@ -413,15 +413,15 @@ export class SchedulerService implements Service, WorkQueue {
 
   sweep(): void {
     const identities = this.dependencies.store.transaction((tx) =>
-      readExpiredUnsettled(tx, Date.now()).map((row) => row.executionId),
+      readExpiredUnsettled(tx, Date.now()).map((row) => row.execution_id),
     );
     for (let index = 0; index < identities.length; index++) {
       const projectId = this.dependencies.store.transaction((tx) => {
         const now = Date.now();
         const row = readExecution(tx, identities[index]!);
-        if (!row || row.endedAt !== null || now < row.expiredAt) return null;
+        if (!row || row.ended_at !== null || now < row.expired_at) return null;
         settlement.declareLoss(tx, this.dependencies, row, now);
-        return row.projectId;
+        return row.project_id;
       });
       if (projectId !== null) this.wake(projectId);
     }

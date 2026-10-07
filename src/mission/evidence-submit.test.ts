@@ -32,23 +32,23 @@ test("submission rejects blank and oversized nested Text before signing or inser
     const subject = field === Field.Subject ? " \t " : "Valid";
     const long = "é".repeat(h.dependencies.config.text_max_bytes);
     const verification = {
-      testedInput: {
+      tested_input: {
         kind: AssetKind.Repository,
-        bindingId: h.repositoryId,
+        binding_id: h.repositoryId,
         commit: "a".repeat(40),
       },
       results: [
         {
           command: field === Field.Command ? long : "true",
           signal: field === Field.Signal ? long : null,
-          exitCode: SUCCESSFUL_EXIT_CODE,
-          timedOut: false,
+          exit_code: SUCCESSFUL_EXIT_CODE,
+          timed_out: false,
         },
       ],
     };
     await assert.rejects(
       h.invoke("evidence.submit", {
-        params: { nodeId: h.nodeId },
+        params: { node_id: h.node_id },
         query: {},
         body: {
           ...h.context,
@@ -58,7 +58,7 @@ test("submission rejects blank and oversized nested Text before signing or inser
             {
               kind: AssetKind.Object,
               size: SINGLE_ITEM,
-              mediaType: "text/plain",
+              media_type: "text/plain",
             },
           ],
         },
@@ -96,25 +96,27 @@ test("repository and produced submissions publish atomically and repeated submis
         kind: AssetKind.Repository,
         address: {
           kind: AssetKind.Repository,
-          bindingId: h.repositoryId,
+          binding_id: h.repositoryId,
           commit: "a".repeat(40),
         },
       },
       {
         kind: AssetKind.Produced,
-        content: { mediaType: "text/plain", encoding: "base64", data: "aGk=" },
+        content: { media_type: "text/plain", encoding: "base64", data: "aGk=" },
       },
     ],
   };
   const submit = () =>
     h.invoke("evidence.submit", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body,
     });
   const first = await submit();
   assert.equal(first.uploads.length, NO_ITEMS);
-  assert.ok(first.evidence.assets.every((asset) => asset.publishedAt !== null));
+  assert.ok(
+    first.evidence.assets.every((asset) => asset.published_at !== null),
+  );
   assert.deepEqual(first.evidence.provenance, h.executionActor);
   const produced = first.evidence.assets.find(
     (asset) => asset.kind === AssetKind.Produced,
@@ -123,7 +125,9 @@ test("repository and produced submissions publish atomically and repeated submis
     kind: AssetKind.Produced,
     sha256: createHash("sha256").update("hi").digest("hex"),
   });
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
   assert.notEqual((await submit()).evidence.id, first.evidence.id);
 });
 
@@ -140,19 +144,19 @@ test("object submissions sign pinned keys and commit pending assets after PUT pr
     assert.deepEqual(binding, h.storage);
     assert.ok(
       key.startsWith(
-        `prefix/${h.projectId}/${h.missionId}/${h.nodeId}/1/evidence_asset_`,
+        `prefix/${h.project_id}/${h.mission_id}/${h.node_id}/1/evidence_asset_`,
       ),
     );
     assert.equal(size, SINGLE_ITEM);
     assert.equal(checksum, sha256);
     return {
-      putUrl: "https://storage.example/put",
+      put_url: "https://storage.example/put",
       headers: { checksum: sha256 },
-      expiresAt: Date.now() + UPLOAD_LIFETIME_MS,
+      expires_at: Date.now() + UPLOAD_LIFETIME_MS,
     };
   };
   const result = await h.invoke("evidence.submit", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
       ...h.context,
@@ -161,7 +165,7 @@ test("object submissions sign pinned keys and commit pending assets after PUT pr
         {
           kind: AssetKind.Object,
           size: SINGLE_ITEM,
-          mediaType: "text/plain",
+          media_type: "text/plain",
           sha256,
         },
       ],
@@ -169,12 +173,12 @@ test("object submissions sign pinned keys and commit pending assets after PUT pr
   });
   assert.equal(result.uploads.length, SINGLE_ITEM);
   const asset = result.evidence.assets[FIRST_ASSET_INDEX]!;
-  assert.equal(asset.publishedAt, null);
+  assert.equal(asset.published_at, null);
   assert.equal(
-    asset.expiredAt! - result.evidence.createdAt,
+    asset.expired_at! - result.evidence.created_at,
     UPLOAD_LIFETIME_MS,
   );
-  assert.equal(result.uploads[FIRST_ASSET_INDEX]!.assetId, asset.id);
+  assert.equal(result.uploads[FIRST_ASSET_INDEX]!.asset_id, asset.id);
 });
 
 test("storage absence, failed signing and revoked claims write no evidence", async (t) => {
@@ -183,12 +187,12 @@ test("storage absence, failed signing and revoked claims write no evidence", asy
     ...empty.context,
     subject: "Object",
     assets: [
-      { kind: AssetKind.Object, size: SINGLE_ITEM, mediaType: "text/plain" },
+      { kind: AssetKind.Object, size: SINGLE_ITEM, media_type: "text/plain" },
     ],
   };
   await assert.rejects(
     empty.invoke("evidence.submit", {
-      params: { nodeId: empty.nodeId },
+      params: { node_id: empty.node_id },
       query: {},
       body,
     }),
@@ -199,7 +203,7 @@ test("storage absence, failed signing and revoked claims write no evidence", asy
   const h = evidenceHarness(t, IDENTITY);
   const submit = () =>
     h.invoke("evidence.submit", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: { ...body, ...h.context },
     });
@@ -211,9 +215,9 @@ test("storage absence, failed signing and revoked claims write no evidence", asy
   h.dependencies.intakeStorage.put = async () => {
     h.dependencies.schedulerClaims.liveExecutionOf = () => null;
     return {
-      putUrl: "https://storage.example/put",
+      put_url: "https://storage.example/put",
       headers: {},
-      expiresAt: Date.now() + UPLOAD_LIFETIME_MS,
+      expires_at: Date.now() + UPLOAD_LIFETIME_MS,
     };
   };
   await assert.rejects(

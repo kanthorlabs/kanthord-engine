@@ -52,13 +52,13 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
   for (const scenario of scenarios) {
     const setup = anthropicSetup();
     const claim = {
-      executionId: setup.execution_id,
-      nodeId: createIdentity("node"),
+      execution_id: setup.execution_id,
+      node_id: createIdentity("node"),
       attempt: 1,
-      pinnedRevision: 1,
-      createdAt: Date.now(),
-      expiredAt: Date.now() + 60000,
-      traceId: "trace",
+      pinned_revision: 1,
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
+      trace_id: "trace",
     };
     const workspaces = WorkspaceRoot.open(temporary(t));
     let reads = 0;
@@ -95,7 +95,7 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
       },
       scheduler: {
         executionRelease: async (input: { body: unknown }) => {
-          assert.deepEqual(input.body, { furtherWork: scenario.further });
+          assert.deepEqual(input.body, { further_work: scenario.further });
           return completed({});
         },
       },
@@ -139,7 +139,10 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
       scenario.evidence ? EVIDENCE_UPLOAD_COUNT : NO_EVIDENCE_UPLOADS,
     );
     assert.equal(opens, scenario.opens);
-    assert.equal(existsSync(workspaces.executionKey(claim.executionId)), false);
+    assert.equal(
+      existsSync(workspaces.executionKey(claim.execution_id)),
+      false,
+    );
   }
 });
 
@@ -150,13 +153,13 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
       resource_budget: { wall_time_ms: 100 },
     });
     const claim = {
-      executionId: setup.execution_id,
-      nodeId: createIdentity("node"),
+      execution_id: setup.execution_id,
+      node_id: createIdentity("node"),
       attempt: 1,
-      pinnedRevision: 1,
-      createdAt: Date.now() - (duringOpen ? 0 : 10000),
-      expiredAt: Date.now() + 60000,
-      traceId: "trace",
+      pinned_revision: 1,
+      created_at: Date.now() - (duringOpen ? 0 : 10000),
+      expired_at: Date.now() + 60000,
+      trace_id: "trace",
     };
     const page = async () => ({
       type: "completed",

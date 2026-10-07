@@ -106,8 +106,8 @@ async function setup(t: TestContext) {
     standIns: {
       intakeActions: actions.seam,
       intakeCheck: scriptedCheck({
-        endState: CheckEndState.Other,
-        landedCommits: [],
+        end_state: CheckEndState.Other,
+        landed_commits: [],
       }),
     },
   });
@@ -204,13 +204,13 @@ async function setup(t: TestContext) {
           ),
         },
         reason: "plan",
-        expectedMissionVersion: version,
+        expected_mission_version: version,
         ...(parentId
-          ? { parentId, expectedParentRevision: FIRST_REVISION }
+          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
           : {}),
       },
     );
-    return result.revisions[FIRST_INDEX]!.nodeId;
+    return result.revisions[FIRST_INDEX]!.node_id;
   };
   const initiative = await create(
     "initiative-1.md",
@@ -234,11 +234,11 @@ async function setup(t: TestContext) {
   );
   await write(["mission", "node", "priority", "set", G], {
     value: GATED_PRIORITY,
-    expectedMissionVersion: FOURTH_MISSION_VERSION,
+    expected_mission_version: FOURTH_MISSION_VERSION,
   });
   await write(["mission", "node", "priority", "set", P], {
     value: PUSHED_PRIORITY,
-    expectedMissionVersion: FOURTH_MISSION_VERSION,
+    expected_mission_version: FOURTH_MISSION_VERSION,
   });
   const M = (await read<{ version: number }>(["mission", "get", project.id]))
     .version;
@@ -250,11 +250,14 @@ async function setup(t: TestContext) {
   const pull = async (nodeId: string, attempt: number) => {
     const result = await write<{ kind: string; execution: ExecutionRecord }>(
       ["scheduler", "work", "pull"],
-      { resourceIdentity: "worker:kanthord:harness", runtimeIdentity },
+      {
+        resource_identity: "worker:kanthord:harness",
+        runtime_identity: runtimeIdentity,
+      },
       W,
     );
     assert.equal(result.kind, WorkPullKind.Claimed);
-    assert.equal(result.execution.nodeId, nodeId);
+    assert.equal(result.execution.node_id, nodeId);
     assert.equal(result.execution.attempt, attempt);
     return result.execution;
   };
@@ -262,20 +265,20 @@ async function setup(t: TestContext) {
   const request = (execution: ExecutionRecord) =>
     client["action.request"](
       {
-        params: { execution_id: execution.executionId },
+        params: { execution_id: execution.execution_id },
         query: {},
         body: null,
       },
       { idempotencyKey: ulid() },
     );
   const context = (execution: ExecutionRecord) => ({
-    executionId: execution.executionId,
+    execution_id: execution.execution_id,
     attempt: execution.attempt,
-    nodeRevision: execution.pinnedRevision,
+    node_revision: execution.pinned_revision,
   });
   const snapshot = (bindingId: string, commit: string) => ({
     kind: "repository",
-    bindingId,
+    binding_id: bindingId,
     commit,
   });
   const work = (
@@ -284,7 +287,7 @@ async function setup(t: TestContext) {
     commit: string,
   ) =>
     write<Submission>(
-      ["mission", "evidence", "submit", execution.nodeId],
+      ["mission", "evidence", "submit", execution.node_id],
       {
         ...context(execution),
         subject: "head commit",
@@ -294,7 +297,7 @@ async function setup(t: TestContext) {
     );
   const run = (execution: ExecutionRecord, bindingId: string, commit: string) =>
     write<Submission>(
-      ["mission", "evidence", "submit", execution.nodeId],
+      ["mission", "evidence", "submit", execution.node_id],
       {
         ...context(execution),
         subject: "verification run",
@@ -302,20 +305,20 @@ async function setup(t: TestContext) {
           {
             kind: "produced",
             content: {
-              mediaType: "text/plain",
+              media_type: "text/plain",
               encoding: "base64",
               data: "b2s=",
             },
           },
         ],
         verification: {
-          testedInput: snapshot(bindingId, commit),
+          tested_input: snapshot(bindingId, commit),
           results: [
             {
               command: "true",
-              exitCode: SUCCESSFUL_EXIT,
+              exit_code: SUCCESSFUL_EXIT,
               signal: null,
-              timedOut: false,
+              timed_out: false,
             },
           ],
         },
@@ -329,21 +332,21 @@ async function setup(t: TestContext) {
     commit: string,
   ) =>
     write<Assessment>(
-      ["mission", "assessment", "submit", execution.nodeId],
+      ["mission", "assessment", "submit", execution.node_id],
       {
         ...context(execution),
-        evidenceIds,
-        childOutcomeIds: [],
+        evidence_ids: evidenceIds,
+        child_outcome_ids: [],
         result: "success",
         rationale: "met",
-        testedInput: snapshot(bindingId, commit),
+        tested_input: snapshot(bindingId, commit),
       },
       W,
     );
   const release = (execution: ExecutionRecord) =>
     write(
-      ["scheduler", "execution", "release", execution.executionId],
-      { furtherWork: false },
+      ["scheduler", "execution", "release", execution.execution_id],
+      { further_work: false },
       W,
     );
   const node = (nodeId: string) =>
@@ -465,7 +468,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       const item = completed(await h.request(e2)).items[0];
       assert.ok(item?.kind === ActionResultKind.Submitted);
       request1 = item.evidence as Evidence;
-      assert.equal(request1.requirementKey, GATED_KEY);
+      assert.equal(request1.requirement_key, GATED_KEY);
       assert.equal(request1.attempt, FIRST_ATTEMPT);
       assert.deepEqual(request1.assets[0]?.address, pr42);
       assert.equal(h.actions.performCalls.length, TWO_CALLS);
@@ -490,10 +493,10 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       "1",
     ]);
     assert.equal(actions.items[0]?.resolution, Resolution.Unresolved);
-    assert.equal(actions.items[0]?.requestEvidenceId, request1.id);
+    assert.equal(actions.items[0]?.request_evidence_id, request1.id);
     const check = await h.write<{ results: { resolution: string }[] }>(
       ["mission", "node", "check", h.G],
-      { expectedMissionVersion: h.M },
+      { expected_mission_version: h.M },
     );
     assert.equal(check.results[0]?.resolution, Resolution.OtherEnd);
     assert.equal((await h.node(h.G)).state, NodeState.Blocked);
@@ -505,9 +508,9 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
         node: { state: string };
         attempt: { attempt: number };
       }>(["mission", "node", "unblock", h.G], {
-        blockedAttempt: FIRST_ATTEMPT,
+        blocked_attempt: FIRST_ATTEMPT,
         expected_revision: FIRST_REVISION,
-        expectedMissionVersion: h.M,
+        expected_mission_version: h.M,
       });
       assert.equal(unblock.node.state, NodeState.Available);
       assert.equal(unblock.attempt.attempt, SECOND_ATTEMPT);
@@ -563,7 +566,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       "2",
     ]);
     const requests = evidence.items.filter(
-      (item) => item.requirementKey === GATED_KEY,
+      (item) => item.requirement_key === GATED_KEY,
     );
     assert.equal(requests.length, SINGLE_ITEM);
     assert.deepEqual(requests[0]?.assets[0]?.address, pr42);
@@ -602,9 +605,9 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
           "scheduler",
           "execution",
           "release",
-          e6.executionId,
+          e6.execution_id,
           "--file",
-          h.file({ furtherWork: false }),
+          h.file({ further_work: false }),
         ],
         h.W,
       );
@@ -621,14 +624,14 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     async () => {
       const act = {
         reason: "hold",
-        expectedMissionVersion: h.M,
-        expectedState: NodeState.Evaluating,
-        expectedAttempt: FIRST_ATTEMPT,
+        expected_mission_version: h.M,
+        expected_state: NodeState.Evaluating,
+        expected_attempt: FIRST_ATTEMPT,
       };
       await h.write(["mission", "node", "pause", h.P], act);
       await h.write(["mission", "node", "resume", h.P], {
         ...act,
-        expectedState: NodeState.Paused,
+        expected_state: NodeState.Paused,
         target: NodeState.Waiting,
       });
       const e7 = await h.pull(h.P, FIRST_ATTEMPT);

@@ -61,12 +61,12 @@ function confirmImport(preview: ImportPreview, body: ImportApply): void {
       {
         ...(isObject(violation.details) ? violation.details : {}),
         filename: violation.filename,
-        nodeId: violation.nodeId,
+        node_id: violation.node_id,
       },
     );
-  const confirmed = new Set(body.confirmedRetirements);
+  const confirmed = new Set(body.confirmed_retirements);
   if (
-    preview.previewDigest !== body.previewDigest ||
+    preview.preview_digest !== body.preview_digest ||
     confirmed.size !== preview.retirements.length ||
     preview.retirements.some((id) => !confirmed.has(id))
   )
@@ -76,28 +76,28 @@ function confirmImport(preview: ImportPreview, body: ImportApply): void {
       "Import preview or confirmed retirements changed.",
     );
   assert.equal(preview.violations.length, NO_VIOLATIONS);
-  assert.equal(preview.expectedMissionVersion, body.missionVersion);
+  assert.equal(preview.expected_mission_version, body.mission_version);
 }
 
 function assignIdentities(resolved: ResolvedImport): ResolvedImportEntry[] {
   const ids = new Map(
-    resolved.resolvedEntries.map((item) => [
+    resolved.resolved_entries.map((item) => [
       item.key,
       item.current?.id ?? createIdentity(NODE_IDENTITY_PREFIX),
     ]),
   );
-  assert.equal(ids.size, resolved.resolvedEntries.length);
+  assert.equal(ids.size, resolved.resolved_entries.length);
   const identity = (key: string): string => {
     const id = ids.get(key);
     assert.ok(id, "Resolved references belong to the imported set.");
     assert.ok(id.startsWith(`${NODE_IDENTITY_PREFIX}_`));
     return id;
   };
-  const entries = resolved.resolvedEntries.map((item) => ({
+  const entries = resolved.resolved_entries.map((item) => ({
     ...item,
     key: identity(item.key),
-    parentId: item.parentId === null ? null : identity(item.parentId),
-    dependsOn: new Set([...item.dependsOn].map(identity)),
+    parent_id: item.parent_id === null ? null : identity(item.parent_id),
+    depends_on: new Set([...item.depends_on].map(identity)),
   }));
   assert.equal(new Set(entries.map((item) => item.key)).size, entries.length);
   return entries;
@@ -112,38 +112,38 @@ function addedEdges(
   const dependencies: Extract<Edge, { kind: typeof EdgeKind.Dependency }>[] =
     [];
   const previous = new Map<string, Set<string>>();
-  for (const edge of resolved.currentDependencies) {
+  for (const edge of resolved.current_dependencies) {
     const targets = previous.get(edge.dependent) ?? new Set<string>();
-    targets.add(edge.dependsOn);
+    targets.add(edge.depends_on);
     previous.set(edge.dependent, targets);
   }
   for (const item of entries) {
-    if (item.parentId !== null && item.current?.parent_id !== item.parentId)
+    if (item.parent_id !== null && item.current?.parent_id !== item.parent_id)
       containment.push({
         kind: EdgeKind.Containment,
-        parentId: item.parentId,
-        childId: item.key,
+        parent_id: item.parent_id,
+        child_id: item.key,
       });
-    for (const target of item.dependsOn) {
+    for (const target of item.depends_on) {
       if (!previous.get(item.key)?.has(target))
         dependencies.push({
           kind: EdgeKind.Dependency,
-          dependentId: item.key,
-          dependsOnId: target,
+          dependent_id: item.key,
+          depends_on_id: target,
         });
     }
   }
-  assert.equal(entries.length, resolved.resolvedEntries.length);
+  assert.equal(entries.length, resolved.resolved_entries.length);
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
   containment.sort(
     (a, b) =>
-      a.parentId.localeCompare(b.parentId) ||
-      a.childId.localeCompare(b.childId),
+      a.parent_id.localeCompare(b.parent_id) ||
+      a.child_id.localeCompare(b.child_id),
   );
   dependencies.sort(
     (a, b) =>
-      a.dependentId.localeCompare(b.dependentId) ||
-      a.dependsOnId.localeCompare(b.dependsOnId),
+      a.dependent_id.localeCompare(b.dependent_id) ||
+      a.depends_on_id.localeCompare(b.depends_on_id),
   );
   return [...containment, ...dependencies];
 }
@@ -155,7 +155,7 @@ function updateRows(
   now: number,
 ): void {
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
-  assert.equal(entries.length, resolved.resolvedEntries.length);
+  assert.equal(entries.length, resolved.resolved_entries.length);
   for (const id of resolved.retirements) {
     const result = tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
@@ -175,7 +175,7 @@ function updateRows(
       .prepare(
         "UPDATE mission_node SET filename = ?, parent_id = ? WHERE id = ?",
       )
-      .run(item.entry.filename, item.parentId, item.key);
+      .run(item.entry.filename, item.parent_id, item.key);
     assert.equal(result.changes, EXPECTED_ROW_CHANGE);
   }
 }
@@ -187,24 +187,24 @@ function writeDependencies(
   entries: ResolvedImportEntry[],
 ): void {
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
-  assert.ok(entries.length <= resolved.resolvedEntries.length);
+  assert.ok(entries.length <= resolved.resolved_entries.length);
   const previous = new Map<string, Set<string>>();
-  for (const edge of resolved.currentDependencies) {
+  for (const edge of resolved.current_dependencies) {
     const targets = previous.get(edge.dependent) ?? new Set<string>();
-    targets.add(edge.dependsOn);
+    targets.add(edge.depends_on);
     previous.set(edge.dependent, targets);
   }
   for (const item of entries) {
     const old = previous.get(item.key) ?? new Set<string>();
     if (
-      old.size === item.dependsOn.size &&
-      [...old].every((id) => item.dependsOn.has(id))
+      old.size === item.depends_on.size &&
+      [...old].every((id) => item.depends_on.has(id))
     )
       continue;
     tx.database
       .prepare("DELETE FROM mission_dependency WHERE dependent_id = ?")
       .run(item.key);
-    for (const target of item.dependsOn)
+    for (const target of item.depends_on)
       insertDependency(tx, missionId, item.key, target);
   }
 }
@@ -217,7 +217,7 @@ function writeNodes(
   now: number,
 ): void {
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
-  assert.equal(entries.length, resolved.resolvedEntries.length);
+  assert.equal(entries.length, resolved.resolved_entries.length);
   tx.database.exec("PRAGMA defer_foreign_keys = ON");
   updateRows(tx, resolved, entries, now);
   writeDependencies(
@@ -234,7 +234,7 @@ function writeNodes(
         mission_id: missionId,
         kind,
         filename: item.entry.filename,
-        parent_id: item.parentId,
+        parent_id: item.parent_id,
         created_at: now,
       });
   }
@@ -250,21 +250,21 @@ function initialResult(
   assert.ok(mission.version > MINIMUM_MISSION_VERSION);
   assert.equal(new Set(entries.map((item) => item.key)).size, entries.length);
   return {
-    missionId: mission.id,
-    missionVersion: mission.version,
-    assignedIds: entries
-      .map((item) => ({ filename: item.entry.filename, nodeId: item.key }))
+    mission_id: mission.id,
+    mission_version: mission.version,
+    assigned_ids: entries
+      .map((item) => ({ filename: item.entry.filename, node_id: item.key }))
       .sort((a, b) => a.filename.localeCompare(b.filename)),
     changes: {
-      missionVersion: mission.version,
+      mission_version: mission.version,
       revisions: [],
-      retiredNodeIds: [],
-      addedEdges: [],
-      removedEdges: [],
-      openAttemptsUnchanged: [],
+      retired_node_ids: [],
+      added_edges: [],
+      removed_edges: [],
+      open_attempts_unchanged: [],
     },
     actor,
-    acceptedAt,
+    accepted_at: acceptedAt,
   };
 }
 
@@ -278,7 +278,7 @@ export function applyImport(
   textMaxBytes: number,
   schedulerClaims: SchedulerClaims,
 ): ImportResult {
-  const mission = requireMission(tx, missionId, body.missionVersion);
+  const mission = requireMission(tx, missionId, body.mission_version);
   const { preview, resolved } = prepareImport(
     tx,
     mission,
@@ -294,11 +294,11 @@ export function applyImport(
   for (const item of entries) {
     if (item.current === null) continue;
     const previous = new Set(
-      resolved.currentDependencies
+      resolved.current_dependencies
         .filter((edge) => edge.dependent === item.key)
-        .map((edge) => edge.dependsOn),
+        .map((edge) => edge.depends_on),
     );
-    if ([...item.dependsOn].some((target) => !previous.has(target)))
+    if ([...item.depends_on].some((target) => !previous.has(target)))
       requireNoLiveSubtree(tx, item.current, schedulerClaims, acceptedAt);
   }
   const result = initialResult(mission, entries, actor, acceptedAt);
@@ -325,7 +325,7 @@ export function applyImport(
     tx,
     workQueue,
     missionId,
-    mission.projectId,
+    mission.project_id,
     before,
     bindings,
   );
@@ -333,18 +333,18 @@ export function applyImport(
   assert.equal(missionVersion, mission.version + VERSION_INCREMENT);
   return {
     ...result,
-    missionVersion,
+    mission_version: missionVersion,
     changes: {
       ...result.changes,
-      missionVersion,
+      mission_version: missionVersion,
       revisions,
-      openAttemptsUnchanged: openAttemptsOf(
+      open_attempts_unchanged: openAttemptsOf(
         tx,
-        revisions.map((revision) => revision.nodeId),
+        revisions.map((revision) => revision.node_id),
       ),
-      retiredNodeIds: resolved.retirements,
-      addedEdges: addedEdges(resolved, entries),
-      removedEdges: resolved.removedEdges,
+      retired_node_ids: resolved.retirements,
+      added_edges: addedEdges(resolved, entries),
+      removed_edges: resolved.removed_edges,
     },
   };
 }

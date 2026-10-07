@@ -97,7 +97,7 @@ function invokeList(
   return registry
     .get(op.id)
     .handler(
-      op.input.parse({ params: { projectId }, query, body: null }),
+      op.input.parse({ params: { project_id: projectId }, query, body: null }),
       caller,
     ) as typeof op.output._output;
 }
@@ -108,12 +108,14 @@ function invokePeek(
   projectId: string,
 ) {
   const op = schedulerOperations.queuePeek;
-  return registry
-    .get(op.id)
-    .handler(
-      op.input.parse({ params: { projectId }, query: {}, body: null }),
-      caller,
-    ) as typeof op.output._output;
+  return registry.get(op.id).handler(
+    op.input.parse({
+      params: { project_id: projectId },
+      query: {},
+      body: null,
+    }),
+    caller,
+  ) as typeof op.output._output;
 }
 
 test("WorkQueue insert adds a row and enforces the node_id unique index", (t) => {
@@ -245,7 +247,7 @@ test("queue list handler pages the work queue order with no duplicate and no omi
         projectId,
         cursor === undefined ? { limit } : { limit, cursor },
       );
-      pages.push(page.items.map((job) => job.jobId));
+      pages.push(page.items.map((job) => job.job_id));
       cursors.push(page.next_cursor);
       cursor = page.next_cursor ?? undefined;
     } while (cursor !== undefined && pages.length <= QUEUE_ORDER.length);
@@ -273,7 +275,7 @@ test("queue list handler continues after a cursor whose job left the queue", (t)
   const caller = makeCallerContext(store);
   const first = invokeList(registry, caller, projectId, { limit: LIMIT_THREE });
   assert.deepEqual(
-    first.items.map((job) => job.jobId),
+    first.items.map((job) => job.job_id),
     [JOB_A, JOB_B, JOB_C],
   );
   assert.ok(first.next_cursor);
@@ -283,7 +285,7 @@ test("queue list handler continues after a cursor whose job left the queue", (t)
     cursor: first.next_cursor,
   });
   assert.deepEqual(
-    second.items.map((job) => job.jobId),
+    second.items.map((job) => job.job_id),
     [JOB_D, JOB_E, JOB_F, JOB_G],
   );
   assert.equal(second.next_cursor, null);
@@ -360,7 +362,7 @@ test("queue peek handler returns the first job by priority desc then id asc, or 
     );
   });
   assert.equal(
-    invokePeek(registry, caller, projectId).job?.jobId,
+    invokePeek(registry, caller, projectId).job?.job_id,
     LOWEST_JOB_ID,
   );
   assert.deepEqual(
@@ -406,7 +408,7 @@ test("run owns the 30-second loss sweep and quiescence stops it permanently", as
   t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
   assert.equal(h.calls.length, ONE_ROW);
   assert.equal(
-    h.store.transaction((tx) => readExecution(tx, row.executionId))?.endedAt,
+    h.store.transaction((tx) => readExecution(tx, row.execution_id))?.ended_at,
     FIXTURE_DEADLINE,
   );
   await h.service.quiesce();
@@ -432,7 +434,7 @@ test("sweep hands consecutive loss counts to Mission once per steps and evaluati
   const counts: number[] = [];
   h.dependencies.transitions.loss = (tx, nodeId, count) => {
     assert.ok(tx.database.isTransaction);
-    assert.ok(rows.some((row) => row.nodeId === nodeId));
+    assert.ok(rows.some((row) => row.node_id === nodeId));
     counts.push(count);
   };
   h.store.transaction((tx) => rows.forEach((row) => insertExecution(tx, row)));
@@ -444,8 +446,8 @@ test("sweep hands consecutive loss counts to Mission once per steps and evaluati
     rows.forEach((row) =>
       insertExecution(tx, {
         ...row,
-        executionId: createIdentity("execution"),
-        endedAt: null,
+        execution_id: createIdentity("execution"),
+        ended_at: null,
       }),
     ),
   );
@@ -473,7 +475,7 @@ test("a timer sweep failure rolls back, stops the timer and returns the original
   t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
   assert.equal(await running, failure);
   assert.equal(
-    h.store.transaction((tx) => readExecution(tx, row.executionId))?.endedAt,
+    h.store.transaction((tx) => readExecution(tx, row.execution_id))?.ended_at,
     null,
   );
   t.mock.timers.tick(LOSS_SWEEP_INTERVAL_MS);
@@ -499,14 +501,14 @@ test("activity is a pure read that never settles an expired execution", (t) => {
   h.store.transaction((tx) => {
     insertExecution(tx, row);
     assert.deepEqual(
-      h.service.activityOf(tx, row.runtimeIdentity, row.createdAt),
-      { activity: "executing", executionId: row.executionId },
+      h.service.activityOf(tx, row.runtime_identity, row.created_at),
+      { activity: "executing", execution_id: row.execution_id },
     );
     assert.deepEqual(
-      h.service.activityOf(tx, row.runtimeIdentity, row.expiredAt),
-      { activity: "idle", executionId: null },
+      h.service.activityOf(tx, row.runtime_identity, row.expired_at),
+      { activity: "idle", execution_id: null },
     );
-    assert.equal(readExecution(tx, row.executionId)?.endedAt, null);
+    assert.equal(readExecution(tx, row.execution_id)?.ended_at, null);
   });
   assert.deepEqual(h.calls, []);
 });

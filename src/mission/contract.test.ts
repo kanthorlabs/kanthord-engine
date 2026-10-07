@@ -64,21 +64,21 @@ const VALID_ACTION_KEY = "repo.pull_request";
 const INVALID_ACTION_KEY = "repo.push";
 const HUMAN = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const CONTEXT = {
-  executionId: createIdentity("execution"),
+  execution_id: createIdentity("execution"),
   attempt: FIRST_REVISION,
-  nodeRevision: FIRST_REVISION,
+  node_revision: FIRST_REVISION,
 };
 const PRODUCED = {
   kind: "produced",
-  content: { mediaType: "text/plain", encoding: "base64", data: "" },
+  content: { media_type: "text/plain", encoding: "base64", data: "" },
 };
 const ASSESSMENT = {
   ...CONTEXT,
-  evidenceIds: [],
-  childOutcomeIds: [],
+  evidence_ids: [],
+  child_outcome_ids: [],
   result: AssessmentResult.Success,
   rationale: REASON,
-  testedInput: { kind: "produced", sha256: "a".repeat(64) },
+  tested_input: { kind: "produced", sha256: "a".repeat(64) },
 };
 
 test("execution and evidence control inputs are strict and refuse forged actors", () => {
@@ -93,7 +93,7 @@ test("execution and evidence control inputs are strict and refuse forged actors"
       schema: evidenceRequestSchema,
       input: {
         ...CONTEXT,
-        requirementKey: VALID_ACTION_KEY,
+        requirement_key: VALID_ACTION_KEY,
         subject: REASON,
         address: {
           kind: "pull_request",
@@ -104,11 +104,11 @@ test("execution and evidence control inputs are strict and refuse forged actors"
     },
     {
       schema: evidenceDeleteSchema,
-      input: { expectedMissionVersion: FIRST_REVISION, force: false },
+      input: { expected_mission_version: FIRST_REVISION, force: false },
     },
     {
       schema: nodeCheckSchema,
-      input: { expectedMissionVersion: FIRST_REVISION },
+      input: { expected_mission_version: FIRST_REVISION },
     },
   ];
   for (const { schema, input } of inputs) {
@@ -131,7 +131,7 @@ test("execution and evidence control inputs are strict and refuse forged actors"
   );
   const id = createIdentity("evidence");
   assert.equal(
-    assessmentSubmitSchema.safeParse({ ...ASSESSMENT, evidenceIds: [id, id] })
+    assessmentSubmitSchema.safeParse({ ...ASSESSMENT, evidence_ids: [id, id] })
       .success,
     false,
   );
@@ -139,7 +139,7 @@ test("execution and evidence control inputs are strict and refuse forged actors"
   assert.equal(
     assessmentSubmitSchema.safeParse({
       ...ASSESSMENT,
-      childOutcomeIds: [outcomeId, outcomeId],
+      child_outcome_ids: [outcomeId, outcomeId],
     }).success,
     false,
   );
@@ -149,7 +149,7 @@ test("object size, media type and forced-delete reason have exact bounds", () =>
   const object = {
     kind: "object",
     size: OBJECT_SIZE_MAX,
-    mediaType: "text/plain",
+    media_type: "text/plain",
   };
   assert.equal(assetSubmitSchema.safeParse(object).success, true);
   assert.equal(
@@ -172,7 +172,7 @@ test("object size, media type and forced-delete reason have exact bounds", () =>
     mediaTypeSchema.safeParse(`${"a".repeat(127)}/${"b".repeat(127)}`).success,
     true,
   );
-  const deletion = { expectedMissionVersion: FIRST_REVISION, force: true };
+  const deletion = { expected_mission_version: FIRST_REVISION, force: true };
   assert.equal(evidenceDeleteSchema.safeParse(deletion).success, false);
   assert.equal(
     evidenceDeleteSchema.safeParse({ ...deletion, reason: REASON }).success,
@@ -181,9 +181,9 @@ test("object size, media type and forced-delete reason have exact bounds", () =>
 });
 const ACT = {
   reason: REASON,
-  expectedMissionVersion: FIRST_REVISION,
-  expectedState: NodeState.Available,
-  expectedAttempt: ZERO_ATTEMPT,
+  expected_mission_version: FIRST_REVISION,
+  expected_state: NodeState.Available,
+  expected_attempt: ZERO_ATTEMPT,
 };
 const CONTENT = {
   name: "Recover accounts",
@@ -203,9 +203,9 @@ const INPUTS = [
   {
     schema: unblockSchema,
     input: {
-      blockedAttempt: ZERO_ATTEMPT,
+      blocked_attempt: ZERO_ATTEMPT,
       expected_revision: FIRST_REVISION,
-      expectedMissionVersion: FIRST_REVISION,
+      expected_mission_version: FIRST_REVISION,
     },
   },
 ];
@@ -222,15 +222,15 @@ test("human control inputs reject unknown fields and forged actors", () => {
 });
 
 test("attempt-zero preconditions are accepted but opened attempts start at one", () => {
-  assert.equal(humanActSchema.parse(ACT).expectedAttempt, ZERO_ATTEMPT);
+  assert.equal(humanActSchema.parse(ACT).expected_attempt, ZERO_ATTEMPT);
   assert.equal(
-    humanActSchema.safeParse({ ...ACT, expectedAttempt: null }).success,
+    humanActSchema.safeParse({ ...ACT, expected_attempt: null }).success,
     false,
   );
   assert.equal(
     humanActSchema.safeParse({
       ...ACT,
-      expectedAttempt: Number.MAX_SAFE_INTEGER + FIRST_REVISION,
+      expected_attempt: Number.MAX_SAFE_INTEGER + FIRST_REVISION,
     }).success,
     false,
   );

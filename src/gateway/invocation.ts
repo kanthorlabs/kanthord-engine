@@ -84,12 +84,7 @@ export class Invocation {
     const body = isObject(input.body)
       ? (input.body as Record<string, unknown>)
       : {};
-    const executionId = [
-      params.execution_id,
-      params.executionId,
-      body.execution_id,
-      body.executionId,
-    ].find(isString);
+    const executionId = [params.execution_id, body.execution_id].find(isString);
     const row = isString(executionId)
       ? this.scheduler?.executionOf(executionId)
       : undefined;
@@ -97,31 +92,23 @@ export class Invocation {
       !isMachineIdentity(identity) ||
       !identity.runtimeIdentity ||
       !row ||
-      row.runtimeIdentity !== identity.runtimeIdentity ||
-      row.endedAt !== null ||
-      Date.now() >= row.expiredAt
+      row.runtime_identity !== identity.runtimeIdentity ||
+      row.ended_at !== null ||
+      Date.now() >= row.expired_at
     )
       throw new GatewayError(
         HttpStatus.Forbidden,
         "gateway.invocation.execution_proof_failed",
         "The execution is not a live claim of this registration.",
       );
-    const {
-      projectId,
-      nodeId,
-      attempt,
-      pinnedRevision,
-      runtimeIdentity,
-      workerBindingId,
-    } = row;
     return {
-      executionId: row.executionId,
-      projectId,
-      nodeId,
-      attempt,
-      pinnedRevision,
-      runtimeIdentity,
-      workerBindingId,
+      executionId: row.execution_id,
+      projectId: row.project_id,
+      nodeId: row.node_id,
+      attempt: row.attempt,
+      pinnedRevision: row.pinned_revision,
+      runtimeIdentity: row.runtime_identity,
+      workerBindingId: row.worker_binding_id,
     };
   }
 

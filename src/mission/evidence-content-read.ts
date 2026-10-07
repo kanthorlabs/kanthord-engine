@@ -29,13 +29,13 @@ import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 export type ContentBound = (tx: Transaction, evidence: EvidenceRow) => boolean;
 const FUNCTION_TYPE = "function";
 const MAX_SIGNINGS = 2;
-const inlineSchema = z.object({ mediaType: z.string(), data: z.string() });
+const inlineSchema = z.object({ media_type: z.string(), data: z.string() });
 export const objectContentSchema = z.object({
   location: z.string(),
   size: z.number(),
-  mediaType: z.string(),
-  storageBindingId: z.string(),
-  objectVersion: z.string().optional(),
+  media_type: z.string(),
+  storage_binding_id: z.string(),
+  object_version: z.string().optional(),
   sha256: z.string().optional(),
 });
 
@@ -51,9 +51,9 @@ export function executionContentBound(
       claim,
       claim.nodeId,
       {
-        executionId: claim.executionId,
+        execution_id: claim.executionId,
         attempt: claim.attempt,
-        nodeRevision: claim.pinnedRevision,
+        node_revision: claim.pinnedRevision,
       },
       Date.now(),
     );
@@ -71,7 +71,7 @@ export function executionContentBound(
     const outcome = readCurrentOutcome(tx, child.id);
     return (
       outcome !== null &&
-      outcomeRecord(tx, dependencies.bindings, outcome).evidenceIds.includes(
+      outcomeRecord(tx, dependencies.bindings, outcome).evidence_ids.includes(
         evidence.id,
       )
     );
@@ -87,7 +87,7 @@ function contentConflict(
     HttpStatus.Conflict,
     code,
     "Evidence content is represented by its external address.",
-    { evidenceId, address: asset.address },
+    { evidence_id: evidenceId, address: asset.address },
   );
 }
 
@@ -125,7 +125,7 @@ export function contentOf(
     const content = inlineSchema.parse(JSON.parse(row.content));
     return {
       result: {
-        assetId,
+        asset_id: assetId,
         address: asset.address,
         ...content,
         encoding: CONTENT_ENCODING,
@@ -136,9 +136,9 @@ export function contentOf(
   const object = objectContentSchema.parse(JSON.parse(row.content));
   return {
     result: {
-      assetId,
+      asset_id: assetId,
       address: asset.address,
-      mediaType: object.mediaType,
+      media_type: object.media_type,
       size: object.size,
     },
     object,
@@ -160,7 +160,7 @@ export async function readContent(
     const binding = authorizeStorage(
       tx,
       dependencies.bindings,
-      content.object.storageBindingId,
+      content.object.storage_binding_id,
     );
     assert.ok(binding);
     return { ...content, binding };
@@ -177,19 +177,19 @@ export async function readContent(
       { context: caller.context, identity: caller.identity },
       binding,
       keyOfLocation(binding, object.location),
-      object.objectVersion ?? null,
+      object.object_version ?? null,
     );
     const current = dependencies.store.transaction((tx) =>
       contentOf(tx, assetId, bound),
     );
     assert.ok(current.object);
-    if (current.object.objectVersion !== object.objectVersion) {
+    if (current.object.object_version !== object.object_version) {
       object = current.object;
       continue;
     }
     return caller.commit((tx) => {
       const final = contentOf(tx, assetId, bound);
-      assert.equal(final.object?.objectVersion, object.objectVersion);
+      assert.equal(final.object?.object_version, object.object_version);
       return storedContentSchema.parse({ ...final.result, ...signed });
     });
   }

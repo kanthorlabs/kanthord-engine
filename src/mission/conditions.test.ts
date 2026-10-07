@@ -54,7 +54,7 @@ function fixture(t: TestContext) {
       return id;
     });
   }
-  return { ...h, projectId, missionId, node };
+  return { ...h, project_id: projectId, mission_id: missionId, node };
 }
 
 test("readiness at attempt zero reads current children and ignores retired objectives and tasks", (t) => {
@@ -66,8 +66,8 @@ test("readiness at attempt zero reads current children and ignores retired objec
     const parent = readNode(tx, initiative)!;
     assert.deepEqual(readinessOf(tx, parent), {
       holds: false,
-      objectivesNotTerminal: [objective],
-      unresolvedActions: [],
+      objectives_not_terminal: [objective],
+      unresolved_actions: [],
     });
     assert.equal(readinessOf(tx, readNode(tx, objective)!).holds, true);
     setNodeState(tx, objective, NodeState.Discarded);
@@ -87,7 +87,7 @@ test("dependency closure includes ancestor dependencies and requires Completed, 
   const objective = h.node(NodeKind.Objective, initiative);
   const dependency = h.node();
   h.store.transaction((tx) => {
-    insertDependency(tx, h.missionId, initiative, dependency);
+    insertDependency(tx, h.mission_id, initiative, dependency);
     setNodeState(tx, dependency, NodeState.Discarded);
     assert.deepEqual(closureUnsatisfied(tx, readNode(tx, objective)!), [
       dependency,
@@ -104,7 +104,7 @@ test("claimability covers all twelve states, attempt zero and retirement", (t) =
     for (const state of Object.values(NodeState)) {
       setNodeState(tx, id, state);
       assert.equal(
-        claimableMap(tx, h.missionId, h.dependencies.bindings).get(id),
+        claimableMap(tx, h.mission_id, h.dependencies.bindings).get(id),
         state === NodeState.Available || state === NodeState.Waiting,
         state,
       );
@@ -114,7 +114,7 @@ test("claimability covers all twelve states, attempt zero and retirement", (t) =
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(NOW, id);
     assert.equal(
-      claimableMap(tx, h.missionId, h.dependencies.bindings).get(id),
+      claimableMap(tx, h.mission_id, h.dependencies.bindings).get(id),
       false,
     );
   });
@@ -127,25 +127,25 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
   const bindings = {
     ...h.dependencies.bindings,
     getBindingRevision: () => ({
-      bindingId,
-      projectId: h.projectId,
+      binding_id: bindingId,
+      project_id: h.project_id,
       name: "repo",
-      resourceIdentity: "repository:github:owner/repo",
+      resource_identity: "repository:github:owner/repo",
       revision: FIRST_ATTEMPT,
       disabled: false,
       tombstone: false,
     }),
     repositoryPolicyOf: () => ({
-      bindingId,
-      projectId: h.projectId,
+      binding_id: bindingId,
+      project_id: h.project_id,
       name: "repo",
       address: "git@github.com:owner/repo.git",
       platform: "github",
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       credential: "github",
-      baseBranch: "main",
+      base_branch: "main",
       action: RepositoryAction.PullRequest,
-      projectPrompt: null,
+      project_prompt: null,
     }),
   };
   h.store.transaction((tx) => {
@@ -158,7 +158,7 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
     const node = readNode(tx, nodeId)!;
     assert.equal(continuationHolds(tx, bindings, node), true);
     setNodeState(tx, nodeId, NodeState.ExternalRequested);
-    assert.equal(claimableMap(tx, h.missionId, bindings).get(nodeId), true);
+    assert.equal(claimableMap(tx, h.mission_id, bindings).get(nodeId), true);
     const id = createIdentity("evidence");
     insertEvidence(
       tx,
@@ -177,11 +177,11 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
     );
     assert.deepEqual(readinessOf(tx, node), {
       holds: false,
-      objectivesNotTerminal: [],
-      unresolvedActions: [REQUEST_KEY],
+      objectives_not_terminal: [],
+      unresolved_actions: [REQUEST_KEY],
     });
     assert.equal(continuationHolds(tx, bindings, node), false);
-    assert.equal(claimableMap(tx, h.missionId, bindings).get(nodeId), false);
+    assert.equal(claimableMap(tx, h.mission_id, bindings).get(nodeId), false);
     tx.database
       .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
       .run(EndState.Expected, id);

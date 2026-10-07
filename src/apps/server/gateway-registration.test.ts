@@ -48,10 +48,10 @@ const machineRead = {
   mutation: false,
   input: emptyInput,
   output: z.strictObject({
-    projectId: z.string(),
-    resourceIdentity: z.string(),
+    project_id: z.string(),
+    resource_identity: z.string(),
     name: z.string(),
-    runtimeIdentity: z.string(),
+    runtime_identity: z.string(),
   }),
   status: HttpStatus.OK,
   description: "Test the machine forwarding contract.",
@@ -112,10 +112,10 @@ async function fixtureForRegistration(
     assert.ok(Object.isFrozen(caller.identity));
     assert.ok(caller.identity.runtimeIdentity);
     return {
-      projectId: caller.identity.projectId,
-      resourceIdentity: caller.identity.resourceIdentity,
+      project_id: caller.identity.projectId,
+      resource_identity: caller.identity.resourceIdentity,
       name: caller.identity.name,
-      runtimeIdentity: caller.identity.runtimeIdentity,
+      runtime_identity: caller.identity.runtimeIdentity,
     };
   });
   const fixture = await gatewayFixture(t, { registry, machines });
@@ -468,10 +468,10 @@ test("work requires a live registration and machine JWTs never authorize human v
   const response = await client.read(input);
   assert.ok(response.type === OperationResultType.Completed);
   assert.deepEqual(response.data, {
-    projectId: TEST_PROJECT_ID,
-    resourceIdentity: `worker:kanthord:${TEST_WORKER_BINDING}`,
+    project_id: TEST_PROJECT_ID,
+    resource_identity: `worker:kanthord:${TEST_WORKER_BINDING}`,
     name: DISPLAY_NAME,
-    runtimeIdentity: registered.data.runtime_identity,
+    runtime_identity: registered.data.runtime_identity,
   });
   const human = await fixture.request("/api/auth/verify", {
     headers: { Authorization: `Bearer ${fixture.machineJWT}` },

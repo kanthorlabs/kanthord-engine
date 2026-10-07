@@ -66,7 +66,7 @@ function checkParent(node: NodeRow, parent: NodeRow): void {
       HttpStatus.Conflict,
       MissionErrorCode.CreateRefused,
       "Parent cannot contain this node.",
-      { parentId: parent.id, parentKind: parent.kind },
+      { parent_id: parent.id, parent_kind: parent.kind },
     );
   assert.notEqual(node.id, parent.id, "Node cannot contain itself.");
   assert.equal(
@@ -117,8 +117,8 @@ function moveTaskRevisions(
   const metadata = {
     reason,
     actor,
-    createdAt: Date.now(),
-    pinnedByAttempts: [],
+    created_at: Date.now(),
+    pinned_by_attempts: [],
   };
   const outgoing: Revision = {
     ...oldRevision,
@@ -127,9 +127,9 @@ function moveTaskRevisions(
     tasks: oldRevision.tasks.filter((item) => item.id !== nodeId),
     change: {
       write: RevisionWrite.NodeMove,
-      previousRevision: oldRevision.revision,
-      changedFields: [TASKS_FIELD],
-      tasks: [{ id: nodeId, change: TaskChange.MovedOut, changedFields: [] }],
+      previous_revision: oldRevision.revision,
+      changed_fields: [TASKS_FIELD],
+      tasks: [{ id: nodeId, change: TaskChange.MovedOut, changed_fields: [] }],
     },
   };
   const incoming: Revision = {
@@ -139,13 +139,13 @@ function moveTaskRevisions(
     tasks: [...newRevision.tasks, task],
     change: {
       write: RevisionWrite.NodeMove,
-      previousRevision: newRevision.revision,
-      changedFields: [TASKS_FIELD],
+      previous_revision: newRevision.revision,
+      changed_fields: [TASKS_FIELD],
       tasks: [
         {
           id: nodeId,
           change: TaskChange.MovedIn,
-          changedFields: [...CONTENT_FIELDS],
+          changed_fields: [...CONTENT_FIELDS],
         },
       ],
     },
@@ -153,11 +153,11 @@ function moveTaskRevisions(
   insertRevision(tx, outgoing);
   insertRevision(tx, incoming);
   return [outgoing, incoming].map((revision) => {
-    const row = readRevision(tx, revision.nodeId, revision.revision);
+    const row = readRevision(tx, revision.node_id, revision.revision);
     assert.ok(row, "Moved revision must be readable.");
     assert.equal(
       row.node_id,
-      revision.nodeId,
+      revision.node_id,
       "Stored revision belongs to its owner.",
     );
     return revisionFromRow(tx, row);
@@ -178,14 +178,14 @@ export function moveNode(
   const mission = requireMission(
     tx,
     node.mission_id,
-    body.expectedMissionVersion,
+    body.expected_mission_version,
   );
   const oldParentId = node.parent_id;
   if (node.kind !== NodeKind.Initiative)
     assert.ok(oldParentId, "Movable node has a parent.");
   const oldParent = oldParentId === null ? null : requireNode(tx, oldParentId);
   requireNonterminal(node.kind === NodeKind.Task ? oldParent! : node);
-  const newParent = requireNode(tx, body.newParentId);
+  const newParent = requireNode(tx, body.new_parent_id);
   requireActive(newParent);
   checkParent(node, newParent);
   if (node.kind === NodeKind.Task) requireNonterminal(newParent);
@@ -194,22 +194,22 @@ export function moveNode(
   const oldRevision =
     oldParent === null
       ? null
-      : currentRevision(tx, oldParent.id, body.expectedOldParentRevision);
+      : currentRevision(tx, oldParent.id, body.expected_old_parent_revision);
   const newRevision = currentRevision(
     tx,
     newParent.id,
-    body.expectedNewParentRevision,
+    body.expected_new_parent_revision,
   );
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   const empty: NodeChange = {
-    missionVersion: mission.version,
+    mission_version: mission.version,
     revisions: [],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   };
-  if (body.newParentId === oldParentId) return empty;
+  if (body.new_parent_id === oldParentId) return empty;
   assert.ok(oldParentId, "A moved node must have an old parent.");
   assert.ok(oldRevision, "Old parent must have a revision.");
   const before =
@@ -242,7 +242,7 @@ export function moveNode(
       tx,
       workQueue,
       mission.id,
-      mission.projectId,
+      mission.project_id,
       before,
       bindings,
     );
@@ -255,22 +255,26 @@ export function moveNode(
   );
   assert.equal(
     newParent.id,
-    body.newParentId,
+    body.new_parent_id,
     "New parent identity is stable.",
   );
   return {
     ...empty,
-    openAttemptsUnchanged: openAttemptsOf(
+    open_attempts_unchanged: openAttemptsOf(
       tx,
-      revisions.map((revision) => revision.nodeId),
+      revisions.map((revision) => revision.node_id),
     ),
-    missionVersion,
+    mission_version: missionVersion,
     revisions,
-    addedEdges: [
-      { kind: EdgeKind.Containment, parentId: newParent.id, childId: node.id },
+    added_edges: [
+      {
+        kind: EdgeKind.Containment,
+        parent_id: newParent.id,
+        child_id: node.id,
+      },
     ],
-    removedEdges: [
-      { kind: EdgeKind.Containment, parentId: oldParentId, childId: node.id },
+    removed_edges: [
+      { kind: EdgeKind.Containment, parent_id: oldParentId, child_id: node.id },
     ],
   };
 }

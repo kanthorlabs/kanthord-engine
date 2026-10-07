@@ -107,7 +107,7 @@ for (const adapter of ["direct", "http"] as const) {
   test(`${adapter} native setup reads pinned facts without secrets or new pins`, async (t) => {
     const h = await setup(t, adapter, undefined, { instanceCount: 2 });
     const input = {
-      params: { execution_id: h.execution.executionId },
+      params: { execution_id: h.execution.execution_id },
       query: {},
       body: null,
     };
@@ -121,7 +121,7 @@ for (const adapter of ["direct", "http"] as const) {
     completed(await h.handover());
     const before = h.f.store.database
       .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
-      .get(h.execution.executionId);
+      .get(h.execution.execution_id);
     const answer = completed(await read());
     assert.equal(answer.credential_id, h.credentialId);
     assert.deepEqual(answer.effective_configuration, {
@@ -148,14 +148,14 @@ for (const adapter of ["direct", "http"] as const) {
     assert.deepEqual(
       h.f.store.database
         .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
-        .get(h.execution.executionId),
+        .get(h.execution.execution_id),
       before,
     );
     const human = await read(h.f.token);
     assert.ok(human.type === OperationResultType.Failure);
     assert.equal(human.status, HttpStatus.Unauthorized);
     const other = await h.f.machineToken(
-      h.execution.projectId,
+      h.execution.project_id,
       "general",
       "other-instance",
     );
@@ -192,7 +192,7 @@ for (const adapter of ["direct", "http"] as const) {
       h.call(
         workerOperations["execution.setup.get"],
         {
-          params: { execution_id: h.execution.executionId },
+          params: { execution_id: h.execution.execution_id },
           query: {},
           body: null,
         },
@@ -264,7 +264,7 @@ for (const adapter of ["direct", "http"] as const) {
       await h.call(
         workerOperations["execution.setup.get"],
         {
-          params: { execution_id: h.execution.executionId },
+          params: { execution_id: h.execution.execution_id },
           query: {},
           body: null,
         },
@@ -514,36 +514,36 @@ async function setup(
   );
   const mission = completed(
     await call(missionOperations.get, {
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: null,
     }),
   );
   const initiative = completed(
     await call(missionOperations["node.create"], {
-      params: { missionId: mission.id },
+      params: { mission_id: mission.id },
       query: {},
       body: {
         filename: "initiative-1.md",
         kind: NodeKind.Initiative,
         content: CONTENT,
         reason: "plan",
-        expectedMissionVersion: 1,
+        expected_mission_version: 1,
       },
     }),
   );
   completed(
     await call(missionOperations["node.create"], {
-      params: { missionId: mission.id },
+      params: { mission_id: mission.id },
       query: {},
       body: {
         filename: "objective-1.md",
         kind: NodeKind.Objective,
         content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
         reason: "plan",
-        expectedMissionVersion: 2,
-        parentId: initiative.revisions[0]!.nodeId,
-        expectedParentRevision: 1,
+        expected_mission_version: 2,
+        parent_id: initiative.revisions[0]!.node_id,
+        expected_parent_revision: 1,
       },
     }),
   );
@@ -559,8 +559,8 @@ async function setup(
           params: {},
           query: {},
           body: {
-            resourceIdentity: "worker:kanthord:general",
-            runtimeIdentity,
+            resource_identity: "worker:kanthord:general",
+            runtime_identity: runtimeIdentity,
           },
         },
         token,
@@ -577,7 +577,7 @@ async function setup(
     deriveClientSecret(f.config.master_key, claims.sub),
   );
   const handover = (
-    executionId = execution.executionId,
+    executionId = execution.execution_id,
     idempotencyKey = ulid(),
     auth = token,
   ) =>
@@ -589,7 +589,7 @@ async function setup(
     );
   const report = (
     value: unknown,
-    executionId = execution.executionId,
+    executionId = execution.execution_id,
     idempotencyKey = ulid(),
   ) =>
     call(
@@ -609,10 +609,14 @@ async function setup(
       token,
       { idempotencyKey },
     );
-  const release = (executionId = execution.executionId) =>
+  const release = (executionId = execution.execution_id) =>
     call(
       schedulerOperations.executionRelease,
-      { params: { executionId }, query: {}, body: { furtherWork: true } },
+      {
+        params: { execution_id: executionId },
+        query: {},
+        body: { further_work: true },
+      },
       token,
     );
   const read = () =>
@@ -623,7 +627,7 @@ async function setup(
     });
   const open = (
     envelope: ReturnType<typeof sealEnvelope>,
-    executionId = execution.executionId,
+    executionId = execution.execution_id,
   ) =>
     handoverPayloadSchema.parse(
       openEnvelope(
@@ -637,7 +641,7 @@ async function setup(
     call,
     token,
     keys,
-    runtimeIdentity,
+    runtime_identity: runtimeIdentity,
     execution,
     pull,
     handover,
@@ -716,8 +720,8 @@ for (const adapter of ["direct", "http"] as const) {
       const before = h.f.store.database
         .prepare("SELECT * FROM credential ORDER BY id")
         .all();
-      const executionId = h.execution.executionId;
-      const aad = handoverAad(executionId, h.runtimeIdentity);
+      const executionId = h.execution.execution_id;
+      const aad = handoverAad(executionId, h.runtime_identity);
       for (const surrogate of ["\ud800", "\udc00"]) {
         const report = {
           credential_id: h.credentialId,
@@ -771,8 +775,8 @@ async function workerBoundaryRoundTrip(h: Awaited<ReturnType<typeof setup>>) {
         endpoint: h.f.endpoint,
         token: h.token,
         clientSecret: deriveClientSecret(h.f.config.master_key, claims.sub),
-        executionId: h.execution.executionId,
-        runtimeIdentity: h.runtimeIdentity,
+        executionId: h.execution.execution_id,
+        runtimeIdentity: h.runtime_identity,
       }),
     ],
     { timeout: CHILD_TIMEOUT_MS, maxBuffer: MAX_CHILD_BUFFER },
@@ -796,12 +800,12 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
       maximum.type === SecretShape.ApiKey
         ? { ...maximum, key: maximum.key + "x" }
         : { ...maximum, access: maximum.access + "x" };
-    const executionId = h.execution.executionId;
+    const executionId = h.execution.execution_id;
     const body = {
       execution_id: executionId,
       ...sealEnvelope(
         h.keys.report,
-        handoverAad(executionId, h.runtimeIdentity),
+        handoverAad(executionId, h.runtime_identity),
         {
           credential_id: h.credentialId,
           digest: digest(maximum),
@@ -881,7 +885,7 @@ for (const adapter of ["direct", "http"] as const) {
   test(`${adapter} handover pins, rotates, refreshes, rejects stale proof and drains after release`, async (t) => {
     const h = await setup(t, adapter);
     const key = ulid();
-    const first = completed(await h.handover(h.execution.executionId, key));
+    const first = completed(await h.handover(h.execution.execution_id, key));
     assert.deepEqual(h.open(first).items, [
       {
         credential_id: h.credentialId,
@@ -889,7 +893,7 @@ for (const adapter of ["direct", "http"] as const) {
         credential: { type: SecretShape.ApiKey, key: SECRET },
       },
     ]);
-    const replay = await h.handover(h.execution.executionId, key);
+    const replay = await h.handover(h.execution.execution_id, key);
     assert(replay.type === OperationResultType.Failure);
     assert.equal(replay.status, HttpStatus.Conflict);
     assert.equal(JSON.stringify(replay).includes("ciphertext"), false);
@@ -936,13 +940,13 @@ for (const adapter of ["direct", "http"] as const) {
       INVALID_REPORT,
     );
     refused(
-      await h.handover(h.execution.executionId, ulid(), h.f.token),
+      await h.handover(h.execution.execution_id, ulid(), h.f.token),
       HttpStatus.Unauthorized,
       "gateway.authentication.unauthorized",
     );
     completed(await h.release());
     refused(
-      await h.handover(h.execution.executionId, key),
+      await h.handover(h.execution.execution_id, key),
       HttpStatus.Forbidden,
       PROOF_FAILED,
     );
@@ -952,7 +956,7 @@ for (const adapter of ["direct", "http"] as const) {
     assert.equal(read.revisions[0]!.ended_at, null);
     const next = await h.pull();
     assert.equal(
-      h.open(completed(await h.handover(next.executionId)), next.executionId)
+      h.open(completed(await h.handover(next.execution_id)), next.execution_id)
         .items[0]!.credential_id,
       read.revisions[0]!.id,
     );
@@ -963,15 +967,15 @@ for (const adapter of ["direct", "http"] as const) {
   test(`${adapter} failed execution proof reserves no key and malformed reports expose no secret`, async (t) => {
     const h = await setup(t, adapter);
     const key = ulid();
-    const clock = t.mock.method(Date, "now", () => h.execution.expiredAt);
+    const clock = t.mock.method(Date, "now", () => h.execution.expired_at);
     refused(
-      await h.handover(h.execution.executionId, key),
+      await h.handover(h.execution.execution_id, key),
       HttpStatus.Forbidden,
       PROOF_FAILED,
     );
     clock.mock.restore();
-    completed(await h.handover(h.execution.executionId, key));
-    const aad = handoverAad(h.execution.executionId, h.runtimeIdentity);
+    completed(await h.handover(h.execution.execution_id, key));
+    const aad = handoverAad(h.execution.execution_id, h.runtime_identity);
     const payload = {
       credential_id: h.credentialId,
       digest: digest({ type: SecretShape.ApiKey, key: SECRET }),
@@ -987,7 +991,7 @@ for (const adapter of ["direct", "http"] as const) {
           {
             params: {},
             query: {},
-            body: { execution_id: h.execution.executionId, ...envelope },
+            body: { execution_id: h.execution.execution_id, ...envelope },
           },
           h.token,
         ),
@@ -995,7 +999,7 @@ for (const adapter of ["direct", "http"] as const) {
         INVALID_REPORT,
       );
     }
-    const extra = { execution_id: h.execution.executionId, extra: true };
+    const extra = { execution_id: h.execution.execution_id, extra: true };
     refused(
       await h.call(
         workerOperations.handover,
@@ -1017,7 +1021,7 @@ test("HTTP handover enforces its byte limit before body parsing", async (t) => {
       "content-type": "application/json",
       "idempotency-key": ulid(),
     },
-    body: JSON.stringify({ executionId: h.execution.executionId }).padEnd(
+    body: JSON.stringify({ execution_id: h.execution.execution_id }).padEnd(
       1025,
       " ",
     ),

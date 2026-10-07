@@ -32,39 +32,39 @@ function fixture(t: TestContext) {
   const nodeId = createIdentity("node");
   const bindingId = createIdentity("binding");
   h.dependencies.bindings.getBindingRevision = () => ({
-    bindingId,
-    projectId: h.projectId,
+    binding_id: bindingId,
+    project_id: h.project_id,
     name: "repo",
-    resourceIdentity: RESOURCE,
+    resource_identity: RESOURCE,
     revision: FIRST_ATTEMPT,
     disabled: false,
     tombstone: false,
   });
   h.dependencies.bindings.repositoryPolicyOf = () => ({
-    bindingId,
-    projectId: h.projectId,
+    binding_id: bindingId,
+    project_id: h.project_id,
     name: "repo",
     address: "git@github.com:owner/repo.git",
     platform: "github",
-    sshCredential: "github-ssh",
+    ssh_credential: "github-ssh",
     credential: "github",
-    baseBranch: "main",
+    base_branch: "main",
     action: RepositoryAction.PullRequest,
-    projectPrompt: null,
+    project_prompt: null,
   });
   h.store.transaction((tx) => {
     insertNode(tx, {
       id: nodeId,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Objective,
       filename: "objective.md",
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       created_at: NOW,
     });
-    const revision = getRevision(tx, h.nodeId, FIRST_ATTEMPT);
+    const revision = getRevision(tx, h.node_id, FIRST_ATTEMPT);
     insertRevision(tx, {
       ...revision,
-      nodeId,
+      node_id: nodeId,
       filename: "objective.md",
       content: { ...revision.content, bindings: [bindingId] },
       tasks: [],
@@ -76,7 +76,7 @@ function fixture(t: TestContext) {
   const body: EvidenceRequest = {
     ...h.context,
     subject: "Opened pull request",
-    requirementKey: KEY,
+    requirement_key: KEY,
     address: {
       kind: PlatformAddressKind.PullRequest,
       resource_identity: RESOURCE,
@@ -85,27 +85,27 @@ function fixture(t: TestContext) {
   };
   const request = (input = body) =>
     h.invoke("evidence.request", {
-      params: { nodeId },
+      params: { node_id: nodeId },
       query: {},
       body: input,
     });
   assert.equal(h.claim.nodeId, nodeId);
   assert.equal(body.attempt, FIRST_ATTEMPT);
-  return { ...h, nodeId, body, request };
+  return { ...h, node_id: nodeId, body, request };
 }
 
 test("an evaluation request records one published platform asset and leaves its action unresolved", async (t) => {
   const h = fixture(t);
   const evidence = await h.request();
-  assert.equal(evidence.requirementKey, KEY);
-  assert.equal(evidence.endState, undefined);
+  assert.equal(evidence.requirement_key, KEY);
+  assert.equal(evidence.end_state, undefined);
   assert.deepEqual(evidence.provenance, h.executionActor);
   assert.equal(evidence.assets.length, FIRST_ATTEMPT);
   assert.equal(evidence.assets[FIRST_INDEX]!.kind, AssetKind.Platform);
-  assert.notEqual(evidence.assets[FIRST_INDEX]!.publishedAt, null);
+  assert.notEqual(evidence.assets[FIRST_INDEX]!.published_at, null);
   assert.deepEqual(evidence.assets[FIRST_INDEX]!.address, h.body.address);
   const states = h.store.transaction((tx) =>
-    actionStatesOf(tx, h.dependencies.bindings, h.nodeId, FIRST_ATTEMPT),
+    actionStatesOf(tx, h.dependencies.bindings, h.node_id, FIRST_ATTEMPT),
   );
   assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unresolved);
   assert.equal(states[FIRST_INDEX]!.request?.id, evidence.id);
@@ -122,7 +122,7 @@ test("an evaluation request records one published platform asset and leaves its 
           tx,
           {
             id: createIdentity("evidence"),
-            node_id: h.nodeId,
+            node_id: h.node_id,
             attempt: FIRST_ATTEMPT,
             subject: "Duplicate",
             requirement_key: KEY,
@@ -140,16 +140,18 @@ test("an evaluation request records one published platform asset and leaves its 
 
 test("request admission rejects a steps claim, unknown action and mismatched platform kind or resource", async (t) => {
   const h = fixture(t);
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Executing));
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Executing));
   await assert.rejects(
     h.request(),
     (error) =>
       error instanceof OperationError &&
       error.code === MissionErrorCode.ExecutionClaimNotEvaluation,
   );
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
   await assert.rejects(
-    h.request({ ...h.body, requirementKey: "other.pull_request" }),
+    h.request({ ...h.body, requirement_key: "other.pull_request" }),
     (error) =>
       error instanceof OperationError &&
       error.code === MissionErrorCode.RequestRequirementUnknown,
@@ -171,11 +173,11 @@ test("request admission rejects a steps claim, unknown action and mismatched pla
     await assert.rejects(h.request({ ...h.body, address }), (error) => {
       assert.ok(error instanceof OperationError);
       assert.equal(error.code, MissionErrorCode.RequestAddressMismatch);
-      assert.deepEqual(error.details, { requirementKey: KEY });
+      assert.deepEqual(error.details, { requirement_key: KEY });
       return true;
     });
   const states = h.store.transaction((tx) =>
-    actionStatesOf(tx, h.dependencies.bindings, h.nodeId, FIRST_ATTEMPT),
+    actionStatesOf(tx, h.dependencies.bindings, h.node_id, FIRST_ATTEMPT),
   );
   assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unrequested);
 });

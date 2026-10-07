@@ -35,7 +35,11 @@ export async function readAllPages<T>(
 export function readPinnedRevision(run: ExecutionRun) {
   return run.call((options) =>
     run.clients.mission["execution.pinnedRevision.get"](
-      { params: { executionId: run.claim.executionId }, query: {}, body: null },
+      {
+        params: { execution_id: run.claim.execution_id },
+        query: {},
+        body: null,
+      },
       options,
     ),
   );
@@ -51,7 +55,7 @@ export function readAttemptEvidence(run: ExecutionRun) {
   return readAllPages(run, (cursor, options) =>
     run.clients.mission["execution.evidence.list"](
       {
-        params: { executionId: run.claim.executionId },
+        params: { execution_id: run.claim.execution_id },
         query: cursor === null ? {} : { cursor },
         body: null,
       },
@@ -62,7 +66,7 @@ export function readAttemptEvidence(run: ExecutionRun) {
 
 export async function readObjectives(run: ExecutionRun) {
   const input = (cursor: string | null) => ({
-    params: { executionId: run.claim.executionId },
+    params: { execution_id: run.claim.execution_id },
     query: cursor === null ? {} : { cursor },
     body: null,
   });
@@ -88,7 +92,11 @@ export async function readClearedOutcome(run: ExecutionRun) {
   if (run.claim.attempt === FIRST_ATTEMPT) return null;
   return run.call((options) =>
     run.clients.mission["execution.clearedOutcome.get"](
-      { params: { executionId: run.claim.executionId }, query: {}, body: null },
+      {
+        params: { execution_id: run.claim.execution_id },
+        query: {},
+        body: null,
+      },
       options,
     ),
   );

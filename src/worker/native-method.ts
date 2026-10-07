@@ -86,7 +86,7 @@ export async function runNativeExecution(
         opened = await open(workspace.directory);
       } catch (error) {
         input.workspaces.release(
-          input.workspaces.objectiveKey(input.claim.nodeId),
+          input.workspaces.objectiveKey(input.claim.node_id),
           WorkspaceKind.Objective,
         );
         throw error;
@@ -118,9 +118,9 @@ export function disposeAgent(
   if (!agent) return;
   try {
     transcript.record({
-      executionId: run.claim.executionId,
+      executionId: run.claim.execution_id,
       attempt: run.claim.attempt,
-      traceId: run.claim.traceId,
+      traceId: run.claim.trace_id,
       messages: agent.transcript(),
     });
   } finally {

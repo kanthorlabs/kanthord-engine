@@ -224,18 +224,18 @@ test(
       ]);
       const result = await write<{
         revisions: {
-          nodeId: string;
+          node_id: string;
           tasks?: { id: string; filename: string }[];
         }[];
       }>(["mission", "node", "create", mission.id], {
         ...body,
         reason: "methods acceptance",
-        expectedMissionVersion: version,
+        expected_mission_version: version,
       });
       const task = result.revisions
         .flatMap((revision) => revision.tasks ?? [])
         .find((task) => task.filename === body.filename);
-      return task?.id ?? result.revisions[0]!.nodeId;
+      return task?.id ?? result.revisions[0]!.node_id;
     }
     const initiative = await create({
       filename: "initiative.md",
@@ -251,8 +251,8 @@ test(
       const node = await create({
         filename: `${name}.md`,
         kind: "objective",
-        parentId: initiative,
-        expectedParentRevision: FIRST_REVISION,
+        parent_id: initiative,
+        expected_parent_revision: FIRST_REVISION,
         content: { ...CONTENT, bindings: [binding] },
       });
       nodes.push(node);
@@ -260,8 +260,8 @@ test(
         await create({
           filename: `task-${name}.md`,
           kind: "task",
-          parentId: node,
-          expectedParentRevision: FIRST_REVISION,
+          parent_id: node,
+          expected_parent_revision: FIRST_REVISION,
           content: {
             ...CONTENT,
             criterion: "hello.txt holds hello",
@@ -283,7 +283,7 @@ test(
       ]);
       await write(["mission", "node", "priority", "set", node], {
         value,
-        expectedMissionVersion: version,
+        expected_mission_version: version,
       });
     }
     writePrivate(
@@ -327,7 +327,7 @@ test(
       );
       return {
         ...auth,
-        runtimeIdentity: registration.runtime_identity,
+        runtime_identity: registration.runtime_identity,
         env,
         binding,
       };
@@ -378,13 +378,13 @@ test(
       const pulled = await write<{ kind: string; execution: ExecutionRecord }>(
         ["scheduler", "work", "pull"],
         {
-          resourceIdentity: `worker:kanthord:${holder.binding}`,
-          runtimeIdentity: holder.runtimeIdentity,
+          resource_identity: `worker:kanthord:${holder.binding}`,
+          runtime_identity: holder.runtime_identity,
         },
         holder.env,
       );
       assert.equal(pulled.kind, WorkPullKind.Claimed);
-      assert.equal(pulled.execution.nodeId, nodeId);
+      assert.equal(pulled.execution.node_id, nodeId);
       const execution = pulled.execution;
       const workerClient = httpClient(
         workerOperations,
@@ -395,11 +395,11 @@ test(
         await workerClient.handover({
           params: {},
           query: {},
-          body: { execution_id: execution.executionId },
+          body: { execution_id: execution.execution_id },
         }),
       );
       const keys = deriveHandoverKeys(holder.client_secret);
-      const aad = handoverAad(execution.executionId, holder.runtimeIdentity);
+      const aad = handoverAad(execution.execution_id, holder.runtime_identity);
       const payload = handoverPayloadSchema.parse(
         openEnvelope(keys.handover, aad, envelope),
       );
@@ -409,7 +409,7 @@ test(
             params: {},
             query: {},
             body: {
-              execution_id: execution.executionId,
+              execution_id: execution.execution_id,
               ...sealEnvelope(keys.report, aad, report),
             },
           }),
@@ -417,7 +417,7 @@ test(
       });
       const setup = completed(
         await workerClient["execution.setup.get"]({
-          params: { execution_id: execution.executionId },
+          params: { execution_id: execution.execution_id },
           query: {},
           body: null,
         }),
@@ -469,7 +469,10 @@ test(
     let gatedResource = "";
     await t.test("E08.1 objective task commit and head evidence", async () => {
       const answer = await execute(general, A, hello());
-      assert.deepEqual(answer.result, { kind: "released", furtherWork: false });
+      assert.deepEqual(answer.result, {
+        kind: "released",
+        furtherWork: false,
+      });
       headA = (
         await simpleGit(
           barePaths.get("git@github.com:owner/repo.git")!,
@@ -479,7 +482,7 @@ test(
       assert.equal(items.length, SINGLE_ITEM);
       assert.deepEqual(items[0]!.assets[0]!.address, {
         kind: "repository",
-        bindingId: answer.setup.repositories[0]!.binding_id,
+        binding_id: answer.setup.repositories[0]!.binding_id,
         commit: headA,
       });
       assert.ok(
@@ -497,7 +500,10 @@ test(
     });
     await t.test("E08.2 gated objective publishes its task", async () => {
       const answer = await execute(general, C, hello());
-      assert.deepEqual(answer.result, { kind: "released", furtherWork: false });
+      assert.deepEqual(answer.result, {
+        kind: "released",
+        furtherWork: false,
+      });
       headC = (
         await simpleGit(
           barePaths.get("git@github.com:owner/gated.git")!,
@@ -542,12 +548,12 @@ test(
         );
         const AVAILABLE = "Available";
         assert.equal(await state(B), AVAILABLE);
-        const claim = await read<{ claimState: string }>(
-          ["scheduler", "claim", "get", answer.execution.executionId],
+        const claim = await read<{ claim_state: string }>(
+          ["scheduler", "claim", "get", answer.execution.execution_id],
           lab.env,
         );
         const FINISHED = "finished";
-        assert.equal(claim.claimState, FINISHED);
+        assert.equal(claim.claim_state, FINISHED);
       },
     );
     await t.test(
@@ -559,13 +565,13 @@ test(
         const verified = (await evidence(A)).items.find(
           (item) => item.verification,
         )!;
-        assert.deepEqual(verified.verification!.testedInput, {
+        assert.deepEqual(verified.verification!.tested_input, {
           kind: "repository",
-          bindingId: answer.setup.repositories[0]!.binding_id,
+          binding_id: answer.setup.repositories[0]!.binding_id,
           commit: headA,
         });
         assert.deepEqual(
-          verified.verification!.results.map((result) => result.exitCode),
+          verified.verification!.results.map((result) => result.exit_code),
           [SUCCESSFUL_EXIT, SUCCESSFUL_EXIT],
         );
         assert.deepEqual(
@@ -573,7 +579,7 @@ test(
           ["test -f hello.txt", "grep -q hello hello.txt"],
         );
         assert.equal(
-          existsSync(workspaces.executionKey(answer.execution.executionId)),
+          existsSync(workspaces.executionKey(answer.execution.execution_id)),
           false,
         );
         assert.equal(
@@ -607,7 +613,7 @@ test(
         });
         assert.ok(
           (await evidence(C)).items.some(
-            (item) => item.requirementKey === GATED_REQUIREMENT,
+            (item) => item.requirement_key === GATED_REQUIREMENT,
           ),
         );
         const REQUESTED = "External.Requested";

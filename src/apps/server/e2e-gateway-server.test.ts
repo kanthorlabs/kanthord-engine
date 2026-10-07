@@ -374,7 +374,7 @@ test("E07.3 project creation also creates its mission", async (t) => {
     await kanthord(["mission", "get", project.id], fixture.env),
   );
   assert.ok(mission.id.startsWith(MISSION_PREFIX));
-  assert.equal(mission.projectId, project.id);
+  assert.equal(mission.project_id, project.id);
 });
 
 test("E07.4 github repository binding advances the binding set to version two", async (t) => {
@@ -445,7 +445,7 @@ test("E07.5 mission initiative creation queues the created node", async (t) => {
       bindings: [],
     },
     reason: "planning edit",
-    expectedMissionVersion: FIRST_REVISION,
+    expected_mission_version: FIRST_REVISION,
   });
   const created = success<NodeChange>(
     await kanthord(
@@ -458,7 +458,7 @@ test("E07.5 mission initiative creation queues the created node", async (t) => {
     await kanthord(["scheduler", "queue", "peek", project.id], fixture.env),
   );
   assert.ok(peek.job);
-  assert.equal(peek.job.nodeId, created.revisions[0].nodeId);
+  assert.equal(peek.job.node_id, created.revisions[0].node_id);
 });
 
 test("E07.6 custody refuses removing a model used by an enablement", async (t) => {

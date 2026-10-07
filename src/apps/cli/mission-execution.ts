@@ -30,7 +30,7 @@ export function addExecutionCommands(mission: Command): void {
       await client(command, "execution.evidence.list")[
         "execution.evidence.list"
       ]({
-        params: { executionId },
+        params: { execution_id: executionId },
         query: pagination(command.optsWithGlobals()),
         body: null,
       }),
@@ -52,7 +52,7 @@ export function addExecutionCommands(mission: Command): void {
       printResult(
         await client(command, "execution.clearedOutcome.get")[
           "execution.clearedOutcome.get"
-        ]({ params: { executionId }, query: {}, body: null }),
+        ]({ params: { execution_id: executionId }, query: {}, body: null }),
         "execution.clearedOutcome.get",
       );
     });
@@ -85,7 +85,7 @@ export function addExecutionCommands(mission: Command): void {
           command,
           "execution.evidence.asset.content.get",
         )["execution.evidence.asset.content.get"]({
-          params: { executionId, assetId },
+          params: { execution_id: executionId, asset_id: assetId },
           query: {},
           body: null,
         });
@@ -135,7 +135,7 @@ function addObjectiveReads(execution: Command): void {
       );
       printResult<unknown>(
         await client(command, operation)[operation]({
-          params: { executionId },
+          params: { execution_id: executionId },
           query: pagination(command.optsWithGlobals()),
           body: null,
         }),
@@ -161,7 +161,7 @@ function addRevisionReads(execution: Command): void {
       printResult(
         await client(command, "execution.pinnedRevision.get")[
           "execution.pinnedRevision.get"
-        ]({ params: { executionId }, query: {}, body: null }),
+        ]({ params: { execution_id: executionId }, query: {}, body: null }),
         "execution.pinnedRevision.get",
       );
     });
@@ -178,7 +178,7 @@ function addRevisionReads(execution: Command): void {
       await client(command, "execution.revision.list")[
         "execution.revision.list"
       ]({
-        params: { executionId },
+        params: { execution_id: executionId },
         query: pagination(command.optsWithGlobals()),
         body: null,
       }),
@@ -207,7 +207,11 @@ function addRevisionReads(execution: Command): void {
         printResult(
           await client(command, "execution.revision.get")[
             "execution.revision.get"
-          ]({ params: { executionId, revision }, query: {}, body: null }),
+          ]({
+            params: { execution_id: executionId, revision },
+            query: {},
+            body: null,
+          }),
           "execution.revision.get",
         );
       },

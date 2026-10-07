@@ -150,10 +150,10 @@ test("workspace preparation refreshes objective branches and creates disposable 
     repositories: [repository, another],
   });
   assert.deepEqual(
-    initiative.testedInput,
+    initiative.tested_input,
     [repository, another].map(({ binding_id }) => ({
       kind: "repository",
-      bindingId: binding_id,
+      binding_id: binding_id,
       commit: base,
     })),
   );
@@ -163,7 +163,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
     executionId: createIdentity("execution"),
     repositories: [],
   });
-  assert.equal(empty.testedInput, null);
+  assert.equal(empty.tested_input, null);
   workspace.release(empty.directory, WorkspaceKind.Execution);
   const failedId = createIdentity("node");
   await assert.rejects(

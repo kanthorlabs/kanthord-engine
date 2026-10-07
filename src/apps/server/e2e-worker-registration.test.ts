@@ -210,7 +210,7 @@ async function setup(t: TestContext) {
     ...H,
     KANTHORD_TOKEN: machineToken(directory, project.id, "worker-b", H),
   };
-  return { directory, projectId: project.id, H, A, B, fixture };
+  return { directory, project_id: project.id, H, A, B, fixture };
 }
 
 async function apply(
@@ -218,7 +218,7 @@ async function apply(
   version: number,
   instanceCount: number | null,
 ): Promise<number> {
-  assert.ok(f.projectId);
+  assert.ok(f.project_id);
   assert.ok(version >= FIRST_REVISION);
   const path = file(f.directory, `v${version}.json`, {
     version,
@@ -226,7 +226,7 @@ async function apply(
   });
   return success<{ binding_set_version: number }>(
     await kanthord(
-      ["project", "binding", "apply", f.projectId, "--file", path],
+      ["project", "binding", "apply", f.project_id, "--file", path],
       f.H,
     ),
   ).binding_set_version;
@@ -241,7 +241,7 @@ test(
     let ridB: string;
     let ridB2: string;
     let record: Instance;
-    const list = ["worker", "instance", "list", "--project", f.projectId];
+    const list = ["worker", "instance", "list", "--project", f.project_id];
     await t.test("E02.1 catalog lists declarations", async () => {
       const page = success<CatalogPage>(
         await kanthord(["worker", "list"], f.H),
@@ -350,7 +350,7 @@ test(
       );
       assert.deepEqual(record, {
         runtime_identity: ridA,
-        project_id: f.projectId,
+        project_id: f.project_id,
         resource_identity: RESOURCE,
         worker_name: NATIVE,
         host: HOST,
@@ -478,7 +478,7 @@ test(
         second.fixture.store.transaction((tx) => {
           const binding = second.fixture.project.workerBindingOf(
             tx,
-            second.projectId,
+            second.project_id,
             RESOURCE,
           );
           assert.ok(binding);
@@ -492,7 +492,7 @@ test(
             )
             .run(
               EXECUTION,
-              second.projectId,
+              second.project_id,
               createIdentity("node"),
               binding.binding_id,
               RESOURCE,
@@ -548,7 +548,12 @@ test(
       await delay(TOKEN_DELAY);
       const C = {
         ...f.H,
-        KANTHORD_TOKEN: machineToken(f.directory, f.projectId, "worker-c", f.H),
+        KANTHORD_TOKEN: machineToken(
+          f.directory,
+          f.project_id,
+          "worker-c",
+          f.H,
+        ),
       };
       const item = success<Registration>(
         await kanthord(["worker", "register"], C),

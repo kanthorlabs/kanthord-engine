@@ -69,15 +69,15 @@ function selectJob(
       declaration.declared_node_states,
       {
         kind: "execution",
-        executionId,
-        clientId: identity.clientId,
+        execution_id: executionId,
+        client_id: identity.clientId,
         name: identity.name,
       },
       now,
     );
-    if (claim) return { nodeId, claim, settled };
+    if (claim) return { node_id: nodeId, claim, settled };
   }
-  return { nodeId: null, claim: null, settled };
+  return { node_id: null, claim: null, settled };
 }
 
 function acquire(
@@ -100,31 +100,31 @@ function acquire(
   );
   if (!selected.claim)
     return { outcome: ClaimOutcome.None, row: null, settled: selected.settled };
-  assert.ok(selected.nodeId);
-  assert.equal(selected.claim.projectId, identity.projectId);
+  assert.ok(selected.node_id);
+  assert.equal(selected.claim.project_id, identity.projectId);
   const trace = dependencies.traceIdentity.mint();
-  assert.ok(traceIdSchema.safeParse(trace.traceId).success);
-  assert.ok(spanIdSchema.safeParse(trace.rootSpanId).success);
+  assert.ok(traceIdSchema.safeParse(trace.trace_id).success);
+  assert.ok(spanIdSchema.safeParse(trace.root_span_id).success);
   const wallTimeMs =
-    binding.resourceBudget?.wallTimeMs ??
+    binding.resource_budget?.wall_time_ms ??
     declaration.resource_budget.wall_time_ms;
   const row: ExecutionRow = {
-    executionId,
-    projectId: identity.projectId,
-    nodeId: selected.nodeId,
-    workerBindingId: binding.bindingId,
-    resourceIdentity: pull.resourceIdentity,
-    runtimeIdentity: pull.runtimeIdentity,
+    execution_id: executionId,
+    project_id: identity.projectId,
+    node_id: selected.node_id,
+    worker_binding_id: binding.binding_id,
+    resource_identity: pull.resource_identity,
+    runtime_identity: pull.runtime_identity,
     attempt: selected.claim.attempt,
-    pinnedRevision: selected.claim.nodeRevision,
+    pinned_revision: selected.claim.node_revision,
     credentials: [],
-    expiredAt:
+    expired_at:
       now +
       wallTimeMs +
       MILLISECONDS_PER_SECOND * dependencies.config.release_reserve,
     ...trace,
-    createdAt: now,
-    endedAt: null,
+    created_at: now,
+    ended_at: null,
   };
   insertExecution(tx, row);
   return { outcome: ClaimOutcome.Claimed, row, settled: selected.settled };
@@ -137,22 +137,24 @@ export function claimOnce(
   pull: WorkPull,
   now: number,
 ): ClaimResult {
-  assert.equal(pull.runtimeIdentity, identity.runtimeIdentity);
-  assert.equal(pull.resourceIdentity, identity.resourceIdentity);
-  const settled = settleRuntime(tx, dependencies, pull.runtimeIdentity, now);
-  const row = readUnendedOfRuntime(tx, pull.runtimeIdentity);
+  assert.equal(pull.runtime_identity, identity.runtimeIdentity);
+  assert.equal(pull.resource_identity, identity.resourceIdentity);
+  const settled = settleRuntime(tx, dependencies, pull.runtime_identity, now);
+  const row = readUnendedOfRuntime(tx, pull.runtime_identity);
   if (row) return { outcome: ClaimOutcome.Running, row, settled };
-  if (!dependencies.registrations.instanceHealthcheck(tx, pull.runtimeIdentity))
+  if (
+    !dependencies.registrations.instanceHealthcheck(tx, pull.runtime_identity)
+  )
     return { outcome: ClaimOutcome.Refused, row: null, settled };
   const binding = dependencies.bindings.workerBindingOf(
     tx,
     identity.projectId,
     identity.resourceIdentity,
   );
-  if (!binding || binding.tombstone || binding.instanceCount <= NO_INSTANCES)
+  if (!binding || binding.tombstone || binding.instance_count <= NO_INSTANCES)
     return { outcome: ClaimOutcome.None, row: null, settled };
   const declaration = dependencies.declarations.declarationOf(
-    binding.workerName,
+    binding.worker_name,
   );
   assert.ok(declaration, "a worker binding must name a declared worker");
   assert.ok(
@@ -166,7 +168,7 @@ export function claimOnce(
       identity.projectId,
       identity.resourceIdentity,
       now,
-    ) >= binding.instanceCount
+    ) >= binding.instance_count
   )
     return { outcome: ClaimOutcome.None, row: null, settled };
   const result = acquire(

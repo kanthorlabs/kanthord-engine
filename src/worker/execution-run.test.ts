@@ -19,13 +19,13 @@ const CALLS = 2;
 const VALUE = "value";
 const ERROR = "test.operation.failed";
 const CLAIM = {
-  executionId: "execution",
-  nodeId: "node",
+  execution_id: "execution",
+  node_id: "node",
   attempt: 1,
-  pinnedRevision: 2,
-  createdAt: Date.now(),
-  expiredAt: Date.now() + 60000,
-  traceId: "trace",
+  pinned_revision: 2,
+  created_at: Date.now(),
+  expired_at: Date.now() + 60000,
+  trace_id: "trace",
 };
 function fixture(release = async () => {}) {
   return new ExecutionRun({
@@ -55,9 +55,9 @@ test("execution calls return data with fresh canonical keys and settle credentia
   await Promise.all([run.settleCredentials(), run.settleCredentials()]);
   assert.equal(reports, SETTLE_CALL_COUNT);
   assert.deepEqual(run.context(), {
-    executionId: CLAIM.executionId,
+    execution_id: CLAIM.execution_id,
     attempt: CLAIM.attempt,
-    nodeRevision: CLAIM.pinnedRevision,
+    node_revision: CLAIM.pinned_revision,
   });
 });
 
@@ -177,19 +177,19 @@ test("submissions pin claim fields and settle credentials before an assessment",
     },
   } as unknown as MethodClients["mission"];
   assert.equal(
-    await run.submitEvidence(CLAIM.nodeId, {
+    await run.submitEvidence(CLAIM.node_id, {
       subject: "head",
       assets: [],
-      ...{ executionId: "foreign", attempt: 99, nodeRevision: 99 },
+      ...{ execution_id: "foreign", attempt: 99, node_revision: 99 },
     }),
     evidence,
   );
-  await run.submitAssessment(CLAIM.nodeId, {
-    evidenceIds: [],
-    childOutcomeIds: [],
+  await run.submitAssessment(CLAIM.node_id, {
+    evidence_ids: [],
+    child_outcome_ids: [],
     result: "undetermined",
     rationale: "unknown",
-    testedInput: { kind: "produced", sha256: "a".repeat(64) },
+    tested_input: { kind: "produced", sha256: "a".repeat(64) },
   });
   assert.deepEqual(order, ["credential", "assessment"]);
 });
@@ -201,7 +201,7 @@ test("lost release answers reconcile only a finished claim", async (t) => {
     const calls: string[] = [];
     run.clients.scheduler = {
       executionRelease: async (input: { body: unknown }) => {
-        assert.deepEqual(input.body, { furtherWork: false });
+        assert.deepEqual(input.body, { further_work: false });
         calls.push("release");
         return { type: OperationResultType.Indeterminate };
       },
@@ -210,7 +210,7 @@ test("lost release answers reconcile only a finished claim", async (t) => {
         return {
           type: OperationResultType.Completed,
           status: 200,
-          data: { claimState, endedAt: Date.now() },
+          data: { claim_state: claimState, ended_at: Date.now() },
         };
       },
     } as unknown as MethodClients["scheduler"];

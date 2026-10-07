@@ -40,13 +40,13 @@ const NO_RELEASES = 0;
 test("S1 refusal aborts an active native session and records its stopped transcript exactly once", async (t) => {
   const setup = anthropicSetup();
   const claim = {
-    executionId: setup.execution_id,
-    nodeId: createIdentity("node"),
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
     attempt: 1,
-    pinnedRevision: 1,
-    createdAt: Date.now(),
-    expiredAt: Date.now() + 60000,
-    traceId: "trace",
+    pinned_revision: 1,
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
   };
   const run = new ExecutionRun({
     claim,
@@ -87,7 +87,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
   stopOnEnd(run, agent);
   const pending = agent.prompt(
     renderWorkPrompt({
-      nodeId: claim.nodeId,
+      node_id: claim.node_id,
       revision: 1,
       content: {
         name: "work",
@@ -138,13 +138,13 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     repositories: [],
   });
   const claim = {
-    executionId: setup.execution_id,
-    nodeId: createIdentity("node"),
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
     attempt: 1,
-    pinnedRevision: 1,
-    createdAt: Date.now(),
-    expiredAt: Date.now() + 60000,
-    traceId: "trace",
+    pinned_revision: 1,
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
   };
   const assetId = createIdentity("evidence_asset");
   const address = { kind: "produced", sha256: "a".repeat(64) };
@@ -185,11 +185,11 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
         }),
       "execution.evidence.asset.content.get": async () =>
         complete({
-          assetId,
+          asset_id: assetId,
           address,
           data: Buffer.from("report").toString("base64"),
           encoding: "base64",
-          mediaType: "text/plain",
+          media_type: "text/plain",
         }),
       "evidence.submit": async () =>
         complete({ evidence: { id: "verification" } }),
@@ -233,13 +233,13 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
 test("native entry runs an initiative report with the scripted provider", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
-    executionId: setup.execution_id,
-    nodeId: createIdentity("node"),
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
     attempt: 1,
-    pinnedRevision: 1,
-    createdAt: Date.now(),
-    expiredAt: Date.now() + 60000,
-    traceId: "trace",
+    pinned_revision: 1,
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
   };
   const provider = scriptedProvider([
     fauxAssistantMessage("All objectives completed."),
@@ -300,13 +300,13 @@ test("refused execution evidence aborts the agent and prevents later server oper
     [409, EXECUTION_NOT_RUNNING],
   ] as const) {
     const claim = {
-      executionId: "execution",
-      nodeId: "node",
+      execution_id: "execution",
+      node_id: "node",
       attempt: 1,
-      pinnedRevision: 1,
-      createdAt: Date.now(),
-      expiredAt: Date.now() + 60000,
-      traceId: "trace",
+      pinned_revision: 1,
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
+      trace_id: "trace",
     };
     let aborts = 0;
     let releases = 0;
@@ -341,7 +341,7 @@ test("refused execution evidence aborts the agent and prevents later server oper
       },
     } as unknown as NativeAgent);
     const result = await executionBoundary(run, async () => {
-      await run.submitEvidence(claim.nodeId, { subject: "head", assets: [] });
+      await run.submitEvidence(claim.node_id, { subject: "head", assets: [] });
       return run.release(false);
     });
     assert.deepEqual(result, {

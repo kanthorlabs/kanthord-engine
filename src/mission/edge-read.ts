@@ -33,8 +33,12 @@ export function edgeCursor(cursor: string): string {
 
 function edgeRecord(row: EdgeRow): Edge {
   return row.kind === EdgeKind.Containment
-    ? { kind: row.kind, parentId: row.firstId, childId: row.secondId }
-    : { kind: row.kind, dependentId: row.firstId, dependsOnId: row.secondId };
+    ? { kind: row.kind, parent_id: row.first_id, child_id: row.second_id }
+    : {
+        kind: row.kind,
+        dependent_id: row.first_id,
+        depends_on_id: row.second_id,
+      };
 }
 
 export function edgePage(

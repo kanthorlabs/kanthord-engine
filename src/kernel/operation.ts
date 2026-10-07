@@ -71,10 +71,17 @@ export interface ExecutionClaim {
   runtimeIdentity: string;
   workerBindingId: string;
 }
-export type ExecutionProofRow = ExecutionClaim & {
-  endedAt: number | null;
-  expiredAt: number;
-};
+export interface ExecutionProofRow {
+  execution_id: string;
+  project_id: string;
+  node_id: string;
+  attempt: number;
+  pinned_revision: number;
+  runtime_identity: string;
+  worker_binding_id: string;
+  ended_at: number | null;
+  expired_at: number;
+}
 
 export interface CallerContext {
   identity?: CallerIdentity;

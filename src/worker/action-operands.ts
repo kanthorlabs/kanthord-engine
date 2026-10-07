@@ -15,13 +15,13 @@ export function operandsOf(
   entry: ActionContext["actions"][number],
 ): ActionOperands {
   assert.ok(entry.action.key);
-  assert.ok(entry.action.configuration.baseBranch);
-  const testedInput = context.currentAssessment?.testedInput;
+  assert.ok(entry.action.configuration.base_branch);
+  const testedInput = context.current_assessment?.tested_input;
   if (
     !testedInput ||
     Array.isArray(testedInput) ||
     testedInput.kind !== TestedInputKind.Repository ||
-    testedInput.bindingId !== entry.action.bindingId
+    testedInput.binding_id !== entry.action.binding_id
   )
     throw new OperationError(
       HttpStatus.Conflict,
@@ -31,7 +31,7 @@ export function operandsOf(
     );
   return {
     nodeBranch: nodeBranchOf(nodeId),
-    baseBranch: entry.action.configuration.baseBranch,
+    baseBranch: entry.action.configuration.base_branch,
     commit: testedInput.commit,
     reusedAddress: null,
   };

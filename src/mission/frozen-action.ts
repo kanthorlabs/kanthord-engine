@@ -36,24 +36,24 @@ export function requiredActionsOf(
     const binding = bindings.getBindingRevision(tx, bindingId);
     assert.ok(binding);
     if (
-      binding.resourceIdentity.split(RESOURCE_KIND_SEPARATOR)[0] !==
+      binding.resource_identity.split(RESOURCE_KIND_SEPARATOR)[0] !==
       MissionBindingKind.Repository
     )
       continue;
     const policy = bindings.repositoryPolicyOf(tx, bindingId);
-    assert.ok(policy && policy.bindingId === bindingId);
+    assert.ok(policy && policy.binding_id === bindingId);
     if (policy.action === null) continue;
     actions.push(
       frozenActionSchema.parse({
         key: `${policy.name}.${policy.action}`,
-        bindingId,
+        binding_id: bindingId,
         action: policy.action,
-        expectedEndState:
+        expected_end_state:
           policy.action === RepositoryAction.PullRequest
             ? ExpectedEndState.PullRequestMerged
             : ExpectedEndState.BaseBranchPushed,
         follows: null,
-        configuration: { baseBranch: policy.baseBranch },
+        configuration: { base_branch: policy.base_branch },
       }),
     );
   }

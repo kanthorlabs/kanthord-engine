@@ -144,8 +144,8 @@ test("upload submits metadata then transfers bytes then completes without exposi
   const putUrl = `http://127.0.0.1:${address.port}/test_private_grant`;
   const api = workerApi("http://127.0.0.1:1");
   const result = {
-    evidenceId: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    assetId: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    evidence_id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    asset_id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     uri: "s3://test-bucket/object",
   };
   t.mock.method(
@@ -157,7 +157,7 @@ test("upload submits metadata then transfers bytes then completes without exposi
         {
           kind: "object",
           size: bytes.length,
-          mediaType: "application/octet-stream",
+          media_type: "application/octet-stream",
           sha256: createHash("sha256").update(bytes).digest("hex"),
         },
       ]);
@@ -170,13 +170,13 @@ test("upload submits metadata then transfers bytes then completes without exposi
         type: OperationResultType.Completed,
         status: 200,
         data: {
-          evidence: { id: result.evidenceId },
+          evidence: { id: result.evidence_id },
           uploads: [
             {
-              assetId: result.assetId,
-              putUrl,
+              asset_id: result.asset_id,
+              put_url: putUrl,
               headers: { "x-test-header": "test_grant_header" },
-              expiresAt: Date.now() + 60000,
+              expires_at: Date.now() + 60000,
             },
           ],
         },
@@ -200,8 +200,8 @@ test("upload submits metadata then transfers bytes then completes without exposi
     context: background,
   };
   assert.deepEqual(await uploadEvidence(input), {
-    evidence_id: result.evidenceId,
-    asset_id: result.assetId,
+    evidence_id: result.evidence_id,
+    asset_id: result.asset_id,
     uri: result.uri,
   });
   assert.deepEqual(events, ["submit", "PUT", "complete"]);

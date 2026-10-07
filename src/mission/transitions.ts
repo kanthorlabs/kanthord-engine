@@ -78,9 +78,9 @@ export function claim(
   dependencies.workQueue.delete(tx, nodeId);
   return {
     kind,
-    projectId: requireMission(tx, node.mission_id).projectId,
+    project_id: requireMission(tx, node.mission_id).project_id,
     attempt: attempt.attempt,
-    nodeRevision: attempt.node_revision,
+    node_revision: attempt.node_revision,
   };
 }
 
@@ -110,7 +110,7 @@ function hasEvidence(
       (id) =>
         dependencies.bindings
           .getBindingRevision(tx, id)
-          ?.resourceIdentity.split(":")[RESOURCE_KIND_SEGMENT] ===
+          ?.resource_identity.split(":")[RESOURCE_KIND_SEGMENT] ===
         MissionBindingKind.Repository,
     );
   return readReleaseEvidence(tx, node.id, attempt.attempt, executionId).some(
@@ -123,8 +123,8 @@ function hasEvidence(
           : asset.kind === AssetKind.Repository &&
             repositoryIds.includes(
               z
-                .object({ bindingId: z.string() })
-                .parse(JSON.parse(asset.content)).bindingId,
+                .object({ binding_id: z.string() })
+                .parse(JSON.parse(asset.content)).binding_id,
             ),
       );
     },
@@ -134,11 +134,11 @@ function hasEvidence(
 export function release(
   tx: Transaction,
   dependencies: Dependencies,
-  execution: { executionId: string; nodeId: string; attempt: number },
+  execution: { execution_id: string; node_id: string; attempt: number },
   furtherWork: boolean,
   now: number,
 ): void {
-  const node = requireNode(tx, execution.nodeId);
+  const node = requireNode(tx, execution.node_id);
   assert.ok(
     node.state === NodeState.Executing || node.state === NodeState.Evaluating,
   );
@@ -147,7 +147,7 @@ export function release(
   if (
     node.state === NodeState.Executing &&
     !furtherWork &&
-    !hasEvidence(tx, dependencies, node, execution.executionId)
+    !hasEvidence(tx, dependencies, node, execution.execution_id)
   )
     refuse(ReleaseObligation.Evidence);
   if (node.state === NodeState.Evaluating) {

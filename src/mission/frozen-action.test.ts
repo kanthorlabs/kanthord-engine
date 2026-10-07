@@ -39,31 +39,31 @@ test("required actions preserve pinned policies across later revisions and omit 
     [
       oldBinding,
       {
-        bindingId: oldBinding,
-        projectId,
+        binding_id: oldBinding,
+        project_id: projectId,
         name: "repo",
         address: "git@github.com:owner/repo.git",
         platform: "github",
-        sshCredential: "github-ssh",
+        ssh_credential: "github-ssh",
         credential: "github",
-        baseBranch: BASE_BRANCH,
+        base_branch: BASE_BRANCH,
         action: RepositoryAction.PullRequest,
-        projectPrompt: null,
+        project_prompt: null,
       },
     ],
     [
       newBinding,
       {
-        bindingId: newBinding,
-        projectId,
+        binding_id: newBinding,
+        project_id: projectId,
         name: "repo",
         address: "git@github.com:owner/repo.git",
         platform: "github",
-        sshCredential: "github-ssh",
+        ssh_credential: "github-ssh",
         credential: "github",
-        baseBranch: "develop",
+        base_branch: "develop",
         action: RepositoryAction.MergePush,
-        projectPrompt: null,
+        project_prompt: null,
       },
     ],
   ]);
@@ -75,10 +75,10 @@ test("required actions preserve pinned policies across later revisions and omit 
     resolveBindingIdentity: () =>
       assert.fail("Pinned reads never resolve the latest revision."),
     getBindingRevision: (_tx, bindingId) => ({
-      bindingId,
-      projectId,
+      binding_id: bindingId,
+      project_id: projectId,
       name: "repo",
-      resourceIdentity: "repository:github:owner/repo",
+      resource_identity: "repository:github:owner/repo",
       revision: FIRST_ATTEMPT,
       tombstone: false,
       disabled: false,
@@ -116,18 +116,18 @@ test("required actions preserve pinned policies across later revisions and omit 
     );
     const expected = {
       key: REQUEST_KEY,
-      bindingId: oldBinding,
+      binding_id: oldBinding,
       action: RepositoryAction.PullRequest,
-      expectedEndState: ExpectedEndState.PullRequestMerged,
+      expected_end_state: ExpectedEndState.PullRequestMerged,
       follows: null,
-      configuration: { baseBranch: BASE_BRANCH },
+      configuration: { base_branch: BASE_BRANCH },
     };
     assert.deepEqual(requiredActionsOf(tx, bindings, nodeId, FIRST_ATTEMPT), [
       expected,
     ]);
     assert.equal(
       requiredActionsOf(tx, bindings, nodeId, SECOND_ATTEMPT)[0]
-        ?.expectedEndState,
+        ?.expected_end_state,
       ExpectedEndState.BaseBranchPushed,
     );
     assert.deepEqual(actionStatesOf(tx, bindings, nodeId, FIRST_ATTEMPT), [
@@ -181,11 +181,11 @@ test("eligibility requires a satisfied predecessor and an unrequested action", (
   const first: ActionState = {
     action: {
       key: REQUEST_KEY,
-      bindingId: createIdentity("binding"),
+      binding_id: createIdentity("binding"),
       action: RepositoryAction.PullRequest,
-      expectedEndState: ExpectedEndState.PullRequestMerged,
+      expected_end_state: ExpectedEndState.PullRequestMerged,
       follows: null,
-      configuration: { baseBranch: BASE_BRANCH },
+      configuration: { base_branch: BASE_BRANCH },
     },
     request: null,
     resolution: Resolution.Unrequested,

@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/scheduler.execution.list.Input/properties/params/pr\
-            operties/projectId"
+            operties/project_id"
       - name: limit
         in: query
         required: false
@@ -30,12 +30,12 @@ pathItem:
         schema:
           $ref: "#/components/schemas/scheduler.execution.list.Input/properties/query/pro\
             perties/cursor"
-      - name: nodeId
+      - name: node_id
         in: query
         required: false
         schema:
           $ref: "#/components/schemas/scheduler.execution.list.Input/properties/query/pro\
-            perties/nodeId"
+            perties/node_id"
       - name: attempt
         in: query
         required: false
@@ -77,14 +77,14 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 34
               maxLength: 34
               pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: project_ followed by a canonical 26-character uppercase ULID.
           required:
-            - projectId
+            - project_id
           additionalProperties: false
         query:
           type: object
@@ -96,14 +96,14 @@ components:
               maximum: 1000
             cursor:
               type: string
-            nodeId:
+            node_id:
               type: string
               minLength: 31
               maxLength: 31
               pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: node_ followed by a canonical 26-character uppercase ULID.
             attempt:
-              description: Requires nodeId when supplied.
+              description: Requires node_id when supplied.
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
@@ -111,7 +111,7 @@ components:
           additionalProperties: false
           dependentRequired:
             attempt:
-              - nodeId
+              - node_id
         body:
           type: "null"
       required:
@@ -127,19 +127,19 @@ components:
           items:
             type: object
             properties:
-              executionId:
+              execution_id:
                 type: string
                 minLength: 36
                 maxLength: 36
                 pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: execution_ followed by a canonical 26-character uppercase ULID.
-              projectId:
+              project_id:
                 type: string
                 minLength: 34
                 maxLength: 34
                 pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: project_ followed by a canonical 26-character uppercase ULID.
-              nodeId:
+              node_id:
                 type: string
                 minLength: 31
                 maxLength: 31
@@ -148,23 +148,23 @@ components:
               claimant:
                 type: object
                 properties:
-                  workerBindingId:
+                  worker_binding_id:
                     type: string
                     minLength: 34
                     maxLength: 34
                     pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: binding_ followed by a canonical 26-character uppercase ULID.
-                  resourceIdentity:
+                  resource_identity:
                     type: string
                     minLength: 1
-                  runtimeIdentity:
+                  runtime_identity:
                     type: string
                     minLength: 42
                     maxLength: 42
                     pattern: ^worker_instance_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: worker_instance_ followed by a canonical 26-character uppercase
                       ULID.
-                  clientId:
+                  client_id:
                     type: string
                     minLength: 42
                     maxLength: 42
@@ -176,15 +176,15 @@ components:
                     minLength: 1
                     maxLength: 64
                 required:
-                  - workerBindingId
-                  - resourceIdentity
-                  - runtimeIdentity
+                  - worker_binding_id
+                  - resource_identity
+                  - runtime_identity
                 additionalProperties: false
               attempt:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
-              pinnedRevision:
+              pinned_revision:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
@@ -196,49 +196,49 @@ components:
                   maxLength: 37
                   pattern: ^credential_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                   description: credential_ followed by a canonical 26-character uppercase ULID.
-              claimState:
+              claim_state:
                 type: string
                 enum:
                   - running
                   - lost
                   - finished
-              expiredAt:
+              expired_at:
                 type: integer
                 minimum: 0
                 maximum: 9007199254740991
                 description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
-              createdAt:
+              created_at:
                 type: integer
                 minimum: 0
                 maximum: 9007199254740991
                 description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
-              endedAt:
+              ended_at:
                 anyOf:
                   - type: integer
                     minimum: 0
                     maximum: 9007199254740991
                     description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
                   - type: "null"
-              traceId:
+              trace_id:
                 type: string
                 pattern: ^[0-9a-f]{32}$
-              rootSpanId:
+              root_span_id:
                 type: string
                 pattern: ^[0-9a-f]{16}$
             required:
-              - executionId
-              - projectId
-              - nodeId
+              - execution_id
+              - project_id
+              - node_id
               - claimant
               - attempt
-              - pinnedRevision
+              - pinned_revision
               - credentials
-              - claimState
-              - expiredAt
-              - createdAt
-              - endedAt
-              - traceId
-              - rootSpanId
+              - claim_state
+              - expired_at
+              - created_at
+              - ended_at
+              - trace_id
+              - root_span_id
             additionalProperties: false
         next_cursor:
           anyOf:

@@ -36,7 +36,7 @@ async function finishObjective(
 ): Promise<ExecutionEnd> {
   const furtherWork = boundary !== null && boundary !== TaskBoundary.RunFailed;
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
-  const remaining = () => state.input.claim.expiredAt - Date.now();
+  const remaining = () => state.input.claim.expired_at - Date.now();
   try {
     if (furtherWork) {
       assert.ok(task);
@@ -61,14 +61,14 @@ async function finishObjective(
     );
     if (!furtherWork) {
       const head = await headCommit(state.directory, cleanup, remaining());
-      await state.run.submitEvidence(state.input.claim.nodeId, {
+      await state.run.submitEvidence(state.input.claim.node_id, {
         subject: HEAD_COMMIT_SUBJECT,
         assets: [
           {
             kind: "repository",
             address: {
               kind: "repository",
-              bindingId: state.input.setup.repositories[0]!.binding_id,
+              binding_id: state.input.setup.repositories[0]!.binding_id,
               commit: head,
             },
           },
@@ -105,7 +105,7 @@ export async function runStepsObjective(
     );
   } finally {
     state.input.workspaces.release(
-      state.input.workspaces.objectiveKey(state.input.claim.nodeId),
+      state.input.workspaces.objectiveKey(state.input.claim.node_id),
       WorkspaceKind.Objective,
     );
   }
@@ -200,24 +200,24 @@ export interface StepsState {
 export function prepareStepsWorkspace(input: StepsInput, run: ExecutionRun) {
   const repository = input.setup.repositories[0];
   assert.ok(repository);
-  assert.equal(input.claim.executionId, input.setup.execution_id);
+  assert.equal(input.claim.execution_id, input.setup.execution_id);
   return input.workspaces.prepareObjective({
-    objectiveId: input.claim.nodeId,
+    objectiveId: input.claim.node_id,
     repository,
     transport: input.transport,
     context: run.operationContext,
     deadlineMs:
       Math.min(
-        input.claim.createdAt + input.setup.resource_budget.wall_time_ms,
-        input.claim.expiredAt,
+        input.claim.created_at + input.setup.resource_budget.wall_time_ms,
+        input.claim.expired_at,
       ) - Date.now(),
   });
 }
 
 export function taskWork(state: StepsState, task: TaskContent) {
   return renderWorkPrompt({
-    nodeId: task.id,
-    revision: state.input.claim.pinnedRevision,
+    node_id: task.id,
+    revision: state.input.claim.pinned_revision,
     content: task.content,
   });
 }
@@ -226,9 +226,9 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
   const verification = await runVerifications({
     directory: state.directory,
     commands: task.content.verifications,
-    testedInput: {
+    tested_input: {
       kind: "repository",
-      bindingId: state.input.setup.repositories[0]!.binding_id,
+      binding_id: state.input.setup.repositories[0]!.binding_id,
       commit: state.head,
     },
     deadline: state.agent.budget.wallDeadline(),
@@ -239,7 +239,7 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
     await discardChanges(
       state.directory,
       cleanup,
-      state.input.claim.expiredAt - Date.now(),
+      state.input.claim.expired_at - Date.now(),
     );
   } finally {
     cleanup.cancel();

@@ -49,7 +49,7 @@ function validateEndpoints(node: NodeRow, target: NodeRow): void {
       HttpStatus.Conflict,
       MissionErrorCode.EndpointInvalid,
       "Dependency endpoints are invalid.",
-      { reason, nodeId: node.id, dependsOnId: target.id },
+      { reason, node_id: node.id, depends_on_id: target.id },
     );
 }
 
@@ -67,7 +67,7 @@ function validateCycle(
   }
   const edges = [
     ...readDependencies(tx, missionId),
-    { dependent: edge.dependentId, dependsOn: edge.dependsOnId },
+    { dependent: edge.dependent_id, depends_on: edge.depends_on_id },
   ];
   if (
     hasDependencyCycle(
@@ -85,12 +85,12 @@ function validateCycle(
 
 function emptyChange(missionVersion: number): NodeChange {
   return {
-    missionVersion,
+    mission_version: missionVersion,
     revisions: [],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   };
 }
 
@@ -104,14 +104,14 @@ function applyDependency(
 ): NodeChange {
   const before = claimableMap(tx, mission.id, bindings);
   if (adding)
-    insertDependency(tx, mission.id, edge.dependentId, edge.dependsOnId);
-  else deleteDependency(tx, edge.dependentId, edge.dependsOnId);
+    insertDependency(tx, mission.id, edge.dependent_id, edge.depends_on_id);
+  else deleteDependency(tx, edge.dependent_id, edge.depends_on_id);
   routeMission(tx, mission.id);
   reconcileMission(
     tx,
     workQueue,
     mission.id,
-    mission.projectId,
+    mission.project_id,
     before,
     bindings,
   );
@@ -122,14 +122,14 @@ function applyDependency(
     "A dependency edit increments the mission once.",
   );
   assert.equal(
-    hasDependency(tx, edge.dependentId, edge.dependsOnId),
+    hasDependency(tx, edge.dependent_id, edge.depends_on_id),
     adding,
     "The dependency edit is visible in the write transaction.",
   );
   return {
     ...emptyChange(missionVersion),
-    addedEdges: adding ? [edge] : [],
-    removedEdges: adding ? [] : [edge],
+    added_edges: adding ? [edge] : [],
+    removed_edges: adding ? [] : [edge],
   };
 }
 
@@ -150,7 +150,7 @@ export function addDependency(
   const mission = requireMission(
     tx,
     node.mission_id,
-    body.expectedMissionVersion,
+    body.expected_mission_version,
   );
   validateEndpoints(node, target);
   requireNonterminal(node);
@@ -158,7 +158,11 @@ export function addDependency(
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   if (hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);
-  const edge = { kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId };
+  const edge = {
+    kind: EdgeKind.Dependency,
+    dependent_id: nodeId,
+    depends_on_id: dependsOnId,
+  };
   validateCycle(tx, mission.id, edge);
   return applyDependency(tx, mission, edge, workQueue, true, bindings);
 }
@@ -188,7 +192,7 @@ export function requireNoLiveSubtree(
         HttpStatus.Conflict,
         MissionErrorCode.ClaimLive,
         "A node in the dependency subtree has a live claim.",
-        { nodeId: id, executionId: live.executionId },
+        { node_id: id, execution_id: live.execution_id },
       );
   }
 }
@@ -207,12 +211,16 @@ export function removeDependency(
   const mission = requireMission(
     tx,
     node.mission_id,
-    body.expectedMissionVersion,
+    body.expected_mission_version,
   );
   requireNonterminal(node);
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   if (!hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);
-  const edge = { kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId };
+  const edge = {
+    kind: EdgeKind.Dependency,
+    dependent_id: nodeId,
+    depends_on_id: dependsOnId,
+  };
   return applyDependency(tx, mission, edge, workQueue, false, bindings);
 }

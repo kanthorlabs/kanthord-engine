@@ -48,7 +48,7 @@ const PAGE_SIZE = 10;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const EMPTY_SET = "[]";
 const SORTED_SET = '["a","z"]';
-const CANONICAL_ASSET = '{"bindingId":"repo","commit":"head"}';
+const CANONICAL_ASSET = '{"binding_id":"repo","commit":"head"}';
 const RATIONALE = "Reviewed";
 const ROLLBACK = new Error("Rollback");
 
@@ -84,50 +84,56 @@ function fixture(t: TestContext) {
     node_revision: FIRST_ATTEMPT,
     created_at: NOW,
   });
-  return { ...h, nodeId, projectId, missionId, assessment };
+  return {
+    ...h,
+    node_id: nodeId,
+    project_id: projectId,
+    mission_id: missionId,
+    assessment,
+  };
 }
 
 test("attempts stay contiguous across rollback and never reopen a closed attempt", (t) => {
   const h = fixture(t);
   h.store.transaction((tx) => {
-    assert.equal(readOpenAttempt(tx, h.nodeId), null);
+    assert.equal(readOpenAttempt(tx, h.node_id), null);
     assert.equal(
-      openAttempt(tx, h.nodeId, FIRST_ATTEMPT, ACTOR, NOW).attempt,
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, ACTOR, NOW).attempt,
       FIRST_ATTEMPT,
     );
     assert.throws(
-      () => openAttempt(tx, h.nodeId, SECOND_ATTEMPT, ACTOR, NOW),
+      () => openAttempt(tx, h.node_id, SECOND_ATTEMPT, ACTOR, NOW),
       /UNIQUE constraint failed/,
     );
-    assert.equal(readNode(tx, h.nodeId)?.attempt, FIRST_ATTEMPT);
-    closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, LATER);
-    assert.equal(readAttempt(tx, h.nodeId, FIRST_ATTEMPT)?.closed_at, LATER);
-    assert.equal(readOpenAttempt(tx, h.nodeId), null);
-    assert.throws(() => closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, LATER));
+    assert.equal(readNode(tx, h.node_id)?.attempt, FIRST_ATTEMPT);
+    closeAttempt(tx, h.node_id, FIRST_ATTEMPT, LATER);
+    assert.equal(readAttempt(tx, h.node_id, FIRST_ATTEMPT)?.closed_at, LATER);
+    assert.equal(readOpenAttempt(tx, h.node_id), null);
+    assert.throws(() => closeAttempt(tx, h.node_id, FIRST_ATTEMPT, LATER));
   });
   assert.throws(
     () =>
       h.store.transaction((tx) => {
-        openAttempt(tx, h.nodeId, SECOND_ATTEMPT, ACTOR, LATER);
+        openAttempt(tx, h.node_id, SECOND_ATTEMPT, ACTOR, LATER);
         throw ROLLBACK;
       }),
     (error) => error === ROLLBACK,
   );
   h.store.transaction((tx) => {
-    const second = openAttempt(tx, h.nodeId, SECOND_ATTEMPT, ACTOR, LATER);
+    const second = openAttempt(tx, h.node_id, SECOND_ATTEMPT, ACTOR, LATER);
     assert.equal(second.attempt, SECOND_ATTEMPT);
     assert.deepEqual(
-      listAttempts(tx, h.nodeId, null, PAGE_SIZE).map((row) => row.attempt),
+      listAttempts(tx, h.node_id, null, PAGE_SIZE).map((row) => row.attempt),
       [SECOND_ATTEMPT, FIRST_ATTEMPT],
     );
     assert.deepEqual(
-      listAttempts(tx, h.nodeId, SECOND_ATTEMPT, PAGE_SIZE).map(
+      listAttempts(tx, h.node_id, SECOND_ATTEMPT, PAGE_SIZE).map(
         (row) => row.attempt,
       ),
       [FIRST_ATTEMPT],
     );
     assert.deepEqual(
-      readAttemptPins(tx, h.nodeId).map((row) => ({ ...row })),
+      readAttemptPins(tx, h.node_id).map((row) => ({ ...row })),
       [
         { attempt: FIRST_ATTEMPT, node_revision: FIRST_ATTEMPT },
         { attempt: SECOND_ATTEMPT, node_revision: SECOND_ATTEMPT },
@@ -145,7 +151,7 @@ test("assessment and outcome sequences and pagination use node-local acceptance 
     assert.equal(second.sequence, SECOND_ATTEMPT);
     const outcome = insertOutcome(tx, {
       id: createIdentity("outcome"),
-      node_id: h.nodeId,
+      node_id: h.node_id,
       result: first.result,
       assessment_id: first.id,
       evidence_ids: EMPTY_SET,
@@ -157,11 +163,11 @@ test("assessment and outcome sequences and pagination use node-local acceptance 
       assessment_id: second.id,
     });
     assert.equal(later.sequence, SECOND_ATTEMPT);
-    assert.deepEqual({ ...readCurrentOutcome(tx, h.nodeId) }, later);
+    assert.deepEqual({ ...readCurrentOutcome(tx, h.node_id) }, later);
     assert.deepEqual({ ...readOutcome(tx, outcome.id) }, outcome);
     assert.deepEqual({ ...readAssessment(tx, first.id) }, first);
     assert.deepEqual(
-      listAssessments(tx, h.nodeId, null, SECOND_ATTEMPT, PAGE_SIZE).map(
+      listAssessments(tx, h.node_id, null, SECOND_ATTEMPT, PAGE_SIZE).map(
         (row) => ({
           ...row,
         }),
@@ -169,19 +175,21 @@ test("assessment and outcome sequences and pagination use node-local acceptance 
       [first],
     );
     assert.deepEqual(
-      readAssessmentsOfAttempt(tx, h.nodeId, SECOND_ATTEMPT).map((row) => ({
+      readAssessmentsOfAttempt(tx, h.node_id, SECOND_ATTEMPT).map((row) => ({
         ...row,
       })),
       [second],
     );
     assert.deepEqual(
-      listOutcomes(tx, h.nodeId, FIRST_ATTEMPT, null, PAGE_SIZE).map((row) => ({
-        ...row,
-      })),
+      listOutcomes(tx, h.node_id, FIRST_ATTEMPT, null, PAGE_SIZE).map(
+        (row) => ({
+          ...row,
+        }),
+      ),
       [outcome],
     );
     assert.deepEqual(
-      readOutcomesOfAttempt(tx, h.nodeId, SECOND_ATTEMPT).map((row) => ({
+      readOutcomesOfAttempt(tx, h.node_id, SECOND_ATTEMPT).map((row) => ({
         ...row,
       })),
       [later],
@@ -214,7 +222,7 @@ test("JSON sets canonicalize order, reject duplicates and preserve sequence on r
     assert.equal(insertAssessment(tx, h.assessment()).sequence, SECOND_ATTEMPT);
     const outcome = insertOutcome(tx, {
       id: createIdentity("outcome"),
-      node_id: h.nodeId,
+      node_id: h.node_id,
       assessment_id: stored.id,
       result: stored.result,
       evidence_ids: row.evidence_ids,
@@ -229,7 +237,7 @@ test("evidence writes all assets atomically and scopes requests, release and lan
   const executionId = createIdentity("execution");
   const row: EvidenceRow = {
     id: createIdentity("evidence"),
-    node_id: h.nodeId,
+    node_id: h.node_id,
     attempt: FIRST_ATTEMPT,
     subject: RATIONALE,
     requirement_key: "repo.pull_request",
@@ -237,8 +245,8 @@ test("evidence writes all assets atomically and scopes requests, release and lan
     verification: null,
     provenance: canonicalJSON({
       kind: ActorKind.Execution,
-      executionId,
-      clientId: null,
+      execution_id: executionId,
+      client_id: null,
       name: null,
     }),
     created_at: NOW,
@@ -247,7 +255,7 @@ test("evidence writes all assets atomically and scopes requests, release and lan
     id: createIdentity("asset"),
     evidence_id: row.id,
     kind: AssetKind.Repository,
-    content: '{"commit":"head","bindingId":"repo"}',
+    content: '{"commit":"head","binding_id":"repo"}',
     published_at: NOW,
     expired_at: null,
   };
@@ -259,11 +267,11 @@ test("evidence writes all assets atomically and scopes requests, release and lan
     assert.deepEqual(readAssets(tx, row.id), []);
     insertEvidence(tx, row, [asset]);
     assert.deepEqual(
-      readRequests(tx, h.nodeId, FIRST_ATTEMPT).map((row) => ({ ...row })),
+      readRequests(tx, h.node_id, FIRST_ATTEMPT).map((row) => ({ ...row })),
       [row],
     );
     assert.deepEqual(
-      readReleaseEvidence(tx, h.nodeId, FIRST_ATTEMPT, executionId).map(
+      readReleaseEvidence(tx, h.node_id, FIRST_ATTEMPT, executionId).map(
         (row) => ({
           ...row,
         }),
@@ -271,7 +279,7 @@ test("evidence writes all assets atomically and scopes requests, release and lan
       [row],
     );
     assert.deepEqual(
-      readReleaseEvidence(tx, h.nodeId, SECOND_ATTEMPT, executionId),
+      readReleaseEvidence(tx, h.node_id, SECOND_ATTEMPT, executionId),
       [],
     );
     assert.equal(readAssets(tx, row.id)[0]?.content, CANONICAL_ASSET);
@@ -286,7 +294,7 @@ test("evidence writes all assets atomically and scopes requests, release and lan
     };
     insertEvidence(tx, landed, []);
     assert.deepEqual(
-      readLandedCommitEvidence(tx, h.nodeId, FIRST_ATTEMPT).map((row) => ({
+      readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT).map((row) => ({
         ...row,
       })),
       [landed],
@@ -297,15 +305,15 @@ test("evidence writes all assets atomically and scopes requests, release and lan
 test("mission harness parses operation contracts and records the one caller transaction", async (t) => {
   const h = fixture(t);
   const result = await h.invoke("get", {
-    params: { projectId: h.projectId },
+    params: { project_id: h.project_id },
     query: {},
     body: null,
   });
-  assert.equal(result.id, h.missionId);
+  assert.equal(result.id, h.mission_id);
   assert.equal(h.commits(), FIRST_ATTEMPT);
   await assert.rejects(
     h.invoke("get", {
-      params: { projectId: h.projectId },
+      params: { project_id: h.project_id },
       query: {},
       body: null,
       actor: ACTOR,

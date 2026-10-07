@@ -28,7 +28,7 @@ export function importContent(item: ResolvedImportEntry): TaskContent {
     item.key.length > EMPTY_LENGTH,
     "Resolved content has an identity.",
   );
-  assert.equal(item.bindingIds.length, entry.bindings.length);
+  assert.equal(item.binding_ids.length, entry.bindings.length);
   return {
     id: item.key,
     filename: entry.filename,
@@ -37,7 +37,7 @@ export function importContent(item: ResolvedImportEntry): TaskContent {
       requirement: entry.requirement,
       criterion: entry.criterion,
       verifications: entry.verifications,
-      bindings: item.bindingIds,
+      bindings: item.binding_ids,
     },
   };
 }
@@ -63,7 +63,7 @@ function taskList(
   entries: ResolvedImportEntry[],
 ): { tasks: TaskContent[]; changes: TaskChanges } {
   const incoming = entries.filter(
-    (item) => item.entry.kind === NodeKind.Task && item.parentId === ownerId,
+    (item) => item.entry.kind === NodeKind.Task && item.parent_id === ownerId,
   );
   const kept = new Map(incoming.map((item) => [item.key, item]));
   const present = new Set(entries.map((item) => item.key));
@@ -75,7 +75,7 @@ function taskList(
       changes.push({
         id: task.id,
         change: present.has(task.id) ? TaskChange.MovedOut : TaskChange.Retired,
-        changedFields: [],
+        changed_fields: [],
       });
       continue;
     }
@@ -86,7 +86,7 @@ function taskList(
       changes.push({
         id: task.id,
         change: TaskChange.Updated,
-        changedFields: fields,
+        changed_fields: fields,
       });
     kept.delete(task.id);
   }
@@ -95,7 +95,7 @@ function taskList(
     changes.push({
       id: item.key,
       change: item.current === null ? TaskChange.Created : TaskChange.MovedIn,
-      changedFields: [...CONTENT_FIELDS],
+      changed_fields: [...CONTENT_FIELDS],
     });
   }
   assert.equal(
@@ -132,7 +132,7 @@ function ownerRevision(
     fields.push(TASKS_FIELD);
   if (fields.length === NO_CHANGED_FIELDS) return null;
   return {
-    nodeId: ownerId,
+    node_id: ownerId,
     filename: next.filename,
     content: next.content,
     revision:
@@ -141,13 +141,13 @@ function ownerRevision(
         : previous.revision + REVISION_INCREMENT,
     reason,
     actor,
-    createdAt: now,
-    pinnedByAttempts: [],
+    created_at: now,
+    pinned_by_attempts: [],
     ...(list === null ? {} : { tasks: list.tasks }),
     change: {
       write: RevisionWrite.Import,
-      previousRevision: previous?.revision ?? null,
-      changedFields: fields,
+      previous_revision: previous?.revision ?? null,
+      changed_fields: fields,
       ...(list === null ? {} : { tasks: list.changes }),
     },
   };
@@ -162,9 +162,9 @@ export function importRevisions(
   now: number,
 ): Revision[] {
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
-  assert.equal(entries.length, resolved.resolvedEntries.length);
+  assert.equal(entries.length, resolved.resolved_entries.length);
   const owners = new Map(
-    [...resolved.currentNodes.values()]
+    [...resolved.current_nodes.values()]
       .filter((node) => node.kind !== NodeKind.Task)
       .map((node) => [node.id, node.kind]),
   );
@@ -176,7 +176,7 @@ export function importRevisions(
   const revisions: Revision[] = [];
   for (const [id, kind] of owners) {
     const row = readCurrentRevision(tx, id);
-    assert.equal(row === null, !resolved.currentNodes.has(id));
+    assert.equal(row === null, !resolved.current_nodes.has(id));
     const previous = row === null ? undefined : revisionFromRow(tx, row);
     if (previous !== undefined && kind === NodeKind.Objective)
       assert.ok(previous.tasks, "Stored objectives contain a task list.");
@@ -193,6 +193,6 @@ export function importRevisions(
     if (revision !== null) revisions.push(revision);
   }
   return revisions.sort(
-    (a, b) => a.nodeId.localeCompare(b.nodeId) || a.revision - b.revision,
+    (a, b) => a.node_id.localeCompare(b.node_id) || a.revision - b.revision,
   );
 }

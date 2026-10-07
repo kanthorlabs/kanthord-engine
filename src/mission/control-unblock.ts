@@ -169,7 +169,7 @@ function changeRevision(
     if (task.filename !== old.filename) fields.unshift(ContentField.Filename);
     return fields.length === NO_CHANGED_FIELDS
       ? []
-      : [{ id: task.id, change: TaskChange.Updated, changedFields: fields }];
+      : [{ id: task.id, change: TaskChange.Updated, changed_fields: fields }];
   });
   if (taskChanges.length > NO_CHANGED_FIELDS) changedFields.push(TASKS_FIELD);
   if (changedFields.length === NO_CHANGED_FIELDS) return previous.revision;
@@ -183,12 +183,12 @@ function changeRevision(
     ...(tasks === undefined ? {} : { tasks }),
     reason: change.reason,
     actor,
-    createdAt: now,
-    pinnedByAttempts: [],
+    created_at: now,
+    pinned_by_attempts: [],
     change: {
       write: RevisionWrite.Unblock,
-      previousRevision: previous.revision,
-      changedFields,
+      previous_revision: previous.revision,
+      changed_fields: changedFields,
       ...(tasks === undefined ? {} : { tasks: taskChanges }),
     },
   });
@@ -210,12 +210,12 @@ export function unblockNode(
   const mission = requireMission(
     tx,
     initial.mission_id,
-    body.expectedMissionVersion,
+    body.expected_mission_version,
   );
   dependencies.schedulerClaims.settle(tx, nodeId, now);
   const node = requireNode(tx, nodeId);
   requireNonterminal(node);
-  if (node.attempt !== body.blockedAttempt) stateConflict(node);
+  if (node.attempt !== body.blocked_attempt) stateConflict(node);
   requireControlState(node, [NodeState.Blocked]);
   const row = readCurrentRevision(tx, nodeId);
   assert.ok(row && node.attempt !== null);
@@ -233,7 +233,7 @@ export function unblockNode(
           tx,
           dependencies,
           node,
-          mission.projectId,
+          mission.project_id,
           revisionFromRow(tx, row),
           body.change,
           actor,

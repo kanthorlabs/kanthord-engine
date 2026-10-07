@@ -26,20 +26,20 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
   ]) {
     const setup = anthropicSetup();
     const claim = {
-      executionId: setup.execution_id,
-      nodeId: "node",
+      execution_id: setup.execution_id,
+      node_id: "node",
       attempt: 1,
-      pinnedRevision: 1,
-      createdAt: Date.now(),
-      expiredAt: Date.now() + 60000,
-      traceId: "trace",
+      pinned_revision: 1,
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
+      trace_id: "trace",
     };
     let releases = 0;
     const clients = {
       worker: {
         "action.request": async (input: unknown) => {
           assert.deepEqual(input, {
-            params: { execution_id: claim.executionId },
+            params: { execution_id: claim.execution_id },
             query: {},
             body: null,
           });
@@ -99,13 +99,13 @@ test("evaluation writes failed-verification assessments without inference and ga
   ]) {
     const setup = anthropicSetup({ repositories: [] });
     const claim = {
-      executionId: setup.execution_id,
-      nodeId: createIdentity("node"),
+      execution_id: setup.execution_id,
+      node_id: createIdentity("node"),
       attempt: 1,
-      pinnedRevision: 1,
-      createdAt: Date.now(),
-      expiredAt: Date.now() + 60000,
-      traceId: "trace",
+      pinned_revision: 1,
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
+      trace_id: "trace",
     };
     const assetId = createIdentity("evidence_asset");
     const address = { kind: "produced", sha256: "a".repeat(64) };
@@ -140,8 +140,8 @@ test("evaluation writes failed-verification assessments without inference and ga
               evidence,
               {
                 id: "request",
-                requirementKey: "action",
-                endState: "expected",
+                requirement_key: "action",
+                end_state: "expected",
                 assets: [],
               },
             ],
@@ -155,7 +155,7 @@ test("evaluation writes failed-verification assessments without inference and ga
         "execution.objective.outcome.list": async () =>
           complete({
             items: [
-              { id: "child-outcome", result: "success", nodeId: "child" },
+              { id: "child-outcome", result: "success", node_id: "child" },
             ],
             next_cursor: null,
           }),
@@ -163,11 +163,11 @@ test("evaluation writes failed-verification assessments without inference and ga
           complete({ items: [], next_cursor: null }),
         "execution.evidence.asset.content.get": async () =>
           complete({
-            assetId,
+            asset_id: assetId,
             address,
             data: Buffer.from("report").toString("base64"),
             encoding: "base64",
-            mediaType: "text/markdown",
+            media_type: "text/markdown",
           }),
         "evidence.submit": async (input: {
           body: { verification: { results: unknown[] } };
@@ -191,17 +191,17 @@ test("evaluation writes failed-verification assessments without inference and ga
         "assessment.submit": async (input: {
           body: {
             result: string;
-            evidenceIds: string[];
-            childOutcomeIds: string[];
+            evidence_ids: string[];
+            child_outcome_ids: string[];
             rationale: string;
           };
         }) => {
           assessments++;
           assert.ok(reported);
           assert.equal(input.body.result, scenario.result);
-          assert.deepEqual(input.body.evidenceIds, ["verification", "placed"]);
+          assert.deepEqual(input.body.evidence_ids, ["verification", "placed"]);
           assert.deepEqual(
-            input.body.childOutcomeIds,
+            input.body.child_outcome_ids,
             scenario.initiative ? ["child-outcome"] : [],
           );
           if (!scenario.opens)
@@ -243,12 +243,18 @@ test("evaluation writes failed-verification assessments without inference and ga
     );
     if (scenario.result === null) await assert.rejects(pending, ExecutionStop);
     else
-      assert.deepEqual(await pending, { kind: "closed", outcomeId: "outcome" });
+      assert.deepEqual(await pending, {
+        kind: "closed",
+        outcomeId: "outcome",
+      });
     assert.equal(opens, scenario.opens);
     assert.equal(
       assessments,
       scenario.result === null ? NO_RELEASES : SINGLE_RELEASE,
     );
-    assert.equal(existsSync(workspaces.executionKey(claim.executionId)), false);
+    assert.equal(
+      existsSync(workspaces.executionKey(claim.execution_id)),
+      false,
+    );
   }
 });

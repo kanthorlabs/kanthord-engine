@@ -55,11 +55,11 @@ export async function takeHandover(input: {
   context: Context;
 }) {
   const { api, claim } = input;
-  assert.ok(claim.executionId);
+  assert.ok(claim.execution_id);
   assert.ok(input.clientSecret);
-  const context = new CancellationContext(input.context, claim.expiredAt);
+  const context = new CancellationContext(input.context, claim.expired_at);
   const keys = deriveHandoverKeys(input.clientSecret);
-  const aad = handoverAad(claim.executionId, claim.claimant.runtimeIdentity);
+  const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
   try {
     const envelope = completed(
       await retryIndeterminate(
@@ -68,11 +68,11 @@ export async function takeHandover(input: {
             {
               params: {},
               query: {},
-              body: { execution_id: claim.executionId },
+              body: { execution_id: claim.execution_id },
             },
             { context, idempotencyKey: key },
           ),
-        claim.expiredAt,
+        claim.expired_at,
         context,
       ),
     );
@@ -89,11 +89,11 @@ export async function takeHandover(input: {
               {
                 params: {},
                 query: {},
-                body: { execution_id: claim.executionId, ...sealed },
+                body: { execution_id: claim.execution_id, ...sealed },
               },
               { context, idempotencyKey: key },
             ),
-          claim.expiredAt,
+          claim.expired_at,
           context,
         ),
       );

@@ -124,7 +124,7 @@ counters follow their service's declared ordering rules.
 The proposed single-record read verb is `get`; `list` reads a collection.
 Existing spellings such as global `config show` and `gateway verify` retain
 their command-specific meaning. CLI flags use kebab-case and proposed wire
-fields use camelCase, including `executionId` across service boundaries.
+fields use snake_case, including `execution_id` across service boundaries.
 
 ## Client configuration
 

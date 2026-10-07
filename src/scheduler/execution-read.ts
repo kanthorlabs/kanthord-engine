@@ -38,13 +38,13 @@ export function executionList(
   caller: CallerContext,
   after: string | undefined,
 ) {
-  const { limit, nodeId, attempt } = input.query;
+  const { limit, node_id: nodeId, attempt } = input.query;
   return caller.commit((tx) => {
     const now = Date.now();
     const rows = listExecutions(
       tx,
-      input.params.projectId,
-      { nodeId, attempt },
+      input.params.project_id,
+      { node_id: nodeId, attempt },
       after,
       limit,
     );
@@ -53,7 +53,7 @@ export function executionList(
       .map((row) => executionRecord(tx, dependencies.registrations, row, now));
     const nextCursor =
       rows.length > limit
-        ? Buffer.from(items.at(-1)!.executionId, TEXT_ENCODING).toString(
+        ? Buffer.from(items.at(-1)!.execution_id, TEXT_ENCODING).toString(
             CURSOR_ENCODING,
           )
         : null;
@@ -69,8 +69,8 @@ export function requireExecution(tx: Transaction, executionId: string) {
       "scheduler.execution.not_found",
       "Execution not found.",
     );
-  assert.equal(row.executionId, executionId);
-  assert.ok(row.projectId);
+  assert.equal(row.execution_id, executionId);
+  assert.ok(row.project_id);
   return row;
 }
 
@@ -89,9 +89,9 @@ export function claimGet(
     const now = Date.now();
     const row = requireExecution(tx, executionId);
     if (
-      row.runtimeIdentity !== identity.runtimeIdentity ||
-      row.projectId !== identity.projectId ||
-      row.resourceIdentity !== identity.resourceIdentity
+      row.runtime_identity !== identity.runtimeIdentity ||
+      row.project_id !== identity.projectId ||
+      row.resource_identity !== identity.resourceIdentity
     )
       throw new OperationError(
         HttpStatus.Forbidden,

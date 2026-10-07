@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: assetId
+      - name: asset_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.evidence.asset.content.get.Input/properties\
-            /params/properties/assetId"
+            /params/properties/asset_id"
     responses:
       "200":
         description: Completed result
@@ -53,7 +53,7 @@ components:
         params:
           type: object
           properties:
-            assetId:
+            asset_id:
               type: string
               minLength: 41
               maxLength: 41
@@ -61,7 +61,7 @@ components:
               description: evidence_asset_ followed by a canonical 26-character uppercase
                 ULID.
           required:
-            - assetId
+            - asset_id
           additionalProperties: false
         query:
           type: object
@@ -78,7 +78,7 @@ components:
       anyOf:
         - type: object
           properties:
-            mediaType:
+            media_type:
               type: string
               maxLength: 255
               pattern: ^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$(?![\s\S])
@@ -87,7 +87,7 @@ components:
               const: base64
             data:
               type: string
-            assetId:
+            asset_id:
               type: string
               minLength: 41
               maxLength: 41
@@ -108,15 +108,15 @@ components:
                 - sha256
               additionalProperties: false
           required:
-            - mediaType
+            - media_type
             - encoding
             - data
-            - assetId
+            - asset_id
             - address
           additionalProperties: false
         - type: object
           properties:
-            assetId:
+            asset_id:
               type: string
               minLength: 41
               maxLength: 41
@@ -142,7 +142,7 @@ components:
                 - kind
                 - location
               additionalProperties: false
-            mediaType:
+            media_type:
               type: string
               maxLength: 255
               pattern: ^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$(?![\s\S])
@@ -150,18 +150,18 @@ components:
               type: integer
               minimum: 0
               maximum: 9007199254740991
-            getUrl:
+            get_url:
               type: string
-            expiresAt:
+            expires_at:
               type: integer
               minimum: 0
               maximum: 9007199254740991
               description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
           required:
-            - assetId
+            - asset_id
             - address
-            - mediaType
+            - media_type
             - size
-            - getUrl
-            - expiresAt
+            - get_url
+            - expires_at
           additionalProperties: false

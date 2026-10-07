@@ -25,7 +25,7 @@ export function addControlCommands(node: Command): void {
       );
     await mutate(command, "node.check", nodeCheckSchema, (api, body, key) =>
       api["node.check"](
-        { params: { nodeId }, query: {}, body },
+        { params: { node_id: nodeId }, query: {}, body },
         { idempotencyKey: key },
       ),
     );
@@ -46,7 +46,7 @@ export function addControlCommands(node: Command): void {
         throw new Diagnostic(code, "invalid node ID");
       await mutate(command, operation, humanActSchema, (api, body, key) =>
         api[operation](
-          { params: { nodeId }, query: {}, body },
+          { params: { node_id: nodeId }, query: {}, body },
           { idempotencyKey: key },
         ),
       );
@@ -65,7 +65,7 @@ export function addControlCommands(node: Command): void {
       );
     await mutate(command, "node.ready", humanActSchema, (api, body, key) =>
       api["node.ready"](
-        { params: { nodeId }, query: {}, body },
+        { params: { node_id: nodeId }, query: {}, body },
         { idempotencyKey: key },
       ),
     );
@@ -83,7 +83,7 @@ export function addControlCommands(node: Command): void {
       );
     await mutate(command, "node.resume", resumeSchema, (api, body, key) =>
       api["node.resume"](
-        { params: { nodeId }, query: {}, body },
+        { params: { node_id: nodeId }, query: {}, body },
         { idempotencyKey: key },
       ),
     );
@@ -98,7 +98,7 @@ export function addControlCommands(node: Command): void {
       throw new Diagnostic(PAUSE_INVALID_NODE, "invalid node ID");
     await mutate(command, "node.pause", humanActSchema, (api, body, key) =>
       api["node.pause"](
-        { params: { nodeId }, query: {}, body },
+        { params: { node_id: nodeId }, query: {}, body },
         { idempotencyKey: key },
       ),
     );
@@ -119,7 +119,7 @@ function addUnblockCommand(node: Command): void {
       );
     await mutate(command, "node.unblock", unblockSchema, (api, body, key) =>
       api["node.unblock"](
-        { params: { nodeId }, query: {}, body },
+        { params: { node_id: nodeId }, query: {}, body },
         { idempotencyKey: key },
       ),
     );
@@ -151,7 +151,7 @@ function addOverrideCommand(node: Command): void {
       (api, body, key) =>
         api["node.override"](
           {
-            params: { nodeId },
+            params: { node_id: nodeId },
             query: {},
             body: { ...body, result: AssessmentResult.Success },
           },

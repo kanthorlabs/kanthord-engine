@@ -96,15 +96,15 @@ export function executionObjectives(
       assert.ok(child.state);
       if (!outcome) return { id: child.id, state: child.state };
       const record = outcomeRecord(tx, dependencies.bindings, outcome);
-      const revision = getRevision(tx, child.id, record.nodeRevision);
+      const revision = getRevision(tx, child.id, record.node_revision);
       const view = nodeRecord(tx, child, dependencies.bindings);
       assert.ok(view.kind === NodeKind.Objective);
       return {
         ...view,
         filename: revision.filename,
         content: revision.content,
-        visibleRevision: revision.revision,
-        pinnedByAttempts: revision.pinnedByAttempts,
+        visible_revision: revision.revision,
+        pinned_by_attempts: revision.pinned_by_attempts,
       };
     },
   );
@@ -145,7 +145,7 @@ export function executionObjectiveEvidence(
       ? []
       : currentObjectivesOf(tx, node.id).flatMap(({ outcome }) =>
           outcome
-            ? outcomeRecord(tx, dependencies.bindings, outcome).evidenceIds
+            ? outcomeRecord(tx, dependencies.bindings, outcome).evidence_ids
             : [],
         );
   const page = identityPage(
@@ -204,9 +204,9 @@ export function executionRead(
     claim,
     claim.nodeId,
     {
-      executionId: claim.executionId,
+      execution_id: claim.executionId,
       attempt: claim.attempt,
-      nodeRevision: claim.pinnedRevision,
+      node_revision: claim.pinnedRevision,
     },
     Date.now(),
   );

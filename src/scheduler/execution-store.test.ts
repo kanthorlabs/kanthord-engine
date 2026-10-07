@@ -35,15 +35,15 @@ test("claim state derives at the deadline, independently of settlement", () => {
       now < FIXTURE_DEADLINE ? ClaimState.Running : ClaimState.Lost,
     );
     assert.equal(
-      claimStateOf({ ...row, endedAt: FIXTURE_DEADLINE - 1 }, now),
+      claimStateOf({ ...row, ended_at: FIXTURE_DEADLINE - 1 }, now),
       ClaimState.Finished,
     );
     assert.equal(
-      claimStateOf({ ...row, endedAt: FIXTURE_DEADLINE }, now),
+      claimStateOf({ ...row, ended_at: FIXTURE_DEADLINE }, now),
       ClaimState.Lost,
     );
     assert.equal(
-      claimStateOf({ ...row, endedAt: FIXTURE_DEADLINE + 1 }, now),
+      claimStateOf({ ...row, ended_at: FIXTURE_DEADLINE + 1 }, now),
       ClaimState.Lost,
     );
   }
@@ -54,41 +54,46 @@ test("execution uniqueness and terminal writes are transactional", (t) => {
   const row = executionFixture({ credentials: [createIdentity("credential")] });
   store.transaction((tx) => {
     insertExecution(tx, row);
-    assert.deepEqual(readExecution(tx, row.executionId), row);
-    assert.deepEqual(readUnendedOfNode(tx, row.nodeId), row);
-    assert.deepEqual(readUnendedOfRuntime(tx, row.runtimeIdentity), row);
+    assert.deepEqual(readExecution(tx, row.execution_id), row);
+    assert.deepEqual(readUnendedOfNode(tx, row.node_id), row);
+    assert.deepEqual(readUnendedOfRuntime(tx, row.runtime_identity), row);
     assert.throws(
-      () => insertExecution(tx, executionFixture({ nodeId: row.nodeId })),
+      () => insertExecution(tx, executionFixture({ node_id: row.node_id })),
       /UNIQUE/,
     );
     assert.throws(
       () =>
         insertExecution(
           tx,
-          executionFixture({ runtimeIdentity: row.runtimeIdentity }),
+          executionFixture({ runtime_identity: row.runtime_identity }),
         ),
       /UNIQUE/,
     );
     assert.equal(
-      countRunningOfGroup(tx, row.projectId, row.resourceIdentity, FIXTURE_NOW),
+      countRunningOfGroup(
+        tx,
+        row.project_id,
+        row.resource_identity,
+        FIXTURE_NOW,
+      ),
       ONE_EXECUTION,
     );
     assert.equal(
       countRunningOfGroup(
         tx,
-        row.projectId,
-        row.resourceIdentity,
+        row.project_id,
+        row.resource_identity,
         FIXTURE_DEADLINE,
       ),
       NO_EXECUTIONS,
     );
     assert.deepEqual(readExpiredUnsettled(tx, FIXTURE_DEADLINE), [row]);
-    endExecution(tx, row.executionId, FIXTURE_NOW);
-    assert.throws(() => endExecution(tx, row.executionId, FIXTURE_NOW));
-    assert.equal(readUnendedOfNode(tx, row.nodeId), null);
+    endExecution(tx, row.execution_id, FIXTURE_NOW);
+    assert.throws(() => endExecution(tx, row.execution_id, FIXTURE_NOW));
+    assert.equal(readUnendedOfNode(tx, row.node_id), null);
     insertExecution(tx, {
       ...row,
-      executionId: createIdentity("execution"),
+      execution_id: createIdentity("execution"),
       credentials: [],
     });
   });
@@ -98,44 +103,44 @@ test("execution uniqueness and terminal writes are transactional", (t) => {
       store.transaction((tx) => {
         endExecution(
           tx,
-          readUnendedOfNode(tx, row.nodeId)!.executionId,
+          readUnendedOfNode(tx, row.node_id)!.execution_id,
           FIXTURE_NOW,
         );
         throw sentinel;
       }),
     sentinel,
   );
-  assert.ok(store.transaction((tx) => readUnendedOfNode(tx, row.nodeId)));
+  assert.ok(store.transaction((tx) => readUnendedOfNode(tx, row.node_id)));
 });
 
 test("execution listing isolates projects, filters attempts, and bounds pages", (t) => {
   const { store } = schedulerHarness(t);
-  const first = executionFixture({ endedAt: FIXTURE_NOW });
+  const first = executionFixture({ ended_at: FIXTURE_NOW });
   const second = executionFixture({
-    projectId: first.projectId,
-    nodeId: first.nodeId,
+    project_id: first.project_id,
+    node_id: first.node_id,
     attempt: 2,
   });
-  const third = executionFixture({ projectId: first.projectId });
+  const third = executionFixture({ project_id: first.project_id });
   store.transaction((tx) => {
     for (const row of [first, second, third, executionFixture()])
       insertExecution(tx, row);
     const ordered = [first, second, third].sort((a, b) =>
-      b.executionId.localeCompare(a.executionId),
+      b.execution_id.localeCompare(a.execution_id),
     );
     assert.deepEqual(
-      listExecutions(tx, first.projectId, {}, undefined, 1),
+      listExecutions(tx, first.project_id, {}, undefined, 1),
       ordered.slice(0, 2),
     );
     assert.deepEqual(
-      listExecutions(tx, first.projectId, {}, ordered[1]!.executionId, 1),
+      listExecutions(tx, first.project_id, {}, ordered[1]!.execution_id, 1),
       ordered.slice(2),
     );
     assert.deepEqual(
       listExecutions(
         tx,
-        first.projectId,
-        { nodeId: first.nodeId, attempt: 2 },
+        first.project_id,
+        { node_id: first.node_id, attempt: 2 },
         undefined,
         10,
       ),
@@ -144,8 +149,8 @@ test("execution listing isolates projects, filters attempts, and bounds pages", 
     assert.deepEqual(
       listExecutions(
         tx,
-        first.projectId,
-        { nodeId: first.nodeId, attempt: 3 },
+        first.project_id,
+        { node_id: first.node_id, attempt: 3 },
         undefined,
         10,
       ),
@@ -154,8 +159,8 @@ test("execution listing isolates projects, filters attempts, and bounds pages", 
     assert.deepEqual(
       listExecutions(
         tx,
-        first.projectId,
-        { nodeId: createIdentity("node") },
+        first.project_id,
+        { node_id: createIdentity("node") },
         undefined,
         10,
       ),
@@ -174,7 +179,7 @@ test("record mapping omits hosted attribution and keeps ended registration attri
       row,
       FIXTURE_NOW,
     );
-    assert.equal(Object.hasOwn(hosted.claimant, "clientId"), false);
+    assert.equal(Object.hasOwn(hosted.claimant, "client_id"), false);
     assert.equal(Object.hasOwn(hosted.claimant, "name"), false);
     const attribution = {
       client_id: createIdentity("client_identity"),
@@ -186,11 +191,11 @@ test("record mapping omits hosted attribution and keeps ended registration attri
         ...h.dependencies.registrations,
         clientAttributionOf: () => attribution,
       },
-      { ...row, endedAt: FIXTURE_NOW },
+      { ...row, ended_at: FIXTURE_NOW },
       FIXTURE_DEADLINE,
     );
-    assert.equal(retained.claimant.clientId, attribution.client_id);
+    assert.equal(retained.claimant.client_id, attribution.client_id);
     assert.equal(retained.claimant.name, attribution.name);
-    assert.equal(retained.claimState, ClaimState.Finished);
+    assert.equal(retained.claim_state, ClaimState.Finished);
   });
 });

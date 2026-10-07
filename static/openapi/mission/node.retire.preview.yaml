@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: nodeId
+      - name: node_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.node.retire.preview.Input/properties/params\
-            /properties/nodeId"
+            /properties/node_id"
       - name: force
         in: query
         required: false
@@ -59,14 +59,14 @@ components:
         params:
           type: object
           properties:
-            nodeId:
+            node_id:
               type: string
               minLength: 31
               maxLength: 31
               pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: node_ followed by a canonical 26-character uppercase ULID.
           required:
-            - nodeId
+            - node_id
           additionalProperties: false
         query:
           type: object
@@ -89,7 +89,7 @@ components:
     mission.node.retire.preview.Output:
       type: object
       properties:
-        nodeId:
+        node_id:
           type: string
           minLength: 31
           maxLength: 31
@@ -97,11 +97,11 @@ components:
           description: node_ followed by a canonical 26-character uppercase ULID.
         force:
           type: boolean
-        missionVersion:
+        mission_version:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
-        retiredNodeIds:
+        retired_node_ids:
           type: array
           items:
             type: string
@@ -109,7 +109,7 @@ components:
             maxLength: 31
             pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
             description: node_ followed by a canonical 26-character uppercase ULID.
-        removedEdges:
+        removed_edges:
           type: array
           items:
             oneOf:
@@ -118,13 +118,13 @@ components:
                   kind:
                     type: string
                     const: containment
-                  parentId:
+                  parent_id:
                     type: string
                     minLength: 31
                     maxLength: 31
                     pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: node_ followed by a canonical 26-character uppercase ULID.
-                  childId:
+                  child_id:
                     type: string
                     minLength: 31
                     maxLength: 31
@@ -132,21 +132,21 @@ components:
                     description: node_ followed by a canonical 26-character uppercase ULID.
                 required:
                   - kind
-                  - parentId
-                  - childId
+                  - parent_id
+                  - child_id
                 additionalProperties: false
               - type: object
                 properties:
                   kind:
                     type: string
                     const: dependency
-                  dependentId:
+                  dependent_id:
                     type: string
                     minLength: 31
                     maxLength: 31
                     pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: node_ followed by a canonical 26-character uppercase ULID.
-                  dependsOnId:
+                  depends_on_id:
                     type: string
                     minLength: 31
                     maxLength: 31
@@ -154,17 +154,17 @@ components:
                     description: node_ followed by a canonical 26-character uppercase ULID.
                 required:
                   - kind
-                  - dependentId
-                  - dependsOnId
+                  - dependent_id
+                  - depends_on_id
                 additionalProperties: false
-        previewDigest:
+        preview_digest:
           type: string
           pattern: ^[0-9a-f]{64}$
       required:
-        - nodeId
+        - node_id
         - force
-        - missionVersion
-        - retiredNodeIds
-        - removedEdges
-        - previewDigest
+        - mission_version
+        - retired_node_ids
+        - removed_edges
+        - preview_digest
       additionalProperties: false

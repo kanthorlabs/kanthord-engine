@@ -46,13 +46,13 @@ export const LANDED_COMMIT_SUBJECT = "Landed commit";
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
 const checkAnswerSchema = z
   .strictObject({
-    endState: checkEndStateSchema,
-    landedCommits: z.array(commitSchema),
+    end_state: checkEndStateSchema,
+    landed_commits: z.array(commitSchema),
   })
   .refine((answer) =>
-    answer.endState === CheckEndState.Expected
-      ? answer.landedCommits.length > NO_LANDED_COMMITS
-      : answer.landedCommits.length === NO_LANDED_COMMITS,
+    answer.end_state === CheckEndState.Expected
+      ? answer.landed_commits.length > NO_LANDED_COMMITS
+      : answer.landed_commits.length === NO_LANDED_COMMITS,
   );
 
 function requestContext(
@@ -77,7 +77,7 @@ function requestContext(
   assert.equal(assets[FIRST_ASSET_INDEX]!.kind, AssetKind.Platform);
   return {
     request,
-    frozenAction,
+    frozen_action: frozenAction,
     address: platformAddressSchema.parse(
       JSON.parse(assets[FIRST_ASSET_INDEX]!.content),
     ),
@@ -92,7 +92,7 @@ export function applyEndState(
   now: number,
 ): void {
   checkAnswerSchema.parse(answer);
-  const { request, frozenAction } = requestContext(
+  const { request, frozen_action: frozenAction } = requestContext(
     tx,
     dependencies,
     evidenceId,
@@ -100,16 +100,16 @@ export function applyEndState(
   const node = requireNode(tx, request.node_id);
   const mission = requireMission(tx, node.mission_id);
   const before = claimableMap(tx, mission.id, dependencies.bindings);
-  if (request.end_state !== null || answer.endState === CheckEndState.None)
+  if (request.end_state !== null || answer.end_state === CheckEndState.None)
     return;
   const write = tx.database
     .prepare(
       "UPDATE mission_evidence SET end_state = ? WHERE id = ? AND end_state IS NULL",
     )
-    .run(answer.endState, evidenceId);
+    .run(answer.end_state, evidenceId);
   assert.equal(write.changes, EXPECTED_ROW_CHANGE);
-  if (answer.endState === CheckEndState.Expected) {
-    for (const commit of answer.landedCommits) {
+  if (answer.end_state === CheckEndState.Expected) {
+    for (const commit of answer.landed_commits) {
       const id = createIdentity("evidence");
       insertEvidence(
         tx,
@@ -133,7 +133,7 @@ export function applyEndState(
             evidence_id: id,
             kind: AssetKind.Repository,
             content: canonicalJSON({
-              bindingId: frozenAction.bindingId,
+              binding_id: frozenAction.binding_id,
               commit,
             }),
             published_at: now,
@@ -165,7 +165,7 @@ export function applyEndState(
       tx,
       dependencies.workQueue,
       mission.id,
-      mission.projectId,
+      mission.project_id,
       before,
       dependencies.bindings,
     );
@@ -211,7 +211,7 @@ export async function checkNode(
       );
     return { mission, requests };
   });
-  const failures: { evidenceId: string; error: ErrorBody }[] = [];
+  const failures: { evidence_id: string; error: ErrorBody }[] = [];
   const checked: string[] = [];
   for (const item of prepared.requests) {
     let answer: CheckAnswer;
@@ -221,13 +221,13 @@ export async function checkNode(
       );
       answer = checkAnswerSchema.parse(
         await dependencies.intakeCheck.check(caller.context, {
-          frozenAction: item.frozenAction,
+          frozen_action: item.frozen_action,
           address: item.address,
         }),
       );
     } catch (error) {
       failures.push({
-        evidenceId: item.request.id,
+        evidence_id: item.request.id,
         error: checkError(error, caller.requestId),
       });
       continue;
@@ -236,7 +236,7 @@ export async function checkNode(
       requireMission(tx, prepared.mission.id, expectedMissionVersion);
       const now = Date.now();
       const claim =
-        answer.endState === CheckEndState.None
+        answer.end_state === CheckEndState.None
           ? null
           : dependencies.schedulerClaims.liveExecutionOf(
               tx,
@@ -249,13 +249,13 @@ export async function checkNode(
     });
     if (live !== null) {
       failures.push({
-        evidenceId: item.request.id,
+        evidence_id: item.request.id,
         error: checkError(
           new OperationError(
             HttpStatus.Conflict,
             MissionErrorCode.ClaimLive,
             "Node has a live claim.",
-            { nodeId: item.request.node_id, executionId: live.executionId },
+            { node_id: item.request.node_id, execution_id: live.execution_id },
           ),
           caller.requestId,
         ),
@@ -270,8 +270,8 @@ export async function checkNode(
       if (!row) recordNotFound();
       assert.ok(row.requirement_key);
       return {
-        evidenceId: id,
-        requirementKey: row.requirement_key,
+        evidence_id: id,
+        requirement_key: row.requirement_key,
         resolution:
           row.end_state === null
             ? Resolution.Unresolved
@@ -282,6 +282,6 @@ export async function checkNode(
     }),
     failures,
   }));
-  dependencies.wakeup.wake(prepared.mission.projectId);
+  dependencies.wakeup.wake(prepared.mission.project_id);
   return result;
 }

@@ -40,9 +40,9 @@ function requireReady(
       NOT_READY,
       "Node is not ready for evaluation.",
       {
-        objectivesNotTerminal: readiness.objectivesNotTerminal,
-        unresolvedActions: readiness.unresolvedActions,
-        unsatisfiedIds,
+        objectives_not_terminal: readiness.objectives_not_terminal,
+        unresolved_actions: readiness.unresolved_actions,
+        unsatisfied_ids: unsatisfiedIds,
       },
     );
 }

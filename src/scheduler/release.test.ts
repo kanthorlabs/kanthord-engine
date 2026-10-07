@@ -25,21 +25,29 @@ function harness(t: TestContext) {
   const caller: CallerContext = {
     context: background,
     requestId: createIdentity("request"),
-    execution: row,
+    execution: {
+      executionId: row.execution_id,
+      projectId: row.project_id,
+      nodeId: row.node_id,
+      attempt: row.attempt,
+      pinnedRevision: row.pinned_revision,
+      runtimeIdentity: row.runtime_identity,
+      workerBindingId: row.worker_binding_id,
+    },
     commit: (write) => h.store.transaction(write),
   };
   const release = (furtherWork = false) =>
     h.invoke(
       "executionRelease",
       {
-        params: { executionId: row.executionId },
+        params: { execution_id: row.execution_id },
         query: {},
-        body: { furtherWork },
+        body: { further_work: furtherWork },
       },
       caller,
     );
   const read = () =>
-    h.store.transaction((tx) => readExecution(tx, row.executionId)!);
+    h.store.transaction((tx) => readExecution(tx, row.execution_id)!);
   return { ...h, row, caller, release, read };
 }
 
@@ -48,25 +56,25 @@ test("release routes once, ends at the transaction reading and wakes after commi
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   const wakes: string[] = [];
   t.mock.method(h.service, "wake", (projectId: string) => {
-    assert.equal(h.read().endedAt, FIXTURE_NOW);
+    assert.equal(h.read().ended_at, FIXTURE_NOW);
     wakes.push(projectId);
   });
   assert.deepEqual(await h.release(true), {
-    executionId: h.row.executionId,
-    endedAt: FIXTURE_NOW,
+    execution_id: h.row.execution_id,
+    ended_at: FIXTURE_NOW,
   });
   await assert.rejects(h.release(), { code: EXECUTION_NOT_RUNNING });
   assert.equal(h.calls.length, WAKE_CALL_COUNT);
   assert.deepEqual(h.calls[0]!.arguments.slice(1), [
     {
-      executionId: h.row.executionId,
-      nodeId: h.row.nodeId,
+      execution_id: h.row.execution_id,
+      node_id: h.row.node_id,
       attempt: h.row.attempt,
     },
     true,
     FIXTURE_NOW,
   ]);
-  assert.deepEqual(wakes, [h.row.projectId]);
+  assert.deepEqual(wakes, [h.row.project_id]);
 });
 
 test("Mission refusal rolls back all release writes and sends no wake", async (t) => {
@@ -74,12 +82,12 @@ test("Mission refusal rolls back all release writes and sends no wake", async (t
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   const failure = new Error("Mission refused release");
   h.dependencies.transitions.release = (tx) => {
-    h.service.insert(tx, h.row.nodeId, h.row.projectId, 0);
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
     throw failure;
   };
   const wake = t.mock.method(h.service, "wake");
   await assert.rejects(h.release(), failure);
-  assert.equal(h.read().endedAt, null);
+  assert.equal(h.read().ended_at, null);
   assert.deepEqual(
     h.store.database.prepare("SELECT * FROM scheduler_job").all(),
     [],
@@ -93,12 +101,12 @@ test("expiry equality, loss and revocation refuse release without routing", asyn
   await assert.rejects(h.release(), { code: EXECUTION_NOT_RUNNING });
   assert.equal(claimStateOf(h.read(), FIXTURE_DEADLINE), ClaimState.Lost);
   h.store.transaction((tx) =>
-    h.service.settle(tx, h.row.nodeId, FIXTURE_DEADLINE),
+    h.service.settle(tx, h.row.node_id, FIXTURE_DEADLINE),
   );
   await assert.rejects(h.release(), { code: EXECUTION_NOT_RUNNING });
   const revoked = harness(t);
   revoked.store.transaction((tx) =>
-    revoked.service.revoke(tx, revoked.row.nodeId, FIXTURE_NOW),
+    revoked.service.revoke(tx, revoked.row.node_id, FIXTURE_NOW),
   );
   await assert.rejects(revoked.release(), { code: EXECUTION_NOT_RUNNING });
   assert.deepEqual(revoked.calls, []);
@@ -114,8 +122,8 @@ test("a release begun before expiry remains finished when commit ends after expi
     now = FIXTURE_DEADLINE + 1;
   };
   assert.deepEqual(await h.release(), {
-    executionId: h.row.executionId,
-    endedAt: started,
+    execution_id: h.row.execution_id,
+    ended_at: started,
   });
   assert.equal(claimStateOf(h.read(), now), ClaimState.Finished);
 });

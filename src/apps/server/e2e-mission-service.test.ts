@@ -115,14 +115,14 @@ const NEW_OBJECTIVE_CONTENT = [
 ].join("\r\n");
 const IMPORT_CONTROLS = {
   format: ImportFormat.Markdown,
-  missionVersion: FIRST_REVISION,
+  mission_version: FIRST_REVISION,
   reason: REASON,
 };
-const APPLY_CONTROLS = { previewDigest: DIGEST, confirmedRetirements: [] };
+const APPLY_CONTROLS = { preview_digest: DIGEST, confirmed_retirements: [] };
 const RETIRE_CONTROLS = {
   reason: REASON,
-  expectedMissionVersion: FIRST_REVISION,
-  previewDigest: DIGEST,
+  expected_mission_version: FIRST_REVISION,
+  preview_digest: DIGEST,
 };
 const EXPORT = "export";
 const HELP = "--help";
@@ -340,7 +340,7 @@ async function createMission(fixture: Fixture): Promise<Mission> {
     await kanthord([MISSION, GET, project.id], fixture.env),
   );
   assert.ok(mission.id.startsWith(`${MISSION_IDENTITY_PREFIX}_`));
-  assert.equal(mission.projectId, project.id);
+  assert.equal(mission.project_id, project.id);
   assert.equal(mission.version, MISSION_INITIAL_VERSION);
   return mission;
 }
@@ -369,10 +369,10 @@ async function createNode(
     kind,
     content: { ...CONTENT, bindings },
     reason: REASON,
-    expectedMissionVersion: version,
+    expected_mission_version: version,
     ...(parentId === undefined
       ? {}
-      : { parentId, expectedParentRevision: parentRevision }),
+      : { parent_id: parentId, expected_parent_revision: parentRevision }),
   };
   const path = jsonFile(fixture, `${kind}-${version}.json`, body);
   return success<Mutation>(
@@ -513,7 +513,7 @@ test(
       kind: NodeKind.Initiative,
       content: CONTENT,
       reason: REASON,
-      expectedMissionVersion: mission.version,
+      expected_mission_version: mission.version,
     });
     const createArgs = [
       MISSION,
@@ -528,9 +528,9 @@ test(
     const created = success<Mutation>(await kanthord(createArgs, fixture.env));
     assert.equal(created.idempotency_key, key);
     assert.equal(created.revisions.length, SINGLE_ITEM);
-    const initiativeId = created.revisions[0]!.nodeId;
+    const initiativeId = created.revisions[0]!.node_id;
     const replayed = success<Mutation>(await kanthord(createArgs, fixture.env));
-    assert.equal(replayed.revisions[0]?.nodeId, initiativeId);
+    assert.equal(replayed.revisions[0]?.node_id, initiativeId);
     assert.deepEqual(replayed, created);
     const updated = success<Mutation>(
       await kanthord(
@@ -545,15 +545,15 @@ test(
             content: { ...CONTENT, name: "Updated plan" },
             reason: REASON,
             expected_revision: FIRST_REVISION,
-            expectedMissionVersion: SECOND_REVISION,
+            expected_mission_version: SECOND_REVISION,
           }),
         ],
         fixture.env,
       ),
     );
     assert.equal(
-      updated.missionVersion,
-      created.missionVersion + VERSION_INCREMENT,
+      updated.mission_version,
+      created.mission_version + VERSION_INCREMENT,
     );
     assert.equal(updated.revisions[0]?.revision, SECOND_REVISION);
     assert.ok(updated.idempotency_key);
@@ -612,7 +612,7 @@ test(
       bindings: Record<string, { id: string }>;
     }>(
       await kanthord(
-        [PROJECT, BINDING, APPLY, mission.projectId, FILE, bindingFile],
+        [PROJECT, BINDING, APPLY, mission.project_id, FILE, bindingFile],
         fixture.env,
       ),
     );
@@ -622,7 +622,7 @@ test(
       fixture,
       mission.id,
       NodeKind.Objective,
-      updated.missionVersion,
+      updated.mission_version,
       initiativeId,
       SECOND_REVISION,
       [bindingId],
@@ -631,18 +631,18 @@ test(
       fixture,
       mission.id,
       NodeKind.Objective,
-      first.missionVersion,
+      first.mission_version,
       initiativeId,
       SECOND_REVISION,
       [bindingId],
     );
-    const oldParent = first.revisions[0]!.nodeId;
-    const newParent = second.revisions[0]!.nodeId;
+    const oldParent = first.revisions[0]!.node_id;
+    const newParent = second.revisions[0]!.node_id;
     const task = await createNode(
       fixture,
       mission.id,
       NodeKind.Task,
-      second.missionVersion,
+      second.mission_version,
       oldParent,
     );
     const taskId = task.revisions[0]?.tasks?.[0]?.id;
@@ -656,27 +656,30 @@ test(
           taskId,
           FILE,
           jsonFile(fixture, "move.json", {
-            newParentId: newParent,
+            new_parent_id: newParent,
             reason: REASON,
-            expectedMissionVersion: task.missionVersion,
+            expected_mission_version: task.mission_version,
             expected_revision: SECOND_REVISION,
-            expectedOldParentRevision: SECOND_REVISION,
-            expectedNewParentRevision: FIRST_REVISION,
+            expected_old_parent_revision: SECOND_REVISION,
+            expected_new_parent_revision: FIRST_REVISION,
           }),
         ],
         fixture.env,
       ),
     );
-    assert.equal(moved.missionVersion, task.missionVersion + VERSION_INCREMENT);
+    assert.equal(
+      moved.mission_version,
+      task.mission_version + VERSION_INCREMENT,
+    );
     assert.ok(moved.idempotency_key);
-    const read = success<{ parentId: string }>(
+    const read = success<{ parent_id: string }>(
       await kanthord([MISSION, NODE, GET, taskId], fixture.env),
     );
-    assert.equal(read.parentId, newParent);
+    assert.equal(read.parent_id, newParent);
     const graphFile = (version: number) =>
       jsonFile(fixture, `graph-${version}.json`, {
         reason: REASON,
-        expectedMissionVersion: version,
+        expected_mission_version: version,
       });
     const added = success<Mutation>(
       await kanthord(
@@ -687,14 +690,14 @@ test(
           oldParent,
           newParent,
           FILE,
-          graphFile(moved.missionVersion),
+          graphFile(moved.mission_version),
         ],
         fixture.env,
       ),
     );
     assert.equal(
-      added.missionVersion,
-      moved.missionVersion + VERSION_INCREMENT,
+      added.mission_version,
+      moved.mission_version + VERSION_INCREMENT,
     );
     assert.ok(added.idempotency_key);
     const pending = success<{ state: string }>(
@@ -710,20 +713,20 @@ test(
           oldParent,
           newParent,
           FILE,
-          graphFile(added.missionVersion),
+          graphFile(added.mission_version),
         ],
         fixture.env,
       ),
     );
     assert.equal(
-      removed.missionVersion,
-      added.missionVersion + VERSION_INCREMENT,
+      removed.mission_version,
+      added.mission_version + VERSION_INCREMENT,
     );
-    const available = success<{ state: string; visibleRevision: number }>(
+    const available = success<{ state: string; visible_revision: number }>(
       await kanthord([MISSION, NODE, GET, oldParent], fixture.env),
     );
     assert.equal(available.state, NodeState.Available);
-    assert.ok(available.visibleRevision >= FIRST_REVISION);
+    assert.ok(available.visible_revision >= FIRST_REVISION);
     const criterion = success<Mutation>(
       await kanthord(
         [
@@ -736,16 +739,16 @@ test(
             criterion: "Revised criterion",
             verifications: ["true"],
             reason: REASON,
-            expected_revision: available.visibleRevision,
-            expectedMissionVersion: removed.missionVersion,
+            expected_revision: available.visible_revision,
+            expected_mission_version: removed.mission_version,
           }),
         ],
         fixture.env,
       ),
     );
     assert.equal(
-      criterion.missionVersion,
-      removed.missionVersion + VERSION_INCREMENT,
+      criterion.mission_version,
+      removed.mission_version + VERSION_INCREMENT,
     );
     const priority = success<{
       id: string;
@@ -762,7 +765,7 @@ test(
           FILE,
           jsonFile(fixture, "priority.json", {
             value: PRIORITY_VALUE,
-            expectedMissionVersion: criterion.missionVersion,
+            expected_mission_version: criterion.mission_version,
           }),
         ],
         fixture.env,
@@ -869,7 +872,7 @@ for (const action of [PREVIEW, APPLY] as const) {
       for (const manifest of [
         { ...controls, format: ImportFormat.Json },
         { ...controls, files: null },
-        { ...controls, missionId: null },
+        { ...controls, mission_id: null },
         { ...controls, entries: [] },
         { ...controls, unknown: true },
         ...(action === APPLY
@@ -969,7 +972,7 @@ async function previewImport(
       fixture.env,
     ),
   );
-  assert.match(preview.previewDigest, DIGEST_PATTERN);
+  assert.match(preview.preview_digest, DIGEST_PATTERN);
   assert.deepEqual(preview.violations, []);
   assert.ok(!Object.hasOwn(preview, "idempotency_key"));
   return preview;
@@ -982,12 +985,12 @@ async function applyImport(
   paths: string[],
   preview: ImportPreview,
 ): Promise<ImportMutation> {
-  assert.equal(preview.missionId, missionId);
+  assert.equal(preview.mission_id, missionId);
   assert.deepEqual(preview.violations, []);
   const path = jsonFile(fixture, MANIFEST_FILE, {
     ...manifest,
-    previewDigest: preview.previewDigest,
-    confirmedRetirements: [],
+    preview_digest: preview.preview_digest,
+    confirmed_retirements: [],
   });
   const key = ulid();
   const args = [
@@ -1013,7 +1016,7 @@ test(
   async (t) => {
     const fixture = await setup(t);
     const mission = await createMission(fixture);
-    const bindingId = await configureRepository(fixture, mission.projectId);
+    const bindingId = await configureRepository(fixture, mission.project_id);
     const initiative = await createNode(
       fixture,
       mission.id,
@@ -1024,8 +1027,8 @@ test(
       fixture,
       mission.id,
       NodeKind.Objective,
-      initiative.missionVersion,
-      initiative.revisions[0]!.nodeId,
+      initiative.mission_version,
+      initiative.revisions[0]!.node_id,
       FIRST_REVISION,
       [bindingId],
     );
@@ -1033,25 +1036,25 @@ test(
       fixture,
       mission.id,
       NodeKind.Task,
-      objective.missionVersion,
-      objective.revisions[0]!.nodeId,
+      objective.mission_version,
+      objective.revisions[0]!.node_id,
     );
     const out = join(fixture.directory, OUTPUT_DIRECTORY);
-    const exported = success<{ missionVersion: number }>(
+    const exported = success<{ mission_version: number }>(
       await kanthord(
         exportArgs(mission.id, ImportFormat.Markdown, out),
         fixture.env,
       ),
     );
-    assert.equal(exported.missionVersion, task.missionVersion);
+    assert.equal(exported.mission_version, task.mission_version);
     const paths = readdirSync(out).map((filename) => join(out, filename));
     assert.equal(paths.length, THREE_ITEMS);
     const manifest = {
       ...IMPORT_CONTROLS,
-      missionVersion: exported.missionVersion,
+      mission_version: exported.mission_version,
     };
     const preview = await previewImport(fixture, mission.id, manifest, paths);
-    assert.equal(preview.noOps.length, THREE_ITEMS);
+    assert.equal(preview.no_ops.length, THREE_ITEMS);
     assert.deepEqual(preview.creates, []);
     const unchanged = await applyImport(
       fixture,
@@ -1060,9 +1063,9 @@ test(
       paths,
       preview,
     );
-    assert.equal(unchanged.missionVersion, exported.missionVersion);
+    assert.equal(unchanged.mission_version, exported.mission_version);
     assert.ok(unchanged.idempotency_key);
-    assert.equal(unchanged.assignedIds.length, THREE_ITEMS);
+    assert.equal(unchanged.assigned_ids.length, THREE_ITEMS);
     const newPath = join(fixture.directory, NEW_OBJECTIVE_FILE);
     writePrivate(newPath, NEW_OBJECTIVE_CONTENT);
     const expandedPaths = [...paths, newPath];
@@ -1081,16 +1084,16 @@ test(
       expanded,
     );
     assert.equal(
-      applied.missionVersion,
-      unchanged.missionVersion + VERSION_INCREMENT,
+      applied.mission_version,
+      unchanged.mission_version + VERSION_INCREMENT,
     );
     assert.ok(applied.idempotency_key);
     assert.equal(
-      applied.assignedIds.length,
-      unchanged.assignedIds.length + VERSION_INCREMENT,
+      applied.assigned_ids.length,
+      unchanged.assigned_ids.length + VERSION_INCREMENT,
     );
     assert.ok(
-      applied.assignedIds.some(
+      applied.assigned_ids.some(
         ({ filename }) => filename === NEW_OBJECTIVE_FILE,
       ),
     );
@@ -1103,28 +1106,28 @@ async function retireImportedNode(
   fixture: Fixture,
   applied: ImportMutation,
 ): Promise<void> {
-  const assigned = applied.assignedIds.find(
+  const assigned = applied.assigned_ids.find(
     ({ filename }) => filename === NEW_OBJECTIVE_FILE,
   );
   assert.ok(assigned);
-  const nodeId = assigned.nodeId;
+  const nodeId = assigned.node_id;
   const preview = success<RetirePreview>(
     await kanthord([MISSION, NODE, RETIRE, PREVIEW, nodeId], fixture.env),
   );
   assert.equal(preview.force, false);
-  assert.equal(preview.missionVersion, applied.missionVersion);
+  assert.equal(preview.mission_version, applied.mission_version);
   const path = jsonFile(fixture, RETIRE_FILE, {
     reason: REASON,
-    expectedMissionVersion: applied.missionVersion,
-    previewDigest: preview.previewDigest,
+    expected_mission_version: applied.mission_version,
+    preview_digest: preview.preview_digest,
   });
   const key = ulid();
   const args = [MISSION, NODE, RETIRE, nodeId, FILE, path, KEY, key];
   const retired = success<Mutation>(await kanthord(args, fixture.env));
-  assert.ok(retired.retiredNodeIds.includes(nodeId));
+  assert.ok(retired.retired_node_ids.includes(nodeId));
   assert.equal(
-    retired.missionVersion,
-    applied.missionVersion + VERSION_INCREMENT,
+    retired.mission_version,
+    applied.mission_version + VERSION_INCREMENT,
   );
   assert.equal(retired.idempotency_key, key);
   assert.deepEqual(success(await kanthord(args, fixture.env)), retired);
@@ -1143,13 +1146,13 @@ test("mission node retire force previews and removes dependent edges", async (t)
     fixture,
     mission.id,
     NodeKind.Initiative,
-    first.missionVersion,
+    first.mission_version,
   );
-  const nodeId = first.revisions[0]!.nodeId;
-  const dependentId = second.revisions[0]!.nodeId;
+  const nodeId = first.revisions[0]!.node_id;
+  const dependentId = second.revisions[0]!.node_id;
   const graphFile = jsonFile(fixture, "retire-dependency.json", {
     reason: REASON,
-    expectedMissionVersion: second.missionVersion,
+    expected_mission_version: second.mission_version,
   });
   const dependency = success<Mutation>(
     await kanthord(
@@ -1164,12 +1167,12 @@ test("mission node retire force previews and removes dependent edges", async (t)
     ),
   );
   assert.equal(preview.force, true);
-  assert.equal(preview.missionVersion, dependency.missionVersion);
-  assert.equal(preview.removedEdges.length, SINGLE_ITEM);
+  assert.equal(preview.mission_version, dependency.mission_version);
+  assert.equal(preview.removed_edges.length, SINGLE_ITEM);
   const path = jsonFile(fixture, RETIRE_FILE, {
     reason: REASON,
-    expectedMissionVersion: preview.missionVersion,
-    previewDigest: preview.previewDigest,
+    expected_mission_version: preview.mission_version,
+    preview_digest: preview.preview_digest,
   });
   const retired = success<Mutation>(
     await kanthord(
@@ -1177,11 +1180,11 @@ test("mission node retire force previews and removes dependent edges", async (t)
       fixture.env,
     ),
   );
-  assert.deepEqual(retired.retiredNodeIds, [nodeId]);
-  assert.deepEqual(retired.removedEdges, preview.removedEdges);
+  assert.deepEqual(retired.retired_node_ids, [nodeId]);
+  assert.deepEqual(retired.removed_edges, preview.removed_edges);
   assert.equal(
-    retired.missionVersion,
-    preview.missionVersion + VERSION_INCREMENT,
+    retired.mission_version,
+    preview.mission_version + VERSION_INCREMENT,
   );
   assert.ok(retired.idempotency_key);
 });
@@ -1191,7 +1194,7 @@ test("mission imports accept empty Markdown controls, embedded files and JSON en
   const mission = await createMission(fixture);
   for (const manifest of [
     IMPORT_CONTROLS,
-    { ...IMPORT_CONTROLS, missionId: mission.id, files: [] },
+    { ...IMPORT_CONTROLS, mission_id: mission.id, files: [] },
     { ...IMPORT_CONTROLS, format: ImportFormat.Json, entries: [] },
   ]) {
     const preview = await previewImport(fixture, mission.id, manifest, []);
@@ -1202,7 +1205,7 @@ test("mission imports accept empty Markdown controls, embedded files and JSON en
       [],
       preview,
     );
-    assert.equal(applied.missionVersion, mission.version);
+    assert.equal(applied.mission_version, mission.version);
     assert.ok(applied.idempotency_key);
   }
 });
@@ -1214,7 +1217,7 @@ test("mission get reads the empty mission created with its project", async (t) =
 test("mission export writes empty Markdown and complete private JSON answers", async (t) => {
   const fixture = await setup(t);
   const mission = await createMission(fixture);
-  const summary = { missionId: mission.id, missionVersion: mission.version };
+  const summary = { mission_id: mission.id, mission_version: mission.version };
   const directory = join(fixture.directory, OUTPUT_DIRECTORY);
   mkdirSync(directory, { mode: PRIVATE_DIRECTORY_MODE });
   for (const out of [
@@ -1283,7 +1286,7 @@ async function readNode(fixture: Fixture, nodeId: string): Promise<Node> {
     await kanthord([MISSION, NODE, GET, nodeId], fixture.env),
   );
   assert.equal(node.id, nodeId);
-  assert.ok(node.visibleRevision >= FIRST_REVISION);
+  assert.ok(node.visible_revision >= FIRST_REVISION);
   return node;
 }
 
@@ -1295,27 +1298,27 @@ async function scenarioChange(
   const { fixture, version } = scenario;
   const path = jsonFile(fixture, SCENARIO_FILE, {
     reason: REASON,
-    expectedMissionVersion: version,
+    expected_mission_version: version,
     ...fields,
   });
   const changed = success<Mutation>(
     await kanthord([MISSION, ...args, FILE, path], fixture.env),
   );
-  assert.equal(changed.missionVersion, version + VERSION_INCREMENT);
+  assert.equal(changed.mission_version, version + VERSION_INCREMENT);
   assert.ok(changed.idempotency_key);
-  scenario.version = changed.missionVersion;
+  scenario.version = changed.mission_version;
   return changed;
 }
 
 async function queued(scenario: Scenario, nodeId: string): Promise<void> {
   const { fixture, mission } = scenario;
   const queue = success<Page<Job>>(
-    await kanthord([SCHEDULER, QUEUE, LIST, mission.projectId], fixture.env),
+    await kanthord([SCHEDULER, QUEUE, LIST, mission.project_id], fixture.env),
   );
   assert.equal(queue.next_cursor, null);
-  const job = queue.items.find((item) => item.nodeId === nodeId);
+  const job = queue.items.find((item) => item.node_id === nodeId);
   assert.ok(job);
-  assert.equal(job.projectId, mission.projectId);
+  assert.equal(job.project_id, mission.project_id);
 }
 
 async function scenarioProject(fixture: Fixture): Promise<Mission> {
@@ -1329,7 +1332,7 @@ async function scenarioProject(fixture: Fixture): Promise<Mission> {
   );
   assert.ok(mission.id.startsWith(`${MISSION_IDENTITY_PREFIX}_`));
   assert.equal(mission.version, MISSION_INITIAL_VERSION);
-  assert.equal(mission.projectId, project.id);
+  assert.equal(mission.project_id, project.id);
   const replayed = success<{ id: string }>(await kanthord(args, fixture.env));
   assert.equal(replayed.id, project.id);
   assert.deepEqual(replayed, project);
@@ -1348,7 +1351,7 @@ async function scenarioInitiative(fixture: Fixture): Promise<Scenario> {
     kind: NodeKind.Initiative,
     content: CONTENT,
     reason: REASON,
-    expectedMissionVersion: mission.version,
+    expected_mission_version: mission.version,
   });
   const createArgs = [
     MISSION,
@@ -1361,14 +1364,14 @@ async function scenarioInitiative(fixture: Fixture): Promise<Scenario> {
     ulid(),
   ];
   const created = success<Mutation>(await kanthord(createArgs, fixture.env));
-  assert.equal(created.missionVersion, mission.version + VERSION_INCREMENT);
+  assert.equal(created.mission_version, mission.version + VERSION_INCREMENT);
   assert.equal(created.revisions.length, SINGLE_ITEM);
-  const initiativeId = created.revisions[0]!.nodeId;
+  const initiativeId = created.revisions[0]!.node_id;
   assert.ok(initiativeId.startsWith(`${NODE_IDENTITY_PREFIX}_`));
   const scenario: Scenario = {
     fixture,
     mission,
-    version: created.missionVersion,
+    version: created.mission_version,
     initiativeId,
     objectiveId: UNSET_NODE_ID,
     secondObjectiveId: UNSET_NODE_ID,
@@ -1380,9 +1383,9 @@ async function scenarioInitiative(fixture: Fixture): Promise<Scenario> {
   };
   await queued(scenario, initiativeId);
   const peek = success<{ job: Job | null }>(
-    await kanthord([SCHEDULER, QUEUE, PEEK, mission.projectId], fixture.env),
+    await kanthord([SCHEDULER, QUEUE, PEEK, mission.project_id], fixture.env),
   );
-  assert.equal(peek.job?.nodeId, initiativeId);
+  assert.equal(peek.job?.node_id, initiativeId);
   const initiative = await readNode(fixture, initiativeId);
   assert.equal(initiative.kind, NodeKind.Initiative);
   assert.equal(initiative.state, NodeState.Available);
@@ -1392,7 +1395,7 @@ async function scenarioInitiative(fixture: Fixture): Promise<Scenario> {
 async function scenarioChildren(scenario: Scenario): Promise<void> {
   const { fixture, mission, initiativeId } = scenario;
   const bindings = success<Page<RepositoryRecord>>(
-    await kanthord([PROJECT, BINDING, LIST, mission.projectId], fixture.env),
+    await kanthord([PROJECT, BINDING, LIST, mission.project_id], fixture.env),
   );
   assert.equal(bindings.items.length, SINGLE_ITEM);
   scenario.bindingId = bindings.items[0]!.id;
@@ -1405,10 +1408,10 @@ async function scenarioChildren(scenario: Scenario): Promise<void> {
     FIRST_REVISION,
     [scenario.bindingId],
   );
-  assert.equal(objective.missionVersion, scenario.version + VERSION_INCREMENT);
+  assert.equal(objective.mission_version, scenario.version + VERSION_INCREMENT);
   assert.equal(objective.revisions.length, SINGLE_ITEM);
-  scenario.objectiveId = objective.revisions[0]!.nodeId;
-  scenario.version = objective.missionVersion;
+  scenario.objectiveId = objective.revisions[0]!.node_id;
+  scenario.version = objective.mission_version;
   const read = await readNode(fixture, scenario.objectiveId);
   assert.deepEqual(read.content.bindings, [scenario.bindingId]);
   const task = await createNode(
@@ -1418,11 +1421,11 @@ async function scenarioChildren(scenario: Scenario): Promise<void> {
     scenario.version,
     scenario.objectiveId,
   );
-  assert.equal(task.missionVersion, scenario.version + VERSION_INCREMENT);
+  assert.equal(task.mission_version, scenario.version + VERSION_INCREMENT);
   const taskId = task.revisions[0]?.tasks?.[0]?.id;
   assert.ok(taskId);
   scenario.taskId = taskId;
-  scenario.version = task.missionVersion;
+  scenario.version = task.mission_version;
   const listed = success<Page<Node>>(
     await kanthord([MISSION, NODE, LIST, mission.id], fixture.env),
   );
@@ -1440,19 +1443,19 @@ async function scenarioRevisions(scenario: Scenario): Promise<void> {
   await scenarioChange(scenario, [NODE, UPDATE, objectiveId], {
     filename: before.filename,
     content: { ...before.content, name: UPDATED_NAME },
-    expected_revision: before.visibleRevision,
+    expected_revision: before.visible_revision,
   });
   const updated = await readNode(fixture, objectiveId);
   assert.equal(updated.content.name, UPDATED_NAME);
   assert.equal(
-    updated.visibleRevision,
-    before.visibleRevision + VERSION_INCREMENT,
+    updated.visible_revision,
+    before.visible_revision + VERSION_INCREMENT,
   );
   const revisions = success<Page<Revision>>(
     await kanthord([MISSION, NODE, REVISION, LIST, objectiveId], fixture.env),
   );
   assert.ok(revisions.items.length >= FIRST_REVISION);
-  assert.equal(revisions.items[0]?.revision, updated.visibleRevision);
+  assert.equal(revisions.items[0]?.revision, updated.visible_revision);
   const first = success<Revision>(
     await kanthord(
       [MISSION, NODE, REVISION, GET, objectiveId, VALID_REVISION],
@@ -1472,24 +1475,24 @@ async function scenarioMove(scenario: Scenario): Promise<void> {
     NodeKind.Objective,
     scenario.version,
     initiativeId,
-    initiative.visibleRevision,
+    initiative.visible_revision,
     [scenario.bindingId],
   );
-  assert.equal(second.missionVersion, scenario.version + VERSION_INCREMENT);
+  assert.equal(second.mission_version, scenario.version + VERSION_INCREMENT);
   assert.equal(second.revisions.length, SINGLE_ITEM);
-  scenario.secondObjectiveId = second.revisions[0]!.nodeId;
-  scenario.version = second.missionVersion;
+  scenario.secondObjectiveId = second.revisions[0]!.node_id;
+  scenario.version = second.mission_version;
   const oldParent = await readNode(fixture, objectiveId);
   const newParent = await readNode(fixture, scenario.secondObjectiveId);
   const task = await readNode(fixture, taskId);
   await scenarioChange(scenario, [NODE, MOVE, taskId], {
-    newParentId: newParent.id,
-    expected_revision: task.visibleRevision,
-    expectedOldParentRevision: oldParent.visibleRevision,
-    expectedNewParentRevision: newParent.visibleRevision,
+    new_parent_id: newParent.id,
+    expected_revision: task.visible_revision,
+    expected_old_parent_revision: oldParent.visible_revision,
+    expected_new_parent_revision: newParent.visible_revision,
   });
   const moved = await readNode(fixture, taskId);
-  assert.equal(moved.parentId, newParent.id);
+  assert.equal(moved.parent_id, newParent.id);
   assert.equal(moved.kind, NodeKind.Task);
 }
 
@@ -1521,13 +1524,13 @@ async function scenarioDependencies(scenario: Scenario): Promise<void> {
   await scenarioChange(scenario, [CRITERION, SET, objectiveId], {
     criterion: UPDATED_CRITERION,
     verifications: CONTENT.verifications,
-    expected_revision: available.visibleRevision,
+    expected_revision: available.visible_revision,
   });
   const revised = await readNode(fixture, objectiveId);
   assert.equal(revised.content.criterion, UPDATED_CRITERION);
   assert.equal(
-    revised.visibleRevision,
-    available.visibleRevision + VERSION_INCREMENT,
+    revised.visible_revision,
+    available.visible_revision + VERSION_INCREMENT,
   );
 }
 
@@ -1536,29 +1539,29 @@ async function scenarioRetire(scenario: Scenario): Promise<void> {
   const preview = success<RetirePreview>(
     await kanthord([MISSION, NODE, RETIRE, PREVIEW, objectiveId], fixture.env),
   );
-  assert.match(preview.previewDigest, DIGEST_PATTERN);
-  assert.equal(preview.missionVersion, scenario.version);
-  assert.deepEqual(preview.retiredNodeIds, [objectiveId]);
+  assert.match(preview.preview_digest, DIGEST_PATTERN);
+  assert.equal(preview.mission_version, scenario.version);
+  assert.deepEqual(preview.retired_node_ids, [objectiveId]);
   const retired = await scenarioChange(scenario, [NODE, RETIRE, objectiveId], {
-    previewDigest: preview.previewDigest,
+    preview_digest: preview.preview_digest,
   });
-  assert.ok(retired.retiredNodeIds.includes(objectiveId));
+  assert.ok(retired.retired_node_ids.includes(objectiveId));
   const read = await readNode(fixture, objectiveId);
-  assert.notEqual(read.retiredAt, null);
+  assert.notEqual(read.retired_at, null);
 }
 
 async function scenarioExport(scenario: Scenario, filename: string) {
   const { fixture, mission } = scenario;
   const out = join(fixture.directory, filename);
-  const summary = success<{ missionId: string; missionVersion: number }>(
+  const summary = success<{ mission_id: string; mission_version: number }>(
     await kanthord(exportArgs(mission.id, ImportFormat.Json, out), fixture.env),
   );
-  assert.equal(summary.missionId, mission.id);
-  assert.equal(summary.missionVersion, scenario.version);
+  assert.equal(summary.mission_id, mission.id);
+  assert.equal(summary.mission_version, scenario.version);
   const exported = JSON.parse(readFileSync(out, UTF8)) as ExportAnswer;
   assert.ok(JSON_ENTRIES in exported);
-  assert.equal(exported.missionId, summary.missionId);
-  assert.equal(exported.missionVersion, summary.missionVersion);
+  assert.equal(exported.mission_id, summary.mission_id);
+  assert.equal(exported.mission_version, summary.mission_version);
   return exported;
 }
 
@@ -1571,8 +1574,8 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
   );
   const manifest = {
     format: ImportFormat.Json,
-    missionId: mission.id,
-    missionVersion: exported.missionVersion,
+    mission_id: mission.id,
+    mission_version: exported.mission_version,
     reason: REASON,
     entries: [
       ...exported.entries,
@@ -1582,7 +1585,7 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
         kind: NodeKind.Objective,
         parent: INITIATIVE_PLAN,
         bindings: [REPOSITORY_NAME],
-        dependsOn: [],
+        depends_on: [],
       },
     ],
   };
@@ -1591,8 +1594,8 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
   assert.deepEqual(preview.creates, [NEW_OBJECTIVE_FILE]);
   const path = jsonFile(fixture, MANIFEST_FILE, {
     ...manifest,
-    previewDigest: preview.previewDigest,
-    confirmedRetirements: preview.retirements,
+    preview_digest: preview.preview_digest,
+    confirmed_retirements: preview.retirements,
   });
   const applied = success<ImportMutation>(
     await kanthord(
@@ -1600,26 +1603,26 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
       fixture.env,
     ),
   );
-  assert.equal(applied.missionVersion, scenario.version + VERSION_INCREMENT);
-  scenario.version = applied.missionVersion;
-  const assigned = applied.assignedIds.find(
+  assert.equal(applied.mission_version, scenario.version + VERSION_INCREMENT);
+  scenario.version = applied.mission_version;
+  const assigned = applied.assigned_ids.find(
     ({ filename }) => filename === NEW_OBJECTIVE_FILE,
   );
   assert.ok(assigned);
-  scenario.importedId = assigned.nodeId;
-  await queued(scenario, assigned.nodeId);
+  scenario.importedId = assigned.node_id;
+  await queued(scenario, assigned.node_id);
   const after = await scenarioExport(scenario, EXISTING_EXPORT_FILE);
   assert.equal(
     after.entries.length,
     exported.entries.length + VERSION_INCREMENT,
   );
-  assert.ok(after.entries.some(({ id }) => id === assigned.nodeId));
+  assert.ok(after.entries.some(({ id }) => id === assigned.node_id));
 }
 
 async function applyRepositorySet(scenario: Scenario, bindings: RepositorySet) {
   const { fixture, mission } = scenario;
   const project = success<{ id: string; binding_set_version: number }>(
-    await kanthord([PROJECT, GET, mission.projectId], fixture.env),
+    await kanthord([PROJECT, GET, mission.project_id], fixture.env),
   );
   const path = jsonFile(fixture, SCENARIO_FILE, {
     version: project.binding_set_version,
@@ -1627,17 +1630,17 @@ async function applyRepositorySet(scenario: Scenario, bindings: RepositorySet) {
   });
   const applied = success<{ project_id: string; binding_set_version: number }>(
     await kanthord(
-      [PROJECT, BINDING, APPLY, mission.projectId, FILE, path],
+      [PROJECT, BINDING, APPLY, mission.project_id, FILE, path],
       fixture.env,
     ),
   );
-  assert.equal(applied.project_id, mission.projectId);
+  assert.equal(applied.project_id, mission.project_id);
   assert.equal(
     applied.binding_set_version,
     project.binding_set_version + VERSION_INCREMENT,
   );
   const listed = success<Page<RepositoryRecord>>(
-    await kanthord([PROJECT, BINDING, LIST, mission.projectId], fixture.env),
+    await kanthord([PROJECT, BINDING, LIST, mission.project_id], fixture.env),
   );
   assert.equal(listed.items.length, Object.keys(bindings).length);
   assert.equal(listed.next_cursor, null);
@@ -1661,7 +1664,7 @@ async function scenarioRebind(scenario: Scenario): Promise<void> {
   assert.notEqual(next.id, scenario.bindingId);
   const path = jsonFile(fixture, SCENARIO_FILE, {
     reason: REASON,
-    expectedMissionVersion: scenario.version,
+    expected_mission_version: scenario.version,
   });
   const rebound = success<RebindResult>(
     await kanthord(
@@ -1670,17 +1673,17 @@ async function scenarioRebind(scenario: Scenario): Promise<void> {
     ),
   );
   assert.equal(
-    rebound.nodeChange.missionVersion,
+    rebound.node_change.mission_version,
     scenario.version + VERSION_INCREMENT,
   );
   assert.equal(rebound.skipped.length, SINGLE_ITEM);
   assert.equal(rebound.skipped[0]?.node.id, scenario.objectiveId);
   assert.equal(rebound.skipped[0]?.condition, RebindSkipCondition.Retired);
   assert.deepEqual(
-    rebound.nodeChange.revisions.map(({ nodeId }) => nodeId).sort(),
+    rebound.node_change.revisions.map(({ node_id: nodeId }) => nodeId).sort(),
     [secondObjectiveId, importedId].sort(),
   );
-  scenario.version = rebound.nodeChange.missionVersion;
+  scenario.version = rebound.node_change.mission_version;
   scenario.bindingId = next.id;
   const second = await readNode(fixture, secondObjectiveId);
   const imported = await readNode(fixture, importedId);
@@ -1692,7 +1695,7 @@ async function scenarioPriorityReplay(scenario: Scenario): Promise<void> {
   const { fixture, mission, secondObjectiveId, createArgs, created } = scenario;
   const path = jsonFile(fixture, SCENARIO_FILE, {
     value: PRIORITY_VALUE,
-    expectedMissionVersion: scenario.version,
+    expected_mission_version: scenario.version,
   });
   const priority = success<Node>(
     await kanthord(
@@ -1707,13 +1710,13 @@ async function scenarioPriorityReplay(scenario: Scenario): Promise<void> {
   assert.ok(read.kind !== NodeKind.Task);
   assert.equal(read.priority, PRIORITY_VALUE);
   const beforeReplay = success<Mission>(
-    await kanthord([MISSION, GET, mission.projectId], fixture.env),
+    await kanthord([MISSION, GET, mission.project_id], fixture.env),
   );
   const replay = success<Mutation>(await kanthord(createArgs, fixture.env));
-  assert.equal(replay.revisions[0]?.nodeId, scenario.initiativeId);
+  assert.equal(replay.revisions[0]?.node_id, scenario.initiativeId);
   assert.deepEqual(replay, created);
   const afterReplay = success<Mission>(
-    await kanthord([MISSION, GET, mission.projectId], fixture.env),
+    await kanthord([MISSION, GET, mission.project_id], fixture.env),
   );
   assert.deepEqual(afterReplay, beforeReplay);
   scenario.version = afterReplay.version;
@@ -1744,7 +1747,7 @@ test(
         kind: NodeKind.Initiative,
         content,
         reason: REASON,
-        expectedMissionVersion: scenario.version,
+        expected_mission_version: scenario.version,
       });
       refusal(
         await kanthord(
@@ -1754,7 +1757,7 @@ test(
         MissionErrorCode.ContentInvalid,
       );
       const read = success<Mission>(
-        await kanthord([MISSION, GET, mission.projectId], fixture.env),
+        await kanthord([MISSION, GET, mission.project_id], fixture.env),
       );
       assert.equal(read.version, scenario.version);
     });
@@ -1762,15 +1765,15 @@ test(
       "E06.26 creating a child of the retired objective is refused",
       async () => {
         const parent = await readNode(fixture, scenario.objectiveId);
-        assert.notEqual(parent.retiredAt, null);
+        assert.notEqual(parent.retired_at, null);
         const path = jsonFile(fixture, SCENARIO_FILE, {
           filename: REFUSED_PLAN,
           kind: NodeKind.Task,
           content: CONTENT,
-          parentId: parent.id,
-          expectedParentRevision: parent.visibleRevision,
+          parent_id: parent.id,
+          expected_parent_revision: parent.visible_revision,
           reason: REASON,
-          expectedMissionVersion: scenario.version,
+          expected_mission_version: scenario.version,
         });
         refusal(
           await kanthord(
@@ -1780,7 +1783,7 @@ test(
           MissionErrorCode.Retired,
         );
         const read = success<Mission>(
-          await kanthord([MISSION, GET, mission.projectId], fixture.env),
+          await kanthord([MISSION, GET, mission.project_id], fixture.env),
         );
         assert.equal(read.version, scenario.version);
       },
@@ -1820,7 +1823,7 @@ async function scenarioRemovedBinding(scenario: Scenario): Promise<void> {
   assert.deepEqual(before.content.bindings, [scenario.bindingId]);
   const path = jsonFile(fixture, SCENARIO_FILE, {
     reason: REASON,
-    expectedMissionVersion: scenario.version,
+    expected_mission_version: scenario.version,
   });
   refusal(
     await kanthord(
@@ -1833,7 +1836,7 @@ async function scenarioRemovedBinding(scenario: Scenario): Promise<void> {
   assert.deepEqual(after.content.bindings, before.content.bindings);
   assert.deepEqual(after, before);
   const read = success<Mission>(
-    await kanthord([MISSION, GET, mission.projectId], fixture.env),
+    await kanthord([MISSION, GET, mission.project_id], fixture.env),
   );
   assert.equal(read.version, scenario.version);
 }

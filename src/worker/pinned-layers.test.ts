@@ -47,7 +47,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
   const cwd = temporary(t);
   const composed = composedPrompt("GLOBAL_MARKER", "PROJECT_MARKER");
   const work = renderWorkPrompt({
-    nodeId: "node",
+    node_id: "node",
     revision: 1,
     content: {
       name: "WORK_MARKER",
@@ -264,7 +264,7 @@ for (const isSplitTurn of [false, true]) {
       "complete project source",
     );
     const work = renderWorkPrompt({
-      nodeId: "node",
+      node_id: "node",
       revision: INITIAL_ATTEMPT,
       content: {
         name: "current work",

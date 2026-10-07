@@ -24,14 +24,14 @@ function harness(t: TestContext) {
   const machine = {
     clientId: createIdentity("client_identity"),
     name: "worker",
-    projectId: row.projectId,
-    resourceIdentity: row.resourceIdentity,
+    projectId: row.project_id,
+    resourceIdentity: row.resource_identity,
     issuedAt: FIXTURE_NOW,
   };
   const caller = {
     context: background,
     requestId: createIdentity("request"),
-    identity: testMachineIdentity(machine, "machine", row.runtimeIdentity),
+    identity: testMachineIdentity(machine, "machine", row.runtime_identity),
     commit: h.store.transaction.bind(h.store),
   };
   return { ...h, row, machine, caller };
@@ -44,18 +44,18 @@ test("claim get reports running, finished and lost without modifying the row", a
   const read = () =>
     h.invoke(
       "claimGet",
-      { params: { executionId: h.row.executionId }, query: {}, body: null },
+      { params: { execution_id: h.row.execution_id }, query: {}, body: null },
       h.caller,
     );
-  assert.equal((await read()).claimState, ClaimState.Running);
+  assert.equal((await read()).claim_state, ClaimState.Running);
   now = FIXTURE_DEADLINE;
-  assert.equal((await read()).claimState, ClaimState.Lost);
+  assert.equal((await read()).claim_state, ClaimState.Lost);
   assert.deepEqual(
-    h.store.transaction((tx) => readExecution(tx, h.row.executionId)),
+    h.store.transaction((tx) => readExecution(tx, h.row.execution_id)),
     h.row,
   );
-  h.store.transaction((tx) => h.service.revoke(tx, h.row.nodeId, FIXTURE_NOW));
-  assert.equal((await read()).claimState, ClaimState.Finished);
+  h.store.transaction((tx) => h.service.revoke(tx, h.row.node_id, FIXTURE_NOW));
+  assert.equal((await read()).claim_state, ClaimState.Finished);
   assert.deepEqual(
     h.calls.filter((call) => call.method !== ATTRIBUTION),
     [],
@@ -67,22 +67,22 @@ test("human execution reads paginate all states and isolate project, node and at
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   const ended = executionFixture({
-    projectId: h.row.projectId,
-    nodeId: h.row.nodeId,
+    project_id: h.row.project_id,
+    node_id: h.row.node_id,
     attempt: 2,
-    endedAt: FIXTURE_NOW,
+    ended_at: FIXTURE_NOW,
   });
   h.store.transaction((tx) => insertExecution(tx, ended));
   const list = (query = {}) =>
     h.invoke(
       "executionList",
-      { params: { projectId: h.row.projectId }, query, body: null },
+      { params: { project_id: h.row.project_id }, query, body: null },
       h.caller,
     );
   const all = await list();
   assert.deepEqual(
-    all.items.map((item) => item.executionId),
-    [ended.executionId, h.row.executionId].sort().reverse(),
+    all.items.map((item) => item.execution_id),
+    [ended.execution_id, h.row.execution_id].sort().reverse(),
   );
   assert.equal(all.items.length, TOTAL_ITEM_COUNT);
   const first = await list({ limit: 1 });
@@ -90,18 +90,18 @@ test("human execution reads paginate all states and isolate project, node and at
   const second = await list({ limit: 1, cursor: first.next_cursor });
   assert.deepEqual([...first.items, ...second.items], all.items);
   assert.equal(second.next_cursor, null);
-  assert.deepEqual((await list({ nodeId: h.row.nodeId })).items, all.items);
+  assert.deepEqual((await list({ node_id: h.row.node_id })).items, all.items);
   assert.deepEqual(
-    (await list({ nodeId: h.row.nodeId, attempt: 2 })).items.map(
-      (item) => item.executionId,
+    (await list({ node_id: h.row.node_id, attempt: 2 })).items.map(
+      (item) => item.execution_id,
     ),
-    [ended.executionId],
+    [ended.execution_id],
   );
   assert.deepEqual(
-    (await list({ nodeId: h.row.nodeId, attempt: 3 })).items,
+    (await list({ node_id: h.row.node_id, attempt: 3 })).items,
     [],
   );
-  assert.deepEqual((await list({ nodeId: createIdentity("node") })).items, []);
+  assert.deepEqual((await list({ node_id: createIdentity("node") })).items, []);
   await assert.rejects(list({ attempt: 1 }));
   for (const cursor of [
     "malformed",
@@ -111,20 +111,23 @@ test("human execution reads paginate all states and isolate project, node and at
   const get = (executionId: string) =>
     h.invoke(
       "executionGet",
-      { params: { executionId }, query: {}, body: null },
+      { params: { execution_id: executionId }, query: {}, body: null },
       h.caller,
     );
-  assert.equal((await get(ended.executionId)).claimState, ClaimState.Finished);
+  assert.equal(
+    (await get(ended.execution_id)).claim_state,
+    ClaimState.Finished,
+  );
   await assert.rejects(get(createIdentity("execution")), { code: NOT_FOUND });
   const foreign = executionFixture();
   h.store.transaction((tx) => insertExecution(tx, foreign));
-  assert.deepEqual((await list({ nodeId: foreign.nodeId })).items, []);
+  assert.deepEqual((await list({ node_id: foreign.node_id })).items, []);
 });
 
 test("claim get isolates runtime, binding and project and distinguishes absent executions", async (t) => {
   const h = harness(t);
   const input = {
-    params: { executionId: h.row.executionId },
+    params: { execution_id: h.row.execution_id },
     query: {},
     body: null,
   };
@@ -133,12 +136,12 @@ test("claim get isolates runtime, binding and project and distinguishes absent e
     testMachineIdentity(
       { ...h.machine, resourceIdentity: "other" },
       "other",
-      h.row.runtimeIdentity,
+      h.row.runtime_identity,
     ),
     testMachineIdentity(
       { ...h.machine, projectId: createIdentity("project") },
       "other",
-      h.row.runtimeIdentity,
+      h.row.runtime_identity,
     ),
   ];
   for (const identity of identities)
@@ -149,13 +152,13 @@ test("claim get isolates runtime, binding and project and distinguishes absent e
   await assert.rejects(
     h.invoke(
       "claimGet",
-      { ...input, params: { executionId: createIdentity("execution") } },
+      { ...input, params: { execution_id: createIdentity("execution") } },
       h.caller,
     ),
     { code: NOT_FOUND },
   );
   assert.deepEqual(
-    h.store.transaction((tx) => readExecution(tx, h.row.executionId)),
+    h.store.transaction((tx) => readExecution(tx, h.row.execution_id)),
     h.row,
   );
 });

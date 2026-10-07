@@ -85,18 +85,18 @@ test("attempt pins survive edits and a rebind keeps the open revision's binding 
   f.store.transaction((tx) =>
     openAttempt(tx, nodeId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
   );
-  const result = f.rebind({ nodeId });
-  assert.deepEqual(result.nodeChange.openAttemptsUnchanged, [
-    { nodeId, attempt: FIRST_REVISION },
+  const result = f.rebind({ node_id: nodeId });
+  assert.deepEqual(result.node_change.open_attempts_unchanged, [
+    { node_id: nodeId, attempt: FIRST_REVISION },
   ]);
   assert.deepEqual(
     f.store.transaction((tx) => getRevision(tx, nodeId, FIRST_REVISION))
-      .pinnedByAttempts,
+      .pinned_by_attempts,
     [FIRST_REVISION],
   );
   assert.deepEqual(
     f.store.transaction((tx) => getRevision(tx, nodeId, NEXT_REVISION))
-      .pinnedByAttempts,
+      .pinned_by_attempts,
     [],
   );
   assert.deepEqual(
@@ -125,16 +125,16 @@ test("task creation and content edits report the unchanged open content-owner at
     openAttempt(tx, nodeId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
   );
   const created = f.create(f.body(NodeKind.Task, nodeId));
-  assert.deepEqual(created.openAttemptsUnchanged, [
-    { nodeId, attempt: FIRST_REVISION },
+  assert.deepEqual(created.open_attempts_unchanged, [
+    { node_id: nodeId, attempt: FIRST_REVISION },
   ]);
-  const taskId = created.addedEdges.find(
+  const taskId = created.added_edges.find(
     (edge) => edge.kind === EdgeKind.Containment,
-  )!.childId;
+  )!.child_id;
   const body = updateBody(f, taskId);
   body.content.name = REASON;
-  assert.deepEqual(f.update(taskId, body).openAttemptsUnchanged, [
-    { nodeId, attempt: FIRST_REVISION },
+  assert.deepEqual(f.update(taskId, body).open_attempts_unchanged, [
+    { node_id: nodeId, attempt: FIRST_REVISION },
   ]);
   assert.equal(
     f.store.transaction((tx) => readOpenAttempt(tx, nodeId))?.node_revision,
@@ -149,17 +149,17 @@ test("priority refuses a live claim before changing its node or job", (t) => {
       settle: () => assert.fail(),
       revoke: () => assert.fail(),
       liveExecutionOf: () => ({
-        executionId,
-        runtimeIdentity: "runtime",
+        execution_id: executionId,
+        runtime_identity: "runtime",
         attempt: 1,
-        pinnedRevision: 1,
+        pinned_revision: 1,
       }),
     },
   });
   const nodeId = f.objective();
   f.refuses(nodeId, ACTIVE_PRIORITY, MissionErrorCode.ClaimLive, {
-    nodeId,
-    executionId,
+    node_id: nodeId,
+    execution_id: executionId,
   });
 });
 
@@ -178,10 +178,10 @@ test("dependency admission settles each descendant before testing its live claim
         assert.ok(settled.has(id));
         return id === claimed
           ? {
-              executionId,
-              runtimeIdentity: "runtime",
+              execution_id: executionId,
+              runtime_identity: "runtime",
               attempt: 1,
-              pinnedRevision: 1,
+              pinned_revision: 1,
             }
           : null;
       },
@@ -190,13 +190,13 @@ test("dependency admission settles each descendant before testing its live claim
   const parent = f.initiative();
   claimed = f.create(f.body(NodeKind.Objective, parent)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const target = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   f.refuses("dependency.add", parent, target, MissionErrorCode.ClaimLive, {
-    nodeId: claimed,
-    executionId,
+    node_id: claimed,
+    execution_id: executionId,
   });
   assert.ok(settled.has(parent));
   assert.ok(settled.has(claimed));
@@ -371,7 +371,7 @@ function handlerFixture(
   function invoke(projectId: string) {
     const operation = missionOperations.get;
     const input = operation.input.parse({
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: null,
     });
@@ -445,7 +445,7 @@ test("mission.get returns a project's mission through one commit", (t) => {
   );
   assert.deepEqual(result, {
     id: result.id,
-    projectId: PROJECT_ID,
+    project_id: PROJECT_ID,
     version: MISSION_INITIAL_VERSION,
   });
   assert.equal(
@@ -618,33 +618,33 @@ const OBJECTIVE_FILENAME = "objective.md";
 const TASK_FILENAME = "task.md";
 const OTHER_FILENAME = "other.md";
 const NEW_FILENAME = "new.md";
-const PARENT_ID_FIELD = "parentId";
-const PARENT_REVISION_FIELD = "expectedParentRevision";
+const PARENT_ID_FIELD = "parent_id";
+const PARENT_REVISION_FIELD = "expected_parent_revision";
 const UNKNOWN_NODE_ID = "node_00000000000000000000000000";
 const UNKNOWN_MISSION_ID = "mission_00000000000000000000000000";
-const IMPORT_PREVIEW_PATH = "/api/mission/:missionId/import/preview";
+const IMPORT_PREVIEW_PATH = "/api/mission/:mission_id/import/preview";
 const PRIORITY = 42;
 const NEGATIVE_PRIORITY = -42;
-const PRIORITY_PATH = "/api/mission/node/:nodeId/priority";
+const PRIORITY_PATH = "/api/mission/node/:node_id/priority";
 const QueueAction = { Insert: "insert", Delete: "delete" } as const;
 type QueueCall = {
   action: string;
-  nodeId: string;
-  projectId?: string;
+  node_id: string;
+  project_id?: string;
   priority?: number;
 };
 const bindingMap = new Map([
   [
     REPOSITORY_NAME,
-    { bindingId: BINDING_ID, resourceIdentity: "repository:github:o/api" },
+    { binding_id: BINDING_ID, resource_identity: "repository:github:o/api" },
   ],
   [
     STORAGE_NAME,
-    { bindingId: OTHER_BINDING_ID, resourceIdentity: "storage:s3:host/b" },
+    { binding_id: OTHER_BINDING_ID, resource_identity: "storage:s3:host/b" },
   ],
   [
     WORKER_NAME,
-    { bindingId: UNKNOWN_BINDING_ID, resourceIdentity: "worker:kanthord:w" },
+    { binding_id: UNKNOWN_BINDING_ID, resource_identity: "worker:kanthord:w" },
   ],
 ]);
 
@@ -652,13 +652,13 @@ function nodeFixture(
   t: TestContext,
   bindingRevision: MissionBindings["getBindingRevision"] = (_tx, id) => {
     const match = [...bindingMap.entries()].find(
-      ([, value]) => value.bindingId === id,
+      ([, value]) => value.binding_id === id,
     );
     return match === undefined
       ? null
       : {
           ...match[1],
-          projectId: PROJECT_ID,
+          project_id: PROJECT_ID,
           name: match[0],
           revision: FIRST_REVISION,
           tombstone: false,
@@ -671,10 +671,15 @@ function nodeFixture(
   const calls: QueueCall[] = [];
   const queue: WorkQueue = {
     insert(_tx, nodeId, projectId, priority) {
-      calls.push({ action: QueueAction.Insert, nodeId, projectId, priority });
+      calls.push({
+        action: QueueAction.Insert,
+        node_id: nodeId,
+        project_id: projectId,
+        priority,
+      });
     },
     delete(_tx, nodeId) {
-      calls.push({ action: QueueAction.Delete, nodeId });
+      calls.push({ action: QueueAction.Delete, node_id: nodeId });
     },
     priorityUpdate() {
       throw new Error(UNEXPECTED_COLLABORATION);
@@ -695,7 +700,7 @@ function nodeFixture(
           const latest = id === OLDER_BINDING_ID ? BINDING_ID : id;
           return (
             [...bindingMap.values()].find(
-              (value) => value.bindingId === latest,
+              (value) => value.binding_id === latest,
             ) ?? null
           );
         },
@@ -715,7 +720,7 @@ function nodeFixture(
   function update(nodeId: string, body: NodeUpdate): NodeChange {
     const operation = missionOperations[RevisionWrite.NodeUpdate];
     const input = operation.input.parse({
-      params: { nodeId },
+      params: { node_id: nodeId },
       query: {},
       body,
     });
@@ -726,7 +731,7 @@ function nodeFixture(
   function criterionSet(nodeId: string, body: CriterionSet): NodeChange {
     const operation = missionOperations[RevisionWrite.CriterionSet];
     const input = operation.input.parse({
-      params: { nodeId },
+      params: { node_id: nodeId },
       query: {},
       body,
     });
@@ -737,7 +742,7 @@ function nodeFixture(
   function create(body: NodeCreate, id = missionId): NodeChange {
     const operation = missionOperations[RevisionWrite.NodeCreate];
     const input = operation.input.parse({
-      params: { missionId: id },
+      params: { mission_id: id },
       query: {},
       body,
     });
@@ -765,20 +770,20 @@ function nodeFixture(
         bindings: kind === NodeKind.Objective ? [BINDING_ID] : [],
       },
       reason: REASON,
-      expectedMissionVersion: version(),
+      expected_mission_version: version(),
       ...(parentId === undefined
         ? {}
-        : { parentId, expectedParentRevision: FIRST_REVISION }),
+        : { parent_id: parentId, expected_parent_revision: FIRST_REVISION }),
     };
   }
   function initiative() {
-    return create(body()).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    return create(body()).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   }
   function objective() {
     const parentId = initiative();
     return create(body(NodeKind.Objective, parentId)).revisions[
       FIRST_ELEMENT_INDEX
-    ]!.nodeId;
+    ]!.node_id;
   }
   function node(id: string) {
     return f.store.transaction((tx) => readNode(tx, id));
@@ -786,7 +791,7 @@ function nodeFixture(
   function read(nodeId: string) {
     const operation = missionOperations["node.get"];
     const input = operation.input.parse({
-      params: { nodeId },
+      params: { node_id: nodeId },
       query: {},
       body: null,
     });
@@ -844,7 +849,7 @@ function nodeFixture(
   }
   return {
     ...f,
-    missionId,
+    mission_id: missionId,
     calls,
     queue,
     version,
@@ -870,18 +875,18 @@ test("node.create initiative stores human attribution, pins, revision one and on
   const result = f.create(body);
   assert.equal(f.commits(), commits + ONE_COMMIT);
   assert.equal(
-    result.missionVersion,
+    result.mission_version,
     MISSION_INITIAL_VERSION + VERSION_INCREMENT,
   );
-  assert.equal(f.version(), result.missionVersion);
+  assert.equal(f.version(), result.mission_version);
   const revision = result.revisions[FIRST_ELEMENT_INDEX]!;
   assert.deepEqual(result, {
-    missionVersion: NEXT_REVISION,
+    mission_version: NEXT_REVISION,
     revisions: [revision],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   });
   assert.equal(revision.revision, FIRST_REVISION);
   assert.equal(revision.filename, body.filename);
@@ -893,23 +898,23 @@ test("node.create initiative stores human attribution, pins, revision one and on
   });
   assert.deepEqual(revision.change, {
     write: RevisionWrite.NodeCreate,
-    previousRevision: null,
-    changedFields: CONTENT_FIELDS,
+    previous_revision: null,
+    changed_fields: CONTENT_FIELDS,
   });
   assert.equal(revision.tasks, undefined);
-  assert.equal(f.node(revision.nodeId)?.state, NodeState.Available);
-  assert.equal(f.node(revision.nodeId)?.attempt, NO_ATTEMPT);
-  assert.equal(f.node(revision.nodeId)?.priority, null);
+  assert.equal(f.node(revision.node_id)?.state, NodeState.Available);
+  assert.equal(f.node(revision.node_id)?.attempt, NO_ATTEMPT);
+  assert.equal(f.node(revision.node_id)?.priority, null);
   assert.deepEqual(f.calls, [
     {
       action: QueueAction.Insert,
-      nodeId: revision.nodeId,
-      projectId: PROJECT_ID,
+      node_id: revision.node_id,
+      project_id: PROJECT_ID,
       priority: LOWEST_PRIORITY,
     },
   ]);
   const stored = f.store.transaction((tx) =>
-    readCurrentRevision(tx, revision.nodeId),
+    readCurrentRevision(tx, revision.node_id),
   );
   assert.ok(stored);
   assert.deepEqual(JSON.parse(stored.actor), humanActor(f.caller));
@@ -922,29 +927,33 @@ test("node.create objective routes Available, queues it and removes its initiati
   f.calls.length = EMPTY_CALLS;
   const result = f.create(f.body(NodeKind.Objective, parentId));
   const revision = result.revisions[FIRST_ELEMENT_INDEX]!;
-  assert.equal(result.missionVersion, THIRD_REVISION);
-  assert.equal(f.node(revision.nodeId)?.state, NodeState.Available);
+  assert.equal(result.mission_version, THIRD_REVISION);
+  assert.equal(f.node(revision.node_id)?.state, NodeState.Available);
   assert.deepEqual(revision.content.bindings, [BINDING_ID]);
   assert.deepEqual(revision.tasks, []);
   assert.deepEqual(revision.change, {
     write: RevisionWrite.NodeCreate,
-    previousRevision: null,
-    changedFields: [...CONTENT_FIELDS, TASKS_FIELD],
+    previous_revision: null,
+    changed_fields: [...CONTENT_FIELDS, TASKS_FIELD],
     tasks: [],
   });
-  assert.deepEqual(result.addedEdges, [
-    { kind: EdgeKind.Containment, parentId, childId: revision.nodeId },
+  assert.deepEqual(result.added_edges, [
+    {
+      kind: EdgeKind.Containment,
+      parent_id: parentId,
+      child_id: revision.node_id,
+    },
   ]);
   assert.equal(f.calls.length, TWO_ROUTING_CALLS);
   assert.ok(
     f.calls.some(
-      (call) => call.action === QueueAction.Delete && call.nodeId === parentId,
+      (call) => call.action === QueueAction.Delete && call.node_id === parentId,
     ),
   );
   assert.ok(
     f.calls.some(
       (call) =>
-        call.action === QueueAction.Insert && call.nodeId === revision.nodeId,
+        call.action === QueueAction.Insert && call.node_id === revision.node_id,
     ),
   );
 });
@@ -953,18 +962,20 @@ test("node.create objective inherits unmet initiative dependencies and has no jo
   const f = nodeFixture(t);
   const parentId = f.initiative();
   const dependency = f.create({ ...f.body(), filename: OTHER_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.store.database
     .prepare(
       "INSERT INTO mission_dependency (dependent_id, depends_on_id, mission_id) VALUES (?, ?, ?)",
     )
-    .run(parentId, dependency, f.missionId);
+    .run(parentId, dependency, f.mission_id);
   f.calls.length = EMPTY_CALLS;
   const result = f.create(f.body(NodeKind.Objective, parentId));
-  const nodeId = result.revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  const nodeId = result.revisions[FIRST_ELEMENT_INDEX]!.node_id;
   assert.equal(f.node(nodeId)?.state, NodeState.Pending);
   assert.equal(f.node(parentId)?.state, NodeState.Pending);
-  assert.deepEqual(f.calls, [{ action: QueueAction.Delete, nodeId: parentId }]);
+  assert.deepEqual(f.calls, [
+    { action: QueueAction.Delete, node_id: parentId },
+  ]);
 });
 
 test("node.create task revises only its objective and stores no task state, attempt or priority", (t) => {
@@ -980,10 +991,10 @@ test("node.create task revises only its objective and stores no task state, atte
   const revision = result.revisions[FIRST_ELEMENT_INDEX]!;
   const task = revision.tasks![FIRST_ELEMENT_INDEX]!;
   assert.equal(
-    result.missionVersion,
-    body.expectedMissionVersion + VERSION_INCREMENT,
+    result.mission_version,
+    body.expected_mission_version + VERSION_INCREMENT,
   );
-  assert.equal(revision.nodeId, parentId);
+  assert.equal(revision.node_id, parentId);
   assert.equal(revision.revision, NEXT_REVISION);
   assert.deepEqual(task, {
     id: task.id,
@@ -996,18 +1007,18 @@ test("node.create task revises only its objective and stores no task state, atte
   assert.deepEqual(revision.actor, humanActor(f.caller));
   assert.deepEqual(revision.change, {
     write: RevisionWrite.NodeCreate,
-    previousRevision: FIRST_REVISION,
-    changedFields: [TASKS_FIELD],
+    previous_revision: FIRST_REVISION,
+    changed_fields: [TASKS_FIELD],
     tasks: [
       {
         id: task.id,
         change: TaskChange.Created,
-        changedFields: CONTENT_FIELDS,
+        changed_fields: CONTENT_FIELDS,
       },
     ],
   });
-  assert.deepEqual(result.addedEdges, [
-    { kind: EdgeKind.Containment, parentId, childId: task.id },
+  assert.deepEqual(result.added_edges, [
+    { kind: EdgeKind.Containment, parent_id: parentId, child_id: task.id },
   ]);
   const row = f.node(task.id)!;
   assert.equal(row.state, null);
@@ -1021,7 +1032,7 @@ test("node.create task revises only its objective and stores no task state, atte
   const next = f.create({
     ...f.body(NodeKind.Task, parentId),
     filename: NEW_FILENAME,
-    expectedParentRevision: NEXT_REVISION,
+    expected_parent_revision: NEXT_REVISION,
   });
   assert.equal(
     next.revisions[FIRST_ELEMENT_INDEX]!.tasks!.length,
@@ -1054,8 +1065,8 @@ for (const kind of [NodeKind.Objective, NodeKind.Task]) {
       }
       const result = f.create(body);
       assert.equal(
-        result.missionVersion,
-        body.expectedMissionVersion + VERSION_INCREMENT,
+        result.mission_version,
+        body.expected_mission_version + VERSION_INCREMENT,
       );
       assert.equal(result.revisions.length, SINGLE_ITEM);
     });
@@ -1068,7 +1079,7 @@ test("node.create refuses wrong parent kinds before parent state admission", (t)
   f.refuses(
     f.body(NodeKind.Objective, objective),
     MissionErrorCode.CreateRefused,
-    { parentId: objective, parentKind: NodeKind.Objective },
+    { parent_id: objective, parent_kind: NodeKind.Objective },
   );
   const task = f.create(f.body(NodeKind.Task, objective)).revisions[
     FIRST_ELEMENT_INDEX
@@ -1076,13 +1087,13 @@ test("node.create refuses wrong parent kinds before parent state admission", (t)
   f.refuses(
     { ...f.body(NodeKind.Task, task), filename: NEW_FILENAME },
     MissionErrorCode.CreateRefused,
-    { parentId: task, parentKind: NodeKind.Task },
+    { parent_id: task, parent_kind: NodeKind.Task },
   );
   const initiative = f.node(objective)!.parent_id!;
   f.refuses(
     { ...f.body(NodeKind.Task, initiative), filename: NEW_FILENAME },
     MissionErrorCode.CreateRefused,
-    { parentId: initiative, parentKind: NodeKind.Initiative },
+    { parent_id: initiative, parent_kind: NodeKind.Initiative },
   );
 });
 
@@ -1096,10 +1107,10 @@ test("node.create refuses a parent in another mission", (t) => {
   f.refuses(
     {
       ...f.body(NodeKind.Objective, parentId),
-      expectedMissionVersion: otherMission.version,
+      expected_mission_version: otherMission.version,
     },
     MissionErrorCode.CreateRefused,
-    { parentId, parentKind: NodeKind.Initiative },
+    { parent_id: parentId, parent_kind: NodeKind.Initiative },
     HttpStatus.Conflict,
     otherMission.id,
   );
@@ -1114,7 +1125,7 @@ for (const kind of [NodeKind.Objective, NodeKind.Task]) {
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(RETIRED_AT, parentId);
     f.refuses(f.body(kind, parentId), MissionErrorCode.Retired, {
-      nodeId: parentId,
+      node_id: parentId,
     });
   });
 }
@@ -1132,7 +1143,7 @@ test("node.create validates mission and parent existence and version before cont
   f.refuses(
     {
       ...f.body(NodeKind.Objective, parentId),
-      expectedMissionVersion: FIRST_REVISION,
+      expected_mission_version: FIRST_REVISION,
     },
     MissionErrorCode.VersionConflict,
     { current: NEXT_REVISION },
@@ -1140,7 +1151,7 @@ test("node.create validates mission and parent existence and version before cont
   f.refuses(
     {
       ...f.body(NodeKind.Objective, parentId),
-      expectedParentRevision: NEXT_REVISION,
+      expected_parent_revision: NEXT_REVISION,
     },
     MissionErrorCode.RevisionConflict,
     { current: FIRST_REVISION },
@@ -1156,13 +1167,13 @@ test("node.create validates mission and parent existence and version before cont
 test("node.create enforces required and forbidden parent fields", (t) => {
   const f = nodeFixture(t);
   f.refuses(
-    { ...f.body(), parentId: UNKNOWN_NODE_ID },
+    { ...f.body(), parent_id: UNKNOWN_NODE_ID },
     MissionErrorCode.ContentInvalid,
     { field: PARENT_ID_FIELD },
     HttpStatus.BadRequest,
   );
   f.refuses(
-    { ...f.body(), expectedParentRevision: FIRST_REVISION },
+    { ...f.body(), expected_parent_revision: FIRST_REVISION },
     MissionErrorCode.ContentInvalid,
     { field: PARENT_ID_FIELD },
     HttpStatus.BadRequest,
@@ -1175,7 +1186,7 @@ test("node.create enforces required and forbidden parent fields", (t) => {
       HttpStatus.BadRequest,
     );
     f.refuses(
-      { ...f.body(kind, UNKNOWN_NODE_ID), expectedParentRevision: undefined },
+      { ...f.body(kind, UNKNOWN_NODE_ID), expected_parent_revision: undefined },
       MissionErrorCode.ContentInvalid,
       { field: PARENT_REVISION_FIELD },
       HttpStatus.BadRequest,
@@ -1193,7 +1204,7 @@ test("node.create refuses active filename reuse but accepts retired filename reu
     .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
     .run(RETIRED_AT, id);
   const result = f.create(f.body());
-  assert.notEqual(result.revisions[FIRST_ELEMENT_INDEX]!.nodeId, id);
+  assert.notEqual(result.revisions[FIRST_ELEMENT_INDEX]!.node_id, id);
   assert.equal(
     result.revisions[FIRST_ELEMENT_INDEX]!.filename,
     INITIATIVE_FILENAME,
@@ -1209,7 +1220,7 @@ test("node insert translates only the active filename unique constraint", (t) =>
       f.store.transaction((tx) =>
         insertNodeRow(tx, {
           id: createIdentity(NODE_IDENTITY_PREFIX),
-          mission_id: f.missionId,
+          mission_id: f.mission_id,
           kind: NodeKind.Initiative,
           filename: INITIATIVE_FILENAME,
           parent_id: null,
@@ -1228,7 +1239,7 @@ test("node insert translates only the active filename unique constraint", (t) =>
       f.store.transaction((tx) =>
         insertNodeRow(tx, {
           id,
-          mission_id: f.missionId,
+          mission_id: f.mission_id,
           kind: NodeKind.Initiative,
           filename: OTHER_FILENAME,
           parent_id: null,
@@ -1261,7 +1272,7 @@ test("node.create pins the latest revision for an older binding revision identit
   body.content.bindings = [OLDER_BINDING_ID];
   const revision = f.create(body).revisions[FIRST_ELEMENT_INDEX]!;
   assert.deepEqual(revision.content.bindings, [BINDING_ID]);
-  assert.deepEqual(f.read(revision.nodeId).content.bindings, [BINDING_ID]);
+  assert.deepEqual(f.read(revision.node_id).content.bindings, [BINDING_ID]);
 });
 
 for (const kind of Object.values(NodeKind)) {
@@ -1295,23 +1306,23 @@ test("shared routing requires Completed dependencies, preserves held states, and
   const f = nodeFixture(t);
   const parentId = f.initiative();
   const dependency = f.create({ ...f.body(), filename: OTHER_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const objective = f.create(f.body(NodeKind.Objective, parentId)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   f.store.database
     .prepare(
       "INSERT INTO mission_dependency (dependent_id, depends_on_id, mission_id) VALUES (?, ?, ?)",
     )
-    .run(parentId, dependency, f.missionId);
+    .run(parentId, dependency, f.mission_id);
   f.store.database
     .prepare("UPDATE mission_node SET priority = ? WHERE id = ?")
     .run(PRIORITY, objective);
   function route() {
     f.store.transaction((tx) => {
-      const before = claimableMap(tx, f.missionId, bindings);
-      routeMission(tx, f.missionId);
-      reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before, bindings);
+      const before = claimableMap(tx, f.mission_id, bindings);
+      routeMission(tx, f.mission_id);
+      reconcileMission(tx, f.queue, f.mission_id, PROJECT_ID, before, bindings);
     });
   }
   f.setState(dependency, NodeState.Discarded);
@@ -1324,8 +1335,8 @@ test("shared routing requires Completed dependencies, preserves held states, and
   assert.deepEqual(f.calls, [
     {
       action: QueueAction.Insert,
-      nodeId: objective,
-      projectId: PROJECT_ID,
+      node_id: objective,
+      project_id: PROJECT_ID,
       priority: PRIORITY,
     },
   ]);
@@ -1349,10 +1360,10 @@ test("shared claimability ignores retired children, requires every current objec
   const other = f.create({
     ...f.body(NodeKind.Objective, parentId),
     filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.setState(objective, NodeState.Completed);
   const before = f.store.transaction((tx) =>
-    claimableMap(tx, f.missionId, bindings),
+    claimableMap(tx, f.mission_id, bindings),
   );
   assert.equal(before.get(parentId), false);
   assert.equal(before.get(task), false);
@@ -1363,27 +1374,27 @@ test("shared claimability ignores retired children, requires every current objec
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(RETIRED_AT, other);
-    routeMission(tx, f.missionId);
-    reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before, bindings);
-    const after = claimableMap(tx, f.missionId, bindings);
+    routeMission(tx, f.mission_id);
+    reconcileMission(tx, f.queue, f.mission_id, PROJECT_ID, before, bindings);
+    const after = claimableMap(tx, f.mission_id, bindings);
     assert.equal(after.get(parentId), true);
     assert.equal(after.get(other), false);
   });
   assert.equal(f.calls.length, TWO_ROUTING_CALLS);
   assert.ok(
     f.calls.some(
-      (call) => call.action === QueueAction.Insert && call.nodeId === parentId,
+      (call) => call.action === QueueAction.Insert && call.node_id === parentId,
     ),
   );
   assert.ok(
     f.calls.some(
-      (call) => call.action === QueueAction.Delete && call.nodeId === other,
+      (call) => call.action === QueueAction.Delete && call.node_id === other,
     ),
   );
   f.setState(objective, NodeState.Discarded);
   assert.equal(
     f.store
-      .transaction((tx) => claimableMap(tx, f.missionId, bindings))
+      .transaction((tx) => claimableMap(tx, f.mission_id, bindings))
       .get(parentId),
     true,
   );
@@ -1393,36 +1404,37 @@ test("shared routing ignores dependency edges with a retired endpoint", (t) => {
   const f = nodeFixture(t);
   const parentId = f.initiative();
   const dependency = f.create({ ...f.body(), filename: OTHER_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.store.database
     .prepare(
       "INSERT INTO mission_dependency (dependent_id, depends_on_id, mission_id) VALUES (?, ?, ?)",
     )
-    .run(parentId, dependency, f.missionId);
+    .run(parentId, dependency, f.mission_id);
   const objective = f.create(f.body(NodeKind.Objective, parentId)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   assert.equal(f.node(objective)?.state, NodeState.Pending);
   f.calls.length = EMPTY_CALLS;
   f.store.transaction((tx) => {
-    const before = claimableMap(tx, f.missionId, bindings);
+    const before = claimableMap(tx, f.mission_id, bindings);
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(RETIRED_AT, dependency);
-    routeMission(tx, f.missionId);
-    reconcileMission(tx, f.queue, f.missionId, PROJECT_ID, before, bindings);
+    routeMission(tx, f.mission_id);
+    reconcileMission(tx, f.queue, f.mission_id, PROJECT_ID, before, bindings);
   });
   assert.equal(f.node(objective)?.state, NodeState.Available);
   assert.equal(f.calls.length, TWO_ROUTING_CALLS);
   assert.ok(
     f.calls.some(
       (call) =>
-        call.action === QueueAction.Delete && call.nodeId === dependency,
+        call.action === QueueAction.Delete && call.node_id === dependency,
     ),
   );
   assert.ok(
     f.calls.some(
-      (call) => call.action === QueueAction.Insert && call.nodeId === objective,
+      (call) =>
+        call.action === QueueAction.Insert && call.node_id === objective,
     ),
   );
 });
@@ -1464,17 +1476,17 @@ test("node reads map current and retired task snapshots, revisions and paginatio
   const initiative = f.initiative();
   const objective = f.create(f.body(NodeKind.Objective, initiative)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const taskRevision = f.create(f.body(NodeKind.Task, objective)).revisions[
     FIRST_ELEMENT_INDEX
   ]!;
   const task = taskRevision.tasks![FIRST_ELEMENT_INDEX]!;
-  const taskNode = nodeSchema.parse(invoke("node.get", { nodeId: task.id }));
-  assert.equal(taskNode.visibleRevision, NEXT_REVISION);
+  const taskNode = nodeSchema.parse(invoke("node.get", { node_id: task.id }));
+  assert.equal(taskNode.visible_revision, NEXT_REVISION);
   assert.deepEqual(taskNode.content, task.content);
   assert.equal("state" in taskNode, false);
   const objectiveNode = nodeSchema.parse(
-    invoke("node.get", { nodeId: objective }),
+    invoke("node.get", { node_id: objective }),
   );
   assert.equal(objectiveNode.kind, NodeKind.Objective);
   if (objectiveNode.kind !== NodeKind.Objective)
@@ -1482,12 +1494,12 @@ test("node reads map current and retired task snapshots, revisions and paginatio
   assert.equal(objectiveNode.priority, LOWEST_PRIORITY);
   assert.deepEqual(objectiveNode.content.bindings, [BINDING_ID]);
   const revision = revisionSchema.parse(
-    invoke("node.revision.get", { nodeId: task.id, revision: NEXT_REVISION }),
+    invoke("node.revision.get", { node_id: task.id, revision: NEXT_REVISION }),
   );
-  assert.equal(revision.nodeId, objective);
+  assert.equal(revision.node_id, objective);
   assert.deepEqual(revision, taskRevision);
   const page = pageOf(revisionSchema).parse(
-    invoke("node.revision.list", { nodeId: task.id }, { limit: "1" }),
+    invoke("node.revision.list", { node_id: task.id }, { limit: "1" }),
   );
   assert.deepEqual(
     page.items.map((item) => item.revision),
@@ -1499,7 +1511,7 @@ test("node reads map current and retired task snapshots, revisions and paginatio
       .parse(
         invoke(
           "node.revision.list",
-          { nodeId: objective },
+          { node_id: objective },
           { limit: "1", cursor: page.next_cursor },
         ),
       )
@@ -1507,14 +1519,14 @@ test("node reads map current and retired task snapshots, revisions and paginatio
     [FIRST_REVISION],
   );
   const first = pageOf(nodeSchema).parse(
-    invoke("node.list", { missionId: f.missionId }, { limit: "1" }),
+    invoke("node.list", { mission_id: f.mission_id }, { limit: "1" }),
   );
   assert.equal(first.items.length, SINGLE_ITEM);
   assert.ok(first.next_cursor);
   const second = pageOf(nodeSchema).parse(
     invoke(
       "node.list",
-      { missionId: f.missionId },
+      { mission_id: f.mission_id },
       { limit: "1", cursor: first.next_cursor },
     ),
   );
@@ -1528,8 +1540,8 @@ test("node reads map current and retired task snapshots, revisions and paginatio
       .parse(
         invoke(
           "node.list",
-          { missionId: f.missionId },
-          { kind: NodeKind.Task, parentId: objective },
+          { mission_id: f.mission_id },
+          { kind: NodeKind.Task, parent_id: objective },
         ),
       )
       .items.map((item) => item.id),
@@ -1540,7 +1552,7 @@ test("node reads map current and retired task snapshots, revisions and paginatio
       .parse(
         invoke(
           "node.list",
-          { missionId: f.missionId },
+          { mission_id: f.mission_id },
           { state: objectiveNode.state },
         ),
       )
@@ -1552,16 +1564,10 @@ test("node reads map current and retired task snapshots, revisions and paginatio
     .run(RETIRED_AT, task.id);
   assert.equal(
     pageOf(nodeSchema).parse(
-      invoke("node.list", { missionId: f.missionId }, { kind: NodeKind.Task }),
-    ).items.length,
-    NO_ITEMS,
-  );
-  assert.equal(
-    pageOf(nodeSchema).parse(
       invoke(
         "node.list",
-        { missionId: f.missionId },
-        { kind: NodeKind.Task, includeRetired: "false" },
+        { mission_id: f.mission_id },
+        { kind: NodeKind.Task },
       ),
     ).items.length,
     NO_ITEMS,
@@ -1570,8 +1576,18 @@ test("node reads map current and retired task snapshots, revisions and paginatio
     pageOf(nodeSchema).parse(
       invoke(
         "node.list",
-        { missionId: f.missionId },
-        { kind: NodeKind.Task, includeRetired: "true" },
+        { mission_id: f.mission_id },
+        { kind: NodeKind.Task, include_retired: "false" },
+      ),
+    ).items.length,
+    NO_ITEMS,
+  );
+  assert.equal(
+    pageOf(nodeSchema).parse(
+      invoke(
+        "node.list",
+        { mission_id: f.mission_id },
+        { kind: NodeKind.Task, include_retired: "true" },
       ),
     ).items.length,
     SINGLE_ITEM,
@@ -1581,8 +1597,8 @@ test("node reads map current and retired task snapshots, revisions and paginatio
       "INSERT INTO mission_node_revision SELECT node_id, revision + 1, filename, name, requirement, criterion, verifications, bindings, '[]', change, reason, actor, created_at FROM mission_node_revision WHERE node_id = ? AND revision = ?",
     )
     .run(objective, NEXT_REVISION);
-  const retired = nodeSchema.parse(invoke("node.get", { nodeId: task.id }));
-  assert.equal(retired.visibleRevision, THIRD_REVISION);
+  const retired = nodeSchema.parse(invoke("node.get", { node_id: task.id }));
+  assert.equal(retired.visible_revision, THIRD_REVISION);
   assert.deepEqual(retired.content, task.content);
 });
 
@@ -1609,14 +1625,14 @@ test("node reads refuse missing identities and malformed cursors", (t) => {
   }
   refuses(
     "node.get",
-    { nodeId: UNKNOWN_NODE_ID },
+    { node_id: UNKNOWN_NODE_ID },
     {},
     MissionErrorCode.NodeNotFound,
     HttpStatus.NotFound,
   );
   refuses(
     "node.list",
-    { missionId: UNKNOWN_MISSION_ID },
+    { mission_id: UNKNOWN_MISSION_ID },
     {},
     MissionErrorCode.MissionNotFound,
     HttpStatus.NotFound,
@@ -1624,35 +1640,35 @@ test("node reads refuse missing identities and malformed cursors", (t) => {
   const objective = f.objective();
   refuses(
     "node.revision.get",
-    { nodeId: objective, revision: NEXT_REVISION },
+    { node_id: objective, revision: NEXT_REVISION },
     {},
     MissionErrorCode.NodeNotFound,
     HttpStatus.NotFound,
   );
   refuses(
     "node.revision.list",
-    { nodeId: UNKNOWN_NODE_ID },
+    { node_id: UNKNOWN_NODE_ID },
     {},
     MissionErrorCode.NodeNotFound,
     HttpStatus.NotFound,
   );
   refuses(
     "node.list",
-    { missionId: f.missionId },
+    { mission_id: f.mission_id },
     { cursor: "%%%" },
     MissionErrorCode.CursorInvalid,
     HttpStatus.BadRequest,
   );
   refuses(
     "node.revision.list",
-    { nodeId: objective },
+    { node_id: objective },
     { cursor: "%%%" },
     MissionErrorCode.CursorInvalid,
     HttpStatus.BadRequest,
   );
   assert.equal(
     missionOperations["node.list"].input.safeParse({
-      params: { missionId: f.missionId },
+      params: { mission_id: f.mission_id },
       query: { kind: NodeKind.Task, state: NodeState.Pending },
       body: null,
     }).success,
@@ -1708,9 +1724,9 @@ function dependencyFixture(
   ) {
     const declaration = missionOperations[operation];
     const input = declaration.input.parse({
-      params: { nodeId, dependsOnId },
+      params: { node_id: nodeId, depends_on_id: dependsOnId },
       query: {},
-      body: { expectedMissionVersion, reason },
+      body: { expected_mission_version: expectedMissionVersion, reason },
     });
     const commits = f.commits();
     try {
@@ -1750,10 +1766,10 @@ function dependencyFixture(
     );
     assert.deepEqual({ ...f.snapshot(), jobs: jobs() }, before);
   }
-  function edges(query: object = {}, missionId = f.missionId) {
+  function edges(query: object = {}, missionId = f.mission_id) {
     const operation = missionOperations["edge.list"];
     const input = operation.input.parse({
-      params: { missionId },
+      params: { mission_id: missionId },
       query,
       body: null,
     });
@@ -1767,9 +1783,9 @@ function dependencyFixture(
   function pair() {
     const nodeId = f.objective();
     const dependsOnId = f.create({ ...f.body(), filename: OTHER_FILENAME })
-      .revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+      .revisions[FIRST_ELEMENT_INDEX]!.node_id;
     f.calls.length = EMPTY_CALLS;
-    return { nodeId, dependsOnId };
+    return { node_id: nodeId, depends_on_id: dependsOnId };
   }
   return { ...f, edit, refuses, jobs, edges, pair };
 }
@@ -1777,29 +1793,33 @@ function dependencyFixture(
 function dependsOnOf(node: Node): string[] {
   assert.notEqual(node.kind, NodeKind.Task);
   if (node.kind === NodeKind.Task) throw new Error(UNEXPECTED_COLLABORATION);
-  return node.dependsOn;
+  return node.depends_on;
 }
 
 function emptyChange(missionVersion: number): NodeChange {
   return {
-    missionVersion,
+    mission_version: missionVersion,
     revisions: [],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   };
 }
 
 test("dependency edits reroute objectives and jobs atomically without revisions or actor writes", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   const before = f.snapshot();
   const version = f.version();
-  const edge = { kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId };
+  const edge = {
+    kind: EdgeKind.Dependency,
+    dependent_id: nodeId,
+    depends_on_id: dependsOnId,
+  };
   assert.deepEqual(f.edit(DependencyOperation.Add, nodeId, dependsOnId), {
     ...emptyChange(version + VERSION_INCREMENT),
-    addedEdges: [edge],
+    added_edges: [edge],
   });
   assert.equal(f.node(nodeId)?.state, NodeState.Pending);
   assert.deepEqual(dependsOnOf(f.read(nodeId)), [dependsOnId]);
@@ -1807,12 +1827,12 @@ test("dependency edits reroute objectives and jobs atomically without revisions 
     f.jobs().some((job) => job.node_id === nodeId),
     false,
   );
-  assert.deepEqual(f.calls, [{ action: QueueAction.Delete, nodeId }]);
+  assert.deepEqual(f.calls, [{ action: QueueAction.Delete, node_id: nodeId }]);
   assert.deepEqual(f.snapshot().revisions, before.revisions);
   f.calls.length = EMPTY_CALLS;
   assert.deepEqual(f.edit(DependencyOperation.Remove, nodeId, dependsOnId), {
     ...emptyChange(version + TWO_VERSION_STEPS),
-    removedEdges: [edge],
+    removed_edges: [edge],
   });
   assert.equal(f.node(nodeId)?.state, NodeState.Available);
   assert.deepEqual(dependsOnOf(f.read(nodeId)), []);
@@ -1823,8 +1843,8 @@ test("dependency edits reroute objectives and jobs atomically without revisions 
   assert.deepEqual(f.calls, [
     {
       action: QueueAction.Insert,
-      nodeId,
-      projectId: PROJECT_ID,
+      node_id: nodeId,
+      project_id: PROJECT_ID,
       priority: LOWEST_PRIORITY,
     },
   ]);
@@ -1838,10 +1858,10 @@ test("node reads answer dependsOn in ascending order on initiatives and objectiv
   const initiative = f.node(objective)!.parent_id!;
   const first = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const second = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const task = f.create(f.body(NodeKind.Task, objective)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.tasks![FIRST_ELEMENT_INDEX]!.id;
@@ -1851,12 +1871,12 @@ test("node reads answer dependsOn in ascending order on initiatives and objectiv
   f.edit(DependencyOperation.Add, objective, first);
   assert.deepEqual(dependsOnOf(f.read(initiative)), [first, second].sort());
   assert.deepEqual(dependsOnOf(f.read(objective)), [first]);
-  assert.equal("dependsOn" in f.read(task), false);
+  assert.equal("depends_on" in f.read(task), false);
 });
 
 test("dependency addition rejects direct, self and inherited ancestor closure cycles without writes", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   f.edit(DependencyOperation.Add, nodeId, dependsOnId);
   f.refuses(
     DependencyOperation.Add,
@@ -1890,21 +1910,21 @@ test("dependency addition rejects crossed initiative waits without writes", (t) 
   const first = f.initiative();
   const objective = f.create(f.body(NodeKind.Objective, first)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const second = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const other = f.create({
     ...f.body(NodeKind.Objective, second),
     filename: "crossed.md",
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.edit(DependencyOperation.Add, objective, second);
   f.refuses(DependencyOperation.Add, other, first, MissionErrorCode.Cycle);
 });
 
 test("dependency addition validates task endpoints in either position and cross-mission endpoints", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   const task = f.create(f.body(NodeKind.Task, nodeId)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.tasks![FIRST_ELEMENT_INDEX]!.id;
@@ -1919,8 +1939,8 @@ test("dependency addition validates task endpoints in either position and cross-
       MissionErrorCode.EndpointInvalid,
       {
         reason: EndpointReason.Task,
-        nodeId: dependent,
-        dependsOnId: target,
+        node_id: dependent,
+        depends_on_id: target,
       },
     );
   }
@@ -1929,9 +1949,9 @@ test("dependency addition validates task endpoints in either position and cross-
   );
   const otherMission = f.invoke(UNKNOWN_PROJECT_ID);
   const other = f.create(
-    { ...f.body(), expectedMissionVersion: otherMission.version },
+    { ...f.body(), expected_mission_version: otherMission.version },
     otherMission.id,
-  ).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  ).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.refuses(
     DependencyOperation.Add,
     nodeId,
@@ -1939,8 +1959,8 @@ test("dependency addition validates task endpoints in either position and cross-
     MissionErrorCode.EndpointInvalid,
     {
       reason: EndpointReason.CrossMission,
-      nodeId,
-      dependsOnId: other,
+      node_id: nodeId,
+      depends_on_id: other,
     },
   );
 });
@@ -1949,16 +1969,16 @@ for (const operation of Object.values(DependencyOperation)) {
   for (const state of [NodeState.Completed, NodeState.Discarded]) {
     test(`${operation} refuses terminal dependent ${state} before no-op`, (t) => {
       const f = dependencyFixture(t);
-      const { nodeId, dependsOnId } = f.pair();
+      const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
       f.setState(nodeId, state);
       f.refuses(operation, nodeId, dependsOnId, MissionErrorCode.Terminal, {
-        nodeId,
+        node_id: nodeId,
       });
     });
   }
   test(`${operation} checks existence, retirement, version, terminal state and reason in order`, (t) => {
     const f = dependencyFixture(t);
-    const { nodeId, dependsOnId } = f.pair();
+    const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
     f.refuses(
       operation,
       UNKNOWN_NODE_ID,
@@ -1995,7 +2015,7 @@ for (const operation of Object.values(DependencyOperation)) {
       nodeId,
       dependsOnId,
       MissionErrorCode.Retired,
-      { nodeId },
+      { node_id: nodeId },
       FIRST_REVISION,
     );
   });
@@ -2004,7 +2024,7 @@ for (const operation of Object.values(DependencyOperation)) {
 for (const operation of Object.values(DependencyOperation)) {
   test(`${operation} rolls back graph, routing, jobs and version when queue reconciliation fails`, (t) => {
     const f = dependencyFixture(t);
-    const { nodeId, dependsOnId } = f.pair();
+    const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
     if (operation === DependencyOperation.Remove)
       f.edit(DependencyOperation.Add, nodeId, dependsOnId);
     const failure = new Error(UNEXPECTED_COLLABORATION);
@@ -2033,7 +2053,7 @@ for (const operation of Object.values(DependencyOperation)) {
 
 test("dependency.add checks both endpoints exist before retirement and target retirement before version", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   f.store.database
     .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
     .run(RETIRED_AT, nodeId);
@@ -2057,14 +2077,14 @@ test("dependency.add checks both endpoints exist before retirement and target re
     nodeId,
     dependsOnId,
     MissionErrorCode.Retired,
-    { nodeId: dependsOnId },
+    { node_id: dependsOnId },
     FIRST_REVISION,
   );
 });
 
 test("dependency duplicate addition and absent removal do not write, increment or call the queue", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   f.edit(DependencyOperation.Add, nodeId, dependsOnId);
   f.calls.length = EMPTY_CALLS;
   const before = { ...f.snapshot(), jobs: f.jobs() };
@@ -2105,7 +2125,7 @@ test("dependency duplicate addition and absent removal do not write, increment o
 
 test("dependency removal does not validate endpoint pairs or target retirement", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   const task = f.create(f.body(NodeKind.Task, nodeId)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.tasks![FIRST_ELEMENT_INDEX]!.id;
@@ -2118,19 +2138,25 @@ test("dependency removal does not validate endpoint pairs or target retirement",
     .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
     .run(RETIRED_AT, dependsOnId);
   assert.deepEqual(
-    f.edit(DependencyOperation.Remove, nodeId, dependsOnId).removedEdges,
-    [{ kind: EdgeKind.Dependency, dependentId: nodeId, dependsOnId }],
+    f.edit(DependencyOperation.Remove, nodeId, dependsOnId).removed_edges,
+    [
+      {
+        kind: EdgeKind.Dependency,
+        dependent_id: nodeId,
+        depends_on_id: dependsOnId,
+      },
+    ],
   );
 });
 
 test("dependency addition on initiative reroutes every child objective and removes their jobs", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   const parentId = f.node(nodeId)!.parent_id!;
   const other = f.create({
     ...f.body(NodeKind.Objective, parentId),
     filename: NEW_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.calls.length = EMPTY_CALLS;
   f.edit(DependencyOperation.Add, parentId, dependsOnId);
   assert.equal(f.node(parentId)?.state, NodeState.Pending);
@@ -2142,7 +2168,7 @@ test("dependency addition on initiative reroutes every child objective and remov
     );
   }
   assert.deepEqual(
-    f.calls.map((call) => call.nodeId).sort(),
+    f.calls.map((call) => call.node_id).sort(),
     [nodeId, other].sort(),
   );
   assert.ok(f.calls.every((call) => call.action === QueueAction.Delete));
@@ -2150,10 +2176,10 @@ test("dependency addition on initiative reroutes every child objective and remov
 
 test("dependency removal only releases nodes when all remaining dependencies are completed", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   const other = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   f.edit(DependencyOperation.Add, nodeId, dependsOnId);
   f.edit(DependencyOperation.Add, nodeId, other);
   f.calls.length = EMPTY_CALLS;
@@ -2172,7 +2198,7 @@ test("dependency removal only releases nodes when all remaining dependencies are
 
 test("edge.list lists only current incident edges, filters kinds and paginates descending keys", (t) => {
   const f = dependencyFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   const parentId = f.node(nodeId)!.parent_id!;
   const task = f.create(f.body(NodeKind.Task, nodeId)).revisions[
     FIRST_ELEMENT_INDEX
@@ -2180,24 +2206,24 @@ test("edge.list lists only current incident edges, filters kinds and paginates d
   f.edit(DependencyOperation.Add, nodeId, dependsOnId);
   const dependency = {
     kind: EdgeKind.Dependency,
-    dependentId: nodeId,
-    dependsOnId,
+    dependent_id: nodeId,
+    depends_on_id: dependsOnId,
   };
   const containment = [
-    { kind: EdgeKind.Containment, parentId, childId: nodeId },
-    { kind: EdgeKind.Containment, parentId: nodeId, childId: task },
-  ].sort((a, b) => (a.parentId > b.parentId ? -SORT_AFTER : SORT_AFTER));
+    { kind: EdgeKind.Containment, parent_id: parentId, child_id: nodeId },
+    { kind: EdgeKind.Containment, parent_id: nodeId, child_id: task },
+  ].sort((a, b) => (a.parent_id > b.parent_id ? -SORT_AFTER : SORT_AFTER));
   const expected = [dependency, ...containment];
   assert.deepEqual(f.edges(), { items: expected, next_cursor: null });
   assert.deepEqual(f.edges({ kind: EdgeKind.Dependency }).items, [dependency]);
   assert.deepEqual(f.edges({ kind: EdgeKind.Containment }).items, containment);
-  assert.deepEqual(f.edges({ nodeId }).items, expected);
-  assert.deepEqual(f.edges({ nodeId: dependsOnId }).items, [dependency]);
+  assert.deepEqual(f.edges({ node_id: nodeId }).items, expected);
+  assert.deepEqual(f.edges({ node_id: dependsOnId }).items, [dependency]);
   assert.deepEqual(
-    f.edges({ kind: EdgeKind.Containment, nodeId: dependsOnId }).items,
+    f.edges({ kind: EdgeKind.Containment, node_id: dependsOnId }).items,
     [],
   );
-  assert.deepEqual(f.edges({ nodeId: UNKNOWN_NODE_ID }).items, []);
+  assert.deepEqual(f.edges({ node_id: UNKNOWN_NODE_ID }).items, []);
   let cursor: string | undefined;
   for (const edge of expected) {
     const page = f.edges({ limit: SINGLE_ITEM, cursor });
@@ -2282,7 +2308,7 @@ function updateBody(f: ReturnType<typeof nodeFixture>, id: string): NodeUpdate {
       ...node.content,
       bindings: node.kind === NodeKind.Objective ? [BINDING_ID] : [],
     },
-    expectedMissionVersion: f.version(),
+    expected_mission_version: f.version(),
     reason: REASON,
   };
 }
@@ -2293,7 +2319,7 @@ function priorityFixture(
 ) {
   const f = nodeFixture(t, undefined, undefined, collaborators);
   const jobs = new Map<string, { id: string; priority: number }>();
-  const updates: Array<{ nodeId: string; priority: number }> = [];
+  const updates: Array<{ node_id: string; priority: number }> = [];
   f.queue.insert = (_tx, nodeId, _projectId, priority) => {
     jobs.set(nodeId, { id: createIdentity("job"), priority });
   };
@@ -2302,7 +2328,7 @@ function priorityFixture(
   };
   f.queue.priorityUpdate = (tx, nodeId, priority) => {
     assert.equal(readNode(tx, nodeId)?.priority, priority);
-    updates.push({ nodeId, priority });
+    updates.push({ node_id: nodeId, priority });
     const job = jobs.get(nodeId);
     if (job) jobs.set(nodeId, { ...job, priority });
   };
@@ -2313,9 +2339,9 @@ function priorityFixture(
     expectedMissionVersion = f.version(),
   ) {
     const input = operation.input.parse({
-      params: { nodeId },
+      params: { node_id: nodeId },
       query: {},
-      body: { value, expectedMissionVersion },
+      body: { value, expected_mission_version: expectedMissionVersion },
     });
     return nodeSchema.parse(
       f.registry.get(operation.id).handler(input, f.caller),
@@ -2357,11 +2383,11 @@ test("node.priority.set declares a human POST write with a closed safe-integer i
   assert.equal(op.access, AccessPolicy.Human);
   assert.equal(op.mutation, true);
   const valid = {
-    params: { nodeId: UNKNOWN_NODE_ID },
+    params: { node_id: UNKNOWN_NODE_ID },
     query: {},
     body: {
       value: LOWEST_PRIORITY,
-      expectedMissionVersion: MISSION_INITIAL_VERSION,
+      expected_mission_version: MISSION_INITIAL_VERSION,
     },
   };
   assert.equal(op.input.safeParse(valid).success, true);
@@ -2388,7 +2414,7 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
   const id = f.objective();
   const get = missionOperations["node.get"];
   const input = get.input.parse({
-    params: { nodeId: id },
+    params: { node_id: id },
     query: {},
     body: null,
   });
@@ -2419,8 +2445,8 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
   assert.equal(second.priority, NEGATIVE_PRIORITY);
   assert.equal(f.node(id)?.priority, NEGATIVE_PRIORITY);
   assert.deepEqual(f.updates, [
-    { nodeId: id, priority: PRIORITY },
-    { nodeId: id, priority: NEGATIVE_PRIORITY },
+    { node_id: id, priority: PRIORITY },
+    { node_id: id, priority: NEGATIVE_PRIORITY },
   ]);
   assert.deepEqual(f.jobs.get(id), { id: job.id, priority: NEGATIVE_PRIORITY });
   assert.equal(f.version(), version);
@@ -2432,7 +2458,7 @@ test("node.priority.set accepts both signed limits and zero on initiatives and o
   const initiative = f.initiative();
   const objective = f.create(f.body(NodeKind.Objective, initiative)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const version = f.version();
   for (const [id, value] of [
     [initiative, Number.MIN_SAFE_INTEGER],
@@ -2473,11 +2499,11 @@ test("node.priority.set checks existence, retirement, version, task and terminal
     task,
     PRIORITY,
     MissionErrorCode.PriorityTask,
-    { nodeId: task },
+    { node_id: task },
     HttpStatus.BadRequest,
   );
   f.setState(id, NodeState.Completed);
-  f.refuses(id, PRIORITY, MissionErrorCode.Terminal, { nodeId: id });
+  f.refuses(id, PRIORITY, MissionErrorCode.Terminal, { node_id: id });
   f.store.database
     .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
     .run(RETIRED_AT, id);
@@ -2485,7 +2511,7 @@ test("node.priority.set checks existence, retirement, version, task and terminal
     id,
     PRIORITY,
     MissionErrorCode.Retired,
-    { nodeId: id },
+    { node_id: id },
     HttpStatus.Conflict,
     MISSION_INITIAL_VERSION,
   );
@@ -2515,12 +2541,12 @@ test("node.update no-op and changed objective fields preserve version and write 
   const noOp = f.update(id, body);
   assert.equal(f.commits(), commits + ONE_COMMIT);
   assert.deepEqual(noOp, {
-    missionVersion: body.expectedMissionVersion,
+    mission_version: body.expected_mission_version,
     revisions: [],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   });
   assert.deepEqual(f.snapshot(), before);
   const changed = f.update(id, {
@@ -2529,22 +2555,22 @@ test("node.update no-op and changed objective fields preserve version and write 
     content: { ...body.content, name: "updated" },
   });
   assert.equal(
-    changed.missionVersion,
-    body.expectedMissionVersion + VERSION_INCREMENT,
+    changed.mission_version,
+    body.expected_mission_version + VERSION_INCREMENT,
   );
   assert.equal(f.node(id)?.filename, NEW_FILENAME);
   assert.equal(changed.revisions[FIRST_ELEMENT_INDEX]?.revision, NEXT_REVISION);
   assert.deepEqual(changed.revisions[FIRST_ELEMENT_INDEX]?.change, {
     write: RevisionWrite.NodeUpdate,
-    previousRevision: FIRST_REVISION,
-    changedFields: ["filename", "name"],
+    previous_revision: FIRST_REVISION,
+    changed_fields: ["filename", "name"],
     tasks: [],
   });
   assert.deepEqual(
     changed.revisions[FIRST_ELEMENT_INDEX]?.actor,
     humanActor(f.caller),
   );
-  assert.equal(f.version(), changed.missionVersion);
+  assert.equal(f.version(), changed.mission_version);
 });
 
 test("node.update initiative lists only changed content fields in canonical order", (t) => {
@@ -2564,8 +2590,8 @@ test("node.update initiative lists only changed content fields in canonical orde
   });
   assert.deepEqual(changed.revisions[FIRST_ELEMENT_INDEX]?.change, {
     write: RevisionWrite.NodeUpdate,
-    previousRevision: FIRST_REVISION,
-    changedFields: CONTENT_FIELDS.filter(
+    previous_revision: FIRST_REVISION,
+    changed_fields: CONTENT_FIELDS.filter(
       (field) => field !== ContentField.Filename,
     ),
   });
@@ -2619,12 +2645,12 @@ test("node.update task no-op leaves objective revision and mission unchanged", (
   const answer = f.update(task, body);
   assert.equal(f.commits(), commits + ONE_COMMIT);
   assert.deepEqual(answer, {
-    missionVersion: body.expectedMissionVersion,
+    mission_version: body.expected_mission_version,
     revisions: [],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   });
   assert.deepEqual(f.snapshot(), before);
 });
@@ -2661,24 +2687,24 @@ test("node.update task revises only its objective and maps filename conflicts", 
   });
   assert.equal(f.commits(), commits + ONE_COMMIT);
   assert.equal(
-    changed.missionVersion,
-    body.expectedMissionVersion + VERSION_INCREMENT,
+    changed.mission_version,
+    body.expected_mission_version + VERSION_INCREMENT,
   );
   assert.equal(f.node(taskId)?.filename, NEW_FILENAME);
-  assert.equal(changed.revisions[FIRST_ELEMENT_INDEX]?.nodeId, objectiveId);
+  assert.equal(changed.revisions[FIRST_ELEMENT_INDEX]?.node_id, objectiveId);
   assert.equal(
     changed.revisions[FIRST_ELEMENT_INDEX]?.revision,
     body.expected_revision + VERSION_INCREMENT,
   );
   assert.deepEqual(changed.revisions[FIRST_ELEMENT_INDEX]?.change, {
     write: RevisionWrite.NodeUpdate,
-    previousRevision: body.expected_revision,
-    changedFields: [TASKS_FIELD],
+    previous_revision: body.expected_revision,
+    changed_fields: [TASKS_FIELD],
     tasks: [
       {
         id: taskId,
         change: TaskChange.Updated,
-        changedFields: ["filename", "name"],
+        changed_fields: ["filename", "name"],
       },
     ],
   });
@@ -2694,7 +2720,7 @@ test("node.update task revises only its objective and maps filename conflicts", 
     f.store.transaction((tx) => readCurrentRevision(tx, taskId)),
     null,
   );
-  assert.equal(f.version(), changed.missionVersion);
+  assert.equal(f.version(), changed.mission_version);
   updateRefuses(
     f,
     taskId,
@@ -2743,9 +2769,9 @@ test("node.update checks existence, retirement, version and revision in order", 
   updateRefuses(
     f,
     id,
-    { ...body, expectedMissionVersion: FIRST_REVISION },
+    { ...body, expected_mission_version: FIRST_REVISION },
     MissionErrorCode.VersionConflict,
-    { current: body.expectedMissionVersion },
+    { current: body.expected_mission_version },
   );
   updateRefuses(
     f,
@@ -2760,9 +2786,9 @@ test("node.update checks existence, retirement, version and revision in order", 
   updateRefuses(
     f,
     id,
-    { ...body, expectedMissionVersion: FIRST_REVISION },
+    { ...body, expected_mission_version: FIRST_REVISION },
     MissionErrorCode.Retired,
-    { nodeId: id },
+    { node_id: id },
   );
 });
 
@@ -2772,7 +2798,7 @@ for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
     const id = kind === NodeKind.Initiative ? f.initiative() : f.objective();
     const body = updateBody(f, id);
     f.setState(id, NodeState.Completed);
-    updateRefuses(f, id, body, MissionErrorCode.Terminal, { nodeId: id });
+    updateRefuses(f, id, body, MissionErrorCode.Terminal, { node_id: id });
   });
 }
 
@@ -2794,7 +2820,7 @@ for (const retired of [false, true]) {
       task,
       body,
       retired ? MissionErrorCode.Retired : MissionErrorCode.Terminal,
-      { nodeId: owner },
+      { node_id: owner },
     );
   });
 }
@@ -2809,7 +2835,7 @@ function criterionBody(
     verifications: update.content.verifications,
     reason: REASON,
     expected_revision: update.expected_revision,
-    expectedMissionVersion: update.expectedMissionVersion,
+    expected_mission_version: update.expected_mission_version,
   };
 }
 
@@ -2845,7 +2871,7 @@ test("criterion.set no-op preserves mission and revision; changed criterion pres
   const commits = f.commits();
   assert.deepEqual(
     f.criterionSet(id, body),
-    emptyChange(body.expectedMissionVersion),
+    emptyChange(body.expected_mission_version),
   );
   assert.equal(f.commits(), commits + ONE_COMMIT);
   assert.deepEqual(f.snapshot(), before);
@@ -2853,14 +2879,14 @@ test("criterion.set no-op preserves mission and revision; changed criterion pres
   const changed = f.criterionSet(id, { ...body, criterion: "new criterion" });
   const revision = changed.revisions[FIRST_ELEMENT_INDEX]!;
   assert.equal(
-    changed.missionVersion,
-    body.expectedMissionVersion + VERSION_INCREMENT,
+    changed.mission_version,
+    body.expected_mission_version + VERSION_INCREMENT,
   );
-  assert.equal(f.version(), changed.missionVersion);
+  assert.equal(f.version(), changed.mission_version);
   assert.deepEqual(revision.change, {
     write: RevisionWrite.CriterionSet,
-    previousRevision: body.expected_revision,
-    changedFields: [ContentField.Criterion],
+    previous_revision: body.expected_revision,
+    changed_fields: [ContentField.Criterion],
     tasks: [],
   });
   assert.equal(revision.filename, original.filename);
@@ -2884,13 +2910,13 @@ test("criterion.set initiative changes only criterion and verifications", (t) =>
   });
   assert.equal(f.commits(), commits + ONE_COMMIT);
   assert.equal(
-    result.missionVersion,
-    body.expectedMissionVersion + VERSION_INCREMENT,
+    result.mission_version,
+    body.expected_mission_version + VERSION_INCREMENT,
   );
   assert.deepEqual(result.revisions[FIRST_ELEMENT_INDEX]!.change, {
     write: RevisionWrite.CriterionSet,
-    previousRevision: FIRST_REVISION,
-    changedFields: [ContentField.Criterion, ContentField.Verifications],
+    previous_revision: FIRST_REVISION,
+    changed_fields: [ContentField.Criterion, ContentField.Verifications],
   });
   assert.equal(result.revisions[FIRST_ELEMENT_INDEX]!.tasks, undefined);
 });
@@ -2910,20 +2936,20 @@ test("criterion.set task revises objective only and preserves task metadata", (t
   });
   const revision = changed.revisions[FIRST_ELEMENT_INDEX]!;
   assert.equal(
-    changed.missionVersion,
-    body.expectedMissionVersion + VERSION_INCREMENT,
+    changed.mission_version,
+    body.expected_mission_version + VERSION_INCREMENT,
   );
-  assert.equal(revision.nodeId, owner);
+  assert.equal(revision.node_id, owner);
   assert.equal(revision.revision, prior.revision + VERSION_INCREMENT);
   assert.deepEqual(revision.change, {
     write: RevisionWrite.CriterionSet,
-    previousRevision: prior.revision,
-    changedFields: [TASKS_FIELD],
+    previous_revision: prior.revision,
+    changed_fields: [TASKS_FIELD],
     tasks: [
       {
         id: task,
         change: TaskChange.Updated,
-        changedFields: [ContentField.Verifications],
+        changed_fields: [ContentField.Verifications],
       },
     ],
   });
@@ -2961,7 +2987,7 @@ test("criterion.set enforces check order, revisions and content validation", (t)
   criterionRefuses(
     f,
     id,
-    { ...body, expectedMissionVersion: FIRST_REVISION },
+    { ...body, expected_mission_version: FIRST_REVISION },
     MissionErrorCode.VersionConflict,
     { current: f.version() },
   );
@@ -2974,7 +3000,7 @@ test("criterion.set enforces check order, revisions and content validation", (t)
   );
   assert.equal(
     missionOperations[RevisionWrite.CriterionSet].input.safeParse({
-      params: { nodeId: id },
+      params: { node_id: id },
       query: {},
       body: { ...body, verifications: [] },
     }).success,
@@ -3005,17 +3031,17 @@ test("criterion.set enforces check order, revisions and content validation", (t)
     HttpStatus.BadRequest,
   );
   f.setState(id, NodeState.Completed);
-  criterionRefuses(f, id, body, MissionErrorCode.Terminal, { nodeId: id });
+  criterionRefuses(f, id, body, MissionErrorCode.Terminal, { node_id: id });
   criterionRefuses(f, task, criterionBody(f, task), MissionErrorCode.Terminal, {
-    nodeId: id,
+    node_id: id,
   });
   f.store.database
     .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
     .run(RETIRED_AT, id);
   criterionRefuses(f, task, criterionBody(f, task), MissionErrorCode.Retired, {
-    nodeId: id,
+    node_id: id,
   });
-  criterionRefuses(f, id, body, MissionErrorCode.Retired, { nodeId: id });
+  criterionRefuses(f, id, body, MissionErrorCode.Retired, { node_id: id });
 });
 
 test("criterion.set refuses a retired task before stale mission version", (t) => {
@@ -3031,9 +3057,9 @@ test("criterion.set refuses a retired task before stale mission version", (t) =>
   criterionRefuses(
     f,
     task,
-    { ...body, expectedMissionVersion: FIRST_REVISION },
+    { ...body, expected_mission_version: FIRST_REVISION },
     MissionErrorCode.Retired,
-    { nodeId: task },
+    { node_id: task },
   );
 });
 
@@ -3055,15 +3081,15 @@ function moveFixture(t: TestContext) {
       f.node(nodeId)?.kind === NodeKind.Task ? oldParentId : nodeId;
     const operation = missionOperations[RevisionWrite.NodeMove];
     const input = operation.input.parse({
-      params: { nodeId },
+      params: { node_id: nodeId },
       query: {},
       body: {
-        newParentId,
+        new_parent_id: newParentId,
         reason: REASON,
-        expectedMissionVersion: f.version(),
+        expected_mission_version: f.version(),
         expected_revision: revision(ownerId ?? nodeId),
-        expectedOldParentRevision: revision(oldParentId ?? nodeId),
-        expectedNewParentRevision: revision(newParentId),
+        expected_old_parent_revision: revision(oldParentId ?? nodeId),
+        expected_new_parent_revision: revision(newParentId),
         ...overrides,
       },
     });
@@ -3103,22 +3129,22 @@ test("node.move objective changes containment without revisions and reroutes bot
   const oldParent = f.initiative();
   const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const newParent = f.create({ ...f.body(), filename: OTHER_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const dependency = f.create({ ...f.body(), filename: NEW_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.edit(DependencyOperation.Add, newParent, dependency);
   const before = f.snapshot().revisions;
   f.calls.length = EMPTY_CALLS;
   const version = f.version();
   assert.deepEqual(f.move(objective, newParent), {
     ...emptyChange(version + VERSION_INCREMENT),
-    addedEdges: [
-      { kind: EdgeKind.Containment, parentId: newParent, childId: objective },
+    added_edges: [
+      { kind: EdgeKind.Containment, parent_id: newParent, child_id: objective },
     ],
-    removedEdges: [
-      { kind: EdgeKind.Containment, parentId: oldParent, childId: objective },
+    removed_edges: [
+      { kind: EdgeKind.Containment, parent_id: oldParent, child_id: objective },
     ],
   });
   assert.equal(f.version(), version + VERSION_INCREMENT);
@@ -3127,12 +3153,14 @@ test("node.move objective changes containment without revisions and reroutes bot
   assert.deepEqual(f.snapshot().revisions, before);
   assert.ok(
     f.calls.some(
-      (call) => call.action === QueueAction.Delete && call.nodeId === objective,
+      (call) =>
+        call.action === QueueAction.Delete && call.node_id === objective,
     ),
   );
   assert.ok(
     f.calls.some(
-      (call) => call.action === QueueAction.Insert && call.nodeId === oldParent,
+      (call) =>
+        call.action === QueueAction.Insert && call.node_id === oldParent,
     ),
   );
   f.calls.length = EMPTY_CALLS;
@@ -3146,16 +3174,16 @@ test("node.move task revises both owners with exact changes and no-op leaves ver
   const newParent = f.create({
     ...f.body(NodeKind.Objective, f.node(oldParent)!.parent_id!),
     filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const task = f.create(f.body(NodeKind.Task, oldParent)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.tasks![FIRST_ELEMENT_INDEX]!.id;
   const version = f.version();
   const result = f.move(task, newParent);
-  assert.equal(result.missionVersion, version + VERSION_INCREMENT);
+  assert.equal(result.mission_version, version + VERSION_INCREMENT);
   assert.equal(result.revisions.length, TWO_REVISIONS);
   assert.deepEqual(
-    result.revisions.map((item) => item.nodeId),
+    result.revisions.map((item) => item.node_id),
     [oldParent, newParent],
   );
   assert.deepEqual(
@@ -3163,19 +3191,19 @@ test("node.move task revises both owners with exact changes and no-op leaves ver
     [
       {
         write: RevisionWrite.NodeMove,
-        previousRevision: SECOND_REVISION,
-        changedFields: [TASKS_FIELD],
-        tasks: [{ id: task, change: TaskChange.MovedOut, changedFields: [] }],
+        previous_revision: SECOND_REVISION,
+        changed_fields: [TASKS_FIELD],
+        tasks: [{ id: task, change: TaskChange.MovedOut, changed_fields: [] }],
       },
       {
         write: RevisionWrite.NodeMove,
-        previousRevision: FIRST_REVISION,
-        changedFields: [TASKS_FIELD],
+        previous_revision: FIRST_REVISION,
+        changed_fields: [TASKS_FIELD],
         tasks: [
           {
             id: task,
             change: TaskChange.MovedIn,
-            changedFields: CONTENT_FIELDS,
+            changed_fields: CONTENT_FIELDS,
           },
         ],
       },
@@ -3189,11 +3217,11 @@ test("node.move task revises both owners with exact changes and no-op leaves ver
     result.revisions.map((item) => item.actor),
     [humanActor(f.caller), humanActor(f.caller)],
   );
-  assert.deepEqual(result.addedEdges, [
-    { kind: EdgeKind.Containment, parentId: newParent, childId: task },
+  assert.deepEqual(result.added_edges, [
+    { kind: EdgeKind.Containment, parent_id: newParent, child_id: task },
   ]);
-  assert.deepEqual(result.removedEdges, [
-    { kind: EdgeKind.Containment, parentId: oldParent, childId: task },
+  assert.deepEqual(result.removed_edges, [
+    { kind: EdgeKind.Containment, parent_id: oldParent, child_id: task },
   ]);
   assert.equal(f.node(task)?.parent_id, newParent);
   assert.deepEqual(f.move(task, newParent), emptyChange(f.version()));
@@ -3206,7 +3234,7 @@ test("node.move checks version, revisions, parents, terminal and retirement befo
   const newParent = f.create({
     ...f.body(NodeKind.Objective, initiative),
     filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const task = f.create(f.body(NodeKind.Task, oldParent)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.tasks![FIRST_ELEMENT_INDEX]!.id;
@@ -3215,7 +3243,7 @@ test("node.move checks version, revisions, parents, terminal and retirement befo
     newParent,
     MissionErrorCode.VersionConflict,
     { current: f.version() },
-    { expectedMissionVersion: MISSION_INITIAL_VERSION },
+    { expected_mission_version: MISSION_INITIAL_VERSION },
   );
   f.refuses(
     task,
@@ -3229,40 +3257,40 @@ test("node.move checks version, revisions, parents, terminal and retirement befo
     newParent,
     MissionErrorCode.RevisionConflict,
     { current: SECOND_REVISION },
-    { expectedOldParentRevision: FIRST_REVISION },
+    { expected_old_parent_revision: FIRST_REVISION },
   );
   f.refuses(
     task,
     newParent,
     MissionErrorCode.RevisionConflict,
     { current: FIRST_REVISION },
-    { expectedNewParentRevision: SECOND_REVISION },
+    { expected_new_parent_revision: SECOND_REVISION },
   );
   f.refuses(task, initiative, MissionErrorCode.CreateRefused, {
-    parentId: initiative,
-    parentKind: NodeKind.Initiative,
+    parent_id: initiative,
+    parent_kind: NodeKind.Initiative,
   });
   f.refuses(initiative, newParent, MissionErrorCode.CreateRefused, {
-    parentId: newParent,
-    parentKind: NodeKind.Objective,
+    parent_id: newParent,
+    parent_kind: NodeKind.Objective,
   });
   f.refuses(oldParent, newParent, MissionErrorCode.CreateRefused, {
-    parentId: newParent,
-    parentKind: NodeKind.Objective,
+    parent_id: newParent,
+    parent_kind: NodeKind.Objective,
   });
   f.refuses(task, UNKNOWN_NODE_ID, MissionErrorCode.NodeNotFound, undefined, {
-    expectedNewParentRevision: FIRST_REVISION,
+    expected_new_parent_revision: FIRST_REVISION,
   });
   f.setState(newParent, NodeState.Completed);
-  f.refuses(task, newParent, MissionErrorCode.Terminal, { nodeId: newParent });
+  f.refuses(task, newParent, MissionErrorCode.Terminal, { node_id: newParent });
   f.setState(newParent, NodeState.Available);
   f.setState(oldParent, NodeState.Completed);
-  f.refuses(task, newParent, MissionErrorCode.Terminal, { nodeId: oldParent });
+  f.refuses(task, newParent, MissionErrorCode.Terminal, { node_id: oldParent });
   f.setState(oldParent, NodeState.Available);
   f.store.database
     .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
     .run(RETIRED_AT, newParent);
-  f.refuses(task, newParent, MissionErrorCode.Retired, { nodeId: newParent });
+  f.refuses(task, newParent, MissionErrorCode.Retired, { node_id: newParent });
 });
 
 test("node.move rejects a newly closed dependency cycle and rolls back containment", (t) => {
@@ -3270,9 +3298,9 @@ test("node.move rejects a newly closed dependency cycle and rolls back containme
   const oldParent = f.initiative();
   const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const newParent = f.create({ ...f.body(), filename: OTHER_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.edit(DependencyOperation.Add, newParent, objective);
   f.refuses(objective, newParent, MissionErrorCode.Cycle);
 });
@@ -3282,9 +3310,9 @@ test("node.move refuses moving an objective under the initiative it depends on",
   const oldParent = f.initiative();
   const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const newParent = f.create({ ...f.body(), filename: OTHER_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.edit(DependencyOperation.Add, objective, newParent);
   f.refuses(objective, newParent, MissionErrorCode.Cycle);
   assert.equal(f.node(objective)?.parent_id, oldParent);
@@ -3292,15 +3320,15 @@ test("node.move refuses moving an objective under the initiative it depends on",
 
 const INVALID_RETIRE_DIGEST = "0".repeat(64);
 const RETIRE_QUEUE_FAILURE = "retirement queue failure";
-const RETIRE_PREVIEW_PATH = "/api/mission/node/:nodeId/retire/preview";
-const RETIRE_PATH = "/api/mission/node/:nodeId/retire";
+const RETIRE_PREVIEW_PATH = "/api/mission/node/:node_id/retire/preview";
+const RETIRE_PATH = "/api/mission/node/:node_id/retire";
 
 function retireFixture(t: TestContext) {
   const f = dependencyFixture(t);
   function preview(nodeId: string, query: object = {}): RetirePreview {
     const operation = missionOperations["node.retire.preview"];
     const input = operation.input.parse({
-      params: { nodeId },
+      params: { node_id: nodeId },
       query,
       body: null,
     });
@@ -3316,7 +3344,7 @@ function retireFixture(t: TestContext) {
   function apply(nodeId: string, body: Retire): NodeChange {
     const operation = missionOperations["node.retire"];
     const input = operation.input.parse({
-      params: { nodeId },
+      params: { node_id: nodeId },
       query: {},
       body,
     });
@@ -3332,8 +3360,8 @@ function retireFixture(t: TestContext) {
   function request(plan: RetirePreview): Retire {
     return {
       reason: REASON,
-      expectedMissionVersion: plan.missionVersion,
-      previewDigest: plan.previewDigest,
+      expected_mission_version: plan.mission_version,
+      preview_digest: plan.preview_digest,
       force: plan.force,
     };
   }
@@ -3346,8 +3374,8 @@ function retireFixture(t: TestContext) {
   ) {
     const body: Retire = {
       reason: REASON,
-      expectedMissionVersion: f.version(),
-      previewDigest: INVALID_RETIRE_DIGEST,
+      expected_mission_version: f.version(),
+      preview_digest: INVALID_RETIRE_DIGEST,
       force,
     };
     const before = { ...f.snapshot(), jobs: f.jobs() };
@@ -3367,7 +3395,7 @@ function retireFixture(t: TestContext) {
     const result = f.create({
       ...f.body(NodeKind.Task, parentId),
       filename,
-      expectedParentRevision: revision.revision,
+      expected_parent_revision: revision.revision,
     });
     const id = result.revisions[FIRST_ELEMENT_INDEX]!.tasks!.find(
       (item) => item.filename === filename,
@@ -3378,7 +3406,7 @@ function retireFixture(t: TestContext) {
   function get(nodeId: string) {
     const operation = missionOperations["node.get"];
     const input = operation.input.parse({
-      params: { nodeId },
+      params: { node_id: nodeId },
       query: {},
       body: null,
     });
@@ -3433,7 +3461,7 @@ test("node.retire operations declare human read preview and write apply with str
   ]) {
     assert.equal(
       preview.input.safeParse({
-        params: { nodeId: id },
+        params: { node_id: id },
         query: { force },
         body: null,
       }).success,
@@ -3447,21 +3475,21 @@ test("node.retire preview is read-only and hashes precisely the other five field
   const id = f.objective();
   const before = { ...f.snapshot(), jobs: f.jobs() };
   const plan = f.preview(id);
-  const { previewDigest, ...fields } = plan;
+  const { preview_digest: previewDigest, ...fields } = plan;
   assert.equal(previewDigest, digest(fields));
   assert.match(previewDigest, /^[0-9a-f]{64}$/);
   assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
   const result = f.apply(id, f.request(plan));
   assert.deepEqual(result, {
-    ...emptyChange(plan.missionVersion + VERSION_INCREMENT),
-    retiredNodeIds: [id],
+    ...emptyChange(plan.mission_version + VERSION_INCREMENT),
+    retired_node_ids: [id],
   });
-  assert.equal(f.version(), plan.missionVersion + VERSION_INCREMENT);
+  assert.equal(f.version(), plan.mission_version + VERSION_INCREMENT);
   assert.deepEqual(f.snapshot().revisions, before.revisions);
   assert.equal(f.snapshot().nodes.length, before.nodes.length);
   assert.equal(f.node(id)?.state, NodeState.Available);
   assert.ok(f.node(id)?.retired_at);
-  f.refuses(id, MissionErrorCode.Retired, { nodeId: id });
+  f.refuses(id, MissionErrorCode.Retired, { node_id: id });
 });
 
 for (const attempt of [FIRST_ATTEMPT, SECOND_ATTEMPT]) {
@@ -3472,7 +3500,7 @@ for (const attempt of [FIRST_ATTEMPT, SECOND_ATTEMPT]) {
       .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
       .run(attempt, id);
     f.refuses(id, MissionErrorCode.RetireRefused, {
-      nodeId: id,
+      node_id: id,
       state: NodeState.Available,
       attempt,
     });
@@ -3496,14 +3524,14 @@ for (const state of [
     const id = f.objective();
     f.setState(id, state);
     f.refuses(id, MissionErrorCode.RetireRefused, {
-      nodeId: id,
+      node_id: id,
       state,
       attempt: NO_ATTEMPT,
     });
     f.refuses(
       id,
       MissionErrorCode.RetireRefused,
-      { nodeId: id, state, attempt: NO_ATTEMPT },
+      { node_id: id, state, attempt: NO_ATTEMPT },
       HttpStatus.Conflict,
       true,
     );
@@ -3516,7 +3544,7 @@ test("node.retire checks a task through its objective outside the retirement set
   const task = f.task(objective);
   f.setState(objective, NodeState.Executing);
   f.refuses(task, MissionErrorCode.RetireRefused, {
-    nodeId: objective,
+    node_id: objective,
     state: NodeState.Executing,
     attempt: NO_ATTEMPT,
   });
@@ -3525,7 +3553,7 @@ test("node.retire checks a task through its objective outside the retirement set
     .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
     .run(FIRST_ATTEMPT, objective);
   f.refuses(task, MissionErrorCode.RetireRefused, {
-    nodeId: objective,
+    node_id: objective,
     state: NodeState.Available,
     attempt: FIRST_ATTEMPT,
   });
@@ -3538,19 +3566,19 @@ test("node.retire checks the named node first, then descendants in identity orde
   const second = f.create({
     ...f.body(NodeKind.Objective, root),
     filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.setState(root, NodeState.Executing);
   f.setState(first, NodeState.Blocked);
   f.setState(second, NodeState.Paused);
   f.refuses(root, MissionErrorCode.RetireRefused, {
-    nodeId: root,
+    node_id: root,
     state: NodeState.Executing,
     attempt: NO_ATTEMPT,
   });
   f.setState(root, NodeState.Available);
   const earliest = [first, second].sort()[FIRST_ELEMENT_INDEX]!;
   f.refuses(root, MissionErrorCode.RetireRefused, {
-    nodeId: earliest,
+    node_id: earliest,
     state: f.node(earliest)!.state,
     attempt: NO_ATTEMPT,
   });
@@ -3563,13 +3591,13 @@ test("node.retire refuses sorted unique nonterminal dependents without force, in
   const second = f.create({
     ...f.body(NodeKind.Objective, root),
     filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const dependent = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   const another = f.create({ ...f.body(), filename: "another.md" }).revisions[
     FIRST_ELEMENT_INDEX
-  ]!.nodeId;
+  ]!.node_id;
   f.edit(DependencyOperation.Add, dependent, first);
   f.edit(DependencyOperation.Add, dependent, second);
   f.edit(DependencyOperation.Add, another, first);
@@ -3584,18 +3612,26 @@ test("node.retire refuses sorted unique nonterminal dependents without force, in
   );
   const plan = f.preview(root, { force: "true" });
   const expected = [
-    { kind: EdgeKind.Dependency, dependentId: dependent, dependsOnId: first },
-    { kind: EdgeKind.Dependency, dependentId: dependent, dependsOnId: second },
-    { kind: EdgeKind.Dependency, dependentId: another, dependsOnId: first },
+    {
+      kind: EdgeKind.Dependency,
+      dependent_id: dependent,
+      depends_on_id: first,
+    },
+    {
+      kind: EdgeKind.Dependency,
+      dependent_id: dependent,
+      depends_on_id: second,
+    },
+    { kind: EdgeKind.Dependency, dependent_id: another, depends_on_id: first },
   ].sort(
     (a, b) =>
-      a.dependentId.localeCompare(b.dependentId) ||
-      a.dependsOnId.localeCompare(b.dependsOnId),
+      a.dependent_id.localeCompare(b.dependent_id) ||
+      a.depends_on_id.localeCompare(b.depends_on_id),
   );
-  assert.deepEqual(plan.removedEdges, expected);
+  assert.deepEqual(plan.removed_edges, expected);
   assert.deepEqual(dependsOnOf(f.read(dependent)), [first, second].sort());
   const result = f.apply(root, f.request(plan));
-  assert.deepEqual(result.removedEdges, expected);
+  assert.deepEqual(result.removed_edges, expected);
   assert.deepEqual(dependsOnOf(f.read(dependent)), []);
   assert.deepEqual(dependsOnOf(f.read(another)), []);
   assert.equal(f.node(dependent)?.state, NodeState.Available);
@@ -3610,13 +3646,13 @@ test("node.retire refuses sorted unique nonterminal dependents without force, in
 for (const state of [NodeState.Completed, NodeState.Discarded]) {
   test(`node.retire preserves ${state} dependent history with and without force`, (t) => {
     const f = retireFixture(t);
-    const { nodeId, dependsOnId } = f.pair();
+    const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
     f.edit(DependencyOperation.Add, nodeId, dependsOnId);
     f.setState(nodeId, state);
     const dependencies = f.snapshot().dependencies;
-    assert.deepEqual(f.preview(dependsOnId).removedEdges, []);
+    assert.deepEqual(f.preview(dependsOnId).removed_edges, []);
     const plan = f.preview(dependsOnId, { force: "true" });
-    assert.deepEqual(plan.removedEdges, []);
+    assert.deepEqual(plan.removed_edges, []);
     f.apply(dependsOnId, f.request(plan));
     assert.deepEqual(f.snapshot().dependencies, dependencies);
     assert.equal(f.node(nodeId)?.state, state);
@@ -3638,12 +3674,12 @@ test("node.retire covers all current descendants, keeps internal dependencies an
   const second = f.create({
     ...f.body(NodeKind.Objective, root),
     filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const secondTask = f.task(second, "second-task.md");
   const third = f.create({
     ...f.body(NodeKind.Objective, root),
     filename: NEW_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.edit(DependencyOperation.Add, third, first);
   const dependencies = f.snapshot().dependencies;
   const jobs = f.jobs().map((job) => job.node_id);
@@ -3656,28 +3692,31 @@ test("node.retire covers all current descendants, keeps internal dependencies an
     assert.equal(
       tx.database
         .prepare("SELECT version FROM mission_mission WHERE id = ?")
-        .get(f.missionId)?.version,
-      plan.missionVersion,
+        .get(f.mission_id)?.version,
+      plan.mission_version,
     );
     deleted.push(id);
     remove(tx, id);
   };
   const plan = f.preview(root);
   assert.deepEqual(
-    plan.retiredNodeIds,
+    plan.retired_node_ids,
     [root, first, firstTask, second, secondTask, third].sort(),
   );
   const result = f.apply(root, f.request(plan));
-  assert.deepEqual(result.retiredNodeIds, plan.retiredNodeIds);
-  assert.equal(result.missionVersion, plan.missionVersion + VERSION_INCREMENT);
+  assert.deepEqual(result.retired_node_ids, plan.retired_node_ids);
+  assert.equal(
+    result.mission_version,
+    plan.mission_version + VERSION_INCREMENT,
+  );
   assert.deepEqual(result.revisions, []);
-  assert.deepEqual(result.removedEdges, []);
+  assert.deepEqual(result.removed_edges, []);
   assert.deepEqual(deleted.sort(), jobs);
   assert.deepEqual(f.jobs(), []);
   assert.deepEqual(f.snapshot().dependencies, dependencies);
   assert.equal(f.node(oldTask)?.retired_at, oldRetirement);
   const timestamps = new Set(
-    plan.retiredNodeIds.map((id) => f.node(id)!.retired_at),
+    plan.retired_node_ids.map((id) => f.node(id)!.retired_at),
   );
   assert.equal(timestamps.size, SINGLE_ITEM);
   assert.ok(!timestamps.has(null));
@@ -3690,7 +3729,7 @@ test("node.retire gives the surviving initiative a job only when its last nonter
   const second = f.create({
     ...f.body(NodeKind.Objective, root),
     filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   f.apply(first, f.request(f.preview(first)));
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
@@ -3704,12 +3743,12 @@ test("node.retire gives the surviving initiative a job only when its last nonter
   );
   assert.ok(
     f.calls.some(
-      (call) => call.action === QueueAction.Delete && call.nodeId === second,
+      (call) => call.action === QueueAction.Delete && call.node_id === second,
     ),
   );
   assert.ok(
     f.calls.some(
-      (call) => call.action === QueueAction.Insert && call.nodeId === root,
+      (call) => call.action === QueueAction.Insert && call.node_id === root,
     ),
   );
   assert.equal(f.node(root)?.retired_at, null);
@@ -3726,10 +3765,10 @@ test("node.retire task alone revises its objective with retired change and retai
     readCurrentRevision(tx, objective),
   )!;
   const result = f.apply(task, f.request(f.preview(task)));
-  assert.deepEqual(result.retiredNodeIds, [task]);
+  assert.deepEqual(result.retired_node_ids, [task]);
   assert.equal(result.revisions.length, SINGLE_ITEM);
   const revision = result.revisions[FIRST_ELEMENT_INDEX]!;
-  assert.equal(revision.nodeId, objective);
+  assert.equal(revision.node_id, objective);
   assert.equal(revision.revision, previous.revision + VERSION_INCREMENT);
   assert.equal(revision.reason, REASON);
   assert.deepEqual(revision.actor, humanActor(f.caller));
@@ -3739,20 +3778,20 @@ test("node.retire task alone revises its objective with retired change and retai
   );
   assert.deepEqual(revision.change, {
     write: RevisionWrite.NodeRetire,
-    previousRevision: previous.revision,
-    changedFields: [TASKS_FIELD],
-    tasks: [{ id: task, change: TaskChange.Retired, changedFields: [] }],
+    previous_revision: previous.revision,
+    changed_fields: [TASKS_FIELD],
+    tasks: [{ id: task, change: TaskChange.Retired, changed_fields: [] }],
   });
   assert.deepEqual(f.jobs(), jobs);
   assert.equal(f.node(objective)?.retired_at, null);
   assert.deepEqual(f.get(task), {
     ...before,
-    retiredAt: f.node(task)!.retired_at,
-    visibleRevision: revision.revision,
+    retired_at: f.node(task)!.retired_at,
+    visible_revision: revision.revision,
   });
   const operation = missionOperations["node.revision.get"];
   const input = operation.input.parse({
-    params: { nodeId: task, revision: previous.revision },
+    params: { node_id: task, revision: previous.revision },
     query: {},
     body: null,
   });
@@ -3768,10 +3807,13 @@ test("node.retire keeps retired runnable identity, filename, content and revisio
   const before = f.get(id);
   const revisions = f.snapshot().revisions;
   f.apply(id, f.request(f.preview(id)));
-  assert.deepEqual(f.get(id), { ...before, retiredAt: f.node(id)!.retired_at });
+  assert.deepEqual(f.get(id), {
+    ...before,
+    retired_at: f.node(id)!.retired_at,
+  });
   const operation = missionOperations["node.revision.list"];
   const input = operation.input.parse({
-    params: { nodeId: id },
+    params: { node_id: id },
     query: {},
     body: null,
   });
@@ -3779,7 +3821,7 @@ test("node.retire keeps retired runnable identity, filename, content and revisio
     f.registry.get(operation.id).handler(input, f.caller),
   );
   assert.equal(result.items.length, SINGLE_ITEM);
-  assert.equal(result.items[FIRST_ELEMENT_INDEX]!.nodeId, id);
+  assert.equal(result.items[FIRST_ELEMENT_INDEX]!.node_id, id);
   assert.equal(result.items[FIRST_ELEMENT_INDEX]!.filename, before.filename);
   assert.deepEqual(f.snapshot().revisions, revisions);
 });
@@ -3797,7 +3839,7 @@ test("node.retire checks existence, retirement, version, reason, admissibility a
   const body = f.request(plan);
   const before = { ...f.snapshot(), jobs: f.jobs() };
   assert.throws(
-    () => f.apply(id, { ...body, previewDigest: INVALID_RETIRE_DIGEST }),
+    () => f.apply(id, { ...body, preview_digest: INVALID_RETIRE_DIGEST }),
     retirementError(MissionErrorCode.RetireMismatch),
   );
   assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
@@ -3806,11 +3848,11 @@ test("node.retire checks existence, retirement, version, reason, admissibility a
     () =>
       f.apply(id, {
         ...body,
-        expectedMissionVersion: MISSION_INITIAL_VERSION,
+        expected_mission_version: MISSION_INITIAL_VERSION,
         reason: "x".repeat(TEXT_MAX_BYTES + VERSION_INCREMENT),
       }),
     retirementError(MissionErrorCode.VersionConflict, {
-      current: plan.missionVersion,
+      current: plan.mission_version,
     }),
   );
   assert.throws(
@@ -3828,7 +3870,7 @@ test("node.retire checks existence, retirement, version, reason, admissibility a
   assert.throws(
     () => f.apply(id, body),
     retirementError(MissionErrorCode.RetireRefused, {
-      nodeId: id,
+      node_id: id,
       state: NodeState.Executing,
       attempt: NO_ATTEMPT,
     }),
@@ -3837,23 +3879,23 @@ test("node.retire checks existence, retirement, version, reason, admissibility a
   f.apply(id, body);
   assert.throws(
     () => f.apply(id, body),
-    retirementError(MissionErrorCode.Retired, { nodeId: id }),
+    retirementError(MissionErrorCode.Retired, { node_id: id }),
   );
 });
 
 test("node.retire detects a changed dependency digest even without a mission version change", (t) => {
   const f = retireFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   const plan = f.preview(dependsOnId, { force: "true" });
   f.store.database
     .prepare(
       "INSERT INTO mission_dependency (mission_id, dependent_id, depends_on_id) VALUES (?, ?, ?)",
     )
-    .run(f.missionId, nodeId, dependsOnId);
+    .run(f.mission_id, nodeId, dependsOnId);
   const before = { ...f.snapshot(), jobs: f.jobs() };
   const changed = f.preview(dependsOnId, { force: "true" });
-  assert.equal(changed.missionVersion, plan.missionVersion);
-  assert.notEqual(changed.previewDigest, plan.previewDigest);
+  assert.equal(changed.mission_version, plan.mission_version);
+  assert.notEqual(changed.preview_digest, plan.preview_digest);
   assert.throws(
     () => f.apply(dependsOnId, f.request(plan)),
     retirementError(MissionErrorCode.RetireMismatch),
@@ -3866,8 +3908,8 @@ test("node.retire digest binds force and mission version", (t) => {
   const id = f.initiative();
   const plan = f.preview(id);
   assert.notEqual(
-    f.preview(id, { force: "true" }).previewDigest,
-    plan.previewDigest,
+    f.preview(id, { force: "true" }).preview_digest,
+    plan.preview_digest,
   );
   assert.throws(
     () => f.apply(id, { ...f.request(plan), force: true }),
@@ -3878,14 +3920,14 @@ test("node.retire digest binds force and mission version", (t) => {
   assert.throws(
     () => f.apply(id, f.request(plan)),
     retirementError(MissionErrorCode.VersionConflict, {
-      current: plan.missionVersion + VERSION_INCREMENT,
+      current: plan.mission_version + VERSION_INCREMENT,
     }),
   );
   assert.throws(
     () =>
       f.apply(id, {
         ...f.request(plan),
-        expectedMissionVersion: plan.missionVersion + VERSION_INCREMENT,
+        expected_mission_version: plan.mission_version + VERSION_INCREMENT,
       }),
     retirementError(MissionErrorCode.RetireMismatch),
   );
@@ -3894,7 +3936,7 @@ test("node.retire digest binds force and mission version", (t) => {
 
 test("node.retire rolls back retirement, dependency removal, routing and jobs when queue deletion fails", (t) => {
   const f = retireFixture(t);
-  const { nodeId, dependsOnId } = f.pair();
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   f.edit(DependencyOperation.Add, nodeId, dependsOnId);
   const plan = f.preview(dependsOnId, { force: "true" });
   const before = f.snapshot();
@@ -3915,7 +3957,7 @@ function importPreviewFixture(t: TestContext) {
   const f = nodeFixture(t);
   const objectiveId = f.objective();
   const entries: ImportEntry[] = f.store.transaction((tx) => {
-    const nodes = readMissionNodes(tx, f.missionId);
+    const nodes = readMissionNodes(tx, f.mission_id);
     const filenames = new Map(nodes.map((node) => [node.id, node.filename]));
     return nodes.map((node) => ({
       id: node.id,
@@ -3933,15 +3975,15 @@ function importPreviewFixture(t: TestContext) {
     { format: typeof ImportFormat.Json }
   > = {
     format: ImportFormat.Json,
-    missionId: f.missionId,
-    missionVersion: f.version(),
+    mission_id: f.mission_id,
+    mission_version: f.version(),
     reason: REASON,
     entries,
   };
-  function preview(body: ImportSnapshot = snapshot, missionId = f.missionId) {
+  function preview(body: ImportSnapshot = snapshot, missionId = f.mission_id) {
     const operation = missionOperations["import.preview"];
     const input = operation.input.parse({
-      params: { missionId },
+      params: { mission_id: missionId },
       query: {},
       body,
     });
@@ -3991,9 +4033,9 @@ test("import.preview is a human POST with a read-only body, one commit and schem
   assert.equal(operation.mutation, false);
   const result = f.preview();
   assert.deepEqual(result.violations, []);
-  assert.deepEqual(result.noOps, f.entries.map((entry) => entry.id!).sort());
+  assert.deepEqual(result.no_ops, f.entries.map((entry) => entry.id!).sort());
   assert.deepEqual(
-    [result.creates, result.updates, result.retirements, result.removedEdges],
+    [result.creates, result.updates, result.retirements, result.removed_edges],
     [[], [], [], []],
   );
 });
@@ -4015,17 +4057,17 @@ test("import.preview stage one stops before unknown identity and binding resolut
       result.creates,
       result.updates,
       result.retirements,
-      result.removedEdges,
-      result.noOps,
+      result.removed_edges,
+      result.no_ops,
     ],
     [[], [], [], [], []],
   );
   assert.equal(
-    result.previewDigest,
+    result.preview_digest,
     importDigest(
-      f.missionId,
-      snapshot.missionVersion,
-      normalizeImportSnapshot(snapshot, f.missionId, TEXT_MAX_BYTES).entries,
+      f.mission_id,
+      snapshot.mission_version,
+      normalizeImportSnapshot(snapshot, f.mission_id, TEXT_MAX_BYTES).entries,
       [],
     ),
   );
@@ -4034,8 +4076,8 @@ test("import.preview stage one stops before unknown identity and binding resolut
 test("import.preview malformed Markdown digest omits refused files and does not resolve references", (t) => {
   const f = importPreviewFixture(t);
   const snapshot: ImportSnapshot = {
-    missionId: f.missionId,
-    missionVersion: f.importSnapshot.missionVersion,
+    mission_id: f.mission_id,
+    mission_version: f.importSnapshot.mission_version,
     reason: REASON,
     format: ImportFormat.Markdown,
     files: [{ filename: NEW_FILENAME, content: "not a plan" }],
@@ -4046,14 +4088,14 @@ test("import.preview malformed Markdown digest omits refused files and does not 
     [MissionErrorCode.PlanInvalid],
   );
   assert.equal(
-    result.previewDigest,
-    importDigest(f.missionId, snapshot.missionVersion, [], []),
+    result.preview_digest,
+    importDigest(f.mission_id, snapshot.mission_version, [], []),
   );
   assert.deepEqual(result.retirements, []);
 });
 
 for (const [label, patch, code] of [
-  ["cycle", { dependsOn: [OBJECTIVE_FILENAME] }, MissionErrorCode.Cycle],
+  ["cycle", { depends_on: [OBJECTIVE_FILENAME] }, MissionErrorCode.Cycle],
   ["unknown identity", { id: UNKNOWN_NODE_ID }, MissionErrorCode.UnknownId],
   [
     "unresolved binding",
@@ -4074,8 +4116,8 @@ for (const [label, patch, code] of [
         result.creates,
         result.updates,
         result.retirements,
-        result.removedEdges,
-        result.noOps,
+        result.removed_edges,
+        result.no_ops,
       ],
       [[], [], [], [], []],
     );
@@ -4113,15 +4155,15 @@ for (const [state, attempt] of [
     const result = f.preview(f.changed({ name: "Changed" }));
     assert.deepEqual(result.updates, [f.objectiveId]);
     assert.deepEqual(
-      result.violations.map(({ code, nodeId, details }) => ({
+      result.violations.map(({ code, node_id: nodeId, details }) => ({
         code,
-        nodeId,
+        node_id: nodeId,
         details,
       })),
       [
         {
           code: MissionErrorCode.ConditionFailed,
-          nodeId: f.objectiveId,
+          node_id: f.objectiveId,
           details: { state, attempt },
         },
       ],
@@ -4135,16 +4177,16 @@ test("import.preview terminal noOps are allowed but changes are terminal_change"
   assert.deepEqual(f.preview().violations, []);
   const result = f.preview(f.changed({ name: "Changed" }));
   assert.deepEqual(
-    result.violations.map(({ code, nodeId, details }) => ({
+    result.violations.map(({ code, node_id: nodeId, details }) => ({
       code,
-      nodeId,
+      node_id: nodeId,
       details,
     })),
     [
       {
         code: MissionErrorCode.TerminalChange,
-        nodeId: f.objectiveId,
-        details: { nodeId: f.objectiveId },
+        node_id: f.objectiveId,
+        details: { node_id: f.objectiveId },
       },
     ],
   );
@@ -4154,7 +4196,7 @@ test("import.preview checks mission existence, version and reason before stages"
   const f = importPreviewFixture(t);
   const invalid = {
     ...f.importSnapshot,
-    missionVersion: MISSION_INITIAL_VERSION,
+    mission_version: MISSION_INITIAL_VERSION,
     reason: "x".repeat(TEXT_MAX_BYTES + VERSION_INCREMENT),
   };
   const before = f.snapshot();
@@ -4170,14 +4212,14 @@ test("import.preview checks mission existence, version and reason before stages"
   assert.throws(
     () => f.preview(invalid),
     retirementError(MissionErrorCode.VersionConflict, {
-      current: f.importSnapshot.missionVersion,
+      current: f.importSnapshot.mission_version,
     }),
   );
   assert.throws(
     () =>
       f.preview({
         ...invalid,
-        missionVersion: f.importSnapshot.missionVersion,
+        mission_version: f.importSnapshot.mission_version,
       }),
     retirementError(
       MissionErrorCode.ContentInvalid,
@@ -4197,18 +4239,18 @@ test("import.preview empty set retires every current node without writes or queu
     f.entries.map((entry) => entry.id!).sort(),
   );
   assert.deepEqual(result.violations, []);
-  assert.deepEqual(result.removedEdges, [
+  assert.deepEqual(result.removed_edges, [
     {
       kind: EdgeKind.Containment,
-      parentId: f.node(f.objectiveId)!.parent_id,
-      childId: f.objectiveId,
+      parent_id: f.node(f.objectiveId)!.parent_id,
+      child_id: f.objectiveId,
     },
   ]);
   assert.equal(
-    result.previewDigest,
+    result.preview_digest,
     importDigest(
-      f.missionId,
-      f.importSnapshot.missionVersion,
+      f.mission_id,
+      f.importSnapshot.mission_version,
       [],
       result.retirements,
     ),
@@ -4230,8 +4272,8 @@ test("import.preview equivalent Markdown and JSON plans have identical classific
   const json = f.preview({ ...f.importSnapshot, entries });
   const markdown = f.preview({
     format: ImportFormat.Markdown,
-    missionId: f.missionId,
-    missionVersion: f.importSnapshot.missionVersion,
+    mission_id: f.mission_id,
+    mission_version: f.importSnapshot.mission_version,
     reason: REASON,
     files: entries.map(
       ({ filename, name, requirement, criterion, ...frontMatter }) => ({
@@ -4246,7 +4288,7 @@ test("import.preview equivalent Markdown and JSON plans have identical classific
   assert.deepEqual(json.updates, [f.objectiveId]);
 });
 
-const IMPORT_APPLY_PATH = "/api/mission/:missionId/import";
+const IMPORT_APPLY_PATH = "/api/mission/:mission_id/import";
 const IMPORT_QUEUE_FAILURE = "import queue insert failed";
 const IMPORT_UPDATED_NAME = "Updated imported content";
 const IMPORT_EXTRA_TASK = "extra-task.md";
@@ -4287,15 +4329,15 @@ function importApplyFixture(
     entry(OBJECTIVE_FILENAME, NodeKind.Objective, INITIATIVE_FILENAME),
     {
       ...entry(OTHER_FILENAME, NodeKind.Objective, INITIATIVE_FILENAME),
-      dependsOn: [OBJECTIVE_FILENAME],
+      depends_on: [OBJECTIVE_FILENAME],
     },
     entry(TASK_FILENAME, NodeKind.Task, OBJECTIVE_FILENAME),
   ];
   function snapshot(entries: ImportEntry[] = initial): ImportSnapshot {
     return {
       format: ImportFormat.Json,
-      missionId: f.missionId,
-      missionVersion: f.version(),
+      mission_id: f.mission_id,
+      mission_version: f.version(),
       reason: REASON,
       entries,
     };
@@ -4305,7 +4347,7 @@ function importApplyFixture(
     return operation.output.parse(
       f.registry.get(operation.id).handler(
         operation.input.parse({
-          params: { missionId: f.missionId },
+          params: { mission_id: f.mission_id },
           query: {},
           body,
         }),
@@ -4318,14 +4360,14 @@ function importApplyFixture(
     assert.deepEqual(plan.violations, []);
     return {
       ...body,
-      previewDigest: plan.previewDigest,
-      confirmedRetirements: plan.retirements,
+      preview_digest: plan.preview_digest,
+      confirmed_retirements: plan.retirements,
     };
   }
-  function apply(body: ImportApply, missionId = f.missionId) {
+  function apply(body: ImportApply, missionId = f.mission_id) {
     const operation = missionOperations["import.apply"];
     const input = operation.input.parse({
-      params: { missionId },
+      params: { mission_id: missionId },
       query: {},
       body,
     });
@@ -4343,7 +4385,7 @@ function importApplyFixture(
     entries: ImportEntry[] = initial,
   ): ImportEntry[] {
     const ids = new Map(
-      result.assignedIds.map((item) => [item.filename, item.nodeId]),
+      result.assigned_ids.map((item) => [item.filename, item.node_id]),
     );
     return entries.map((item) => {
       const id = ids.get(item.filename);
@@ -4383,10 +4425,10 @@ test("import dependency additions settle live descendants and dependency-only ed
         assert.ok(settled.has(id));
         return claimed.has(id)
           ? {
-              executionId,
-              runtimeIdentity: "runtime",
+              execution_id: executionId,
+              runtime_identity: "runtime",
               attempt: 1,
-              pinnedRevision: 1,
+              pinned_revision: 1,
             }
           : null;
       },
@@ -4408,7 +4450,7 @@ test("import dependency additions settle live descendants and dependency-only ed
     openAttempt(tx, parentId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
   );
   const modified = ids.map((item) =>
-    item.id === parentId ? { ...item, dependsOn: [IMPORT_NEW_PARENT] } : item,
+    item.id === parentId ? { ...item, depends_on: [IMPORT_NEW_PARENT] } : item,
   );
   const body = f.request(f.importSnapshot(modified));
   claimed.add(childId);
@@ -4419,7 +4461,10 @@ test("import dependency additions settle live descendants and dependency-only ed
       assert.ok(error instanceof OperationError);
       assert.equal(error.code, MissionErrorCode.ClaimLive);
       assert.equal(error.status, HttpStatus.Conflict);
-      assert.deepEqual(error.details, { nodeId: childId, executionId });
+      assert.deepEqual(error.details, {
+        node_id: childId,
+        execution_id: executionId,
+      });
       return true;
     },
   );
@@ -4432,7 +4477,7 @@ test("import dependency additions settle live descendants and dependency-only ed
     FIRST_REVISION,
   );
   const removed = f.apply(f.request(f.importSnapshot(ids)));
-  assert.equal(removed.changes.removedEdges.length, SINGLE_ITEM);
+  assert.equal(removed.changes.removed_edges.length, SINGLE_ITEM);
 });
 
 test("import.apply is a human mutation and imports a full graph in one commit and version increment", (t) => {
@@ -4447,18 +4492,21 @@ test("import.apply is a human mutation and imports a full graph in one commit an
   assert.equal(operation.body, true);
   const body = f.request();
   const result = f.apply(body);
-  assert.equal(result.missionVersion, body.missionVersion + VERSION_INCREMENT);
-  assert.equal(result.changes.missionVersion, result.missionVersion);
-  assert.equal(f.version(), result.missionVersion);
-  assert.equal(result.assignedIds.length, IMPORT_NODE_COUNT);
+  assert.equal(
+    result.mission_version,
+    body.mission_version + VERSION_INCREMENT,
+  );
+  assert.equal(result.changes.mission_version, result.mission_version);
+  assert.equal(f.version(), result.mission_version);
+  assert.equal(result.assigned_ids.length, IMPORT_NODE_COUNT);
   assert.deepEqual(
-    result.assignedIds.map((item) => item.filename),
+    result.assigned_ids.map((item) => item.filename),
     f.initial.map((item) => item.filename).sort(),
   );
   assert.deepEqual(result.actor, humanActor(f.caller));
-  assert.ok(result.acceptedAt >= CREATED_AT);
+  assert.ok(result.accepted_at >= CREATED_AT);
   const ids = new Map(
-    result.assignedIds.map((item) => [item.filename, item.nodeId]),
+    result.assigned_ids.map((item) => [item.filename, item.node_id]),
   );
   const objective = ids.get(OBJECTIVE_FILENAME)!;
   const task = ids.get(TASK_FILENAME)!;
@@ -4466,7 +4514,7 @@ test("import.apply is a human mutation and imports a full graph in one commit an
   assert.equal(f.node(ids.get(OTHER_FILENAME)!)?.state, NodeState.Pending);
   assert.deepEqual(dependsOnOf(f.read(ids.get(OTHER_FILENAME)!)), [objective]);
   assert.deepEqual(dependsOnOf(f.read(ids.get(INITIATIVE_FILENAME)!)), []);
-  assert.equal("dependsOn" in f.read(task), false);
+  assert.equal("depends_on" in f.read(task), false);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
     [objective],
@@ -4477,7 +4525,7 @@ test("import.apply is a human mutation and imports a full graph in one commit an
     null,
   );
   const revision = result.changes.revisions.find(
-    (item) => item.nodeId === objective,
+    (item) => item.node_id === objective,
   )!;
   assert.deepEqual(revision.tasks, [
     {
@@ -4494,29 +4542,29 @@ test("import.apply is a human mutation and imports a full graph in one commit an
   ]);
   assert.deepEqual(revision.change, {
     write: RevisionWrite.Import,
-    previousRevision: null,
-    changedFields: [...CONTENT_FIELDS, TASKS_FIELD],
+    previous_revision: null,
+    changed_fields: [...CONTENT_FIELDS, TASKS_FIELD],
     tasks: [
       {
         id: task,
         change: TaskChange.Created,
-        changedFields: [...CONTENT_FIELDS],
+        changed_fields: [...CONTENT_FIELDS],
       },
     ],
   });
-  assert.equal(result.changes.addedEdges.length, IMPORT_NODE_COUNT);
-  assert.deepEqual(result.changes.removedEdges, []);
-  assert.deepEqual(result.changes.openAttemptsUnchanged, []);
+  assert.equal(result.changes.added_edges.length, IMPORT_NODE_COUNT);
+  assert.deepEqual(result.changes.removed_edges, []);
+  assert.deepEqual(result.changes.open_attempts_unchanged, []);
   assert.deepEqual(
-    result.changes.revisions.map((item) => item.nodeId),
-    result.changes.revisions.map((item) => item.nodeId).sort(),
+    result.changes.revisions.map((item) => item.node_id),
+    result.changes.revisions.map((item) => item.node_id).sort(),
   );
   for (const revision of result.changes.revisions) {
     assert.equal(revision.revision, FIRST_REVISION);
     assert.equal(revision.change.write, RevisionWrite.Import);
     assert.equal(revision.reason, REASON);
     assert.deepEqual(revision.actor, result.actor);
-    assert.equal(revision.createdAt, result.acceptedAt);
+    assert.equal(revision.created_at, result.accepted_at);
   }
 });
 
@@ -4530,15 +4578,15 @@ test("import.apply identical identified set is a no-op with every assigned ident
     .get();
   const calls = [...f.calls];
   const result = f.apply(body);
-  assert.equal(result.missionVersion, first.missionVersion);
-  assert.deepEqual(result.assignedIds, first.assignedIds);
+  assert.equal(result.mission_version, first.mission_version);
+  assert.deepEqual(result.assigned_ids, first.assigned_ids);
   assert.deepEqual(result.changes, {
-    missionVersion: first.missionVersion,
+    mission_version: first.mission_version,
     revisions: [],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   });
   assert.deepEqual(f.state(), before);
   assert.deepEqual(f.calls, calls);
@@ -4564,12 +4612,12 @@ test("import.apply stops at the first staged violation before digest checking an
     () =>
       f.apply({
         ...snapshot,
-        previewDigest: INVALID_RETIRE_DIGEST,
-        confirmedRetirements: [],
+        preview_digest: INVALID_RETIRE_DIGEST,
+        confirmed_retirements: [],
       }),
     retirementError(
       first.code,
-      { field: "filename", filename: first.filename, nodeId: first.nodeId },
+      { field: "filename", filename: first.filename, node_id: first.node_id },
       HttpStatus.BadRequest,
     ),
   );
@@ -4580,7 +4628,7 @@ for (const [label, patch, code] of [
   ["unknown id", { id: UNKNOWN_NODE_ID }, MissionErrorCode.UnknownId],
   ["binding", { bindings: [UNKNOWN_NAME] }, MissionErrorCode.BindingsInvalid],
   ["reference", { parent: NEW_FILENAME }, MissionErrorCode.UnresolvedReference],
-  ["cycle", { dependsOn: [OBJECTIVE_FILENAME] }, MissionErrorCode.Cycle],
+  ["cycle", { depends_on: [OBJECTIVE_FILENAME] }, MissionErrorCode.Cycle],
 ] satisfies Array<[string, Partial<ImportEntry>, string]>) {
   test(`import.apply maps resolved ${label} violations to 400 with locators and no effects`, (t) => {
     const f = importApplyFixture(t);
@@ -4596,15 +4644,15 @@ for (const [label, patch, code] of [
       () =>
         f.apply({
           ...snapshot,
-          previewDigest: INVALID_RETIRE_DIGEST,
-          confirmedRetirements: [],
+          preview_digest: INVALID_RETIRE_DIGEST,
+          confirmed_retirements: [],
         }),
       retirementError(
         code,
         {
           ...(violation.details as object),
           filename: violation.filename,
-          nodeId: violation.nodeId,
+          node_id: violation.node_id,
         },
         HttpStatus.BadRequest,
       ),
@@ -4637,15 +4685,15 @@ for (const [state, code] of [
       () =>
         f.apply({
           ...snapshot,
-          previewDigest: INVALID_RETIRE_DIGEST,
-          confirmedRetirements: [],
+          preview_digest: INVALID_RETIRE_DIGEST,
+          confirmed_retirements: [],
         }),
       retirementError(code, {
         ...(code === MissionErrorCode.ConditionFailed
           ? { state, attempt: NO_ATTEMPT }
           : {}),
         filename: OBJECTIVE_FILENAME,
-        nodeId: objective.id,
+        node_id: objective.id,
       }),
     );
     assert.deepEqual(f.state(), before);
@@ -4672,11 +4720,11 @@ test("import.apply checks existence then version then reason without changing ro
   assert.throws(
     () => f.apply(invalid),
     retirementError(MissionErrorCode.VersionConflict, {
-      current: body.missionVersion + VERSION_INCREMENT,
+      current: body.mission_version + VERSION_INCREMENT,
     }),
   );
   assert.throws(
-    () => f.apply({ ...invalid, missionVersion: f.version() }),
+    () => f.apply({ ...invalid, mission_version: f.version() }),
     retirementError(
       MissionErrorCode.ContentInvalid,
       { field: "reason" },
@@ -4692,18 +4740,18 @@ test("import.apply refuses changed digest, changed entries and missing or wrong 
   const body = f.request(f.importSnapshot([]));
   const before = f.state();
   for (const invalid of [
-    { ...body, previewDigest: INVALID_RETIRE_DIGEST },
-    { ...body, confirmedRetirements: [] },
+    { ...body, preview_digest: INVALID_RETIRE_DIGEST },
+    { ...body, confirmed_retirements: [] },
     {
       ...body,
-      confirmedRetirements: [
-        ...body.confirmedRetirements.slice(SECOND_ENTRY_INDEX),
+      confirmed_retirements: [
+        ...body.confirmed_retirements.slice(SECOND_ENTRY_INDEX),
         UNKNOWN_NODE_ID,
       ],
     },
     {
       ...body,
-      confirmedRetirements: [...body.confirmedRetirements, UNKNOWN_NODE_ID],
+      confirmed_retirements: [...body.confirmed_retirements, UNKNOWN_NODE_ID],
     },
     { ...body, format: ImportFormat.Json, entries: f.identified(first) },
   ]) {
@@ -4715,12 +4763,12 @@ test("import.apply refuses changed digest, changed entries and missing or wrong 
   }
   const result = f.apply({
     ...body,
-    confirmedRetirements: [
-      ...body.confirmedRetirements,
-      ...body.confirmedRetirements,
+    confirmed_retirements: [
+      ...body.confirmed_retirements,
+      ...body.confirmed_retirements,
     ],
   });
-  assert.deepEqual(result.changes.retiredNodeIds, body.confirmedRetirements);
+  assert.deepEqual(result.changes.retired_node_ids, body.confirmed_retirements);
   assert.deepEqual(f.jobs(), []);
 });
 
@@ -4741,7 +4789,7 @@ test("import.apply task rename and move, objective retirement and dependency rep
       if (item.id === newObjective)
         return {
           ...item,
-          dependsOn: [NEW_FILENAME],
+          depends_on: [NEW_FILENAME],
           name: IMPORT_UPDATED_NAME,
         };
       if (item.id === task)
@@ -4751,27 +4799,30 @@ test("import.apply task rename and move, objective retirement and dependency rep
   next.push(f.entry(NEW_FILENAME, NodeKind.Initiative));
   const body = f.request(f.importSnapshot(next));
   const result = f.apply(body);
-  assert.equal(result.missionVersion, first.missionVersion + VERSION_INCREMENT);
-  assert.equal(f.node(oldObjective)?.retired_at, result.acceptedAt);
+  assert.equal(
+    result.mission_version,
+    first.mission_version + VERSION_INCREMENT,
+  );
+  assert.equal(f.node(oldObjective)?.retired_at, result.accepted_at);
   assert.equal(f.node(task)?.parent_id, newObjective);
   const oldRevision = result.changes.revisions.find(
-    (item) => item.nodeId === oldObjective,
+    (item) => item.node_id === oldObjective,
   )!;
   const newRevision = result.changes.revisions.find(
-    (item) => item.nodeId === newObjective,
+    (item) => item.node_id === newObjective,
   )!;
   assert.deepEqual(oldRevision.change.tasks, [
-    { id: task, change: TaskChange.MovedOut, changedFields: [] },
+    { id: task, change: TaskChange.MovedOut, changed_fields: [] },
   ]);
   assert.deepEqual(oldRevision.tasks, []);
   assert.deepEqual(newRevision.change.tasks, [
     {
       id: task,
       change: TaskChange.MovedIn,
-      changedFields: [...CONTENT_FIELDS],
+      changed_fields: [...CONTENT_FIELDS],
     },
   ]);
-  assert.deepEqual(newRevision.change.changedFields, [
+  assert.deepEqual(newRevision.change.changed_fields, [
     ContentField.Name,
     TASKS_FIELD,
   ]);
@@ -4785,30 +4836,30 @@ test("import.apply task rename and move, objective retirement and dependency rep
       (item) => item.change.write === RevisionWrite.Import,
     ),
   );
-  assert.deepEqual(result.changes.retiredNodeIds, [oldObjective]);
+  assert.deepEqual(result.changes.retired_node_ids, [oldObjective]);
   const removedContainment = [
     {
       kind: EdgeKind.Containment,
-      parentId: entries.find((item) => item.kind === NodeKind.Initiative)!.id!,
-      childId: oldObjective,
+      parent_id: entries.find((item) => item.kind === NodeKind.Initiative)!.id!,
+      child_id: oldObjective,
     },
-    { kind: EdgeKind.Containment, parentId: oldObjective, childId: task },
+    { kind: EdgeKind.Containment, parent_id: oldObjective, child_id: task },
   ].sort(
     (a, b) =>
-      a.parentId.localeCompare(b.parentId) ||
-      a.childId.localeCompare(b.childId),
+      a.parent_id.localeCompare(b.parent_id) ||
+      a.child_id.localeCompare(b.child_id),
   );
-  assert.deepEqual(result.changes.removedEdges, [
+  assert.deepEqual(result.changes.removed_edges, [
     ...removedContainment,
     {
       kind: EdgeKind.Dependency,
-      dependentId: newObjective,
-      dependsOnId: oldObjective,
+      dependent_id: newObjective,
+      depends_on_id: oldObjective,
     },
   ]);
-  const created = result.assignedIds.find(
+  const created = result.assigned_ids.find(
     (item) => item.filename === NEW_FILENAME,
-  )!.nodeId;
+  )!.node_id;
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
     [created],
@@ -4818,7 +4869,7 @@ test("import.apply task rename and move, objective retirement and dependency rep
     f.state().dependencies.map((edge) => ({ ...edge })),
     [
       {
-        mission_id: f.missionId,
+        mission_id: f.mission_id,
         dependent_id: newObjective,
         depends_on_id: created,
       },
@@ -4857,16 +4908,16 @@ test("import.apply retains stored task order, appends creates in set order and c
     revision.tasks?.map((item) => item.filename),
     [NEW_FILENAME, IMPORT_NEW_TASK, IMPORT_EXTRA_TASK],
   );
-  assert.deepEqual(revision.change.changedFields, [TASKS_FIELD]);
+  assert.deepEqual(revision.change.changed_fields, [TASKS_FIELD]);
   assert.deepEqual(
     revision.change.tasks?.slice(FIRST_ELEMENT_INDEX, TWO_ITEMS),
     [
       {
         id: originalTask.id,
         change: TaskChange.Updated,
-        changedFields: [ContentField.Filename, ContentField.Name],
+        changed_fields: [ContentField.Filename, ContentField.Name],
       },
-      { id: retiredTask.id, change: TaskChange.Retired, changedFields: [] },
+      { id: retiredTask.id, change: TaskChange.Retired, changed_fields: [] },
     ],
   );
   assert.ok(
@@ -4889,17 +4940,17 @@ test("import.apply same filename without identity retires and replaces the old n
     item.id === old ? { ...item, id: undefined } : item,
   );
   const result = f.apply(f.request(f.importSnapshot(next)));
-  const replacement = result.assignedIds.find(
+  const replacement = result.assigned_ids.find(
     (item) => item.filename === OBJECTIVE_FILENAME,
-  )!.nodeId;
+  )!.node_id;
   assert.notEqual(replacement, old);
-  assert.equal(f.node(old)?.retired_at, result.acceptedAt);
+  assert.equal(f.node(old)?.retired_at, result.accepted_at);
   assert.equal(f.node(replacement)?.retired_at, null);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
     [replacement],
   );
-  assert.deepEqual(result.changes.retiredNodeIds, [old]);
+  assert.deepEqual(result.changes.retired_node_ids, [old]);
   assert.deepEqual(
     f.store.database.prepare("PRAGMA foreign_key_check").all(),
     [],
@@ -4936,7 +4987,10 @@ test("import.apply rolls back every row including jobs after a late queue insert
   );
   f.queue.insert = insert;
   const result = f.apply(body);
-  assert.equal(result.missionVersion, first.missionVersion + VERSION_INCREMENT);
+  assert.equal(
+    result.mission_version,
+    first.mission_version + VERSION_INCREMENT,
+  );
 });
 
 test("import.apply handles filename swaps and new parents without transient uniqueness or foreign key failures", (t) => {
@@ -4950,16 +5004,16 @@ test("import.apply handles filename swaps and new parents without transient uniq
       return {
         ...item,
         filename: OBJECTIVE_FILENAME,
-        dependsOn: [OTHER_FILENAME],
+        depends_on: [OTHER_FILENAME],
       };
     if (item.kind === NodeKind.Task) return { ...item, parent: OTHER_FILENAME };
     return item;
   });
   next.push(f.entry(IMPORT_NEW_PARENT, NodeKind.Initiative));
   const result = f.apply(f.request(f.importSnapshot(next)));
-  const newParent = result.assignedIds.find(
+  const newParent = result.assigned_ids.find(
     (item) => item.filename === IMPORT_NEW_PARENT,
-  )!.nodeId;
+  )!.node_id;
   const moved = entries.find(
     (item) => item.filename === OBJECTIVE_FILENAME,
   )!.id!;
@@ -4985,18 +5039,21 @@ test("import.apply graph-only changes reroute jobs without writing content revis
   )!;
   const before = f.state().revisions;
   const next = entries.map((item) =>
-    item.id === other.id ? { ...item, dependsOn: [] } : item,
+    item.id === other.id ? { ...item, depends_on: [] } : item,
   );
   const result = f.apply(f.request(f.importSnapshot(next)));
-  assert.equal(result.missionVersion, first.missionVersion + VERSION_INCREMENT);
+  assert.equal(
+    result.mission_version,
+    first.mission_version + VERSION_INCREMENT,
+  );
   assert.deepEqual(result.changes.revisions, []);
   assert.deepEqual(f.state().revisions, before);
-  assert.deepEqual(result.changes.addedEdges, []);
-  assert.deepEqual(result.changes.removedEdges, [
+  assert.deepEqual(result.changes.added_edges, []);
+  assert.deepEqual(result.changes.removed_edges, [
     {
       kind: EdgeKind.Dependency,
-      dependentId: other.id,
-      dependsOnId: objective.id,
+      dependent_id: other.id,
+      depends_on_id: objective.id,
     },
   ]);
   assert.deepEqual(
@@ -5008,8 +5065,8 @@ test("import.apply graph-only changes reroute jobs without writing content revis
 test("import.apply permits terminal no-ops and an empty mission without writes", (t) => {
   const f = importApplyFixture(t);
   const empty = f.apply(f.request(f.importSnapshot([])));
-  assert.equal(empty.missionVersion, MISSION_INITIAL_VERSION);
-  assert.deepEqual(empty.assignedIds, []);
+  assert.equal(empty.mission_version, MISSION_INITIAL_VERSION);
+  assert.deepEqual(empty.assigned_ids, []);
   const first = f.apply(f.request());
   const entries = f.identified(first);
   const objective = entries.find(
@@ -5019,7 +5076,7 @@ test("import.apply permits terminal no-ops and an empty mission without writes",
   const body = f.request(f.importSnapshot(entries));
   const before = f.state();
   const result = f.apply(body);
-  assert.equal(result.missionVersion, first.missionVersion);
+  assert.equal(result.mission_version, first.mission_version);
   assert.deepEqual(result.changes.revisions, []);
   assert.deepEqual(f.state(), before);
 });
@@ -5029,8 +5086,8 @@ test("import.apply Markdown uses the same digest, revisions, graph and no-op beh
   function markdown(entries: ImportEntry[]): ImportSnapshot {
     return {
       format: ImportFormat.Markdown,
-      missionId: f.missionId,
-      missionVersion: f.version(),
+      mission_id: f.mission_id,
+      mission_version: f.version(),
       reason: REASON,
       files: entries.map(
         ({ filename, name, requirement, criterion, ...frontMatter }) => ({
@@ -5041,29 +5098,29 @@ test("import.apply Markdown uses the same digest, revisions, graph and no-op beh
     };
   }
   const body = f.request(markdown(f.initial));
-  assert.equal(body.previewDigest, f.request().previewDigest);
+  assert.equal(body.preview_digest, f.request().preview_digest);
   const result = f.apply(body);
-  assert.equal(result.assignedIds.length, IMPORT_NODE_COUNT);
+  assert.equal(result.assigned_ids.length, IMPORT_NODE_COUNT);
   assert.equal(result.changes.revisions.length, THREE_REVISIONS);
   assert.equal(f.jobs().length, SINGLE_ITEM);
   const entries = f.identified(result);
   const before = f.state();
   const second = f.apply(f.request(markdown(entries)));
-  assert.equal(second.missionVersion, result.missionVersion);
-  assert.deepEqual(second.assignedIds, result.assignedIds);
+  assert.equal(second.mission_version, result.mission_version);
+  assert.deepEqual(second.assigned_ids, result.assigned_ids);
   assert.deepEqual(f.state(), before);
 });
 
-const EXPORT_PATH = "/api/mission/:missionId/export";
+const EXPORT_PATH = "/api/mission/:mission_id/export";
 
 function invokeExport(
   f: ReturnType<typeof importApplyFixture>,
   format: ImportFormat,
-  missionId = f.missionId,
+  missionId = f.mission_id,
 ): ExportAnswer {
   const operation = missionOperations.export;
   const input = operation.input.parse({
-    params: { missionId },
+    params: { mission_id: missionId },
     query: { format },
     body: null,
   });
@@ -5086,14 +5143,14 @@ for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
     assert.equal(declaration.mutation, false);
     assert.throws(() =>
       declaration.input.parse({
-        params: { missionId: f.missionId },
+        params: { mission_id: f.mission_id },
         query: {},
         body: null,
       }),
     );
     const before = f.state();
     const answer = invokeExport(f, format);
-    assert.equal(answer.missionVersion, f.version());
+    assert.equal(answer.mission_version, f.version());
     const payload: ImportSnapshot =
       "entries" in answer
         ? { ...answer, format: ImportFormat.Json, reason: REASON }
@@ -5104,11 +5161,11 @@ for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
     assert.deepEqual(preview.retirements, []);
     const applied = f.apply({
       ...payload,
-      previewDigest: preview.previewDigest,
-      confirmedRetirements: [],
+      preview_digest: preview.preview_digest,
+      confirmed_retirements: [],
     });
     assert.deepEqual(applied.changes.revisions, []);
-    assert.equal(applied.missionVersion, answer.missionVersion);
+    assert.equal(applied.mission_version, answer.mission_version);
     assert.deepEqual(f.state(), before);
     if ("entries" in answer) {
       assert.deepEqual(
@@ -5130,10 +5187,10 @@ for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
         (entry) => entry.kind === NodeKind.Task,
       )!;
       assert.equal(Object.hasOwn(initiative, "parent"), false);
-      assert.deepEqual(initiative.dependsOn, []);
+      assert.deepEqual(initiative.depends_on, []);
       assert.equal(objective.parent, INITIATIVE_FILENAME);
       assert.deepEqual(objective.bindings, [REPOSITORY_NAME]);
-      assert.equal(Object.hasOwn(task, "dependsOn"), false);
+      assert.equal(Object.hasOwn(task, "depends_on"), false);
       assert.equal(task.parent, OBJECTIVE_FILENAME);
     } else {
       assert.match(
@@ -5153,9 +5210,9 @@ for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
 test("mission.export excludes retired nodes and refuses an unknown mission", (t) => {
   const f = importApplyFixture(t);
   const result = f.apply(f.request());
-  const retired = result.assignedIds.find(
+  const retired = result.assigned_ids.find(
     (item) => item.filename === TASK_FILENAME,
-  )!.nodeId;
+  )!.node_id;
   f.store.database
     .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
     .run(RETIRED_AT, retired);
@@ -5216,15 +5273,15 @@ test("mission.export enforces the 10 MiB serialized answer bound", (t) => {
 
 test("serializePlanFile round-trips YAML-special verification strings", () => {
   const entry = exportAnswerSchema.parse({
-    missionId: UNKNOWN_MISSION_ID,
-    missionVersion: FIRST_REVISION,
+    mission_id: UNKNOWN_MISSION_ID,
+    mission_version: FIRST_REVISION,
     entries: [
       {
         filename: OBJECTIVE_FILENAME,
         id: UNKNOWN_NODE_ID,
         kind: NodeKind.Objective,
         parent: INITIATIVE_FILENAME,
-        dependsOn: [],
+        depends_on: [],
         bindings: [REPOSITORY_NAME],
         verifications: ["echo key: value", "echo #hash", 'echo "quoted"'],
         name: "Objective",
@@ -5243,7 +5300,7 @@ test("serializePlanFile round-trips YAML-special verification strings", () => {
   assert.deepEqual(parsed.verifications, objective.verifications);
 });
 
-const REBIND_PATH = "/api/mission/:missionId/rebind";
+const REBIND_PATH = "/api/mission/:mission_id/rebind";
 const NEXT_BINDING_ID = "binding_00000000000000000000000003";
 const NEXT_STORAGE_ID = "binding_00000000000000000000000004";
 type BindingRevision = NonNullable<
@@ -5253,10 +5310,10 @@ type BindingRevision = NonNullable<
 function rebindFixture(t: TestContext) {
   const table = new Map<string, BindingRevision>(
     [...bindingMap].map(([name, binding]) => [
-      binding.bindingId,
+      binding.binding_id,
       {
         ...binding,
-        projectId: PROJECT_ID,
+        project_id: PROJECT_ID,
         name,
         revision: FIRST_REVISION,
         tombstone: false,
@@ -5266,24 +5323,24 @@ function rebindFixture(t: TestContext) {
   );
   table.set(NEXT_BINDING_ID, {
     ...table.get(BINDING_ID)!,
-    bindingId: NEXT_BINDING_ID,
+    binding_id: NEXT_BINDING_ID,
     revision: NEXT_REVISION,
   });
   table.set(NEXT_STORAGE_ID, {
     ...table.get(OTHER_BINDING_ID)!,
-    bindingId: NEXT_STORAGE_ID,
+    binding_id: NEXT_STORAGE_ID,
     revision: NEXT_REVISION,
   });
   const f = nodeFixture(t, (_tx, id) => table.get(id) ?? null);
-  function rebind(overrides: Partial<Rebind> = {}, missionId = f.missionId) {
+  function rebind(overrides: Partial<Rebind> = {}, missionId = f.mission_id) {
     const operation = missionOperations[RevisionWrite.NodeRebind];
     const input = operation.input.parse({
-      params: { missionId },
+      params: { mission_id: missionId },
       query: {},
       body: {
-        bindingId: NEXT_BINDING_ID,
+        binding_id: NEXT_BINDING_ID,
         reason: REASON,
-        expectedMissionVersion: f.version(),
+        expected_mission_version: f.version(),
         ...overrides,
       },
     });
@@ -5301,7 +5358,7 @@ function rebindFixture(t: TestContext) {
     code: string,
     status: number = HttpStatus.Conflict,
     details?: unknown,
-    missionId = f.missionId,
+    missionId = f.mission_id,
   ) {
     const before = f.snapshot();
     assert.throws(
@@ -5321,12 +5378,12 @@ function rebindFixture(t: TestContext) {
 
 function emptyRebindChange(missionVersion: number): NodeChange {
   return {
-    missionVersion,
+    mission_version: missionVersion,
     revisions: [],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   };
 }
 
@@ -5355,16 +5412,16 @@ test("mission.node.rebind declares a human write and advances a pin without chan
     ),
     [],
   );
-  const result = f.rebind({ nodeId });
-  assert.equal(result.nodeChange.missionVersion, version + VERSION_INCREMENT);
-  assert.equal(result.nodeChange.revisions.length, SINGLE_ITEM);
-  const revision = result.nodeChange.revisions[FIRST_ELEMENT_INDEX]!;
-  assert.equal(revision.nodeId, nodeId);
+  const result = f.rebind({ node_id: nodeId });
+  assert.equal(result.node_change.mission_version, version + VERSION_INCREMENT);
+  assert.equal(result.node_change.revisions.length, SINGLE_ITEM);
+  const revision = result.node_change.revisions[FIRST_ELEMENT_INDEX]!;
+  assert.equal(revision.node_id, nodeId);
   assert.equal(revision.revision, previous.revision + VERSION_INCREMENT);
   assert.deepEqual(revision.change, {
     write: RevisionWrite.NodeRebind,
-    previousRevision: previous.revision,
-    changedFields: [ContentField.Bindings],
+    previous_revision: previous.revision,
+    changed_fields: [ContentField.Bindings],
     tasks: [],
   });
   assert.deepEqual(revision.tasks, JSON.parse(previous.tasks!));
@@ -5381,9 +5438,9 @@ test("mission.node.rebind declares a human write and advances a pin without chan
     name: DISPLAY_NAME,
   });
   assert.equal(revision.reason, REASON);
-  assert.deepEqual(revision.pinnedByAttempts, []);
+  assert.deepEqual(revision.pinned_by_attempts, []);
   assert.deepEqual(result.skipped, []);
-  assert.deepEqual(result.nodeChange.openAttemptsUnchanged, []);
+  assert.deepEqual(result.node_change.open_attempts_unchanged, []);
   assert.deepEqual(f.snapshot().nodes, before.nodes);
   assert.deepEqual(f.calls, before.calls);
   assert.deepEqual(
@@ -5415,20 +5472,20 @@ test("mission rebind changes initiative and objective once, preserving unrelated
   const initiativeBody = f.body();
   initiativeBody.content.bindings = [OTHER_BINDING_ID];
   const initiative =
-    f.create(initiativeBody).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    f.create(initiativeBody).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const objectiveBody = f.body(NodeKind.Objective, initiative);
   objectiveBody.content.bindings.push(OTHER_BINDING_ID);
   const objective =
-    f.create(objectiveBody).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    f.create(objectiveBody).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const version = f.version();
-  const result = f.rebind({ bindingId: NEXT_STORAGE_ID });
-  assert.equal(result.nodeChange.missionVersion, version + VERSION_INCREMENT);
-  assert.equal(result.nodeChange.revisions.length, TWO_REVISIONS);
-  const initiativeRevision = result.nodeChange.revisions.find(
-    (r) => r.nodeId === initiative,
+  const result = f.rebind({ binding_id: NEXT_STORAGE_ID });
+  assert.equal(result.node_change.mission_version, version + VERSION_INCREMENT);
+  assert.equal(result.node_change.revisions.length, TWO_REVISIONS);
+  const initiativeRevision = result.node_change.revisions.find(
+    (r) => r.node_id === initiative,
   )!;
-  const objectiveRevision = result.nodeChange.revisions.find(
-    (r) => r.nodeId === objective,
+  const objectiveRevision = result.node_change.revisions.find(
+    (r) => r.node_id === objective,
   )!;
   assert.deepEqual(initiativeRevision.content.bindings, [NEXT_STORAGE_ID]);
   assert.equal(Object.hasOwn(initiativeRevision.change, "tasks"), false);
@@ -5453,7 +5510,7 @@ test("mission rebind reports only terminal and retired earlier pins and keeps sk
   const expected = conditions.map((state, index) => {
     const body = f.body(NodeKind.Objective, parent);
     body.filename = `node-${index}.md`;
-    const nodeId = f.create(body).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+    const nodeId = f.create(body).revisions[FIRST_ELEMENT_INDEX]!.node_id;
     f.setState(nodeId, state);
     if (state === NodeState.Available)
       f.store.database
@@ -5472,7 +5529,7 @@ test("mission rebind reports only terminal and retired earlier pins and keeps sk
   f.setState(parent, NodeState.Completed);
   const before = f.snapshot();
   const result = f.rebind();
-  assert.deepEqual(result.nodeChange, emptyRebindChange(f.version()));
+  assert.deepEqual(result.node_change, emptyRebindChange(f.version()));
   assert.deepEqual(
     result.skipped,
     expected.sort((a, b) => a.node.id.localeCompare(b.node.id)),
@@ -5480,14 +5537,14 @@ test("mission rebind reports only terminal and retired earlier pins and keeps sk
   assert.deepEqual(f.snapshot(), before);
   const body = f.body();
   body.filename = NEW_FILENAME;
-  const activeParent = f.create(body).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  const activeParent = f.create(body).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const activeBody = f.body(NodeKind.Objective, activeParent);
   activeBody.filename = OTHER_FILENAME;
-  const active = f.create(activeBody).revisions[FIRST_ELEMENT_INDEX]!.nodeId;
+  const active = f.create(activeBody).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   const mixed = f.rebind();
   assert.deepEqual(mixed.skipped, expected);
   assert.deepEqual(
-    mixed.nodeChange.revisions.map((r) => r.nodeId),
+    mixed.node_change.revisions.map((r) => r.node_id),
     [active],
   );
 });
@@ -5496,11 +5553,11 @@ for (const named of [false, true]) {
   test(`equal target rebind is a no-op with named=${named}`, (t) => {
     const f = rebindFixture(t);
     const nodeId = f.objective();
-    f.rebind({ nodeId });
+    f.rebind({ node_id: nodeId });
     const version = f.version();
     const before = f.snapshot();
-    assert.deepEqual(f.rebind(named ? { nodeId } : {}), {
-      nodeChange: emptyRebindChange(version),
+    assert.deepEqual(f.rebind(named ? { node_id: nodeId } : {}), {
+      node_change: emptyRebindChange(version),
       skipped: [],
     });
     assert.deepEqual(f.snapshot(), before);
@@ -5520,7 +5577,7 @@ for (const condition of Object.values(TargetFailure)) {
     if (condition === TargetFailure.Absent) f.table.delete(NEXT_BINDING_ID);
     if (condition === TargetFailure.Foreign)
       Object.assign(target, {
-        projectId: UNKNOWN_PROJECT_ID,
+        project_id: UNKNOWN_PROJECT_ID,
         tombstone: true,
         disabled: true,
       });
@@ -5535,7 +5592,7 @@ for (const condition of Object.values(TargetFailure)) {
         ? MissionErrorCode.BindingRemoved
         : MissionErrorCode.BindingDisabled;
     f.refuses(
-      { nodeId: UNKNOWN_NODE_ID },
+      { node_id: UNKNOWN_NODE_ID },
       code,
       notFound ? HttpStatus.NotFound : HttpStatus.Conflict,
     );
@@ -5554,7 +5611,7 @@ test("mission rebind validates mission, version and reason before target lookup"
   );
   f.refuses(
     {
-      expectedMissionVersion: NEXT_REVISION,
+      expected_mission_version: NEXT_REVISION,
       reason: "x".repeat(TEXT_MAX_BYTES + VERSION_INCREMENT),
     },
     MissionErrorCode.VersionConflict,
@@ -5579,12 +5636,12 @@ for (const condition of Object.values(RebindSkipCondition)) {
         .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
         .run(RETIRED_AT, nodeId);
     f.refuses(
-      { nodeId },
+      { node_id: nodeId },
       condition === RebindSkipCondition.Retired
         ? MissionErrorCode.Retired
         : MissionErrorCode.Terminal,
       HttpStatus.Conflict,
-      { nodeId },
+      { node_id: nodeId },
     );
   });
 }
@@ -5592,7 +5649,7 @@ for (const condition of Object.values(RebindSkipCondition)) {
 test("mission rebind refuses missing and foreign named nodes", (t) => {
   const f = rebindFixture(t);
   f.refuses(
-    { nodeId: UNKNOWN_NODE_ID },
+    { node_id: UNKNOWN_NODE_ID },
     MissionErrorCode.NodeNotFound,
     HttpStatus.NotFound,
   );
@@ -5604,7 +5661,11 @@ test("mission rebind refuses missing and foreign named nodes", (t) => {
   f.store.database
     .prepare("UPDATE mission_node SET mission_id = ? WHERE id = ?")
     .run(foreignMission, nodeId);
-  f.refuses({ nodeId }, MissionErrorCode.NodeNotFound, HttpStatus.NotFound);
+  f.refuses(
+    { node_id: nodeId },
+    MissionErrorCode.NodeNotFound,
+    HttpStatus.NotFound,
+  );
 });
 
 for (const kind of [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task]) {
@@ -5623,10 +5684,10 @@ for (const kind of [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task]) {
     }
     const bindingId = NEXT_STORAGE_ID;
     f.refuses(
-      { nodeId, bindingId },
+      { node_id: nodeId, binding_id: bindingId },
       MissionErrorCode.BindingMismatch,
       HttpStatus.Conflict,
-      { nodeId, bindingId },
+      { node_id: nodeId, binding_id: bindingId },
     );
   });
 }
@@ -5642,20 +5703,20 @@ for (const condition of Object.values(UnmatchedPin)) {
     const nodeId = f.objective();
     const stored = f.table.get(BINDING_ID)!;
     if (condition === UnmatchedPin.Foreign)
-      stored.projectId = UNKNOWN_PROJECT_ID;
+      stored.project_id = UNKNOWN_PROJECT_ID;
     if (condition === UnmatchedPin.Newer) stored.revision = THIRD_REVISION;
     if (condition === UnmatchedPin.Missing) f.table.delete(BINDING_ID);
     const before = f.snapshot();
     assert.deepEqual(f.rebind(), {
-      nodeChange: emptyRebindChange(f.version()),
+      node_change: emptyRebindChange(f.version()),
       skipped: [],
     });
     assert.deepEqual(f.snapshot(), before);
     f.refuses(
-      { nodeId },
+      { node_id: nodeId },
       MissionErrorCode.BindingMismatch,
       HttpStatus.Conflict,
-      { nodeId, bindingId: NEXT_BINDING_ID },
+      { node_id: nodeId, binding_id: NEXT_BINDING_ID },
     );
   });
 }

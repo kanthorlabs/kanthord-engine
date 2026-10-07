@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: projectId
+      - name: project_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.get.Input/properties/params/properties/proj\
-            ectId"
+            ect_id"
     responses:
       "200":
         description: Completed result
@@ -53,14 +53,14 @@ components:
         params:
           type: object
           properties:
-            projectId:
+            project_id:
               type: string
               minLength: 34
               maxLength: 34
               pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: project_ followed by a canonical 26-character uppercase ULID.
           required:
-            - projectId
+            - project_id
           additionalProperties: false
         query:
           type: object
@@ -82,7 +82,7 @@ components:
           maxLength: 34
           pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: mission_ followed by a canonical 26-character uppercase ULID.
-        projectId:
+        project_id:
           type: string
           minLength: 34
           maxLength: 34
@@ -94,6 +94,6 @@ components:
           maximum: 9007199254740991
       required:
         - id
-        - projectId
+        - project_id
         - version
       additionalProperties: false

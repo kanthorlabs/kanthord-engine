@@ -75,7 +75,7 @@ const CONTENT = {
   bindings: [],
 };
 type Pull = { kind: string; execution: ExecutionRecord };
-type Change = { revisions: { nodeId: string }[] };
+type Change = { revisions: { node_id: string }[] };
 const credential = (key: string) => ({ type: "api_key" as const, key });
 
 function noSecrets(text: string): void {
@@ -233,7 +233,7 @@ async function resources(c: ReturnType<typeof cli>) {
     },
   });
   assert.equal(applied.binding_set_version, FULL_BINDING_SET_VERSION);
-  return { projectId: project.id, bindingId: applied.bindings.repo!.id };
+  return { project_id: project.id, binding_id: applied.bindings.repo!.id };
 }
 
 async function graph(
@@ -249,7 +249,7 @@ async function graph(
       kind: "initiative",
       content: CONTENT,
       reason: "plan",
-      expectedMissionVersion: FIRST_REVISION,
+      expected_mission_version: FIRST_REVISION,
     },
   );
   assert.ok(initiative.revisions[0]);
@@ -260,9 +260,9 @@ async function graph(
       kind: "objective",
       content: { ...CONTENT, bindings: [bindingId] },
       reason: "plan",
-      parentId: initiative.revisions[0].nodeId,
-      expectedParentRevision: FIRST_REVISION,
-      expectedMissionVersion: SECOND_REVISION,
+      parent_id: initiative.revisions[0].node_id,
+      expected_parent_revision: FIRST_REVISION,
+      expected_mission_version: SECOND_REVISION,
     },
   );
   assert.ok(objective.revisions[0]);
@@ -282,7 +282,7 @@ async function setup(t: TestContext) {
     KANTHORD_TOKEN: fixture.token,
   };
   const c = cli(directory, human);
-  const { projectId, bindingId } = await resources(c);
+  const { project_id: projectId, binding_id: bindingId } = await resources(c);
   await graph(c, projectId, bindingId);
   writePrivate(
     join(directory, "server.yaml"),
@@ -301,8 +301,8 @@ async function setup(t: TestContext) {
     c.write<Pull>(
       ["scheduler", "work", "pull"],
       {
-        resourceIdentity: "worker:kanthord:general",
-        runtimeIdentity: registration.runtime_identity,
+        resource_identity: "worker:kanthord:general",
+        runtime_identity: registration.runtime_identity,
       },
       env,
     );
@@ -356,7 +356,7 @@ async function setup(t: TestContext) {
     handover,
     report,
     pull,
-    executionId: claim.execution.executionId,
+    execution_id: claim.execution.execution_id,
     credentialId: stored.revisions[0].id,
   };
 }
@@ -366,7 +366,7 @@ test(
   { timeout: JOURNEY_TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    const X = h.executionId;
+    const X = h.execution_id;
     const C1 = h.credentialId;
     const K1 = ulid();
     let C2: string;
@@ -603,7 +603,7 @@ test(
       async () => {
         await h.write(
           ["scheduler", "execution", "release", X],
-          { furtherWork: true },
+          { further_work: true },
           h.env,
         );
         const execution = await h.read<ExecutionRecord>([
@@ -612,7 +612,7 @@ test(
           "get",
           X,
         ]);
-        assert.equal(typeof execution.endedAt, NUMBER_TYPE);
+        assert.equal(typeof execution.ended_at, NUMBER_TYPE);
         await h.refuses(
           ["worker", "handover", X],
           "gateway.invocation.execution_proof_failed",
@@ -630,7 +630,7 @@ test(
       async () => {
         const claim = await h.pull();
         assert.equal(claim.kind, WorkPullKind.Claimed);
-        X2 = claim.execution.executionId;
+        X2 = claim.execution.execution_id;
         const receipt = await h.read<{ received: boolean }>(
           ["worker", "handover", X2],
           h.env,
@@ -669,7 +669,7 @@ test(
       async () => {
         await h.write(
           ["scheduler", "execution", "release", X2],
-          { furtherWork: true },
+          { further_work: true },
           h.env,
         );
         const stored = await h.read<CredentialAnswer>([
@@ -697,7 +697,7 @@ test(
           String(FIRST_REVISION),
         ]);
         await h.refuses(
-          ["worker", "handover", claim.execution.executionId],
+          ["worker", "handover", claim.execution.execution_id],
           "agent.enablement.unavailable",
           h.env,
         );
@@ -705,7 +705,7 @@ test(
           "scheduler",
           "execution",
           "get",
-          claim.execution.executionId,
+          claim.execution.execution_id,
         ]);
         assert.deepEqual(execution.credentials, []);
         noSecrets(JSON.stringify(h.fixture.logs));

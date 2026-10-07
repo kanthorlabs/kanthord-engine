@@ -19,10 +19,10 @@ import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 const objectContentSchema = z.strictObject({
   location: z.string(),
   size: z.number().int().nonnegative(),
-  mediaType: z.string(),
-  storageBindingId: z.string(),
+  media_type: z.string(),
+  storage_binding_id: z.string(),
   sha256: z.string().optional(),
-  objectVersion: z.string().optional(),
+  object_version: z.string().optional(),
 });
 const EXPECTED_ROW_CHANGE = 1;
 
@@ -51,8 +51,8 @@ export function prepareComplete(
   if (evidence.attempt !== claim.attempt) executionMismatch("attempt");
   const content = objectContentSchema.parse(JSON.parse(asset.content));
   const result = {
-    assetId: asset.id,
-    evidenceId: evidence.id,
+    asset_id: asset.id,
+    evidence_id: evidence.id,
     uri: content.location,
   };
   if (asset.published_at !== null) return { result, pending: null };
@@ -66,7 +66,7 @@ export function prepareComplete(
   const binding = authorizeStorage(
     tx,
     dependencies.bindings,
-    content.storageBindingId,
+    content.storage_binding_id,
   );
   assert.ok(binding);
   return {
@@ -123,7 +123,7 @@ export async function completeEvidence(
     );
     const updated = {
       ...content,
-      ...(checked.version === null ? {} : { objectVersion: checked.version }),
+      ...(checked.version === null ? {} : { object_version: checked.version }),
     };
     const write = tx.database
       .prepare(

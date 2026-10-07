@@ -207,14 +207,14 @@ test(
       },
     });
     const mission = await read<{ id: string }>(["mission", "get", project.id]);
-    const initiative = await write<{ revisions: { nodeId: string }[] }>(
+    const initiative = await write<{ revisions: { node_id: string }[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename: "initiative.md",
         kind: "initiative",
         content: { ...CONTENT, bindings: [] },
         reason: "runtime acceptance",
-        expectedMissionVersion: FIRST_REVISION,
+        expected_mission_version: FIRST_REVISION,
       },
     );
     for (const [index, name] of ["a", "b"].entries())
@@ -223,9 +223,9 @@ test(
         kind: "objective",
         content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
         reason: "runtime acceptance",
-        expectedMissionVersion: index + MISSION_VERSION_BASE,
-        parentId: initiative.revisions[0]!.nodeId,
-        expectedParentRevision: FIRST_REVISION,
+        expected_mission_version: index + MISSION_VERSION_BASE,
+        parent_id: initiative.revisions[0]!.node_id,
+        expected_parent_revision: FIRST_REVISION,
       });
     writePrivate(
       join(directory, "server.yaml"),
@@ -269,15 +269,15 @@ test(
       const result = await write<{ kind: string; execution: ExecutionRecord }>(
         ["scheduler", "work", "pull"],
         {
-          resourceIdentity: `worker:kanthord:${binding}`,
-          runtimeIdentity: registration.runtime_identity,
+          resource_identity: `worker:kanthord:${binding}`,
+          runtime_identity: registration.runtime_identity,
         },
         env,
       );
       assert.equal(result.kind, WorkPullKind.Claimed);
       return {
         ...auth,
-        runtimeIdentity: registration.runtime_identity,
+        runtime_identity: registration.runtime_identity,
         execution: result.execution,
         client: httpClient(workerOperations, f.endpoint, auth.token),
       };
@@ -310,14 +310,14 @@ test(
         await holder.client.handover({
           params: {},
           query: {},
-          body: { execution_id: holder.execution.executionId },
+          body: { execution_id: holder.execution.execution_id },
         }),
       );
       const keys = deriveHandoverKeys(holder.client_secret);
       const payload = handoverPayloadSchema.parse(
         openEnvelope(
           keys.handover,
-          handoverAad(holder.execution.executionId, holder.runtimeIdentity),
+          handoverAad(holder.execution.execution_id, holder.runtime_identity),
           envelope,
         ),
       );
@@ -329,7 +329,7 @@ test(
       t.after(() => credentials.discard());
       const setup = completed(
         await holder.client["execution.setup.get"]({
-          params: { execution_id: holder.execution.executionId },
+          params: { execution_id: holder.execution.execution_id },
           query: {},
           body: null,
         }),
@@ -338,7 +338,7 @@ test(
         await httpClient(missionOperations, f.endpoint, holder.token)[
           "execution.pinnedRevision.get"
         ]({
-          params: { executionId: holder.execution.executionId },
+          params: { execution_id: holder.execution.execution_id },
           query: {},
           body: null,
         }),
@@ -435,7 +435,7 @@ test(
       assert.ok(!runtimeX.setup.prompt.final.includes(PROJECT));
       assert.equal(runtimeX.setup.credential_id, runtimeX.item.credential_id);
       const refused = await x.client["execution.setup.get"]({
-        params: { execution_id: y.execution.executionId },
+        params: { execution_id: y.execution.execution_id },
         query: {},
         body: null,
       });
@@ -444,7 +444,7 @@ test(
       assert.equal(refused.error.error.code, PROOF_FAILED);
     });
     const prepared = await root.prepareObjective({
-      objectiveId: x.execution.nodeId,
+      objectiveId: x.execution.node_id,
       repository,
       transport,
       context: background,
@@ -453,13 +453,13 @@ test(
     await t.test("E07.4 private node workspace", async () => {
       assert.equal(
         prepared.directory,
-        join(state, "workspaces", x.execution.nodeId, repository.binding_id),
+        join(state, "workspaces", x.execution.node_id, repository.binding_id),
       );
       assert.equal(statSync(prepared.directory).mode & 0o777, PRIVATE_MODE);
       assert.equal(prepared.head, main);
       assert.equal(
         (await simpleGit(prepared.directory).branch()).current,
-        `kanthord/${x.execution.nodeId}`,
+        `kanthord/${x.execution.node_id}`,
       );
     });
     const provider = scriptedProvider([
@@ -555,9 +555,9 @@ test(
       const verification = await runVerifications({
         directory: prepared.directory,
         commands,
-        testedInput: {
+        tested_input: {
           kind: "repository",
-          bindingId: repository.binding_id,
+          binding_id: repository.binding_id,
           commit: head,
         },
         deadline: agent.budget.wallDeadline(),
@@ -566,15 +566,15 @@ test(
       assert.deepEqual(verification.results, [
         {
           command: commands[0],
-          exitCode: SUCCESSFUL_EXIT,
+          exit_code: SUCCESSFUL_EXIT,
           signal: null,
-          timedOut: false,
+          timed_out: false,
         },
         {
           command: commands[1],
-          exitCode: FAILURE_EXIT,
+          exit_code: FAILURE_EXIT,
           signal: null,
-          timedOut: false,
+          timed_out: false,
         },
       ]);
       assert.equal(verificationPassed(verification, commands), false);
@@ -610,7 +610,7 @@ test(
         wall_time_ms: 600000,
       });
       const lab = await root.prepareObjective({
-        objectiveId: y.execution.nodeId,
+        objectiveId: y.execution.node_id,
         repository: runtimeY.setup.repositories[0]!,
         transport,
         context: background,
@@ -643,17 +643,17 @@ test(
       } finally {
         labAgent.dispose();
         root.release(
-          root.objectiveKey(y.execution.nodeId),
+          root.objectiveKey(y.execution.node_id),
           WorkspaceKind.Objective,
         );
       }
     });
     await t.test("E07.9 sweep retains only the held objective", () => {
       root.sweep(Date.now() + 8 * 24 * 3600 * 1000);
-      assert.equal(existsSync(root.objectiveKey(y.execution.nodeId)), false);
-      assert.equal(existsSync(root.objectiveKey(x.execution.nodeId)), true);
+      assert.equal(existsSync(root.objectiveKey(y.execution.node_id)), false);
+      assert.equal(existsSync(root.objectiveKey(x.execution.node_id)), true);
       root.release(
-        root.objectiveKey(x.execution.nodeId),
+        root.objectiveKey(x.execution.node_id),
         WorkspaceKind.Objective,
       );
     });

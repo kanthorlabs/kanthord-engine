@@ -33,8 +33,8 @@ export function readinessOf(
   node: NodeRow,
 ): {
   holds: boolean;
-  objectivesNotTerminal: string[];
-  unresolvedActions: string[];
+  objectives_not_terminal: string[];
+  unresolved_actions: string[];
 } {
   assert.notEqual(node.kind, NodeKind.Task);
   assert.ok(node.attempt !== null);
@@ -63,8 +63,8 @@ export function readinessOf(
     holds:
       objectivesNotTerminal.length === NO_PENDING_ITEMS &&
       unresolvedActions.length === NO_PENDING_ITEMS,
-    objectivesNotTerminal,
-    unresolvedActions,
+    objectives_not_terminal: objectivesNotTerminal,
+    unresolved_actions: unresolvedActions,
   };
 }
 

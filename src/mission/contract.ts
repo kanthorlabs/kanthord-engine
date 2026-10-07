@@ -32,35 +32,35 @@ export interface MissionBindings {
     tx: Transaction,
     bindingId: string,
   ): {
-    bindingId: string;
-    projectId: string;
+    binding_id: string;
+    project_id: string;
     name: string;
     address: string;
     platform: string;
-    sshCredential: string;
+    ssh_credential: string;
     credential: string | null;
-    baseBranch: string;
+    base_branch: string;
     action: "pull_request" | "merge_push" | null;
-    projectPrompt: string | null;
+    project_prompt: string | null;
   } | null;
   resolveBinding(
     tx: Transaction,
     projectId: string,
     bindingName: string,
-  ): { bindingId: string; resourceIdentity: string } | null;
+  ): { binding_id: string; resource_identity: string } | null;
   resolveBindingIdentity(
     tx: Transaction,
     projectId: string,
     bindingId: string,
-  ): { bindingId: string; resourceIdentity: string } | null;
+  ): { binding_id: string; resource_identity: string } | null;
   getBindingRevision(
     tx: Transaction,
     bindingId: string,
   ): {
-    projectId: string;
-    bindingId: string;
+    project_id: string;
+    binding_id: string;
     name: string;
-    resourceIdentity: string;
+    resource_identity: string;
     revision: number;
     tombstone: boolean;
     disabled: boolean;
@@ -91,10 +91,10 @@ export interface SchedulerClaims {
     nodeId: string,
     now: number,
   ): {
-    executionId: string;
-    runtimeIdentity: string;
+    execution_id: string;
+    runtime_identity: string;
     attempt: number;
-    pinnedRevision: number;
+    pinned_revision: number;
   } | null;
 }
 
@@ -104,8 +104,8 @@ export interface IntakeCall {
 }
 
 export interface StorageBinding {
-  bindingId: string;
-  projectId: string;
+  binding_id: string;
+  project_id: string;
   endpoint: string;
   bucket: string;
   region: string;
@@ -122,9 +122,9 @@ export interface IntakeStorage {
     size: number,
     sha256: string | null,
   ): Promise<{
-    putUrl: string;
+    put_url: string;
     headers: Record<string, string>;
-    expiresAt: number;
+    expires_at: number;
   }>;
   check(
     call: IntakeCall,
@@ -138,13 +138,13 @@ export interface IntakeStorage {
     binding: StorageBinding,
     key: string,
     version: string | null,
-  ): Promise<{ getUrl: string; expiresAt: number }>;
+  ): Promise<{ get_url: string; expires_at: number }>;
   executionGet(
     call: IntakeCall,
     binding: StorageBinding,
     key: string,
     version: string | null,
-  ): Promise<{ getUrl: string; expiresAt: number }>;
+  ): Promise<{ get_url: string; expires_at: number }>;
   delete(
     call: IntakeCall,
     binding: StorageBinding,
@@ -164,10 +164,10 @@ export const checkEndStateSchema = z.enum(CheckEndState);
 export interface IntakeCheck {
   check(
     context: Context,
-    request: { frozenAction: FrozenAction; address: PlatformAddress },
+    request: { frozen_action: FrozenAction; address: PlatformAddress },
   ): Promise<{
-    endState: z.infer<typeof checkEndStateSchema>;
-    landedCommits: string[];
+    end_state: z.infer<typeof checkEndStateSchema>;
+    landed_commits: string[];
   }>;
 }
 
@@ -180,18 +180,18 @@ export interface ExecutionAttribution {
     tx: Transaction,
     executionId: string,
   ): {
-    clientId: string | null;
+    client_id: string | null;
     name: string | null;
-    workerName: string;
+    worker_name: string;
   } | null;
 }
 
 export type ExecutionActor = Extract<Actor, { kind: "execution" }>;
 export type ClaimAdmission = {
   kind: ClaimKind;
-  projectId: string;
+  project_id: string;
   attempt: number;
-  nodeRevision: number;
+  node_revision: number;
 };
 
 export interface MissionTransitions {
@@ -204,7 +204,7 @@ export interface MissionTransitions {
   ): ClaimAdmission | null;
   release(
     tx: Transaction,
-    execution: { executionId: string; nodeId: string; attempt: number },
+    execution: { execution_id: string; node_id: string; attempt: number },
     furtherWork: boolean,
     now: number,
   ): void;
@@ -454,9 +454,9 @@ export const nodeCreateSchema = z.strictObject({
   kind: nodeKindSchema,
   content: contentSchema,
   reason: z.string().min(1),
-  expectedMissionVersion: z.number().int().positive(),
-  parentId: identitySchema("node").optional(),
-  expectedParentRevision: z.number().int().positive().optional(),
+  expected_mission_version: z.number().int().positive(),
+  parent_id: identitySchema("node").optional(),
+  expected_parent_revision: z.number().int().positive().optional(),
 });
 export type NodeCreate = z.infer<typeof nodeCreateSchema>;
 export const nodeUpdateSchema = z.strictObject({
@@ -464,21 +464,21 @@ export const nodeUpdateSchema = z.strictObject({
   content: contentSchema,
   reason: z.string().min(1),
   expected_revision: z.number().int().positive(),
-  expectedMissionVersion: z.number().int().positive(),
+  expected_mission_version: z.number().int().positive(),
 });
 export type NodeUpdate = z.infer<typeof nodeUpdateSchema>;
 export const moveSchema = z.strictObject({
-  newParentId: identitySchema("node"),
+  new_parent_id: identitySchema("node"),
   reason: z.string().min(1),
-  expectedMissionVersion: z.number().int().positive(),
+  expected_mission_version: z.number().int().positive(),
   expected_revision: z.number().int().positive(),
-  expectedOldParentRevision: z.number().int().positive(),
-  expectedNewParentRevision: z.number().int().positive(),
+  expected_old_parent_revision: z.number().int().positive(),
+  expected_new_parent_revision: z.number().int().positive(),
 });
 export type Move = z.infer<typeof moveSchema>;
 export const graphEditSchema = z.strictObject({
   reason: z.string().min(1),
-  expectedMissionVersion: z.number().int().positive(),
+  expected_mission_version: z.number().int().positive(),
 });
 export type GraphEdit = z.infer<typeof graphEditSchema>;
 export const criterionSetSchema = z.strictObject({
@@ -486,7 +486,7 @@ export const criterionSetSchema = z.strictObject({
   verifications: z.array(z.string().min(1)).min(1),
   reason: z.string().min(1),
   expected_revision: z.number().int().positive(),
-  expectedMissionVersion: z.number().int().positive(),
+  expected_mission_version: z.number().int().positive(),
 });
 export type CriterionSet = z.infer<typeof criterionSetSchema>;
 export const prioritySetSchema = z.strictObject({
@@ -495,20 +495,20 @@ export const prioritySetSchema = z.strictObject({
     .int()
     .min(Number.MIN_SAFE_INTEGER)
     .max(Number.MAX_SAFE_INTEGER),
-  expectedMissionVersion: z.number().int().positive(),
+  expected_mission_version: z.number().int().positive(),
 });
 export type PrioritySet = z.infer<typeof prioritySetSchema>;
 export const rebindSchema = z.strictObject({
-  bindingId: identitySchema("binding"),
+  binding_id: identitySchema("binding"),
   reason: z.string().min(1),
-  expectedMissionVersion: z.number().int().positive(),
-  nodeId: identitySchema("node").optional(),
+  expected_mission_version: z.number().int().positive(),
+  node_id: identitySchema("node").optional(),
 });
 export type Rebind = z.infer<typeof rebindSchema>;
 export const retireSchema = z.strictObject({
   reason: z.string().min(1),
-  expectedMissionVersion: z.number().int().positive(),
-  previewDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  expected_mission_version: z.number().int().positive(),
+  preview_digest: z.string().regex(/^[0-9a-f]{64}$/),
   force: z.boolean(),
 });
 export type Retire = z.infer<typeof retireSchema>;
@@ -520,14 +520,14 @@ export const taskContentSchema = z.strictObject({
 export type TaskContent = z.infer<typeof taskContentSchema>;
 export const revisionChangeSchema = z.strictObject({
   write: revisionWriteSchema,
-  previousRevision: z.number().int().positive().nullable(),
-  changedFields: z.array(z.string()),
+  previous_revision: z.number().int().positive().nullable(),
+  changed_fields: z.array(z.string()),
   tasks: z
     .array(
       z.strictObject({
         id: identitySchema("node"),
         change: taskChangeSchema,
-        changedFields: z.array(z.string()),
+        changed_fields: z.array(z.string()),
       }),
     )
     .optional(),
@@ -541,8 +541,8 @@ export const actorSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal(ActorKind.Execution),
-    executionId: identitySchema("execution"),
-    clientId: identitySchema("client_identity").nullable(),
+    execution_id: identitySchema("execution"),
+    client_id: identitySchema("client_identity").nullable(),
     name: z.string().nullable(),
   }),
   z.strictObject({
@@ -553,52 +553,52 @@ export const actorSchema = z.discriminatedUnion("kind", [
 ]);
 export type Actor = z.infer<typeof actorSchema>;
 export const revisionSchema = z.strictObject({
-  nodeId: identitySchema("node"),
+  node_id: identitySchema("node"),
   filename: planFileNameSchema,
   revision: z.number().int().positive(),
   reason: z.string(),
   actor: actorSchema,
-  createdAt: timestamp,
+  created_at: timestamp,
   content: contentSchema,
   tasks: z.array(taskContentSchema).optional(),
   change: revisionChangeSchema,
-  pinnedByAttempts: z.array(z.number().int().positive()),
+  pinned_by_attempts: z.array(z.number().int().positive()),
 });
 export type Revision = z.infer<typeof revisionSchema>;
 export const edgeSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(EdgeKind.Containment),
-    parentId: identitySchema("node"),
-    childId: identitySchema("node"),
+    parent_id: identitySchema("node"),
+    child_id: identitySchema("node"),
   }),
   z.strictObject({
     kind: z.literal(EdgeKind.Dependency),
-    dependentId: identitySchema("node"),
-    dependsOnId: identitySchema("node"),
+    dependent_id: identitySchema("node"),
+    depends_on_id: identitySchema("node"),
   }),
 ]);
 export type Edge = z.infer<typeof edgeSchema>;
 export const nodeChangeSchema = z.strictObject({
-  missionVersion: z.number().int().positive(),
+  mission_version: z.number().int().positive(),
   revisions: z.array(revisionSchema),
-  retiredNodeIds: z.array(identitySchema("node")),
-  addedEdges: z.array(edgeSchema),
-  removedEdges: z.array(edgeSchema),
-  openAttemptsUnchanged: z.array(
+  retired_node_ids: z.array(identitySchema("node")),
+  added_edges: z.array(edgeSchema),
+  removed_edges: z.array(edgeSchema),
+  open_attempts_unchanged: z.array(
     z.strictObject({
-      nodeId: identitySchema("node"),
+      node_id: identitySchema("node"),
       attempt: z.number().int().nonnegative(),
     }),
   ),
 });
 export type NodeChange = z.infer<typeof nodeChangeSchema>;
 export const retirePreviewSchema = z.strictObject({
-  nodeId: identitySchema("node"),
+  node_id: identitySchema("node"),
   force: z.boolean(),
-  missionVersion: z.number().int().positive(),
-  retiredNodeIds: z.array(identitySchema("node")),
-  removedEdges: z.array(edgeSchema),
-  previewDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  mission_version: z.number().int().positive(),
+  retired_node_ids: z.array(identitySchema("node")),
+  removed_edges: z.array(edgeSchema),
+  preview_digest: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type RetirePreview = z.infer<typeof retirePreviewSchema>;
 export const importEntrySchema = z.strictObject({
@@ -611,7 +611,7 @@ export const importEntrySchema = z.strictObject({
   bindings: z.array(z.string()),
   id: identitySchema("node").optional(),
   parent: z.string().min(1).optional(),
-  dependsOn: z.array(z.string().min(1)).optional(),
+  depends_on: z.array(z.string().min(1)).optional(),
 });
 export type ImportEntry = z.infer<typeof importEntrySchema>;
 export const exportEntrySchema = z.strictObject({
@@ -624,7 +624,7 @@ export const exportEntrySchema = z.strictObject({
   verifications: z.array(z.string().min(1)).min(1),
   bindings: z.array(z.string()),
   parent: planFileNameSchema.optional(),
-  dependsOn: z.array(planFileNameSchema).optional(),
+  depends_on: z.array(planFileNameSchema).optional(),
 });
 export type ExportEntry = z.infer<typeof exportEntrySchema>;
 export const planFileEntrySchema = z.strictObject({
@@ -634,26 +634,26 @@ export const planFileEntrySchema = z.strictObject({
 export type PlanFileEntry = z.infer<typeof planFileEntrySchema>;
 export const exportAnswerSchema = z.union([
   z.strictObject({
-    missionId: identitySchema(MISSION_IDENTITY_PREFIX),
-    missionVersion: z.number().int().positive(),
+    mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
+    mission_version: z.number().int().positive(),
     entries: z.array(exportEntrySchema),
   }),
   z.strictObject({
-    missionId: identitySchema(MISSION_IDENTITY_PREFIX),
-    missionVersion: z.number().int().positive(),
+    mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
+    mission_version: z.number().int().positive(),
     files: z.array(planFileEntrySchema),
   }),
 ]);
 export type ExportAnswer = z.infer<typeof exportAnswerSchema>;
 
 const importBase = {
-  missionId: identitySchema("mission"),
-  missionVersion: z.number().int().positive(),
+  mission_id: identitySchema("mission"),
+  mission_version: z.number().int().positive(),
   reason: z.string().min(1),
 };
 const importApplyFields = {
-  previewDigest: z.string().regex(/^[0-9a-f]{64}$/),
-  confirmedRetirements: z.array(identitySchema("node")),
+  preview_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  confirmed_retirements: z.array(identitySchema("node")),
 };
 export const importSnapshotSchema = z.discriminatedUnion("format", [
   z.strictObject({
@@ -687,40 +687,40 @@ export const violationSchema = z.strictObject({
   code: z.string(),
   message: z.string(),
   filename: z.string().nullable(),
-  nodeId: identitySchema("node").nullable(),
+  node_id: identitySchema("node").nullable(),
   details: z.unknown().nullable(),
 });
 export type Violation = z.infer<typeof violationSchema>;
 export const importPreviewSchema = z.strictObject({
-  missionId: identitySchema("mission"),
-  expectedMissionVersion: z.number().int().positive(),
-  previewDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  mission_id: identitySchema("mission"),
+  expected_mission_version: z.number().int().positive(),
+  preview_digest: z.string().regex(/^[0-9a-f]{64}$/),
   creates: z.array(planFileNameSchema),
   updates: z.array(identitySchema("node")),
   retirements: z.array(identitySchema("node")),
-  removedEdges: z.array(edgeSchema),
-  noOps: z.array(identitySchema("node")),
+  removed_edges: z.array(edgeSchema),
+  no_ops: z.array(identitySchema("node")),
   violations: z.array(violationSchema),
 });
 export type ImportPreview = z.infer<typeof importPreviewSchema>;
 export const importResultSchema = z.strictObject({
-  missionId: identitySchema("mission"),
-  missionVersion: z.number().int().positive(),
-  assignedIds: z.array(
+  mission_id: identitySchema("mission"),
+  mission_version: z.number().int().positive(),
+  assigned_ids: z.array(
     z.strictObject({
       filename: planFileNameSchema,
-      nodeId: identitySchema("node"),
+      node_id: identitySchema("node"),
     }),
   ),
   changes: nodeChangeSchema,
   actor: actorSchema,
-  acceptedAt: timestamp,
+  accepted_at: timestamp,
 });
 export type ImportResult = z.infer<typeof importResultSchema>;
 
 export const repositoryAddressSchema = z.strictObject({
   kind: z.literal(AssetKind.Repository),
-  bindingId: identitySchema("binding"),
+  binding_id: identitySchema("binding"),
   commit: commitSchema,
 });
 export type RepositoryAddress = z.infer<typeof repositoryAddressSchema>;
@@ -760,40 +760,40 @@ export const testedInputSchema = z.union([
 ]);
 export type TestedInput = z.infer<typeof testedInputSchema>;
 export const verificationSchema = z.strictObject({
-  testedInput: testedInputSchema,
+  tested_input: testedInputSchema,
   results: z.array(
     z.strictObject({
       command: textSchema,
-      exitCode: z.number().int().nullable(),
+      exit_code: z.number().int().nullable(),
       signal: textSchema.nullable(),
-      timedOut: z.boolean(),
+      timed_out: z.boolean(),
     }),
   ),
 });
 export type Verification = z.infer<typeof verificationSchema>;
 export const frozenActionSchema = z.strictObject({
   key: actionKeySchema,
-  bindingId: identitySchema("binding"),
+  binding_id: identitySchema("binding"),
   action: repositoryActionSchema,
-  expectedEndState: expectedEndStateSchema,
+  expected_end_state: expectedEndStateSchema,
   follows: actionKeySchema.nullable(),
-  configuration: z.strictObject({ baseBranch: textSchema }),
+  configuration: z.strictObject({ base_branch: textSchema }),
 });
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
 export type ActionContext = {
   state: NodeState;
-  currentAssessment: {
+  current_assessment: {
     result: AssessmentResult;
-    testedInput: TestedInput;
+    tested_input: TestedInput;
   } | null;
   actions: {
     action: FrozenAction;
-    resourceIdentity: string;
+    resource_identity: string;
     resolution: Resolution;
-    requestEvidenceId: string | null;
+    request_evidence_id: string | null;
     eligible: boolean;
-    reuseCandidates: {
-      evidenceId: string;
+    reuse_candidates: {
+      evidence_id: string;
       attempt: number;
       address: PlatformAddress;
     }[];
@@ -809,20 +809,20 @@ export interface MissionActions {
   ): ActionContext;
 }
 export const attemptSchema = z.strictObject({
-  nodeId: identitySchema("node"),
+  node_id: identitySchema("node"),
   attempt: z.number().int().positive(),
-  nodeRevision: z.number().int().positive(),
-  requiredExternalActions: z.array(frozenActionSchema),
-  openedAt: timestamp,
-  closedAt: timestamp.nullable(),
-  outcomeIds: z.array(identitySchema("outcome")),
-  openedBy: actorSchema,
+  node_revision: z.number().int().positive(),
+  required_external_actions: z.array(frozenActionSchema),
+  opened_at: timestamp,
+  closed_at: timestamp.nullable(),
+  outcome_ids: z.array(identitySchema("outcome")),
+  opened_by: actorSchema,
 });
 export type Attempt = z.infer<typeof attemptSchema>;
 const assetBase = {
   id: identitySchema("evidence_asset"),
-  publishedAt: timestamp.nullable(),
-  expiredAt: timestamp.nullable(),
+  published_at: timestamp.nullable(),
+  expired_at: timestamp.nullable(),
 };
 export const evidenceAssetSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -839,9 +839,9 @@ export const evidenceAssetSchema = z.discriminatedUnion("kind", [
     ...assetBase,
     kind: z.literal(AssetKind.Object),
     address: objectAddressSchema,
-    storageBindingId: identitySchema("binding"),
+    storage_binding_id: identitySchema("binding"),
     size: z.number().int().nonnegative(),
-    mediaType: textSchema,
+    media_type: textSchema,
   }),
   z.strictObject({
     ...assetBase,
@@ -852,61 +852,61 @@ export const evidenceAssetSchema = z.discriminatedUnion("kind", [
 export type EvidenceAsset = z.infer<typeof evidenceAssetSchema>;
 export const evidenceSchema = z.strictObject({
   id: identitySchema("evidence"),
-  nodeId: identitySchema("node"),
+  node_id: identitySchema("node"),
   attempt: z.number().int().nonnegative(),
   subject: textSchema,
   assets: z.array(evidenceAssetSchema),
   provenance: actorSchema,
-  createdAt: timestamp,
-  requirementKey: actionKeySchema.optional(),
-  endState: endStateSchema.optional(),
+  created_at: timestamp,
+  requirement_key: actionKeySchema.optional(),
+  end_state: endStateSchema.optional(),
   verification: verificationSchema.optional(),
 });
 export type Evidence = z.infer<typeof evidenceSchema>;
 export const currencySchema = z.strictObject({
   current: z.boolean(),
-  contextMatches: z.boolean(),
-  authorityAdmits: z.boolean(),
-  orderSelected: z.boolean(),
+  context_matches: z.boolean(),
+  authority_admits: z.boolean(),
+  order_selected: z.boolean(),
   reasons: z.array(textSchema),
 });
 export type Currency = z.infer<typeof currencySchema>;
 export const assessmentSchema = z.strictObject({
   id: identitySchema("assessment"),
-  nodeId: identitySchema("node"),
-  executionId: identitySchema("execution").nullable(),
+  node_id: identitySchema("node"),
+  execution_id: identitySchema("execution").nullable(),
   attempt: z.number().int().nonnegative(),
-  nodeRevision: z.number().int().positive(),
-  evidenceIds: z.array(identitySchema("evidence")),
-  childOutcomeIds: z.array(identitySchema("outcome")),
+  node_revision: z.number().int().positive(),
+  evidence_ids: z.array(identitySchema("evidence")),
+  child_outcome_ids: z.array(identitySchema("outcome")),
   result: assessmentResultSchema,
   rationale: textSchema,
-  testedInput: testedInputSchema.nullable(),
+  tested_input: testedInputSchema.nullable(),
   actor: actorSchema,
-  createdAt: timestamp,
+  created_at: timestamp,
   currency: currencySchema.nullable(),
-  childNodeIds: z.array(identitySchema("node")),
-  workerVersion: textSchema.nullable(),
+  child_node_ids: z.array(identitySchema("node")),
+  worker_version: textSchema.nullable(),
 });
 export type Assessment = z.infer<typeof assessmentSchema>;
 export const outcomeSchema = z.strictObject({
   id: identitySchema("outcome"),
-  nodeId: identitySchema("node"),
+  node_id: identitySchema("node"),
   attempt: z.number().int().nonnegative(),
-  nodeRevision: z.number().int().positive(),
-  closingEvent: closingEventSchema,
+  node_revision: z.number().int().positive(),
+  closing_event: closingEventSchema,
   result: assessmentResultSchema,
-  assessmentId: identitySchema("assessment"),
-  evidenceIds: z.array(identitySchema("evidence")),
-  createdAt: timestamp,
+  assessment_id: identitySchema("assessment"),
+  evidence_ids: z.array(identitySchema("evidence")),
+  created_at: timestamp,
 });
 export type Outcome = z.infer<typeof outcomeSchema>;
 export const externalActionSchema = z.strictObject({
-  nodeId: identitySchema("node"),
+  node_id: identitySchema("node"),
   attempt: z.number().int().nonnegative(),
   action: frozenActionSchema,
   requested: z.boolean(),
-  requestEvidenceId: identitySchema("evidence").nullable(),
+  request_evidence_id: identitySchema("evidence").nullable(),
   resolution: resolutionSchema,
 });
 export type ExternalAction = z.infer<typeof externalActionSchema>;
@@ -917,9 +917,9 @@ export const blockedContextSchema = z.strictObject({
 export type BlockedContext = z.infer<typeof blockedContextSchema>;
 export const humanActSchema = z.strictObject({
   reason: textSchema,
-  expectedMissionVersion: z.number().int().positive(),
-  expectedState: nodeStateSchema,
-  expectedAttempt: z.number().int().nonnegative(),
+  expected_mission_version: z.number().int().positive(),
+  expected_state: nodeStateSchema,
+  expected_attempt: z.number().int().nonnegative(),
 });
 export type HumanAct = z.infer<typeof humanActSchema>;
 export const resumeSchema = humanActSchema.extend({
@@ -928,7 +928,7 @@ export const resumeSchema = humanActSchema.extend({
 export type Resume = z.infer<typeof resumeSchema>;
 export const overrideSchema = humanActSchema.extend({
   result: z.enum([AssessmentResult.Success]),
-  landedCommit: repositoryAddressSchema.optional(),
+  landed_commit: repositoryAddressSchema.optional(),
 });
 export type Override = z.infer<typeof overrideSchema>;
 export const unblockChangeSchema = z.strictObject({
@@ -938,9 +938,9 @@ export const unblockChangeSchema = z.strictObject({
 });
 export type UnblockChange = z.infer<typeof unblockChangeSchema>;
 export const unblockSchema = z.strictObject({
-  blockedAttempt: z.number().int().nonnegative(),
+  blocked_attempt: z.number().int().nonnegative(),
   expected_revision: z.number().int().positive(),
-  expectedMissionVersion: z.number().int().positive(),
+  expected_mission_version: z.number().int().positive(),
   change: unblockChangeSchema.optional(),
 });
 export type Unblock = z.infer<typeof unblockSchema>;
@@ -948,15 +948,15 @@ export type Unblock = z.infer<typeof unblockSchema>;
 const nodeBase = {
   id: identitySchema("node"),
   filename: planFileNameSchema,
-  missionId: identitySchema("mission"),
-  parentId: identitySchema("node").nullable(),
-  visibleRevision: z.number().int().positive(),
+  mission_id: identitySchema("mission"),
+  parent_id: identitySchema("node").nullable(),
+  visible_revision: z.number().int().positive(),
   content: contentSchema,
-  retiredAt: timestamp.nullable(),
-  pinnedByAttempts: z.array(z.number().int().positive()),
+  retired_at: timestamp.nullable(),
+  pinned_by_attempts: z.array(z.number().int().positive()),
 };
 const runnableNodeFields = {
-  blockedContext: blockedContextSchema.optional(),
+  blocked_context: blockedContextSchema.optional(),
   state: nodeStateSchema,
   attempt: z.number().int().nonnegative(),
   priority: z
@@ -964,7 +964,7 @@ const runnableNodeFields = {
     .int()
     .min(Number.MIN_SAFE_INTEGER)
     .max(Number.MAX_SAFE_INTEGER),
-  dependsOn: z.array(identitySchema("node")),
+  depends_on: z.array(identitySchema("node")),
 };
 export const nodeSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -988,7 +988,7 @@ export const controlResultSchema = z.strictObject({
   attempt: attemptSchema.nullable(),
   outcome: outcomeSchema.nullable(),
   actor: actorSchema,
-  acceptedAt: timestamp,
+  accepted_at: timestamp,
 });
 export type ControlResult = z.infer<typeof controlResultSchema>;
 export const OBJECT_SIZE_MAX = 5 * 1024 ** 3;
@@ -1003,14 +1003,14 @@ export const mediaTypeSchema = z
   .max(MEDIA_TYPE_MAX)
   .regex(MEDIA_TYPE_PATTERN);
 export const contentBytesSchema = z.strictObject({
-  mediaType: mediaTypeSchema,
+  media_type: mediaTypeSchema,
   encoding: z.literal(CONTENT_ENCODING),
   data: z.string(),
 });
 export const executionContextSchema = z.strictObject({
-  executionId: identitySchema("execution"),
+  execution_id: identitySchema("execution"),
   attempt: z.number().int().positive(),
-  nodeRevision: z.number().int().positive(),
+  node_revision: z.number().int().positive(),
 });
 export type ExecutionContext = z.infer<typeof executionContextSchema>;
 export const assetSubmitSchema = z.discriminatedUnion("kind", [
@@ -1025,7 +1025,7 @@ export const assetSubmitSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(AssetKind.Object),
     size: z.number().int().nonnegative().max(OBJECT_SIZE_MAX),
-    mediaType: mediaTypeSchema,
+    media_type: mediaTypeSchema,
     sha256: sha256Schema.optional(),
   }),
 ]);
@@ -1036,28 +1036,28 @@ export const evidenceSubmitSchema = executionContextSchema.extend({
 });
 export type EvidenceSubmit = z.infer<typeof evidenceSubmitSchema>;
 export const assessmentSubmitSchema = executionContextSchema.extend({
-  evidenceIds: z
+  evidence_ids: z
     .array(identitySchema("evidence"))
     .refine((items) => new Set(items).size === items.length)
     .meta({ uniqueItems: true }),
-  childOutcomeIds: z
+  child_outcome_ids: z
     .array(identitySchema("outcome"))
     .refine((items) => new Set(items).size === items.length)
     .meta({ uniqueItems: true }),
   result: assessmentResultSchema,
   rationale: textSchema,
-  testedInput: testedInputSchema,
+  tested_input: testedInputSchema,
 });
 export type AssessmentSubmit = z.infer<typeof assessmentSubmitSchema>;
 export const evidenceRequestSchema = executionContextSchema.extend({
-  requirementKey: actionKeySchema,
+  requirement_key: actionKeySchema,
   subject: textSchema,
   address: platformAddressSchema,
 });
 export type EvidenceRequest = z.infer<typeof evidenceRequestSchema>;
 export const evidenceDeleteSchema = z
   .strictObject({
-    expectedMissionVersion: z.number().int().positive(),
+    expected_mission_version: z.number().int().positive(),
     force: z.boolean(),
     reason: textSchema.optional(),
   })
@@ -1074,22 +1074,22 @@ export const evidenceDeleteSchema = z
     then: { required: ["reason"] },
   });
 export const nodeCheckSchema = z.strictObject({
-  expectedMissionVersion: z.number().int().positive(),
+  expected_mission_version: z.number().int().positive(),
 });
 export const evidenceSubmitResultSchema = z.strictObject({
   evidence: evidenceSchema,
   uploads: z.array(
     z.strictObject({
-      assetId: identitySchema("evidence_asset"),
-      putUrl: z.string(),
+      asset_id: identitySchema("evidence_asset"),
+      put_url: z.string(),
       headers: z.record(z.string(), z.string()),
-      expiresAt: timestamp,
+      expires_at: timestamp,
     }),
   ),
 });
 export const assetUploadResultSchema = z.strictObject({
-  assetId: identitySchema("evidence_asset"),
-  evidenceId: identitySchema("evidence"),
+  asset_id: identitySchema("evidence_asset"),
+  evidence_id: identitySchema("evidence"),
   uri: z.string().startsWith("s3://"),
 });
 export const assessmentSubmitResultSchema = z.strictObject({
@@ -1099,23 +1099,23 @@ export const assessmentSubmitResultSchema = z.strictObject({
 });
 export const storedContentSchema = z.union([
   contentBytesSchema.extend({
-    assetId: identitySchema("evidence_asset"),
+    asset_id: identitySchema("evidence_asset"),
     address: producedAddressSchema,
   }),
   z.strictObject({
-    assetId: identitySchema("evidence_asset"),
+    asset_id: identitySchema("evidence_asset"),
     address: objectAddressSchema,
-    mediaType: mediaTypeSchema,
+    media_type: mediaTypeSchema,
     size: z.number().int().nonnegative(),
-    getUrl: z.string(),
-    expiresAt: timestamp,
+    get_url: z.string(),
+    expires_at: timestamp,
   }),
 ]);
 export const nodeCheckResultSchema = z.strictObject({
   results: z.array(
     z.strictObject({
-      evidenceId: identitySchema("evidence"),
-      requirementKey: actionKeySchema,
+      evidence_id: identitySchema("evidence"),
+      requirement_key: actionKeySchema,
       resolution: z.enum([
         Resolution.Unresolved,
         Resolution.ExpectedEnd,
@@ -1125,7 +1125,7 @@ export const nodeCheckResultSchema = z.strictObject({
   ),
   failures: z.array(
     z.strictObject({
-      evidenceId: identitySchema("evidence"),
+      evidence_id: identitySchema("evidence"),
       error: errorSchema,
     }),
   ),
@@ -1136,7 +1136,7 @@ export const executionObjectiveSchema = z.union([
   z.strictObject({ id: identitySchema("node"), state: nodeStateSchema }),
 ]);
 export const rebindResultSchema = z.strictObject({
-  nodeChange: nodeChangeSchema,
+  node_change: nodeChangeSchema,
   skipped: z.array(
     z.strictObject({ node: nodeSchema, condition: rebindSkipConditionSchema }),
   ),
@@ -1144,7 +1144,7 @@ export const rebindResultSchema = z.strictObject({
 export type RebindResult = z.infer<typeof rebindResultSchema>;
 export const missionSchema = z.strictObject({
   id: identitySchema("mission"),
-  projectId: identitySchema("project"),
+  project_id: identitySchema("project"),
   version: z.number().int().positive(),
 });
 export type Mission = z.infer<typeof missionSchema>;
@@ -1198,8 +1198,8 @@ const attemptSelector = (minimum: number) =>
 
 const dependencyInput = z.strictObject({
   params: z.strictObject({
-    nodeId: identitySchema(NODE_IDENTITY_PREFIX),
-    dependsOnId: identitySchema(NODE_IDENTITY_PREFIX),
+    node_id: identitySchema(NODE_IDENTITY_PREFIX),
+    depends_on_id: identitySchema(NODE_IDENTITY_PREFIX),
   }),
   query: z.strictObject({}),
   body: graphEditSchema,
@@ -1212,9 +1212,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.objective.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/objective",
+    path: "/api/mission/execution/:execution_id/objective",
     input: readInput(
-      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(executionObjectiveSchema),
@@ -1226,9 +1226,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.objective.outcome.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/objective/outcome",
+    path: "/api/mission/execution/:execution_id/objective/outcome",
     input: readInput(
-      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(outcomeSchema),
@@ -1240,9 +1240,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.objective.evidence.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/objective/evidence",
+    path: "/api/mission/execution/:execution_id/objective/evidence",
     input: readInput(
-      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(evidenceSchema),
@@ -1254,9 +1254,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.evidence.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/evidence",
+    path: "/api/mission/execution/:execution_id/evidence",
     input: readInput(
-      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(evidenceSchema),
@@ -1268,9 +1268,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.clearedOutcome.get",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/cleared-outcome",
+    path: "/api/mission/execution/:execution_id/cleared-outcome",
     input: readInput(
-      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject({}),
     ),
     output: outcomeSchema,
@@ -1282,9 +1282,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.pinnedRevision.get",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/pinned-revision",
+    path: "/api/mission/execution/:execution_id/pinned-revision",
     input: readInput(
-      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject({}),
     ),
     output: revisionSchema,
@@ -1296,9 +1296,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.revision.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/revision",
+    path: "/api/mission/execution/:execution_id/revision",
     input: readInput(
-      z.strictObject({ executionId: identitySchema("execution") }),
+      z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(revisionSchema),
@@ -1310,10 +1310,10 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.revision.get",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/revision/:revision",
+    path: "/api/mission/execution/:execution_id/revision/:revision",
     input: readInput(
       z.strictObject({
-        executionId: identitySchema("execution"),
+        execution_id: identitySchema("execution"),
         revision: z.coerce.number().int().positive(),
       }),
       z.strictObject({}),
@@ -1326,9 +1326,9 @@ export const missionOperations = {
     id: "mission.evidence.delete",
     method: HttpMethod.Delete,
     status: HttpStatus.NoContent,
-    path: "/api/mission/evidence/:evidenceId",
+    path: "/api/mission/evidence/:evidence_id",
     input: z.strictObject({
-      params: z.strictObject({ evidenceId: identitySchema("evidence") }),
+      params: z.strictObject({ evidence_id: identitySchema("evidence") }),
       query: z.strictObject({}),
       body: evidenceDeleteSchema,
     }),
@@ -1341,9 +1341,9 @@ export const missionOperations = {
     id: "mission.evidence.asset.delete",
     method: HttpMethod.Delete,
     status: HttpStatus.NoContent,
-    path: "/api/mission/evidence/asset/:assetId",
+    path: "/api/mission/evidence/asset/:asset_id",
     input: z.strictObject({
-      params: z.strictObject({ assetId: identitySchema("evidence_asset") }),
+      params: z.strictObject({ asset_id: identitySchema("evidence_asset") }),
       query: z.strictObject({}),
       body: evidenceDeleteSchema,
     }),
@@ -1354,9 +1354,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.check",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/check",
+    path: "/api/mission/node/:node_id/check",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema("node") }),
+      params: z.strictObject({ node_id: identitySchema("node") }),
       query: z.strictObject({}),
       body: nodeCheckSchema,
     }),
@@ -1369,9 +1369,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.assessment.submit",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/assessment",
+    path: "/api/mission/node/:node_id/assessment",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema("node") }),
+      params: z.strictObject({ node_id: identitySchema("node") }),
       query: z.strictObject({}),
       body: assessmentSubmitSchema,
     }),
@@ -1382,9 +1382,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.evidence.asset.content.get",
     method: HttpMethod.Get,
-    path: "/api/mission/evidence/asset/:assetId/content",
+    path: "/api/mission/evidence/asset/:asset_id/content",
     input: readInput(
-      z.strictObject({ assetId: identitySchema("evidence_asset") }),
+      z.strictObject({ asset_id: identitySchema("evidence_asset") }),
       z.strictObject({}),
     ),
     output: storedContentSchema,
@@ -1396,11 +1396,11 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.execution.evidence.asset.content.get",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:executionId/evidence/asset/:assetId/content",
+    path: "/api/mission/execution/:execution_id/evidence/asset/:asset_id/content",
     input: readInput(
       z.strictObject({
-        executionId: identitySchema("execution"),
-        assetId: identitySchema("evidence_asset"),
+        execution_id: identitySchema("execution"),
+        asset_id: identitySchema("evidence_asset"),
       }),
       z.strictObject({}),
     ),
@@ -1411,9 +1411,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.evidence.list",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/evidence",
+    path: "/api/mission/node/:node_id/evidence",
     input: readInput(
-      z.strictObject({ nodeId: identitySchema("node") }),
+      z.strictObject({ node_id: identitySchema("node") }),
       z.strictObject({ ...pageQuery, attempt: attemptSelector(0).optional() }),
     ),
     output: pageOf(evidenceSchema),
@@ -1423,9 +1423,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.evidence.get",
     method: HttpMethod.Get,
-    path: "/api/mission/evidence/:evidenceId",
+    path: "/api/mission/evidence/:evidence_id",
     input: readInput(
-      z.strictObject({ evidenceId: identitySchema("evidence") }),
+      z.strictObject({ evidence_id: identitySchema("evidence") }),
       z.strictObject({}),
     ),
     output: evidenceSchema,
@@ -1437,9 +1437,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.evidence.submit",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/evidence",
+    path: "/api/mission/node/:node_id/evidence",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema("node") }),
+      params: z.strictObject({ node_id: identitySchema("node") }),
       query: z.strictObject({}),
       body: evidenceSubmitSchema,
     }),
@@ -1452,9 +1452,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.evidence.request",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/evidence/request",
+    path: "/api/mission/node/:node_id/evidence/request",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema("node") }),
+      params: z.strictObject({ node_id: identitySchema("node") }),
       query: z.strictObject({}),
       body: evidenceRequestSchema,
     }),
@@ -1467,9 +1467,9 @@ export const missionOperations = {
     requiresExecution: true,
     id: "mission.evidence.asset.complete",
     method: HttpMethod.Post,
-    path: "/api/mission/evidence/asset/:assetId/complete",
+    path: "/api/mission/evidence/asset/:asset_id/complete",
     input: z.strictObject({
-      params: z.strictObject({ assetId: identitySchema("evidence_asset") }),
+      params: z.strictObject({ asset_id: identitySchema("evidence_asset") }),
       query: z.strictObject({}),
       body: executionContextSchema,
     }),
@@ -1480,9 +1480,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.assessment.list",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/assessment",
+    path: "/api/mission/node/:node_id/assessment",
     input: readInput(
-      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
         attempt: attemptSelector(0).optional(),
@@ -1495,9 +1495,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.assessment.get",
     method: HttpMethod.Get,
-    path: "/api/mission/assessment/:assessmentId",
+    path: "/api/mission/assessment/:assessment_id",
     input: readInput(
-      z.strictObject({ assessmentId: identitySchema("assessment") }),
+      z.strictObject({ assessment_id: identitySchema("assessment") }),
       z.strictObject({}),
     ),
     output: assessmentSchema,
@@ -1507,9 +1507,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.outcome.list",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/outcome",
+    path: "/api/mission/node/:node_id/outcome",
     input: readInput(
-      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
         attempt: attemptSelector(0).optional(),
@@ -1522,9 +1522,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.outcome.get",
     method: HttpMethod.Get,
-    path: "/api/mission/outcome/:outcomeId",
+    path: "/api/mission/outcome/:outcome_id",
     input: readInput(
-      z.strictObject({ outcomeId: identitySchema("outcome") }),
+      z.strictObject({ outcome_id: identitySchema("outcome") }),
       z.strictObject({}),
     ),
     output: outcomeSchema,
@@ -1534,9 +1534,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.attempt.list",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/attempt",
+    path: "/api/mission/node/:node_id/attempt",
     input: readInput(
-      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(attemptSchema),
@@ -1546,10 +1546,10 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.attempt.get",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/attempt/:attempt",
+    path: "/api/mission/node/:node_id/attempt/:attempt",
     input: readInput(
       z.strictObject({
-        nodeId: identitySchema(NODE_IDENTITY_PREFIX),
+        node_id: identitySchema(NODE_IDENTITY_PREFIX),
         attempt: attemptSelector(1),
       }),
       z.strictObject({}),
@@ -1561,9 +1561,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.externalAction.list",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/external-action",
+    path: "/api/mission/node/:node_id/external-action",
     input: readInput(
-      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
         attempt: attemptSelector(0).optional(),
@@ -1576,12 +1576,12 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.externalAction.get",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/attempt/:attempt/external-action/:actionKey",
+    path: "/api/mission/node/:node_id/attempt/:attempt/external-action/:action_key",
     input: readInput(
       z.strictObject({
-        nodeId: identitySchema(NODE_IDENTITY_PREFIX),
+        node_id: identitySchema(NODE_IDENTITY_PREFIX),
         attempt: attemptSelector(1),
-        actionKey: actionKeySchema,
+        action_key: actionKeySchema,
       }),
       z.strictObject({}),
     ),
@@ -1592,9 +1592,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.unblock",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/unblock",
+    path: "/api/mission/node/:node_id/unblock",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: unblockSchema,
     }),
@@ -1605,9 +1605,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.override",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/override",
+    path: "/api/mission/node/:node_id/override",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: overrideSchema,
     }),
@@ -1618,9 +1618,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.block",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/block",
+    path: "/api/mission/node/:node_id/block",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: humanActSchema,
     }),
@@ -1631,9 +1631,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.discard",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/discard",
+    path: "/api/mission/node/:node_id/discard",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: humanActSchema,
     }),
@@ -1644,9 +1644,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.ready",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/ready",
+    path: "/api/mission/node/:node_id/ready",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: humanActSchema,
     }),
@@ -1657,9 +1657,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.resume",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/resume",
+    path: "/api/mission/node/:node_id/resume",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: resumeSchema,
     }),
@@ -1670,9 +1670,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.pause",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/pause",
+    path: "/api/mission/node/:node_id/pause",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: humanActSchema,
     }),
@@ -1683,9 +1683,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.export",
     method: HttpMethod.Get,
-    path: "/api/mission/:missionId/export",
+    path: "/api/mission/:mission_id/export",
     input: readInput(
-      z.strictObject({ missionId: identitySchema(MISSION_IDENTITY_PREFIX) }),
+      z.strictObject({ mission_id: identitySchema(MISSION_IDENTITY_PREFIX) }),
       z.strictObject({ format: importFormatSchema }),
     ),
     output: exportAnswerSchema,
@@ -1695,10 +1695,10 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.import.apply",
     method: HttpMethod.Post,
-    path: "/api/mission/:missionId/import",
+    path: "/api/mission/:mission_id/import",
     input: z.strictObject({
       params: z.strictObject({
-        missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+        mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
       }),
       query: z.strictObject({}),
       body: importApplySchema,
@@ -1711,10 +1711,10 @@ export const missionOperations = {
     body: true,
     id: "mission.import.preview",
     method: HttpMethod.Post,
-    path: "/api/mission/:missionId/import/preview",
+    path: "/api/mission/:mission_id/import/preview",
     input: z.strictObject({
       params: z.strictObject({
-        missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+        mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
       }),
       query: z.strictObject({}),
       body: importSnapshotSchema,
@@ -1726,13 +1726,13 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.edge.list",
     method: HttpMethod.Get,
-    path: "/api/mission/:missionId/edge",
+    path: "/api/mission/:mission_id/edge",
     input: readInput(
-      z.strictObject({ missionId: identitySchema(MISSION_IDENTITY_PREFIX) }),
+      z.strictObject({ mission_id: identitySchema(MISSION_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
         kind: edgeKindSchema.optional(),
-        nodeId: identitySchema(NODE_IDENTITY_PREFIX).optional(),
+        node_id: identitySchema(NODE_IDENTITY_PREFIX).optional(),
       }),
     ),
     output: pageOf(edgeSchema),
@@ -1742,7 +1742,7 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.dependency.add",
     method: HttpMethod.Put,
-    path: "/api/mission/node/:nodeId/dependency/:dependsOnId",
+    path: "/api/mission/node/:node_id/dependency/:depends_on_id",
     input: dependencyInput,
     output: nodeChangeSchema,
     description: "Add a mission dependency.",
@@ -1751,7 +1751,7 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.dependency.remove",
     method: HttpMethod.Delete,
-    path: "/api/mission/node/:nodeId/dependency/:dependsOnId",
+    path: "/api/mission/node/:node_id/dependency/:depends_on_id",
     input: dependencyInput,
     output: nodeChangeSchema,
     description: "Remove a mission dependency.",
@@ -1760,16 +1760,19 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.node.list",
     method: HttpMethod.Get,
-    path: "/api/mission/:missionId/node",
+    path: "/api/mission/:mission_id/node",
     input: readInput(
-      z.strictObject({ missionId: identitySchema(MISSION_IDENTITY_PREFIX) }),
+      z.strictObject({ mission_id: identitySchema(MISSION_IDENTITY_PREFIX) }),
       z
         .strictObject({
           ...pageQuery,
           kind: nodeKindSchema.optional(),
           state: nodeStateSchema.optional(),
-          parentId: identitySchema(NODE_IDENTITY_PREFIX).optional(),
-          includeRetired: z.enum(["true", "false"]).default("false").optional(),
+          parent_id: identitySchema(NODE_IDENTITY_PREFIX).optional(),
+          include_retired: z
+            .enum(["true", "false"])
+            .default("false")
+            .optional(),
         })
         .refine(
           (query) => query.kind !== NodeKind.Task || query.state === undefined,
@@ -1782,9 +1785,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.node.get",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId",
+    path: "/api/mission/node/:node_id",
     input: readInput(
-      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({}),
     ),
     output: nodeSchema,
@@ -1794,9 +1797,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.node.revision.list",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/revision",
+    path: "/api/mission/node/:node_id/revision",
     input: readInput(
-      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(revisionSchema),
@@ -1806,10 +1809,10 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.node.revision.get",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/revision/:revision",
+    path: "/api/mission/node/:node_id/revision/:revision",
     input: readInput(
       z.strictObject({
-        nodeId: identitySchema(NODE_IDENTITY_PREFIX),
+        node_id: identitySchema(NODE_IDENTITY_PREFIX),
         revision: z.coerce.number().int().positive().safe(),
       }),
       z.strictObject({}),
@@ -1821,9 +1824,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.node.retire.preview",
     method: HttpMethod.Get,
-    path: "/api/mission/node/:nodeId/retire/preview",
+    path: "/api/mission/node/:node_id/retire/preview",
     input: readInput(
-      z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({
         force: z.enum(["true", "false"]).default("false"),
       }),
@@ -1835,10 +1838,10 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.rebind",
     method: HttpMethod.Post,
-    path: "/api/mission/:missionId/rebind",
+    path: "/api/mission/:mission_id/rebind",
     input: z.strictObject({
       params: z.strictObject({
-        missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+        mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
       }),
       query: z.strictObject({}),
       body: rebindSchema,
@@ -1850,9 +1853,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.retire",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/retire",
+    path: "/api/mission/node/:node_id/retire",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: retireSchema,
     }),
@@ -1863,9 +1866,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.priority.set",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/priority",
+    path: "/api/mission/node/:node_id/priority",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: prioritySetSchema,
     }),
@@ -1876,9 +1879,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.move",
     method: HttpMethod.Post,
-    path: "/api/mission/node/:nodeId/move",
+    path: "/api/mission/node/:node_id/move",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: moveSchema,
     }),
@@ -1889,9 +1892,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.criterion.set",
     method: HttpMethod.Put,
-    path: "/api/mission/node/:nodeId/criterion",
+    path: "/api/mission/node/:node_id/criterion",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: criterionSetSchema,
     }),
@@ -1902,9 +1905,9 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.update",
     method: HttpMethod.Put,
-    path: "/api/mission/node/:nodeId",
+    path: "/api/mission/node/:node_id",
     input: z.strictObject({
-      params: z.strictObject({ nodeId: identitySchema(NODE_IDENTITY_PREFIX) }),
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       query: z.strictObject({}),
       body: nodeUpdateSchema,
     }),
@@ -1915,10 +1918,10 @@ export const missionOperations = {
     ...writeOperation,
     id: "mission.node.create",
     method: HttpMethod.Post,
-    path: "/api/mission/:missionId/node",
+    path: "/api/mission/:mission_id/node",
     input: z.strictObject({
       params: z.strictObject({
-        missionId: identitySchema(MISSION_IDENTITY_PREFIX),
+        mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
       }),
       query: z.strictObject({}),
       body: nodeCreateSchema,
@@ -1930,9 +1933,9 @@ export const missionOperations = {
     ...readOperation,
     id: "mission.get",
     method: HttpMethod.Get,
-    path: "/api/mission/project/:projectId",
+    path: "/api/mission/project/:project_id",
     input: readInput(
-      z.strictObject({ projectId: identitySchema("project") }),
+      z.strictObject({ project_id: identitySchema("project") }),
       z.strictObject({}),
     ),
     output: missionSchema,

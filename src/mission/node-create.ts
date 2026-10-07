@@ -45,8 +45,8 @@ import { requireMission } from "./write.ts";
 const FIRST_REVISION = 1;
 const REVISION_INCREMENT = 1;
 const Field = {
-  ParentId: "parentId",
-  ExpectedParentRevision: "expectedParentRevision",
+  ParentId: "parent_id",
+  ExpectedParentRevision: "expected_parent_revision",
   Reason: "reason",
 } as const;
 
@@ -66,16 +66,16 @@ function requireParent(
 ): Revision | null {
   if (body.kind === NodeKind.Initiative) {
     if (
-      body.parentId !== undefined ||
-      body.expectedParentRevision !== undefined
+      body.parent_id !== undefined ||
+      body.expected_parent_revision !== undefined
     )
       invalidField(Field.ParentId);
     return null;
   }
-  if (body.parentId === undefined) invalidField(Field.ParentId);
-  if (body.expectedParentRevision === undefined)
+  if (body.parent_id === undefined) invalidField(Field.ParentId);
+  if (body.expected_parent_revision === undefined)
     invalidField(Field.ExpectedParentRevision);
-  const parent = readNode(tx, body.parentId);
+  const parent = readNode(tx, body.parent_id);
   if (!parent)
     throw new OperationError(
       HttpStatus.NotFound,
@@ -87,7 +87,7 @@ function requireParent(
       HttpStatus.Conflict,
       MissionErrorCode.Retired,
       "Parent node is retired.",
-      { nodeId: parent.id },
+      { node_id: parent.id },
     );
   const expectedKind =
     body.kind === NodeKind.Objective ? NodeKind.Initiative : NodeKind.Objective;
@@ -96,7 +96,7 @@ function requireParent(
       HttpStatus.Conflict,
       MissionErrorCode.CreateRefused,
       "Parent cannot contain this node.",
-      { parentId: parent.id, parentKind: parent.kind },
+      { parent_id: parent.id, parent_kind: parent.kind },
     );
   if (!parentCreateAdmissible(parent.state))
     throw new OperationError(
@@ -112,7 +112,7 @@ function requireParent(
     parent.id,
     "Parent revision must belong to the parent.",
   );
-  if (current.revision !== body.expectedParentRevision)
+  if (current.revision !== body.expected_parent_revision)
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.RevisionConflict,
@@ -146,7 +146,7 @@ export function resolveContent(
   checkBindingRuleTable(body.kind, resolved);
   return {
     ...body.content,
-    bindings: resolved.map((binding) => binding.bindingId),
+    bindings: resolved.map((binding) => binding.binding_id),
   };
 }
 
@@ -161,8 +161,8 @@ function createdRevision(
   const metadata = {
     reason: body.reason,
     actor,
-    createdAt,
-    pinnedByAttempts: [],
+    created_at: createdAt,
+    pinned_by_attempts: [],
   };
   if (body.kind === NodeKind.Task) {
     assert.ok(parent, "Task creation requires an objective revision.");
@@ -177,13 +177,13 @@ function createdRevision(
       ],
       change: {
         write: RevisionWrite.NodeCreate,
-        previousRevision: parent.revision,
-        changedFields: [TASKS_FIELD],
+        previous_revision: parent.revision,
+        changed_fields: [TASKS_FIELD],
         tasks: [
           {
             id: nodeId,
             change: TaskChange.Created,
-            changedFields: [...CONTENT_FIELDS],
+            changed_fields: [...CONTENT_FIELDS],
           },
         ],
       },
@@ -192,15 +192,15 @@ function createdRevision(
   const objective = body.kind === NodeKind.Objective;
   return {
     ...metadata,
-    nodeId,
+    node_id: nodeId,
     filename: body.filename,
     revision: FIRST_REVISION,
     content,
     ...(objective ? { tasks: [] } : {}),
     change: {
       write: RevisionWrite.NodeCreate,
-      previousRevision: null,
-      changedFields: objective
+      previous_revision: null,
+      changed_fields: objective
         ? [...CONTENT_FIELDS, TASKS_FIELD]
         : [...CONTENT_FIELDS],
       ...(objective ? { tasks: [] } : {}),
@@ -217,12 +217,12 @@ export function createNode(
   workQueue: WorkQueue,
   textMaxBytes: number,
 ): NodeChange {
-  const mission = requireMission(tx, missionId, body.expectedMissionVersion);
+  const mission = requireMission(tx, missionId, body.expected_mission_version);
   const parent = requireParent(tx, missionId, body);
   const content = resolveContent(
     tx,
     bindings,
-    mission.projectId,
+    mission.project_id,
     body,
     textMaxBytes,
   );
@@ -236,7 +236,7 @@ export function createNode(
     mission_id: missionId,
     kind: body.kind,
     filename: body.filename,
-    parent_id: body.parentId ?? null,
+    parent_id: body.parent_id ?? null,
     created_at: createdAt,
   });
   const revision = createdRevision(
@@ -253,12 +253,12 @@ export function createNode(
     tx,
     workQueue,
     missionId,
-    mission.projectId,
+    mission.project_id,
     before,
     bindings,
   );
   const missionVersion = incrementMissionVersion(tx, missionId);
-  const stored = readRevision(tx, revision.nodeId, revision.revision);
+  const stored = readRevision(tx, revision.node_id, revision.revision);
   assert.ok(
     stored,
     "The inserted revision must be readable in the write transaction.",
@@ -269,20 +269,20 @@ export function createNode(
     "A create increments the mission once.",
   );
   return {
-    missionVersion,
+    mission_version: missionVersion,
     revisions: [revisionFromRow(tx, stored)],
-    retiredNodeIds: [],
-    addedEdges:
-      body.parentId === undefined
+    retired_node_ids: [],
+    added_edges:
+      body.parent_id === undefined
         ? []
         : [
             {
               kind: EdgeKind.Containment,
-              parentId: body.parentId,
-              childId: nodeId,
+              parent_id: body.parent_id,
+              child_id: nodeId,
             },
           ],
-    removedEdges: [],
-    openAttemptsUnchanged: openAttemptsOf(tx, [stored.node_id]),
+    removed_edges: [],
+    open_attempts_unchanged: openAttemptsOf(tx, [stored.node_id]),
   };
 }

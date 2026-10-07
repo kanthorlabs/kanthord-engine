@@ -13,11 +13,11 @@ import {
 const NO_ROWS = 0;
 const ONE_ROW = 1;
 const credentialList = z.array(identitySchema("credential"));
-const COLUMNS = `id AS executionId, project_id AS projectId, node_id AS nodeId,
-  worker_binding_id AS workerBindingId, resource_identity AS resourceIdentity,
-  runtime_identity AS runtimeIdentity, attempt, pinned_revision AS pinnedRevision,
-  credentials, expired_at AS expiredAt, trace_id AS traceId, root_span_id AS rootSpanId,
-  created_at AS createdAt, ended_at AS endedAt`;
+const COLUMNS = `id AS execution_id, project_id, node_id,
+  worker_binding_id, resource_identity,
+  runtime_identity, attempt, pinned_revision,
+  credentials, expired_at, trace_id, root_span_id,
+  created_at, ended_at`;
 type StoredRow = Omit<ExecutionRow, "credentials"> & { credentials: string };
 
 function decode(row: StoredRow): ExecutionRow {
@@ -30,7 +30,7 @@ function decode(row: StoredRow): ExecutionRow {
 export function insertExecution(tx: Transaction, row: ExecutionRow): void {
   assert.equal(new Set(row.credentials).size, row.credentials.length);
   assert.ok(
-    row.expiredAt > row.createdAt && Number.isSafeInteger(row.expiredAt),
+    row.expired_at > row.created_at && Number.isSafeInteger(row.expired_at),
   );
   tx.database
     .prepare(
@@ -40,20 +40,20 @@ export function insertExecution(tx: Transaction, row: ExecutionRow): void {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      row.executionId,
-      row.projectId,
-      row.nodeId,
-      row.workerBindingId,
-      row.resourceIdentity,
-      row.runtimeIdentity,
+      row.execution_id,
+      row.project_id,
+      row.node_id,
+      row.worker_binding_id,
+      row.resource_identity,
+      row.runtime_identity,
       row.attempt,
-      row.pinnedRevision,
+      row.pinned_revision,
       canonicalJSON(row.credentials),
-      row.expiredAt,
-      row.traceId,
-      row.rootSpanId,
-      row.createdAt,
-      row.endedAt,
+      row.expired_at,
+      row.trace_id,
+      row.root_span_id,
+      row.created_at,
+      row.ended_at,
     );
 }
 
@@ -135,12 +135,12 @@ export function endExecution(
 export function listExecutions(
   tx: Transaction,
   projectId: string,
-  filter: { nodeId?: string; attempt?: number },
+  filter: { node_id?: string; attempt?: number },
   after: string | undefined,
   count: number,
 ): ExecutionRow[] {
   assert.ok(Number.isSafeInteger(count) && count > NO_ROWS);
-  assert.ok(filter.attempt === undefined || filter.nodeId !== undefined);
+  assert.ok(filter.attempt === undefined || filter.node_id !== undefined);
   return (
     tx.database
       .prepare(
@@ -150,8 +150,8 @@ export function listExecutions(
       )
       .all(
         projectId,
-        filter.nodeId ?? null,
-        filter.nodeId ?? null,
+        filter.node_id ?? null,
+        filter.node_id ?? null,
         filter.attempt ?? null,
         filter.attempt ?? null,
         after ?? null,
@@ -162,10 +162,12 @@ export function listExecutions(
 }
 export function claimStateOf(row: ExecutionRow, now: number): ClaimState {
   assert.ok(Number.isSafeInteger(now) && now >= NO_ROWS);
-  assert.ok(row.expiredAt > row.createdAt);
-  if (row.endedAt !== null)
-    return row.endedAt < row.expiredAt ? ClaimState.Finished : ClaimState.Lost;
-  return now < row.expiredAt ? ClaimState.Running : ClaimState.Lost;
+  assert.ok(row.expired_at > row.created_at);
+  if (row.ended_at !== null)
+    return row.ended_at < row.expired_at
+      ? ClaimState.Finished
+      : ClaimState.Lost;
+  return now < row.expired_at ? ClaimState.Running : ClaimState.Lost;
 }
 export function executionRecord(
   tx: Transaction,
@@ -173,21 +175,26 @@ export function executionRecord(
   row: ExecutionRow,
   now: number,
 ): ExecutionRecord {
-  const { workerBindingId, resourceIdentity, runtimeIdentity, ...fields } = row;
+  const {
+    worker_binding_id: workerBindingId,
+    resource_identity: resourceIdentity,
+    runtime_identity: runtimeIdentity,
+    ...fields
+  } = row;
   assert.ok(workerBindingId.length > NO_ROWS);
   assert.ok(runtimeIdentity.length > NO_ROWS);
   const attribution = registrations.clientAttributionOf(tx, runtimeIdentity);
   return {
     ...fields,
     claimant: {
-      workerBindingId,
-      resourceIdentity,
-      runtimeIdentity,
+      worker_binding_id: workerBindingId,
+      resource_identity: resourceIdentity,
+      runtime_identity: runtimeIdentity,
       ...(attribution && {
-        clientId: attribution.client_id,
+        client_id: attribution.client_id,
         name: attribution.name,
       }),
     },
-    claimState: claimStateOf(row, now),
+    claim_state: claimStateOf(row, now),
   };
 }

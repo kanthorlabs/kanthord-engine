@@ -310,7 +310,7 @@ export function readReleaseEvidence(
 ): EvidenceRow[] {
   return tx.database
     .prepare(
-      "SELECT * FROM mission_evidence WHERE node_id = ? AND attempt = ? AND json_extract(provenance, '$.kind') = ? AND json_extract(provenance, '$.executionId') = ? ORDER BY id",
+      "SELECT * FROM mission_evidence WHERE node_id = ? AND attempt = ? AND json_extract(provenance, '$.kind') = ? AND json_extract(provenance, '$.execution_id') = ? ORDER BY id",
     )
     .all(
       nodeId,

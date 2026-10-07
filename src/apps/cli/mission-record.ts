@@ -41,7 +41,7 @@ export function addRecordCommands(mission: Command): void {
     validateNode(nodeId, "cli.mission.attempt.list.invalid_node_id");
     printResult(
       await client(command, "attempt.list")["attempt.list"]({
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: pagination(command.optsWithGlobals()),
         body: null,
       }),
@@ -62,7 +62,7 @@ export function addRecordCommands(mission: Command): void {
         );
         printResult(
           await client(command, "attempt.get")["attempt.get"]({
-            params: { nodeId, attempt },
+            params: { node_id: nodeId, attempt },
             query: {},
             body: null,
           }),
@@ -108,7 +108,7 @@ function addAssessmentCommands(mission: Command): void {
       assessmentSubmitSchema,
       (api, body, key) =>
         api["assessment.submit"](
-          { params: { nodeId }, query: {}, body },
+          { params: { node_id: nodeId }, query: {}, body },
           { idempotencyKey: key },
         ),
     );
@@ -117,7 +117,7 @@ function addAssessmentCommands(mission: Command): void {
     validateNode(nodeId, "cli.mission.assessment.list.invalid_node_id");
     printResult(
       await client(command, "assessment.list")["assessment.list"]({
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: recordListQuery(
           command,
           "cli.mission.assessment.list.invalid_attempt",
@@ -135,7 +135,7 @@ function addAssessmentCommands(mission: Command): void {
       );
     printResult(
       await client(command, "assessment.get")["assessment.get"]({
-        params: { assessmentId },
+        params: { assessment_id: assessmentId },
         query: {},
         body: null,
       }),
@@ -150,7 +150,7 @@ function addOutcomeCommands(mission: Command): void {
     validateNode(nodeId, "cli.mission.outcome.list.invalid_node_id");
     printResult(
       await client(command, "outcome.list")["outcome.list"]({
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: recordListQuery(
           command,
           "cli.mission.outcome.list.invalid_attempt",
@@ -168,7 +168,7 @@ function addOutcomeCommands(mission: Command): void {
       );
     printResult(
       await client(command, "outcome.get")["outcome.get"]({
-        params: { outcomeId },
+        params: { outcome_id: outcomeId },
         query: {},
         body: null,
       }),
@@ -200,7 +200,7 @@ function addExternalCommands(mission: Command): void {
           );
     printResult(
       await client(command, "externalAction.list")["externalAction.list"]({
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: { ...pagination(options), attempt },
         body: null,
       }),
@@ -233,7 +233,7 @@ function addExternalCommands(mission: Command): void {
           );
         printResult(
           await client(command, "externalAction.get")["externalAction.get"]({
-            params: { nodeId, attempt, actionKey },
+            params: { node_id: nodeId, attempt, action_key: actionKey },
             query: {},
             body: null,
           }),

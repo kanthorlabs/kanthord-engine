@@ -144,36 +144,36 @@ async function setup(t: TestContext) {
     kind: NodeKind.Initiative,
     content: CONTENT,
     reason: "plan",
-    expectedMissionVersion: FIRST_REVISION,
+    expected_mission_version: FIRST_REVISION,
   });
-  const initiativeId = initiative.revisions[FIRST_INDEX]!.nodeId;
+  const initiativeId = initiative.revisions[FIRST_INDEX]!.node_id;
   const objectiveBody = {
     filename: "objective-1.md",
     kind: NodeKind.Objective,
     content: { ...CONTENT, bindings: [binding.bindings.repo!.id] },
     reason: "plan",
-    parentId: initiativeId,
-    expectedParentRevision: FIRST_REVISION,
-    expectedMissionVersion: SECOND_REVISION,
+    parent_id: initiativeId,
+    expected_parent_revision: FIRST_REVISION,
+    expected_mission_version: SECOND_REVISION,
   };
   const objective = await create(objectiveBody);
-  const objectiveId = objective.revisions[FIRST_INDEX]!.nodeId;
+  const objectiveId = objective.revisions[FIRST_INDEX]!.node_id;
   const task = await create({
     filename: "task-1.md",
     kind: NodeKind.Task,
     content: CONTENT,
     reason: "plan",
-    parentId: objectiveId,
-    expectedParentRevision: FIRST_REVISION,
-    expectedMissionVersion: THIRD_MISSION_VERSION,
+    parent_id: objectiveId,
+    expected_parent_revision: FIRST_REVISION,
+    expected_mission_version: THIRD_MISSION_VERSION,
   });
-  const taskId = task.addedEdges.find(
+  const taskId = task.added_edges.find(
     (edge) => edge.kind === EdgeKind.Containment,
-  )!.childId;
+  )!.child_id;
   const secondObjective = await create({
     ...objectiveBody,
     filename: "objective-2.md",
-    expectedMissionVersion: FOURTH_MISSION_VERSION,
+    expected_mission_version: FOURTH_MISSION_VERSION,
   });
   const node = await read<Node>(["mission", "node", "get", objectiveId]);
   return {
@@ -181,14 +181,14 @@ async function setup(t: TestContext) {
     write,
     refuses,
     env,
-    projectId: project.id,
-    missionId: mission.id,
+    project_id: project.id,
+    mission_id: mission.id,
     initiativeId,
     objectiveId,
     taskId,
-    secondObjectiveId: secondObjective.revisions[FIRST_INDEX]!.nodeId,
-    bindingId: node.content.bindings[FIRST_INDEX]!,
-    revision: node.visibleRevision,
+    secondObjectiveId: secondObjective.revisions[FIRST_INDEX]!.node_id,
+    binding_id: node.content.bindings[FIRST_INDEX]!,
+    revision: node.visible_revision,
   };
 }
 
@@ -199,9 +199,9 @@ test(
     const h = await setup(t);
     const act = (state: NodeState, attempt: number) => ({
       reason: "hold",
-      expectedMissionVersion: VERSION,
-      expectedState: state,
-      expectedAttempt: attempt,
+      expected_mission_version: VERSION,
+      expected_state: state,
+      expected_attempt: attempt,
     });
     const control = (
       name: string,
@@ -211,11 +211,11 @@ test(
     ) =>
       h.write<ControlResult>(["mission", "node", name, id, ...options], body);
     const queue = () =>
-      h.read<Page<{ nodeId: string }>>([
+      h.read<Page<{ node_id: string }>>([
         "scheduler",
         "queue",
         "list",
-        h.projectId,
+        h.project_id,
       ]);
     const refuse = (
       name: string,
@@ -256,14 +256,14 @@ test(
         assert.ok(answer.node.kind !== NodeKind.Task);
         assert.equal(answer.node.attempt, FIRST_ATTEMPT);
         assert.equal(answer.attempt?.attempt, FIRST_ATTEMPT);
-        assert.equal(answer.attempt?.nodeRevision, h.revision);
-        assert.equal(answer.attempt?.openedBy.kind, ActorKind.Human);
+        assert.equal(answer.attempt?.node_revision, h.revision);
+        assert.equal(answer.attempt?.opened_by.kind, ActorKind.Human);
         assert.equal(answer.outcome, null);
         assert.ok(
-          (await queue()).items.some((item) => item.nodeId === h.objectiveId),
+          (await queue()).items.some((item) => item.node_id === h.objectiveId),
         );
         assert.equal(
-          (await h.read<Mission>(["mission", "get", h.projectId])).version,
+          (await h.read<Mission>(["mission", "get", h.project_id])).version,
           VERSION,
         );
       },
@@ -277,9 +277,9 @@ test(
           act(NodeState.Waiting, FIRST_ATTEMPT),
         );
         state(answer, NodeState.Paused);
-        assert.equal(answer.attempt?.closedAt, null);
+        assert.equal(answer.attempt?.closed_at, null);
         assert.ok(
-          !(await queue()).items.some((item) => item.nodeId === h.objectiveId),
+          !(await queue()).items.some((item) => item.node_id === h.objectiveId),
         );
       },
     );
@@ -292,7 +292,7 @@ test(
         NodeState.Waiting,
       );
       assert.ok(
-        (await queue()).items.some((item) => item.nodeId === h.objectiveId),
+        (await queue()).items.some((item) => item.node_id === h.objectiveId),
       );
     });
     await scenario(
@@ -310,9 +310,9 @@ test(
         );
         state(answer, NodeState.Blocked);
         assert.equal(answer.outcome?.result, AssessmentResult.Undetermined);
-        assert.equal(answer.outcome?.closingEvent, ClosingEvent.HumanBlock);
+        assert.equal(answer.outcome?.closing_event, ClosingEvent.HumanBlock);
         assert.equal(answer.outcome?.attempt, FIRST_ATTEMPT);
-        assert.equal(typeof answer.attempt?.closedAt, NUMBER_TYPE);
+        assert.equal(typeof answer.attempt?.closed_at, NUMBER_TYPE);
         blockedOutcome = answer.outcome!.id;
         const node = await h.read<Node>([
           "mission",
@@ -321,19 +321,19 @@ test(
           h.objectiveId,
         ]);
         assert.ok(node.kind !== NodeKind.Task);
-        assert.equal(node.blockedContext?.outcome.id, blockedOutcome);
-        assert.deepEqual(node.blockedContext?.requests, []);
+        assert.equal(node.blocked_context?.outcome.id, blockedOutcome);
+        assert.deepEqual(node.blocked_context?.requests, []);
       },
     );
     await scenario("E01.6 unblock opens exactly the next attempt", async () => {
       const answer = await control("unblock", h.objectiveId, {
-        blockedAttempt: FIRST_ATTEMPT,
+        blocked_attempt: FIRST_ATTEMPT,
         expected_revision: h.revision,
-        expectedMissionVersion: VERSION,
+        expected_mission_version: VERSION,
       });
       state(answer, NodeState.Available);
       assert.equal(answer.attempt?.attempt, SECOND_ATTEMPT);
-      assert.equal(answer.attempt?.openedBy.kind, ActorKind.Human);
+      assert.equal(answer.attempt?.opened_by.kind, ActorKind.Human);
       assert.equal(answer.outcome, null);
     });
     await scenario("E01.7 attempt reads retain closed history", async () => {
@@ -355,8 +355,8 @@ test(
         h.objectiveId,
         String(FIRST_ATTEMPT),
       ]);
-      assert.equal(typeof closed.closedAt, NUMBER_TYPE);
-      assert.deepEqual(closed.outcomeIds, [blockedOutcome]);
+      assert.equal(typeof closed.closed_at, NUMBER_TYPE);
+      assert.deepEqual(closed.outcome_ids, [blockedOutcome]);
     });
     await scenario(
       "E01.8 attempt reads frozen repository requirements",
@@ -368,17 +368,17 @@ test(
           h.objectiveId,
           String(SECOND_ATTEMPT),
         ]);
-        assert.deepEqual(attempt.requiredExternalActions, [
+        assert.deepEqual(attempt.required_external_actions, [
           {
             key: ACTION_KEY,
-            bindingId: h.bindingId,
+            binding_id: h.binding_id,
             action: RepositoryAction.PullRequest,
-            expectedEndState: ExpectedEndState.PullRequestMerged,
+            expected_end_state: ExpectedEndState.PullRequestMerged,
             follows: null,
-            configuration: { baseBranch: "main" },
+            configuration: { base_branch: "main" },
           },
         ]);
-        assert.equal(attempt.closedAt, null);
+        assert.equal(attempt.closed_at, null);
       },
     );
     await scenario("E01.9 external actions are unrequested", async () => {
@@ -393,7 +393,7 @@ test(
       assert.equal(page.items.length, SINGLE_ITEM);
       assert.equal(page.items[FIRST_INDEX]!.resolution, Resolution.Unrequested);
       assert.equal(page.items[FIRST_INDEX]!.requested, false);
-      assert.equal(page.items[FIRST_INDEX]!.requestEvidenceId, null);
+      assert.equal(page.items[FIRST_INDEX]!.request_evidence_id, null);
       const action = await h.read<ExternalAction>([
         "mission",
         "external-action",
@@ -418,10 +418,10 @@ test(
         assessmentId = assessment.id;
         assert.equal(assessment.actor.kind, ActorKind.Human);
         assert.equal(assessment.result, AssessmentResult.Undetermined);
-        assert.equal(assessment.executionId, null);
-        assert.equal(assessment.testedInput, null);
+        assert.equal(assessment.execution_id, null);
+        assert.equal(assessment.tested_input, null);
         assert.equal(assessment.currency, null);
-        assert.equal(assessment.workerVersion, null);
+        assert.equal(assessment.worker_version, null);
         assert.equal(assessment.attempt, FIRST_ATTEMPT);
         assert.equal(
           (
@@ -454,7 +454,7 @@ test(
             "get",
             page.items[FIRST_INDEX]!.id,
           ])
-        ).assessmentId,
+        ).assessment_id,
         assessmentId,
       );
     });
@@ -466,9 +466,9 @@ test(
           h.objectiveId,
           {
             ...act(NodeState.Available, SECOND_ATTEMPT),
-            landedCommit: {
+            landed_commit: {
               kind: "repository",
-              bindingId: h.bindingId,
+              binding_id: h.binding_id,
               commit: COMMIT,
             },
           },
@@ -477,11 +477,11 @@ test(
         state(answer, NodeState.Completed);
         assert.equal(answer.outcome?.result, AssessmentResult.Success);
         assert.equal(
-          answer.outcome?.closingEvent,
+          answer.outcome?.closing_event,
           ClosingEvent.SuccessOverride,
         );
-        assert.equal(answer.outcome?.evidenceIds.length, SINGLE_ITEM);
-        assert.equal(typeof answer.attempt?.closedAt, NUMBER_TYPE);
+        assert.equal(answer.outcome?.evidence_ids.length, SINGLE_ITEM);
+        assert.equal(typeof answer.attempt?.closed_at, NUMBER_TYPE);
       },
     );
     await scenario("E01.13 discard preserves attempt zero", async () => {
@@ -493,13 +493,13 @@ test(
       state(answer, NodeState.Discarded);
       assert.equal(answer.attempt, null);
       assert.equal(answer.outcome?.attempt, INITIAL_ATTEMPT);
-      assert.equal(answer.outcome?.closingEvent, ClosingEvent.HumanDiscard);
+      assert.equal(answer.outcome?.closing_event, ClosingEvent.HumanDiscard);
     });
     await scenario(
       "E01.14 terminal objectives admit initiative readiness",
       async () => {
         assert.ok(
-          (await queue()).items.some((item) => item.nodeId === h.initiativeId),
+          (await queue()).items.some((item) => item.node_id === h.initiativeId),
         );
         const answer = await control(
           "ready",
@@ -550,7 +550,7 @@ test(
           h.initiativeId,
           {
             ...act(NodeState.Waiting, FIRST_ATTEMPT),
-            expectedMissionVersion: FOURTH_MISSION_VERSION,
+            expected_mission_version: FOURTH_MISSION_VERSION,
           },
           "mission.version.conflict",
         );
@@ -564,9 +564,9 @@ test(
           h.initiativeId,
           {
             ...act(NodeState.Waiting, FIRST_ATTEMPT),
-            landedCommit: {
+            landed_commit: {
               kind: "repository",
-              bindingId: BINDING_ID,
+              binding_id: BINDING_ID,
               commit: COMMIT,
             },
           },

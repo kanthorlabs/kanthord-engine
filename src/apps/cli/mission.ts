@@ -58,7 +58,10 @@ const CRITERION = "criterion";
 const REBIND = "rebind";
 const PRIORITY = "priority";
 const BINDING_IDENTITY_PREFIX = "binding";
-const REBIND_FILE_SCHEMA = rebindSchema.omit({ bindingId: true, nodeId: true });
+const REBIND_FILE_SCHEMA = rebindSchema.omit({
+  binding_id: true,
+  node_id: true,
+});
 const FILE_OPTION = "--file";
 const KEY_OPTION = "--idempotency-key";
 const GET = "get";
@@ -144,7 +147,7 @@ export function validateNodeId(id: string, code: string): void {
 async function get(projectId: string, command: Command): Promise<void> {
   validateProjectId(projectId, GET_INVALID_PROJECT_ID);
   const result = await client(command, GET)[GET]({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {},
     body: null,
   });
@@ -171,11 +174,11 @@ async function nodeList(missionId: string, command: Command): Promise<void> {
     ...pagination(options),
     ...(kind.data !== undefined ? { kind: kind.data } : {}),
     ...(state.data !== undefined ? { state: state.data } : {}),
-    ...(options.parent !== undefined ? { parentId: options.parent } : {}),
-    includeRetired: options.includeRetired ? TRUE : FALSE,
+    ...(options.parent !== undefined ? { parent_id: options.parent } : {}),
+    include_retired: options.includeRetired ? TRUE : FALSE,
   } as const;
   const result = await client(command, NODE_LIST)[NODE_LIST]({
-    params: { missionId },
+    params: { mission_id: missionId },
     query,
     body: null,
   });
@@ -185,7 +188,7 @@ async function nodeList(missionId: string, command: Command): Promise<void> {
 async function nodeGet(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, NODE_GET_INVALID_NODE_ID);
   const result = await client(command, NODE_GET)[NODE_GET]({
-    params: { nodeId },
+    params: { node_id: nodeId },
     query: {},
     body: null,
   });
@@ -196,7 +199,7 @@ async function nodeCreate(missionId: string, command: Command): Promise<void> {
   validateMissionId(missionId, NODE_CREATE_INVALID_MISSION_ID);
   await mutate(command, "node.create", nodeCreateSchema, (api, body, key) =>
     api["node.create"](
-      { params: { missionId }, query: {}, body },
+      { params: { mission_id: missionId }, query: {}, body },
       { idempotencyKey: key },
     ),
   );
@@ -206,7 +209,7 @@ async function nodeUpdate(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, NODE_UPDATE_INVALID_NODE_ID);
   await mutate(command, "node.update", nodeUpdateSchema, (api, body, key) =>
     api["node.update"](
-      { params: { nodeId }, query: {}, body },
+      { params: { node_id: nodeId }, query: {}, body },
       { idempotencyKey: key },
     ),
   );
@@ -216,7 +219,7 @@ async function nodeMove(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, NODE_MOVE_INVALID_NODE_ID);
   await mutate(command, "node.move", moveSchema, (api, body, key) =>
     api["node.move"](
-      { params: { nodeId }, query: {}, body },
+      { params: { node_id: nodeId }, query: {}, body },
       { idempotencyKey: key },
     ),
   );
@@ -243,7 +246,11 @@ async function dependencyEdit(
   );
   await mutate(command, name, graphEditSchema, (api, body, key) =>
     api[name](
-      { params: { nodeId, dependsOnId }, query: {}, body },
+      {
+        params: { node_id: nodeId, depends_on_id: dependsOnId },
+        query: {},
+        body,
+      },
       { idempotencyKey: key },
     ),
   );
@@ -253,7 +260,7 @@ async function criterionSet(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, CRITERION_SET_INVALID_NODE_ID);
   await mutate(command, "criterion.set", criterionSetSchema, (api, body, key) =>
     api["criterion.set"](
-      { params: { nodeId }, query: {}, body },
+      { params: { node_id: nodeId }, query: {}, body },
       { idempotencyKey: key },
     ),
   );
@@ -272,12 +279,12 @@ async function nodeRebind(
   await mutate(command, "node.rebind", REBIND_FILE_SCHEMA, (api, file, key) =>
     api["node.rebind"](
       {
-        params: { missionId },
+        params: { mission_id: missionId },
         query: {},
         body: {
           ...file,
-          bindingId,
-          ...(nodeId === undefined ? {} : { nodeId }),
+          binding_id: bindingId,
+          ...(nodeId === undefined ? {} : { node_id: nodeId }),
         },
       },
       { idempotencyKey: key },
@@ -293,7 +300,7 @@ async function prioritySet(nodeId: string, command: Command): Promise<void> {
     prioritySetSchema,
     (api, body, key) =>
       api["node.priority.set"](
-        { params: { nodeId }, query: {}, body },
+        { params: { node_id: nodeId }, query: {}, body },
         { idempotencyKey: key },
       ),
   );
@@ -303,7 +310,7 @@ async function revisionList(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, REVISION_LIST_INVALID_NODE_ID);
   const query = pagination(command.optsWithGlobals());
   const result = await client(command, REVISION_LIST)[REVISION_LIST]({
-    params: { nodeId },
+    params: { node_id: nodeId },
     query,
     body: null,
   });
@@ -318,7 +325,7 @@ async function revisionGet(
   validateNodeId(nodeId, REVISION_GET_INVALID_NODE_ID);
   const rev = parsePositiveInt(revision, REVISION_GET_INVALID_REVISION);
   const result = await client(command, REVISION_GET)[REVISION_GET]({
-    params: { nodeId, revision: rev },
+    params: { node_id: nodeId, revision: rev },
     query: {},
     body: null,
   });
@@ -336,10 +343,10 @@ async function edgeList(missionId: string, command: Command): Promise<void> {
   const query = {
     ...pagination(options),
     ...(kind.data !== undefined ? { kind: kind.data } : {}),
-    ...(options.node !== undefined ? { nodeId: options.node } : {}),
+    ...(options.node !== undefined ? { node_id: options.node } : {}),
   };
   const result = await client(command, EDGE_LIST)[EDGE_LIST]({
-    params: { missionId },
+    params: { mission_id: missionId },
     query,
     body: null,
   });
@@ -357,7 +364,7 @@ async function retirePreview(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, RETIRE_PREVIEW_INVALID_NODE_ID);
   const options = command.optsWithGlobals();
   const result = await client(command, RETIRE_PREVIEW)[RETIRE_PREVIEW]({
-    params: { nodeId },
+    params: { node_id: nodeId },
     query: { force: options.force ? TRUE : FALSE },
     body: null,
   });
@@ -374,7 +381,7 @@ async function nodeRetire(nodeId: string, command: Command): Promise<void> {
   await mutate(command, NODE_RETIRE, RETIRE_FILE_SCHEMA, (api, file, key) =>
     api[NODE_RETIRE](
       {
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: {},
         body: { ...file, force: Boolean(options.force) },
       },
@@ -406,8 +413,8 @@ function importFileSchema<S extends z.ZodTypeAny>(
     .transform((manifest): unknown => {
       const body = {
         ...manifest,
-        missionId:
-          manifest.missionId === undefined ? missionId : manifest.missionId,
+        mission_id:
+          manifest.mission_id === undefined ? missionId : manifest.mission_id,
       };
       if (manifest.format === ImportFormat.Json && paths.length > NO_FILES)
         throw new Diagnostic(
@@ -448,7 +455,7 @@ async function importPreview(
     importFileSchema(importSnapshotSchema, missionId, paths, IMPORT_PREVIEW),
   );
   const result = await api[IMPORT_PREVIEW]({
-    params: { missionId },
+    params: { mission_id: missionId },
     query: {},
     body,
   });
@@ -470,7 +477,7 @@ async function importApply(
     importFileSchema(importApplySchema, missionId, paths, IMPORT_APPLY),
     (api, body, key) =>
       api[IMPORT_APPLY](
-        { params: { missionId }, query: {}, body },
+        { params: { mission_id: missionId }, query: {}, body },
         { idempotencyKey: key },
       ),
   );
@@ -497,12 +504,12 @@ async function exportMission(
   if (format.data === ImportFormat.Markdown)
     validateExportDirectory(options.out);
   const result = await client(command, EXPORT)[EXPORT]({
-    params: { missionId },
+    params: { mission_id: missionId },
     query: { format: format.data },
     body: null,
   });
   const data = handleReadResult(result, `cli.mission.${EXPORT}.indeterminate`);
-  assert.equal(data.missionId, missionId);
+  assert.equal(data.mission_id, missionId);
   if (format.data === ImportFormat.Markdown) {
     assert.ok("files" in data);
     validateExportDirectory(options.out);
@@ -514,7 +521,7 @@ async function exportMission(
     writePrivate(options.out, JSON.stringify(data));
   }
   process.stdout.write(
-    `${JSON.stringify({ missionId: data.missionId, missionVersion: data.missionVersion })}\n`,
+    `${JSON.stringify({ mission_id: data.mission_id, mission_version: data.mission_version })}\n`,
   );
 }
 

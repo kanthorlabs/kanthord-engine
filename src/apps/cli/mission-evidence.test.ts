@@ -39,7 +39,7 @@ test("both evidence delete commands send an explicit boolean force through the H
         { from: "user" },
       );
       assert.deepEqual(bodies.at(-1), {
-        expectedMissionVersion: 1,
+        expected_mission_version: 1,
         force,
         ...(force ? { reason: "Remove exposed material" } : {}),
       });

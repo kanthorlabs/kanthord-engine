@@ -19,12 +19,12 @@ export function release(
     const row = requireRunning(tx, executionId, proof.runtimeIdentity, now);
     dependencies.transitions.release(
       tx,
-      { executionId, nodeId: row.nodeId, attempt: row.attempt },
+      { execution_id: executionId, node_id: row.node_id, attempt: row.attempt },
       furtherWork,
       now,
     );
     endExecution(tx, executionId, now);
-    return { executionId, endedAt: now };
+    return { execution_id: executionId, ended_at: now };
   });
   wake(proof.projectId);
   return result;

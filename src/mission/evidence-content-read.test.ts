@@ -34,7 +34,7 @@ test("initiative content bound includes only evidence of current child outcomes"
   const h = evidenceHarness(t, IDENTITY);
   const submit = () =>
     h.invoke("evidence.submit", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: {
         ...h.context,
@@ -43,7 +43,7 @@ test("initiative content bound includes only evidence of current child outcomes"
           {
             kind: AssetKind.Produced,
             content: {
-              mediaType: "text/plain",
+              media_type: "text/plain",
               encoding: "base64",
               data: DATA,
             },
@@ -57,7 +57,7 @@ test("initiative content bound includes only evidence of current child outcomes"
     const assessmentId = createIdentity("assessment");
     insertAssessment(tx, {
       id: assessmentId,
-      node_id: h.nodeId,
+      node_id: h.node_id,
       attempt: FIRST_ATTEMPT,
       result: AssessmentResult.Undetermined,
       rationale: "Blocked",
@@ -71,7 +71,7 @@ test("initiative content bound includes only evidence of current child outcomes"
     });
     insertOutcome(tx, {
       id: createIdentity("outcome"),
-      node_id: h.nodeId,
+      node_id: h.node_id,
       assessment_id: assessmentId,
       result: AssessmentResult.Undetermined,
       evidence_ids: "[]",
@@ -81,7 +81,7 @@ test("initiative content bound includes only evidence of current child outcomes"
   h.claim.nodeId = h.node().parent_id!;
   const read = (assetId: string) =>
     h.invoke("execution.evidence.asset.content.get", {
-      params: { assetId, executionId: h.claim.executionId },
+      params: { asset_id: assetId, execution_id: h.claim.executionId },
       query: {},
       body: null,
     });
@@ -97,7 +97,7 @@ test("initiative content bound includes only evidence of current child outcomes"
   h.store.transaction((tx) =>
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-      .run(FIRST_ATTEMPT, h.nodeId),
+      .run(FIRST_ATTEMPT, h.node_id),
   );
   await assert.rejects(
     read(named.evidence.assets[FIRST_ASSET_INDEX]!.id),
@@ -111,12 +111,12 @@ test("content signing repeats after publication and never releases a URL after d
   for (const change of Object.values(Change)) {
     const h = evidenceHarness(t, IDENTITY);
     h.dependencies.intakeStorage.put = async () => ({
-      putUrl: "https://example.com/put",
+      put_url: "https://example.com/put",
       headers: {},
-      expiresAt: Date.now() + FIRST_ATTEMPT,
+      expires_at: Date.now() + FIRST_ATTEMPT,
     });
     const submitted = await h.invoke("evidence.submit", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: {
         ...h.context,
@@ -124,7 +124,7 @@ test("content signing repeats after publication and never releases a URL after d
         assets: [
           {
             kind: AssetKind.Object,
-            mediaType: "text/plain",
+            media_type: "text/plain",
             size: FIRST_ATTEMPT,
           },
         ],
@@ -143,7 +143,7 @@ test("content signing repeats after publication and never releases a URL after d
         h.store.transaction((tx) =>
           tx.database
             .prepare(
-              "UPDATE mission_evidence_asset SET content = json_set(content, '$.objectVersion', ?), published_at = ? WHERE id = ?",
+              "UPDATE mission_evidence_asset SET content = json_set(content, '$.object_version', ?), published_at = ? WHERE id = ?",
             )
             .run(VERSION, FIRST_ATTEMPT, assetId),
         );
@@ -156,13 +156,13 @@ test("content signing repeats after publication and never releases a URL after d
       if (change === Change.Claim)
         h.dependencies.schedulerClaims.liveExecutionOf = () => null;
       return {
-        getUrl: `https://example.com/${version ?? "latest"}`,
-        expiresAt: FIRST_ATTEMPT,
+        get_url: `https://example.com/${version ?? "latest"}`,
+        expires_at: FIRST_ATTEMPT,
       };
     };
     const read = () =>
       h.invoke("execution.evidence.asset.content.get", {
-        params: { assetId, executionId: h.claim.executionId },
+        params: { asset_id: assetId, execution_id: h.claim.executionId },
         query: {},
         body: null,
       });
@@ -179,9 +179,9 @@ test("content signing repeats after publication and never releases a URL after d
       continue;
     }
     const result = await read();
-    assert.ok(result.address.kind === AssetKind.Object && "getUrl" in result);
+    assert.ok(result.address.kind === AssetKind.Object && "get_url" in result);
     assert.equal(result.address.version, VERSION);
-    assert.equal(result.getUrl, `https://example.com/${VERSION}`);
+    assert.equal(result.get_url, `https://example.com/${VERSION}`);
     assert.deepEqual(versions, [null, VERSION]);
   }
 });
@@ -189,7 +189,7 @@ test("content signing repeats after publication and never releases a URL after d
 test("content reads return inline bytes or sign only the recorded object version with the correct reader seam", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
   const inline = await h.invoke("evidence.submit", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
       ...h.context,
@@ -197,14 +197,14 @@ test("content reads return inline bytes or sign only the recorded object version
       assets: [
         {
           kind: AssetKind.Produced,
-          content: { mediaType: "text/plain", encoding: "base64", data: DATA },
+          content: { media_type: "text/plain", encoding: "base64", data: DATA },
         },
       ],
     },
   });
   const assetId = inline.evidence.assets[0]!.id;
   const human = await h.invoke("evidence.asset.content.get", {
-    params: { assetId },
+    params: { asset_id: assetId },
     query: {},
     body: null,
   });
@@ -219,7 +219,7 @@ test("content reads return inline bytes or sign only the recorded object version
         tx,
         {
           id,
-          node_id: h.nodeId,
+          node_id: h.node_id,
           attempt: FIRST_ATTEMPT,
           subject: "Object",
           requirement_key: null,
@@ -236,9 +236,9 @@ test("content reads return inline bytes or sign only the recorded object version
             content: canonicalJSON({
               location: "s3://bucket/key",
               size: FIRST_ATTEMPT,
-              mediaType: "text/plain",
-              storageBindingId: h.storageId,
-              ...(objectVersion ? { objectVersion } : {}),
+              media_type: "text/plain",
+              storage_binding_id: h.storageId,
+              ...(objectVersion ? { object_version: objectVersion } : {}),
             }),
             published_at: FIRST_ATTEMPT,
             expired_at: null,
@@ -258,17 +258,17 @@ test("content reads return inline bytes or sign only the recorded object version
         assert.equal(key, KEY);
         assert.equal(version, objectVersion ?? null);
         return {
-          getUrl: "https://storage.example/get",
-          expiresAt: FIRST_ATTEMPT,
+          get_url: "https://storage.example/get",
+          expires_at: FIRST_ATTEMPT,
         };
       };
     await h.invoke("evidence.asset.content.get", {
-      params: { assetId: objectId },
+      params: { asset_id: objectId },
       query: {},
       body: null,
     });
     await h.invoke("execution.evidence.asset.content.get", {
-      params: { assetId: objectId, executionId: h.claim.executionId },
+      params: { asset_id: objectId, execution_id: h.claim.executionId },
       query: {},
       body: null,
     });
@@ -283,7 +283,7 @@ test("external addresses answer typed conflicts only after the execution bound a
       AssetKind.Repository,
       {
         kind: AssetKind.Repository,
-        bindingId: h.repositoryId,
+        binding_id: h.repositoryId,
         commit: "a".repeat(40),
       },
       MissionErrorCode.EvidenceContentRepository,
@@ -305,7 +305,7 @@ test("external addresses answer typed conflicts only after the execution bound a
         tx,
         {
           id: evidenceId,
-          node_id: h.nodeId,
+          node_id: h.node_id,
           attempt: FIRST_ATTEMPT,
           subject: "Address",
           requirement_key: null,
@@ -328,14 +328,17 @@ test("external addresses answer typed conflicts only after the execution bound a
     );
     await assert.rejects(
       h.invoke("evidence.asset.content.get", {
-        params: { assetId },
+        params: { asset_id: assetId },
         query: {},
         body: null,
       }),
       (error) => {
         assert.ok(error instanceof OperationError);
         assert.equal(error.code, code);
-        assert.deepEqual(error.details, { evidenceId, address: content });
+        assert.deepEqual(error.details, {
+          evidence_id: evidenceId,
+          address: content,
+        });
         return true;
       },
     );
@@ -346,7 +349,7 @@ test("external addresses answer typed conflicts only after the execution bound a
     );
     await assert.rejects(
       h.invoke("execution.evidence.asset.content.get", {
-        params: { assetId, executionId: h.claim.executionId },
+        params: { asset_id: assetId, execution_id: h.claim.executionId },
         query: {},
         body: null,
       }),
@@ -364,7 +367,7 @@ test("external addresses answer typed conflicts only after the execution bound a
     );
     await assert.rejects(
       h.invoke("execution.evidence.asset.content.get", {
-        params: { assetId, executionId: h.claim.executionId },
+        params: { asset_id: assetId, execution_id: h.claim.executionId },
         query: {},
         body: null,
       }),
@@ -379,7 +382,7 @@ test("external addresses answer typed conflicts only after the execution bound a
     );
     await assert.rejects(
       h.invoke("evidence.asset.content.get", {
-        params: { assetId },
+        params: { asset_id: assetId },
         query: {},
         body: null,
       }),

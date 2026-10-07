@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: executionId
+      - name: execution_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.execution.revision.get.Input/properties/par\
-            ams/properties/executionId"
+            ams/properties/execution_id"
       - name: revision
         in: path
         required: true
@@ -59,7 +59,7 @@ components:
         params:
           type: object
           properties:
-            executionId:
+            execution_id:
               type: string
               minLength: 36
               maxLength: 36
@@ -70,7 +70,7 @@ components:
               exclusiveMinimum: 0
               maximum: 9007199254740991
           required:
-            - executionId
+            - execution_id
             - revision
           additionalProperties: false
         query:
@@ -87,7 +87,7 @@ components:
     mission.execution.revision.get.Output:
       type: object
       properties:
-        nodeId:
+        node_id:
           type: string
           minLength: 31
           maxLength: 31
@@ -123,13 +123,13 @@ components:
                 kind:
                   type: string
                   const: execution
-                executionId:
+                execution_id:
                   type: string
                   minLength: 36
                   maxLength: 36
                   pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                   description: execution_ followed by a canonical 26-character uppercase ULID.
-                clientId:
+                client_id:
                   anyOf:
                     - type: string
                       minLength: 42
@@ -144,8 +144,8 @@ components:
                     - type: "null"
               required:
                 - kind
-                - executionId
-                - clientId
+                - execution_id
+                - client_id
                 - name
               additionalProperties: false
             - type: object
@@ -168,7 +168,7 @@ components:
                 - kind
                 - service
               additionalProperties: false
-        createdAt:
+        created_at:
           type: integer
           minimum: 0
           maximum: 9007199254740991
@@ -264,13 +264,13 @@ components:
                 - node.rebind
                 - criterion.set
                 - unblock
-            previousRevision:
+            previous_revision:
               anyOf:
                 - type: integer
                   exclusiveMinimum: 0
                   maximum: 9007199254740991
                 - type: "null"
-            changedFields:
+            changed_fields:
               type: array
               items:
                 type: string
@@ -293,34 +293,34 @@ components:
                       - moved-in
                       - moved-out
                       - retired
-                  changedFields:
+                  changed_fields:
                     type: array
                     items:
                       type: string
                 required:
                   - id
                   - change
-                  - changedFields
+                  - changed_fields
                 additionalProperties: false
           required:
             - write
-            - previousRevision
-            - changedFields
+            - previous_revision
+            - changed_fields
           additionalProperties: false
-        pinnedByAttempts:
+        pinned_by_attempts:
           type: array
           items:
             type: integer
             exclusiveMinimum: 0
             maximum: 9007199254740991
       required:
-        - nodeId
+        - node_id
         - filename
         - revision
         - reason
         - actor
-        - createdAt
+        - created_at
         - content
         - change
-        - pinnedByAttempts
+        - pinned_by_attempts
       additionalProperties: false

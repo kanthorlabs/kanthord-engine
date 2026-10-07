@@ -67,7 +67,7 @@ export function insertMission(
 export function readMissionByProject(
   tx: Transaction,
   projectId: string,
-): { id: string; projectId: string; version: number } | null {
+): { id: string; project_id: string; version: number } | null {
   const row = tx.database
     .prepare(
       "SELECT id, project_id, version FROM mission_mission WHERE project_id = ?",
@@ -75,7 +75,7 @@ export function readMissionByProject(
     .get(projectId) as
     { id: string; project_id: string; version: number } | undefined;
   return row
-    ? { id: row.id, projectId: row.project_id, version: row.version }
+    ? { id: row.id, project_id: row.project_id, version: row.version }
     : null;
 }
 
@@ -84,9 +84,7 @@ export function readMission(
   missionId: string,
 ): Mission | null {
   const row = tx.database
-    .prepare(
-      "SELECT id, project_id AS projectId, version FROM mission_mission WHERE id = ?",
-    )
+    .prepare("SELECT id, project_id, version FROM mission_mission WHERE id = ?")
     .get(missionId) as Mission | undefined;
   return row ?? null;
 }
@@ -220,8 +218,8 @@ export function readMissionNodes(
 export interface NodeListFilter {
   kind?: NodeKind;
   state?: NodeState;
-  parentId?: string;
-  includeRetired: boolean;
+  parent_id?: string;
+  include_retired: boolean;
   after?: string;
 }
 
@@ -243,13 +241,13 @@ export function listNodes(
     )
     .all(
       missionId,
-      Number(filter.includeRetired),
+      Number(filter.include_retired),
       filter.kind ?? null,
       filter.kind ?? null,
       filter.state ?? null,
       filter.state ?? null,
-      filter.parentId ?? null,
-      filter.parentId ?? null,
+      filter.parent_id ?? null,
+      filter.parent_id ?? null,
       filter.after ?? null,
       filter.after ?? null,
       count,
@@ -313,7 +311,7 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      revision.nodeId,
+      revision.node_id,
       revision.revision,
       revision.filename,
       revision.content.name,
@@ -325,7 +323,7 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
       JSON.stringify(revision.change),
       revision.reason,
       JSON.stringify(revision.actor),
-      revision.createdAt,
+      revision.created_at,
     );
 }
 
@@ -363,7 +361,7 @@ export function readDependencies(
 ): DepEdge[] {
   return tx.database
     .prepare(
-      `SELECT d.dependent_id AS dependent, d.depends_on_id AS dependsOn
+      `SELECT d.dependent_id AS dependent, d.depends_on_id AS depends_on
     FROM mission_dependency d
     JOIN mission_node source ON source.id = d.dependent_id
     JOIN mission_node target ON target.id = d.depends_on_id
@@ -384,14 +382,14 @@ export function readDependsOnIds(tx: Transaction, nodeId: string): string[] {
 
 export interface EdgeListFilter {
   kind?: EdgeKind;
-  nodeId?: string;
+  node_id?: string;
   after?: string;
 }
 
 export interface EdgeRow {
   kind: EdgeKind;
-  firstId: string;
-  secondId: string;
+  first_id: string;
+  second_id: string;
   key: string;
 }
 
@@ -404,7 +402,7 @@ export function listEdges(
   return tx.database
     .prepare(
       `WITH edges AS (
-      SELECT ? AS kind, parent.id AS firstId, child.id AS secondId
+      SELECT ? AS kind, parent.id AS first_id, child.id AS second_id
       FROM mission_node child JOIN mission_node parent ON parent.id = child.parent_id
       WHERE child.mission_id = ? AND child.retired_at IS NULL AND parent.retired_at IS NULL
       UNION ALL
@@ -414,11 +412,11 @@ export function listEdges(
       JOIN mission_node target ON target.id = d.depends_on_id
       WHERE d.mission_id = ? AND source.retired_at IS NULL AND target.retired_at IS NULL
     ), keyed AS (
-      SELECT *, kind || '|' || firstId || '|' || secondId AS key FROM edges
+      SELECT *, kind || '|' || first_id || '|' || second_id AS key FROM edges
     )
     SELECT * FROM keyed
     WHERE (? IS NULL OR kind = ?)
-      AND (? IS NULL OR firstId = ? OR secondId = ?)
+      AND (? IS NULL OR first_id = ? OR second_id = ?)
       AND (? IS NULL OR key < ?)
     ORDER BY key DESC LIMIT ?`,
     )
@@ -429,9 +427,9 @@ export function listEdges(
       missionId,
       filter.kind ?? null,
       filter.kind ?? null,
-      filter.nodeId ?? null,
-      filter.nodeId ?? null,
-      filter.nodeId ?? null,
+      filter.node_id ?? null,
+      filter.node_id ?? null,
+      filter.node_id ?? null,
       filter.after ?? null,
       filter.after ?? null,
       count,
@@ -534,13 +532,13 @@ export function readLiveNodesPinning(
 export function openAttemptsOf(
   tx: Transaction,
   ownerIds: readonly string[],
-): { nodeId: string; attempt: number }[] {
+): { node_id: string; attempt: number }[] {
   return tx.database
     .prepare(
-      "SELECT node_id AS nodeId, attempt FROM mission_attempt WHERE closed_at IS NULL AND node_id IN (SELECT value FROM json_each(?)) ORDER BY node_id",
+      "SELECT node_id, attempt FROM mission_attempt WHERE closed_at IS NULL AND node_id IN (SELECT value FROM json_each(?)) ORDER BY node_id",
     )
     .all(JSON.stringify(ownerIds)) as unknown as {
-    nodeId: string;
+    node_id: string;
     attempt: number;
   }[];
 }

@@ -49,7 +49,7 @@ const CONFIGURATION = {
   reasoning_effort: "off",
 };
 type Page<T> = { items: T[]; next_cursor: string | null };
-type Node = { state: string; attempt: number; visibleRevision: number };
+type Node = { state: string; attempt: number; visible_revision: number };
 type Pull = {
   kind: string;
   execution: ExecutionRecord;
@@ -57,10 +57,10 @@ type Pull = {
 };
 type Attempt = {
   attempt: number;
-  closedAt: number | null;
-  openedBy: { kind: string; executionId: string };
+  closed_at: number | null;
+  opened_by: { kind: string; execution_id: string };
 };
-type Change = { revisions: { nodeId: string }[] };
+type Change = { revisions: { node_id: string }[] };
 
 function machineToken(
   directory: string,
@@ -228,7 +228,7 @@ async function setup(t: TestContext, short = false) {
       kind: "initiative",
       content: CONTENT,
       reason: "plan",
-      expectedMissionVersion: 1,
+      expected_mission_version: 1,
     },
   );
   const objective = await write<Change>(
@@ -238,14 +238,14 @@ async function setup(t: TestContext, short = false) {
       kind: "objective",
       content: { ...CONTENT, bindings: [applied.bindings.repo!.id] },
       reason: "plan",
-      parentId: initiative.revisions[0]!.nodeId,
-      expectedParentRevision: 1,
-      expectedMissionVersion: 2,
+      parent_id: initiative.revisions[0]!.node_id,
+      expected_parent_revision: 1,
+      expected_mission_version: 2,
     },
   );
-  const objectiveId = objective.revisions[0]!.nodeId;
+  const objectiveId = objective.revisions[0]!.node_id;
   const revision = (await read<Node>(["mission", "node", "get", objectiveId]))
-    .visibleRevision;
+    .visible_revision;
   writePrivate(
     join(directory, "server.yaml"),
     stringify(
@@ -294,12 +294,12 @@ async function setup(t: TestContext, short = false) {
     : (await read<{ runtime_identity: string }>(["worker", "register"], R))
         .runtime_identity;
   const generalPull = {
-    resourceIdentity: "worker:kanthord:general",
-    runtimeIdentity: general,
+    resource_identity: "worker:kanthord:general",
+    runtime_identity: general,
   };
   const reviewerPull = {
-    resourceIdentity: "worker:kanthord:reviewer",
-    runtimeIdentity: reviewer,
+    resource_identity: "worker:kanthord:reviewer",
+    runtime_identity: reviewer,
   };
   const pull = (env = G, body = generalPull, suffix: string[] = []) =>
     write<Pull>(["scheduler", "work", "pull", ...suffix], body, env);
@@ -309,12 +309,12 @@ async function setup(t: TestContext, short = false) {
     read<ExecutionRecord>(["scheduler", "claim", "get", executionId], env);
   const node = () => read<Node>(["mission", "node", "get", objectiveId]);
   const queue = () =>
-    read<Page<{ nodeId: string }>>(["scheduler", "queue", "list", project.id]);
+    read<Page<{ node_id: string }>>(["scheduler", "queue", "list", project.id]);
   const act = (state: string) => ({
     reason: "hold",
-    expectedMissionVersion: THIRD_MISSION_VERSION,
-    expectedState: state,
-    expectedAttempt: FIRST_ATTEMPT,
+    expected_mission_version: THIRD_MISSION_VERSION,
+    expected_state: state,
+    expected_attempt: FIRST_ATTEMPT,
   });
   return {
     fixture,
@@ -327,7 +327,7 @@ async function setup(t: TestContext, short = false) {
     reviewer,
     generalPull,
     reviewerPull,
-    projectId: project.id,
+    project_id: project.id,
     objectiveId,
     revision,
     file,
@@ -350,35 +350,38 @@ test(
     const h = await setup(t);
     let X = UNSET_EXECUTION_ID;
     let E = UNSET_EXECUTION_ID;
-    const further = h.file({ furtherWork: true });
-    const release = h.file({ furtherWork: false });
+    const further = h.file({ further_work: true });
+    const release = h.file({ further_work: false });
     await t.test(
       "E03.1 steps claim pins the attempt, binding and deadline",
       async () => {
         const result = await h.pull();
         assert.equal(result.kind, WorkPullKind.Claimed);
         const execution = result.execution;
-        X = execution.executionId;
-        assert.equal(execution.nodeId, h.objectiveId);
+        X = execution.execution_id;
+        assert.equal(execution.node_id, h.objectiveId);
         assert.equal(execution.attempt, FIRST_ATTEMPT);
-        assert.equal(execution.pinnedRevision, h.revision);
-        assert.equal(execution.claimState, ClaimState.Running);
+        assert.equal(execution.pinned_revision, h.revision);
+        assert.equal(execution.claim_state, ClaimState.Running);
         assert.deepEqual(execution.credentials, []);
-        assert.equal(execution.endedAt, null);
-        assert.equal(execution.claimant.runtimeIdentity, h.general);
+        assert.equal(execution.ended_at, null);
+        assert.equal(execution.claimant.runtime_identity, h.general);
         assert.equal(
-          execution.claimant.resourceIdentity,
-          h.generalPull.resourceIdentity,
+          execution.claimant.resource_identity,
+          h.generalPull.resource_identity,
         );
-        assert.ok(execution.claimant.clientId?.startsWith("client_identity_"));
-        assert.equal(execution.expiredAt - execution.createdAt, DEADLINE_DELTA);
-        assert.match(execution.traceId, /^[0-9a-f]{32}$/);
-        assert.match(execution.rootSpanId, /^[0-9a-f]{16}$/);
+        assert.ok(execution.claimant.client_id?.startsWith("client_identity_"));
+        assert.equal(
+          execution.expired_at - execution.created_at,
+          DEADLINE_DELTA,
+        );
+        assert.match(execution.trace_id, /^[0-9a-f]{32}$/);
+        assert.match(execution.root_span_id, /^[0-9a-f]{16}$/);
         const node = await h.node();
         assert.equal(node.state, NodeState.Executing);
         assert.equal(node.attempt, FIRST_ATTEMPT);
         assert.equal(
-          (await h.queue()).items.some((job) => job.nodeId === h.objectiveId),
+          (await h.queue()).items.some((job) => job.node_id === h.objectiveId),
           false,
         );
         const attempt = await h.read<Attempt>([
@@ -389,8 +392,8 @@ test(
           "1",
         ]);
         const executionKind = "execution";
-        assert.equal(attempt.openedBy.kind, executionKind);
-        assert.equal(attempt.openedBy.executionId, X);
+        assert.equal(attempt.opened_by.kind, executionKind);
+        assert.equal(attempt.opened_by.execution_id, X);
       },
     );
     await t.test(
@@ -398,7 +401,7 @@ test(
       async () => {
         assert.equal(
           (await h.pull(h.G, h.generalPull, ["--idempotency-key", ulid()]))
-            .execution.executionId,
+            .execution.execution_id,
           X,
         );
         assert.equal(
@@ -407,7 +410,7 @@ test(
               "scheduler",
               "execution",
               "list",
-              h.projectId,
+              h.project_id,
             ])
           ).items.length,
           SINGLE_EXECUTION,
@@ -415,7 +418,7 @@ test(
       },
     );
     await t.test("E03.3 claim reads enforce the owner", async () => {
-      assert.equal((await h.claim(X)).claimState, ClaimState.Running);
+      assert.equal((await h.claim(X)).claim_state, ClaimState.Running);
       await h.refuses(
         ["scheduler", "claim", "get", X],
         "scheduler.execution.not_owner",
@@ -452,7 +455,7 @@ test(
           "--file",
           h.file({
             value: FIRST_PRIORITY,
-            expectedMissionVersion: THIRD_MISSION_VERSION,
+            expected_mission_version: THIRD_MISSION_VERSION,
           }),
         ],
         "mission.node.claim_live",
@@ -467,27 +470,27 @@ test(
           h.G,
         );
         const row = await h.get(X);
-        assert.equal(row.claimState, ClaimState.Running);
-        assert.equal(row.endedAt, null);
+        assert.equal(row.claim_state, ClaimState.Running);
+        assert.equal(row.ended_at, null);
       },
     );
     await t.test(
       "E03.7 further work finishes the execution and requeues its node",
       async () => {
         const result = await h.read<{
-          executionId: string;
-          endedAt: number;
+          execution_id: string;
+          ended_at: number;
           idempotency_key: string;
         }>(["scheduler", "execution", "release", X, "--file", further], h.G);
-        assert.equal(result.executionId, X);
-        assert.ok(Number.isSafeInteger(result.endedAt));
+        assert.equal(result.execution_id, X);
+        assert.ok(Number.isSafeInteger(result.ended_at));
         assert.ok(ulidSchema.safeParse(result.idempotency_key).success);
-        assert.equal((await h.claim(X)).claimState, ClaimState.Finished);
+        assert.equal((await h.claim(X)).claim_state, ClaimState.Finished);
         const node = await h.node();
         assert.equal(node.state, NodeState.Available);
         assert.equal(node.attempt, FIRST_ATTEMPT);
         assert.equal(
-          (await h.queue()).items.some((job) => job.nodeId === h.objectiveId),
+          (await h.queue()).items.some((job) => job.node_id === h.objectiveId),
           true,
         );
       },
@@ -515,11 +518,11 @@ test(
       assert.equal(ready.node.state, NodeState.Waiting);
       const result = await pending;
       assert.equal(result.kind, WorkPullKind.Claimed);
-      E = result.execution.executionId;
-      assert.equal(result.execution.nodeId, h.objectiveId);
+      E = result.execution.execution_id;
+      assert.equal(result.execution.node_id, h.objectiveId);
       assert.equal(result.execution.attempt, FIRST_ATTEMPT);
-      assert.equal(result.execution.pinnedRevision, h.revision);
-      assert.equal(result.execution.claimant.runtimeIdentity, h.reviewer);
+      assert.equal(result.execution.pinned_revision, h.revision);
+      assert.equal(result.execution.claimant.runtime_identity, h.reviewer);
       assert.equal((await h.node()).state, NodeState.Evaluating);
     });
     await t.test(
@@ -538,23 +541,23 @@ test(
           "scheduler",
           "execution",
           "list",
-          h.projectId,
+          h.project_id,
           "--node",
           h.objectiveId,
           "--attempt",
           "1",
         ]);
         assert.deepEqual(
-          result.items.map((row) => row.executionId),
+          result.items.map((row) => row.execution_id),
           [E, X],
         );
         assert.deepEqual(
-          result.items.map((row) => row.claimState),
+          result.items.map((row) => row.claim_state),
           [ClaimState.Running, ClaimState.Finished],
         );
         assert.equal(result.next_cursor, null);
         await h.refuses(
-          ["scheduler", "execution", "list", h.projectId, "--attempt", "1"],
+          ["scheduler", "execution", "list", h.project_id, "--attempt", "1"],
           "gateway.request.validation_failed",
         );
       },
@@ -566,8 +569,8 @@ test(
       );
       assert.equal(result.node.state, NodeState.Paused);
       const row = await h.claim(E, h.R);
-      assert.equal(row.claimState, ClaimState.Finished);
-      assert.ok(Number.isSafeInteger(row.endedAt));
+      assert.equal(row.claim_state, ClaimState.Finished);
+      assert.ok(Number.isSafeInteger(row.ended_at));
     });
     await t.test("E03.13 disabled enablement answers no-work", async () => {
       await h.read([
@@ -590,7 +593,7 @@ test(
           ["scheduler", "execution", "get", UNKNOWN_EXECUTION],
           "scheduler.execution.not_found",
         );
-        assert.equal((await h.get(X)).claimState, ClaimState.Finished);
+        assert.equal((await h.get(X)).claim_state, ClaimState.Finished);
       },
     );
     await t.test(
@@ -614,14 +617,14 @@ test(
             "cli.scheduler.execution.list.invalid_project_id",
           ],
           [
-            ["execution", "list", h.projectId, "--node", "invalid"],
+            ["execution", "list", h.project_id, "--node", "invalid"],
             "cli.scheduler.execution.list.invalid_node_id",
           ],
           [
             [
               "execution",
               "list",
-              h.projectId,
+              h.project_id,
               "--node",
               h.objectiveId,
               "--attempt",
@@ -651,7 +654,7 @@ test(
           "work",
           "pull",
           "--file",
-          h.file({ ...h.generalPull, projectId: h.projectId }),
+          h.file({ ...h.generalPull, project_id: h.project_id }),
         ],
         "cli.file.schema_invalid",
         h.G,
@@ -671,9 +674,9 @@ test(
       async () => {
         const result = await h.pull();
         assert.equal(result.kind, WorkPullKind.Claimed);
-        X = result.execution.executionId;
+        X = result.execution.execution_id;
         assert.equal(
-          result.execution.expiredAt - result.execution.createdAt,
+          result.execution.expired_at - result.execution.created_at,
           SHORT_DEADLINE_DELTA,
         );
       },
@@ -683,8 +686,8 @@ test(
       async () => {
         await delay(1100);
         const row = await h.get(X);
-        assert.equal(row.claimState, ClaimState.Lost);
-        assert.equal(row.endedAt, null);
+        assert.equal(row.claim_state, ClaimState.Lost);
+        assert.equal(row.ended_at, null);
         await h.refuses(
           [
             "scheduler",
@@ -692,7 +695,7 @@ test(
             "release",
             X,
             "--file",
-            h.file({ furtherWork: true }),
+            h.file({ further_work: true }),
           ],
           "gateway.invocation.execution_proof_failed",
           h.G,
@@ -704,11 +707,11 @@ test(
       async () => {
         const result = await h.pull();
         assert.equal(result.kind, WorkPullKind.Claimed);
-        assert.notEqual(result.execution.executionId, X);
+        assert.notEqual(result.execution.execution_id, X);
         assert.equal(result.execution.attempt, FIRST_ATTEMPT);
         const old = await h.get(X);
-        assert.equal(old.claimState, ClaimState.Lost);
-        assert.ok(old.endedAt !== null && old.endedAt >= old.expiredAt);
+        assert.equal(old.claim_state, ClaimState.Lost);
+        assert.ok(old.ended_at !== null && old.ended_at >= old.expired_at);
         const attempts = await h.read<Page<Attempt>>([
           "mission",
           "attempt",
@@ -719,7 +722,7 @@ test(
           attempts.items.map((attempt) => attempt.attempt),
           [FIRST_ATTEMPT],
         );
-        assert.equal(attempts.items[0]!.closedAt, null);
+        assert.equal(attempts.items[0]!.closed_at, null);
       },
     );
   },

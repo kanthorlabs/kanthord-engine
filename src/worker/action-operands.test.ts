@@ -18,27 +18,30 @@ const COMMIT = "b".repeat(40);
 const entry: ActionContext["actions"][number] = {
   action: {
     key: "gated.pull_request",
-    bindingId: BINDING,
+    binding_id: BINDING,
     action: RepositoryAction.PullRequest,
-    expectedEndState: "pull_request_merged",
+    expected_end_state: "pull_request_merged",
     follows: null,
-    configuration: { baseBranch: "main" },
+    configuration: { base_branch: "main" },
   },
-  resourceIdentity: "repository:github:owner/gated",
+  resource_identity: "repository:github:owner/gated",
   resolution: ActionResolution.Unrequested,
-  requestEvidenceId: null,
+  request_evidence_id: null,
   eligible: true,
-  reuseCandidates: [],
+  reuse_candidates: [],
 };
 const snapshot = {
   kind: TestedInputKind.Repository,
-  bindingId: BINDING,
+  binding_id: BINDING,
   commit: COMMIT,
 };
 function context(testedInput: TestedInput): ActionContext {
   return {
     state: ActionNodeState.Evaluating,
-    currentAssessment: { result: ActionAssessmentResult.Success, testedInput },
+    current_assessment: {
+      result: ActionAssessmentResult.Success,
+      tested_input: testedInput,
+    },
     actions: [entry],
   };
 }
@@ -58,7 +61,7 @@ test("non-repository, aggregate and wrong-binding snapshots are refused", () => 
   const inputs: TestedInput[] = [
     { kind: TestedInputKind.Produced, sha256: "a".repeat(64) },
     [snapshot],
-    { ...snapshot, bindingId: "binding_other" },
+    { ...snapshot, binding_id: "binding_other" },
     { kind: TestedInputKind.Object, location: "s3://bucket/key" },
   ];
   for (const input of inputs)
@@ -70,7 +73,7 @@ test("non-repository, aggregate and wrong-binding snapshots are refused", () => 
     () =>
       operandsOf(
         NODE,
-        { ...context(snapshot), currentAssessment: null },
+        { ...context(snapshot), current_assessment: null },
         entry,
       ),
     { code: WorkerErrorCode.SnapshotAbsent },

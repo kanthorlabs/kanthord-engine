@@ -30,9 +30,9 @@ import {
 import type { Dependencies } from "./service.ts";
 import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 
-type Identities = { evidenceId: string; assetIds: string[] };
+type Identities = { evidence_id: string; asset_ids: string[] };
 type ObjectUpload = {
-  assetId: string;
+  asset_id: string;
   binding: StorageBinding;
   key: string;
   size: number;
@@ -72,22 +72,22 @@ export function prepareEvidence(
         dependencies.config.text_max_bytes,
       );
   }
-  assert.equal(ids.assetIds.length, body.assets.length);
+  assert.equal(ids.asset_ids.length, body.assets.length);
   if (body.verification)
     requireTestedInput(
       tx,
       dependencies.bindings,
       node,
       revision,
-      body.verification.testedInput,
+      body.verification.tested_input,
     );
   const objects: ObjectUpload[] = [];
   const assets: AssetRow[] = body.assets.map((asset, index) => {
-    const id = ids.assetIds[index];
+    const id = ids.asset_ids[index];
     assert.ok(id);
     const base = {
       id,
-      evidence_id: ids.evidenceId,
+      evidence_id: ids.evidence_id,
       kind: asset.kind,
       published_at: now,
       expired_at: null,
@@ -133,7 +133,7 @@ export function prepareEvidence(
       id,
     );
     objects.push({
-      assetId: id,
+      asset_id: id,
       binding,
       key,
       size: asset.size,
@@ -144,8 +144,8 @@ export function prepareEvidence(
       content: canonicalJSON({
         location: objectLocation(binding, key),
         size: asset.size,
-        mediaType: asset.mediaType,
-        storageBindingId,
+        media_type: asset.media_type,
+        storage_binding_id: storageBindingId,
         ...(asset.sha256 === undefined ? {} : { sha256: asset.sha256 }),
       }),
       published_at: null,
@@ -153,7 +153,7 @@ export function prepareEvidence(
     };
   });
   const evidence: EvidenceRow = {
-    id: ids.evidenceId,
+    id: ids.evidence_id,
     node_id: node.id,
     attempt: claim.attempt,
     subject: body.subject,
@@ -177,14 +177,14 @@ export async function submitEvidence(
   assert.ok(caller.identity);
   const identity = caller.identity;
   const ids = {
-    evidenceId: createIdentity("evidence"),
-    assetIds: body.assets.map(() => createIdentity("evidence_asset")),
+    evidence_id: createIdentity("evidence"),
+    asset_ids: body.assets.map(() => createIdentity("evidence_asset")),
   };
   const uploads: {
-    assetId: string;
-    putUrl: string;
+    asset_id: string;
+    put_url: string;
     headers: Record<string, string>;
-    expiresAt: number;
+    expires_at: number;
   }[] = [];
   if (body.assets.some((asset) => asset.kind === AssetKind.Object)) {
     const prepared = dependencies.store.transaction((tx) =>
@@ -198,7 +198,7 @@ export async function submitEvidence(
         object.size,
         object.sha256,
       );
-      uploads.push({ assetId: object.assetId, ...signed });
+      uploads.push({ asset_id: object.asset_id, ...signed });
     }
   }
   return caller.commit((tx) => {

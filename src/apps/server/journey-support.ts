@@ -44,7 +44,7 @@ export function journeyClient(t: TestContext, endpoint: string, token: string) {
     assert.equal(result.code, SUCCESS, result.stderr);
     assert.equal(result.stderr, NO_OUTPUT);
     assert.ok(secrets.every((secret) => !result.stdout.includes(secret)));
-    assert.ok(!result.stdout.includes('"putUrl"'));
+    assert.ok(!result.stdout.includes('"put_url"'));
     return JSON.parse(result.stdout) as T;
   }
   function write<T>(args: string[], body: unknown, machine?: string) {
@@ -74,20 +74,23 @@ export async function createJourneyNode(
     projectId,
   ]);
   const parent = parentId
-    ? await cli.read<{ visibleRevision: number }>([
+    ? await cli.read<{ visible_revision: number }>([
         "mission",
         "node",
         "get",
         parentId,
       ])
     : null;
-  const result = await cli.write<{ revisions: { nodeId: string }[] }>(
+  const result = await cli.write<{ revisions: { node_id: string }[] }>(
     ["mission", "node", "create", mission.id],
     {
       filename,
       kind,
       ...(parent
-        ? { parentId, expectedParentRevision: parent.visibleRevision }
+        ? {
+            parent_id: parentId,
+            expected_parent_revision: parent.visible_revision,
+          }
         : {}),
       content: {
         ...NODE_CONTENT,
@@ -100,10 +103,10 @@ export async function createJourneyNode(
               : NODE_CONTENT.verifications,
       },
       reason: "plan",
-      expectedMissionVersion: mission.version,
+      expected_mission_version: mission.version,
     },
   );
   assert.ok(result.revisions.length);
-  assert.ok(result.revisions[0]!.nodeId);
-  return result.revisions[0]!.nodeId;
+  assert.ok(result.revisions[0]!.node_id);
+  return result.revisions[0]!.node_id;
 }

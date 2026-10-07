@@ -4,7 +4,7 @@ import { WORK_PULL_WAIT_MS } from "./contract.ts";
 
 const NO_WAITERS = 0;
 interface Waiter {
-  runtimeIdentity: string;
+  runtime_identity: string;
   finish(): void;
 }
 
@@ -29,7 +29,7 @@ export class WaitingPulls {
     let finished = false;
     let unsubscribe = () => {};
     const waiter: Waiter = {
-      runtimeIdentity,
+      runtime_identity: runtimeIdentity,
       finish: () => {
         if (finished) return;
         finished = true;
@@ -76,7 +76,9 @@ export class WaitingPulls {
 
   pulling(runtimeIdentity: string): boolean {
     return [...this.projects.values()].some((waiters) =>
-      [...waiters].some((waiter) => waiter.runtimeIdentity === runtimeIdentity),
+      [...waiters].some(
+        (waiter) => waiter.runtime_identity === runtimeIdentity,
+      ),
     );
   }
   size(): number {

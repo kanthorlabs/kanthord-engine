@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: nodeId
+      - name: node_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.node.check.Input/properties/params/properti\
-            es/nodeId"
+            es/node_id"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
@@ -60,14 +60,14 @@ components:
         params:
           type: object
           properties:
-            nodeId:
+            node_id:
               type: string
               minLength: 31
               maxLength: 31
               pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: node_ followed by a canonical 26-character uppercase ULID.
           required:
-            - nodeId
+            - node_id
           additionalProperties: false
         query:
           type: object
@@ -76,12 +76,12 @@ components:
         body:
           type: object
           properties:
-            expectedMissionVersion:
+            expected_mission_version:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
           required:
-            - expectedMissionVersion
+            - expected_mission_version
           additionalProperties: false
       required:
         - params
@@ -96,13 +96,13 @@ components:
           items:
             type: object
             properties:
-              evidenceId:
+              evidence_id:
                 type: string
                 minLength: 35
                 maxLength: 35
                 pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: evidence_ followed by a canonical 26-character uppercase ULID.
-              requirementKey:
+              requirement_key:
                 type: string
                 pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
               resolution:
@@ -112,8 +112,8 @@ components:
                   - expected-end
                   - other-end
             required:
-              - evidenceId
-              - requirementKey
+              - evidence_id
+              - requirement_key
               - resolution
             additionalProperties: false
         failures:
@@ -121,7 +121,7 @@ components:
           items:
             type: object
             properties:
-              evidenceId:
+              evidence_id:
                 type: string
                 minLength: 35
                 maxLength: 35
@@ -161,7 +161,7 @@ components:
                   - request_id
                 additionalProperties: false
             required:
-              - evidenceId
+              - evidence_id
               - error
             additionalProperties: false
       required:

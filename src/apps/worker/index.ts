@@ -287,7 +287,7 @@ export class Worker implements Service {
 
   private beginExecution(claim: ExecutionRecord): void {
     this.executionLive = true;
-    const context = new CancellationContext(background, claim.expiredAt);
+    const context = new CancellationContext(background, claim.expired_at);
     if (this.shutdown.err()) context.cancel();
     const task = this.execute(claim, context)
       .then((result) => {

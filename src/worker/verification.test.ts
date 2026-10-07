@@ -17,13 +17,13 @@ test("verification runs in order and stops on the first failure or unstarted dea
   const input: VerificationInput = {
     directory: temporary(t),
     commands: ["true", "false", "true"],
-    testedInput: { kind: "produced", sha256: "hash" },
+    tested_input: { kind: "produced", sha256: "hash" },
     deadline: Date.now() + 10000,
     context: background,
   };
   const failed = await runVerifications(input);
   assert.deepEqual(
-    failed.results.map(({ exitCode }) => exitCode),
+    failed.results.map(({ exit_code: exitCode }) => exitCode),
     [0, 1],
   );
   assert.equal(verificationPassed(failed, input.commands), false);
@@ -45,16 +45,16 @@ test("verification runs in order and stops on the first failure or unstarted dea
   );
   assert.deepEqual(
     (await runVerifications({ ...input, commands: ["exit 3"] })).results,
-    [{ command: "exit 3", exitCode: 3, signal: null, timedOut: false }],
+    [{ command: "exit 3", exit_code: 3, signal: null, timed_out: false }],
   );
   assert.deepEqual(
     (await runVerifications({ ...input, commands: ["kill -TERM $$"] })).results,
     [
       {
         command: "kill -TERM $$",
-        exitCode: null,
+        exit_code: null,
         signal: "SIGTERM",
-        timedOut: false,
+        timed_out: false,
       },
     ],
   );
@@ -118,7 +118,7 @@ for (const timedOut of [true, false]) {
     const running = runVerifications({
       directory,
       commands: ["echo $$ > shell; sleep 30 & echo $! > child; wait"],
-      testedInput: { kind: "produced", sha256: "hash" },
+      tested_input: { kind: "produced", sha256: "hash" },
       deadline: Date.now() + (timedOut ? 3000 : 10000),
       context,
     });
@@ -135,7 +135,10 @@ for (const timedOut of [true, false]) {
       if (!timedOut) context.cancel();
       const result = await running;
       assert.deepEqual(
-        result.results.map(({ signal, timedOut }) => ({ signal, timedOut })),
+        result.results.map(({ signal, timed_out: timedOut }) => ({
+          signal,
+          timedOut,
+        })),
         [{ signal: "SIGKILL", timedOut }],
       );
       await observe(
@@ -166,7 +169,7 @@ test("verification child gets no provider environment key", async (t) => {
   const result = await runVerifications({
     directory: temporary(t),
     commands,
-    testedInput: { kind: "produced", sha256: "hash" },
+    tested_input: { kind: "produced", sha256: "hash" },
     deadline: Date.now() + 10000,
     context: background,
   });

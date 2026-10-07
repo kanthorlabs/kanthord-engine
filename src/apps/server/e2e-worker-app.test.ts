@@ -485,7 +485,7 @@ test(
       const identity = await ready(first);
       const list = await setup.read<{
         items: { runtime_identity: string; registered: boolean }[];
-      }>(["worker", "instance", "list", "--project", setup.projectId]);
+      }>(["worker", "instance", "list", "--project", setup.project_id]);
       assert.ok(
         list.items.some(
           (item) => item.runtime_identity === identity && item.registered,

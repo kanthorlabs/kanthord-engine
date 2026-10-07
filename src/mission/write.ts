@@ -11,7 +11,7 @@ export function requireActive(node: NodeRow): void {
       HttpStatus.Conflict,
       MissionErrorCode.Retired,
       "Node is retired.",
-      { nodeId: node.id },
+      { node_id: node.id },
     );
 }
 
@@ -21,7 +21,7 @@ export function requireNonterminal(node: NodeRow): void {
       HttpStatus.Conflict,
       MissionErrorCode.Terminal,
       "Node is terminal.",
-      { nodeId: node.id },
+      { node_id: node.id },
     );
 }
 

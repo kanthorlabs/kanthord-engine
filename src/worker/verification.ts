@@ -4,17 +4,17 @@ import type { Context } from "../kernel/context.ts";
 import { childEnvironment } from "./tool-table.ts";
 
 export type TestedInput =
-  | { kind: "repository"; bindingId: string; commit: string }
+  | { kind: "repository"; binding_id: string; commit: string }
   | { kind: "produced"; sha256: string }
   | { kind: "object"; location: string; version?: string; sha256?: string }
-  | { kind: "repository"; bindingId: string; commit: string }[];
+  | { kind: "repository"; binding_id: string; commit: string }[];
 export interface Verification {
-  testedInput: TestedInput;
+  tested_input: TestedInput;
   results: {
     command: string;
-    exitCode: number | null;
+    exit_code: number | null;
     signal: string | null;
-    timedOut: boolean;
+    timed_out: boolean;
   }[];
 }
 const SUCCESS = 0;
@@ -22,7 +22,7 @@ const PROCESS_ABSENT = "ESRCH";
 export interface VerificationInput {
   directory: string;
   commands: readonly string[];
-  testedInput: TestedInput;
+  tested_input: TestedInput;
   deadline: number;
   context: Context;
 }
@@ -65,7 +65,7 @@ function runCommand(
     const finish = (exitCode: number | null, signal: string | null) => {
       clearTimeout(timer);
       unsubscribe();
-      resolve({ command, exitCode, signal, timedOut });
+      resolve({ command, exit_code: exitCode, signal, timed_out: timedOut });
     };
     child.once("error", () => finish(null, null));
     child.once("exit", finish);
@@ -82,9 +82,9 @@ export async function runVerifications(
     if (Date.now() >= input.deadline || input.context.err()) break;
     const result = await runCommand(command, input);
     results.push(result);
-    if (result.exitCode !== SUCCESS) break;
+    if (result.exit_code !== SUCCESS) break;
   }
-  return { testedInput: input.testedInput, results };
+  return { tested_input: input.tested_input, results };
 }
 
 export function verificationPassed(
@@ -97,7 +97,7 @@ export function verificationPassed(
     verification.results.length === commands.length &&
     verification.results.every(
       (result, index) =>
-        result.command === commands[index] && result.exitCode === SUCCESS,
+        result.command === commands[index] && result.exit_code === SUCCESS,
     )
   );
 }

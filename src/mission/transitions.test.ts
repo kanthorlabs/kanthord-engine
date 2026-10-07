@@ -36,53 +36,57 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
   const executionId = createIdentity("execution");
   const opener = {
     kind: ActorKind.Execution,
-    executionId,
-    clientId: createIdentity("client_identity"),
+    execution_id: executionId,
+    client_id: createIdentity("client_identity"),
     name: "Worker",
   };
   h.dependencies.bindings.getBindingRevision = () => ({
-    projectId: h.projectId,
-    bindingId,
+    project_id: h.project_id,
+    binding_id: bindingId,
     name: "repo",
-    resourceIdentity: "repository:github:owner/repo",
+    resource_identity: "repository:github:owner/repo",
     revision: FIRST_ATTEMPT,
     disabled: false,
     tombstone: false,
   });
   h.dependencies.bindings.repositoryPolicyOf = () => ({
-    projectId: h.projectId,
-    bindingId,
+    project_id: h.project_id,
+    binding_id: bindingId,
     name: "repo",
     address: "git@github.com:owner/repo.git",
     platform: "github",
-    sshCredential: "github-ssh",
+    ssh_credential: "github-ssh",
     credential: "github",
-    baseBranch: "main",
+    base_branch: "main",
     action: RepositoryAction.PullRequest,
-    projectPrompt: null,
+    project_prompt: null,
   });
   h.store.transaction((tx) => {
     tx.database
       .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(kind, h.nodeId);
+      .run(kind, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
       )
       .run(
         JSON.stringify(kind === NodeKind.Objective ? [bindingId] : []),
-        h.nodeId,
+        h.node_id,
       );
   });
   const claim = (states: NodeState[] = [NodeState.Available]) =>
     h.store.transaction((tx) =>
-      h.service.claim(tx, h.nodeId, states, opener, NOW),
+      h.service.claim(tx, h.node_id, states, opener, NOW),
     );
   const release = (furtherWork = false) =>
     h.store.transaction((tx) =>
       h.service.release(
         tx,
-        { executionId, nodeId: h.nodeId, attempt: FIRST_ATTEMPT },
+        {
+          execution_id: executionId,
+          node_id: h.node_id,
+          attempt: FIRST_ATTEMPT,
+        },
         furtherWork,
         NOW,
       ),
@@ -98,7 +102,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
         tx,
         {
           id,
-          node_id: h.nodeId,
+          node_id: h.node_id,
           attempt: FIRST_ATTEMPT,
           subject: "Work",
           requirement_key: null,
@@ -114,7 +118,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
             kind: assetKind,
             content: JSON.stringify(
               assetKind === AssetKind.Repository
-                ? { bindingId: address, commit: "a".repeat(40) }
+                ? { binding_id: address, commit: "a".repeat(40) }
                 : { data: "work" },
             ),
             published_at: published ? NOW : null,
@@ -140,8 +144,8 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
   };
   return {
     ...h,
-    bindingId,
-    executionId,
+    binding_id: bindingId,
+    execution_id: executionId,
     opener,
     claim,
     release,
@@ -156,19 +160,19 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
   const claim = h.claim();
   assert.deepEqual(claim, {
     kind: ClaimKind.Steps,
-    projectId: h.projectId,
+    project_id: h.project_id,
     attempt: FIRST_ATTEMPT,
-    nodeRevision: FIRST_ATTEMPT,
+    node_revision: FIRST_ATTEMPT,
   });
   assert.deepEqual(
     JSON.parse(
-      h.store.transaction((tx) => readOpenAttempt(tx, h.nodeId))!.opened_by,
+      h.store.transaction((tx) => readOpenAttempt(tx, h.node_id))!.opened_by,
     ),
     h.opener,
   );
   h.release(true);
   h.store.transaction((tx) => {
-    const prior = revisionFromRow(tx, readCurrentRevision(tx, h.nodeId)!);
+    const prior = revisionFromRow(tx, readCurrentRevision(tx, h.node_id)!);
     insertRevision(tx, {
       ...prior,
       revision: FIRST_ATTEMPT + FIRST_ATTEMPT,
@@ -176,7 +180,7 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
     });
   });
   assert.deepEqual(h.claim(), claim);
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Blocked));
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Blocked));
   assert.equal(h.claim([NodeState.Blocked]), null);
   assert.equal(
     h.store.transaction((tx) =>
@@ -192,7 +196,7 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
   );
   h.store.database
     .prepare("UPDATE mission_node SET state = ?, retired_at = ? WHERE id = ?")
-    .run(NodeState.Available, NOW, h.nodeId);
+    .run(NodeState.Available, NOW, h.node_id);
   assert.equal(h.claim(), null);
 });
 
@@ -201,10 +205,10 @@ test("initiative claim refuses nonterminal objectives and task claim is never ad
   h.store.transaction((tx) =>
     insertNode(tx, {
       id: createIdentity("node"),
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       created_at: NOW,
     }),
   );
@@ -212,7 +216,7 @@ test("initiative claim refuses nonterminal objectives and task claim is never ad
   assert.equal(h.node().attempt, NO_ATTEMPT);
   h.store.database
     .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-    .run(NodeKind.Task, h.nodeId);
+    .run(NodeKind.Task, h.node_id);
   assert.equal(h.claim(), null);
 });
 
@@ -251,13 +255,16 @@ test("steps release excludes foreign execution and attempt evidence and requires
         tx,
         {
           id,
-          node_id: h.nodeId,
+          node_id: h.node_id,
           attempt,
           subject: "Work",
           requirement_key: null,
           end_state: null,
           verification: null,
-          provenance: JSON.stringify({ ...h.opener, executionId }),
+          provenance: JSON.stringify({
+            ...h.opener,
+            execution_id: executionId,
+          }),
           created_at: NOW,
         },
         [
@@ -266,7 +273,7 @@ test("steps release excludes foreign execution and attempt evidence and requires
             evidence_id: id,
             kind: AssetKind.Repository,
             content: JSON.stringify({
-              bindingId: h.bindingId,
+              binding_id: h.binding_id,
               commit: "a".repeat(40),
             }),
             published_at: NOW,
@@ -289,21 +296,23 @@ test("steps release excludes foreign execution and attempt evidence and requires
     });
   add(createIdentity("execution"), FIRST_ATTEMPT, false);
   h.refuses(ReleaseObligation.Evidence);
-  add(h.executionId, NO_ATTEMPT, false);
+  add(h.execution_id, NO_ATTEMPT, false);
   h.refuses(ReleaseObligation.Evidence);
-  add(h.executionId, FIRST_ATTEMPT, true);
+  add(h.execution_id, FIRST_ATTEMPT, true);
   h.refuses(ReleaseObligation.Evidence);
 });
 
 test("reviewer release requires a current success and every eligible request", (t) => {
   const h = fixture(t);
   h.claim();
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
   h.refuses(ReleaseObligation.Assessment);
   h.store.transaction((tx) =>
     insertAssessment(tx, {
       id: createIdentity("assessment"),
-      node_id: h.nodeId,
+      node_id: h.node_id,
       attempt: FIRST_ATTEMPT,
       node_revision: FIRST_ATTEMPT,
       result: AssessmentResult.Success,
@@ -311,7 +320,7 @@ test("reviewer release requires a current success and every eligible request", (
       evidence_ids: "[]",
       child_outcome_ids: "[]",
       tested_input: null,
-      execution_id: h.executionId,
+      execution_id: h.execution_id,
       actor: null,
       created_at: NOW,
     }),
@@ -322,7 +331,7 @@ test("reviewer release requires a current success and every eligible request", (
       tx,
       {
         id: createIdentity("evidence"),
-        node_id: h.nodeId,
+        node_id: h.node_id,
         attempt: FIRST_ATTEMPT,
         subject: "Request",
         requirement_key: "repo.pull_request",
@@ -342,24 +351,26 @@ test("reviewer release requires a current success and every eligible request", (
 test("loss routes below the limit, pauses at the limit and resume permits another claim", async (t) => {
   const h = fixture(t);
   h.claim();
-  h.store.transaction((tx) => h.service.loss(tx, h.nodeId, FIRST_ATTEMPT, NOW));
+  h.store.transaction((tx) =>
+    h.service.loss(tx, h.node_id, FIRST_ATTEMPT, NOW),
+  );
   assert.equal(h.node().state, NodeState.Available);
   h.claim();
   h.store.transaction((tx) =>
     h.service.loss(
       tx,
-      h.nodeId,
+      h.node_id,
       h.dependencies.config.consecutive_loss_limit,
       NOW,
     ),
   );
   assert.equal(h.node().state, NodeState.Paused);
   assert.equal(
-    h.store.transaction((tx) => readOpenAttempt(tx, h.nodeId))?.closed_at,
+    h.store.transaction((tx) => readOpenAttempt(tx, h.node_id))?.closed_at,
     null,
   );
   await h.invoke("node.resume", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
       ...h.body(NodeState.Paused, FIRST_ATTEMPT),
@@ -368,8 +379,8 @@ test("loss routes below the limit, pauses at the limit and resume permits anothe
   });
   assert.ok(h.claim());
   h.store.transaction((tx) => {
-    setNodeState(tx, h.nodeId, NodeState.Evaluating);
-    h.service.loss(tx, h.nodeId, FIRST_ATTEMPT, NOW);
+    setNodeState(tx, h.node_id, NodeState.Evaluating);
+    h.service.loss(tx, h.node_id, FIRST_ATTEMPT, NOW);
   });
   assert.equal(h.node().state, NodeState.Waiting);
 });

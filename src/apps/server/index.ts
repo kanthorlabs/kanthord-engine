@@ -63,13 +63,6 @@ import {
 } from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
 import {
-  bindingIdentityView,
-  bindingRevisionView,
-  repositoryPolicyView,
-  schedulerWorkerBinding,
-  storageBindingView,
-} from "./project-ports.ts";
-import {
   WorkerService,
   workerMigrations,
   toolDeclarations,
@@ -191,14 +184,12 @@ export function composeServices(options: {
     },
     bindings: {
       workerBindingOf: (tx, projectId, resourceIdentity) =>
-        schedulerWorkerBinding(
-          project.workerBindingOf(tx, projectId, resourceIdentity),
-        ),
+        project.workerBindingOf(tx, projectId, resourceIdentity),
     },
     traceIdentity: {
       mint: () => ({
-        traceId: randomBytes(16).toString("hex"),
-        rootSpanId: randomBytes(8).toString("hex"),
+        trace_id: randomBytes(16).toString("hex"),
+        root_span_id: randomBytes(8).toString("hex"),
       }),
     },
     health: options.health,
@@ -217,17 +208,7 @@ export function composeServices(options: {
       ...STORAGE_PLATFORMS,
     },
     executions: {
-      requireRunning: (...args) => {
-        const row = scheduler.requireRunning(...args);
-        return {
-          execution_id: row.executionId,
-          project_id: row.projectId,
-          worker_binding_id: row.workerBindingId,
-          resource_identity: row.resourceIdentity,
-          runtime_identity: row.runtimeIdentity,
-          credentials: row.credentials,
-        };
-      },
+      requireRunning: (...args) => scheduler.requireRunning(...args),
       pinCredential: (...args) => scheduler.pinCredential(...args),
       liveExecutionsPinning: (...args) =>
         scheduler.liveExecutionsPinning(...args),
@@ -353,16 +334,12 @@ export function composeServices(options: {
       of: (...args) => scheduler.executionAttribution(...args),
     },
     bindings: {
-      resolveBinding: (tx, pid, name) =>
-        bindingIdentityView(project.resolveBinding(tx, pid, name)),
+      resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
       resolveBindingIdentity: (tx, pid, bid) =>
-        bindingIdentityView(project.resolveBindingIdentity(tx, pid, bid)),
-      getBindingRevision: (tx, bid) =>
-        bindingRevisionView(project.getBindingRevision(tx, bid)),
-      repositoryPolicyOf: (tx, bid) =>
-        repositoryPolicyView(project.repositoryPolicyOf(tx, bid)),
-      storageBindingOf: (tx, bid) =>
-        storageBindingView(project.storageBindingOf(tx, bid)),
+        project.resolveBindingIdentity(tx, pid, bid),
+      getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
+      repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
+      storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid),
     },
   });
   const project: ProjectService = new ProjectService({

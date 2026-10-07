@@ -9,13 +9,13 @@ import type { MethodClients } from "./method-clients.ts";
 
 test("transcript records the execution identity and session messages before disposal", (t) => {
   const claim = {
-    executionId: "execution",
-    nodeId: "node",
+    execution_id: "execution",
+    node_id: "node",
     attempt: 2,
-    pinnedRevision: 1,
-    createdAt: Date.now(),
-    expiredAt: Date.now() + 60000,
-    traceId: "trace",
+    pinned_revision: 1,
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
   };
   const run = new ExecutionRun({
     claim,
@@ -44,18 +44,18 @@ test("transcript records the execution identity and session messages before disp
   disposeAgent(run, agent, sink);
   assert.deepEqual(events, [
     {
-      executionId: claim.executionId,
+      executionId: claim.execution_id,
       attempt: claim.attempt,
-      traceId: claim.traceId,
+      traceId: claim.trace_id,
       messages,
     },
     "disposed",
   ]);
   assert.deepEqual(Object.keys(noTranscript), ["record"]);
   noTranscript.record({
-    executionId: claim.executionId,
+    executionId: claim.execution_id,
     attempt: claim.attempt,
-    traceId: claim.traceId,
+    traceId: claim.trace_id,
     messages,
   });
 });

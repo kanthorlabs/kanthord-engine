@@ -12,30 +12,30 @@ export class ExecutionBudget {
   private readonly agents = new Set<CancellationContext>();
 
   constructor(input: {
-    createdAt: number;
-    expiredAt: number;
-    resourceBudget: { turns?: number; wall_time_ms: number };
+    created_at: number;
+    expired_at: number;
+    resource_budget: { turns?: number; wall_time_ms: number };
   }) {
     assert.ok(
-      Number.isSafeInteger(input.createdAt) &&
-        Number.isSafeInteger(input.expiredAt),
+      Number.isSafeInteger(input.created_at) &&
+        Number.isSafeInteger(input.expired_at),
     );
     assert.ok(
-      Number.isSafeInteger(input.resourceBudget.wall_time_ms) &&
-        input.resourceBudget.wall_time_ms > BUDGET_FLOOR,
+      Number.isSafeInteger(input.resource_budget.wall_time_ms) &&
+        input.resource_budget.wall_time_ms > BUDGET_FLOOR,
     );
     assert.ok(
-      input.resourceBudget.turns === undefined ||
-        (Number.isSafeInteger(input.resourceBudget.turns) &&
-          input.resourceBudget.turns > BUDGET_FLOOR),
+      input.resource_budget.turns === undefined ||
+        (Number.isSafeInteger(input.resource_budget.turns) &&
+          input.resource_budget.turns > BUDGET_FLOOR),
     );
     this.deadline = Math.min(
-      input.createdAt + input.resourceBudget.wall_time_ms,
-      input.expiredAt,
+      input.created_at + input.resource_budget.wall_time_ms,
+      input.expired_at,
     );
-    this.expiredAt = input.expiredAt;
+    this.expiredAt = input.expired_at;
     this.remaining = Math.max(BUDGET_FLOOR, this.deadline - Date.now());
-    this.turns = input.resourceBudget.turns;
+    this.turns = input.resource_budget.turns;
   }
   wallDeadline(): number {
     return this.deadline;

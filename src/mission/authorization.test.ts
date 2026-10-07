@@ -15,23 +15,25 @@ import { evidenceHarness } from "./test-support.ts";
 test("Mission proves live claim, node, open attempt and binding before granting a frozen action", (t) => {
   const h = evidenceHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
   h.dependencies.bindings.repositoryPolicyOf = () => ({
-    bindingId: h.repositoryId,
-    projectId: h.projectId,
+    binding_id: h.repositoryId,
+    project_id: h.project_id,
     name: "repo",
     address: "git@github.com:owner/repo.git",
     platform: "github",
-    sshCredential: "github-ssh",
+    ssh_credential: "github-ssh",
     credential: "github",
-    baseBranch: "main",
+    base_branch: "main",
     action: RepositoryAction.PullRequest,
-    projectPrompt: null,
+    project_prompt: null,
   });
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
   const authorize = () =>
     h.store.transaction((tx) =>
       authorizeAction(tx, h.dependencies, h.claim, "repo.pull_request"),
     );
-  assert.equal(authorize().bindingId, h.repositoryId);
+  assert.equal(authorize().binding_id, h.repositoryId);
   const refuses = (fn: () => unknown, reason: string) =>
     assert.throws(fn, {
       status: 403,
@@ -70,7 +72,7 @@ test("Mission proves live claim, node, open attempt and binding before granting 
   refuses(authorize, "claim_not_live");
   h.dependencies.schedulerClaims.liveExecutionOf = live;
   h.store.transaction((tx) =>
-    closeAttempt(tx, h.nodeId, h.claim.attempt, Date.now()),
+    closeAttempt(tx, h.node_id, h.claim.attempt, Date.now()),
   );
   refuses(authorize, "attempt_closed");
 });

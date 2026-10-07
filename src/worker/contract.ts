@@ -155,11 +155,11 @@ export const RepositoryAction = {
 } as const;
 export type FrozenAction = {
   key: string;
-  bindingId: string;
+  binding_id: string;
   action: (typeof RepositoryAction)[keyof typeof RepositoryAction];
-  expectedEndState: "pull_request_merged" | "base_branch_pushed";
+  expected_end_state: "pull_request_merged" | "base_branch_pushed";
   follows: string | null;
-  configuration: { baseBranch: string };
+  configuration: { base_branch: string };
 };
 export const ActionNodeState = {
   Pending: "Pending",
@@ -193,7 +193,7 @@ export const TestedInputKind = {
 } as const;
 export type RepositorySnapshot = {
   kind: typeof TestedInputKind.Repository;
-  bindingId: string;
+  binding_id: string;
   commit: string;
 };
 export type TestedInput =
@@ -208,18 +208,18 @@ export type TestedInput =
     };
 export type ActionContext = {
   state: (typeof ActionNodeState)[keyof typeof ActionNodeState];
-  currentAssessment: {
+  current_assessment: {
     result: (typeof ActionAssessmentResult)[keyof typeof ActionAssessmentResult];
-    testedInput: TestedInput;
+    tested_input: TestedInput;
   } | null;
   actions: {
     action: FrozenAction;
-    resourceIdentity: string;
+    resource_identity: string;
     resolution: (typeof ActionResolution)[keyof typeof ActionResolution];
-    requestEvidenceId: string | null;
+    request_evidence_id: string | null;
     eligible: boolean;
-    reuseCandidates: {
-      evidenceId: string;
+    reuse_candidates: {
+      evidence_id: string;
       attempt: number;
       address: PlatformAddress;
     }[];
@@ -274,13 +274,13 @@ export interface IntakeActions {
 export interface EvidenceRequests {
   request(
     input: {
-      params: { nodeId: string };
+      params: { node_id: string };
       query: Record<string, never>;
       body: {
-        executionId: string;
+        execution_id: string;
         attempt: number;
-        nodeRevision: number;
-        requirementKey: string;
+        node_revision: number;
+        requirement_key: string;
         subject: string;
         address: PlatformAddress;
       };
@@ -442,21 +442,21 @@ export interface SchedulerClaims {
     runtimeIdentity: string,
     now: number,
   ): {
-    executionId: string;
-    nodeId: string;
+    execution_id: string;
+    node_id: string;
     attempt: number;
-    pinnedRevision: number;
+    pinned_revision: number;
   };
   runningExecutionOfRuntime(
     tx: Transaction,
     runtimeIdentity: string,
     now: number,
-  ): { executionId: string } | null;
+  ): { execution_id: string } | null;
   activityOf(
     tx: Transaction,
     runtimeIdentity: string,
     now: number,
-  ): { activity: InstanceActivity; executionId: string | null };
+  ): { activity: InstanceActivity; execution_id: string | null };
 }
 
 export type WorkerEntry = {

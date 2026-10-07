@@ -31,7 +31,7 @@ export function pinCredential(
   assert.ok(tx.database.isTransaction);
   assert.ok(identitySchema("credential").safeParse(credentialId).success);
   const row = readExecution(tx, executionId);
-  if (!row || row.endedAt !== null)
+  if (!row || row.ended_at !== null)
     throw new OperationError(
       HttpStatus.Conflict,
       EXECUTION_NOT_RUNNING,
@@ -71,18 +71,18 @@ export function executionAttribution(
   if (!row) return null;
   const attribution = dependencies.registrations.clientAttributionOf(
     tx,
-    row.runtimeIdentity,
+    row.runtime_identity,
   );
   const binding = dependencies.bindings.workerBindingOf(
     tx,
-    row.projectId,
-    row.resourceIdentity,
+    row.project_id,
+    row.resource_identity,
   );
   assert.ok(binding, "an execution retains its worker binding group");
   return {
-    clientId: attribution?.client_id ?? null,
+    client_id: attribution?.client_id ?? null,
     name: attribution?.name ?? null,
-    workerName: binding.workerName,
+    worker_name: binding.worker_name,
   };
 }
 
@@ -92,9 +92,9 @@ export function declareLoss(
   row: ExecutionRow,
   now: number,
 ): void {
-  assert.equal(row.endedAt, null);
-  assert.ok(now >= row.expiredAt);
-  endExecution(tx, row.executionId, now);
+  assert.equal(row.ended_at, null);
+  assert.ok(now >= row.expired_at);
+  endExecution(tx, row.execution_id, now);
   const result = tx.database
     .prepare(
       `SELECT count(*) AS count FROM scheduler_execution
@@ -102,10 +102,10 @@ export function declareLoss(
     AND ended_at > coalesce((SELECT max(ended_at) FROM scheduler_execution
       WHERE node_id = ? AND attempt = ? AND ended_at < expired_at), -1)`,
     )
-    .get(row.nodeId, row.attempt, row.nodeId, row.attempt)!;
+    .get(row.node_id, row.attempt, row.node_id, row.attempt)!;
   const count = Number(result.count);
   assert.ok(Number.isSafeInteger(count) && count > NO_LOSSES);
-  dependencies.transitions.loss(tx, row.nodeId, count, now);
+  dependencies.transitions.loss(tx, row.node_id, count, now);
 }
 export function settleNode(
   tx: Transaction,
@@ -114,7 +114,7 @@ export function settleNode(
   now: number,
 ): boolean {
   const row = readUnendedOfNode(tx, nodeId);
-  if (!row || row.expiredAt > now) return false;
+  if (!row || row.expired_at > now) return false;
   declareLoss(tx, dependencies, row, now);
   return true;
 }
@@ -125,7 +125,7 @@ export function settleRuntime(
   now: number,
 ): boolean {
   const row = readUnendedOfRuntime(tx, runtimeIdentity);
-  if (!row || row.expiredAt > now) return false;
+  if (!row || row.expired_at > now) return false;
   declareLoss(tx, dependencies, row, now);
   return true;
 }
@@ -136,8 +136,8 @@ export function revoke(
 ): string | null {
   const row = liveExecutionOf(tx, nodeId, now);
   if (!row) return null;
-  endExecution(tx, row.executionId, now);
-  return row.executionId;
+  endExecution(tx, row.execution_id, now);
+  return row.execution_id;
 }
 export function liveExecutionOf(
   tx: Transaction,
@@ -145,7 +145,7 @@ export function liveExecutionOf(
   now: number,
 ): ExecutionRow | null {
   const row = readUnendedOfNode(tx, nodeId);
-  return row && now < row.expiredAt ? row : null;
+  return row && now < row.expired_at ? row : null;
 }
 export function runningExecutionOfRuntime(
   tx: Transaction,
@@ -155,7 +155,7 @@ export function runningExecutionOfRuntime(
 ): ExecutionRow | null {
   settleRuntime(tx, dependencies, runtimeIdentity, now);
   const row = readUnendedOfRuntime(tx, runtimeIdentity);
-  return row && now < row.expiredAt ? row : null;
+  return row && now < row.expired_at ? row : null;
 }
 export function requireRunning(
   tx: Transaction,
@@ -166,16 +166,16 @@ export function requireRunning(
   const row = readExecution(tx, executionId);
   if (
     !row ||
-    row.runtimeIdentity !== runtimeIdentity ||
-    row.endedAt !== null ||
-    now >= row.expiredAt
+    row.runtime_identity !== runtimeIdentity ||
+    row.ended_at !== null ||
+    now >= row.expired_at
   )
     throw new OperationError(
       HttpStatus.Conflict,
       EXECUTION_NOT_RUNNING,
       "The execution is not a running claim of this registration.",
     );
-  assert.equal(row.executionId, executionId);
-  assert.equal(row.runtimeIdentity, runtimeIdentity);
+  assert.equal(row.execution_id, executionId);
+  assert.equal(row.runtime_identity, runtimeIdentity);
   return row;
 }

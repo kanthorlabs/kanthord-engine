@@ -29,7 +29,7 @@ test("evidence reads paginate descending identities, include attempt zero and pr
         tx,
         {
           id,
-          node_id: h.nodeId,
+          node_id: h.node_id,
           attempt: index,
           subject: "Evidence",
           requirement_key: index === SECOND_ITEM_INDEX ? KEY : null,
@@ -46,8 +46,8 @@ test("evidence reads paginate descending identities, include attempt zero and pr
             content: canonicalJSON({
               location: "s3://bucket/key",
               size: EMPTY_OBJECT_SIZE,
-              mediaType: "text/plain",
-              storageBindingId: h.storageId,
+              media_type: "text/plain",
+              storage_binding_id: h.storageId,
             }),
             published_at: null,
             expired_at: FUTURE_EXPIRY,
@@ -57,16 +57,16 @@ test("evidence reads paginate descending identities, include attempt zero and pr
   });
   const page = (query: object) =>
     h.invoke("evidence.list", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query,
       body: null,
     });
   const first = await page({ limit: SINGLE_RESULT });
   assert.equal(first.items[FIRST_ITEM_INDEX]!.id, ids[SECOND_ITEM_INDEX]);
-  assert.equal(first.items[FIRST_ITEM_INDEX]!.requirementKey, KEY);
-  assert.equal(first.items[FIRST_ITEM_INDEX]!.endState, undefined);
+  assert.equal(first.items[FIRST_ITEM_INDEX]!.requirement_key, KEY);
+  assert.equal(first.items[FIRST_ITEM_INDEX]!.end_state, undefined);
   assert.equal(
-    first.items[FIRST_ITEM_INDEX]!.assets[FIRST_ITEM_INDEX]!.publishedAt,
+    first.items[FIRST_ITEM_INDEX]!.assets[FIRST_ITEM_INDEX]!.published_at,
     null,
   );
   const second = await page({ cursor: first.next_cursor });
@@ -77,7 +77,7 @@ test("evidence reads paginate descending identities, include attempt zero and pr
     SINGLE_RESULT,
   );
   const read = await h.invoke("evidence.get", {
-    params: { evidenceId: ids[SECOND_ITEM_INDEX] },
+    params: { evidence_id: ids[SECOND_ITEM_INDEX] },
     query: {},
     body: null,
   });
@@ -96,10 +96,10 @@ test("evidence reads refuse tasks and absent nodes or records", async (t) => {
   h.store.transaction((tx) =>
     insertNode(tx, {
       id: task,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Task,
       filename: "task.md",
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       created_at: CREATED_AT,
     }),
   );
@@ -108,12 +108,16 @@ test("evidence reads refuse tasks and absent nodes or records", async (t) => {
     [createIdentity("node"), MissionErrorCode.NodeNotFound],
   ])
     await assert.rejects(
-      h.invoke("evidence.list", { params: { nodeId }, query: {}, body: null }),
+      h.invoke("evidence.list", {
+        params: { node_id: nodeId },
+        query: {},
+        body: null,
+      }),
       (error) => error instanceof OperationError && error.code === code,
     );
   await assert.rejects(
     h.invoke("evidence.get", {
-      params: { evidenceId: createIdentity("evidence") },
+      params: { evidence_id: createIdentity("evidence") },
       query: {},
       body: null,
     }),

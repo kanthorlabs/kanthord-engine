@@ -37,20 +37,20 @@ const VALIDATION = "gateway.request.validation_failed";
 const INPUT = { kind: AssetKind.Produced, sha256: "a".repeat(64) } as const;
 const RESULT = {
   command: "true",
-  exitCode: SUCCESS_EXIT_CODE,
+  exit_code: SUCCESS_EXIT_CODE,
   signal: null,
-  timedOut: false,
+  timed_out: false,
 };
 
 function fixture(t: TestContext) {
   const h = executionHarness(t, IDENTITY);
   const body: AssessmentSubmit = {
     ...h.context,
-    evidenceIds: [],
-    childOutcomeIds: [],
+    evidence_ids: [],
+    child_outcome_ids: [],
     result: AssessmentResult.Success,
     rationale: "Checked",
-    testedInput: INPUT,
+    tested_input: INPUT,
   };
   const seed = (
     verification: Verification | null,
@@ -64,7 +64,7 @@ function fixture(t: TestContext) {
         tx,
         {
           id,
-          node_id: h.nodeId,
+          node_id: h.node_id,
           attempt,
           subject: "Proof",
           requirement_key: null,
@@ -80,7 +80,7 @@ function fixture(t: TestContext) {
             evidence_id: id,
             kind: AssetKind.Produced,
             content: canonicalJSON({
-              mediaType: "text/plain",
+              media_type: "text/plain",
               data: "",
               sha256: INPUT.sha256,
             }),
@@ -94,8 +94,8 @@ function fixture(t: TestContext) {
   };
   const admit = (input = body, objective = false) =>
     h.store.transaction((tx) => {
-      const node = readNode(tx, h.nodeId)!;
-      const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
+      const node = readNode(tx, h.node_id)!;
+      const revision = getRevision(tx, h.node_id, FIRST_REVISION);
       if (objective) {
         node.kind = NodeKind.Objective;
         revision.tasks = [
@@ -110,13 +110,13 @@ function fixture(t: TestContext) {
         tx,
         h.dependencies,
         node,
-        readOpenAttempt(tx, h.nodeId)!,
+        readOpenAttempt(tx, h.node_id)!,
         revision,
         input,
       );
     });
   assert.equal(body.attempt, FIRST_ATTEMPT);
-  assert.equal(body.evidenceIds.length, NO_EVIDENCE);
+  assert.equal(body.evidence_ids.length, NO_EVIDENCE);
   return { ...h, body, seed, admit };
 }
 
@@ -133,8 +133,8 @@ function refusal(run: () => void, code: string, field?: string) {
 test("assessment admission requires one passing verification with matching tested input and all pinned task commands", (t) => {
   const h = fixture(t);
   refusal(() => h.admit(), MissionErrorCode.AssessmentVerificationFailed);
-  const passing = { testedInput: INPUT, results: [RESULT] };
-  h.body.evidenceIds = [h.seed(passing)];
+  const passing = { tested_input: INPUT, results: [RESULT] };
+  h.body.evidence_ids = [h.seed(passing)];
   h.admit();
   refusal(
     () => h.admit(h.body, true),
@@ -142,42 +142,45 @@ test("assessment admission requires one passing verification with matching teste
   );
   refusal(
     () =>
-      h.admit({ ...h.body, testedInput: { ...INPUT, sha256: "b".repeat(64) } }),
+      h.admit({
+        ...h.body,
+        tested_input: { ...INPUT, sha256: "b".repeat(64) },
+      }),
     VALIDATION,
-    "testedInput",
+    "tested_input",
   );
-  h.body.evidenceIds.push(h.seed(passing));
+  h.body.evidence_ids.push(h.seed(passing));
   refusal(() => h.admit(), MissionErrorCode.AssessmentVerificationFailed);
 });
 
 test("assessment success counts only the verification that covers every required command", (t) => {
   const h = fixture(t);
-  const partial = h.seed({ testedInput: INPUT, results: [RESULT] });
+  const partial = h.seed({ tested_input: INPUT, results: [RESULT] });
   const full = {
-    testedInput: INPUT,
+    tested_input: INPUT,
     results: [RESULT, { ...RESULT, command: "task" }],
   };
   const failing = {
     ...full,
     results: [
       RESULT,
-      { ...RESULT, command: "task", exitCode: FAILURE_EXIT_CODE },
+      { ...RESULT, command: "task", exit_code: FAILURE_EXIT_CODE },
     ],
   };
   const fullId = h.seed(full);
-  h.body.evidenceIds = [partial, fullId];
+  h.body.evidence_ids = [partial, fullId];
   h.admit(h.body, true);
-  h.body.evidenceIds = [partial, fullId, h.seed(full)];
+  h.body.evidence_ids = [partial, fullId, h.seed(full)];
   refusal(
     () => h.admit(h.body, true),
     MissionErrorCode.AssessmentVerificationFailed,
   );
-  h.body.evidenceIds = [partial];
+  h.body.evidence_ids = [partial];
   refusal(
     () => h.admit(h.body, true),
     MissionErrorCode.AssessmentVerificationFailed,
   );
-  h.body.evidenceIds = [h.seed(failing), partial];
+  h.body.evidence_ids = [h.seed(failing), partial];
   refusal(
     () => h.admit(h.body, true),
     MissionErrorCode.AssessmentVerificationFailed,
@@ -186,10 +189,10 @@ test("assessment success counts only the verification that covers every required
 
 test("assessment result order permits criterion-not-met for a failed run but rejects undetermined", (t) => {
   const h = fixture(t);
-  h.body.evidenceIds = [
+  h.body.evidence_ids = [
     h.seed({
-      testedInput: INPUT,
-      results: [{ ...RESULT, exitCode: FAILURE_EXIT_CODE }],
+      tested_input: INPUT,
+      results: [{ ...RESULT, exit_code: FAILURE_EXIT_CODE }],
     }),
   ];
   refusal(() => h.admit(), MissionErrorCode.AssessmentVerificationFailed);
@@ -205,8 +208,8 @@ test("assessment admission checks rationale and evidence ownership before public
   const h = fixture(t);
   const pending = h.seed(null, false);
   const foreignAttempt = h.seed(null, true, NO_ATTEMPT);
-  h.body.evidenceIds = [pending, foreignAttempt];
-  refusal(() => h.admit(), VALIDATION, "evidenceIds");
+  h.body.evidence_ids = [pending, foreignAttempt];
+  refusal(() => h.admit(), VALIDATION, "evidence_ids");
   assert.throws(
     () =>
       h.admit({
@@ -220,15 +223,15 @@ test("assessment admission checks rationale and evidence ownership before public
       error.code === VALIDATION &&
       canonicalJSON(error.details).includes("rationale"),
   );
-  h.body.evidenceIds = [pending];
-  h.body.childOutcomeIds = [createIdentity("outcome")];
+  h.body.evidence_ids = [pending];
+  h.body.child_outcome_ids = [createIdentity("outcome")];
   refusal(() => h.admit(), MissionErrorCode.AssessmentEvidenceUnpublished);
-  h.body.evidenceIds = [h.seed(null, false, FIRST_ATTEMPT, EXPIRED_TIMESTAMP)];
+  h.body.evidence_ids = [h.seed(null, false, FIRST_ATTEMPT, EXPIRED_TIMESTAMP)];
   refusal(() => h.admit(), MissionErrorCode.AssessmentEvidenceUnpublished);
-  h.body.evidenceIds = [h.seed(null)];
-  refusal(() => h.admit(), VALIDATION, "childOutcomeIds");
-  refusal(() => h.admit(h.body, true), VALIDATION, "childOutcomeIds");
-  h.body.childOutcomeIds = [];
+  h.body.evidence_ids = [h.seed(null)];
+  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
+  refusal(() => h.admit(h.body, true), VALIDATION, "child_outcome_ids");
+  h.body.child_outcome_ids = [];
   refusal(
     () => h.admit({ ...h.body, result: AssessmentResult.Undetermined }),
     VALIDATION,
@@ -238,7 +241,7 @@ test("assessment admission checks rationale and evidence ownership before public
 
 test("non-success assessments retain the verification's tested input", (t) => {
   const h = fixture(t);
-  h.body.evidenceIds = [h.seed({ testedInput: INPUT, results: [RESULT] })];
+  h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
   for (const result of [
     AssessmentResult.CriterionNotMet,
     AssessmentResult.Undetermined,
@@ -248,30 +251,30 @@ test("non-success assessments retain the verification's tested input", (t) => {
         h.admit({
           ...h.body,
           result,
-          testedInput: { ...INPUT, sha256: "b".repeat(64) },
+          tested_input: { ...INPUT, sha256: "b".repeat(64) },
         }),
       VALIDATION,
-      "testedInput",
+      "tested_input",
     );
 });
 
 test("initiative admission tracks replacement child outcomes and excludes retired children", (t) => {
   const h = fixture(t);
-  h.body.evidenceIds = [h.seed({ testedInput: INPUT, results: [RESULT] })];
+  h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
   const childId = createIdentity("node");
   h.store.transaction((tx) => {
-    const base = getRevision(tx, h.nodeId, FIRST_REVISION);
+    const base = getRevision(tx, h.node_id, FIRST_REVISION);
     insertNode(tx, {
       id: childId,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Objective,
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       filename: "child.md",
       created_at: NOW,
     });
     insertRevision(tx, {
       ...base,
-      nodeId: childId,
+      node_id: childId,
       filename: "child.md",
       tasks: [],
     });
@@ -302,18 +305,18 @@ test("initiative admission tracks replacement child outcomes and excludes retire
         created_at: NOW,
       });
     });
-  h.body.childOutcomeIds = [outcome().id];
+  h.body.child_outcome_ids = [outcome().id];
   h.admit();
   const replacement = outcome();
-  refusal(() => h.admit(), VALIDATION, "childOutcomeIds");
-  h.body.childOutcomeIds = [replacement.id];
+  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
+  h.body.child_outcome_ids = [replacement.id];
   h.admit();
   h.store.transaction((tx) =>
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(NOW, childId),
   );
-  refusal(() => h.admit(), VALIDATION, "childOutcomeIds");
-  h.body.childOutcomeIds = [];
+  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
+  h.body.child_outcome_ids = [];
   h.admit();
 });

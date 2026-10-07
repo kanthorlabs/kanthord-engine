@@ -46,7 +46,7 @@ const CRITERION_FIELDS = [ContentField.Criterion, ContentField.Verifications];
 
 type EditBody = Pick<
   NodeUpdate,
-  "reason" | "expectedMissionVersion" | "expected_revision"
+  "reason" | "expected_mission_version" | "expected_revision"
 >;
 type EditContext = {
   node: NodeRow;
@@ -82,7 +82,7 @@ function editContext(
   const mission = requireMission(
     tx,
     node.mission_id,
-    body.expectedMissionVersion,
+    body.expected_mission_version,
   );
   const owner = contentOwner(tx, node);
   const current = readCurrentRevision(tx, owner.id);
@@ -147,8 +147,8 @@ function updatedRevision(
     revision: previous.revision + REVISION_INCREMENT,
     reason: body.reason,
     actor,
-    createdAt: Date.now(),
-    pinnedByAttempts: [],
+    created_at: Date.now(),
+    pinned_by_attempts: [],
   };
   if (node.kind !== NodeKind.Task)
     return {
@@ -157,8 +157,8 @@ function updatedRevision(
       content,
       change: {
         write,
-        previousRevision: previous.revision,
-        changedFields: fields,
+        previous_revision: previous.revision,
+        changed_fields: fields,
         ...(node.kind === NodeKind.Objective ? { tasks: [] } : {}),
       },
     };
@@ -174,10 +174,10 @@ function updatedRevision(
     ),
     change: {
       write,
-      previousRevision: previous.revision,
-      changedFields: [TASKS_FIELD],
+      previous_revision: previous.revision,
+      changed_fields: [TASKS_FIELD],
       tasks: [
-        { id: node.id, change: TaskChange.Updated, changedFields: fields },
+        { id: node.id, change: TaskChange.Updated, changed_fields: fields },
       ],
     },
   };
@@ -201,12 +201,12 @@ function finishEdit(
     candidates,
   );
   const empty = {
-    missionVersion: mission.version,
+    mission_version: mission.version,
     revisions: [],
-    retiredNodeIds: [],
-    addedEdges: [],
-    removedEdges: [],
-    openAttemptsUnchanged: [],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
   };
   if (fields.length === NO_CHANGED_FIELDS) return empty;
   if (filename !== node.filename && filenameTaken(tx, mission.id, filename))
@@ -232,9 +232,9 @@ function finishEdit(
   );
   return {
     ...empty,
-    missionVersion,
+    mission_version: missionVersion,
     revisions: [revisionFromRow(tx, stored)],
-    openAttemptsUnchanged: openAttemptsOf(tx, [owner.id]),
+    open_attempts_unchanged: openAttemptsOf(tx, [owner.id]),
   };
 }
 
@@ -250,7 +250,7 @@ export function updateNode(
   const content = resolveContent(
     tx,
     bindings,
-    context.mission.projectId,
+    context.mission.project_id,
     { ...body, kind: context.node.kind },
     textMaxBytes,
   );

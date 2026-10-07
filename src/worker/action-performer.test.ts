@@ -41,30 +41,30 @@ const PR = {
 
 function actionable(t: TestContext) {
   const h = harness(t);
-  const snapshot = h.context.currentAssessment!.testedInput;
+  const snapshot = h.context.current_assessment!.tested_input;
   assert.ok(
     !Array.isArray(snapshot) && snapshot.kind === TestedInputKind.Repository,
   );
   const entry: ActionContext["actions"][number] = {
     action: {
       key: "repo.pull_request",
-      bindingId: snapshot.bindingId,
+      binding_id: snapshot.binding_id,
       action: RepositoryAction.PullRequest,
-      expectedEndState: "pull_request_merged",
+      expected_end_state: "pull_request_merged",
       follows: null,
-      configuration: { baseBranch: "main" },
+      configuration: { base_branch: "main" },
     },
-    resourceIdentity: RESOURCE,
+    resource_identity: RESOURCE,
     resolution: ActionResolution.Unrequested,
-    requestEvidenceId: null,
+    request_evidence_id: null,
     eligible: true,
-    reuseCandidates: [],
+    reuse_candidates: [],
   };
   h.context.actions.push(entry);
   const evidence = {
     id: createIdentity("evidence"),
     attempt: FIRST_ATTEMPT,
-    requirementKey: entry.action.key,
+    requirement_key: entry.action.key,
     assets: [{ address: PR }],
   };
   h.dependencies.evidenceRequests.request = async () => ({
@@ -101,11 +101,11 @@ function harness(t: TestContext) {
   );
   const context: ActionContext = {
     state: ActionNodeState.Evaluating,
-    currentAssessment: {
+    current_assessment: {
       result: ActionAssessmentResult.Success,
-      testedInput: {
+      tested_input: {
         kind: TestedInputKind.Repository,
-        bindingId: createIdentity("binding"),
+        binding_id: createIdentity("binding"),
         commit: COMMIT,
       },
     },
@@ -121,7 +121,12 @@ function harness(t: TestContext) {
         assert.equal(runtimeIdentity, claim.runtimeIdentity);
         assert.ok(Number.isSafeInteger(now));
         calls.push("claim");
-        return claim;
+        return {
+          execution_id: claim.executionId,
+          node_id: claim.nodeId,
+          attempt: claim.attempt,
+          pinned_revision: claim.pinnedRevision,
+        };
       },
       runningExecutionOfRuntime: () => assert.fail("unexpected read"),
       activityOf: () => assert.fail("unexpected read"),
@@ -131,8 +136,8 @@ function harness(t: TestContext) {
         assert.ok(tx.database.isTransaction);
         assert.deepEqual(suppliedClaim, claim);
         const entry = context.actions.find((item) =>
-          item.reuseCandidates.some(
-            (candidate) => candidate.evidenceId === evidenceId,
+          item.reuse_candidates.some(
+            (candidate) => candidate.evidence_id === evidenceId,
           ),
         );
         assert.ok(entry);
@@ -200,11 +205,11 @@ test("admission refuses steps claims before any external call", async (t) => {
 
 test("admission requires a current passing assessment", async (t) => {
   const h = harness(t);
-  h.context.currentAssessment!.result = ActionAssessmentResult.CriterionNotMet;
+  h.context.current_assessment!.result = ActionAssessmentResult.CriterionNotMet;
   await assert.rejects(h.perform(), {
     code: WorkerErrorCode.AssessmentNotCurrent,
   });
-  h.context.currentAssessment = null;
+  h.context.current_assessment = null;
   await assert.rejects(h.perform(), {
     code: WorkerErrorCode.AssessmentNotCurrent,
   });
@@ -245,10 +250,10 @@ test("dispatch forwards identity, derived operands and the returned address to M
   ]);
   const [input, options] = request.mock.calls[0]!.arguments;
   assert.deepEqual(input.body, {
-    executionId: h.claim.executionId,
+    execution_id: h.claim.executionId,
     attempt: FIRST_ATTEMPT,
-    nodeRevision: FIRST_ATTEMPT,
-    requirementKey: h.entry.action.key,
+    node_revision: FIRST_ATTEMPT,
+    requirement_key: h.entry.action.key,
     subject: h.entry.action.key,
     address: PR,
   });
@@ -299,7 +304,10 @@ test("no-effect refusal releases the reservation for a later invocation", async 
   assert.deepEqual((await h.perform()).items, [
     {
       kind: ActionResultKind.FailedBeforeEffect,
-      action: { key: h.entry.action.key, binding_id: h.entry.action.bindingId },
+      action: {
+        key: h.entry.action.key,
+        binding_id: h.entry.action.binding_id,
+      },
       refusal,
     },
   ]);
@@ -324,7 +332,7 @@ test("refused or thrown recording retains the known address as recording uncerta
   });
   const expected = {
     kind: ActionResultKind.Uncertain,
-    action: { key: h.entry.action.key, binding_id: h.entry.action.bindingId },
+    action: { key: h.entry.action.key, binding_id: h.entry.action.binding_id },
     uncertainty: Uncertainty.Recording,
     address: PR,
   };
@@ -339,7 +347,7 @@ test("refused or thrown recording retains the known address as recording uncerta
       ...expected,
       action: {
         key: other.entry.action.key,
-        binding_id: other.entry.action.bindingId,
+        binding_id: other.entry.action.binding_id,
       },
     },
   ]);
@@ -348,8 +356,8 @@ test("refused or thrown recording retains the known address as recording uncerta
 function reusable(t: TestContext) {
   const h = actionable(t);
   h.claim.attempt = SECOND_ATTEMPT;
-  h.entry.reuseCandidates.push({
-    evidenceId: createIdentity("evidence"),
+  h.entry.reuse_candidates.push({
+    evidence_id: createIdentity("evidence"),
     attempt: FIRST_ATTEMPT,
     address: PR,
   });
@@ -366,7 +374,7 @@ function reusable(t: TestContext) {
     "perform",
     async () => PR,
   );
-  assert.equal(h.entry.reuseCandidates.length, SINGLE_CALL_COUNT);
+  assert.equal(h.entry.reuse_candidates.length, SINGLE_CALL_COUNT);
   assert.equal(h.claim.attempt, SECOND_ATTEMPT);
   return { ...h, body, performSpy: perform };
 }
@@ -399,8 +407,8 @@ test("closed pull request dispatches fresh and a later matching candidate is sel
   await h.perform();
   assert.equal(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, null);
   const second = { ...PR, number: 43 };
-  h.entry.reuseCandidates.push({
-    evidenceId: createIdentity("evidence"),
+  h.entry.reuse_candidates.push({
+    evidence_id: createIdentity("evidence"),
     attempt: FIRST_ATTEMPT,
     address: second,
   });
@@ -441,7 +449,7 @@ test("merge push and foreign repository candidates never call read", async (t) =
   await h.perform();
   assert.equal(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, null);
   h.entry.action.action = RepositoryAction.PullRequest;
-  h.entry.reuseCandidates[0]!.address = {
+  h.entry.reuse_candidates[0]!.address = {
     ...PR,
     resource_identity: "repository:github:other/repo",
   };
@@ -465,7 +473,7 @@ test("concurrent calls of one execution take a new snapshot after submission", a
   h.dependencies.evidenceRequests.request = async () => {
     h.entry.eligible = false;
     h.entry.resolution = ActionResolution.Unresolved;
-    h.entry.requestEvidenceId = h.evidence.id;
+    h.entry.request_evidence_id = h.evidence.id;
     return {
       type: OperationResultType.Completed,
       status: HttpStatus.OK,
@@ -565,7 +573,7 @@ test("same-attempt request evidence prunes uncertainty without dispatch", async 
   await h.perform();
   h.entry.eligible = false;
   h.entry.resolution = ActionResolution.Unresolved;
-  h.entry.requestEvidenceId = h.evidence.id;
+  h.entry.request_evidence_id = h.evidence.id;
   assert.deepEqual((await h.perform()).items, []);
   assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
 });
@@ -574,7 +582,7 @@ test("read exception clears its reservation and every undispatched owned action"
   const h = reusable(t);
   const second = structuredClone(h.entry);
   second.action.key = "z.pull_request";
-  second.reuseCandidates = [];
+  second.reuse_candidates = [];
   h.context.actions.push(second);
   h.dependencies.intakeActions.read = async () => {
     throw new Error("read failed");

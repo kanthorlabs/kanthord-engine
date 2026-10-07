@@ -100,7 +100,10 @@ export class DispatchReservations {
         keyOf({
           nodeId,
           attempt,
-          action: { key: entry.action.key, binding_id: entry.action.bindingId },
+          action: {
+            key: entry.action.key,
+            binding_id: entry.action.binding_id,
+          },
         }),
       );
     }

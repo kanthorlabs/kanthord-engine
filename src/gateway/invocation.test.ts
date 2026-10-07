@@ -101,26 +101,26 @@ test("execution proof precedes reservation and replay and supplies only proven c
   const store = new Store(":memory:");
   t.after(() => store.close());
   const row: ExecutionProofRow = {
-    executionId: createIdentity("execution"),
-    projectId: createIdentity("project"),
-    nodeId: createIdentity("node"),
-    runtimeIdentity: createIdentity("worker_instance"),
-    workerBindingId: createIdentity("binding"),
+    execution_id: createIdentity("execution"),
+    project_id: createIdentity("project"),
+    node_id: createIdentity("node"),
+    runtime_identity: createIdentity("worker_instance"),
+    worker_binding_id: createIdentity("binding"),
     attempt: 1,
-    pinnedRevision: 2,
-    expiredAt: now + 100,
-    endedAt: null,
+    pinned_revision: 2,
+    expired_at: now + 100,
+    ended_at: null,
   };
   const identity = testMachineIdentity(
     {
       clientId: createIdentity("client_identity"),
       name: "worker",
-      projectId: row.projectId,
+      projectId: row.project_id,
       resourceIdentity: "worker:kanthord:general",
       issuedAt: now,
     },
     "machine",
-    row.runtimeIdentity,
+    row.runtime_identity,
   );
   let proof: ExecutionProofRow | undefined = row;
   let registered = true;
@@ -130,22 +130,22 @@ test("execution proof precedes reservation and replay and supplies only proven c
     mutation: true,
     requiresExecution: true,
     input: z.strictObject({
-      params: z.strictObject({ executionId: z.string().optional() }),
+      params: z.strictObject({ execution_id: z.string().optional() }),
       query: z.strictObject({}),
-      body: z.strictObject({ executionId: z.string().optional() }),
+      body: z.strictObject({ execution_id: z.string().optional() }),
     }),
   };
   let calls = 0;
   registry.register(protectedOperation, (_input, caller) => {
     calls++;
     const claim = {
-      executionId: row.executionId,
-      projectId: row.projectId,
-      nodeId: row.nodeId,
-      runtimeIdentity: row.runtimeIdentity,
-      workerBindingId: row.workerBindingId,
+      executionId: row.execution_id,
+      projectId: row.project_id,
+      nodeId: row.node_id,
+      runtimeIdentity: row.runtime_identity,
+      workerBindingId: row.worker_binding_id,
       attempt: row.attempt,
-      pinnedRevision: row.pinnedRevision,
+      pinnedRevision: row.pinned_revision,
     };
     assert.deepEqual(caller.execution, claim);
     return caller.commit(() => COMMITTED_VALUE);
@@ -167,7 +167,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
         findByClient: () =>
           registered
             ? {
-                runtime_identity: row.runtimeIdentity,
+                runtime_identity: row.runtime_identity,
                 registered_at: now,
                 client_id: identity.clientId,
                 name: identity.name,
@@ -178,22 +178,22 @@ test("execution proof precedes reservation and replay and supplies only proven c
         heartbeat: () => {},
       },
       scheduler: {
-        executionOf: (id) => (id === row.executionId ? proof : undefined),
+        executionOf: (id) => (id === row.execution_id ? proof : undefined),
       },
     },
   });
   t.after(() => invocation.stop());
   const key = createIdentity("request").slice("request_".length);
   const request = {
-    params: { executionId: row.executionId },
+    params: { execution_id: row.execution_id },
     query: {},
     body: {},
   };
   for (const candidate of [
     undefined,
-    { ...row, runtimeIdentity: createIdentity("worker_instance") },
-    { ...row, endedAt: now },
-    { ...row, expiredAt: now },
+    { ...row, runtime_identity: createIdentity("worker_instance") },
+    { ...row, ended_at: now },
+    { ...row, expired_at: now },
   ]) {
     proof = candidate;
     const answer = await invocation.invoke(operation.id, request, {
@@ -220,7 +220,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
     HttpStatus.OK,
   );
   assert.equal(calls, ONE_CALL);
-  proof = { ...row, endedAt: now };
+  proof = { ...row, ended_at: now };
   assert.equal(
     (
       await invocation.invoke(operation.id, request, {
@@ -236,7 +236,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
     (
       await invocation.invoke(
         operation.id,
-        { params: {}, query: {}, body: { executionId: row.executionId } },
+        { params: {}, query: {}, body: { execution_id: row.execution_id } },
         {
           identity,
           idempotencyKey: createIdentity("request").slice("request_".length),

@@ -58,7 +58,7 @@ function requireChildren(
     new Set(childOutcomeIds).size !== expected.length ||
     !expected.every((id) => childOutcomeIds.includes(id))
   )
-    invalidExecutionInput("childOutcomeIds");
+    invalidExecutionInput("child_outcome_ids");
 }
 
 function requireResult(
@@ -82,10 +82,10 @@ function requireResult(
         "Assessment requires exactly one passing verification.",
       );
     if (
-      canonicalJSON(verification.testedInput) !==
-      canonicalJSON(body.testedInput)
+      canonicalJSON(verification.tested_input) !==
+      canonicalJSON(body.tested_input)
     )
-      invalidExecutionInput("testedInput");
+      invalidExecutionInput("tested_input");
     return;
   }
   if (
@@ -99,11 +99,11 @@ function requireResult(
   if (
     verifications.some(
       (verification) =>
-        canonicalJSON(verification.testedInput) !==
-        canonicalJSON(body.testedInput),
+        canonicalJSON(verification.tested_input) !==
+        canonicalJSON(body.tested_input),
     )
   )
-    invalidExecutionInput("testedInput");
+    invalidExecutionInput("tested_input");
 }
 
 export function admitAssessment(
@@ -121,14 +121,14 @@ export function admitAssessment(
     body.rationale,
     dependencies.config.text_max_bytes,
   );
-  const evidence = body.evidenceIds.map((id) => readEvidence(tx, id));
+  const evidence = body.evidence_ids.map((id) => readEvidence(tx, id));
   if (
     evidence.some(
       (row) =>
         !row || row.node_id !== node.id || row.attempt !== attempt.attempt,
     )
   )
-    invalidExecutionInput("evidenceIds");
+    invalidExecutionInput("evidence_ids");
   const verifications: Verification[] = [];
   for (const row of evidence) {
     assert.ok(row);
@@ -143,13 +143,13 @@ export function admitAssessment(
         verificationSchema.parse(JSON.parse(row.verification)),
       );
   }
-  requireChildren(tx, node, body.childOutcomeIds);
+  requireChildren(tx, node, body.child_outcome_ids);
   requireTestedInput(
     tx,
     dependencies.bindings,
     node,
     revision,
-    body.testedInput,
+    body.tested_input,
   );
   requireResult(body, verifications, requiredVerifications(tx, node, revision));
 }

@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: executionId
+      - name: execution_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.execution.objective.outcome.list.Input/prop\
-            erties/params/properties/executionId"
+            erties/params/properties/execution_id"
       - name: limit
         in: query
         required: false
@@ -65,14 +65,14 @@ components:
         params:
           type: object
           properties:
-            executionId:
+            execution_id:
               type: string
               minLength: 36
               maxLength: 36
               pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: execution_ followed by a canonical 26-character uppercase ULID.
           required:
-            - executionId
+            - execution_id
           additionalProperties: false
         query:
           type: object
@@ -106,7 +106,7 @@ components:
                 maxLength: 34
                 pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: outcome_ followed by a canonical 26-character uppercase ULID.
-              nodeId:
+              node_id:
                 type: string
                 minLength: 31
                 maxLength: 31
@@ -116,11 +116,11 @@ components:
                 type: integer
                 minimum: 0
                 maximum: 9007199254740991
-              nodeRevision:
+              node_revision:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
-              closingEvent:
+              closing_event:
                 type: string
                 enum:
                   - success-override
@@ -136,13 +136,13 @@ components:
                   - success
                   - criterion-not-met
                   - undetermined
-              assessmentId:
+              assessment_id:
                 type: string
                 minLength: 37
                 maxLength: 37
                 pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: assessment_ followed by a canonical 26-character uppercase ULID.
-              evidenceIds:
+              evidence_ids:
                 type: array
                 items:
                   type: string
@@ -150,21 +150,21 @@ components:
                   maxLength: 35
                   pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                   description: evidence_ followed by a canonical 26-character uppercase ULID.
-              createdAt:
+              created_at:
                 type: integer
                 minimum: 0
                 maximum: 9007199254740991
                 description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
             required:
               - id
-              - nodeId
+              - node_id
               - attempt
-              - nodeRevision
-              - closingEvent
+              - node_revision
+              - closing_event
               - result
-              - assessmentId
-              - evidenceIds
-              - createdAt
+              - assessment_id
+              - evidence_ids
+              - created_at
             additionalProperties: false
         next_cursor:
           anyOf:

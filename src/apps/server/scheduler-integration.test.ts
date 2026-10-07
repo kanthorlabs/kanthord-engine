@@ -212,40 +212,40 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
   );
   const mission = completed(
     await call(missionOperations.get, {
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: null,
     }),
   );
   const initiative = completed(
     await call(missionOperations["node.create"], {
-      params: { missionId: mission.id },
+      params: { mission_id: mission.id },
       query: {},
       body: {
         filename: "initiative-1.md",
         kind: NodeKind.Initiative,
         content: CONTENT,
         reason: "plan",
-        expectedMissionVersion: 1,
+        expected_mission_version: 1,
       },
     }),
   );
   const objective = completed(
     await call(missionOperations["node.create"], {
-      params: { missionId: mission.id },
+      params: { mission_id: mission.id },
       query: {},
       body: {
         filename: "objective-1.md",
         kind: NodeKind.Objective,
         content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
         reason: "plan",
-        expectedMissionVersion: 2,
-        parentId: initiative.revisions[0]!.nodeId,
-        expectedParentRevision: 1,
+        expected_mission_version: 2,
+        parent_id: initiative.revisions[0]!.node_id,
+        expected_parent_revision: 1,
       },
     }),
   );
-  const nodeId = objective.revisions[0]!.nodeId;
+  const nodeId = objective.revisions[0]!.node_id;
   const generalToken = await f.machineToken(projectId, "general", "general-a");
   const otherToken = await f.machineToken(projectId, "general", "general-b");
   const reviewerToken = await f.machineToken(projectId, "reviewer", "reviewer");
@@ -269,11 +269,11 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
         params: {},
         query: {},
         body: {
-          resourceIdentity:
+          resource_identity:
             runtimeIdentity === reviewer
               ? "worker:kanthord:reviewer"
               : "worker:kanthord:general",
-          runtimeIdentity,
+          runtime_identity: runtimeIdentity,
         },
       },
       token,
@@ -286,20 +286,24 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
   ) =>
     call(
       schedulerOperations.executionRelease,
-      { params: { executionId }, query: {}, body: { furtherWork } },
+      {
+        params: { execution_id: executionId },
+        query: {},
+        body: { further_work: furtherWork },
+      },
       generalToken,
       options,
     );
   const get = (executionId: string) =>
     call(schedulerOperations.executionGet, {
-      params: { executionId },
+      params: { execution_id: executionId },
       query: {},
       body: null,
     });
   const node = async () =>
     completed(
       await call(missionOperations["node.get"], {
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: {},
         body: null,
       }),
@@ -307,8 +311,8 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
   return {
     f,
     call,
-    projectId,
-    nodeId,
+    project_id: projectId,
+    node_id: nodeId,
     generalToken,
     reviewerToken,
     general,
@@ -330,7 +334,7 @@ for (const adapter of ["direct", "http"] as const) {
       await h.pull(h.general, h.generalToken, { idempotencyKey: key }),
     );
     assert.ok(first.kind === WorkPullKind.Claimed);
-    assert.equal(first.execution.nodeId, h.nodeId);
+    assert.equal(first.execution.node_id, h.node_id);
     for (const idempotencyKey of [key, ulid()])
       assert.deepEqual(
         completed(await h.pull(h.general, h.generalToken, { idempotencyKey })),
@@ -349,12 +353,12 @@ for (const adapter of ["direct", "http"] as const) {
     assert.notEqual((await other).type, OperationResultType.Completed);
     const releaseKey = ulid();
     completed(
-      await h.release(first.execution.executionId, true, {
+      await h.release(first.execution.execution_id, true, {
         idempotencyKey: releaseKey,
       }),
     );
     refused(
-      await h.release(first.execution.executionId, true, {
+      await h.release(first.execution.execution_id, true, {
         idempotencyKey: releaseKey,
       }),
       HttpStatus.Forbidden,
@@ -364,21 +368,21 @@ for (const adapter of ["direct", "http"] as const) {
       await h.call(
         schedulerOperations.claimGet,
         {
-          params: { executionId: first.execution.executionId },
+          params: { execution_id: first.execution.execution_id },
           query: {},
           body: null,
         },
         h.generalToken,
       ),
     );
-    assert.equal(ended.claimState, ClaimState.Finished);
+    assert.equal(ended.claim_state, ClaimState.Finished);
     const next = completed(await h.pull());
     assert.ok(next.kind === WorkPullKind.Claimed);
-    assert.notEqual(next.execution.executionId, first.execution.executionId);
+    assert.notEqual(next.execution.execution_id, first.execution.execution_id);
     assert.equal(next.execution.attempt, FIRST_ATTEMPT);
     const list = completed(
       await h.call(schedulerOperations.executionList, {
-        params: { projectId: h.projectId },
+        params: { project_id: h.project_id },
         query: {},
         body: null,
       }),
@@ -386,7 +390,7 @@ for (const adapter of ["direct", "http"] as const) {
     assert.equal(list.items.length, EXPECTED_PAIR_COUNT);
     refused(
       await h.call(schedulerOperations.executionList, {
-        params: { projectId: h.projectId },
+        params: { project_id: h.project_id },
         query: { attempt: 1 },
         body: null,
       }),
@@ -417,11 +421,11 @@ test("two proved releases race at the transaction, for equal and different paylo
       return original(input, caller);
     };
     try {
-      const winning = h.release(result.execution.executionId);
+      const winning = h.release(result.execution.execution_id);
       await firstAdmitted.promise;
       const [winner, loser] = await Promise.all([
         winning,
-        h.release(result.execution.executionId, furtherWork),
+        h.release(result.execution.execution_id, furtherWork),
       ]);
       completed(winner);
       refused(loser, HttpStatus.Conflict, NOT_RUNNING);
@@ -444,12 +448,12 @@ test("proof before expiry cannot authorize a release whose transaction begins at
   );
   const original = registered.handler;
   registered.handler = (input, caller) => {
-    t.mock.method(Date, "now", () => claim.execution.expiredAt);
+    t.mock.method(Date, "now", () => claim.execution.expired_at);
     return original(input, caller);
   };
   try {
     refused(
-      await h.release(claim.execution.executionId),
+      await h.release(claim.execution.execution_id),
       HttpStatus.Conflict,
       NOT_RUNNING,
     );
@@ -457,7 +461,7 @@ test("proof before expiry cannot authorize a release whose transaction begins at
     registered.handler = original;
   }
   assert.equal(
-    h.f.scheduler.executionOf(claim.execution.executionId)?.endedAt,
+    h.f.scheduler.executionOf(claim.execution.execution_id)?.ended_at,
     null,
   );
 });
@@ -468,12 +472,12 @@ test("pull, registration resume and human pause settle an expired row before adm
   t.mock.method(Date, "now", () => now);
   const first = completed(await h.pull());
   assert.ok(first.kind === WorkPullKind.Claimed);
-  now = first.execution.expiredAt;
+  now = first.execution.expired_at;
   const next = completed(await h.pull());
   assert.ok(next.kind === WorkPullKind.Claimed);
-  assert.notEqual(next.execution.executionId, first.execution.executionId);
+  assert.notEqual(next.execution.execution_id, first.execution.execution_id);
   assert.equal(
-    h.f.scheduler.executionOf(first.execution.executionId)?.endedAt,
+    h.f.scheduler.executionOf(first.execution.execution_id)?.ended_at,
     now,
   );
   completed(
@@ -483,7 +487,7 @@ test("pull, registration resume and human pause settle an expired row before adm
       h.generalToken,
     ),
   );
-  now = next.execution.expiredAt;
+  now = next.execution.expired_at;
   refused(
     await h.call(workerOperations["instance.resume"], {
       params: { runtime_identity: h.general },
@@ -503,32 +507,32 @@ test("pull, registration resume and human pause settle an expired row before adm
     await h.call(
       schedulerOperations.executionRelease,
       {
-        params: { executionId: third.execution.executionId },
+        params: { execution_id: third.execution.execution_id },
         query: {},
-        body: { furtherWork: true },
+        body: { further_work: true },
       },
       h.otherToken,
     ),
   );
   const fourth = completed(await h.pull(h.other, h.otherToken));
   assert.ok(fourth.kind === WorkPullKind.Claimed);
-  now = fourth.execution.expiredAt;
+  now = fourth.execution.expired_at;
   const pause = completed(
     await h.call(missionOperations["node.pause"], {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: {
         reason: "hold",
-        expectedMissionVersion: 3,
-        expectedState: NodeState.Available,
-        expectedAttempt: 1,
+        expected_mission_version: 3,
+        expected_state: NodeState.Available,
+        expected_attempt: 1,
       },
     }),
   );
   assert.ok(pause.node.kind !== NodeKind.Task);
   assert.equal(pause.node.state, NodeState.Paused);
   assert.equal(
-    h.f.scheduler.executionOf(fourth.execution.executionId)?.endedAt,
+    h.f.scheduler.executionOf(fourth.execution.execution_id)?.ended_at,
     now,
   );
 });
@@ -536,7 +540,7 @@ test("pull, registration resume and human pause settle an expired row before adm
 test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and body bounds", async (t) => {
   const h = await setup(t, "http");
   const invalidFilter = await h.f.request(
-    `/api/scheduler/project/${h.projectId}/execution?attempt=1`,
+    `/api/scheduler/project/${h.project_id}/execution?attempt=1`,
     { headers: { Authorization: `Bearer ${h.f.token}` } },
   );
   assert.equal(invalidFilter.status, HttpStatus.BadRequest);
@@ -557,8 +561,8 @@ test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and b
       isPull ? OperationLifetime.Wait : OperationLifetime.Unary,
     );
     const path = operation.path
-      .replace(":projectId", h.projectId)
-      .replace(":executionId", createIdentity("execution"));
+      .replace(":project_id", h.project_id)
+      .replace(":execution_id", createIdentity("execution"));
     const token =
       operation.access === AccessPolicy.Client ? h.generalToken : h.f.token;
     const response = await h.f.request(path + "?unexpected=true", {
@@ -582,7 +586,7 @@ test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and b
     schedulerOperations.executionRelease,
   ]) {
     const response = await h.f.request(
-      operation.path.replace(":executionId", createIdentity("execution")),
+      operation.path.replace(":execution_id", createIdentity("execution")),
       {
         method: operation.method,
         headers: {
@@ -605,16 +609,16 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
       const first = completed(await h.pull());
       assert.ok(first.kind === WorkPullKind.Claimed);
       if (evaluation) {
-        completed(await h.release(first.execution.executionId));
+        completed(await h.release(first.execution.execution_id));
         completed(
           await h.call(missionOperations["node.ready"], {
-            params: { nodeId: h.nodeId },
+            params: { node_id: h.node_id },
             query: {},
             body: {
               reason: "review",
-              expectedMissionVersion: 3,
-              expectedState: NodeState.Available,
-              expectedAttempt: 1,
+              expected_mission_version: 3,
+              expected_state: NodeState.Available,
+              expected_attempt: 1,
             },
           }),
         );
@@ -629,7 +633,7 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
           ),
         );
         assert.ok(claim.kind === WorkPullKind.Claimed);
-        now = claim.execution.expiredAt;
+        now = claim.execution.expired_at;
         h.f.scheduler.sweep();
         h.f.scheduler.sweep();
         assert.equal(routing.mock.calls.length, loss);
@@ -646,17 +650,17 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
         );
         const queue = completed(
           await h.call(schedulerOperations.queueList, {
-            params: { projectId: h.projectId },
+            params: { project_id: h.project_id },
             query: {},
             body: null,
           }),
         );
         assert.equal(
-          queue.items.some((job) => job.nodeId === h.nodeId),
+          queue.items.some((job) => job.node_id === h.node_id),
           loss < limit,
         );
         assert.equal(
-          completed(await h.get(claim.execution.executionId)).claimState,
+          completed(await h.get(claim.execution.execution_id)).claim_state,
           ClaimState.Lost,
         );
       }
@@ -677,18 +681,18 @@ test("sweep and human revocation defeat an already proved release with one termi
       const releases = step.mock.method(h.f.mission, "release");
       registered.handler = async (input, caller) => {
         if (sweep) {
-          step.mock.method(Date, "now", () => claim.execution.expiredAt);
+          step.mock.method(Date, "now", () => claim.execution.expired_at);
           h.f.scheduler.sweep();
         } else
           completed(
             await h.call(missionOperations["node.pause"], {
-              params: { nodeId: h.nodeId },
+              params: { node_id: h.node_id },
               query: {},
               body: {
                 reason: "hold",
-                expectedMissionVersion: 3,
-                expectedState: NodeState.Executing,
-                expectedAttempt: 1,
+                expected_mission_version: 3,
+                expected_state: NodeState.Executing,
+                expected_attempt: 1,
               },
             }),
           );
@@ -696,7 +700,7 @@ test("sweep and human revocation defeat an already proved release with one termi
       };
       try {
         refused(
-          await h.release(claim.execution.executionId),
+          await h.release(claim.execution.execution_id),
           HttpStatus.Conflict,
           NOT_RUNNING,
         );
@@ -705,7 +709,7 @@ test("sweep and human revocation defeat an already proved release with one termi
       }
       assert.deepEqual(releases.mock.calls, []);
       assert.ok(
-        h.f.scheduler.executionOf(claim.execution.executionId)?.endedAt !==
+        h.f.scheduler.executionOf(claim.execution.execution_id)?.ended_at !==
           null,
       );
     });
@@ -719,17 +723,17 @@ test("ended executions remain readable after reopening a file store", async (t) 
     const h = await setup(step, "http", path);
     const claim = completed(await h.pull());
     assert.ok(claim.kind === WorkPullKind.Claimed);
-    executionId = claim.execution.executionId;
+    executionId = claim.execution.execution_id;
     completed(await h.release(executionId));
   });
   const f = await gatewayFixture(t, { path });
   const result = completed(
     await httpClient(schedulerOperations, f.endpoint, f.token).executionGet({
-      params: { executionId },
+      params: { execution_id: executionId },
       query: {},
       body: null,
     }),
   );
-  assert.equal(result.claimState, ClaimState.Finished);
-  assert.ok(result.endedAt !== null);
+  assert.equal(result.claim_state, ClaimState.Finished);
+  assert.ok(result.ended_at !== null);
 });

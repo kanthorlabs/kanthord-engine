@@ -12,24 +12,24 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: nodeId
+      - name: node_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.externalAction.get.Input/properties/params/\
-            properties/nodeId"
+            properties/node_id"
       - name: attempt
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.externalAction.get.Input/properties/params/\
             properties/attempt"
-      - name: actionKey
+      - name: action_key
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.externalAction.get.Input/properties/params/\
-            properties/actionKey"
+            properties/action_key"
     responses:
       "200":
         description: Completed result
@@ -65,7 +65,7 @@ components:
         params:
           type: object
           properties:
-            nodeId:
+            node_id:
               type: string
               minLength: 31
               maxLength: 31
@@ -75,13 +75,13 @@ components:
               type: integer
               minimum: 1
               maximum: 9007199254740991
-            actionKey:
+            action_key:
               type: string
               pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
           required:
-            - nodeId
+            - node_id
             - attempt
-            - actionKey
+            - action_key
           additionalProperties: false
         query:
           type: object
@@ -97,7 +97,7 @@ components:
     mission.externalAction.get.Output:
       type: object
       properties:
-        nodeId:
+        node_id:
           type: string
           minLength: 31
           maxLength: 31
@@ -113,7 +113,7 @@ components:
             key:
               type: string
               pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
-            bindingId:
+            binding_id:
               type: string
               minLength: 34
               maxLength: 34
@@ -124,7 +124,7 @@ components:
               enum:
                 - pull_request
                 - merge_push
-            expectedEndState:
+            expected_end_state:
               type: string
               enum:
                 - pull_request_merged
@@ -137,23 +137,23 @@ components:
             configuration:
               type: object
               properties:
-                baseBranch:
+                base_branch:
                   type: string
                   minLength: 1
               required:
-                - baseBranch
+                - base_branch
               additionalProperties: false
           required:
             - key
-            - bindingId
+            - binding_id
             - action
-            - expectedEndState
+            - expected_end_state
             - follows
             - configuration
           additionalProperties: false
         requested:
           type: boolean
-        requestEvidenceId:
+        request_evidence_id:
           anyOf:
             - type: string
               minLength: 35
@@ -169,10 +169,10 @@ components:
             - expected-end
             - other-end
       required:
-        - nodeId
+        - node_id
         - attempt
         - action
         - requested
-        - requestEvidenceId
+        - request_evidence_id
         - resolution
       additionalProperties: false

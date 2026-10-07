@@ -25,24 +25,24 @@ const THREE_COMMITS = 3;
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
   const row = executionFixture({
-    createdAt: Date.now(),
-    expiredAt: Date.now() + 10000,
+    created_at: Date.now(),
+    expired_at: Date.now() + 10000,
   });
   const identity = testMachineIdentity(
     {
       clientId: createIdentity("client_identity"),
       name: "worker",
-      projectId: row.projectId,
-      resourceIdentity: row.resourceIdentity,
+      projectId: row.project_id,
+      resourceIdentity: row.resource_identity,
       issuedAt: Date.now(),
     },
     "pull",
-    row.runtimeIdentity,
+    row.runtime_identity,
   );
   h.dependencies.bindings.workerBindingOf = () => ({
-    bindingId: row.workerBindingId,
-    workerName: "general@1",
-    instanceCount: 2,
+    binding_id: row.worker_binding_id,
+    worker_name: "general@1",
+    instance_count: 2,
     tombstone: false,
   });
   h.dependencies.declarations.declarationOf = () => ({
@@ -55,9 +55,9 @@ function harness(t: TestContext) {
     tx.database.prepare("INSERT INTO attempts VALUES (?)").run(nodeId);
     return {
       kind: "steps",
-      projectId: row.projectId,
+      project_id: row.project_id,
       attempt: 1,
-      nodeRevision: 1,
+      node_revision: 1,
     };
   };
   h.store.database.exec("CREATE TABLE attempts (node_id TEXT PRIMARY KEY)");
@@ -75,15 +75,15 @@ function harness(t: TestContext) {
     params: {},
     query: {},
     body: {
-      resourceIdentity: row.resourceIdentity,
-      runtimeIdentity: row.runtimeIdentity,
+      resource_identity: row.resource_identity,
+      runtime_identity: row.runtime_identity,
     },
   };
   const pull = (context = caller.context) =>
     h.invoke("workPull", input, { ...caller, context });
   const enqueue = () =>
     h.store.transaction((tx) =>
-      h.service.insert(tx, row.nodeId, row.projectId, 0),
+      h.service.insert(tx, row.node_id, row.project_id, 0),
     );
   return {
     ...h,
@@ -134,7 +134,7 @@ const HEALTHCHECK = "instanceHealthcheck";
 test("project wake serves parked pulls in arrival order and another project does not", async (t) => {
   const h = harness(t);
   const first = h.pull();
-  assert.equal(h.service.pulling(h.row.runtimeIdentity), true);
+  assert.equal(h.service.pulling(h.row.runtime_identity), true);
   const otherRuntime = createIdentity("worker_instance");
   const otherIdentity = testMachineIdentity(
     {
@@ -150,7 +150,7 @@ test("project wake serves parked pulls in arrival order and another project does
   const context = new CancellationContext();
   const second = h.invoke(
     "workPull",
-    { ...h.input, body: { ...h.input.body, runtimeIdentity: otherRuntime } },
+    { ...h.input, body: { ...h.input.body, runtime_identity: otherRuntime } },
     { ...h.caller, identity: otherIdentity, context },
   );
   const secondRejected = assert.rejects(second, { code: CANCELLED });
@@ -158,7 +158,7 @@ test("project wake serves parked pulls in arrival order and another project does
   await turn();
   assert.equal(h.commits(), NO_COMMITS);
   h.enqueue();
-  h.service.wake(h.row.projectId);
+  h.service.wake(h.row.project_id);
   const result = await first;
   assert.equal(result.kind, WorkPullKind.Claimed);
   assert.equal(h.commits(), ONE_COMMIT);
@@ -173,7 +173,7 @@ test("concurrent empty pulls of one runtime retain one waiter and each duplicate
   const context = new CancellationContext();
   const first = h.pull(context);
   const cancelled = assert.rejects(first, { code: CANCELLED });
-  assert.equal(h.service.pulling(h.row.runtimeIdentity), true);
+  assert.equal(h.service.pulling(h.row.runtime_identity), true);
   const duplicates = await Promise.all([h.pull(), h.pull(), h.pull()]);
   assert.deepEqual(
     duplicates,
@@ -182,11 +182,11 @@ test("concurrent empty pulls of one runtime retain one waiter and each duplicate
     })),
   );
   assert.equal(h.commits(), THREE_COMMITS);
-  assert.equal(h.service.pulling(h.row.runtimeIdentity), true);
+  assert.equal(h.service.pulling(h.row.runtime_identity), true);
   context.cancel();
   await cancelled;
   assert.equal(h.commits(), THREE_COMMITS);
-  assert.equal(h.service.pulling(h.row.runtimeIdentity), false);
+  assert.equal(h.service.pulling(h.row.runtime_identity), false);
   h.enqueue();
   const claim = await h.pull();
   assert.equal(claim.kind, WorkPullKind.Claimed);
@@ -196,7 +196,7 @@ test("woken health failure and quiescence answer no-work once without claims", a
   const h = harness(t);
   const waiting = h.pull();
   h.dependencies.registrations.instanceHealthcheck = () => false;
-  h.service.wake(h.row.projectId);
+  h.service.wake(h.row.project_id);
   assert.deepEqual(await waiting, { kind: WorkPullKind.NoWork });
   assert.equal(h.commits(), ONE_COMMIT);
   const stopped = harness(t);
@@ -232,8 +232,8 @@ test("window expiry commits no-work and cancellation commits nothing", async (t)
 test("mismatches and unexpected probe errors propagate without a commit", async (t) => {
   const h = harness(t);
   for (const body of [
-    { ...h.input.body, runtimeIdentity: createIdentity("worker_instance") },
-    { ...h.input.body, resourceIdentity: "another-binding" },
+    { ...h.input.body, runtime_identity: createIdentity("worker_instance") },
+    { ...h.input.body, resource_identity: "another-binding" },
   ])
     await assert.rejects(h.invoke("workPull", { ...h.input, body }, h.caller), {
       code: CLAIMANT_MISMATCH,
@@ -250,30 +250,30 @@ test("loss probes commit settlement at once and return a new claim", async (t) =
   const h = harness(t);
   const now = Date.now();
   t.mock.method(Date, "now", () => now);
-  const expired = { ...h.row, createdAt: now - 1000, expiredAt: now };
+  const expired = { ...h.row, created_at: now - 1000, expired_at: now };
   h.store.transaction((tx) => insertExecution(tx, expired));
   h.dependencies.transitions.loss = (tx, nodeId) =>
-    h.service.insert(tx, nodeId, h.row.projectId, 0);
+    h.service.insert(tx, nodeId, h.row.project_id, 0);
   const result = await h.pull();
   assert.equal(result.kind, WorkPullKind.Claimed);
   assert.equal(h.commits(), ONE_COMMIT);
   assert.equal(
-    h.store.transaction((tx) => readExecution(tx, expired.executionId))!
-      .endedAt,
+    h.store.transaction((tx) => readExecution(tx, expired.execution_id))!
+      .ended_at,
     now,
   );
   if (result.kind === WorkPullKind.Claimed)
-    assert.notEqual(result.execution.executionId, expired.executionId);
+    assert.notEqual(result.execution.execution_id, expired.execution_id);
 });
 
 test("the deciding probe and commit share one clock reading", async (t) => {
   const h = harness(t);
-  let now = h.row.expiredAt - 1;
+  let now = h.row.expired_at - 1;
   t.mock.method(Date, "now", () => now);
   h.store.transaction((tx) => insertExecution(tx, h.row));
   const original = h.caller.commit;
   h.caller.commit = (write) => {
-    now = h.row.expiredAt;
+    now = h.row.expired_at;
     return original(write);
   };
   const result = await h.pull();

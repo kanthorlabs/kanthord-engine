@@ -36,7 +36,7 @@ test("controls reject blank and oversized UTF-8 reasons without writes, preservi
   ]) {
     await assert.rejects(
       h.invoke("node.pause", {
-        params: { nodeId: h.nodeId },
+        params: { node_id: h.node_id },
         query: {},
         body: { ...h.body(), reason },
       }),
@@ -50,7 +50,7 @@ test("controls reject blank and oversized UTF-8 reasons without writes, preservi
     );
   }
   const result = await h.invoke("node.pause", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: { ...h.body(), reason: "界界界界" },
   });
@@ -63,24 +63,24 @@ for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
     const h = controlHarness(t, IDENTITY);
     h.store.database
       .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(kind, h.nodeId);
+      .run(kind, h.node_id);
     const result = await h.invoke("node.ready", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: h.body(),
     });
     assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Waiting);
-    assert.equal(result.attempt?.nodeRevision, FIRST_ATTEMPT);
-    assert.deepEqual(result.attempt?.openedBy, h.actor);
+    assert.equal(result.attempt?.node_revision, FIRST_ATTEMPT);
+    assert.deepEqual(result.attempt?.opened_by, h.actor);
     assert.ok(h.calls.some((call) => call.method === INSERT));
     await h.invoke("node.pause", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: h.body(NodeState.Waiting, FIRST_ATTEMPT),
     });
     const resumed = await h.invoke("node.resume", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: {
         ...h.body(NodeState.Paused, FIRST_ATTEMPT),
@@ -97,16 +97,16 @@ test("ready refuses a nonterminal objective child before opening an attempt", as
   h.store.transaction((tx) =>
     insertNode(tx, {
       id: createIdentity("node"),
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       created_at: NOW,
     }),
   );
   await assert.rejects(
     h.invoke("node.ready", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: h.body(),
     }),
@@ -123,37 +123,37 @@ test("ready refuses a nonterminal objective child before opening an attempt", as
 test("resume Waiting at attempt 0 opens attempt 1 as ready does; Available opens none", async (t) => {
   const h = controlHarness(t, IDENTITY);
   await h.invoke("node.pause", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: h.body(),
   });
   const resumed = await h.invoke("node.resume", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: { ...h.body(NodeState.Paused), target: ResumeTarget.Waiting },
   });
   assert.ok(resumed.node.kind !== NodeKind.Task);
   assert.equal(resumed.node.state, NodeState.Waiting);
   assert.equal(h.node().attempt, FIRST_ATTEMPT);
-  assert.equal(resumed.attempt?.nodeRevision, FIRST_ATTEMPT);
-  assert.deepEqual(resumed.attempt?.openedBy, h.actor);
+  assert.equal(resumed.attempt?.node_revision, FIRST_ATTEMPT);
+  assert.deepEqual(resumed.attempt?.opened_by, h.actor);
   assert.ok(h.calls.some((call) => call.method === INSERT));
 });
 
 test("resume Waiting keeps an open attempt; resume Available at attempt 0 opens none", async (t) => {
   const open = controlHarness(t, IDENTITY);
   await open.invoke("node.ready", {
-    params: { nodeId: open.nodeId },
+    params: { node_id: open.node_id },
     query: {},
     body: open.body(),
   });
   await open.invoke("node.pause", {
-    params: { nodeId: open.nodeId },
+    params: { node_id: open.node_id },
     query: {},
     body: open.body(NodeState.Waiting, FIRST_ATTEMPT),
   });
   const kept = await open.invoke("node.resume", {
-    params: { nodeId: open.nodeId },
+    params: { node_id: open.node_id },
     query: {},
     body: {
       ...open.body(NodeState.Paused, FIRST_ATTEMPT),
@@ -161,15 +161,15 @@ test("resume Waiting keeps an open attempt; resume Available at attempt 0 opens 
     },
   });
   assert.equal(open.node().attempt, FIRST_ATTEMPT);
-  assert.equal(kept.attempt?.nodeRevision, FIRST_ATTEMPT);
+  assert.equal(kept.attempt?.node_revision, FIRST_ATTEMPT);
   const fresh = controlHarness(t, IDENTITY);
   await fresh.invoke("node.pause", {
-    params: { nodeId: fresh.nodeId },
+    params: { node_id: fresh.node_id },
     query: {},
     body: fresh.body(),
   });
   const result = await fresh.invoke("node.resume", {
-    params: { nodeId: fresh.nodeId },
+    params: { node_id: fresh.node_id },
     query: {},
     body: { ...fresh.body(NodeState.Paused), target: ResumeTarget.Available },
   });
@@ -183,18 +183,18 @@ test("resume Waiting refuses unsatisfied closure; Available routes to Pending wi
   h.store.transaction((tx) => {
     insertNode(tx, {
       id: target,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Initiative,
       filename: "dependency.md",
       parent_id: null,
       created_at: NOW,
     });
-    insertDependency(tx, h.missionId, h.nodeId, target);
-    setNodeState(tx, h.nodeId, NodeState.Paused);
+    insertDependency(tx, h.mission_id, h.node_id, target);
+    setNodeState(tx, h.node_id, NodeState.Paused);
   });
   await assert.rejects(
     h.invoke("node.resume", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: { ...h.body(NodeState.Paused), target: ResumeTarget.Waiting },
     }),
@@ -202,15 +202,15 @@ test("resume Waiting refuses unsatisfied closure; Available routes to Pending wi
       assert.ok(error instanceof OperationError);
       assert.equal(error.code, NOT_READY);
       assert.deepEqual(error.details, {
-        objectivesNotTerminal: [],
-        unresolvedActions: [],
-        unsatisfiedIds: [target],
+        objectives_not_terminal: [],
+        unresolved_actions: [],
+        unsatisfied_ids: [target],
       });
       return true;
     },
   );
   const result = await h.invoke("node.resume", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: { ...h.body(NodeState.Paused), target: ResumeTarget.Available },
   });
@@ -228,41 +228,41 @@ for (const [end, target] of [
     const h = controlHarness(t, IDENTITY);
     const bindingId = createIdentity("binding");
     h.dependencies.bindings.getBindingRevision = () => ({
-      projectId: h.projectId,
-      bindingId,
+      project_id: h.project_id,
+      binding_id: bindingId,
       name: "repo",
-      resourceIdentity: "repository:github:owner/repo",
+      resource_identity: "repository:github:owner/repo",
       revision: FIRST_ATTEMPT,
       disabled: false,
       tombstone: false,
     });
     h.dependencies.bindings.repositoryPolicyOf = () => ({
-      projectId: h.projectId,
-      bindingId,
+      project_id: h.project_id,
+      binding_id: bindingId,
       name: "repo",
       address: "git@github.com:owner/repo.git",
       platform: "github",
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       credential: "github",
-      baseBranch: "main",
+      base_branch: "main",
       action: RepositoryAction.PullRequest,
-      projectPrompt: null,
+      project_prompt: null,
     });
     h.store.transaction((tx) => {
       tx.database
         .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
-        .run(NodeKind.Objective, NodeState.Paused, h.nodeId);
+        .run(NodeKind.Objective, NodeState.Paused, h.node_id);
       tx.database
         .prepare(
           "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
         )
-        .run(JSON.stringify([bindingId]), h.nodeId);
-      openAttempt(tx, h.nodeId, FIRST_ATTEMPT, h.actor, NOW);
+        .run(JSON.stringify([bindingId]), h.node_id);
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
       insertEvidence(
         tx,
         {
           id: createIdentity("evidence"),
-          node_id: h.nodeId,
+          node_id: h.node_id,
           attempt: FIRST_ATTEMPT,
           subject: "Request",
           requirement_key: "repo.pull_request",
@@ -275,7 +275,7 @@ for (const [end, target] of [
       );
     });
     const result = await h.invoke("node.resume", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: {
         ...h.body(NodeState.Paused, FIRST_ATTEMPT),
@@ -284,7 +284,7 @@ for (const [end, target] of [
     });
     assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, target);
-    assert.equal(result.attempt?.closedAt, null);
+    assert.equal(result.attempt?.closed_at, null);
     assert.equal(result.outcome, null);
   });
 }
@@ -301,21 +301,21 @@ for (const state of [
   test(`pause from ${state} preserves the open attempt and revokes only active claims`, async (t) => {
     const h = controlHarness(t, IDENTITY);
     h.store.transaction((tx) => {
-      openAttempt(tx, h.nodeId, FIRST_ATTEMPT, h.actor, NOW);
-      setNodeState(tx, h.nodeId, state);
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, state);
     });
     const result = await h.invoke("node.pause", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: h.body(state, FIRST_ATTEMPT),
     });
     assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Paused);
-    assert.equal(result.attempt?.closedAt, null);
+    assert.equal(result.attempt?.closed_at, null);
     assert.equal(result.attempt?.attempt, FIRST_ATTEMPT);
     assert.equal(result.outcome, null);
     assert.equal(
-      h.store.transaction((tx) => readAttempt(tx, h.nodeId, FIRST_ATTEMPT))
+      h.store.transaction((tx) => readAttempt(tx, h.node_id, FIRST_ATTEMPT))
         ?.closed_at,
       null,
     );
@@ -329,7 +329,7 @@ for (const state of [
       false,
     );
     const mission = await h.invoke("get", {
-      params: { projectId: h.projectId },
+      params: { project_id: h.project_id },
       query: {},
       body: null,
     });
@@ -339,10 +339,10 @@ for (const state of [
 
 test("pause refuses Blocked without a write or wakeup", async (t) => {
   const h = controlHarness(t, IDENTITY);
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Blocked));
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Blocked));
   await assert.rejects(
     h.invoke("node.pause", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: h.body(NodeState.Blocked),
     }),

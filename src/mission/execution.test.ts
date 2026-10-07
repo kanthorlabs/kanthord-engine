@@ -24,16 +24,22 @@ test("execution admission derives the pin and actor and rejects ended or foreign
   const h = executionHarness(t, IDENTITY);
   const admit = () =>
     h.store.transaction((tx) =>
-      admitExecution(tx, h.dependencies, h.claim, h.nodeId, h.context, NOW),
+      admitExecution(tx, h.dependencies, h.claim, h.node_id, h.context, NOW),
     );
   const accepted = admit();
   assert.deepEqual(accepted.actor, h.executionActor);
   assert.equal(accepted.revision.revision, h.claim.pinnedRevision);
   assert.equal(accepted.attempt.attempt, h.claim.attempt);
+  const liveRow = {
+    execution_id: h.claim.executionId,
+    runtime_identity: h.claim.runtimeIdentity,
+    attempt: h.claim.attempt,
+    pinned_revision: h.claim.pinnedRevision,
+  };
   for (const live of [
     null,
-    { ...h.claim, executionId: createIdentity("execution") },
-    { ...h.claim, runtimeIdentity: createIdentity("worker_instance") },
+    { ...liveRow, execution_id: createIdentity("execution") },
+    { ...liveRow, runtime_identity: createIdentity("worker_instance") },
   ]) {
     h.dependencies.schedulerClaims.liveExecutionOf = () => live;
     assert.throws(
@@ -52,29 +58,29 @@ test("execution context checks every supplied field and refuses a task route", (
   h.store.transaction((tx) =>
     insertNode(tx, {
       id: taskId,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Task,
       filename: "task.md",
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       created_at: NOW,
     }),
   );
   const cases = [
-    { nodeId: taskId, context: h.context, field: "nodeId" },
+    { node_id: taskId, context: h.context, field: "node_id" },
     {
-      nodeId: h.nodeId,
-      context: { ...h.context, executionId: createIdentity("execution") },
-      field: "executionId",
+      node_id: h.node_id,
+      context: { ...h.context, execution_id: createIdentity("execution") },
+      field: "execution_id",
     },
     {
-      nodeId: h.nodeId,
+      node_id: h.node_id,
       context: { ...h.context, attempt: NEXT },
       field: "attempt",
     },
     {
-      nodeId: h.nodeId,
-      context: { ...h.context, nodeRevision: NEXT },
-      field: "nodeRevision",
+      node_id: h.node_id,
+      context: { ...h.context, node_revision: NEXT },
+      field: "node_revision",
     },
   ];
   for (const item of cases)
@@ -85,7 +91,7 @@ test("execution context checks every supplied field and refuses a task route", (
             tx,
             h.dependencies,
             h.claim,
-            item.nodeId,
+            item.node_id,
             item.context,
             NOW,
           ),
@@ -107,7 +113,9 @@ test("evaluation admission and UTF-8 text bounds are exact", (t) => {
       error instanceof OperationError &&
       error.code === MissionErrorCode.ExecutionClaimNotEvaluation,
   );
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
   requireEvaluationClaim(h.node());
   requireTextBound("subject", "éé", TEXT_BOUND);
   assert.throws(

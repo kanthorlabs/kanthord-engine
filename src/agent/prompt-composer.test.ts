@@ -4,7 +4,7 @@ import { renderWorkPrompt } from "./prompt-composer.ts";
 
 test("work prompts retain commands and exact text with no tag", () => {
   const work = renderWorkPrompt({
-    nodeId: "node",
+    node_id: "node",
     revision: 3,
     content: {
       name: "unit",

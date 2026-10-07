@@ -31,14 +31,14 @@ function decide(
   pull: WorkPull,
   now: number,
 ): ClaimResult {
-  assert.equal(identity.runtimeIdentity, pull.runtimeIdentity);
-  assert.equal(identity.resourceIdentity, pull.resourceIdentity);
+  assert.equal(identity.runtimeIdentity, pull.runtime_identity);
+  assert.equal(identity.resourceIdentity, pull.resource_identity);
   if (dependencies.accepting())
     return claimOnce(tx, dependencies, identity, pull, now);
   return {
     outcome: ClaimOutcome.None,
     row: null,
-    settled: settleRuntime(tx, dependencies, pull.runtimeIdentity, now),
+    settled: settleRuntime(tx, dependencies, pull.runtime_identity, now),
   };
 }
 
@@ -105,8 +105,8 @@ export async function workPull(
     "work pull requires a verified machine",
   );
   if (
-    pull.runtimeIdentity !== identity.runtimeIdentity ||
-    pull.resourceIdentity !== identity.resourceIdentity
+    pull.runtime_identity !== identity.runtimeIdentity ||
+    pull.resource_identity !== identity.resourceIdentity
   )
     throw new OperationError(
       HttpStatus.Forbidden,
@@ -123,13 +123,13 @@ export async function workPull(
       result.outcome !== ClaimOutcome.None ||
       result.settled ||
       remaining <= WINDOW_ENDED ||
-      dependencies.waiting.pulling(pull.runtimeIdentity) ||
+      dependencies.waiting.pulling(pull.runtime_identity) ||
       !dependencies.accepting()
     )
       return commit(dependencies, identity, pull, caller, now);
     await dependencies.waiting.park(
       identity.projectId,
-      pull.runtimeIdentity,
+      pull.runtime_identity,
       remaining,
       caller.context,
     );

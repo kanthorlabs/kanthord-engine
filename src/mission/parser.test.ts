@@ -12,7 +12,7 @@ const EXAMPLE = `---
 id: node_01ARZ3NDEKTSV4RRFFQ69G5FAV
 kind: objective
 parent: account-recovery.md
-dependsOn: []
+depends_on: []
 bindings:
   - api-repo
 verifications:
@@ -50,7 +50,7 @@ test("parses the canonical plan file and preserves every field", () => {
     id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAV",
     kind: NodeKind.Objective,
     parent: "account-recovery.md",
-    dependsOn: [],
+    depends_on: [],
     bindings: ["api-repo"],
     verifications: ["npm run e2e", "npm run test:reset"],
     name: "Add password reset",
@@ -67,7 +67,7 @@ test("new initiative defaults lists and omits identity and parent", () => {
         "kind: objective\nparent: account-recovery.md\n",
         "kind: initiative\n",
       )
-      .replace(/dependsOn: \[\]\n/, "")
+      .replace(/depends_on: \[\]\n/, "")
       .replace(/bindings:\n  - api-repo\n/, "")
       .replace(/verifications:\n  - npm run e2e\n  - npm run test:reset\n/, ""),
   );
@@ -75,7 +75,7 @@ test("new initiative defaults lists and omits identity and parent", () => {
   assert.equal(result.id, undefined);
   assert.equal(result.parent, undefined);
   assert.deepEqual(
-    [result.dependsOn, result.bindings, result.verifications],
+    [result.depends_on, result.bindings, result.verifications],
     [[], [], []],
   );
 });
@@ -189,7 +189,7 @@ for (const [label, content, reason] of [
   ],
   [
     "invalid dependency filename",
-    EXAMPLE.replace("dependsOn: []", "dependsOn: [../other.md]"),
+    EXAMPLE.replace("depends_on: []", "depends_on: [../other.md]"),
     "field_invalid",
   ],
   [

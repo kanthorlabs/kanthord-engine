@@ -40,7 +40,7 @@ export function admitDelete(
   const mission = requireMission(
     tx,
     node.mission_id,
-    body.expectedMissionVersion,
+    body.expected_mission_version,
   );
   if (body.force) return mission;
   const remaining = new Map(
@@ -97,14 +97,14 @@ export async function deleteObject(
   if (asset.kind !== AssetKind.Object) return;
   const content = objectContentSchema.parse(JSON.parse(asset.content));
   const binding = dependencies.store.transaction((tx) =>
-    authorizeStorage(tx, dependencies.bindings, content.storageBindingId),
+    authorizeStorage(tx, dependencies.bindings, content.storage_binding_id),
   );
   assert.ok(binding);
   await dependencies.intakeStorage.delete(
     { context: caller.context, identity: caller.identity },
     binding,
     keyOfLocation(binding, content.location),
-    content.objectVersion ?? null,
+    content.object_version ?? null,
     asset.id,
   );
 }
@@ -181,6 +181,6 @@ export async function removeEvidence(
     }
     return null;
   });
-  dependencies.wakeup.wake(prepared.mission.projectId);
+  dependencies.wakeup.wake(prepared.mission.project_id);
   return result;
 }

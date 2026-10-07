@@ -22,7 +22,7 @@ test("Scheduler inputs are closed and runtime identities are canonical", () => {
     schedulerOperations.queuePeek,
   ]) {
     const input = {
-      params: { projectId: row.projectId },
+      params: { project_id: row.project_id },
       query: {},
       body: null,
     };
@@ -33,37 +33,48 @@ test("Scheduler inputs are closed and runtime identities are canonical", () => {
     );
   }
   const pull = {
-    resourceIdentity: row.resourceIdentity,
-    runtimeIdentity: row.runtimeIdentity,
+    resource_identity: row.resource_identity,
+    runtime_identity: row.runtime_identity,
   };
   assert.ok(workPullSchema.safeParse(pull).success);
   assert.ok(!workPullSchema.safeParse({ ...pull, extra: true }).success);
   for (const runtimeIdentity of [
-    row.runtimeIdentity.slice("worker_instance_".length),
-    row.runtimeIdentity.replace("worker_instance", "runtime_identity"),
-    row.runtimeIdentity.toLowerCase(),
+    row.runtime_identity.slice("worker_instance_".length),
+    row.runtime_identity.replace("worker_instance", "runtime_identity"),
+    row.runtime_identity.toLowerCase(),
   ])
-    assert.ok(!workPullSchema.safeParse({ ...pull, runtimeIdentity }).success);
-  assert.ok(executionReleaseSchema.safeParse({ furtherWork: true }).success);
+    assert.ok(
+      !workPullSchema.safeParse({ ...pull, runtime_identity: runtimeIdentity })
+        .success,
+    );
+  assert.ok(executionReleaseSchema.safeParse({ further_work: true }).success);
   assert.ok(
-    !executionReleaseSchema.safeParse({ furtherWork: true, extra: true })
+    !executionReleaseSchema.safeParse({ further_work: true, extra: true })
       .success,
   );
 });
 
 test("Execution records omit hosted attribution and refuse null or unknown fields", () => {
-  const { workerBindingId, resourceIdentity, runtimeIdentity, ...row } =
-    executionFixture();
+  const {
+    worker_binding_id: workerBindingId,
+    resource_identity: resourceIdentity,
+    runtime_identity: runtimeIdentity,
+    ...row
+  } = executionFixture();
   const record = {
     ...row,
-    claimant: { workerBindingId, resourceIdentity, runtimeIdentity },
-    claimState: ClaimState.Running,
+    claimant: {
+      worker_binding_id: workerBindingId,
+      resource_identity: resourceIdentity,
+      runtime_identity: runtimeIdentity,
+    },
+    claim_state: ClaimState.Running,
   };
   assert.ok(executionRecordSchema.safeParse(record).success);
   assert.ok(
     !executionRecordSchema.safeParse({
       ...record,
-      claimant: { ...record.claimant, clientId: null },
+      claimant: { ...record.claimant, client_id: null },
     }).success,
   );
   assert.ok(

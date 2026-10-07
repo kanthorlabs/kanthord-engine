@@ -60,10 +60,10 @@ const positiveInteger = z
   .positive()
   .max(Number.MAX_SAFE_INTEGER);
 export const claimantSchema = z.strictObject({
-  workerBindingId: identitySchema("binding"),
-  resourceIdentity: z.string().min(1),
-  runtimeIdentity: identitySchema(WORKER_INSTANCE_IDENTITY_PREFIX),
-  clientId: identitySchema("client_identity").optional(),
+  worker_binding_id: identitySchema("binding"),
+  resource_identity: z.string().min(1),
+  runtime_identity: identitySchema(WORKER_INSTANCE_IDENTITY_PREFIX),
+  client_id: identitySchema("client_identity").optional(),
   name: z
     .string()
     .min(1)
@@ -72,24 +72,24 @@ export const claimantSchema = z.strictObject({
     .optional(),
 });
 export const executionRecordSchema = z.strictObject({
-  executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
-  projectId: identitySchema("project"),
-  nodeId: identitySchema("node"),
+  execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX),
+  project_id: identitySchema("project"),
+  node_id: identitySchema("node"),
   claimant: claimantSchema,
   attempt: positiveInteger,
-  pinnedRevision: positiveInteger,
+  pinned_revision: positiveInteger,
   credentials: z.array(identitySchema("credential")),
-  claimState: claimStateSchema,
-  expiredAt: timestamp,
-  createdAt: timestamp,
-  endedAt: timestamp.nullable(),
-  traceId: traceIdSchema,
-  rootSpanId: spanIdSchema,
+  claim_state: claimStateSchema,
+  expired_at: timestamp,
+  created_at: timestamp,
+  ended_at: timestamp.nullable(),
+  trace_id: traceIdSchema,
+  root_span_id: spanIdSchema,
 });
 export type ExecutionRecord = z.infer<typeof executionRecordSchema>;
 export const workPullSchema = z.strictObject({
-  resourceIdentity: z.string().min(1),
-  runtimeIdentity: identitySchema(WORKER_INSTANCE_IDENTITY_PREFIX),
+  resource_identity: z.string().min(1),
+  runtime_identity: identitySchema(WORKER_INSTANCE_IDENTITY_PREFIX),
 });
 export type WorkPull = z.infer<typeof workPullSchema>;
 export const workPullResultSchema = z.discriminatedUnion("kind", [
@@ -100,28 +100,28 @@ export const workPullResultSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal(WorkPullKind.NoWork) }),
 ]);
 export const executionReleaseSchema = z.strictObject({
-  furtherWork: z.boolean(),
+  further_work: z.boolean(),
 });
 export const releaseResultSchema = z.strictObject({
-  executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
-  endedAt: timestamp,
+  execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX),
+  ended_at: timestamp,
 });
 
 export interface ExecutionRow {
-  executionId: string;
-  projectId: string;
-  nodeId: string;
-  workerBindingId: string;
-  resourceIdentity: string;
-  runtimeIdentity: string;
+  execution_id: string;
+  project_id: string;
+  node_id: string;
+  worker_binding_id: string;
+  resource_identity: string;
+  runtime_identity: string;
   attempt: number;
-  pinnedRevision: number;
+  pinned_revision: number;
   credentials: string[];
-  expiredAt: number;
-  traceId: string;
-  rootSpanId: string;
-  createdAt: number;
-  endedAt: number | null;
+  expired_at: number;
+  trace_id: string;
+  root_span_id: string;
+  created_at: number;
+  ended_at: number | null;
 }
 export interface SchedulerClaims {
   revoke(tx: Transaction, nodeId: string, now: number): string | null;
@@ -157,9 +157,9 @@ export interface ExecutionAttribution {
     tx: Transaction,
     executionId: string,
   ): {
-    clientId: string | null;
+    client_id: string | null;
     name: string | null;
-    workerName: string;
+    worker_name: string;
   } | null;
 }
 export interface MissionTransitions {
@@ -169,20 +169,20 @@ export interface MissionTransitions {
     declaredStates: readonly string[],
     opener: {
       kind: "execution";
-      executionId: string;
-      clientId: string | null;
+      execution_id: string;
+      client_id: string | null;
       name: string | null;
     },
     now: number,
   ): {
     kind: string;
-    projectId: string;
+    project_id: string;
     attempt: number;
-    nodeRevision: number;
+    node_revision: number;
   } | null;
   release(
     tx: Transaction,
-    execution: { executionId: string; nodeId: string; attempt: number },
+    execution: { execution_id: string; node_id: string; attempt: number },
     furtherWork: boolean,
     now: number,
   ): void;
@@ -213,15 +213,15 @@ export interface WorkerBindings {
     projectId: string,
     resourceIdentity: string,
   ): {
-    bindingId: string;
-    workerName: string;
-    instanceCount: number;
-    resourceBudget?: { wallTimeMs: number } | null;
+    binding_id: string;
+    worker_name: string;
+    instance_count: number;
+    resource_budget?: { wall_time_ms: number } | null;
     tombstone: boolean;
   } | null;
 }
 export interface TraceIdentity {
-  mint(): { traceId: string; rootSpanId: string };
+  mint(): { trace_id: string; root_span_id: string };
 }
 
 export interface WorkQueue {
@@ -236,9 +236,9 @@ export interface WorkQueue {
 }
 
 export const jobSchema = z.strictObject({
-  jobId: identitySchema(JOB_IDENTITY_PREFIX),
-  projectId: identitySchema("project"),
-  nodeId: identitySchema("node"),
+  job_id: identitySchema(JOB_IDENTITY_PREFIX),
+  project_id: identitySchema("project"),
+  node_id: identitySchema("node"),
   priority: z
     .number()
     .int()
@@ -256,7 +256,7 @@ export const schedulerOperations = {
     id: "scheduler.execution.list",
     service: SCHEDULER_SERVICE_NAME,
     method: HttpMethod.Get,
-    path: "/api/scheduler/project/:projectId/execution",
+    path: "/api/scheduler/project/:project_id/execution",
     access: AccessPolicy.Human,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
@@ -266,7 +266,7 @@ export const schedulerOperations = {
     status: HttpStatus.OK,
     description: "List live and ended executions, newest identity first.",
     input: z.strictObject({
-      params: z.strictObject({ projectId: identitySchema("project") }),
+      params: z.strictObject({ project_id: identitySchema("project") }),
       query: z
         .strictObject({
           limit: z.coerce
@@ -276,19 +276,19 @@ export const schedulerOperations = {
             .max(QUEUE_LIST_LIMIT_MAX)
             .default(QUEUE_LIST_LIMIT_DEFAULT),
           cursor: z.string().optional(),
-          nodeId: identitySchema("node").optional(),
+          node_id: identitySchema("node").optional(),
           attempt: z.coerce
             .number()
             .int()
             .positive()
             .max(Number.MAX_SAFE_INTEGER)
             .optional()
-            .describe("Requires nodeId when supplied."),
+            .describe("Requires node_id when supplied."),
         })
         .refine(
-          (query) => query.attempt === undefined || query.nodeId !== undefined,
+          (query) => query.attempt === undefined || query.node_id !== undefined,
         )
-        .meta({ dependentRequired: { attempt: ["nodeId"] } }),
+        .meta({ dependentRequired: { attempt: ["node_id"] } }),
       body: z.null(),
     }),
     output: z.strictObject({
@@ -300,7 +300,7 @@ export const schedulerOperations = {
     id: "scheduler.execution.get",
     service: SCHEDULER_SERVICE_NAME,
     method: HttpMethod.Get,
-    path: "/api/scheduler/execution/:executionId",
+    path: "/api/scheduler/execution/:execution_id",
     access: AccessPolicy.Human,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
@@ -311,7 +311,7 @@ export const schedulerOperations = {
     description: "Read a live or ended execution.",
     input: z.strictObject({
       params: z.strictObject({
-        executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
+        execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX),
       }),
       query: z.strictObject({}),
       body: z.null(),
@@ -322,7 +322,7 @@ export const schedulerOperations = {
     id: "scheduler.claim.get",
     service: SCHEDULER_SERVICE_NAME,
     method: HttpMethod.Get,
-    path: "/api/scheduler/claim/:executionId",
+    path: "/api/scheduler/claim/:execution_id",
     access: AccessPolicy.Client,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
@@ -334,7 +334,7 @@ export const schedulerOperations = {
       "Read the execution of this registered claimant, including ended claims.",
     input: z.strictObject({
       params: z.strictObject({
-        executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
+        execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX),
       }),
       query: z.strictObject({}),
       body: z.null(),
@@ -345,7 +345,7 @@ export const schedulerOperations = {
     id: "scheduler.execution.release",
     service: SCHEDULER_SERVICE_NAME,
     method: HttpMethod.Post,
-    path: "/api/scheduler/execution/:executionId/release",
+    path: "/api/scheduler/execution/:execution_id/release",
     access: AccessPolicy.Client,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
@@ -357,7 +357,7 @@ export const schedulerOperations = {
     description: "Release a running execution after Mission admission.",
     input: z.strictObject({
       params: z.strictObject({
-        executionId: identitySchema(EXECUTION_IDENTITY_PREFIX),
+        execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX),
       }),
       query: z.strictObject({}),
       body: executionReleaseSchema,
@@ -389,7 +389,7 @@ export const schedulerOperations = {
     id: "scheduler.queue.list",
     service: SCHEDULER_SERVICE_NAME,
     method: HttpMethod.Get,
-    path: "/api/scheduler/project/:projectId/queue",
+    path: "/api/scheduler/project/:project_id/queue",
     access: AccessPolicy.Human,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
@@ -400,7 +400,7 @@ export const schedulerOperations = {
     description:
       "List current jobs in the project's work queue, ordered by priority descending, then job identity ascending.",
     input: z.strictObject({
-      params: z.strictObject({ projectId: identitySchema("project") }),
+      params: z.strictObject({ project_id: identitySchema("project") }),
       query: z.strictObject({
         limit: z.coerce
           .number()
@@ -422,7 +422,7 @@ export const schedulerOperations = {
     id: "scheduler.queue.peek",
     service: SCHEDULER_SERVICE_NAME,
     method: HttpMethod.Get,
-    path: "/api/scheduler/project/:projectId/queue/peek",
+    path: "/api/scheduler/project/:project_id/queue/peek",
     access: AccessPolicy.Human,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
@@ -433,7 +433,7 @@ export const schedulerOperations = {
     description:
       "Read the first job of the project's work queue by selection order without removing it.",
     input: z.strictObject({
-      params: z.strictObject({ projectId: identitySchema("project") }),
+      params: z.strictObject({ project_id: identitySchema("project") }),
       query: z.strictObject({}),
       body: z.null(),
     }),

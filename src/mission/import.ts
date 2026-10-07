@@ -44,7 +44,7 @@ const SORT_BEFORE = -1;
 const SORT_AFTER = 1;
 const REASON_FIELD = "reason";
 const TEMPORARY_KEY_PREFIX = "file:";
-const REFERENCE = { Parent: "parent", DependsOn: "dependsOn" } as const;
+const REFERENCE = { Parent: "parent", DependsOn: "depends_on" } as const;
 const PLAN_REASON = {
   ParentRequired: "parent_required",
   ParentForbidden: "parent_forbidden",
@@ -66,23 +66,23 @@ export interface ResolvedImportEntry {
   entry: NormalizedEntry;
   key: string;
   current: NodeRow | null;
-  parentId: string | null;
-  dependsOn: Set<string>;
-  bindingIds: string[];
+  parent_id: string | null;
+  depends_on: Set<string>;
+  binding_ids: string[];
 }
 
 export interface ResolvedImport {
   violations: Violation[];
   creates: string[];
   updates: string[];
-  contentUpdates: string[];
-  noOps: string[];
+  content_updates: string[];
+  no_ops: string[];
   retirements: string[];
-  removedEdges: Edge[];
-  resolvedEntries: ResolvedImportEntry[];
-  currentNodes: Map<string, NodeRow>;
-  currentDependencies: DepEdge[];
-  parentMap: Map<string, string>;
+  removed_edges: Edge[];
+  resolved_entries: ResolvedImportEntry[];
+  current_nodes: Map<string, NodeRow>;
+  current_dependencies: DepEdge[];
+  parent_map: Map<string, string>;
   dependencies: Map<string, Set<string>>;
 }
 
@@ -102,7 +102,7 @@ function violation(
     message,
     details,
     filename: entry?.filename ?? null,
-    nodeId: entry?.id ?? null,
+    node_id: entry?.id ?? null,
   };
 }
 
@@ -126,9 +126,9 @@ function planRules(entry: ImportEntry, violations: Violation[]): void {
     reasons.push(PLAN_REASON.ParentForbidden);
   if (entry.kind !== NodeKind.Initiative && entry.parent === undefined)
     reasons.push(PLAN_REASON.ParentRequired);
-  if (entry.kind === NodeKind.Task && entry.dependsOn !== undefined)
+  if (entry.kind === NodeKind.Task && entry.depends_on !== undefined)
     reasons.push(PLAN_REASON.DependsOnForbidden);
-  const dependencies = entry.dependsOn ?? [];
+  const dependencies = entry.depends_on ?? [];
   if (new Set(dependencies).size !== dependencies.length)
     reasons.push(PLAN_REASON.DependsOnRepeated);
   const references =
@@ -152,7 +152,7 @@ function normalizeEntry(entry: ImportEntry): NormalizedEntry {
     ...(entry.id === undefined ? {} : { id: entry.id }),
     kind: entry.kind,
     ...(entry.parent === undefined ? {} : { parent: entry.parent }),
-    dependsOn: [...(entry.dependsOn ?? [])],
+    depends_on: [...(entry.depends_on ?? [])],
     bindings: [...entry.bindings],
     name: entry.name,
     requirement: entry.requirement,
@@ -171,12 +171,12 @@ export function normalizeImportSnapshot(
   validateText(REASON_FIELD, snapshot.reason, textMaxBytes);
   const result: NormalizedSnapshot = { entries: [], violations: [] };
   const { entries, violations } = result;
-  if (snapshot.missionId !== routeMissionId)
+  if (snapshot.mission_id !== routeMissionId)
     violations.push(
       violation(
         MissionErrorCode.MissionMismatch,
         "Snapshot belongs to another mission.",
-        { missionId: snapshot.missionId },
+        { mission_id: snapshot.mission_id },
       ),
     );
   const seen = new Set<string>();
@@ -205,7 +205,7 @@ export function normalizeImportSnapshot(
     if (parsed === undefined) continue;
     const rules =
       "content" in input && parsed.kind === NodeKind.Task
-        ? { ...parsed, dependsOn: undefined }
+        ? { ...parsed, depends_on: undefined }
         : parsed;
     planRules(rules, violations);
     collect(violations, parsed, () =>
@@ -270,7 +270,7 @@ function resolveIdentity(
       violation(
         MissionErrorCode.KindChanged,
         "Node kind cannot change.",
-        { id, kind: entry.kind, currentKind: current.kind },
+        { id, kind: entry.kind, current_kind: current.kind },
         entry,
       ),
     );
@@ -326,7 +326,7 @@ function resolveBindings(
   const resolved: ResolvedBinding[] = [];
   for (const name of entry.bindings) {
     const binding = collect(violations, entry, () =>
-      bindings.resolveBinding(tx, mission.projectId, name),
+      bindings.resolveBinding(tx, mission.project_id, name),
     );
     if (binding === undefined) continue;
     if (binding === null) {
@@ -346,25 +346,26 @@ function resolveBindings(
     collect(violations, entry, () =>
       checkBindingRuleTable(entry.kind, resolved),
     );
-  return resolved.map((binding) => binding.bindingId);
+  return resolved.map((binding) => binding.binding_id);
 }
 
 function resolveGraph(result: ResolvedImport): void {
   const byFilename = new Map(
-    result.resolvedEntries.map((item) => [item.entry.filename, item]),
+    result.resolved_entries.map((item) => [item.entry.filename, item]),
   );
-  for (const item of result.resolvedEntries) {
+  for (const item of result.resolved_entries) {
     const { entry } = item;
     if (entry.parent !== undefined)
-      item.parentId = resolveReference(
+      item.parent_id = resolveReference(
         entry,
         entry.parent,
         REFERENCE.Parent,
         byFilename,
         result.violations,
       );
-    if (item.parentId !== null) result.parentMap.set(item.key, item.parentId);
-    for (const name of entry.dependsOn) {
+    if (item.parent_id !== null)
+      result.parent_map.set(item.key, item.parent_id);
+    for (const name of entry.depends_on) {
       const key = resolveReference(
         entry,
         name,
@@ -372,22 +373,22 @@ function resolveGraph(result: ResolvedImport): void {
         byFilename,
         result.violations,
       );
-      if (key !== null) item.dependsOn.add(key);
+      if (key !== null) item.depends_on.add(key);
     }
-    result.dependencies.set(item.key, item.dependsOn);
+    result.dependencies.set(item.key, item.depends_on);
   }
-  const keys = new Set(result.resolvedEntries.map((item) => item.key));
-  if (keys.size !== result.resolvedEntries.length) return;
-  const edges = result.resolvedEntries.flatMap((item) =>
-    [...item.dependsOn].map((dependsOn) => ({
+  const keys = new Set(result.resolved_entries.map((item) => item.key));
+  if (keys.size !== result.resolved_entries.length) return;
+  const edges = result.resolved_entries.flatMap((item) =>
+    [...item.depends_on].map((dependsOn) => ({
       dependent: item.key,
-      dependsOn,
+      depends_on: dependsOn,
     })),
   );
-  const runnable = result.resolvedEntries
+  const runnable = result.resolved_entries
     .filter((item) => item.entry.kind !== NodeKind.Task)
     .map((item) => item.key);
-  if (hasDependencyCycle(runnable, edges, result.parentMap))
+  if (hasDependencyCycle(runnable, edges, result.parent_map))
     result.violations.push(
       violation(
         MissionErrorCode.Cycle,
@@ -410,11 +411,11 @@ function entryChanged(
     requirement: entry.requirement,
     criterion: entry.criterion,
     verifications: entry.verifications,
-    bindings: item.bindingIds,
+    bindings: item.binding_ids,
   };
   return (
     current.filename !== entry.filename ||
-    current.parent_id !== item.parentId ||
+    current.parent_id !== item.parent_id ||
     canonicalJSON(nodeRecord(tx, current, bindings).content) !==
       canonicalJSON(content)
   );
@@ -423,34 +424,34 @@ function entryChanged(
 function droppedEdges(result: ResolvedImport): Edge[] {
   const containment: Extract<Edge, { kind: typeof EdgeKind.Containment }>[] =
     [];
-  for (const node of result.currentNodes.values()) {
-    if (node.parent_id === null || !result.currentNodes.has(node.parent_id))
+  for (const node of result.current_nodes.values()) {
+    if (node.parent_id === null || !result.current_nodes.has(node.parent_id))
       continue;
-    if (result.parentMap.get(node.id) === node.parent_id) continue;
+    if (result.parent_map.get(node.id) === node.parent_id) continue;
     containment.push({
       kind: EdgeKind.Containment,
-      parentId: node.parent_id,
-      childId: node.id,
+      parent_id: node.parent_id,
+      child_id: node.id,
     });
   }
   containment.sort(
     (a, b) =>
-      a.parentId.localeCompare(b.parentId) ||
-      a.childId.localeCompare(b.childId),
+      a.parent_id.localeCompare(b.parent_id) ||
+      a.child_id.localeCompare(b.child_id),
   );
-  const dependencies = result.currentDependencies
+  const dependencies = result.current_dependencies
     .filter(
-      (edge) => !result.dependencies.get(edge.dependent)?.has(edge.dependsOn),
+      (edge) => !result.dependencies.get(edge.dependent)?.has(edge.depends_on),
     )
     .map((edge) => ({
       kind: EdgeKind.Dependency,
-      dependentId: edge.dependent,
-      dependsOnId: edge.dependsOn,
+      dependent_id: edge.dependent,
+      depends_on_id: edge.depends_on,
     }));
   dependencies.sort(
     (a, b) =>
-      a.dependentId.localeCompare(b.dependentId) ||
-      a.dependsOnId.localeCompare(b.dependsOnId),
+      a.dependent_id.localeCompare(b.dependent_id) ||
+      a.depends_on_id.localeCompare(b.depends_on_id),
   );
   return [...containment, ...dependencies];
 }
@@ -466,7 +467,7 @@ function classify(
     "Classification requires a valid resolved graph.",
   );
   const kept = new Set<string>();
-  for (const item of result.resolvedEntries) {
+  for (const item of result.resolved_entries) {
     if (item.entry.id === undefined) {
       result.creates.push(item.entry.filename);
       continue;
@@ -477,25 +478,25 @@ function classify(
     );
     kept.add(item.current.id);
     const contentChanged = entryChanged(tx, item, bindings);
-    if (contentChanged) result.contentUpdates.push(item.current.id);
-    const previous = result.currentDependencies
+    if (contentChanged) result.content_updates.push(item.current.id);
+    const previous = result.current_dependencies
       .filter((edge) => edge.dependent === item.key)
-      .map((edge) => edge.dependsOn)
+      .map((edge) => edge.depends_on)
       .sort();
     const target =
       contentChanged ||
-      canonicalJSON(previous) !== canonicalJSON([...item.dependsOn].sort())
+      canonicalJSON(previous) !== canonicalJSON([...item.depends_on].sort())
         ? result.updates
-        : result.noOps;
+        : result.no_ops;
     target.push(item.current.id);
   }
-  result.retirements = [...result.currentNodes.keys()]
+  result.retirements = [...result.current_nodes.keys()]
     .filter((id) => !kept.has(id))
     .sort();
   result.creates.sort();
   result.updates.sort();
-  result.noOps.sort();
-  result.removedEdges = droppedEdges(result);
+  result.no_ops.sort();
+  result.removed_edges = droppedEdges(result);
 }
 
 export function resolveImportSet(
@@ -521,28 +522,28 @@ export function resolveImportSet(
     violations: [],
     creates: [],
     updates: [],
-    contentUpdates: [],
-    noOps: [],
+    content_updates: [],
+    no_ops: [],
     retirements: [],
-    removedEdges: [],
-    resolvedEntries: [],
-    currentNodes,
-    currentDependencies: readDependencies(tx, mission.id).filter(
+    removed_edges: [],
+    resolved_entries: [],
+    current_nodes: currentNodes,
+    current_dependencies: readDependencies(tx, mission.id).filter(
       (edge) =>
-        currentNodes.has(edge.dependent) && currentNodes.has(edge.dependsOn),
+        currentNodes.has(edge.dependent) && currentNodes.has(edge.depends_on),
     ),
-    parentMap: new Map(),
+    parent_map: new Map(),
     dependencies: new Map(),
   };
   const seen = new Set<string>();
   for (const entry of entries) {
-    result.resolvedEntries.push({
+    result.resolved_entries.push({
       entry,
       key: entry.id ?? `${TEMPORARY_KEY_PREFIX}${entry.filename}`,
       current: resolveIdentity(tx, mission, entry, seen, result.violations),
-      parentId: null,
-      dependsOn: new Set(),
-      bindingIds: resolveBindings(
+      parent_id: null,
+      depends_on: new Set(),
+      binding_ids: resolveBindings(
         tx,
         mission,
         entry,
@@ -560,26 +561,29 @@ export function resolveImportSet(
 function modifiedNodes(resolved: ResolvedImport): Set<string> {
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
   const modified = new Set<string>();
-  const updates = new Set(resolved.contentUpdates);
+  const updates = new Set(resolved.content_updates);
   const retiring = new Set(resolved.retirements);
   const add = (id: string | null): void => {
-    if (id !== null && resolved.currentNodes.has(id)) modified.add(id);
+    if (id !== null && resolved.current_nodes.has(id)) modified.add(id);
   };
-  for (const item of resolved.resolvedEntries) {
+  for (const item of resolved.resolved_entries) {
     const { current } = item;
     if (current === null) {
-      add(item.parentId);
+      add(item.parent_id);
       continue;
     }
     if (!updates.has(current.id)) continue;
     if (current.kind !== NodeKind.Task) add(current.id);
-    if (current.kind === NodeKind.Task || current.parent_id !== item.parentId) {
+    if (
+      current.kind === NodeKind.Task ||
+      current.parent_id !== item.parent_id
+    ) {
       add(current.parent_id);
-      add(item.parentId);
+      add(item.parent_id);
     }
   }
   for (const id of retiring) {
-    const node = resolved.currentNodes.get(id);
+    const node = resolved.current_nodes.get(id);
     assert.ok(node, "Retirements name current nodes.");
     add(node.kind === NodeKind.Task ? node.parent_id : node.id);
     if (node.parent_id !== null && !retiring.has(node.parent_id))
@@ -596,7 +600,7 @@ export function checkImportCondition(
   const violations: Violation[] = [];
   const modified = modifiedNodes(resolved);
   const dependents = resolved.updates.filter(
-    (id) => resolved.currentNodes.get(id)?.kind !== NodeKind.Task,
+    (id) => resolved.current_nodes.get(id)?.kind !== NodeKind.Task,
   );
   for (const id of [...new Set([...modified, ...dependents])].sort()) {
     const node = readNode(tx, id);
@@ -607,7 +611,7 @@ export function checkImportCondition(
         violation(
           MissionErrorCode.TerminalChange,
           "Import cannot change a terminal node.",
-          { nodeId: id },
+          { node_id: id },
           locator,
         ),
       );
@@ -642,7 +646,7 @@ export function prepareImport(
   assert.equal(mission.id, routeMissionId, "Route mission was loaded.");
   assert.equal(
     mission.version,
-    snapshot.missionVersion,
+    snapshot.mission_version,
     "Version was checked.",
   );
   const normalized = normalizeImportSnapshot(
@@ -664,19 +668,19 @@ export function prepareImport(
   return {
     resolved,
     preview: {
-      missionId: mission.id,
-      expectedMissionVersion: snapshot.missionVersion,
-      previewDigest: importDigest(
+      mission_id: mission.id,
+      expected_mission_version: snapshot.mission_version,
+      preview_digest: importDigest(
         mission.id,
-        snapshot.missionVersion,
+        snapshot.mission_version,
         normalized.entries,
         retirements,
       ),
       creates: resolved?.creates ?? [],
       updates: resolved?.updates ?? [],
       retirements,
-      removedEdges: resolved?.removedEdges ?? [],
-      noOps: resolved?.noOps ?? [],
+      removed_edges: resolved?.removed_edges ?? [],
+      no_ops: resolved?.no_ops ?? [],
       violations,
     },
   };
@@ -715,8 +719,8 @@ export function importDigest(
     "Digest covers a persisted mission version.",
   );
   return digest({
-    missionId,
-    missionVersion,
+    mission_id: missionId,
+    mission_version: missionVersion,
     entries: [...entries].sort((a, b) =>
       a.filename === b.filename
         ? SORT_EQUAL

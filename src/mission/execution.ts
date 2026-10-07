@@ -54,22 +54,22 @@ export function admitExecution(
   );
   if (
     !live ||
-    live.executionId !== claim.executionId ||
-    live.runtimeIdentity !== claim.runtimeIdentity
+    live.execution_id !== claim.executionId ||
+    live.runtime_identity !== claim.runtimeIdentity
   )
     throw new OperationError(
       HttpStatus.Conflict,
       NOT_RUNNING,
       "Execution is not running.",
     );
-  if (routeNodeId !== claim.nodeId) executionMismatch("nodeId");
-  if (context.executionId !== claim.executionId)
-    executionMismatch("executionId");
+  if (routeNodeId !== claim.nodeId) executionMismatch("node_id");
+  if (context.execution_id !== claim.executionId)
+    executionMismatch("execution_id");
   if (context.attempt !== claim.attempt) executionMismatch("attempt");
-  if (context.nodeRevision !== claim.pinnedRevision)
-    executionMismatch("nodeRevision");
+  if (context.node_revision !== claim.pinnedRevision)
+    executionMismatch("node_revision");
   assert.equal(live.attempt, claim.attempt);
-  assert.equal(live.pinnedRevision, claim.pinnedRevision);
+  assert.equal(live.pinned_revision, claim.pinnedRevision);
   const node = requireNode(tx, claim.nodeId);
   assert.notEqual(node.kind, NodeKind.Task);
   const attempt = readOpenAttempt(tx, node.id);
@@ -84,8 +84,8 @@ export function admitExecution(
   assert.ok(attribution);
   const actor: ExecutionActor = {
     kind: ActorKind.Execution,
-    executionId: claim.executionId,
-    clientId: attribution.clientId,
+    execution_id: claim.executionId,
+    client_id: attribution.client_id,
     name: attribution.name,
   };
   return { node, attempt, revision, actor };

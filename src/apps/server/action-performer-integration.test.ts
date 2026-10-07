@@ -191,40 +191,40 @@ async function setup(
   )!;
   const mission = completed(
     await call(missionOperations.get, {
-      params: { projectId },
+      params: { project_id: projectId },
       query: {},
       body: null,
     }),
   );
   const initiative = completed(
     await call(missionOperations["node.create"], {
-      params: { missionId: mission.id },
+      params: { mission_id: mission.id },
       query: {},
       body: {
         filename: "initiative-1.md",
         kind: NodeKind.Initiative,
         content: CONTENT,
         reason: "plan",
-        expectedMissionVersion: FIRST_REVISION,
+        expected_mission_version: FIRST_REVISION,
       },
     }),
   );
   const objective = completed(
     await call(missionOperations["node.create"], {
-      params: { missionId: mission.id },
+      params: { mission_id: mission.id },
       query: {},
       body: {
         filename: "objective-1.md",
         kind: NodeKind.Objective,
         content: { ...CONTENT, bindings: [binding.id] },
         reason: "plan",
-        expectedMissionVersion: SECOND_REVISION,
-        parentId: initiative.revisions[0]!.nodeId,
-        expectedParentRevision: FIRST_REVISION,
+        expected_mission_version: SECOND_REVISION,
+        parent_id: initiative.revisions[0]!.node_id,
+        expected_parent_revision: FIRST_REVISION,
       },
     }),
   );
-  const nodeId = objective.revisions[0]!.nodeId;
+  const nodeId = objective.revisions[0]!.node_id;
   const token = await fixture.machineToken(projectId, "harness", "first");
   const runtimeIdentity = completed(
     await call(workerOperations.register, NO_INPUT, token),
@@ -237,8 +237,8 @@ async function setup(
           params: {},
           query: {},
           body: {
-            runtimeIdentity,
-            resourceIdentity: "worker:kanthord:harness",
+            runtime_identity: runtimeIdentity,
+            resource_identity: "worker:kanthord:harness",
           },
         },
         token,
@@ -251,19 +251,19 @@ async function setup(
   const steps = await pull();
   const snapshot = {
     kind: AssetKind.Repository,
-    bindingId: binding.id,
+    binding_id: binding.id,
     commit: COMMIT,
   };
   const work = completed(
     await call(
       missionOperations["evidence.submit"],
       {
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: {},
         body: {
-          executionId: steps.executionId,
+          execution_id: steps.execution_id,
           attempt: FIRST_ATTEMPT,
-          nodeRevision: FIRST_REVISION,
+          node_revision: FIRST_REVISION,
           subject: "work",
           assets: [{ kind: AssetKind.Repository, address: snapshot }],
         },
@@ -275,24 +275,24 @@ async function setup(
     await call(
       schedulerOperations.executionRelease,
       {
-        params: { executionId: steps.executionId },
+        params: { execution_id: steps.execution_id },
         query: {},
-        body: { furtherWork: false },
+        body: { further_work: false },
       },
       token,
     ),
   );
   const execution = await pull();
   const context = {
-    executionId: execution.executionId,
+    execution_id: execution.execution_id,
     attempt: FIRST_ATTEMPT,
-    nodeRevision: FIRST_REVISION,
+    node_revision: FIRST_REVISION,
   };
   const run = completed(
     await call(
       missionOperations["evidence.submit"],
       {
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: {},
         body: {
           ...context,
@@ -301,20 +301,20 @@ async function setup(
             {
               kind: AssetKind.Produced,
               content: {
-                mediaType: "text/plain",
+                media_type: "text/plain",
                 encoding: "base64",
                 data: "b2s=",
               },
             },
           ],
           verification: {
-            testedInput: snapshot,
+            tested_input: snapshot,
             results: [
               {
                 command: "true",
-                exitCode: SUCCESSFUL_EXIT,
+                exit_code: SUCCESSFUL_EXIT,
                 signal: null,
-                timedOut: false,
+                timed_out: false,
               },
             ],
           },
@@ -327,15 +327,15 @@ async function setup(
     await call(
       missionOperations["assessment.submit"],
       {
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: {},
         body: {
           ...context,
-          evidenceIds: [work.evidence.id, run.evidence.id],
-          childOutcomeIds: [],
+          evidence_ids: [work.evidence.id, run.evidence.id],
+          child_outcome_ids: [],
           result: AssessmentResult.Success,
           rationale: "met",
-          testedInput: snapshot,
+          tested_input: snapshot,
         },
       },
       token,
@@ -347,7 +347,7 @@ async function setup(
     call(
       workerOperations["action.request"],
       {
-        params: { execution_id: execution.executionId },
+        params: { execution_id: execution.execution_id },
         query: {},
         body: null,
       },
@@ -355,7 +355,15 @@ async function setup(
       transport,
       key,
     );
-  return { fixture, actions, call, request, token, projectId, nodeId };
+  return {
+    fixture,
+    actions,
+    call,
+    request,
+    token,
+    project_id: projectId,
+    node_id: nodeId,
+  };
 }
 
 test("both adapters serialize one execution and replay the completed request", async (t) => {
@@ -384,13 +392,13 @@ test("both adapters serialize one execution and replay the completed request", a
   assert.equal(h.actions.performCalls.length, SINGLE_CALL);
   const evidence = completed(
     await h.call(missionOperations["evidence.list"], {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: null,
     }),
   );
   assert.equal(
-    evidence.items.filter((item) => item.requirementKey).length,
+    evidence.items.filter((item) => item.requirement_key).length,
     SINGLE_CALL,
   );
   assert.deepEqual(completed(await h.request(DIRECT, key)), completed(one));
@@ -399,7 +407,7 @@ test("both adapters serialize one execution and replay the completed request", a
 
 test("another registration fails the execution proof through both adapters", async (t) => {
   const h = await setup(t, HTTP);
-  const other = await h.fixture.machineToken(h.projectId, "harness", "second");
+  const other = await h.fixture.machineToken(h.project_id, "harness", "second");
   completed(await h.call(workerOperations.register, NO_INPUT, other));
   for (const adapter of [DIRECT, HTTP] as const)
     refused(

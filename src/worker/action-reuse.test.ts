@@ -47,7 +47,7 @@ test("reuse refuses closed, merged, other branches, forks and malformed bodies",
 
 test("repository identity and candidate repository must match", () => {
   const candidate = {
-    evidenceId: "evidence",
+    evidence_id: "evidence",
     attempt: 1,
     address: {
       kind: PlatformAddressKind.PullRequest,

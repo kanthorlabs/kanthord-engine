@@ -67,15 +67,15 @@ async function judge(
   const agent = await openAgent(directory);
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
   const work = renderWorkPrompt({
-    nodeId: input.claim.nodeId,
-    revision: input.claim.pinnedRevision,
+    node_id: input.claim.node_id,
+    revision: input.claim.pinned_revision,
     content: revision.content,
   });
   await agent.instruct(
     work,
     evaluationInstruction({
       tasks: revision.tasks ?? [],
-      testedInput: verification.testedInput,
+      tested_input: verification.tested_input,
       evidence,
       objectives,
     }),
@@ -98,22 +98,22 @@ export async function runEvaluation(
   try {
     const budget = new ExecutionBudget({
       ...input.claim,
-      resourceBudget: input.setup.resource_budget,
+      resource_budget: input.setup.resource_budget,
     });
     const verification = await runVerifications({
       directory: prepared.directory,
       commands: verificationCommands(revision),
-      testedInput: prepared.testedInput,
+      tested_input: prepared.tested_input,
       deadline: budget.wallDeadline(),
       context: run.operationContext,
     });
-    const recorded = await run.submitEvidence(input.claim.nodeId, {
+    const recorded = await run.submitEvidence(input.claim.node_id, {
       subject: VERIFICATION_SUBJECT,
       assets: [
         {
           kind: "produced",
           content: {
-            mediaType: "application/json",
+            media_type: "application/json",
             encoding: "base64",
             data: Buffer.from(canonicalJSON(verification.results)).toString(
               "base64",
@@ -137,11 +137,11 @@ export async function runEvaluation(
       openAgent,
       objectives,
     );
-    const answer = await run.submitAssessment(input.claim.nodeId, {
-      evidenceIds: [recorded.id, ...prepared.evidenceIds],
-      childOutcomeIds,
+    const answer = await run.submitAssessment(input.claim.node_id, {
+      evidence_ids: [recorded.id, ...prepared.evidenceIds],
+      child_outcome_ids: childOutcomeIds,
       ...judgement,
-      testedInput: prepared.testedInput,
+      tested_input: prepared.tested_input,
     });
     if (answer.outcome)
       return { kind: ExecutionEndKind.Closed, outcomeId: answer.outcome.id };

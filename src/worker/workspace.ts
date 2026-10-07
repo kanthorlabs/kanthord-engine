@@ -146,14 +146,14 @@ export class WorkspaceRoot {
     },
   ): Promise<{
     directory: string;
-    testedInput:
-      { kind: "repository"; bindingId: string; commit: string }[] | null;
+    tested_input:
+      { kind: "repository"; binding_id: string; commit: string }[] | null;
   }> {
     const { directory } = this.prepareExecution(input);
     const end = performance.now() + input.deadlineMs;
     const testedInput: {
       kind: "repository";
-      bindingId: string;
+      binding_id: string;
       commit: string;
     }[] = [];
     try {
@@ -178,13 +178,13 @@ export class WorkspaceRoot {
         );
         testedInput.push({
           kind: "repository",
-          bindingId: repository.binding_id,
+          binding_id: repository.binding_id,
           commit,
         });
       }
       return {
         directory,
-        testedInput: testedInput.length ? testedInput : null,
+        tested_input: testedInput.length ? testedInput : null,
       };
     } catch (error) {
       this.release(directory, WorkspaceKind.Execution);

@@ -38,7 +38,7 @@ export function requestEvidence(
     dependencies.bindings,
     nodeId,
     claim.pinnedRevision,
-  ).find((item) => item.key === body.requirementKey);
+  ).find((item) => item.key === body.requirement_key);
   if (!action)
     throw new OperationError(
       HttpStatus.BadRequest,
@@ -47,7 +47,7 @@ export function requestEvidence(
     );
   const binding = dependencies.bindings.getBindingRevision(
     tx,
-    action.bindingId,
+    action.binding_id,
   );
   assert.ok(binding);
   const kind =
@@ -56,17 +56,17 @@ export function requestEvidence(
       : PlatformAddressKind.BranchPush;
   if (
     body.address.kind !== kind ||
-    body.address.resource_identity !== binding.resourceIdentity
+    body.address.resource_identity !== binding.resource_identity
   )
     throw new OperationError(
       HttpStatus.BadRequest,
       MissionErrorCode.RequestAddressMismatch,
       "Request address does not match the required action.",
-      { requirementKey: body.requirementKey },
+      { requirement_key: body.requirement_key },
     );
   if (
     readRequests(tx, nodeId, claim.attempt).some(
-      (request) => request.requirement_key === body.requirementKey,
+      (request) => request.requirement_key === body.requirement_key,
     )
   )
     throw new OperationError(
@@ -82,7 +82,7 @@ export function requestEvidence(
       node_id: nodeId,
       attempt: claim.attempt,
       subject: body.subject,
-      requirement_key: body.requirementKey,
+      requirement_key: body.requirement_key,
       end_state: null,
       verification: null,
       provenance: canonicalJSON(admitted.actor),

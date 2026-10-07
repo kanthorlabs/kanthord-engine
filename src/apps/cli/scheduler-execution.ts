@@ -47,7 +47,11 @@ async function executionGet(
     schedulerOperations,
     endpoint,
     token,
-  ).executionGet({ params: { executionId }, query: {}, body: null });
+  ).executionGet({
+    params: { execution_id: executionId },
+    query: {},
+    body: null,
+  });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, "cli.scheduler.execution.get.indeterminate"))}\n`,
   );
@@ -94,8 +98,8 @@ async function executionList(
     endpoint,
     token,
   ).executionList({
-    params: { projectId },
-    query: { limit, nodeId: options.node, attempt, cursor: options.cursor },
+    params: { project_id: projectId },
+    query: { limit, node_id: options.node, attempt, cursor: options.cursor },
     body: null,
   });
   process.stdout.write(
@@ -115,7 +119,7 @@ async function claimGet(executionId: string, command: Command): Promise<void> {
     schedulerOperations,
     endpoint,
     token,
-  ).claimGet({ params: { executionId }, query: {}, body: null });
+  ).claimGet({ params: { execution_id: executionId }, query: {}, body: null });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, "cli.scheduler.claim.get.indeterminate"))}\n`,
   );
@@ -137,7 +141,7 @@ async function release(executionId: string, command: Command): Promise<void> {
     endpoint,
     token,
   ).executionRelease(
-    { params: { executionId }, query: {}, body },
+    { params: { execution_id: executionId }, query: {}, body },
     { idempotencyKey: key },
   );
   process.stdout.write(

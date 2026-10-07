@@ -27,7 +27,7 @@ const FIELD = {
   Id: "id",
   Kind: "kind",
   Parent: "parent",
-  DependsOn: "dependsOn",
+  DependsOn: "depends_on",
   Bindings: "bindings",
   Verifications: "verifications",
 } as const;
@@ -55,7 +55,7 @@ export interface ParsedPlanFile {
   id?: string;
   kind: NodeKindType;
   parent?: string;
-  dependsOn: string[];
+  depends_on: string[];
   bindings: string[];
   verifications: string[];
   name: string;
@@ -156,7 +156,7 @@ function fields(
     ...(id !== undefined ? { id: id as string } : {}),
     kind: typedKind,
     ...(parent !== undefined ? { parent: parent as string } : {}),
-    dependsOn,
+    depends_on: dependsOn,
     bindings,
     verifications,
   };

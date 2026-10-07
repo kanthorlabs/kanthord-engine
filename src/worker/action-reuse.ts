@@ -41,10 +41,10 @@ export function fulfils(
 }
 
 export function sameRepository(
-  candidate: ActionContext["actions"][number]["reuseCandidates"][number],
+  candidate: ActionContext["actions"][number]["reuse_candidates"][number],
   resourceIdentity: string,
 ): boolean {
-  assert.ok(candidate.evidenceId);
+  assert.ok(candidate.evidence_id);
   assert.ok(resourceIdentity);
   return candidate.address.resource_identity === resourceIdentity;
 }

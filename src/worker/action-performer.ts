@@ -96,9 +96,9 @@ export class ActionPerformer {
         claim.runtimeIdentity,
         now,
       );
-      assert.equal(running.nodeId, claim.nodeId);
+      assert.equal(running.node_id, claim.nodeId);
       assert.equal(running.attempt, claim.attempt);
-      assert.equal(running.pinnedRevision, claim.pinnedRevision);
+      assert.equal(running.pinned_revision, claim.pinnedRevision);
       const context = this.dependencies.missionActions.actionContextOf(
         tx,
         claim.nodeId,
@@ -110,7 +110,7 @@ export class ActionPerformer {
           WorkerErrorCode.ClaimNotEvaluation,
           "The claim is not an evaluation claim.",
         );
-      if (context.currentAssessment?.result !== ActionAssessmentResult.Success)
+      if (context.current_assessment?.result !== ActionAssessmentResult.Success)
         throw new OperationError(
           HttpStatus.Conflict,
           WorkerErrorCode.AssessmentNotCurrent,
@@ -170,7 +170,7 @@ export class ActionPerformer {
         attempt: claim.attempt,
         action: {
           key: entry.action.key,
-          binding_id: entry.action.bindingId,
+          binding_id: entry.action.binding_id,
         },
       },
     }));
@@ -266,14 +266,14 @@ export class ActionPerformer {
   ): Promise<ActionResultItem | null> {
     const { entry, operands } = pending;
     assert.ok(entry.action.key);
-    assert.ok(entry.resourceIdentity);
+    assert.ok(entry.resource_identity);
     if (entry.action.action !== RepositoryAction.PullRequest) return null;
-    for (const candidate of entry.reuseCandidates) {
-      if (!sameRepository(candidate, entry.resourceIdentity)) continue;
+    for (const candidate of entry.reuse_candidates) {
+      if (!sameRepository(candidate, entry.resource_identity)) continue;
       this.dependencies.store.transaction((tx) =>
         this.dependencies.missionActions.authorizeRequest(
           tx,
-          candidate.evidenceId,
+          candidate.evidence_id,
           claim,
         ),
       );
@@ -284,7 +284,7 @@ export class ActionPerformer {
       );
       if (isResultClass(answer))
         return readRefusalItem(pending.key.action, answer);
-      if (!fulfils(answer.body, operands, entry.resourceIdentity)) continue;
+      if (!fulfils(answer.body, operands, entry.resource_identity)) continue;
       operands.reusedAddress = candidate.address;
       break;
     }
@@ -301,13 +301,13 @@ export class ActionPerformer {
     try {
       result = await this.dependencies.evidenceRequests.request(
         {
-          params: { nodeId: claim.nodeId },
+          params: { node_id: claim.nodeId },
           query: {},
           body: {
-            executionId: claim.executionId,
+            execution_id: claim.executionId,
             attempt: claim.attempt,
-            nodeRevision: claim.pinnedRevision,
-            requirementKey: pending.entry.action.key,
+            node_revision: claim.pinnedRevision,
+            requirement_key: pending.entry.action.key,
             subject: pending.entry.action.key,
             address,
           },

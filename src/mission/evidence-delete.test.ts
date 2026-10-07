@@ -57,7 +57,7 @@ test("force never bypasses disabled or removed storage authorization", async (t)
     });
     assert.equal(remote.mock.callCount(), NO_CALLS);
     assert.equal(
-      h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
+      h.store.transaction((tx) => readAssets(tx, h.evidence_id).length),
       FIRST_ATTEMPT,
     );
   }
@@ -72,7 +72,7 @@ function fixture(t: TestContext, request = false) {
       tx,
       {
         id: evidenceId,
-        node_id: h.nodeId,
+        node_id: h.node_id,
         attempt: FIRST_ATTEMPT,
         subject: "Stored",
         requirement_key: request ? "repo.pull_request" : null,
@@ -96,9 +96,9 @@ function fixture(t: TestContext, request = false) {
               : {
                   location: "s3://bucket/key",
                   size: FIRST_ATTEMPT,
-                  mediaType: "text/plain",
-                  storageBindingId: h.storageId,
-                  objectVersion: VERSION,
+                  media_type: "text/plain",
+                  storage_binding_id: h.storageId,
+                  object_version: VERSION,
                 },
           ),
           published_at: request ? FIRST_ATTEMPT : null,
@@ -109,17 +109,17 @@ function fixture(t: TestContext, request = false) {
   );
   const remove = (force = false, expectedMissionVersion = FIRST_ATTEMPT) =>
     h.invoke("evidence.asset.delete", {
-      params: { assetId },
+      params: { asset_id: assetId },
       query: {},
       body: {
         force,
-        expectedMissionVersion,
+        expected_mission_version: expectedMissionVersion,
         ...(force ? { reason: "Remove" } : {}),
       },
     });
   assert.equal(h.node().attempt, FIRST_ATTEMPT);
   assert.ok(assetId);
-  return { ...h, evidenceId, assetId, remove };
+  return { ...h, evidence_id: evidenceId, asset_id: assetId, remove };
 }
 
 test("asset deletes require a terminal ancestor chain or force and preserve the empty evidence", async (t) => {
@@ -131,10 +131,10 @@ test("asset deletes require a terminal ancestor chain or force and preserve the 
     version,
     requestKey,
   ) => {
-    assert.equal(binding.bindingId, h.storageId);
+    assert.equal(binding.binding_id, h.storageId);
     assert.equal(key, KEY);
     assert.equal(version, VERSION);
-    assert.equal(requestKey, h.assetId);
+    assert.equal(requestKey, h.asset_id);
   };
   await assert.rejects(
     h.remove(),
@@ -142,7 +142,7 @@ test("asset deletes require a terminal ancestor chain or force and preserve the 
       error instanceof OperationError &&
       error.code === MissionErrorCode.EvidenceRemoveNodeLive,
   );
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Completed));
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Completed));
   await assert.rejects(
     h.remove(),
     (error) =>
@@ -153,9 +153,9 @@ test("asset deletes require a terminal ancestor chain or force and preserve the 
   h.store.transaction((tx) => setNodeState(tx, parentId, NodeState.Discarded));
   assert.equal(await h.remove(), null);
   h.store.transaction((tx) => {
-    assert.equal(readAssets(tx, h.evidenceId).length, NO_CALLS);
-    assert.ok(readEvidence(tx, h.evidenceId));
-    assert.equal(readMission(tx, h.missionId)?.version, FIRST_ATTEMPT);
+    assert.equal(readAssets(tx, h.evidence_id).length, NO_CALLS);
+    assert.ok(readEvidence(tx, h.evidence_id));
+    assert.equal(readMission(tx, h.mission_id)?.version, FIRST_ATTEMPT);
   });
 });
 
@@ -173,8 +173,8 @@ test("failed remote deletion reads back on repeat and requires human request rem
     version,
     requestKey,
   ) => {
-    assert.equal(requestKey, h.assetId);
-    assert.equal(binding.bindingId, h.storageId);
+    assert.equal(requestKey, h.asset_id);
+    assert.equal(binding.binding_id, h.storageId);
     assert.equal(key, KEY);
     assert.equal(version, VERSION);
     if (failedRequest) {
@@ -196,7 +196,7 @@ test("failed remote deletion reads back on repeat and requires human request rem
   assert.equal(calls, NO_CALLS);
   await assert.rejects(h.remove(true), (error) => error === failure);
   assert.equal(
-    h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
+    h.store.transaction((tx) => readAssets(tx, h.evidence_id).length),
     FIRST_ATTEMPT,
   );
   await assert.rejects(h.remove(true), (error) => error === failure);
@@ -208,7 +208,7 @@ test("failed remote deletion reads back on repeat and requires human request rem
   await h.remove(true);
   assert.equal(calls, SECOND_VERSION);
   assert.equal(
-    h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
+    h.store.transaction((tx) => readAssets(tx, h.evidence_id).length),
     NO_CALLS,
   );
 });
@@ -222,7 +222,7 @@ test("request platform assets cannot be removed separately even with force", asy
       error.code === MissionErrorCode.EvidenceRequestAssetRefused,
   );
   assert.equal(
-    h.store.transaction((tx) => readAssets(tx, h.evidenceId).length),
+    h.store.transaction((tx) => readAssets(tx, h.evidence_id).length),
     FIRST_ATTEMPT,
   );
 });
@@ -235,11 +235,11 @@ test("whole evidence deletion clears assessment and outcome sets without changin
   h.store.transaction((tx) => {
     insertAssessment(tx, {
       id: assessmentId,
-      node_id: h.nodeId,
+      node_id: h.node_id,
       attempt: FIRST_ATTEMPT,
       result: AssessmentResult.Undetermined,
       rationale: "Human block",
-      evidence_ids: canonicalJSON([h.evidenceId]),
+      evidence_ids: canonicalJSON([h.evidence_id]),
       child_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
@@ -249,24 +249,24 @@ test("whole evidence deletion clears assessment and outcome sets without changin
     });
     insertOutcome(tx, {
       id: outcomeId,
-      node_id: h.nodeId,
+      node_id: h.node_id,
       assessment_id: assessmentId,
       result: AssessmentResult.Undetermined,
-      evidence_ids: canonicalJSON([h.evidenceId]),
+      evidence_ids: canonicalJSON([h.evidence_id]),
       created_at: FIRST_ATTEMPT,
     });
   });
   await h.invoke("evidence.delete", {
-    params: { evidenceId: h.evidenceId },
+    params: { evidence_id: h.evidence_id },
     query: {},
     body: {
-      expectedMissionVersion: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
       force: true,
       reason: "Remove",
     },
   });
   h.store.transaction((tx) => {
-    assert.equal(readEvidence(tx, h.evidenceId), null);
+    assert.equal(readEvidence(tx, h.evidence_id), null);
     assert.deepEqual(
       JSON.parse(readAssessment(tx, assessmentId)!.evidence_ids),
       [],
@@ -275,13 +275,13 @@ test("whole evidence deletion clears assessment and outcome sets without changin
     assert.deepEqual(JSON.parse(outcome.evidence_ids), []);
     assert.equal(outcome.result, AssessmentResult.Undetermined);
     assert.equal(
-      outcomeRecord(tx, h.dependencies.bindings, outcome).closingEvent,
+      outcomeRecord(tx, h.dependencies.bindings, outcome).closing_event,
       ClosingEvent.HumanBlock,
     );
   });
   await assert.rejects(
     h.invoke("evidence.get", {
-      params: { evidenceId: h.evidenceId },
+      params: { evidence_id: h.evidence_id },
       query: {},
       body: null,
     }),
@@ -301,24 +301,24 @@ test("forced request deletion pauses and revokes only the open attempt", async (
     };
     if (closed)
       h.store.transaction((tx) => {
-        closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, SECOND_VERSION);
-        setNodeState(tx, h.nodeId, NodeState.Completed);
+        closeAttempt(tx, h.node_id, FIRST_ATTEMPT, SECOND_VERSION);
+        setNodeState(tx, h.node_id, NodeState.Completed);
       });
     await assert.rejects(
       h.invoke("evidence.delete", {
-        params: { evidenceId: h.evidenceId },
+        params: { evidence_id: h.evidence_id },
         query: {},
-        body: { expectedMissionVersion: FIRST_ATTEMPT, force: false },
+        body: { expected_mission_version: FIRST_ATTEMPT, force: false },
       }),
       (error) =>
         error instanceof OperationError &&
         error.code === MissionErrorCode.EvidenceRequestForceRequired,
     );
     await h.invoke("evidence.delete", {
-      params: { evidenceId: h.evidenceId },
+      params: { evidence_id: h.evidence_id },
       query: {},
       body: {
-        expectedMissionVersion: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
         force: true,
         reason: "Remove request",
       },

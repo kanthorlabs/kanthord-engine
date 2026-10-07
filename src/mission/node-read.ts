@@ -104,11 +104,11 @@ export function nodeRecord(
   const base = {
     id: node.id,
     filename: node.filename,
-    missionId: node.mission_id,
-    parentId: node.parent_id,
-    visibleRevision: revision.revision,
-    retiredAt: node.retired_at,
-    pinnedByAttempts: revision.pinnedByAttempts,
+    mission_id: node.mission_id,
+    parent_id: node.parent_id,
+    visible_revision: revision.revision,
+    retired_at: node.retired_at,
+    pinned_by_attempts: revision.pinned_by_attempts,
   };
   if (node.kind !== NodeKind.Task) {
     assert.ok(node.state, "Runnable node must have a state.");
@@ -119,9 +119,9 @@ export function nodeRecord(
       state: node.state,
       attempt: node.attempt ?? 0,
       priority: node.priority ?? 0,
-      dependsOn: readDependsOnIds(tx, node.id),
+      depends_on: readDependsOnIds(tx, node.id),
       ...(node.state === NodeState.Blocked
-        ? { blockedContext: blockedContextOf(tx, bindings, node) }
+        ? { blocked_context: blockedContextOf(tx, bindings, node) }
         : {}),
     };
   }

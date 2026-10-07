@@ -32,7 +32,7 @@ test("host takes handover before setup and method, discards on every method end"
     credential: { type: "api_key", key: "test_host_key" },
   };
   const setup: ExecutionSetup = {
-    execution_id: claim.executionId,
+    execution_id: claim.execution_id,
     worker_name: "general@1",
     agent_name: "swe@1",
     credential_id: credential.credential_id,
@@ -55,7 +55,7 @@ test("host takes handover before setup and method, discards on every method end"
       status: 200,
       data: sealEnvelope(
         deriveHandoverKeys(SECRET).handover,
-        handoverAad(claim.executionId, claim.claimant.runtimeIdentity),
+        handoverAad(claim.execution_id, claim.claimant.runtime_identity),
         { items: [credential] },
       ),
     };
@@ -131,10 +131,10 @@ test("host takes handover before setup and method, discards on every method end"
           evidence: { id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA" },
           uploads: [
             {
-              assetId: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-              putUrl: "http://127.0.0.1/test_upload",
+              asset_id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+              put_url: "http://127.0.0.1/test_upload",
               headers: {},
-              expiresAt: Date.now() + 60000,
+              expires_at: Date.now() + 60000,
             },
           ],
         },

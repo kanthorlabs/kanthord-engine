@@ -36,8 +36,8 @@ export async function pullLoop(
           params: {},
           query: {},
           body: {
-            resourceIdentity: registration.resource_identity,
-            runtimeIdentity: registration.runtime_identity,
+            resource_identity: registration.resource_identity,
+            runtime_identity: registration.runtime_identity,
           },
         },
         { idempotencyKey: ulid(), context: background },

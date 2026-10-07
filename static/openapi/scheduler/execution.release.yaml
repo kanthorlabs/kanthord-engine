@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: executionId
+      - name: execution_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/scheduler.execution.release.Input/properties/params\
-            /properties/executionId"
+            /properties/execution_id"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
@@ -60,14 +60,14 @@ components:
         params:
           type: object
           properties:
-            executionId:
+            execution_id:
               type: string
               minLength: 36
               maxLength: 36
               pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: execution_ followed by a canonical 26-character uppercase ULID.
           required:
-            - executionId
+            - execution_id
           additionalProperties: false
         query:
           type: object
@@ -76,10 +76,10 @@ components:
         body:
           type: object
           properties:
-            furtherWork:
+            further_work:
               type: boolean
           required:
-            - furtherWork
+            - further_work
           additionalProperties: false
       required:
         - params
@@ -89,18 +89,18 @@ components:
     scheduler.execution.release.Output:
       type: object
       properties:
-        executionId:
+        execution_id:
           type: string
           minLength: 36
           maxLength: 36
           pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: execution_ followed by a canonical 26-character uppercase ULID.
-        endedAt:
+        ended_at:
           type: integer
           minimum: 0
           maximum: 9007199254740991
           description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
       required:
-        - executionId
-        - endedAt
+        - execution_id
+        - ended_at
       additionalProperties: false

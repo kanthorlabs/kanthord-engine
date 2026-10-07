@@ -99,26 +99,26 @@ test("prune clears only requested actions in the same attempt", () => {
   reservations.acquire({ ...key, attempt: SECOND_ATTEMPT });
   const action = {
     key: key.action.key,
-    bindingId: key.action.binding_id,
+    binding_id: key.action.binding_id,
     action: "pull_request",
-    expectedEndState: "pull_request_merged",
+    expected_end_state: "pull_request_merged",
     follows: null,
-    configuration: { baseBranch: "main" },
+    configuration: { base_branch: "main" },
   } as const;
   const entries: ActionContext["actions"] = [
     {
       action,
-      resourceIdentity: "repository:github:owner/repo",
+      resource_identity: "repository:github:owner/repo",
       resolution: ActionResolution.Unrequested,
-      requestEvidenceId: null,
+      request_evidence_id: null,
       eligible: true,
-      reuseCandidates: [],
+      reuse_candidates: [],
     },
   ];
   reservations.prune(key.nodeId, FIRST_ATTEMPT, entries);
   assert.ok("held" in reservations.acquire(key));
   entries[0]!.resolution = ActionResolution.Unresolved;
-  entries[0]!.requestEvidenceId = "evidence";
+  entries[0]!.request_evidence_id = "evidence";
   reservations.prune(key.nodeId, FIRST_ATTEMPT, entries);
   assert.ok("owner" in reservations.acquire(key));
   assert.ok(

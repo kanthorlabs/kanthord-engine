@@ -49,7 +49,7 @@ export function failedVerificationRationale(
   commands: readonly string[],
 ): string {
   const index = verification.results.findIndex(
-    (result) => result.exitCode !== SUCCESS_EXIT,
+    (result) => result.exit_code !== SUCCESS_EXIT,
   );
   const position = index < SUCCESS_EXIT ? verification.results.length : index;
   const result = verification.results[position];
@@ -60,9 +60,9 @@ export function failedVerificationRationale(
   assert.ok(position < commands.length);
   const prefix = `Verification ${position + 1} \`${commands[position]}\``;
   if (!result) return `${prefix} was not run.`;
-  if (result.timedOut) return `${prefix} reached its deadline.`;
+  if (result.timed_out) return `${prefix} reached its deadline.`;
   if (result.signal) return `${prefix} was ended by signal ${result.signal}.`;
-  return `${prefix} failed with exit code ${result.exitCode}.`;
+  return `${prefix} failed with exit code ${result.exit_code}.`;
 }
 
 export function taskRevisionInstruction(
@@ -80,11 +80,11 @@ export function criterionRevisionInstruction(rationale: string): string {
 
 export function evaluationInstruction(input: {
   tasks: readonly TaskContent[];
-  testedInput: TestedInput;
+  tested_input: TestedInput;
   evidence: unknown;
   objectives?: unknown;
 }): string {
-  return `Judge the evidence against the node criterion in the pinned work prompt, every current task criterion below, and the default standard. Inspect the supporting assets at the workspace-relative paths in the review bundle. Weigh each current objective outcome in the supplied objective context. Give one result: success, criterion-not-met, or undetermined. A default-standard violation requires criterion-not-met. Name each current task whose criterion is unmet in the rationale.\nTasks: ${JSON.stringify(input.tasks.map((task) => ({ id: task.id, criterion: task.content.criterion })))}\nTested input: ${JSON.stringify(input.testedInput)}\nEvidence: ${JSON.stringify(input.evidence)}\nCurrent objective context: ${JSON.stringify(input.objectives ?? null)}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"result": "success", "rationale": "Explain your judgement"}`;
+  return `Judge the evidence against the node criterion in the pinned work prompt, every current task criterion below, and the default standard. Inspect the supporting assets at the workspace-relative paths in the review bundle. Weigh each current objective outcome in the supplied objective context. Give one result: success, criterion-not-met, or undetermined. A default-standard violation requires criterion-not-met. Name each current task whose criterion is unmet in the rationale.\nTasks: ${JSON.stringify(input.tasks.map((task) => ({ id: task.id, criterion: task.content.criterion })))}\nTested input: ${JSON.stringify(input.tested_input)}\nEvidence: ${JSON.stringify(input.evidence)}\nCurrent objective context: ${JSON.stringify(input.objectives ?? null)}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"result": "success", "rationale": "Explain your judgement"}`;
 }
 
 export function reportInstruction(

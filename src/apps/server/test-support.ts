@@ -217,8 +217,8 @@ export function sinkStorage(sink: ObjectSink): IntakeStorage {
     throwIfCancelled(call.context);
     assert.ok(key);
     return {
-      getUrl: `${sink.endpoint}/${encodeURIComponent(key)}`,
-      expiresAt: Date.now() + OBJECT_GRANT_LIFETIME_MS,
+      get_url: `${sink.endpoint}/${encodeURIComponent(key)}`,
+      expires_at: Date.now() + OBJECT_GRANT_LIFETIME_MS,
     };
   };
   return {
@@ -228,9 +228,9 @@ export function sinkStorage(sink: ObjectSink): IntakeStorage {
       const headers: Record<string, string> = {};
       if (sha256 !== null) headers[CHECKSUM_HEADER] = sha256;
       return {
-        putUrl: `${sink.endpoint}/${encodeURIComponent(key)}`,
+        put_url: `${sink.endpoint}/${encodeURIComponent(key)}`,
         headers,
-        expiresAt: Date.now() + OBJECT_GRANT_LIFETIME_MS,
+        expires_at: Date.now() + OBJECT_GRANT_LIFETIME_MS,
       };
     },
     async check(call, binding, key, size, sha256) {
@@ -267,7 +267,7 @@ export function scriptedCheck(
     calls,
     async check(...args: Parameters<IntakeCheck["check"]>) {
       throwIfCancelled(args[0]);
-      assert.ok(args[1].frozenAction.key);
+      assert.ok(args[1].frozen_action.key);
       calls.push(args);
       return structuredClone(answer);
     },

@@ -46,7 +46,7 @@ async function fixture(t: TestContext) {
   const mission = await setup.read<{ id: string }>([
     "mission",
     "get",
-    setup.projectId,
+    setup.project_id,
   ]);
   const content = {
     name: "Greetings",
@@ -55,40 +55,40 @@ async function fixture(t: TestContext) {
     verifications: ["test -f hello.txt"],
     bindings: [] as string[],
   };
-  const initiative = await setup.write<{ revisions: { nodeId: string }[] }>(
+  const initiative = await setup.write<{ revisions: { node_id: string }[] }>(
     ["mission", "node", "create", mission.id],
     {
       filename: "initiative-1.md",
       kind: "initiative",
       content: { ...content, verifications: ["true"] },
       reason: "plan",
-      expectedMissionVersion: FIRST_REVISION,
+      expected_mission_version: FIRST_REVISION,
     },
   );
-  const objective = await setup.write<{ revisions: { nodeId: string }[] }>(
+  const objective = await setup.write<{ revisions: { node_id: string }[] }>(
     ["mission", "node", "create", mission.id],
     {
       filename: "objective-a.md",
       kind: "objective",
-      parentId: initiative.revisions[0]!.nodeId,
-      expectedParentRevision: FIRST_REVISION,
+      parent_id: initiative.revisions[0]!.node_id,
+      expected_parent_revision: FIRST_REVISION,
       content: {
         ...content,
         bindings: [setup.bindings.repo!.id, setup.bindings.store!.id],
       },
       reason: "plan",
-      expectedMissionVersion: SECOND_REVISION,
+      expected_mission_version: SECOND_REVISION,
     },
   );
-  const nodeId = objective.revisions[0]!.nodeId;
+  const nodeId = objective.revisions[0]!.node_id;
   await setup.write(["mission", "node", "create", mission.id], {
     filename: "task-a.md",
     kind: "task",
-    parentId: nodeId,
-    expectedParentRevision: FIRST_REVISION,
+    parent_id: nodeId,
+    expected_parent_revision: FIRST_REVISION,
     content,
     reason: "plan",
-    expectedMissionVersion: THIRD_REVISION,
+    expected_mission_version: THIRD_REVISION,
   });
   const seed = join(setup.directory, "seed");
   const bare = join(setup.directory, "bare.git");
@@ -113,7 +113,7 @@ async function fixture(t: TestContext) {
   const auth = setup.machine("general-a");
   assert.ok(nodeId);
   assert.ok(auth.client_secret);
-  return { ...setup, nodeId, bare, git, auth, transport };
+  return { ...setup, node_id: nodeId, bare, git, auth, transport };
 }
 
 async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
@@ -122,12 +122,12 @@ async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
       "scheduler",
       "execution",
       "list",
-      setup.projectId,
+      setup.project_id,
       "--node",
-      setup.nodeId,
+      setup.node_id,
     ]);
     const record = page.items.find(
-      (item) => item.claimState === ClaimState.Finished,
+      (item) => item.claim_state === ClaimState.Finished,
     );
     if (record) {
       assert.equal(page.items.length, SINGLE_ITEM);
@@ -186,7 +186,7 @@ test(
           "mission",
           "evidence",
           "list",
-          setup.nodeId,
+          setup.node_id,
           "--attempt",
           "1",
         ]);
@@ -200,10 +200,10 @@ test(
         assert.equal(asset.kind, AssetKind.Object);
         assert.ok(asset.kind === AssetKind.Object);
         assert.equal(asset.size, SIZE);
-        assert.equal(asset.mediaType, MEDIA_TYPE);
-        assert.ok(Number.isFinite(asset.publishedAt));
+        assert.equal(asset.media_type, MEDIA_TYPE);
+        assert.ok(Number.isFinite(asset.published_at));
         assert.ok(asset.address.sha256);
-        const grant = await setup.read<{ getUrl: string }>([
+        const grant = await setup.read<{ get_url: string }>([
           "mission",
           "evidence",
           "asset",
@@ -211,7 +211,7 @@ test(
           "get",
           asset.id,
         ]);
-        const response = await fetch(grant.getUrl);
+        const response = await fetch(grant.get_url);
         assert.ok(response.ok);
         assert.equal(await response.text(), HELLO);
         const messages = provider.calls.at(-1)!.messages;
@@ -235,13 +235,13 @@ test(
         assert.ok(refused.role === TOOL_RESULT && refused.isError);
         assert.ok(JSON.stringify(refused.content).includes(PATH_REFUSED));
         const trace = JSON.stringify(provider.calls);
-        assert.ok(!trace.includes("putUrl"));
+        assert.ok(!trace.includes("put_url"));
         assert.ok(!trace.includes("X-Amz"));
         assert.ok(!trace.includes(setup.sink!.endpoint));
         assert.match(
           await setup.git.listRemote([
             setup.bare,
-            `refs/heads/kanthord/${setup.nodeId}`,
+            `refs/heads/kanthord/${setup.node_id}`,
           ]),
           /^[a-f0-9]{40}\s/,
         );
@@ -249,7 +249,7 @@ test(
           "mission",
           "node",
           "get",
-          setup.nodeId,
+          setup.node_id,
         ]);
         assert.equal(node.state, NodeState.Waiting);
         assert.equal(await host.worker.stop(), null);
@@ -317,19 +317,19 @@ async function assertLive(
     "scheduler",
     "execution",
     "list",
-    setup.projectId,
+    setup.project_id,
     "--node",
-    setup.nodeId,
+    setup.node_id,
   ]);
   assert.equal(executions.items.length, SINGLE_ITEM);
   const claim = await setup.read<ExecutionRecord>(
-    ["scheduler", "claim", "get", executions.items[0]!.executionId],
+    ["scheduler", "claim", "get", executions.items[0]!.execution_id],
     { ...setup.human, KANTHORD_TOKEN: setup.auth.token },
   );
-  assert.equal(claim.claimState, ClaimState.Running);
+  assert.equal(claim.claim_state, ClaimState.Running);
   const list = await setup.read<{
     items: { runtime_identity: string; registered: boolean }[];
-  }>(["worker", "instance", "list", "--project", setup.projectId]);
+  }>(["worker", "instance", "list", "--project", setup.project_id]);
   const identity = logs.find(
     (record) => record.msg === READY,
   )!.runtime_identity;

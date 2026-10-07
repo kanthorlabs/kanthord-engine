@@ -18,13 +18,13 @@ const INITIAL_ATTEMPT = 1;
 function fixture(attempt = 1) {
   return new ExecutionRun({
     claim: {
-      executionId: "execution",
-      nodeId: "node",
+      execution_id: "execution",
+      node_id: "node",
       attempt,
-      pinnedRevision: 1,
-      createdAt: Date.now(),
-      expiredAt: Date.now() + 60000,
-      traceId: "trace",
+      pinned_revision: 1,
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
+      trace_id: "trace",
     },
     clients: {} as MethodClients,
     credentials: { release: async () => {} },

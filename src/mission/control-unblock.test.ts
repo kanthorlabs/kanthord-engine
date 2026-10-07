@@ -27,25 +27,25 @@ for (const filenames of [
     const h = controlHarness(t, IDENTITY);
     const bindingId = createIdentity("binding");
     h.dependencies.bindings.getBindingRevision = () => ({
-      bindingId,
-      projectId: h.projectId,
+      binding_id: bindingId,
+      project_id: h.project_id,
       name: "repo",
-      resourceIdentity: "repository:github:owner/repo",
+      resource_identity: "repository:github:owner/repo",
       revision: FIRST_ATTEMPT,
       disabled: false,
       tombstone: false,
     });
     h.dependencies.bindings.repositoryPolicyOf = () => ({
-      bindingId,
-      projectId: h.projectId,
+      binding_id: bindingId,
+      project_id: h.project_id,
       name: "repo",
       address: "git@github.com:owner/repo.git",
       platform: "github",
-      sshCredential: "github-ssh",
+      ssh_credential: "github-ssh",
       credential: "github",
-      baseBranch: "main",
+      base_branch: "main",
       action: null,
-      projectPrompt: null,
+      project_prompt: null,
     });
     const taskIds = [createIdentity("node"), createIdentity("node")];
     const content = {
@@ -61,31 +61,34 @@ for (const filenames of [
       content,
     }));
     h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
-      projectId === h.projectId && id === bindingId
-        ? { bindingId, resourceIdentity: "repository:github:owner/repo" }
+      projectId === h.project_id && id === bindingId
+        ? {
+            binding_id: bindingId,
+            resource_identity: "repository:github:owner/repo",
+          }
         : null;
     h.store.transaction((tx) => {
       tx.database
         .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
-        .run(NodeKind.Objective, NodeState.Paused, h.nodeId);
+        .run(NodeKind.Objective, NodeState.Paused, h.node_id);
       for (const task of tasks)
         insertNode(tx, {
           id: task.id,
-          mission_id: h.missionId,
+          mission_id: h.mission_id,
           kind: NodeKind.Task,
           filename: task.filename,
-          parent_id: h.nodeId,
+          parent_id: h.node_id,
           created_at: NOW,
         });
       tx.database
         .prepare(
           "UPDATE mission_node_revision SET bindings = ?, tasks = ? WHERE node_id = ?",
         )
-        .run(JSON.stringify([bindingId]), JSON.stringify(tasks), h.nodeId);
-      openAttempt(tx, h.nodeId, FIRST_ATTEMPT, h.actor, NOW);
+        .run(JSON.stringify([bindingId]), JSON.stringify(tasks), h.node_id);
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
     });
     await h.invoke("node.block", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: h.body(NodeState.Paused, FIRST_ATTEMPT),
     });
@@ -98,12 +101,12 @@ for (const filenames of [
       })),
     };
     const input = {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: {
-        blockedAttempt: FIRST_ATTEMPT,
+        blocked_attempt: FIRST_ATTEMPT,
         expected_revision: FIRST_ATTEMPT,
-        expectedMissionVersion: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
         change,
       },
     };
@@ -130,7 +133,7 @@ for (const filenames of [
     );
     assert.deepEqual(snapshot(), before);
     assert.equal(
-      h.store.transaction((tx) => readCurrentRevision(tx, h.nodeId))?.revision,
+      h.store.transaction((tx) => readCurrentRevision(tx, h.node_id))?.revision,
       FIRST_ATTEMPT,
     );
     const callCount = h.calls.length;
@@ -141,14 +144,16 @@ for (const filenames of [
     await assert.rejects(h.invoke("node.unblock", input), /queue write failed/);
     assert.deepEqual(snapshot(), before);
     assert.equal(
-      h.store.transaction((tx) => readCurrentRevision(tx, h.nodeId))?.revision,
+      h.store.transaction((tx) => readCurrentRevision(tx, h.node_id))?.revision,
       FIRST_ATTEMPT,
     );
     assert.equal(h.calls.length, callCount + FIRST_ATTEMPT);
     h.dependencies.workQueue.insert = insert;
     const result = await h.invoke("node.unblock", input);
     assert.equal(result.attempt?.attempt, SECOND_ATTEMPT);
-    const row = h.store.transaction((tx) => readCurrentRevision(tx, h.nodeId))!;
+    const row = h.store.transaction((tx) =>
+      readCurrentRevision(tx, h.node_id),
+    )!;
     assert.deepEqual(
       JSON.parse(row.tasks!)
         .map((task: { filename: string }) => task.filename)
@@ -169,19 +174,22 @@ test("objective unblock validates the exact task set and writes the changed task
     bindings: [],
   };
   h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
-    projectId === h.projectId && id === bindingId
-      ? { bindingId, resourceIdentity: "repository:github:owner/repo" }
+    projectId === h.project_id && id === bindingId
+      ? {
+          binding_id: bindingId,
+          resource_identity: "repository:github:owner/repo",
+        }
       : null;
   h.store.transaction((tx) => {
     tx.database
       .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
-      .run(NodeKind.Objective, NodeState.Paused, h.nodeId);
+      .run(NodeKind.Objective, NodeState.Paused, h.node_id);
     insertNode(tx, {
       id: taskId,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Task,
       filename: "task.md",
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       created_at: NOW,
     });
     tx.database
@@ -191,11 +199,11 @@ test("objective unblock validates the exact task set and writes the changed task
       .run(
         JSON.stringify([bindingId]),
         JSON.stringify([{ id: taskId, filename: "task.md", content }]),
-        h.nodeId,
+        h.node_id,
       );
   });
   await h.invoke("node.block", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: h.body(NodeState.Paused),
   });
@@ -211,12 +219,12 @@ test("objective unblock validates the exact task set and writes the changed task
     ],
   };
   const input = {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
-      blockedAttempt: NO_ATTEMPT,
+      blocked_attempt: NO_ATTEMPT,
       expected_revision: FIRST_ATTEMPT,
-      expectedMissionVersion: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
       change,
     },
   };
@@ -244,7 +252,7 @@ test("objective unblock validates the exact task set and writes the changed task
   );
   assert.equal(h.node().state, NodeState.Blocked);
   const read = await h.invoke("node.get", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: null,
   });
@@ -253,9 +261,9 @@ test("objective unblock validates the exact task set and writes the changed task
     ...input,
     body: { ...input.body, change: { ...change, content: read.content } },
   });
-  assert.equal(result.node.visibleRevision, SECOND_ATTEMPT);
+  assert.equal(result.node.visible_revision, SECOND_ATTEMPT);
   const stored = h.store.transaction((tx) =>
-    readCurrentRevision(tx, h.nodeId),
+    readCurrentRevision(tx, h.node_id),
   )!;
   assert.deepEqual(JSON.parse(stored.tasks!), change.tasks);
 });
@@ -264,21 +272,21 @@ for (const attempt of [NO_ATTEMPT, FIRST_ATTEMPT]) {
     const h = controlHarness(t, IDENTITY);
     h.store.transaction((tx) => {
       if (attempt > NO_ATTEMPT)
-        openAttempt(tx, h.nodeId, FIRST_ATTEMPT, h.actor, NOW);
-      setNodeState(tx, h.nodeId, NodeState.Paused);
+        openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, NodeState.Paused);
     });
     await h.invoke("node.block", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: h.body(NodeState.Paused, attempt),
     });
     const input = {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: {
-        blockedAttempt: attempt,
+        blocked_attempt: attempt,
         expected_revision: FIRST_ATTEMPT,
-        expectedMissionVersion: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
       },
     };
     const result = await h.invoke("node.unblock", input);
@@ -287,7 +295,7 @@ for (const attempt of [NO_ATTEMPT, FIRST_ATTEMPT]) {
       attempt === NO_ATTEMPT ? NO_ATTEMPT : SECOND_ATTEMPT,
     );
     if (result.attempt !== null)
-      assert.deepEqual(result.attempt.openedBy, h.actor);
+      assert.deepEqual(result.attempt.opened_by, h.actor);
     assert.equal(result.outcome, null);
     await assert.rejects(
       h.invoke("node.unblock", input),
@@ -304,18 +312,18 @@ for (const attempt of [NO_ATTEMPT, FIRST_ATTEMPT]) {
 test("unblock checks attempt and revision before changing content; changed content is pinned once", async (t) => {
   const h = controlHarness(t, IDENTITY);
   h.store.transaction((tx) => {
-    openAttempt(tx, h.nodeId, FIRST_ATTEMPT, h.actor, NOW);
-    setNodeState(tx, h.nodeId, NodeState.Paused);
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Paused);
   });
   const blocked = await h.invoke("node.block", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: h.body(NodeState.Paused, FIRST_ATTEMPT),
   });
   const body = {
-    blockedAttempt: FIRST_ATTEMPT,
+    blocked_attempt: FIRST_ATTEMPT,
     expected_revision: FIRST_ATTEMPT,
-    expectedMissionVersion: FIRST_ATTEMPT,
+    expected_mission_version: FIRST_ATTEMPT,
     change: {
       content: { ...blocked.node.content, name: "New direction" },
       reason: "Redirect",
@@ -323,12 +331,12 @@ test("unblock checks attempt and revision before changing content; changed conte
   };
   const invoke = (changes: Partial<typeof body>) =>
     h.invoke("node.unblock", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: { ...body, ...changes },
     });
   await assert.rejects(
-    invoke({ blockedAttempt: NO_ATTEMPT }),
+    invoke({ blocked_attempt: NO_ATTEMPT }),
     (error) =>
       error instanceof OperationError &&
       error.code === ControlError.StateConflict,
@@ -340,10 +348,10 @@ test("unblock checks attempt and revision before changing content; changed conte
       error.code === MissionErrorCode.RevisionConflict,
   );
   const result = await invoke({});
-  assert.equal(result.attempt?.nodeRevision, SECOND_ATTEMPT);
-  assert.equal(result.node.visibleRevision, SECOND_ATTEMPT);
+  assert.equal(result.attempt?.node_revision, SECOND_ATTEMPT);
+  assert.equal(result.node.visible_revision, SECOND_ATTEMPT);
   const mission = await h.invoke("get", {
-    params: { projectId: h.projectId },
+    params: { project_id: h.project_id },
     query: {},
     body: null,
   });
@@ -354,37 +362,37 @@ test("unchanged content makes no revision and unsatisfied closure routes unblock
   const h = controlHarness(t, IDENTITY);
   const target = createIdentity("node");
   h.store.transaction((tx) => {
-    setNodeState(tx, h.nodeId, NodeState.Paused);
+    setNodeState(tx, h.node_id, NodeState.Paused);
     insertNode(tx, {
       id: target,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Initiative,
       filename: "target.md",
       parent_id: null,
       created_at: NOW,
     });
-    insertDependency(tx, h.missionId, h.nodeId, target);
+    insertDependency(tx, h.mission_id, h.node_id, target);
   });
   const blocked = await h.invoke("node.block", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: h.body(NodeState.Paused),
   });
   const result = await h.invoke("node.unblock", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
-      blockedAttempt: NO_ATTEMPT,
+      blocked_attempt: NO_ATTEMPT,
       expected_revision: FIRST_ATTEMPT,
-      expectedMissionVersion: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
       change: { content: blocked.node.content, reason: "Preserve" },
     },
   });
   assert.ok(result.node.kind !== NodeKind.Task);
   assert.equal(result.node.state, NodeState.Pending);
-  assert.equal(result.node.visibleRevision, FIRST_ATTEMPT);
+  assert.equal(result.node.visible_revision, FIRST_ATTEMPT);
   assert.equal(
-    h.store.transaction((tx) => readCurrentRevision(tx, h.nodeId))?.revision,
+    h.store.transaction((tx) => readCurrentRevision(tx, h.node_id))?.revision,
     FIRST_ATTEMPT,
   );
 });

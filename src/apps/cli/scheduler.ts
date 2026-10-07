@@ -51,7 +51,7 @@ async function list(projectId: string, command: Command): Promise<void> {
     endpoint,
     token,
   ).queueList({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {
       limit,
       ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
@@ -73,7 +73,7 @@ async function peek(projectId: string, command: Command): Promise<void> {
     endpoint,
     token,
   ).queuePeek({
-    params: { projectId },
+    params: { project_id: projectId },
     query: {},
     body: null,
   });

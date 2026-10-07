@@ -27,8 +27,8 @@ const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
 function fixture(t: TestContext, expired = false) {
   const h = executionHarness(t, IDENTITY);
   const binding: StorageBinding = {
-    bindingId: createIdentity("binding"),
-    projectId: h.projectId,
+    binding_id: createIdentity("binding"),
+    project_id: h.project_id,
     endpoint: "https://storage.example",
     bucket: "bucket",
     region: "region",
@@ -37,14 +37,14 @@ function fixture(t: TestContext, expired = false) {
     available: true,
   };
   h.dependencies.bindings.storageBindingOf = (_tx, id) => {
-    assert.equal(id, binding.bindingId);
+    assert.equal(id, binding.binding_id);
     return binding;
   };
   h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
-    bindingId: id,
-    projectId: h.projectId,
+    binding_id: id,
+    project_id: h.project_id,
     name: "storage",
-    resourceIdentity: "storage:s3:bucket",
+    resource_identity: "storage:s3:bucket",
     revision: 1,
     tombstone: false,
     disabled: false,
@@ -57,7 +57,7 @@ function fixture(t: TestContext, expired = false) {
       tx,
       {
         id: evidenceId,
-        node_id: h.nodeId,
+        node_id: h.node_id,
         attempt: h.claim.attempt,
         subject: "Upload",
         requirement_key: null,
@@ -74,8 +74,8 @@ function fixture(t: TestContext, expired = false) {
           content: canonicalJSON({
             location,
             size: SIZE,
-            mediaType: "text/plain",
-            storageBindingId: binding.bindingId,
+            media_type: "text/plain",
+            storage_binding_id: binding.binding_id,
           }),
           published_at: null,
           expired_at: expired
@@ -102,7 +102,7 @@ function fixture(t: TestContext, expired = false) {
   };
   const complete = () =>
     h.invoke("evidence.asset.complete", {
-      params: { assetId },
+      params: { asset_id: assetId },
       query: {},
       body: h.context,
     });
@@ -111,13 +111,13 @@ function fixture(t: TestContext, expired = false) {
       evidenceRecord(tx, readEvidence(tx, evidenceId)!),
     );
   assert.equal(evidence().assets.length, SINGLE_ITEM);
-  assert.equal(evidence().assets[FIRST_ASSET_INDEX]!.publishedAt, null);
+  assert.equal(evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
   return {
     ...h,
     complete,
     evidence,
-    evidenceId,
-    assetId,
+    evidence_id: evidenceId,
+    asset_id: assetId,
     location,
     checks: () => checks,
   };
@@ -127,12 +127,12 @@ test("completion publishes a checked version and a repeat skips Intake", async (
   const h = fixture(t);
   const result = await h.complete();
   assert.deepEqual(result, {
-    assetId: h.assetId,
-    evidenceId: h.evidenceId,
+    asset_id: h.asset_id,
+    evidence_id: h.evidence_id,
     uri: h.location,
   });
   const asset = h.evidence().assets[FIRST_ASSET_INDEX]!;
-  assert.notEqual(asset.publishedAt, null);
+  assert.notEqual(asset.published_at, null);
   assert.equal(asset.kind, AssetKind.Object);
   if (asset.kind !== AssetKind.Object) assert.fail();
   assert.equal(asset.address.version, VERSION);
@@ -147,7 +147,7 @@ test("failed remote checks and claims ending during the check keep uploads pendi
     throw failure;
   };
   await assert.rejects(h.complete, (error) => error === failure);
-  assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.publishedAt, null);
+  assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
   h.dependencies.intakeStorage.check = async () => {
     h.dependencies.schedulerClaims.liveExecutionOf = () => null;
     return { location: h.location, version: null };
@@ -156,7 +156,7 @@ test("failed remote checks and claims ending during the check keep uploads pendi
     h.complete,
     (error) => error instanceof OperationError && error.code === NOT_RUNNING,
   );
-  assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.publishedAt, null);
+  assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
 });
 
 test("expired uploads fail before Intake and foreign claimed nodes fail context admission", async (t) => {

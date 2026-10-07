@@ -44,8 +44,8 @@ test("control admission checks retirement, kind and mission before settlement an
           admitControl(
             tx,
             h.dependencies,
-            h.nodeId,
-            { ...h.body(), expectedMissionVersion: NO_ATTEMPT },
+            h.node_id,
+            { ...h.body(), expected_mission_version: NO_ATTEMPT },
             [NodeState.Paused],
             NOW,
           ),
@@ -54,15 +54,15 @@ test("control admission checks retirement, kind and mission before settlement an
     );
   h.store.database
     .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-    .run(NOW, h.nodeId);
+    .run(NOW, h.node_id);
   check(MissionErrorCode.Retired);
   h.store.database
     .prepare("UPDATE mission_node SET retired_at = NULL, kind = ? WHERE id = ?")
-    .run(NodeKind.Task, h.nodeId);
+    .run(NodeKind.Task, h.node_id);
   check(ControlError.Task);
   h.store.database
     .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-    .run(NodeKind.Initiative, h.nodeId);
+    .run(NodeKind.Initiative, h.node_id);
   check(MissionErrorCode.VersionConflict);
   assert.deepEqual(h.calls, []);
   assert.throws(
@@ -71,7 +71,7 @@ test("control admission checks retirement, kind and mission before settlement an
         admitControl(
           tx,
           h.dependencies,
-          h.nodeId,
+          h.node_id,
           h.body(NodeState.Paused),
           [NodeState.Paused],
           NOW,
@@ -87,7 +87,7 @@ test("control admission checks retirement, kind and mission before settlement an
         admitControl(
           tx,
           h.dependencies,
-          h.nodeId,
+          h.node_id,
           h.body(),
           [NodeState.Paused],
           NOW,
@@ -110,7 +110,7 @@ test("control admission re-reads settled state and terminal refusal precedes exp
     admitControl(
       tx,
       h.dependencies,
-      h.nodeId,
+      h.node_id,
       h.body(NodeState.Paused),
       [NodeState.Paused],
       NOW,
@@ -125,7 +125,7 @@ test("control admission re-reads settled state and terminal refusal precedes exp
         admitControl(
           tx,
           h.dependencies,
-          h.nodeId,
+          h.node_id,
           h.body(),
           [NodeState.Available],
           NOW,
@@ -153,7 +153,7 @@ test("attempt-zero human records produce blocked context and no attempt", (t) =>
     transition(
       tx,
       h.dependencies,
-      requireMission(tx, h.missionId),
+      requireMission(tx, h.mission_id),
       node,
       NodeState.Blocked,
       NOW,
@@ -161,7 +161,7 @@ test("attempt-zero human records produce blocked context and no attempt", (t) =>
     const answer = controlResult(
       tx,
       h.dependencies,
-      h.nodeId,
+      h.node_id,
       outcome,
       h.actor,
       NOW,
@@ -170,7 +170,7 @@ test("attempt-zero human records produce blocked context and no attempt", (t) =>
     assert.equal(answer.outcome?.attempt, NO_ATTEMPT);
     assert.ok(answer.node.kind !== NodeKind.Task);
     assert.equal(answer.node.state, NodeState.Blocked);
-    assert.equal(requireMission(tx, h.missionId).version, FIRST_ATTEMPT);
+    assert.equal(requireMission(tx, h.mission_id).version, FIRST_ATTEMPT);
   });
 });
 
@@ -181,7 +181,7 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
     transition(
       tx,
       h.dependencies,
-      requireMission(tx, h.missionId),
+      requireMission(tx, h.mission_id),
       node,
       NodeState.Waiting,
       NOW,
@@ -276,7 +276,7 @@ test("unresolved action guard reads the open attempt only", (t) => {
       (error) => {
         assert.ok(error instanceof OperationError);
         assert.equal(error.code, ControlError.Unresolved);
-        assert.deepEqual(error.details, { requirementKeys: [KEY] });
+        assert.deepEqual(error.details, { requirement_keys: [KEY] });
         return true;
       },
     );

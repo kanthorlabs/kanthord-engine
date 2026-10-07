@@ -277,9 +277,9 @@ HTTP `200` returns the summary fields plus:
   default to `{ wall_time_ms: 7200000 }`. Every worker binding may override the
   default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
   defines a turn as one `turn_end` event of the pi agent loop and measures wall
-  time from the execution's `createdAt`. After budget end, execution code
-  checkpoints, pushes and releases, with cleanup bounded by `expiredAt`.
-  An external harness must release before its `expiredAt`.
+  time from the execution's `created_at`. After budget end, execution code
+  checkpoints, pushes and releases, with cleanup bounded by `expired_at`.
+  An external harness must release before its `expired_at`.
 
 Absent/inapplicable native fields other than `resource_budget` are omitted for
 externally hosted workers. The result changes no registration, pool, project

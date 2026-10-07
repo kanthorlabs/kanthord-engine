@@ -25,7 +25,7 @@ export function serializePlanFile(entry: ExportEntry): string {
     ...(entry.parent === undefined ? {} : { parent: entry.parent }),
     ...(entry.kind === NodeKind.Task
       ? {}
-      : { dependsOn: entry.dependsOn ?? [] }),
+      : { depends_on: entry.depends_on ?? [] }),
     bindings: entry.bindings,
     verifications: entry.verifications,
   });
@@ -61,7 +61,7 @@ function exportEntry(
     ...(parent === null || parent === undefined
       ? {}
       : { parent: parent.filename }),
-    ...(node.kind === NodeKind.Task ? {} : { dependsOn }),
+    ...(node.kind === NodeKind.Task ? {} : { depends_on: dependsOn }),
     bindings: names,
   };
 }
@@ -81,13 +81,13 @@ export function exportMission(
   const dependencies = new Map<string, string[]>();
   for (const edge of readDependencies(tx, missionId)) {
     const targets = dependencies.get(edge.dependent) ?? [];
-    targets.push(edge.dependsOn);
+    targets.push(edge.depends_on);
     dependencies.set(edge.dependent, targets);
   }
   const entries = [...nodes.values()]
     .map((node) => exportEntry(tx, node, nodes, dependencies, bindings))
     .sort((a, b) => a.filename.localeCompare(b.filename));
-  const base = { missionId: mission.id, missionVersion: mission.version };
+  const base = { mission_id: mission.id, mission_version: mission.version };
   const answer: ExportAnswer =
     format === ImportFormat.Json
       ? { ...base, entries }

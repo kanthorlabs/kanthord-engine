@@ -1,12 +1,12 @@
 import { DirectedGraph } from "graphology";
 
-export type DepEdge = { dependent: string; dependsOn: string };
+export type DepEdge = { dependent: string; depends_on: string };
 
 const NO_DEPENDENCIES = 0;
 
 export function detectCycle(edges: DepEdge[]): boolean {
   const graph = new DirectedGraph();
-  for (const { dependent, dependsOn } of edges) {
+  for (const { dependent, depends_on: dependsOn } of edges) {
     graph.mergeNode(dependent);
     graph.mergeNode(dependsOn);
     if (!graph.hasEdge(dependent, dependsOn)) {
@@ -52,7 +52,7 @@ export function buildDependencyClosureOf(
   }
 
   const closure = new Set<string>();
-  for (const { dependent, dependsOn } of allEdges) {
+  for (const { dependent, depends_on: dependsOn } of allEdges) {
     if (chain.has(dependent)) closure.add(dependsOn);
   }
   return closure;
@@ -66,7 +66,7 @@ export function waitEdges(
   for (const child of nodeIds) {
     const parent = parentMap.get(child);
     if (parent !== undefined)
-      edges.push({ dependent: parent, dependsOn: child });
+      edges.push({ dependent: parent, depends_on: child });
   }
   return edges;
 }
@@ -94,7 +94,7 @@ export function closureEdges(
       allEdges,
       parentMap,
     )) {
-      edges.push({ dependent, dependsOn });
+      edges.push({ dependent, depends_on: dependsOn });
     }
   }
   return edges;

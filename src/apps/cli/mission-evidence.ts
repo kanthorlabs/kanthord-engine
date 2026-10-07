@@ -40,7 +40,7 @@ function deleteBody(
   code: string,
 ) {
   return {
-    expectedMissionVersion: parsePositiveInt(
+    expected_mission_version: parsePositiveInt(
       options.expectedMissionVersion,
       code,
     ),
@@ -73,7 +73,7 @@ export function addEvidenceCommands(mission: Command): void {
     );
     const key = resolveKey(options);
     const result = await client(command, "evidence.delete")["evidence.delete"](
-      { params: { evidenceId }, query: {}, body },
+      { params: { evidence_id: evidenceId }, query: {}, body },
       { idempotencyKey: key },
     );
     handleMutationResult(
@@ -106,7 +106,10 @@ export function addEvidenceCommands(mission: Command): void {
     const key = resolveKey(options);
     const result = await client(command, "evidence.asset.delete")[
       "evidence.asset.delete"
-    ]({ params: { assetId }, query: {}, body }, { idempotencyKey: key });
+    ](
+      { params: { asset_id: assetId }, query: {}, body },
+      { idempotencyKey: key },
+    );
     handleMutationResult(
       result,
       "cli.mission.evidence.asset.delete.indeterminate",
@@ -128,7 +131,7 @@ export function addEvidenceCommands(mission: Command): void {
       printResult(
         await client(command, "evidence.asset.content.get")[
           "evidence.asset.content.get"
-        ]({ params: { assetId }, query: {}, body: null }),
+        ]({ params: { asset_id: assetId }, query: {}, body: null }),
         "evidence.asset.content.get",
       );
     });
@@ -151,7 +154,7 @@ export function addEvidenceCommands(mission: Command): void {
             "Use the host upload helper for object assets.",
           );
         return api["evidence.submit"](
-          { params: { nodeId }, query: {}, body },
+          { params: { node_id: nodeId }, query: {}, body },
           { idempotencyKey: key },
         );
       },
@@ -186,7 +189,7 @@ function addEvidenceReads(evidence: Command): void {
       );
     printResult(
       await client(command, "evidence.list")["evidence.list"]({
-        params: { nodeId },
+        params: { node_id: nodeId },
         query: {
           ...pagination(options),
           ...(attempt === undefined ? {} : { attempt }),
@@ -207,7 +210,7 @@ function addEvidenceReads(evidence: Command): void {
         );
       printResult(
         await client(command, "evidence.get")["evidence.get"]({
-          params: { evidenceId },
+          params: { evidence_id: evidenceId },
           query: {},
           body: null,
         }),

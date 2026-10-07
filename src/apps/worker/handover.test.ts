@@ -25,7 +25,7 @@ test("handover retries a lost answer with a fresh key and reports refresh and re
   const api = workerApi("http://127.0.0.1:1");
   const claim = testClaim();
   const keys = deriveHandoverKeys(SECRET);
-  const aad = handoverAad(claim.executionId, claim.claimant.runtimeIdentity);
+  const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
   const requestKeys: string[] = [];
   t.mock.method(
     api.worker,
@@ -95,7 +95,7 @@ test("another client secret refuses handover without exposing material", async (
     status: 200,
     data: sealEnvelope(
       deriveHandoverKeys(SECRET).handover,
-      handoverAad(claim.executionId, claim.claimant.runtimeIdentity),
+      handoverAad(claim.execution_id, claim.claimant.runtime_identity),
       { items: [ITEM] },
     ),
   }));

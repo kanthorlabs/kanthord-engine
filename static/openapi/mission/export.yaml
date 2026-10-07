@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: missionId
+      - name: mission_id
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/mission.export.Input/properties/params/properties/m\
-            issionId"
+            ission_id"
       - name: format
         in: query
         required: true
@@ -59,14 +59,14 @@ components:
         params:
           type: object
           properties:
-            missionId:
+            mission_id:
               type: string
               minLength: 34
               maxLength: 34
               pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: mission_ followed by a canonical 26-character uppercase ULID.
           required:
-            - missionId
+            - mission_id
           additionalProperties: false
         query:
           type: object
@@ -90,13 +90,13 @@ components:
       anyOf:
         - type: object
           properties:
-            missionId:
+            mission_id:
               type: string
               minLength: 34
               maxLength: 34
               pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: mission_ followed by a canonical 26-character uppercase ULID.
-            missionVersion:
+            mission_version:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
@@ -142,7 +142,7 @@ components:
                   parent:
                     type: string
                     pattern: ^[a-z][a-z0-9_-]*\.md$
-                  dependsOn:
+                  depends_on:
                     type: array
                     items:
                       type: string
@@ -158,19 +158,19 @@ components:
                   - bindings
                 additionalProperties: false
           required:
-            - missionId
-            - missionVersion
+            - mission_id
+            - mission_version
             - entries
           additionalProperties: false
         - type: object
           properties:
-            missionId:
+            mission_id:
               type: string
               minLength: 34
               maxLength: 34
               pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
               description: mission_ followed by a canonical 26-character uppercase ULID.
-            missionVersion:
+            mission_version:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
@@ -189,7 +189,7 @@ components:
                   - content
                 additionalProperties: false
           required:
-            - missionId
-            - missionVersion
+            - mission_id
+            - mission_version
             - files
           additionalProperties: false

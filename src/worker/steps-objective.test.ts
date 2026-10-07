@@ -86,13 +86,13 @@ async function fixture(
     },
   ];
   const claim = {
-    executionId: setup.execution_id,
-    nodeId: createIdentity("node"),
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
     attempt: 1,
-    pinnedRevision: 1,
-    createdAt: Date.now(),
-    expiredAt: Date.now() + 60000,
-    traceId: "trace",
+    pinned_revision: 1,
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
   };
   const input = {
     claim,
@@ -192,8 +192,8 @@ test("objective checkpoints budget-ended work and refuses release after a failed
   );
   let released = false;
   h.run.clients.scheduler = {
-    executionRelease: async (input: { body: { furtherWork: boolean } }) => {
-      released = input.body.furtherWork;
+    executionRelease: async (input: { body: { further_work: boolean } }) => {
+      released = input.body.further_work;
       return { type: "completed", status: 200, data: {} };
     },
   } as unknown as MethodClients["scheduler"];
@@ -243,7 +243,7 @@ test("start check judges passing tasks in order and discards verification change
   assert.ok(JSON.stringify(h.provider.calls[0]).includes(tasks[1]!.id));
   assert.ok(JSON.stringify(h.provider.calls[1]).includes(tasks[2]!.id));
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.nodeId),
+    h.input.workspaces.objectiveKey(h.input.claim.node_id),
     WorkspaceKind.Objective,
   );
 });
@@ -275,7 +275,7 @@ test("task work commits revisions and cleans verification writes before judgemen
   assert.ok(log.all[0]!.message.includes(current.id));
   assert.equal(existsSync(join(h.directory, "transient")), false);
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.nodeId),
+    h.input.workspaces.objectiveKey(h.input.claim.node_id),
     WorkspaceKind.Objective,
   );
 });
@@ -301,7 +301,7 @@ test("turn exhaustion during task work leaves an uncommitted checkpoint boundary
   assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), before);
   assert.ok(existsSync(join(h.directory, "notes")));
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.nodeId),
+    h.input.workspaces.objectiveKey(h.input.claim.node_id),
     WorkspaceKind.Objective,
   );
 });
@@ -336,10 +336,10 @@ test("B1 start-check timeout keeps failed disposition and cleanup runs after the
   const checked = await startCheck(h);
   assert.equal(checked.budgetEnd?.boundary, TaskBoundary.RunFailed);
   assert.equal(existsSync(join(h.directory, "transient")), false);
-  assert.ok(Date.now() >= deadline && Date.now() < h.input.claim.expiredAt);
+  assert.ok(Date.now() >= deadline && Date.now() < h.input.claim.expired_at);
   assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   const verification = await verifyTask(h, current);
-  assert.equal(verification.results[0]!.timedOut, true);
+  assert.equal(verification.results[0]!.timed_out, true);
 });
 
 test("S1 budget-ended task verification releases the evidenced head without further work", async (t) => {
@@ -355,9 +355,9 @@ test("S1 budget-ended task verification releases the evidenced head without furt
     },
   } as unknown as MethodClients["mission"];
   h.run.clients.scheduler = {
-    executionRelease: async (input: { body: { furtherWork: boolean } }) => {
+    executionRelease: async (input: { body: { further_work: boolean } }) => {
       assert.ok(evidenced);
-      assert.equal(input.body.furtherWork, false);
+      assert.equal(input.body.further_work, false);
       released = true;
       return { type: "completed", status: 200, data: {} };
     },

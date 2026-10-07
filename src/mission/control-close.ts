@@ -61,18 +61,18 @@ function landedEvidence(
   const pins = z.array(z.string()).parse(JSON.parse(revision.bindings));
   const binding = dependencies.bindings.getBindingRevision(
     tx,
-    address.bindingId,
+    address.binding_id,
   );
   if (
     node.kind !== NodeKind.Objective ||
-    !pins.includes(address.bindingId) ||
-    binding?.resourceIdentity.split(":")[0] !== MissionBindingKind.Repository
+    !pins.includes(address.binding_id) ||
+    binding?.resource_identity.split(":")[0] !== MissionBindingKind.Repository
   )
     throw new OperationError(
       HttpStatus.BadRequest,
       BINDING_MISMATCH,
       "Landed commit does not name the objective's pinned repository.",
-      { bindingId: address.bindingId },
+      { binding_id: address.binding_id },
     );
   const id = createIdentity("evidence");
   insertEvidence(
@@ -94,7 +94,7 @@ function landedEvidence(
         evidence_id: id,
         kind: AssetKind.Repository,
         content: canonicalJSON({
-          bindingId: address.bindingId,
+          binding_id: address.binding_id,
           commit: address.commit,
         }),
         published_at: now,
@@ -128,13 +128,13 @@ export function overrideNode(
     node.attempt === NO_ATTEMPT
       ? []
       : readLandedCommitEvidence(tx, nodeId, node.attempt).map((row) => row.id);
-  if (body.landedCommit !== undefined)
+  if (body.landed_commit !== undefined)
     evidenceIds.push(
       landedEvidence(
         tx,
         dependencies,
         node,
-        body.landedCommit,
+        body.landed_commit,
         body.reason,
         actor,
         now,

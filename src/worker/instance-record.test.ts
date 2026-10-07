@@ -121,7 +121,7 @@ test("instance records distinguish native/external placement and pure Scheduler 
                 assert.equal(transaction, tx);
                 assert.equal(runtimeIdentity, registration.runtime_identity);
                 assert.equal(now, NOW);
-                return { activity, executionId };
+                return { activity, execution_id: executionId };
               },
             },
           },
@@ -156,7 +156,7 @@ test("instance inventory pages live rows descending with both filters and canoni
         runningExecutionOfRuntime: () => null,
         activityOf: () => ({
           activity: InstanceActivity.Idle,
-          executionId: null,
+          execution_id: null,
         }),
       },
     };

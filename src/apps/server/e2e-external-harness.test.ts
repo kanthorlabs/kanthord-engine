@@ -168,8 +168,8 @@ test(
       );
     });
     const pullFile = cli.file({
-      resourceIdentity: resource,
-      runtimeIdentity: runtime,
+      resource_identity: resource,
+      runtime_identity: runtime,
     });
     const pull = () =>
       cli.read<Claim>(
@@ -179,39 +179,39 @@ test(
     const node = (id: string) =>
       cli.read<{ state: string }>(["mission", "node", "get", id]);
     const ctx = (execution: ExecutionRecord) => ({
-      executionId: execution.executionId,
+      execution_id: execution.execution_id,
       attempt: execution.attempt,
-      nodeRevision: execution.pinnedRevision,
+      node_revision: execution.pinned_revision,
     });
     const repoAt = (character: string) => ({
       kind: "repository",
-      bindingId: bindings.bindings.repo!.id,
+      binding_id: bindings.bindings.repo!.id,
       commit: character.repeat(40),
     });
     const release = (execution: ExecutionRecord) =>
-      cli.write<{ endedAt: number }>(
-        ["scheduler", "execution", "release", execution.executionId],
-        { furtherWork: false },
+      cli.write<{ ended_at: number }>(
+        ["scheduler", "execution", "release", execution.execution_id],
+        { further_work: false },
         auth.token,
       );
     const first = await pull();
     await t.test("EX10.3 steps claim and instance activity", async () => {
       assert.equal(first.kind, CLAIMED);
-      assert.equal(first.execution.nodeId, objective);
+      assert.equal(first.execution.node_id, objective);
       assert.equal(first.execution.attempt, FIRST_ATTEMPT);
-      assert.equal(first.execution.claimant.runtimeIdentity, runtime);
+      assert.equal(first.execution.claimant.runtime_identity, runtime);
       const instance = await cli.read<{
         activity: string;
         execution_id: string;
       }>(["worker", "instance", "get", runtime]);
       assert.equal(instance.activity, InstanceActivity.Executing);
-      assert.equal(instance.execution_id, first.execution.executionId);
+      assert.equal(instance.execution_id, first.execution.execution_id);
     });
     await t.test(
       "EX10.4 external harness receives no inference credential",
       async () => {
         await cli.refuses(
-          ["worker", "handover", first.execution.executionId],
+          ["worker", "handover", first.execution.execution_id],
           auth.token,
           "worker.authorization.refused",
         );
@@ -219,7 +219,7 @@ test(
           "scheduler",
           "execution",
           "get",
-          first.execution.executionId,
+          first.execution.execution_id,
         ]);
         assert.deepEqual(execution.credentials, []);
       },
@@ -237,7 +237,7 @@ test(
             "execution",
             "pinned-revision",
             "get",
-            first.execution.executionId,
+            first.execution.execution_id,
           ],
           auth.token,
         );
@@ -255,21 +255,24 @@ test(
           )
         ).evidence;
         assert.equal(work.provenance.kind, EXECUTION_ACTOR);
-        assert.ok("executionId" in work.provenance);
-        assert.equal(work.provenance.executionId, first.execution.executionId);
-        assert.ok(Number.isFinite((await release(first.execution)).endedAt));
+        assert.ok("execution_id" in work.provenance);
+        assert.equal(
+          work.provenance.execution_id,
+          first.execution.execution_id,
+        );
+        assert.ok(Number.isFinite((await release(first.execution)).ended_at));
         assert.equal((await node(objective)).state, NodeState.Waiting);
       },
     );
     const second = await pull();
     await t.test("EX10.6 evaluation claim", async () => {
-      assert.equal(second.execution.nodeId, objective);
+      assert.equal(second.execution.node_id, objective);
       assert.equal(second.execution.attempt, FIRST_ATTEMPT);
-      const claim = await cli.read<{ claimState: string }>(
-        ["scheduler", "claim", "get", second.execution.executionId],
+      const claim = await cli.read<{ claim_state: string }>(
+        ["scheduler", "claim", "get", second.execution.execution_id],
         auth.token,
       );
-      assert.equal(claim.claimState, ClaimState.Running);
+      assert.equal(claim.claim_state, ClaimState.Running);
       assert.equal((await node(objective)).state, NodeState.Evaluating);
     });
     async function verification(
@@ -279,7 +282,7 @@ test(
     ) {
       return (
         await cli.write<Submitted>(
-          ["mission", "evidence", "submit", execution.nodeId],
+          ["mission", "evidence", "submit", execution.node_id],
           {
             ...ctx(execution),
             subject: "verification run",
@@ -287,16 +290,16 @@ test(
               {
                 kind: "produced",
                 content: {
-                  mediaType: "text/plain",
+                  media_type: "text/plain",
                   encoding: "base64",
                   data: "b2s=",
                 },
               },
             ],
             verification: {
-              testedInput: input,
+              tested_input: input,
               results: [
-                { command, exitCode: 0, signal: null, timedOut: false },
+                { command, exit_code: 0, signal: null, timed_out: false },
               ],
             },
           },
@@ -315,32 +318,32 @@ test(
         ["mission", "assessment", "submit", objective],
         {
           ...ctx(second.execution),
-          evidenceIds: [run.id, work.id],
-          childOutcomeIds: [],
+          evidence_ids: [run.id, work.id],
+          child_outcome_ids: [],
           result: SUCCESS,
           rationale: "hello.txt exists",
-          testedInput: repoAt("a"),
+          tested_input: repoAt("a"),
         },
         auth.token,
       );
       assert.equal(assessed.assessment.actor.kind, EXECUTION_ACTOR);
-      assert.equal(assessed.assessment.workerVersion, WORKER);
+      assert.equal(assessed.assessment.worker_version, WORKER);
       assert.equal(assessed.node.state, NodeState.Completed);
       assert.equal(assessed.outcome.result, SUCCESS);
-      assert.equal(assessed.outcome.closingEvent, ASSESSMENT_PASSED);
+      assert.equal(assessed.outcome.closing_event, ASSESSMENT_PASSED);
       outcomeA = assessed.outcome.id;
-      const claim = await cli.read<{ claimState: string }>(
-        ["scheduler", "claim", "get", second.execution.executionId],
+      const claim = await cli.read<{ claim_state: string }>(
+        ["scheduler", "claim", "get", second.execution.execution_id],
         auth.token,
       );
-      assert.equal(claim.claimState, ClaimState.Finished);
+      assert.equal(claim.claim_state, ClaimState.Finished);
     });
     const third = await pull();
     let report!: Evidence;
     await t.test(
       "EX10.8 initiative report follows terminal objective",
       async () => {
-        assert.equal(third.execution.nodeId, initiative);
+        assert.equal(third.execution.node_id, initiative);
         const children = await cli.read<{
           items: { id: string; state: string }[];
         }>(
@@ -349,7 +352,7 @@ test(
             "execution",
             "objective",
             "list",
-            third.execution.executionId,
+            third.execution.execution_id,
           ],
           auth.token,
         );
@@ -365,7 +368,7 @@ test(
             "objective",
             "outcome",
             "list",
-            third.execution.executionId,
+            third.execution.execution_id,
           ],
           auth.token,
         );
@@ -383,7 +386,7 @@ test(
                 {
                   kind: "produced",
                   content: {
-                    mediaType: "text/markdown",
+                    media_type: "text/markdown",
                     encoding: "base64",
                     data: Buffer.from("A is complete.").toString("base64"),
                   },
@@ -401,23 +404,23 @@ test(
       "EX10.9 initiative assessment closes with child outcome",
       async () => {
         const fourth = await pull();
-        assert.equal(fourth.execution.nodeId, initiative);
+        assert.equal(fourth.execution.node_id, initiative);
         const testedInput = [repoAt("b")];
         const run = await verification(fourth.execution, testedInput, "true");
         const assessed = await cli.write<Assessed>(
           ["mission", "assessment", "submit", initiative],
           {
             ...ctx(fourth.execution),
-            evidenceIds: [run.id, report.id],
-            childOutcomeIds: [outcomeA],
+            evidence_ids: [run.id, report.id],
+            child_outcome_ids: [outcomeA],
             result: SUCCESS,
             rationale: "A is complete.",
-            testedInput,
+            tested_input: testedInput,
           },
           auth.token,
         );
         assert.equal(assessed.node.state, NodeState.Completed);
-        assert.deepEqual(assessed.assessment.childNodeIds, [objective]);
+        assert.deepEqual(assessed.assessment.child_node_ids, [objective]);
         assert.equal(assessed.outcome.result, SUCCESS);
       },
     );
@@ -447,8 +450,8 @@ test(
         assert.ok(
           executions.items.every(
             (item) =>
-              item.claimState === ClaimState.Finished &&
-              item.claimant.runtimeIdentity === runtime,
+              item.claim_state === ClaimState.Finished &&
+              item.claimant.runtime_identity === runtime,
           ),
         );
       },

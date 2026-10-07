@@ -11,7 +11,7 @@ import {
 
 const edge = (dependent: string, dependsOn: string): DepEdge => ({
   dependent,
-  dependsOn,
+  depends_on: dependsOn,
 });
 
 test("detectCycle finds two-node, three-node and self cycles", () => {

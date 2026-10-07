@@ -49,11 +49,11 @@ const FILTERED = [
 test("all record reads enforce human access with valid parameters and return precise HTTP refusals", async (t) => {
   const h = await gatewayFixture(t, { machines: fakeMachines() });
   const params = {
-    nodeId: createIdentity("node"),
-    assessmentId: createIdentity("assessment"),
-    outcomeId: createIdentity("outcome"),
+    node_id: createIdentity("node"),
+    assessment_id: createIdentity("assessment"),
+    outcome_id: createIdentity("outcome"),
     attempt: String(FIRST_ATTEMPT),
-    actionKey: "repo.pull_request",
+    action_key: "repo.pull_request",
   };
   const machine = await h.machineToken(TEST_PROJECT_ID, TEST_WORKER_BINDING);
   const pathOf = (name: (typeof READS)[number]) =>
@@ -104,7 +104,7 @@ test("all record reads enforce human access with valid parameters and return pre
         "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?)",
       )
       .run(
-        params.nodeId,
+        params.node_id,
         missionId,
         NodeKind.Objective,
         "objective.md",
@@ -118,8 +118,8 @@ test("all record reads enforce human access with valid parameters and return pre
       .prepare(
         "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)",
       )
-      .run(taskId, missionId, NodeKind.Task, "task.md", params.nodeId, NOW);
-    params.nodeId = taskId;
+      .run(taskId, missionId, NodeKind.Task, "task.md", params.node_id, NOW);
+    params.node_id = taskId;
   });
   for (const name of [
     "attempt.list",
@@ -139,7 +139,7 @@ test("all record reads enforce human access with valid parameters and return pre
       NodeState.Available,
       INITIAL_ATTEMPT,
       INITIAL_PRIORITY,
-      params.nodeId,
+      params.node_id,
     );
   for (const name of [
     "attempt.list",
@@ -166,7 +166,7 @@ test("all record reads enforce human access with valid parameters and return pre
     );
     for (const attempt of [null, false, true, "", " ", [], {}]) {
       const result = await api.read(
-        { params: { nodeId: params.nodeId }, query: { attempt }, body: null },
+        { params: { node_id: params.node_id }, query: { attempt }, body: null },
         { identity },
       );
       assert.equal(result.type, OperationResultType.Failure);
@@ -192,9 +192,9 @@ test("all record reads enforce human access with valid parameters and return pre
       const result = await api.read(
         {
           params: {
-            nodeId: params.nodeId,
+            node_id: params.node_id,
             attempt,
-            ...(name === ACTION_GET ? { actionKey: params.actionKey } : {}),
+            ...(name === ACTION_GET ? { action_key: params.action_key } : {}),
           },
           query: {},
           body: null,

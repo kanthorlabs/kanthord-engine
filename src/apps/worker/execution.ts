@@ -36,17 +36,20 @@ export async function hostExecution(
   input: HostExecutionInput,
   execute = runNativeExecution,
 ): Promise<Diagnostic | null> {
-  assert.ok(input.claim.executionId);
+  assert.ok(input.claim.execution_id);
   assert.ok(input.clientSecret);
   let handover: Awaited<ReturnType<typeof takeHandover>> | undefined;
   let revoked = false;
-  const context = new CancellationContext(input.context, input.claim.expiredAt);
+  const context = new CancellationContext(
+    input.context,
+    input.claim.expired_at,
+  );
   try {
     throwIfCancelled(context);
     handover = await takeHandover({ ...input, context });
     input.log({
       msg: "credential handover received",
-      executionId: input.claim.executionId,
+      executionId: input.claim.execution_id,
       credentialId: handover.handoverItem.credential_id,
     });
     const setup = completed(
@@ -54,13 +57,13 @@ export async function hostExecution(
         () =>
           input.api.worker["execution.setup.get"](
             {
-              params: { execution_id: input.claim.executionId },
+              params: { execution_id: input.claim.execution_id },
               query: {},
               body: null,
             },
             { context },
           ),
-        input.claim.expiredAt,
+        input.claim.expired_at,
         context,
       ),
     );
@@ -106,7 +109,7 @@ export async function hostExecution(
     if (context.err()) throw context.err();
     input.log({
       msg: "execution ended",
-      executionId: input.claim.executionId,
+      executionId: input.claim.execution_id,
       kind: result.kind,
       ...(result.kind === ENDED ? { code: result.code } : {}),
     });

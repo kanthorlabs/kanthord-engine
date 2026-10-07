@@ -43,24 +43,24 @@ test("initiative currency follows real child outcomes and only current closure r
   const childId = createIdentity("node");
   const dependentId = createIdentity("node");
   h.store.transaction((tx) => {
-    const base = getRevision(tx, h.nodeId, FIRST_REVISION);
+    const base = getRevision(tx, h.node_id, FIRST_REVISION);
     insertNode(tx, {
       id: childId,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.nodeId,
+      parent_id: h.node_id,
       created_at: FIRST_REVISION,
     });
     insertRevision(tx, {
       ...base,
-      nodeId: childId,
+      node_id: childId,
       filename: "child.md",
       tasks: [],
     });
     insertNode(tx, {
       id: dependentId,
-      mission_id: h.missionId,
+      mission_id: h.mission_id,
       kind: NodeKind.Initiative,
       filename: "dependent.md",
       parent_id: null,
@@ -68,15 +68,15 @@ test("initiative currency follows real child outcomes and only current closure r
     });
     insertRevision(tx, {
       ...base,
-      nodeId: dependentId,
+      node_id: dependentId,
       filename: "dependent.md",
     });
-    insertDependency(tx, h.missionId, dependentId, h.nodeId);
-    setNodeState(tx, h.nodeId, NodeState.Evaluating);
+    insertDependency(tx, h.mission_id, dependentId, h.node_id);
+    setNodeState(tx, h.node_id, NodeState.Evaluating);
   });
   const input = { kind: AssetKind.Produced, sha256: "a".repeat(64) } as const;
   const evidence = await h.invoke("evidence.submit", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
       ...h.context,
@@ -85,20 +85,20 @@ test("initiative currency follows real child outcomes and only current closure r
         {
           kind: AssetKind.Produced,
           content: {
-            mediaType: "text/plain",
+            media_type: "text/plain",
             encoding: "base64",
             data: "b2s=",
           },
         },
       ],
       verification: {
-        testedInput: input,
+        tested_input: input,
         results: [
           {
             command: "true",
-            exitCode: SUCCESSFUL_EXIT_CODE,
+            exit_code: SUCCESSFUL_EXIT_CODE,
             signal: null,
-            timedOut: false,
+            timed_out: false,
           },
         ],
       },
@@ -106,15 +106,15 @@ test("initiative currency follows real child outcomes and only current closure r
   });
   const body = {
     ...h.context,
-    evidenceIds: [evidence.evidence.id],
-    childOutcomeIds: [] as string[],
+    evidence_ids: [evidence.evidence.id],
+    child_outcome_ids: [] as string[],
     result: AssessmentResult.Success,
     rationale: "Passed",
-    testedInput: input,
+    tested_input: input,
   };
   const submit = () =>
     h.invoke("assessment.submit", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body,
     });
@@ -156,7 +156,7 @@ test("initiative currency follows real child outcomes and only current closure r
     submit(),
     (error) => error instanceof OperationError && error.code === VALIDATION,
   );
-  body.childOutcomeIds = [outcomeId];
+  body.child_outcome_ids = [outcomeId];
   const final = await submit();
   assert.equal(final.assessment.currency?.current, true);
   assert.equal(final.outcome?.result, AssessmentResult.Success);
@@ -171,43 +171,45 @@ test("initiative currency follows real child outcomes and only current closure r
 async function fixture(t: TestContext, action: RepositoryAction | null = null) {
   const h = evidenceHarness(t, IDENTITY);
   h.dependencies.bindings.repositoryPolicyOf = () => ({
-    bindingId: h.repositoryId,
-    projectId: h.projectId,
+    binding_id: h.repositoryId,
+    project_id: h.project_id,
     name: "repo",
     address: "git@github.com:owner/repo.git",
     platform: "github",
-    sshCredential: "github-ssh",
+    ssh_credential: "github-ssh",
     credential: "github",
-    baseBranch: "main",
+    base_branch: "main",
     action,
-    projectPrompt: null,
+    project_prompt: null,
   });
   const address = {
     kind: AssetKind.Repository,
-    bindingId: h.repositoryId,
+    binding_id: h.repositoryId,
     commit: "a".repeat(40),
   } as const;
   const evidence = await h.invoke("evidence.submit", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
       ...h.context,
       subject: "Verified",
       assets: [{ kind: AssetKind.Repository, address }],
       verification: {
-        testedInput: address,
+        tested_input: address,
         results: [
           {
             command: "true",
-            exitCode: SUCCESSFUL_EXIT_CODE,
+            exit_code: SUCCESSFUL_EXIT_CODE,
             signal: null,
-            timedOut: false,
+            timed_out: false,
           },
         ],
       },
     },
   });
-  h.store.transaction((tx) => setNodeState(tx, h.nodeId, NodeState.Evaluating));
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
   let revokes = NO_CALLS;
   h.dependencies.schedulerClaims.revoke = () => {
     revokes++;
@@ -216,20 +218,20 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
   };
   const body: AssessmentSubmit = {
     ...h.context,
-    evidenceIds: [evidence.evidence.id],
-    childOutcomeIds: [],
+    evidence_ids: [evidence.evidence.id],
+    child_outcome_ids: [],
     result: AssessmentResult.Success,
     rationale: "Passed",
-    testedInput: address,
+    tested_input: address,
   };
   const submit = (input = body) =>
     h.invoke("assessment.submit", {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: input,
     });
   assert.equal(h.node().state, NodeState.Evaluating);
-  assert.equal(body.evidenceIds.length, FIRST_REVISION);
+  assert.equal(body.evidence_ids.length, FIRST_REVISION);
   return { ...h, body, submit, revokes: () => revokes };
 }
 
@@ -238,10 +240,10 @@ test("current passing assessments close attempts and revoke claims without an ex
   const result = await h.submit();
   assert.ok("state" in result.node);
   assert.equal(result.node.state, NodeState.Completed);
-  assert.equal(result.outcome?.closingEvent, ClosingEvent.AssessmentPassed);
-  assert.equal(result.outcome?.assessmentId, result.assessment.id);
+  assert.equal(result.outcome?.closing_event, ClosingEvent.AssessmentPassed);
+  assert.equal(result.outcome?.assessment_id, result.assessment.id);
   assert.equal(
-    h.store.transaction((tx) => readOpenAttempt(tx, h.nodeId)),
+    h.store.transaction((tx) => readOpenAttempt(tx, h.node_id)),
     null,
   );
   assert.equal(h.revokes(), FIRST_REVISION);
@@ -261,7 +263,7 @@ test("current nonpassing assessments block and a required-action pass keeps eval
     assert.ok("state" in answer.node);
     assert.equal(answer.node.state, NodeState.Blocked);
     assert.equal(
-      answer.outcome?.closingEvent,
+      answer.outcome?.closing_event,
       ClosingEvent.AssessmentNotPassed,
     );
     assert.equal(h.revokes(), FIRST_REVISION);
@@ -272,19 +274,19 @@ test("current nonpassing assessments block and a required-action pass keeps eval
   assert.equal(answer.node.state, NodeState.Evaluating);
   assert.equal(answer.outcome, null);
   assert.equal(h.revokes(), NO_CALLS);
-  assert.ok(h.store.transaction((tx) => readOpenAttempt(tx, h.nodeId)));
+  assert.ok(h.store.transaction((tx) => readOpenAttempt(tx, h.node_id)));
 });
 
 test("nonpassing assessment closes into Blocked while preserving its unresolved request", async (t) => {
   const h = await fixture(t, RepositoryAction.PullRequest);
   await h.submit();
   const request = await h.invoke("evidence.request", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
       ...h.context,
       subject: "PR",
-      requirementKey: "repo.pull_request",
+      requirement_key: "repo.pull_request",
       address: {
         kind: PlatformAddressKind.PullRequest,
         resource_identity: "repository:github:owner/repo",
@@ -300,7 +302,7 @@ test("nonpassing assessment closes into Blocked while preserving its unresolved 
   assert.equal(answer.node.state, NodeState.Blocked);
   assert.equal(h.revokes(), FIRST_REVISION);
   h.store.transaction((tx) => {
-    assert.equal(readOpenAttempt(tx, h.nodeId), null);
+    assert.equal(readOpenAttempt(tx, h.node_id), null);
     assert.equal(readEvidence(tx, request.id)?.end_state, null);
   });
 });

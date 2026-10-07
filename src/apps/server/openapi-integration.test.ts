@@ -514,7 +514,7 @@ type ResolvedOperation = {
   "x-timeout-ms"?: number;
   security?: unknown;
 };
-const MISSION_GET_PATH = "/api/mission/project/{projectId}";
+const MISSION_GET_PATH = "/api/mission/project/{project_id}";
 const MISSION_PROJECT_NAME = "openapi-mission";
 const apiOperations = [
   ...Object.values(gatewayOperations),
@@ -717,7 +717,7 @@ function assertBlockedNode(schema: unknown): void {
     [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task],
   );
   for (const variant of variants) {
-    const context = variant.properties.blockedContext;
+    const context = variant.properties.blocked_context;
     if (variant.properties.kind?.const === NodeKind.Task) {
       assert.equal(context, undefined);
       continue;
@@ -728,14 +728,14 @@ function assertBlockedNode(schema: unknown): void {
     assert.deepEqual(
       Object.keys(context.properties.outcome!.properties).sort(),
       [
-        "assessmentId",
+        "assessment_id",
         "attempt",
-        "closingEvent",
-        "createdAt",
-        "evidenceIds",
+        "closing_event",
+        "created_at",
+        "evidence_ids",
         "id",
-        "nodeId",
-        "nodeRevision",
+        "node_id",
+        "node_revision",
         "result",
       ],
     );
@@ -746,23 +746,23 @@ function assertEvidenceShape(schema: ResolvedSchema): void {
   assert.deepEqual(Object.keys(schema.properties).sort(), [
     "assets",
     "attempt",
-    "createdAt",
-    "endState",
+    "created_at",
+    "end_state",
     "id",
-    "nodeId",
+    "node_id",
     "provenance",
-    "requirementKey",
+    "requirement_key",
     "subject",
     "verification",
   ]);
   assert.deepEqual(schema.required, [
     "id",
-    "nodeId",
+    "node_id",
     "attempt",
     "subject",
     "assets",
     "provenance",
-    "createdAt",
+    "created_at",
   ]);
   const variants = schema.properties.assets!.items!.oneOf!;
   assert.deepEqual(
@@ -772,15 +772,15 @@ function assertEvidenceShape(schema: ResolvedSchema): void {
   for (const asset of variants) {
     assert.deepEqual(asset.required, [
       "id",
-      "publishedAt",
-      "expiredAt",
+      "published_at",
+      "expired_at",
       "kind",
       "address",
       ...(asset.properties.kind!.const === AssetKind.Object
-        ? ["storageBindingId", "size", "mediaType"]
+        ? ["storage_binding_id", "size", "media_type"]
         : []),
     ]);
-    for (const field of ["publishedAt", "expiredAt"])
+    for (const field of ["published_at", "expired_at"])
       assert.ok(
         asset.properties[field]!.anyOf!.some(
           (item) => item.type === NULL_SCHEMA_TYPE,
@@ -789,7 +789,7 @@ function assertEvidenceShape(schema: ResolvedSchema): void {
     assert.ok(asset.properties.address);
   }
   assert.deepEqual(schema.properties.verification!.required, [
-    "testedInput",
+    "tested_input",
     "results",
   ]);
   assert.deepEqual(
@@ -842,7 +842,7 @@ test("named evidence exceptions retain record shapes and conditional request val
       "utf8",
     ),
   );
-  for (const field of ["evidenceIds", "childOutcomeIds"])
+  for (const field of ["evidence_ids", "child_outcome_ids"])
     assert.equal(
       assessment.components.schemas["mission.assessment.submit.Input"]
         .properties.body.properties[field].uniqueItems,
@@ -870,19 +870,19 @@ test("objective list exception preserves full objective and identity-only varian
   assert.deepEqual(full.required, [
     "id",
     "filename",
-    "missionId",
-    "parentId",
-    "visibleRevision",
+    "mission_id",
+    "parent_id",
+    "visible_revision",
     "content",
-    "retiredAt",
-    "pinnedByAttempts",
+    "retired_at",
+    "pinned_by_attempts",
     "kind",
     "state",
     "attempt",
     "priority",
-    "dependsOn",
+    "depends_on",
   ]);
-  assert.deepEqual(full.properties.blockedContext.required, [
+  assert.deepEqual(full.properties.blocked_context.required, [
     "outcome",
     "requests",
   ]);
@@ -1175,10 +1175,10 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   const executionQuery =
     executionFragment.components.schemas["scheduler.execution.list.Input"]!
       .properties.query;
-  assert.deepEqual(executionQuery.dependentRequired, { attempt: ["nodeId"] });
+  assert.deepEqual(executionQuery.dependentRequired, { attempt: ["node_id"] });
   assert.match(
     executionQuery.properties.attempt.description!,
-    /Requires nodeId/,
+    /Requires node_id/,
   );
   const executionPage = resolved.paths?.[executionListPath]?.get?.responses[
     HttpStatus.OK
@@ -1265,7 +1265,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
         schema.type,
       ]),
     ),
-    { id: "string", projectId: "string", version: "integer" },
+    { id: "string", project_id: "string", version: "integer" },
   );
   const fixture = await gatewayFixture(t);
   for (const name of [
@@ -1315,13 +1315,13 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   assert.equal(created.status, HttpStatus.OK);
   const project = projectOperations.create.output.parse(await created.json());
   const response = await fixture.request(
-    missionOperations.get.path.replace(":projectId", project.id),
+    missionOperations.get.path.replace(":project_id", project.id),
     { headers: { Authorization: headers.Authorization } },
   );
   assert.equal(response.status, HttpStatus.OK);
   const mission = missionSchema.parse(await response.json());
   assert.match(mission.id, /^mission_/);
-  assert.equal(mission.projectId, project.id);
+  assert.equal(mission.project_id, project.id);
   assert.equal(mission.version, MISSION_INITIAL_VERSION);
   const health = await fixture.request(gatewayOperations.liveness.path);
   gatewayOperations.liveness.output.parse(await health.json());

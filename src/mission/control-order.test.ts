@@ -78,7 +78,7 @@ for (const control of CONTROLS) {
     expectedAttempt: number,
   ) =>
     h.invoke(control.operation, {
-      params: { nodeId: h.nodeId },
+      params: { node_id: h.node_id },
       query: {},
       body: { ...h.body(expectedState, expectedAttempt), ...control.extra },
     } as never);
@@ -86,7 +86,7 @@ for (const control of CONTROLS) {
   for (const terminal of [NodeState.Completed, NodeState.Discarded]) {
     test(`${control.operation} on a ${terminal} node answers terminal before expected state and admitted states`, async (t) => {
       const h = controlHarness(t, IDENTITY);
-      h.store.transaction((tx) => setNodeState(tx, h.nodeId, terminal));
+      h.store.transaction((tx) => setNodeState(tx, h.node_id, terminal));
       const before = h.node();
       await assert.rejects(
         call(h, control.refused, STALE_ATTEMPT),
@@ -102,7 +102,7 @@ for (const control of CONTROLS) {
 
   test(`${control.operation} answers state_conflict before control_refused on a nonterminal node`, async (t) => {
     const h = controlHarness(t, IDENTITY);
-    h.store.transaction((tx) => setNodeState(tx, h.nodeId, control.admitted));
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, control.admitted));
     const before = h.node();
     await assert.rejects(
       call(h, control.refused, before.attempt!),
@@ -112,7 +112,7 @@ for (const control of CONTROLS) {
       call(h, control.admitted, before.attempt! + STALE_ATTEMPT),
       rejectsWith(ControlError.StateConflict),
     );
-    h.store.transaction((tx) => setNodeState(tx, h.nodeId, control.refused));
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, control.refused));
     await assert.rejects(
       call(h, control.admitted, before.attempt!),
       rejectsWith(ControlError.StateConflict),
@@ -122,7 +122,7 @@ for (const control of CONTROLS) {
 
   test(`${control.operation} answers control_refused when expected state equals the current state outside the admitted states`, async (t) => {
     const h = controlHarness(t, IDENTITY);
-    h.store.transaction((tx) => setNodeState(tx, h.nodeId, control.refused));
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, control.refused));
     const before = h.node();
     await assert.rejects(
       call(h, control.refused, before.attempt!),
@@ -137,19 +137,19 @@ const unblock = (
   blockedAttempt: number,
 ) =>
   h.invoke("node.unblock", {
-    params: { nodeId: h.nodeId },
+    params: { node_id: h.node_id },
     query: {},
     body: {
-      expectedMissionVersion: FIRST_REVISION,
+      expected_mission_version: FIRST_REVISION,
       expected_revision: FIRST_REVISION,
-      blockedAttempt,
+      blocked_attempt: blockedAttempt,
     },
   } as never);
 
 for (const terminal of [NodeState.Completed, NodeState.Discarded]) {
   test(`node.unblock on a ${terminal} node answers terminal before blockedAttempt and admitted states`, async (t) => {
     const h = controlHarness(t, IDENTITY);
-    h.store.transaction((tx) => setNodeState(tx, h.nodeId, terminal));
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, terminal));
     const before = h.node();
     await assert.rejects(
       unblock(h, STALE_ATTEMPT),

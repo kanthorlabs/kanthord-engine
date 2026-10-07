@@ -55,7 +55,7 @@ function bindingOf(
     })
     .filter(
       (binding) =>
-        binding.resourceIdentity.split(SEPARATOR)[RESOURCE_KIND_SEGMENT] ===
+        binding.resource_identity.split(SEPARATOR)[RESOURCE_KIND_SEGMENT] ===
         kind,
     );
   assert.ok(matches.length <= SINGLE_BINDING_MATCH);
@@ -76,7 +76,7 @@ export function storageBindingIdOf(
   revision: Revision,
 ): string | null {
   return (
-    bindingOf(tx, bindings, revision, MissionBindingKind.Storage)?.bindingId ??
+    bindingOf(tx, bindings, revision, MissionBindingKind.Storage)?.binding_id ??
     null
   );
 }
@@ -86,7 +86,7 @@ function bindingMismatch(bindingId: string): never {
     HttpStatus.BadRequest,
     MissionErrorCode.EvidenceBindingMismatch,
     "Repository binding does not match the node.",
-    { bindingId },
+    { binding_id: bindingId },
   );
 }
 
@@ -98,25 +98,25 @@ export function requireRepositoryAddress(
   address: RepositoryAddress,
 ): void {
   assert.notEqual(node.kind, NodeKind.Task);
-  assert.equal(revision.nodeId, node.id);
+  assert.equal(revision.node_id, node.id);
   if (node.kind === NodeKind.Objective) {
     if (
-      repositoryBindingOf(tx, bindings, revision)?.bindingId !==
-      address.bindingId
+      repositoryBindingOf(tx, bindings, revision)?.binding_id !==
+      address.binding_id
     )
-      bindingMismatch(address.bindingId);
+      bindingMismatch(address.binding_id);
     return;
   }
   const mission = readMission(tx, node.mission_id);
   assert.ok(mission);
-  const binding = bindings.getBindingRevision(tx, address.bindingId);
+  const binding = bindings.getBindingRevision(tx, address.binding_id);
   if (
     !binding ||
-    binding.projectId !== mission.projectId ||
-    binding.resourceIdentity.split(SEPARATOR)[RESOURCE_KIND_SEGMENT] !==
+    binding.project_id !== mission.project_id ||
+    binding.resource_identity.split(SEPARATOR)[RESOURCE_KIND_SEGMENT] !==
       MissionBindingKind.Repository
   )
-    bindingMismatch(address.bindingId);
+    bindingMismatch(address.binding_id);
 }
 
 export function repositoryBindingIdsOf(
@@ -133,7 +133,7 @@ export function repositoryBindingIdsOf(
       bindings,
       getRevision(tx, nodeId, nodeRevision),
     );
-    return binding ? [binding.bindingId] : [];
+    return binding ? [binding.binding_id] : [];
   }
   assert.equal(node.kind, NodeKind.Initiative);
   assert.ok(tx.database.isTransaction);
@@ -143,17 +143,17 @@ export function repositoryBindingIdsOf(
       child.kind === NodeKind.Objective &&
       child.retired_at === null,
   );
-  const resources = new Map<string, { bindingId: string; revision: number }>();
+  const resources = new Map<string, { binding_id: string; revision: number }>();
   for (const child of objectives) {
     const row = readCurrentRevision(tx, child.id);
     assert.ok(row);
     const binding = repositoryBindingOf(tx, bindings, revisionFromRow(tx, row));
     if (!binding) continue;
-    const previous = resources.get(binding.resourceIdentity);
+    const previous = resources.get(binding.resource_identity);
     if (!previous || previous.revision < binding.revision)
-      resources.set(binding.resourceIdentity, binding);
+      resources.set(binding.resource_identity, binding);
   }
-  return [...resources.values()].map(({ bindingId }) => bindingId);
+  return [...resources.values()].map(({ binding_id: bindingId }) => bindingId);
 }
 
 export function requireTestedInput(
@@ -164,9 +164,9 @@ export function requireTestedInput(
   testedInput: TestedInput,
 ): void {
   assert.notEqual(node.kind, NodeKind.Task);
-  assert.equal(revision.nodeId, node.id);
+  assert.equal(revision.node_id, node.id);
   if (node.kind === NodeKind.Objective) {
-    if (Array.isArray(testedInput)) invalidExecutionInput("testedInput");
+    if (Array.isArray(testedInput)) invalidExecutionInput("tested_input");
     if (testedInput.kind === AssetKind.Repository)
       requireRepositoryAddress(tx, bindings, node, revision, testedInput);
     return;
@@ -176,32 +176,32 @@ export function requireTestedInput(
       (id) => {
         const binding = bindings.getBindingRevision(tx, id);
         assert.ok(binding);
-        return binding.resourceIdentity;
+        return binding.resource_identity;
       },
     ),
   );
   if (resources.size === NO_REPOSITORY_BINDINGS) {
     if (Array.isArray(testedInput) || testedInput.kind === AssetKind.Repository)
-      invalidExecutionInput("testedInput");
+      invalidExecutionInput("tested_input");
     return;
   }
-  if (!Array.isArray(testedInput)) invalidExecutionInput("testedInput");
+  if (!Array.isArray(testedInput)) invalidExecutionInput("tested_input");
   const seen = new Set<string>();
   for (const address of testedInput) {
     requireRepositoryAddress(tx, bindings, node, revision, address);
-    const binding = bindings.getBindingRevision(tx, address.bindingId);
+    const binding = bindings.getBindingRevision(tx, address.binding_id);
     assert.ok(binding);
     if (
-      !resources.has(binding.resourceIdentity) ||
-      seen.has(binding.resourceIdentity)
+      !resources.has(binding.resource_identity) ||
+      seen.has(binding.resource_identity)
     )
-      bindingMismatch(address.bindingId);
-    seen.add(binding.resourceIdentity);
+      bindingMismatch(address.binding_id);
+    seen.add(binding.resource_identity);
   }
-  if (seen.size !== resources.size) invalidExecutionInput("testedInput");
+  if (seen.size !== resources.size) invalidExecutionInput("tested_input");
 }
 
-export function producedContent(bytes: { mediaType: string; data: string }) {
+export function producedContent(bytes: { media_type: string; data: string }) {
   const decoded = Buffer.from(bytes.data, CONTENT_ENCODING);
   if (decoded.toString(CONTENT_ENCODING) !== bytes.data)
     invalidExecutionInput("assets");
@@ -212,7 +212,7 @@ export function producedContent(bytes: { mediaType: string; data: string }) {
       "Inline evidence exceeds the byte limit.",
     );
   return {
-    mediaType: bytes.mediaType,
+    media_type: bytes.media_type,
     sha256: createHash(SHA256).update(decoded).digest(HEX),
     data: bytes.data,
   };
@@ -226,7 +226,7 @@ export function objectKey(
   attempt: number,
   assetId: string,
 ): string {
-  assert.equal(binding.projectId, projectId);
+  assert.equal(binding.project_id, projectId);
   assert.ok(Number.isSafeInteger(attempt) && attempt >= MINIMUM_ATTEMPT);
   return [binding.prefix, projectId, missionId, nodeId, attempt, assetId].join(
     "/",
@@ -255,7 +255,7 @@ export function requiredVerifications(
   revision: Revision,
 ): string[] {
   assert.notEqual(node.kind, NodeKind.Task);
-  assert.equal(revision.nodeId, node.id);
+  assert.equal(revision.node_id, node.id);
   const commands = [...revision.content.verifications];
   if (node.kind === NodeKind.Objective) {
     for (const task of revision.tasks ?? [])
@@ -294,7 +294,7 @@ export function verificationPasses(
   return (
     verificationCovers(verification, expected) &&
     verification.results.every(
-      (result) => result.exitCode === SUCCESSFUL_EXIT_CODE,
+      (result) => result.exit_code === SUCCESSFUL_EXIT_CODE,
     )
   );
 }

@@ -44,19 +44,19 @@ test("initiative reads use outcome revisions, include discarded children, minimi
   const outcomeId = createIdentity("outcome");
   const evidenceId = createIdentity("evidence");
   h.store.transaction((tx) => {
-    const base = getRevision(tx, h.nodeId, FIRST_REVISION);
+    const base = getRevision(tx, h.node_id, FIRST_REVISION);
     for (const id of [childId, freshId]) {
       insertNode(tx, {
         id,
-        mission_id: h.missionId,
+        mission_id: h.mission_id,
         kind: NodeKind.Objective,
         filename: `${id.toLowerCase()}.md`,
-        parent_id: h.nodeId,
+        parent_id: h.node_id,
         created_at: CREATED_AT,
       });
       insertRevision(tx, {
         ...base,
-        nodeId: id,
+        node_id: id,
         content: { ...base.content, name: PINNED },
         tasks: [],
       });
@@ -102,7 +102,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
     });
     insertRevision(tx, {
       ...base,
-      nodeId: childId,
+      node_id: childId,
       revision: SECOND_REVISION,
       filename: "renamed.md",
       content: { ...base.content, name: "Later" },
@@ -113,7 +113,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
       .run("renamed.md", childId);
   });
   const input = {
-    params: { executionId: h.claim.executionId },
+    params: { execution_id: h.claim.executionId },
     query: {},
     body: null,
   };
@@ -121,7 +121,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
   const child = page.items.find((item) => item.id === childId)!;
   assert.ok("content" in child);
   assert.equal(child.content.name, PINNED);
-  assert.equal(child.visibleRevision, FIRST_REVISION);
+  assert.equal(child.visible_revision, FIRST_REVISION);
   assert.equal(child.filename, PINNED_FILENAME);
   assert.deepEqual(
     page.items.find((item) => item.id === freshId),
@@ -164,7 +164,7 @@ test("initiative reads use outcome revisions, include discarded children, minimi
   ] as const)
     assert.deepEqual(
       await objective.invoke(operation, {
-        params: { executionId: objective.claim.executionId },
+        params: { execution_id: objective.claim.executionId },
         query: {},
         body: null,
       }),
@@ -176,7 +176,7 @@ test("execution evidence is attempt-bound and cleared outcome appears only after
   const h = evidenceHarness(t, IDENTITY);
   const readCleared = () =>
     h.invoke("execution.clearedOutcome.get", {
-      params: { executionId: h.claim.executionId },
+      params: { execution_id: h.claim.executionId },
       query: {},
       body: null,
     });
@@ -192,7 +192,7 @@ test("execution evidence is attempt-bound and cleared outcome appears only after
     const assessmentId = createIdentity("assessment");
     insertAssessment(tx, {
       id: assessmentId,
-      node_id: h.nodeId,
+      node_id: h.node_id,
       attempt: FIRST_ATTEMPT,
       result: AssessmentResult.Undetermined,
       rationale: "Blocked",
@@ -206,21 +206,21 @@ test("execution evidence is attempt-bound and cleared outcome appears only after
     });
     insertOutcome(tx, {
       id: outcomeId,
-      node_id: h.nodeId,
+      node_id: h.node_id,
       result: AssessmentResult.Undetermined,
       assessment_id: assessmentId,
       evidence_ids: "[]",
       created_at: CREATED_AT,
     });
-    closeAttempt(tx, h.nodeId, FIRST_ATTEMPT, CLOSE_AT);
-    openAttempt(tx, h.nodeId, FIRST_REVISION, h.actor, LATER_TS);
+    closeAttempt(tx, h.node_id, FIRST_ATTEMPT, CLOSE_AT);
+    openAttempt(tx, h.node_id, FIRST_REVISION, h.actor, LATER_TS);
     for (const attempt of [FIRST_ATTEMPT, SECOND_ATTEMPT])
       insertEvidence(
         tx,
         {
           id:
             attempt === SECOND_ATTEMPT ? currentId : createIdentity("evidence"),
-          node_id: h.nodeId,
+          node_id: h.node_id,
           attempt,
           subject: "Attempt evidence",
           requirement_key: null,
@@ -235,7 +235,7 @@ test("execution evidence is attempt-bound and cleared outcome appears only after
   h.claim.attempt = SECOND_ATTEMPT;
   assert.equal((await readCleared()).id, outcomeId);
   const page = await h.invoke("execution.evidence.list", {
-    params: { executionId: h.claim.executionId },
+    params: { execution_id: h.claim.executionId },
     query: {},
     body: null,
   });
@@ -248,7 +248,7 @@ test("execution evidence is attempt-bound and cleared outcome appears only after
 test("execution revision reads carry the pinned tasks and exclude later human revisions from every page", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
   h.store.transaction((tx) => {
-    const revision = getRevision(tx, h.nodeId, FIRST_REVISION);
+    const revision = getRevision(tx, h.node_id, FIRST_REVISION);
     insertRevision(tx, {
       ...revision,
       revision: SECOND_REVISION,
@@ -266,11 +266,11 @@ test("execution revision reads carry the pinned tasks and exclude later human re
       .prepare(
         "UPDATE mission_attempt SET node_revision = ? WHERE node_id = ? AND attempt = ?",
       )
-      .run(SECOND_REVISION, h.nodeId, FIRST_ATTEMPT);
+      .run(SECOND_REVISION, h.node_id, FIRST_ATTEMPT);
   });
   h.claim.pinnedRevision = SECOND_REVISION;
   const pinned = await h.invoke("execution.pinnedRevision.get", {
-    params: { executionId: h.claim.executionId },
+    params: { execution_id: h.claim.executionId },
     query: {},
     body: null,
   });
@@ -278,13 +278,13 @@ test("execution revision reads carry the pinned tasks and exclude later human re
   assert.equal(pinned.content.name, PINNED);
   assert.equal(pinned.tasks?.length, SINGLE_ITEM);
   const first = await h.invoke("execution.revision.list", {
-    params: { executionId: h.claim.executionId },
+    params: { execution_id: h.claim.executionId },
     query: { limit: SINGLE_ITEM },
     body: null,
   });
   assert.equal(first.items[FIRST_ITEM_INDEX]!.revision, SECOND_REVISION);
   const second = await h.invoke("execution.revision.list", {
-    params: { executionId: h.claim.executionId },
+    params: { execution_id: h.claim.executionId },
     query: { cursor: first.next_cursor, limit: SINGLE_ITEM },
     body: null,
   });
@@ -292,7 +292,7 @@ test("execution revision reads carry the pinned tasks and exclude later human re
   assert.equal(second.next_cursor, null);
   await assert.rejects(
     h.invoke("execution.revision.get", {
-      params: { executionId: h.claim.executionId, revision: THIRD_REVISION },
+      params: { execution_id: h.claim.executionId, revision: THIRD_REVISION },
       query: {},
       body: null,
     }),
