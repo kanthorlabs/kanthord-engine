@@ -35,7 +35,7 @@ export default tseslint.config(
         {
           type: "service",
           pattern:
-            "src/(custody|project|mission|scheduler|worker|workbench|tracking|gateway)",
+            "src/(custody|project|mission|scheduler|worker|workbench|tracking|gateway|intake)",
           capture: ["name"],
         },
         { type: "apps-server", pattern: "src/apps/server" },
@@ -212,6 +212,23 @@ export default tseslint.config(
               ],
             },
             {
+              to: element("kernel", { fileInternalPath: "service-mint.ts" }),
+              disallow: [
+                {
+                  from: element({
+                    anyOf: [
+                      "kernel",
+                      "component",
+                      "service",
+                      "apps-cli",
+                      "apps-worker",
+                    ],
+                  }),
+                },
+                { from: file({ anyOf: ["config", "config-global", "main"] }) },
+              ],
+            },
+            {
               from: serviceEntry("contract.ts"),
               disallow: [
                 {
@@ -286,7 +303,8 @@ export default tseslint.config(
             {
               group: ["**/caller.ts"],
               importNames: ["callerProvenance"],
-              message: "Only caller-mint.ts may access caller provenance.",
+              message:
+                "Only caller-mint.ts and service-mint.ts may access caller provenance.",
             },
           ],
         },
@@ -295,7 +313,11 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/**/*.test.ts", "src/kernel/caller-mint.ts"],
+    ignores: [
+      "src/**/*.test.ts",
+      "src/kernel/caller-mint.ts",
+      "src/kernel/service-mint.ts",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -308,7 +330,8 @@ export default tseslint.config(
             {
               group: ["**/caller.ts"],
               importNames: ["callerProvenance"],
-              message: "Only caller-mint.ts may access caller provenance.",
+              message:
+                "Only caller-mint.ts and service-mint.ts may access caller provenance.",
             },
           ],
         },

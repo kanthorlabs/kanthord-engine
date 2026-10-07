@@ -30,6 +30,7 @@ engine/
 │   │   ├── operation.ts        # Operations, structural registry, callers, and client results
 │   │   ├── caller.ts           # Identity types, provenance, and predicates
 │   │   ├── caller-mint.ts      # Identity minting entry reserved for Gateway
+│   │   ├── service-mint.ts     # Service identity factory reserved for the server composition root
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
 │   │   ├── handover.ts         # Handover keys, additional authenticated data and envelope codec
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas

@@ -9,6 +9,7 @@ import {
   MAX_DISPLAY_NAME_LENGTH,
   isHumanIdentity,
   isMachineIdentity,
+  type HumanIdentity,
   type MachineIdentity,
   type CallerIdentity,
 } from "../kernel/caller.ts";
@@ -92,10 +93,9 @@ export class Authentication {
     context: Context,
     requiresRegistration = true,
   ): Promise<CallerIdentity> {
-    if (!isHumanIdentity(identity) && !isMachineIdentity(identity))
-      throw unauthorized();
     if (isHumanIdentity(identity))
       return mintHumanIdentity(identity.accountId, identity.name, identity.jti);
+    if (!isMachineIdentity(identity)) throw unauthorized();
     const current = await this.resolveMachine(
       identity.clientId,
       identity.name,
@@ -118,7 +118,7 @@ export class Authentication {
   async authenticate(
     authorization: string | undefined,
     context: Context = background,
-  ): Promise<CallerIdentity> {
+  ): Promise<HumanIdentity | MachineIdentity> {
     if (!authorization || !/^Bearer [^\s,]+$/i.test(authorization))
       throw unauthorized();
     const key = await this.key;
