@@ -734,6 +734,9 @@ export class AgentComponent {
         };
       }),
     );
+    registry.register(agentOperations["model.list"], ({ query }, caller) =>
+      caller.commit((tx) => this.listCredentialModels(tx, query)),
+    );
     registry.register(
       agentOperations.get,
       async ({ params, query }, caller) => {
@@ -843,9 +846,6 @@ export class AgentComponent {
         caller.commit((tx) =>
           this.listModels(tx, params.agentName, params.providerName),
         ),
-    );
-    registry.register(agentOperations["model.list"], ({ query }, caller) =>
-      caller.commit((tx) => this.listCredentialModels(tx, query)),
     );
   }
 }

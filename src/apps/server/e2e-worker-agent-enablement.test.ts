@@ -522,3 +522,23 @@ test("E03.16 last provider cannot be removed", async (t) => {
     "agent.enablement.provider.required",
   );
 });
+
+test("E03.17 credential model list answers over HTTP before any enablement", async (t) => {
+  const fixture = await setup(t);
+  await createCredential(fixture);
+  const answer = success<{ items: { modelIdentifier: string }[] }>(
+    await kanthord(
+      [
+        "agent",
+        "model",
+        "list",
+        "--provider",
+        ANTHROPIC,
+        "--credential",
+        CREDENTIAL,
+      ],
+      fixture.env,
+    ),
+  );
+  assert.ok(answer.items.some((item) => item.modelIdentifier === SONNET));
+});
