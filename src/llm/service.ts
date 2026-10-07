@@ -368,7 +368,11 @@ export class LlmComponent implements Service {
     caller: CallerContext,
   ): Promise<typeof llmOperations.login.output._output> {
     if (!this.acceptingLogins)
-      throw new Diagnostic(LlmErrorCode.Stopped, "llm: login is stopped.");
+      throw new OperationError(
+        HttpStatus.ServiceUnavailable,
+        LlmErrorCode.Stopped,
+        "The LLM component is stopped.",
+      );
     const { platform, name, mode: requested } = input.body;
     if (!isLlmPlatform(platform))
       throw new OperationError(
@@ -423,12 +427,8 @@ export class LlmComponent implements Service {
 
   private loginSession(id: string): LoginSession {
     const session = this.sessions.get(id);
-    if (!session || session.state === LoginSessionState.Expired)
-      throw loginNotFound();
-    if (session.expires_at <= this.now()) {
-      this.logins.get(id)?.expire();
-      throw loginNotFound();
-    }
+    if (!session) throw loginNotFound();
+    if (session.expires_at <= this.now()) this.logins.get(id)?.expire();
     return session;
   }
 

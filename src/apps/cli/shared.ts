@@ -147,7 +147,7 @@ export function handleMutationResult<T>(
   if (result.type === OperationResultType.Failure)
     throw new Diagnostic(
       result.error.error.code,
-      JSON.stringify({ ...result.error.error, idempotency_key: key }),
+      `request failed (HTTP ${result.status}); idempotency key ${key}.`,
     );
   throw new Diagnostic(
     indeterminateCode,
@@ -163,7 +163,7 @@ export function handleReadResult<T>(
   if (result.type === OperationResultType.Failure)
     throw new Diagnostic(
       result.error.error.code,
-      JSON.stringify(result.error.error),
+      `request failed (HTTP ${result.status}).`,
     );
   throw new Diagnostic(indeterminateCode, "retry the command");
 }

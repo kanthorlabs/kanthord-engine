@@ -41,6 +41,7 @@ const SINGLE_MODE = 1;
 const FIRST_MODE = 0;
 const PUBLIC_GITHUB_DOMAIN = "";
 const LOGIN_FAILED = "login failed";
+const LOGIN_FAILED_CODE = "credential.login.failed";
 const MODE_UNSUPPORTED = "credential.login.mode_unsupported";
 const INVALID_INPUT = "credential.input.invalid";
 export const LOGIN_NOT_FOUND = "credential.login.not_found";
@@ -82,10 +83,18 @@ export function loginNotFound(): OperationError {
   );
 }
 
+function loginFailed(): OperationError {
+  return new OperationError(
+    HttpStatus.ServiceUnavailable,
+    LOGIN_FAILED_CODE,
+    "The login failed before an address.",
+  );
+}
+
 export class OAuthLogin {
   readonly controller = new AbortController();
   readonly ready = Promise.withResolvers<void>();
-  failure: Error = new Error(LOGIN_FAILED);
+  failure: Error = loginFailed();
   private timer?: NodeJS.Timeout;
   private answer?: (value: string) => void;
 
@@ -246,8 +255,7 @@ export class OAuthLogin {
       const cause = error instanceof ModelsError ? error.cause : error;
       if (this.session.expires_at <= this.now()) this.expire();
       if (this.session.state === LoginSessionState.Pending) {
-        this.failure =
-          cause instanceof OperationError ? cause : new Error(LOGIN_FAILED);
+        this.failure = cause instanceof OperationError ? cause : loginFailed();
         this.sessions.fail(
           this.session.id,
           cause instanceof OperationError ? cause.code : LOGIN_FAILED,

@@ -366,6 +366,44 @@ test("worker handover validates locally and prints receipt metadata without the 
   assert.doesNotMatch(result.stdout, /nonce|ciphertext/);
 });
 
+test("scheduler execution release tells the operator to read the execution before a retry when the answer is lost", (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  const file = join(directory, "release.json");
+  writeFileSync(file, JSON.stringify({ further_work: false }), {
+    mode: 0o600,
+  });
+  const executionId = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const result = invocation(
+    [
+      "scheduler",
+      "execution",
+      "release",
+      executionId,
+      "--file",
+      file,
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "machine",
+      "--idempotency-key",
+      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    ],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Failure);
+  assert.equal(result.stdout, EMPTY_OUTPUT);
+  assert.match(
+    result.stderr,
+    /^cli\.scheduler\.execution\.release\.indeterminate:/,
+  );
+  assert.ok(
+    result.stderr.includes(`kanthord scheduler execution get ${executionId}`),
+    result.stderr,
+  );
+  assert.doesNotMatch(result.stderr, /retry with --idempotency-key/);
+});
+
 test("agent enablement commands expose offline help and validate inputs before I/O", (t) => {
   const env = environment(temporary(t));
   for (const [path, fileRequired] of [

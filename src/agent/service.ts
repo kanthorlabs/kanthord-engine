@@ -370,6 +370,8 @@ export class AgentComponent {
     );
     if (credentials.size !== agentProviders.length)
       throw conflict(agentName, AgentErrorCode.ProviderCredentialConflict);
+    for (const item of agentProviders)
+      validateProvider(this.dependencies, tx, agentName, item);
     this.validateEffectiveConfig(
       tx,
       agentName,

@@ -25,7 +25,11 @@ import {
   SCHEDULER_SERVICE_NAME,
   type WorkQueue,
 } from "../../scheduler/contract.ts";
-import { MissionService, missionMigrations } from "../../mission/index.ts";
+import {
+  MissionService,
+  missionMigrations,
+  unavailableStorage,
+} from "../../mission/index.ts";
 import {
   MISSION_SERVICE_NAME,
   missionOperations,
@@ -294,13 +298,7 @@ export function composeServices(options: {
   });
   const mission: MissionService = new MissionService({
     store: options.store,
-    intakeStorage: options.standIns?.intakeStorage ?? {
-      put: unwired("IntakeStorage.put"),
-      check: unwired("IntakeStorage.check"),
-      get: unwired("IntakeStorage.get"),
-      executionGet: unwired("IntakeStorage.executionGet"),
-      delete: unwired("IntakeStorage.delete"),
-    },
+    intakeStorage: options.standIns?.intakeStorage ?? unavailableStorage,
     intakeCheck: options.standIns?.intakeCheck ?? {
       check: unwired("IntakeCheck.check"),
     },
@@ -316,6 +314,7 @@ export function composeServices(options: {
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
     },
+    logger: options.logger,
     bindings: {
       resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
       resolveBindingIdentity: (tx, pid, bid) =>

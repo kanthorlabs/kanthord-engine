@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
+import pino from "pino";
 import type { z } from "zod";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
@@ -273,6 +274,7 @@ export function missionHarness(
         return null;
       },
     },
+    logger: pino({ enabled: false }),
     ...overrides,
   };
   const service = new MissionService(dependencies);

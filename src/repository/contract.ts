@@ -24,6 +24,8 @@ import {
 } from "../kernel/operation.ts";
 
 export const REPOSITORY_COMPONENT_NAME = "repository";
+export const SSH_RESOLVE_FAILED_STATUS = 422;
+export const SSH_CONFIG_UNREADABLE_STATUS = 422;
 
 const emptyParams = z.strictObject({});
 const emptyQuery = z.strictObject({});
@@ -104,6 +106,7 @@ export const repositoryOperations = {
       body: credentialCreateSchema,
     }),
     output: credentialAnswerSchema,
+    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Create a repository credential with its first revision.",
   },
   list: {
@@ -167,6 +170,7 @@ export const repositoryOperations = {
       body: credentialRotateBodySchema,
     }),
     output: credentialAnswerSchema,
+    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Rotate a repository credential secret into a new revision.",
   },
   update_metadata: {
@@ -188,6 +192,7 @@ export const repositoryOperations = {
       body: credentialUpdateMetadataBodySchema,
     }),
     output: credentialAnswerSchema,
+    errors: [SSH_RESOLVE_FAILED_STATUS],
     description: "Update repository credential metadata in a new revision.",
   },
   revoke: {
@@ -284,6 +289,7 @@ export const repositoryOperations = {
     mutation: false,
     body: false,
     status: HttpStatus.OK,
+    errors: [SSH_CONFIG_UNREADABLE_STATUS],
     input: z.strictObject({
       params: emptyParams,
       query: emptyQuery,

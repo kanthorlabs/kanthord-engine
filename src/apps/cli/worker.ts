@@ -393,7 +393,7 @@ export function addWorkerCommand(program: Command): void {
     )
     .option(
       "--token <jwt>",
-      "Machine JWT (otherwise KANTHORD_TOKEN or an operator-supplied client file)",
+      "Machine JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
     )
     .option(
       "--idempotency-key <ulid>",

@@ -20,7 +20,10 @@ export function addExecutionCommands(mission: Command): void {
   const evidence = execution.command("evidence").description("Bound evidence");
   evidence.action(() => evidence.help());
   addPagination(
-    evidence.command("list").argument("<execution-id>", "Execution ID"),
+    evidence
+      .command("list")
+      .description("List the evidence bound to the claimed execution as JSON")
+      .argument("<execution-id>", "Execution ID"),
   ).action(async (executionId: string, _options, command: Command) => {
     executionIdentity(
       executionId,
@@ -43,6 +46,7 @@ export function addExecutionCommands(mission: Command): void {
   cleared.action(() => cleared.help());
   cleared
     .command("get")
+    .description("Get the outcome that an unblock cleared as JSON")
     .argument("<execution-id>", "Execution ID")
     .action(async (executionId: string, _options, command: Command) => {
       executionIdentity(
@@ -62,6 +66,7 @@ export function addExecutionCommands(mission: Command): void {
   content.action(() => content.help());
   content
     .command("get")
+    .description("Get the content of a bound evidence asset")
     .argument("<execution-id>", "Execution ID")
     .argument("<asset-id>", "Asset ID")
     .action(
@@ -121,13 +126,28 @@ function addObjectiveReads(execution: Command): void {
     .command("evidence")
     .description("Current objective evidence");
   evidence.action(() => evidence.help());
-  for (const [group, operation] of [
-    [objective, "execution.objective.list"],
-    [outcome, "execution.objective.outcome.list"],
-    [evidence, "execution.objective.evidence.list"],
+  for (const [group, operation, description] of [
+    [
+      objective,
+      "execution.objective.list",
+      "List the current child objectives",
+    ],
+    [
+      outcome,
+      "execution.objective.outcome.list",
+      "List the current outcomes of the child objectives",
+    ],
+    [
+      evidence,
+      "execution.objective.evidence.list",
+      "List the current evidence of the child objectives",
+    ],
   ] as const) {
     addPagination(
-      group.command("list").argument("<execution-id>", "Execution ID"),
+      group
+        .command("list")
+        .description(`${description} as JSON`)
+        .argument("<execution-id>", "Execution ID"),
     ).action(async (executionId: string, _options, command: Command) => {
       executionIdentity(
         executionId,
@@ -152,6 +172,7 @@ function addRevisionReads(execution: Command): void {
   pinned.action(() => pinned.help());
   pinned
     .command("get")
+    .description("Get the node revision that the claim pins as JSON")
     .argument("<execution-id>", "Execution ID")
     .action(async (executionId: string, _options, command: Command) => {
       executionIdentity(
@@ -168,7 +189,10 @@ function addRevisionReads(execution: Command): void {
   const revision = execution.command("revision").description("Bound revisions");
   revision.action(() => revision.help());
   addPagination(
-    revision.command("list").argument("<execution-id>", "Execution ID"),
+    revision
+      .command("list")
+      .description("List the node revisions that the claim can read as JSON")
+      .argument("<execution-id>", "Execution ID"),
   ).action(async (executionId: string, _options, command: Command) => {
     executionIdentity(
       executionId,
@@ -187,6 +211,7 @@ function addRevisionReads(execution: Command): void {
   });
   revision
     .command("get")
+    .description("Get a node revision that the claim can read as JSON")
     .argument("<execution-id>", "Execution ID")
     .argument("<revision>", "Revision")
     .action(

@@ -437,7 +437,7 @@ async function remove(agentName: string, command: Command): Promise<void> {
   );
   const data = handleMutationResult(result, REMOVE_INDETERMINATE, key);
   process.stdout.write(
-    `${JSON.stringify({ agent_name: data.agent_name, idempotency_key: key })}\n`,
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
   );
 }
 
@@ -544,7 +544,8 @@ export function addAgentCommand(program: Command): void {
       singleUse("--token"),
     );
   agent
-    .command("get <agent-name>")
+    .command("get")
+    .argument("<agent-name>", "Agent name")
     .description("Get an agent declaration (human JWT)")
     .option(
       "--view <view>",

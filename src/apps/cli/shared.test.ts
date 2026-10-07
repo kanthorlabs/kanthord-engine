@@ -190,7 +190,8 @@ test("mutation results return data or include the retry key", () => {
     (error) =>
       error instanceof Diagnostic &&
       error.code === FAILURE_CODE &&
-      error.message.includes(KEY),
+      error.message ===
+        `request failed (HTTP ${FAILURE_STATUS}); idempotency key ${KEY}.`,
   );
   assert.throws(
     () => handleMutationResult(indeterminate, INDETERMINATE_CODE, KEY),
@@ -224,7 +225,10 @@ test("read results return data, preserve server failures, and signal uncertainty
   );
   assert.throws(
     () => handleReadResult(failure, INDETERMINATE_CODE),
-    diagnosticCode(FAILURE_CODE),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === FAILURE_CODE &&
+      error.message === `request failed (HTTP ${FAILURE_STATUS}).`,
   );
   assert.throws(
     () => handleReadResult(indeterminate, INDETERMINATE_CODE),

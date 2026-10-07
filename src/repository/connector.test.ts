@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { simpleGit } from "simple-git";
 import { background, CancellationContext } from "../kernel/context.ts";
+import { OperationError } from "../kernel/errors.ts";
 import {
   gitLsRemote,
   resolveSshHostname,
@@ -18,6 +19,8 @@ import { temporary } from "../kernel/test-support.ts";
 const DEADLINE_MS = 5000;
 const EXPIRED_DEADLINE_MS = 1;
 const LOCAL_HOST = "localhost";
+const SSH_RESOLVE_FAILED_STATUS = 422;
+const SSH_RESOLVE_FAILED_CODE = "repository.credential.ssh_resolve_failed";
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_plan04_test";
 
 test("resolveSshHostname reads the hostname line of ssh -G", async () => {
@@ -30,10 +33,17 @@ test("resolveSshHostname reads the hostname line of ssh -G", async () => {
 test("resolveSshHostname rejects when the deadline elapses or the context was cancelled", async () => {
   await assert.rejects(
     resolveSshHostname(LOCAL_HOST, background, EXPIRED_DEADLINE_MS - 1),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === SSH_RESOLVE_FAILED_STATUS &&
+      error.code === SSH_RESOLVE_FAILED_CODE,
   );
   const context = new CancellationContext();
   context.cancel();
-  await assert.rejects(resolveSshHostname(LOCAL_HOST, context, DEADLINE_MS));
+  await assert.rejects(
+    resolveSshHostname(LOCAL_HOST, context, DEADLINE_MS),
+    (error) => error === context.err(),
+  );
 });
 
 test("gitLsRemote resolves for a local git repository", async (t) => {

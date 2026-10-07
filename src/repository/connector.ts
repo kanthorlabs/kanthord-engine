@@ -3,11 +3,15 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
-import { Diagnostic } from "../kernel/errors.ts";
-import { parseSshIdentity, type SshIdentity } from "./ssh-identity.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
+import { SSH_RESOLVE_FAILED_STATUS } from "./contract.ts";
+import {
+  parseSshIdentity,
+  SshErrorCode,
+  type SshIdentity,
+} from "./ssh-identity.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
-const SSH_RESOLVE_FAILED = "repository.connector.ssh_resolve_failed";
 const EMPTY_STRING = "";
 const EXPIRED = 0;
 const execFileAsync = promisify(execFile);
@@ -72,7 +76,13 @@ export async function resolveSshIdentity(
     });
     return parseSshIdentity(stdout);
   } catch {
-    throw new Diagnostic(SSH_RESOLVE_FAILED, "ssh -G: resolution failed.");
+    throwIfCancelled(context);
+    throw new OperationError(
+      SSH_RESOLVE_FAILED_STATUS,
+      SshErrorCode.ResolveFailed,
+      "The SSH host does not resolve through ssh -G.",
+      { host },
+    );
   } finally {
     clearTimeout(timer);
     unsubscribe();

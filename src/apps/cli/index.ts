@@ -111,7 +111,8 @@ function addServeCommand(
     !program.commands.some((command) => command.name() === CommandName.Serve),
   );
   const serve = program
-    .command(`${CommandName.Serve} [application]`)
+    .command(CommandName.Serve)
+    .argument("[application]", "Application to start: server or worker")
     .description("Start an application (default: server)")
     .option("--config <path>", "YAML configuration file")
     .action((application: string | undefined, _options, command: Command) =>
@@ -120,7 +121,7 @@ function addServeCommand(
   serve
     .command(CommandName.Worker)
     .description(
-      "Start the worker application after checking the server version",
+      "Start the worker application: register, pull and execute work",
     )
     .option("--endpoint <url>", "Server endpoint")
     .option(
@@ -170,7 +171,9 @@ export function createProgram(
   for (const name of [CommandName.Tracking]) {
     const group = program
       .command(name)
-      .description(`${name[0]!.toUpperCase()}${name.slice(1)} Service commands`)
+      .description(
+        `${name[0]!.toUpperCase()}${name.slice(1)} Service commands (not implemented)`,
+      )
       .option("--endpoint <url>", "Server endpoint");
     group.action(() => group.help());
   }
@@ -195,10 +198,7 @@ function addGatewayCommand(program: Command): void {
   gateway
     .command("verify")
     .description("Verify a human JWT through the server and print its identity")
-    .option(
-      "--token <jwt>",
-      "Human JWT (otherwise KANTHORD_TOKEN or an operator-supplied client file)",
-    )
+    .option("--token <jwt>", "Human JWT (otherwise KANTHORD_TOKEN or cli.yaml)")
     .action(async (_options, command: Command) => {
       const config = resolveClient(command.optsWithGlobals());
       const result = await httpClient(

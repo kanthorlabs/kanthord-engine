@@ -8,7 +8,10 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 import { gatewayFixture } from "./test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "../../gateway/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
-import { repositoryOperations } from "../../repository/contract.ts";
+import {
+  repositoryOperations,
+  SSH_RESOLVE_FAILED_STATUS,
+} from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
 import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
 import {
@@ -184,6 +187,25 @@ test("published asset delete names its operation with a bodyless 204 response", 
     fragment.pathItem.delete.responses[HttpStatus.NoContent].content,
     undefined,
   );
+});
+
+test("published SSH credential writes declare the ssh -G resolution failure status", () => {
+  for (const [file, method] of [
+    ["credential.create", "post"],
+    ["credential.rotate", "post"],
+    ["credential.update_metadata", "put"],
+  ] as const) {
+    const fragment = parse(
+      readFileSync(
+        join(dirname(openapiPath()), `openapi/repository/${file}.yaml`),
+        "utf8",
+      ),
+    );
+    assert.ok(
+      String(SSH_RESOLVE_FAILED_STATUS) in fragment.pathItem[method].responses,
+      file,
+    );
+  }
 });
 
 test("published node check names its operation", () => {

@@ -201,14 +201,14 @@ async function providerRemoved(fixture: Fixture): Promise<void> {
 
 async function removed(fixture: Fixture): Promise<void> {
   await providerRemoved(fixture);
-  const answer = success<{ agent_name: string }>(
+  const answer = success<{ agent_name: string; removed: boolean }>(
     await kanthord(
       [...COMMAND, "remove", AGENT, REVISION, String(FIFTH_REVISION)],
       fixture.env,
     ),
   );
   assert.equal(answer.agent_name, AGENT);
-  assert.ok(answer.agent_name);
+  assert.equal(answer.removed, true);
 }
 
 test("E03.1 create credential and put enablement", async (t) => {

@@ -9,6 +9,7 @@ export const SshErrorCode = {
   IdentityAmbiguous: "repository.credential.ssh_identity_ambiguous",
   Drift: "repository.credential.ssh_drift",
   ConfigUnreadable: "repository.credential.ssh_config_unreadable",
+  ResolveFailed: "repository.credential.ssh_resolve_failed",
 } as const;
 
 export const sshPinSchema = z.strictObject({

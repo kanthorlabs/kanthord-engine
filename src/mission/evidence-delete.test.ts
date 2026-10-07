@@ -330,3 +330,43 @@ test("forced request deletion pauses and revokes only the open attempt", async (
     assert.equal(revokes, closed ? NO_CALLS : FIRST_ATTEMPT);
   }
 });
+
+test("both deletes log the human, the force and the reason after the commit", async (t) => {
+  const h = fixture(t);
+  h.dependencies.intakeStorage.delete = async () => undefined;
+  const records: { fields: unknown; message: string }[] = [];
+  h.dependencies.logger.info = ((fields: unknown, message: string) => {
+    records.push({ fields, message });
+  }) as typeof h.dependencies.logger.info;
+  await h.remove(true);
+  const parentId = h.node().parent_id!;
+  h.store.transaction((tx) => {
+    setNodeState(tx, h.node_id, NodeState.Completed);
+    setNodeState(tx, parentId, NodeState.Discarded);
+  });
+  await h.invoke("evidence.delete", {
+    params: { evidence_id: h.evidence_id },
+    query: {},
+    body: { expected_mission_version: FIRST_ATTEMPT, force: false },
+  });
+  assert.deepEqual(records, [
+    {
+      fields: {
+        asset_id: h.asset_id,
+        account: IDENTITY.accountId,
+        force: true,
+        reason: "Remove",
+      },
+      message: "evidence asset deleted",
+    },
+    {
+      fields: {
+        evidence_id: h.evidence_id,
+        account: IDENTITY.accountId,
+        force: false,
+        reason: null,
+      },
+      message: "evidence deleted",
+    },
+  ]);
+});

@@ -1121,6 +1121,31 @@ test("Custody refusals map to credential_unsuitable, while unexpected failures p
   }
 });
 
+test("put refuses an unsuitable credential on a non-default provider before any write", (t) => {
+  const f = enablementFixture(t, {
+    custodySuitability: (_tx, { credential }) => {
+      if (credential === spare.credential)
+        throw new OperationError(
+          HttpStatus.NotFound,
+          "credential.credential.not_found",
+          "Missing credential.",
+        );
+    },
+  });
+  refuses(
+    () =>
+      f.invoke("enablement.put", {
+        ...putBody,
+        agent_providers: [provider, spare],
+      }),
+    AgentErrorCode.CredentialUnsuitable,
+  );
+  assert.equal(
+    f.store.transaction((tx) => getLatestRevision(tx, AGENT)),
+    null,
+  );
+});
+
 test("validateEntry enforces availability, allowlist and entry forms", (t) => {
   const f = enablementFixture(t);
   const validate = (entry: AgentEntry | null) =>
