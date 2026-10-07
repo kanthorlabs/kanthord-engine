@@ -104,12 +104,12 @@ test("worker configuration defaults and strict validation", () => {
   }
 });
 
-test("agent prompt configuration defaults to empty paths and accepts strings", () => {
+test("agent prompt configuration defaults the agent directory to agents and accepts strings", () => {
   const masterKey = randomBytes(32).toString("base64");
   assert.deepEqual(
     configuration({ master_key: masterKey }).getProperties().agent,
     {
-      prompt: { system_file: "", agent_directory: "", host_file: true },
+      prompt: { system_file: "", agent_directory: "agents", host_file: true },
     },
   );
   const prompt = {

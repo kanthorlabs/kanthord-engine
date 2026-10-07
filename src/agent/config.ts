@@ -30,9 +30,9 @@ export const agentConfigSchema: Schema<AgentConfig> = {
       default: "",
     },
     agent_directory: {
-      doc: "Agent file directory path; empty means no agent file source.",
+      doc: "Agent file directory path, relative to the data directory; empty means no agent file source.",
       format: pathFormat,
-      default: "",
+      default: "agents",
     },
     host_file: {
       doc: "Host agent file source of the system prompt; false locks its switch off.",
