@@ -11,17 +11,17 @@ import type { Verification } from "./verification.ts";
 
 test("the final marker is strict and invalid handoffs are refused", () => {
   const text =
-    'kanthord-judgement: {"criterionMet":false,"rationale":"before"}\nkanthord-judgement: {"criterionMet":true,"rationale":" final "}';
+    'kanthord-judgement: {"criterion_met":false,"rationale":"before"}\nkanthord-judgement: {"criterion_met":true,"rationale":" final "}';
   assert.deepEqual(parseJudgement(text, taskJudgementSchema), {
-    criterionMet: true,
+    criterion_met: true,
     rationale: "final",
   });
   for (const invalid of [
     undefined,
     "missing",
     "kanthord-judgement: invalid",
-    'kanthord-judgement: {"criterionMet":true,"rationale":" "}',
-    'kanthord-judgement: {"criterionMet":true,"rationale":"yes","extra":true}',
+    'kanthord-judgement: {"criterion_met":true,"rationale":" "}',
+    'kanthord-judgement: {"criterion_met":true,"rationale":"yes","extra":true}',
   ])
     assert.equal(parseJudgement(invalid, taskJudgementSchema), null);
   assert.deepEqual(

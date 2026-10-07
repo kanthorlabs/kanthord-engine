@@ -37,7 +37,7 @@ const LIVE_STOP = "worker.stop.execution_live";
 const DECRYPTION_FAILED = "worker.handover.decryption_failed";
 const PATH_REFUSED = "worker.evidence_upload.path_refused";
 const JUDGEMENT =
-  'kanthord-judgement: {"criterionMet":true,"rationale":"hello.txt holds hello"}';
+  'kanthord-judgement: {"criterion_met":true,"rationale":"hello.txt holds hello"}';
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
   fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
 

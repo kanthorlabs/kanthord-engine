@@ -11,7 +11,7 @@ const AssessmentResult = {
   Undetermined: "undetermined",
 } as const;
 export const taskJudgementSchema = z.strictObject({
-  criterionMet: z.boolean(),
+  criterion_met: z.boolean(),
   rationale: z.string().trim().min(1),
 });
 export const evaluationJudgementSchema = z.strictObject({
@@ -41,7 +41,7 @@ export function parseJudgement<T extends z.ZodType>(
 export function taskJudgementInstruction(task: TaskContent): string {
   assert.ok(task.id);
   assert.ok(task.content.criterion);
-  return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterionMet": true, "rationale": "Explain your judgement"}`;
+  return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterion_met": true, "rationale": "Explain your judgement"}`;
 }
 
 export function failedVerificationRationale(

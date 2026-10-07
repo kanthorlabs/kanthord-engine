@@ -82,7 +82,7 @@ const hello = () => [
   tool("bash", { command: "printf hello > hello.txt" }),
   fauxAssistantMessage("done"),
   fauxAssistantMessage(
-    'kanthord-judgement: {"criterionMet":true,"rationale":"hello.txt holds hello"}',
+    'kanthord-judgement: {"criterion_met":true,"rationale":"hello.txt holds hello"}',
   ),
 ];
 const review = () => [

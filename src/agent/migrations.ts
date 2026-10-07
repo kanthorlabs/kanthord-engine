@@ -1,6 +1,4 @@
-import { canonicalJSON } from "../kernel/json.ts";
 import type { Migration } from "../kernel/store.ts";
-import { isObject } from "../kernel/values.ts";
 
 const LEGACY_ENABLEMENT_TABLE = "worker_agent_enablement";
 
@@ -52,44 +50,8 @@ const addSystemLayerOverride: Migration = (database) => {
   `);
 };
 
-const DEFAULT_CONFIGURATION_KEYS: Readonly<Record<string, string>> = {
-  agentProvider: "agent_provider",
-  modelIdentifier: "model_identifier",
-  reasoningEffort: "reasoning_effort",
-};
-
-function renameDefaultConfiguration(configuration: unknown): unknown {
-  if (!isObject(configuration) || Array.isArray(configuration))
-    return configuration;
-  return Object.fromEntries(
-    Object.entries(configuration).map(([key, item]) => [
-      Object.hasOwn(DEFAULT_CONFIGURATION_KEYS, key)
-        ? DEFAULT_CONFIGURATION_KEYS[key]
-        : key,
-      item,
-    ]),
-  );
-}
-
-const renameDefaultConfigurationKeys: Migration = (database) => {
-  const update = database.prepare(
-    "UPDATE agent_enablement SET default_configuration = ? WHERE id = ?",
-  );
-  const rows = database
-    .prepare("SELECT id, default_configuration FROM agent_enablement")
-    .all() as { id: string; default_configuration: string }[];
-  for (const { id, default_configuration } of rows)
-    update.run(
-      canonicalJSON(
-        renameDefaultConfiguration(JSON.parse(default_configuration)),
-      ),
-      id,
-    );
-};
-
 export const agentMigrations: readonly Migration[] = [
   createEnablementTable,
   createPromptTable,
   addSystemLayerOverride,
-  renameDefaultConfigurationKeys,
 ];

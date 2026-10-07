@@ -175,7 +175,7 @@ export async function runTask(
       taskJudgementSchema,
     );
     if (!judgement) state.run.stop(EndReason.JudgementInvalid);
-    if (judgement.criterionMet) return { kind: TaskResultKind.Complete };
+    if (judgement.criterion_met) return { kind: TaskResultKind.Complete };
     instruction = criterionRevisionInstruction(judgement.rationale);
   }
   return ended(boundary);
@@ -276,7 +276,7 @@ export async function startCheck(state: StepsState): Promise<{
       taskJudgementSchema,
     );
     if (!judgement) state.run.stop(EndReason.JudgementInvalid);
-    if (!judgement.criterionMet) pending.push({ task, boundary });
+    if (!judgement.criterion_met) pending.push({ task, boundary });
   }
   return { pending, budgetEnd: null };
 }

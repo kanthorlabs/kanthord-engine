@@ -228,10 +228,10 @@ test("start check judges passing tasks in order and discards verification change
   ];
   const h = await fixture(t, tasks, [
     fauxAssistantMessage(
-      'kanthord-judgement: {"criterionMet":true,"rationale":"met"}',
+      'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
     ),
     fauxAssistantMessage(
-      'kanthord-judgement: {"criterionMet":false,"rationale":"unmet"}',
+      'kanthord-judgement: {"criterion_met":false,"rationale":"unmet"}',
     ),
   ]);
   assert.deepEqual(
@@ -263,7 +263,7 @@ test("task work commits revisions and cleans verification writes before judgemen
       write("good"),
       fauxAssistantMessage("second"),
       fauxAssistantMessage(
-        'kanthord-judgement: {"criterionMet":true,"rationale":"met"}',
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
       ),
     ],
   );
@@ -393,7 +393,7 @@ test("criterion-negative judgement revises work and a budget-ended judgement kee
     [
       fauxAssistantMessage("work"),
       fauxAssistantMessage(
-        'kanthord-judgement: {"criterionMet":false,"rationale":"revise"}',
+        'kanthord-judgement: {"criterion_met":false,"rationale":"revise"}',
       ),
       fauxAssistantMessage(
         fauxToolCall("write", { path: "revision", content: "fixed" }),
@@ -401,7 +401,7 @@ test("criterion-negative judgement revises work and a budget-ended judgement kee
       ),
       fauxAssistantMessage("revised"),
       fauxAssistantMessage(
-        'kanthord-judgement: {"criterionMet":true,"rationale":"met"}',
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
       ),
     ],
   );
@@ -413,7 +413,7 @@ test("criterion-negative judgement revises work and a budget-ended judgement kee
     [
       fauxAssistantMessage("work"),
       fauxAssistantMessage(
-        'kanthord-judgement: {"criterionMet":true,"rationale":"met"}',
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
       ),
     ],
   );

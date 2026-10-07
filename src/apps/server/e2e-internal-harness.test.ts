@@ -80,7 +80,7 @@ const DEFAULTS = {
   reasoning_effort: "off",
 };
 const JUDGED =
-  'kanthord-judgement: {"criterionMet":true,"rationale":"hello.txt holds hello"}';
+  'kanthord-judgement: {"criterion_met":true,"rationale":"hello.txt holds hello"}';
 const PASSED =
   'kanthord-judgement: {"result":"success","rationale":"hello.txt exists and holds hello; task met."}';
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
