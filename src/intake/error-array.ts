@@ -3,14 +3,14 @@ import { z } from "zod";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { ERROR_ARRAY_MAX_BYTES, ERROR_MESSAGE_MAX_BYTES } from "./contract.ts";
 
-export const ErrorItem = z.strictObject({
+export const errorItemSchema = z.strictObject({
   code: z.string().min(1),
   message: z.string(),
   created_at: timestamp,
 });
-export type ErrorItem = z.infer<typeof ErrorItem>;
+export type ErrorItem = z.infer<typeof errorItemSchema>;
 
-const ErrorItems = z.array(ErrorItem);
+const errorItemsSchema = z.array(errorItemSchema);
 
 function byteLength(text: string): number {
   return Buffer.byteLength(text, "utf8");
@@ -33,12 +33,12 @@ function cutMessage(message: string): string {
 
 function parseStored(current: string | null): ErrorItem[] {
   if (current === null) return [];
-  return ErrorItems.parse(JSON.parse(current));
+  return errorItemsSchema.parse(JSON.parse(current));
 }
 
 export function appendError(current: string | null, item: ErrorItem): string {
   const stored = parseStored(current);
-  const next = ErrorItem.parse({
+  const next = errorItemSchema.parse({
     code: item.code,
     message: cutMessage(item.message),
     created_at: item.created_at,
