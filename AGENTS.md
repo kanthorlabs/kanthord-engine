@@ -98,8 +98,12 @@ engine/
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
 │   ├── intake/                 # Intake Service: inbound events and outbound requests
-│   │   ├── contract.ts         # Service name, closed sets, identity prefixes, and numeric bounds
+│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, and operations
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
+│   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
+│   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
+│   │   ├── outbound-read.ts    # Outbound request list and get handlers
+│   │   ├── outbound-write.ts   # Outbound request discard and delete handlers
 │   │   └── service.ts          # Lifecycle, health probe, and resource inventory
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
 │   │   ├── contract.ts         # Mission schemas, operations, and collaboration types
@@ -207,6 +211,7 @@ engine/
 │       │   ├── repository.ts   # Repository command group
 │       │   ├── storage.ts      # Storage command group
 │       │   ├── agent.ts        # Agent command group
+│       │   ├── intake.ts       # Intake command group and outbound request commands
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton
 │           ├── api.ts          # Server operation clients and bounded backoff
