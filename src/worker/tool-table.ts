@@ -30,8 +30,8 @@ export function sessionTools(
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
   assert.ok(cwd);
-  const allowlist: string[] = [...agent.tools, ...agent.hostTools];
-  const customTools: ToolDefinition[] = agent.hostTools.map(() =>
+  const allowlist: string[] = [...agent.tools, ...agent.host_tools];
+  const customTools: ToolDefinition[] = agent.host_tools.map(() =>
     evidenceUploadTool(hostTools),
   );
   if (!agent.tools.includes(BuiltinTool.Bash))
@@ -84,7 +84,7 @@ export async function toolDeclarations(agentName: string): Promise<
   {
     name: string;
     source: ToolSource;
-    inputSchema: Record<string, unknown>;
+    input_schema: Record<string, unknown>;
   }[]
 > {
   const agent = getAgentDeclaration(agentName);
@@ -105,7 +105,7 @@ export async function toolDeclarations(agentName: string): Promise<
     return {
       name: definition.name,
       source: ToolSource.Builtin,
-      inputSchema: JSON.parse(JSON.stringify(definition.parameters)) as Record<
+      input_schema: JSON.parse(JSON.stringify(definition.parameters)) as Record<
         string,
         unknown
       >,
@@ -113,10 +113,10 @@ export async function toolDeclarations(agentName: string): Promise<
   });
   return [
     ...builtin,
-    ...agent.hostTools.map((name) => ({
+    ...agent.host_tools.map((name) => ({
       name,
       source: ToolSource.Host,
-      inputSchema: JSON.parse(
+      input_schema: JSON.parse(
         JSON.stringify(EVIDENCE_UPLOAD_PARAMETERS),
       ) as Record<string, unknown>,
     })),

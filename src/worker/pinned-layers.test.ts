@@ -36,7 +36,7 @@ function composedPrompt(first: string, second: string) {
   return {
     systemPrompt: [
       framing(PromptConsumer.Worker),
-      getAgentDeclaration("swe@1")!.agentPrompt,
+      getAgentDeclaration("swe@1")!.agent_prompt,
     ].join("\n"),
     layers: { global: layer(first), project: layer(second) },
   };
@@ -130,7 +130,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
       );
     }
     assert.ok(
-      call.systemPrompt?.includes(getAgentDeclaration("swe@1")!.agentPrompt),
+      call.systemPrompt?.includes(getAgentDeclaration("swe@1")!.agent_prompt),
     );
     assert.equal(call.apiKey, expectedKey);
   }

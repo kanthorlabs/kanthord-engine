@@ -29,9 +29,9 @@ const providers: AgentProviderItem[] = [
   { name: "other", provider: "github-copilot", credential: "other-secret" },
 ];
 const defaults: DefaultConfiguration = {
-  agentProvider: "primary",
-  modelIdentifier: "model-a",
-  reasoningEffort: "low",
+  agent_provider: "primary",
+  model_identifier: "model-a",
+  reasoning_effort: "low",
 };
 
 function withStore(work: (tx: Transaction) => void): void {
@@ -139,19 +139,19 @@ test("pagination skips tombstones before limiting and validates cursors", () => 
     );
     const first = listEnablements(tx, 1, null);
     assert.deepEqual(
-      first.items.map((item) => item.agentName),
+      first.items.map((item) => item.agent_name),
       ["alpha"],
     );
     assert.equal(first.next_cursor, Buffer.from("alpha").toString("base64url"));
     const second = listEnablements(tx, 1, first.next_cursor);
     assert.deepEqual(
-      second.items.map((item) => item.agentName),
+      second.items.map((item) => item.agent_name),
       ["charlie"],
     );
     assert.notEqual(second.next_cursor, null);
     const third = listEnablements(tx, 1, second.next_cursor);
     assert.deepEqual(
-      third.items.map((item) => item.agentName),
+      third.items.map((item) => item.agent_name),
       ["delta"],
     );
     assert.equal(third.next_cursor, null);
@@ -206,14 +206,14 @@ test("model lookup matches the selected provider credential and model on live ro
     );
     insertEnablementRevision(tx, "bravo", EnablementState.Enabled, providers, {
       ...defaults,
-      agentProvider: "other",
+      agent_provider: "other",
     });
     insertEnablementRevision(
       tx,
       "charlie",
       EnablementState.Enabled,
       providers,
-      { ...defaults, modelIdentifier: "model-b" },
+      { ...defaults, model_identifier: "model-b" },
     );
     insertEnablementRevision(
       tx,

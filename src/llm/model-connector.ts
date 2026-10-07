@@ -44,10 +44,10 @@ const platformMetadataSchema = z.record(z.string(), z.string());
 const NO_ENV = 0;
 
 export type ModelConfiguration = {
-  agentProvider: string;
+  agent_provider: string;
   provider: string;
-  modelIdentifier: string;
-  reasoningEffort: ReasoningLevel;
+  model_identifier: string;
+  reasoning_effort: ReasoningLevel;
 };
 export interface ModelConnectorInput {
   credentials: CredentialStore;
@@ -103,10 +103,10 @@ function compatibleProvider(input: ModelConnectorInput) {
   });
   return createProvider({
     id: Platform.OpenAICompatible,
-    name: configuration.agentProvider,
+    name: configuration.agent_provider,
     baseUrl: metadata.base_url,
     auth: {
-      apiKey: envApiKeyAuth(`${configuration.agentProvider} API key`, []),
+      apiKey: envApiKeyAuth(`${configuration.agent_provider} API key`, []),
     },
     models,
     api: openAIResponsesApi(),
@@ -177,14 +177,14 @@ export function resolveModel(
   configuration: ModelConfiguration,
 ): Model<Api> {
   assert.ok(runtime);
-  assert.ok(configuration.modelIdentifier);
+  assert.ok(configuration.model_identifier);
   const model = runtime.getModel(
     configuration.provider,
-    configuration.modelIdentifier,
+    configuration.model_identifier,
   );
   if (!model) refuse(SetupRefusal.ModelUnknown);
   if (
-    !getSupportedThinkingLevels(model).includes(configuration.reasoningEffort)
+    !getSupportedThinkingLevels(model).includes(configuration.reasoning_effort)
   )
     refuse(SetupRefusal.ReasoningEffortUnsupported);
   return model;

@@ -33,7 +33,11 @@ import {
 } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  agentDefaultsOf,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -192,10 +196,10 @@ async function resources(c: ReturnType<typeof cli>) {
   const enabled = await c.write<{ revision: number }>(
     ["agent", "enablement", "put", "swe@1"],
     {
-      agentProviders: [
+      agent_providers: [
         { name: "default", provider: PROVIDER, credential: NAME },
       ],
-      defaultConfiguration: CONFIGURATION,
+      default_configuration: agentDefaultsOf(CONFIGURATION),
     },
   );
   assert.equal(enabled.revision, FIRST_REVISION);

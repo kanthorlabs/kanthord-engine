@@ -7,7 +7,12 @@ import { configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { gatewayFixture, objectSink, sinkStorage } from "./test-support.ts";
+import {
+  gatewayFixture,
+  objectSink,
+  sinkStorage,
+  agentDefaultsOf,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const NO_STDERR = "";
@@ -73,10 +78,10 @@ export async function workerAcceptance(t: TestContext, host = false) {
     secret: {},
   });
   await write(["agent", "enablement", "put", "swe@1"], {
-    agentProviders: [
+    agent_providers: [
       { name: "default", provider: "anthropic", credential: "anthro-1" },
     ],
-    defaultConfiguration: WORKER_DEFAULTS,
+    default_configuration: agentDefaultsOf(WORKER_DEFAULTS),
   });
   const storage = {
     endpoint: "https://s3.example.com",

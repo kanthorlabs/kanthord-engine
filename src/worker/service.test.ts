@@ -25,6 +25,7 @@ import {
   agentOperations,
   AgentErrorCode,
   AGENT_COMPONENT_NAME,
+  type AgentEntry,
 } from "../agent/contract.ts";
 import { AgentProviderKind } from "../agent/enablements.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
@@ -294,11 +295,31 @@ const provider = {
   credential: "anthropic",
 };
 const defaults = {
+  agent_provider: provider.name,
+  model_identifier: MODEL,
+  reasoning_effort: "off",
+};
+const entryDefaults = {
   agentProvider: provider.name,
   modelIdentifier: MODEL,
   reasoningEffort: "off",
 };
-const putBody = { agentProviders: [provider], defaultConfiguration: defaults };
+const ENTRY_KEYS: Readonly<Record<string, string>> = {
+  agentProvider: "agent_provider",
+  modelIdentifier: "model_identifier",
+  reasoningEffort: "reasoning_effort",
+};
+function agentEntryOf(entry: WorkerEntry | null): AgentEntry | null {
+  return entry === null
+    ? null
+    : (Object.fromEntries(
+        Object.entries(entry).map(([key, value]) => [ENTRY_KEYS[key], value]),
+      ) as AgentEntry);
+}
+const putBody = {
+  agent_providers: [provider],
+  default_configuration: defaults,
+};
 
 test("registration admission is idempotent, bounded by the latest slot count and rolled back with its transaction", (t) => {
   let instanceCount = 2;
@@ -948,7 +969,7 @@ test("native instance health resolves the latest agent entry and enablement in t
   assert.equal(check(), true);
   entries = [{ agent: AGENT, modelIdentifier: MISSING_MODEL }];
   assert.equal(check(), false);
-  entries = [{ agent: AGENT, ...defaults }];
+  entries = [{ agent: AGENT, ...entryDefaults }];
   assert.equal(check(), true);
   f.invokeAgent("enablement.disable", { expected_revision: FIRST_REVISION });
   assert.equal(check(), false);
@@ -1102,7 +1123,12 @@ function enablementFixture(
     config: WORKER_CONFIG,
     store,
     ...fakeCollaborations,
-    agentConfiguration: agent,
+    agentConfiguration: {
+      validateEntry: (tx, name, entry) =>
+        agent.validateEntry(tx, name, agentEntryOf(entry)),
+      agentView: (tx, name, entry, models) =>
+        agent.agentView(tx, name, agentEntryOf(entry), models),
+    },
     ...collaborations,
   });
   const registry = new OperationRegistry();
@@ -1121,7 +1147,7 @@ function enablementFixture(
   function invoke<K extends OperationKey>(
     key: K,
     body: unknown = null,
-    params: Record<string, string> = { agentName: AGENT },
+    params: Record<string, string> = { agent_name: AGENT },
     query: Record<string, unknown> = {},
   ): (typeof workerOperations)[K]["output"]["_output"] {
     const operation = workerOperations[key];
@@ -1133,7 +1159,7 @@ function enablementFixture(
   function invokeAgent<K extends keyof typeof agentOperations>(
     key: K,
     body: unknown = null,
-    params: Record<string, string> = { agentName: AGENT },
+    params: Record<string, string> = { agent_name: AGENT },
   ): (typeof agentOperations)[K]["output"]["_output"] {
     const operation = agentOperations[key];
     const input = operation.input.parse({ params, query: {}, body });
@@ -1385,7 +1411,7 @@ test("validateEntry refuses unknown workers and external entries and validates e
     () => validate(null),
     AgentErrorCode.Unavailable,
     HttpStatus.BadRequest,
-    { agentName: AGENT },
+    { agent_name: AGENT },
   );
   refuses(() => validate(null, UNKNOWN), AgentErrorCode.InvalidConfiguration);
   assert.doesNotThrow(() => validate(null, "claude@1"));
@@ -1394,7 +1420,7 @@ test("validateEntry refuses unknown workers and external entries and validates e
     AgentErrorCode.InvalidConfiguration,
   );
   f.invokeAgent("enablement.put", putBody);
-  assert.doesNotThrow(() => validate(defaults));
+  assert.doesNotThrow(() => validate(entryDefaults));
   refuses(
     () => validate({ modelIdentifier: MISSING_MODEL }),
     AgentErrorCode.ModelUnknown,
@@ -1432,7 +1458,9 @@ test("workerAgentView answers null outside the agents of the worker and delegate
   const entry = { modelIdentifier: MISSING_MODEL };
   assert.deepEqual(
     view(entry),
-    f.store.transaction((tx) => f.agent.agentView(tx, AGENT, entry)),
+    f.store.transaction((tx) =>
+      f.agent.agentView(tx, AGENT, agentEntryOf(entry)),
+    ),
   );
   assert.equal(view()?.valid, true);
 });

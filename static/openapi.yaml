@@ -4,21 +4,21 @@ info:
   title: kanthord
   version: 28.0.1
 paths:
-  /api/agent/enablement/{agentName}/disable:
+  /api/agent/enablement/{agent_name}/disable:
     $ref: ./openapi/agent/enablement.disable.yaml#/pathItem
-  /api/agent/enablement/{agentName}/enable:
+  /api/agent/enablement/{agent_name}/enable:
     $ref: ./openapi/agent/enablement.enable.yaml#/pathItem
-  /api/agent/enablement/{agentName}:
+  /api/agent/enablement/{agent_name}:
     $ref: ./openapi/agent/enablement.get.yaml#/pathItem
   /api/agent/enablement:
     $ref: ./openapi/agent/enablement.list.yaml#/pathItem
-  /api/agent/enablement/{agentName}/provider:
+  /api/agent/enablement/{agent_name}/provider:
     $ref: ./openapi/agent/enablement.provider.add.yaml#/pathItem
-  /api/agent/enablement/{agentName}/provider/{providerName}/model:
+  /api/agent/enablement/{agent_name}/provider/{provider_name}/model:
     $ref: ./openapi/agent/enablement.provider.model.list.yaml#/pathItem
-  /api/agent/enablement/{agentName}/provider/{providerName}:
+  /api/agent/enablement/{agent_name}/provider/{provider_name}:
     $ref: ./openapi/agent/enablement.provider.remove.yaml#/pathItem
-  /api/agent/{agentName}:
+  /api/agent/{agent_name}:
     $ref: ./openapi/agent/get.yaml#/pathItem
   /api/agent/model:
     $ref: ./openapi/agent/model.list.yaml#/pathItem

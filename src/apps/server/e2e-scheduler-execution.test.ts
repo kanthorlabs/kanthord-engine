@@ -15,7 +15,11 @@ import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  agentDefaultsOf,
+} from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
 const SUCCESS = 0;
@@ -164,10 +168,10 @@ async function setup(t: TestContext, short = false) {
     const result = await write<{ revision: number }>(
       ["agent", "enablement", "put", agent],
       {
-        agentProviders: [
+        agent_providers: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
-        defaultConfiguration: CONFIGURATION,
+        default_configuration: agentDefaultsOf(CONFIGURATION),
       },
     );
     assert.equal(result.revision, INITIAL_ENABLEMENT_REVISION);

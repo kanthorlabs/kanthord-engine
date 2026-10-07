@@ -44,17 +44,17 @@ export function promptSettings(
   if (!row)
     return {
       scope,
-      agentName,
+      agent_name: agentName,
       switches: allOn(scope),
-      customText: "",
+      custom_text: "",
       system_layer: defaultOverride(scope),
       revision: ABSENT_REVISION,
     };
   return {
     scope,
-    agentName,
+    agent_name: agentName,
     switches: { ...allOn(scope), ...JSON.parse(row.switches) },
-    customText: row.custom_text,
+    custom_text: row.custom_text,
     system_layer: row.system_layer ?? defaultOverride(scope),
     revision: row.revision,
   };
@@ -76,9 +76,9 @@ export function savePromptSettings(
       .run(
         createIdentity(AGENT_PROMPT_PREFIX),
         settings.scope,
-        settings.agentName,
+        settings.agent_name,
         canonicalJSON(settings.switches),
-        settings.customText,
+        settings.custom_text,
         settings.system_layer,
         FIRST_REVISION,
         now,
@@ -91,12 +91,12 @@ export function savePromptSettings(
       )
       .run(
         canonicalJSON(settings.switches),
-        settings.customText,
+        settings.custom_text,
         settings.system_layer,
         revision + FIRST_REVISION,
         now,
         settings.scope,
-        settings.agentName,
+        settings.agent_name,
       );
-  return promptSettings(tx, settings.scope, settings.agentName);
+  return promptSettings(tx, settings.scope, settings.agent_name);
 }

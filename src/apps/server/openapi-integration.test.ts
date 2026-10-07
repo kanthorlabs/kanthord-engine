@@ -1020,7 +1020,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     const published = resolved.paths?.[
       operation.path
         .replace(":workerName", "{workerName}")
-        .replace(":agentName", "{agentName}")
+        .replace(":agent_name", "{agent_name}")
     ]?.get as ResolvedOperation | undefined;
     assert.equal(published?.operationId, operation.id);
     assert.equal(published?.["x-access-policy"], AccessPolicy.Human);

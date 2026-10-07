@@ -19,7 +19,11 @@ import {
   workerOperations,
 } from "../../worker/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  agentDefaultsOf,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -173,10 +177,10 @@ async function setup(t: TestContext) {
     await kanthord(["llm", "credential", "create", "--file", credential], H),
   );
   const enablement = file(directory, "enablement.json", {
-    agentProviders: [
+    agent_providers: [
       { name: "default", provider: "anthropic", credential: "anthro-1" },
     ],
-    defaultConfiguration: CONFIGURATION,
+    default_configuration: agentDefaultsOf(CONFIGURATION),
   });
   const enabled = success<{ revision: number }>(
     await kanthord(

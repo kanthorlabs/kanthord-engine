@@ -534,10 +534,10 @@ The list pages the declared agents of the selected template; `get` selects
 one. Proposed item fields are:
 
 - `agent`, `worker`, `workerBindingId`, and `bindingSetVersion`.
-- `defaults`: the enablement's `agentProvider`, `modelIdentifier` and `reasoningEffort`, or `null` when no enablement exists.
+- `defaults`: the enablement's `agent_provider`, `model_identifier` and `reasoning_effort`, or `null` when no enablement exists.
 - `entry`: the binding's tuning or complete entry, or `null` when absent.
 - `effective`, present only when the Worker Service resolves and validates it:
-  `agentProvider`, `provider`, `credential`, `modelIdentifier` and `reasoningEffort`.
+  `agent_provider`, `provider`, `credential`, `model_identifier` and `reasoning_effort`.
   An invalid result permits no fallback.
 - `revisions`: proposed object with `workerBinding`, `entry` and `enablement`
   revision values supplied by the Worker snapshot. `workerBinding` and `entry` are `BindingId` values.

@@ -380,16 +380,16 @@ export type BindingChange = {
 };
 export type WorkerAgentView = {
   defaults: {
-    agentProvider: string;
-    modelIdentifier: string;
-    reasoningEffort: string;
+    agent_provider: string;
+    model_identifier: string;
+    reasoning_effort: string;
   } | null;
   effective: {
-    agentProvider: string;
+    agent_provider: string;
     provider: string;
     credential: string;
-    modelIdentifier: string;
-    reasoningEffort: string;
+    model_identifier: string;
+    reasoning_effort: string;
   } | null;
   valid: boolean;
   issues: Array<{ path: string[]; code: string }>;

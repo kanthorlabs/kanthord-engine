@@ -13,18 +13,18 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: agentName
+      - name: agent_name
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/agent.enablement.provider.model.list.Input/properti\
-            es/params/properties/agentName"
-      - name: providerName
+            es/params/properties/agent_name"
+      - name: provider_name
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/agent.enablement.provider.model.list.Input/properti\
-            es/params/properties/providerName"
+            es/params/properties/provider_name"
     responses:
       "200":
         description: Completed result
@@ -60,15 +60,15 @@ components:
         params:
           type: object
           properties:
-            agentName:
+            agent_name:
               type: string
               minLength: 1
-            providerName:
+            provider_name:
               type: string
               minLength: 1
           required:
-            - agentName
-            - providerName
+            - agent_name
+            - provider_name
           additionalProperties: false
         query:
           type: object
@@ -89,10 +89,10 @@ components:
           items:
             type: object
             properties:
-              modelIdentifier:
+              model_identifier:
                 type: string
                 minLength: 1
-              reasoningEfforts:
+              reasoning_efforts:
                 type: array
                 items:
                   type: string
@@ -105,8 +105,8 @@ components:
                     - xhigh
                     - max
             required:
-              - modelIdentifier
-              - reasoningEfforts
+              - model_identifier
+              - reasoning_efforts
             additionalProperties: false
       required:
         - items

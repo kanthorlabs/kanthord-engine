@@ -67,7 +67,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const entry = {
     agent: setup.agentName,
     agentProvider: "default",
-    modelIdentifier: setup.effectiveConfiguration.modelIdentifier,
+    modelIdentifier: setup.effectiveConfiguration.model_identifier,
     reasoningEffort: "low",
   };
   const composed: string[] = [];
@@ -136,7 +136,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
         defaults: null,
         effective: {
           ...setup.effectiveConfiguration,
-          reasoningEffort: entry.reasoningEffort,
+          reasoning_effort: entry.reasoningEffort,
         },
         valid: true,
         issues: [],
@@ -154,7 +154,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.ok(answer.prompt.final.includes(AGENT_TEXT));
   assert.ok(!answer.prompt.final.includes(WORKING_TEXT));
   assert.equal(
-    answer.effectiveConfiguration.reasoningEffort,
+    answer.effectiveConfiguration.reasoning_effort,
     entry.reasoningEffort,
   );
   assert.equal(commits, before + 1);

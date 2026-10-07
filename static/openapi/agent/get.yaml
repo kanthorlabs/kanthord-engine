@@ -12,29 +12,29 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: agentName
+      - name: agent_name
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/agent.get.Input/properties/params/properties/agentN\
-            ame"
+          $ref: "#/components/schemas/agent.get.Input/properties/params/properties/agent_\
+            name"
       - name: view
         in: query
         required: false
         schema:
           $ref: "#/components/schemas/agent.get.Input/properties/query/properties/view"
-      - name: projectId
+      - name: project_id
         in: query
         required: false
         schema:
           $ref: "#/components/schemas/agent.get.Input/properties/query/properties/project\
-            Id"
-      - name: bindingId
+            _id"
+      - name: binding_id
         in: query
         required: false
         schema:
           $ref: "#/components/schemas/agent.get.Input/properties/query/properties/binding\
-            Id"
+            _id"
     responses:
       "200":
         description: Completed result
@@ -70,11 +70,11 @@ components:
         params:
           type: object
           properties:
-            agentName:
+            agent_name:
               type: string
               minLength: 1
           required:
-            - agentName
+            - agent_name
           additionalProperties: false
         query:
           type: object
@@ -83,10 +83,10 @@ components:
               type: string
               enum:
                 - final
-            projectId:
+            project_id:
               type: string
               minLength: 1
-            bindingId:
+            binding_id:
               type: string
               minLength: 1
           additionalProperties: false
@@ -100,15 +100,15 @@ components:
     agent.get.Output:
       type: object
       properties:
-        agentName:
+        agent_name:
           type: string
           minLength: 1
-        configurationSchema:
+        configuration_schema:
           type: object
           propertyNames:
             type: string
           additionalProperties: {}
-        overridableFields:
+        overridable_fields:
           type: array
           items:
             type: string
@@ -197,7 +197,7 @@ components:
                   - host
                   - builtin
                   - kanthord-mcp
-              inputSchema:
+              input_schema:
                 type: object
                 propertyNames:
                   type: string
@@ -205,20 +205,20 @@ components:
             required:
               - name
               - source
-              - inputSchema
+              - input_schema
             additionalProperties: false
         enablement:
           anyOf:
             - type: object
               properties:
-                agentName:
+                agent_name:
                   type: string
                 state:
                   type: string
                   enum:
                     - enabled
                     - disabled
-                agentProviders:
+                agent_providers:
                   type: array
                   items:
                     type: object
@@ -278,16 +278,16 @@ components:
                       - provider
                       - credential
                     additionalProperties: false
-                defaultConfiguration:
+                default_configuration:
                   type: object
                   properties:
-                    agentProvider:
+                    agent_provider:
                       type: string
                       minLength: 1
-                    modelIdentifier:
+                    model_identifier:
                       type: string
                       minLength: 1
-                    reasoningEffort:
+                    reasoning_effort:
                       type: string
                       enum:
                         - off
@@ -298,26 +298,26 @@ components:
                         - xhigh
                         - max
                   required:
-                    - agentProvider
-                    - modelIdentifier
-                    - reasoningEffort
+                    - agent_provider
+                    - model_identifier
+                    - reasoning_effort
                   additionalProperties: false
                 revision:
                   type: integer
                   exclusiveMinimum: 0
                   maximum: 9007199254740991
               required:
-                - agentName
+                - agent_name
                 - state
-                - agentProviders
-                - defaultConfiguration
+                - agent_providers
+                - default_configuration
                 - revision
               additionalProperties: false
             - type: "null"
       required:
-        - agentName
-        - configurationSchema
-        - overridableFields
+        - agent_name
+        - configuration_schema
+        - overridable_fields
         - prompt
         - tools
         - enablement

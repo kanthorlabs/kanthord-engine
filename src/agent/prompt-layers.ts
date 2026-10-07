@@ -221,17 +221,17 @@ function systemSpecs(input: LayerInput): SourceSpec[] {
       path: null,
       owner: SYSTEM_OWNER,
       label: () => "database custom system prompt",
-      load: textSource(input.settings.system.customText),
+      load: textSource(input.settings.system.custom_text),
     },
   ];
 }
 
 function agentSpecs(input: LayerInput): SourceSpec[] {
-  const owner = `agent ${input.agent.agentName}`;
+  const owner = `agent ${input.agent.agent_name}`;
   const path = input.agentDirectory
     ? join(
         resolve(input.dataDirectory, input.agentDirectory),
-        `${input.agent.agentName}${MARKDOWN_EXTENSION}`,
+        `${input.agent.agent_name}${MARKDOWN_EXTENSION}`,
       )
     : null;
   return [
@@ -251,8 +251,8 @@ function agentSpecs(input: LayerInput): SourceSpec[] {
       origin: PromptOrigin.Binary,
       path: null,
       owner,
-      label: () => `binary ${input.agent.agentName}${MARKDOWN_EXTENSION}`,
-      load: textSource(input.agent.agentPrompt),
+      label: () => `binary ${input.agent.agent_name}${MARKDOWN_EXTENSION}`,
+      load: textSource(input.agent.agent_prompt),
     },
     {
       source: AgentPromptSource.Custom,
@@ -260,7 +260,7 @@ function agentSpecs(input: LayerInput): SourceSpec[] {
       path: null,
       owner,
       label: () => "database custom agent prompt",
-      load: textSource(input.settings.agent.customText),
+      load: textSource(input.settings.agent.custom_text),
     },
   ];
 }
@@ -293,7 +293,7 @@ function workingSpecs(input: LayerInput): SourceSpec[] {
       path: null,
       owner: WORKING_OWNER,
       label: () => "database custom workbench prompt",
-      load: textSource(input.settings.working.customText),
+      load: textSource(input.settings.working.custom_text),
     },
   ];
 }

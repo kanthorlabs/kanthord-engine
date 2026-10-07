@@ -62,7 +62,7 @@ const SECOND_REVISION = 2;
 const THIRD_REVISION = 3;
 const ADD_PROVIDER = "enablement.provider.add";
 const REMOVE_PROVIDER = "enablement.provider.remove";
-const TOOLS = [{ name: "read", source: ToolSource.Builtin, inputSchema: {} }];
+const TOOLS = [{ name: "read", source: ToolSource.Builtin, input_schema: {} }];
 const provider = {
   name: "primary",
   provider: AgentProviderKind.Anthropic,
@@ -70,12 +70,15 @@ const provider = {
 };
 const spare = { ...provider, name: "spare", credential: "anthropic-spare" };
 const defaults = {
-  agentProvider: provider.name,
-  modelIdentifier: MODEL,
-  reasoningEffort: "off",
+  agent_provider: provider.name,
+  model_identifier: MODEL,
+  reasoning_effort: "off",
 };
-const putBody = { agentProviders: [provider], defaultConfiguration: defaults };
-const binding = { bindingId: "binding", workerName: WORKER, entry: null };
+const putBody = {
+  agent_providers: [provider],
+  default_configuration: defaults,
+};
+const binding = { binding_id: "binding", worker_name: WORKER, entry: null };
 const fakeCollaborations: Omit<Dependencies, "store"> = {
   config: { prompt: { system_file: "", agent_directory: "" } },
   dataDirectory: "/nonexistent/data",
@@ -121,7 +124,7 @@ function enablementFixture(
   function invoke<K extends OperationKey>(
     key: K,
     body: unknown = null,
-    params: Record<string, string> = { agentName: AGENT },
+    params: Record<string, string> = { agent_name: AGENT },
     query: Record<string, unknown> = {},
   ): (typeof agentOperations)[K]["output"]["_output"] {
     const operation = agentOperations[key];
@@ -162,8 +165,8 @@ test("agent read answers the layers, the working layer of the workbench and the 
     "prompt.put",
     {
       scope: PromptScope.Workbench,
-      agentName: AGENT,
-      customText: CUSTOM_TEXT,
+      agent_name: AGENT,
+      custom_text: CUSTOM_TEXT,
     },
     {},
   );
@@ -177,7 +180,7 @@ test("agent read answers the layers, the working layer of the workbench and the 
     operation.output.parse(
       await f.registry.get(operation.id).handler(
         operation.input.parse({
-          params: { agentName: AGENT },
+          params: { agent_name: AGENT },
           query,
           body: null,
         }),
@@ -267,7 +270,7 @@ test("agent read with a repository binding answers its working layer and the wor
     operation.output.parse(
       await f.registry.get(operation.id).handler(
         operation.input.parse({
-          params: { agentName: AGENT },
+          params: { agent_name: AGENT },
           query,
           body: null,
         }),
@@ -275,7 +278,10 @@ test("agent read with a repository binding answers its working layer and the wor
       ),
     );
   const working = async (bindingId: string) => {
-    const answer = await read({ projectId: "project-a", bindingId });
+    const answer = await read({
+      project_id: "project-a",
+      binding_id: bindingId,
+    });
     return { answer, sources: answer.prompt.layers![2]!.sources };
   };
   const on = await working("binding-on");
@@ -312,22 +318,25 @@ test("agent read with a repository binding answers its working layer and the wor
   assert.equal(off.sources[4]!.state, PromptSourceState.Off);
   assert.ok(!off.answer.prompt.final.includes(PROJECT_TEXT));
   await assert.rejects(
-    read({ projectId: "project-b", bindingId: "binding-on" }),
+    read({ project_id: "project-b", binding_id: "binding-on" }),
     (error) =>
       error instanceof OperationError &&
       error.status === HttpStatus.NotFound &&
       error.code === ProjectErrorCode.BindingNotFound,
   );
   await assert.rejects(
-    read({ projectId: "project-a", bindingId: "binding-missing" }),
+    read({ project_id: "project-a", binding_id: "binding-missing" }),
     (error) =>
       error instanceof OperationError &&
       error.code === ProjectErrorCode.BindingNotFound,
   );
-  for (const query of [{ projectId: "project-a" }, { bindingId: "binding-on" }])
+  for (const query of [
+    { project_id: "project-a" },
+    { binding_id: "binding-on" },
+  ])
     assert.equal(
       operation.input.safeParse({
-        params: { agentName: AGENT },
+        params: { agent_name: AGENT },
         query,
         body: null,
       }).success,
@@ -350,7 +359,10 @@ test("agent declaration read exposes prompts, tools and current enablement witho
     operation.output.parse(
       await f.registry
         .get(operation.id)
-        .handler({ params: { agentName }, query: {}, body: null }, f.caller),
+        .handler(
+          { params: { agent_name: agentName }, query: {}, body: null },
+          f.caller,
+        ),
     );
   const before = f.store.database
     .prepare("SELECT total_changes() AS count")
@@ -369,21 +381,21 @@ test("agent declaration read exposes prompts, tools and current enablement witho
     ),
   );
   assert.ok(sources["agent.shipped"]!.text?.startsWith("## Role"));
-  assert.equal(declaration.configurationSchema.$schema, schemaVersion);
-  assert.equal(declaration.configurationSchema.additionalProperties, false);
-  assert.deepEqual(declaration.configurationSchema.required, [
-    "agentProvider",
+  assert.equal(declaration.configuration_schema.$schema, schemaVersion);
+  assert.equal(declaration.configuration_schema.additionalProperties, false);
+  assert.deepEqual(declaration.configuration_schema.required, [
+    "agent_provider",
     "provider",
     "credential",
-    "modelIdentifier",
-    "reasoningEffort",
+    "model_identifier",
+    "reasoning_effort",
   ]);
   assert.doesNotMatch(
-    JSON.stringify(declaration.configurationSchema),
+    JSON.stringify(declaration.configuration_schema),
     /"(?:default|options)":/,
   );
   assert.match(
-    String(declaration.configurationSchema.description),
+    String(declaration.configuration_schema.description),
     /JSON Schema validates neither lookup/,
   );
   assert.deepEqual((await read(OTHER_AGENT)).tools, TOOLS);
@@ -529,19 +541,19 @@ test("enablement operations use one commit, page ascending, and project only wir
     () => f.invoke("enablement.get"),
     AgentErrorCode.NotFound,
     HttpStatus.NotFound,
-    { agentName: AGENT },
+    { agent_name: AGENT },
   );
   const first = f.invoke("enablement.put", putBody);
   assert.deepEqual(first, {
-    agentName: AGENT,
+    agent_name: AGENT,
     state: EnablementState.Enabled,
     ...putBody,
     revision: FIRST_REVISION,
   });
-  f.invoke("enablement.put", putBody, { agentName: OTHER_AGENT });
+  f.invoke("enablement.put", putBody, { agent_name: OTHER_AGENT });
   const page = f.invoke("enablement.list", null, {}, { limit: "1" });
   assert.deepEqual(
-    page.items.map(({ agentName }) => agentName),
+    page.items.map(({ agent_name }) => agent_name),
     [OTHER_AGENT],
   );
   assert.ok(page.next_cursor);
@@ -572,7 +584,7 @@ test("put checks catalog then tombstone-aware expected revision and restarts ena
       f.invoke(
         "enablement.put",
         { ...putBody, expected_revision: 1 },
-        { agentName: UNKNOWN },
+        { agent_name: UNKNOWN },
       ),
     AgentErrorCode.AgentNotFound,
     HttpStatus.NotFound,
@@ -581,25 +593,25 @@ test("put checks catalog then tombstone-aware expected revision and restarts ena
     () => f.invoke("enablement.put", { ...putBody, expected_revision: 1 }),
     AgentErrorCode.RevisionConflict,
     HttpStatus.Conflict,
-    { agentName: AGENT, revision: null },
+    { agent_name: AGENT, revision: null },
   );
   f.invoke("enablement.put", putBody);
   refuses(
     () => f.invoke("enablement.put", putBody),
     AgentErrorCode.RevisionConflict,
     HttpStatus.Conflict,
-    { agentName: AGENT, revision: FIRST_REVISION },
+    { agent_name: AGENT, revision: FIRST_REVISION },
   );
   f.invoke("enablement.disable", { expected_revision: 1 });
   assert.deepEqual(f.invoke("enablement.remove", { expected_revision: 2 }), {
-    agentName: AGENT,
+    agent_name: AGENT,
     removed: true,
   });
   refuses(
     () => f.invoke("enablement.put", putBody),
     AgentErrorCode.RevisionConflict,
     HttpStatus.Conflict,
-    { agentName: AGENT, revision: THIRD_REVISION },
+    { agent_name: AGENT, revision: THIRD_REVISION },
   );
   refuses(
     () => f.invoke("enablement.get"),
@@ -631,10 +643,10 @@ test("mutations check catalog, existence, and then revision in order", (t) => {
         : { expected_revision: 99 };
     const params: Record<string, string> =
       key === REMOVE_PROVIDER
-        ? { agentName: AGENT, providerName: spare.name }
-        : { agentName: AGENT };
+        ? { agent_name: AGENT, provider_name: spare.name }
+        : { agent_name: AGENT };
     refuses(
-      () => f.invoke(key, body, { ...params, agentName: UNKNOWN }),
+      () => f.invoke(key, body, { ...params, agent_name: UNKNOWN }),
       AgentErrorCode.AgentNotFound,
       HttpStatus.NotFound,
     );
@@ -656,7 +668,7 @@ test("disable skips dependent validation; enable validates defaults and every bi
   let entries: AgentDependentBinding[] = [];
   const f = enablementFixture(t, { entriesOfAgent: () => entries });
   f.invoke("enablement.put", putBody);
-  entries = [{ ...binding, entry: { modelIdentifier: MISSING_MODEL } }];
+  entries = [{ ...binding, entry: { model_identifier: MISSING_MODEL } }];
   const disabled = f.invoke("enablement.disable", {
     expected_revision: 1,
   });
@@ -666,11 +678,11 @@ test("disable skips dependent validation; enable validates defaults and every bi
     AgentErrorCode.InvalidatesBindings,
     HttpStatus.Conflict,
     {
-      agentName: AGENT,
+      agent_name: AGENT,
       bindings: [
         {
-          bindingId: binding.bindingId,
-          workerName: WORKER,
+          binding_id: binding.binding_id,
+          worker_name: WORKER,
           code: AgentErrorCode.ModelUnknown,
         },
       ],
@@ -697,13 +709,13 @@ test("remove refuses bindings and tombstones only when unused", (t) => {
     AgentErrorCode.InUse,
     HttpStatus.Conflict,
     {
-      agentName: AGENT,
-      bindings: [{ bindingId: binding.bindingId, workerName: WORKER }],
+      agent_name: AGENT,
+      bindings: [{ binding_id: binding.binding_id, worker_name: WORKER }],
     },
   );
   entries = [];
   assert.deepEqual(f.invoke("enablement.remove", { expected_revision: 1 }), {
-    agentName: AGENT,
+    agent_name: AGENT,
     removed: true,
   });
   assert.deepEqual(f.invoke("enablement.list", null, {}), {
@@ -720,7 +732,7 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
     f.invoke(
       "enablement.provider.remove",
       { expected_revision: revision },
-      { agentName: AGENT, providerName: name },
+      { agent_name: AGENT, provider_name: name },
     );
   refuses(
     () => remove(UNKNOWN, 1),
@@ -730,7 +742,7 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
   refuses(() => remove(provider.name, 1), AgentErrorCode.ProviderRequired);
   assert.deepEqual(
     f.invoke("enablement.provider.add", { ...spare, expected_revision: 1 })
-      .agentProviders,
+      .agent_providers,
     [provider, spare],
   );
   refuses(
@@ -752,29 +764,31 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
     AgentErrorCode.ProviderCredentialConflict,
     HttpStatus.Conflict,
     {
-      agentName: AGENT,
+      agent_name: AGENT,
       credential: spare.credential,
-      agentProvider: spare.name,
+      agent_provider: spare.name,
     },
   );
   refuses(
     () => remove(provider.name, 2),
     AgentErrorCode.ProviderInUse,
     HttpStatus.Conflict,
-    { agentName: AGENT, dependents: [{ kind: "defaultConfiguration" }] },
+    { agent_name: AGENT, dependents: [{ kind: "default_configuration" }] },
   );
-  entries = [{ ...binding, entry: { ...defaults, agentProvider: spare.name } }];
+  entries = [
+    { ...binding, entry: { ...defaults, agent_provider: spare.name } },
+  ];
   refuses(
     () => remove(spare.name, 2),
     AgentErrorCode.ProviderInUse,
     HttpStatus.Conflict,
     {
-      agentName: AGENT,
-      dependents: [{ bindingId: binding.bindingId, workerName: WORKER }],
+      agent_name: AGENT,
+      dependents: [{ binding_id: binding.binding_id, worker_name: WORKER }],
     },
   );
   entries = [binding];
-  assert.deepEqual(remove(spare.name, 2).agentProviders, [provider]);
+  assert.deepEqual(remove(spare.name, 2).agent_providers, [provider]);
 });
 
 test("put rejects duplicate names, duplicate credentials, absent defaults, provider-kind changes, and omitted explicit providers", (t) => {
@@ -784,7 +798,7 @@ test("put rejects duplicate names, duplicate credentials, absent defaults, provi
     () =>
       f.invoke("enablement.put", {
         ...putBody,
-        agentProviders: [provider, provider],
+        agent_providers: [provider, provider],
       }),
     AgentErrorCode.ProviderNameConflict,
     HttpStatus.Conflict,
@@ -793,7 +807,7 @@ test("put rejects duplicate names, duplicate credentials, absent defaults, provi
     () =>
       f.invoke("enablement.put", {
         ...putBody,
-        agentProviders: [
+        agent_providers: [
           provider,
           { ...spare, credential: provider.credential },
         ],
@@ -805,21 +819,21 @@ test("put rejects duplicate names, duplicate credentials, absent defaults, provi
     () =>
       f.invoke("enablement.put", {
         ...putBody,
-        defaultConfiguration: { ...defaults, agentProvider: UNKNOWN },
+        default_configuration: { ...defaults, agent_provider: UNKNOWN },
       }),
     AgentErrorCode.ProviderNotFound,
     HttpStatus.NotFound,
   );
   f.invoke("enablement.put", {
     ...putBody,
-    agentProviders: [provider, spare],
+    agent_providers: [provider, spare],
   });
   refuses(
     () =>
       f.invoke("enablement.put", {
         ...putBody,
         expected_revision: 1,
-        agentProviders: [
+        agent_providers: [
           provider,
           { ...spare, provider: AgentProviderKind.GithubCopilot },
         ],
@@ -827,14 +841,16 @@ test("put rejects duplicate names, duplicate credentials, absent defaults, provi
     AgentErrorCode.ProviderFixed,
     HttpStatus.Conflict,
   );
-  entries = [{ ...binding, entry: { ...defaults, agentProvider: spare.name } }];
+  entries = [
+    { ...binding, entry: { ...defaults, agent_provider: spare.name } },
+  ];
   refuses(
     () => f.invoke("enablement.put", { ...putBody, expected_revision: 1 }),
     AgentErrorCode.ProviderInUse,
     HttpStatus.Conflict,
     {
-      agentName: AGENT,
-      bindings: [{ bindingId: binding.bindingId, workerName: WORKER }],
+      agent_name: AGENT,
+      bindings: [{ binding_id: binding.binding_id, worker_name: WORKER }],
     },
   );
   assert.deepEqual(
@@ -848,14 +864,14 @@ test("put collects binding validation failures and validates its defaults first"
   const f = enablementFixture(t, { entriesOfAgent: () => entries });
   f.invoke("enablement.put", putBody);
   entries = [
-    { ...binding, entry: { modelIdentifier: MISSING_MODEL } },
+    { ...binding, entry: { model_identifier: MISSING_MODEL } },
     {
       ...binding,
-      bindingId: "second",
+      binding_id: "second",
       entry: {
-        agentProvider: UNKNOWN,
-        modelIdentifier: MODEL,
-        reasoningEffort: "off",
+        agent_provider: UNKNOWN,
+        model_identifier: MODEL,
+        reasoning_effort: "off",
       },
     },
   ];
@@ -864,16 +880,16 @@ test("put collects binding validation failures and validates its defaults first"
     AgentErrorCode.InvalidatesBindings,
     HttpStatus.Conflict,
     {
-      agentName: AGENT,
+      agent_name: AGENT,
       bindings: [
         {
-          bindingId: binding.bindingId,
-          workerName: WORKER,
+          binding_id: binding.binding_id,
+          worker_name: WORKER,
           code: AgentErrorCode.ModelUnknown,
         },
         {
-          bindingId: "second",
-          workerName: WORKER,
+          binding_id: "second",
+          worker_name: WORKER,
           code: AgentErrorCode.ProviderNotFound,
         },
       ],
@@ -884,7 +900,7 @@ test("put collects binding validation failures and validates its defaults first"
       f.invoke("enablement.put", {
         ...putBody,
         expected_revision: 1,
-        defaultConfiguration: { ...defaults, modelIdentifier: MISSING_MODEL },
+        default_configuration: { ...defaults, model_identifier: MISSING_MODEL },
       }),
     AgentErrorCode.ModelUnknown,
   );
@@ -900,12 +916,12 @@ test("anthropic uses the built-in catalog, not absent credential metadata", (t) 
     () =>
       f.invoke("enablement.put", {
         ...putBody,
-        defaultConfiguration: { ...defaults, modelIdentifier: MISSING_MODEL },
+        default_configuration: { ...defaults, model_identifier: MISSING_MODEL },
       }),
     AgentErrorCode.ModelUnknown,
   );
   assert.equal(
-    f.invoke("enablement.put", putBody).defaultConfiguration.modelIdentifier,
+    f.invoke("enablement.put", putBody).default_configuration.model_identifier,
     MODEL,
   );
 });
@@ -918,8 +934,8 @@ test("openai-codex uses the built-in catalog and refuses an unknown model", (t) 
   });
   const codex = { ...provider, provider: AgentProviderKind.OpenaiCodex };
   const body = (modelIdentifier: string) => ({
-    agentProviders: [codex],
-    defaultConfiguration: { ...defaults, modelIdentifier },
+    agent_providers: [codex],
+    default_configuration: { ...defaults, model_identifier: modelIdentifier },
   });
   refuses(
     () => f.invoke("enablement.put", body(MODEL)),
@@ -927,8 +943,8 @@ test("openai-codex uses the built-in catalog and refuses an unknown model", (t) 
   );
   const builtin = "gpt-5.5";
   assert.equal(
-    f.invoke("enablement.put", body(builtin)).defaultConfiguration
-      .modelIdentifier,
+    f.invoke("enablement.put", body(builtin)).default_configuration
+      .model_identifier,
     builtin,
   );
 });
@@ -941,8 +957,8 @@ test("openrouter uses the built-in catalog and refuses an unknown model", (t) =>
   });
   const router = { ...provider, provider: AgentProviderKind.Openrouter };
   const body = (modelIdentifier: string) => ({
-    agentProviders: [router],
-    defaultConfiguration: { ...defaults, modelIdentifier },
+    agent_providers: [router],
+    default_configuration: { ...defaults, model_identifier: modelIdentifier },
   });
   refuses(
     () => f.invoke("enablement.put", body(MODEL)),
@@ -950,8 +966,8 @@ test("openrouter uses the built-in catalog and refuses an unknown model", (t) =>
   );
   const builtin = "anthropic/claude-3-haiku";
   assert.equal(
-    f.invoke("enablement.put", body(builtin)).defaultConfiguration
-      .modelIdentifier,
+    f.invoke("enablement.put", body(builtin)).default_configuration
+      .model_identifier,
     builtin,
   );
 });
@@ -964,8 +980,8 @@ test("groq uses the built-in catalog and refuses an unknown model", (t) => {
   });
   const groq = { ...provider, provider: "groq" };
   const body = (modelIdentifier: string) => ({
-    agentProviders: [groq],
-    defaultConfiguration: { ...defaults, modelIdentifier },
+    agent_providers: [groq],
+    default_configuration: { ...defaults, model_identifier: modelIdentifier },
   });
   refuses(
     () => f.invoke("enablement.put", body(MODEL)),
@@ -973,8 +989,8 @@ test("groq uses the built-in catalog and refuses an unknown model", (t) => {
   );
   const builtin = "llama-3.1-8b-instant";
   assert.equal(
-    f.invoke("enablement.put", body(builtin)).defaultConfiguration
-      .modelIdentifier,
+    f.invoke("enablement.put", body(builtin)).default_configuration
+      .model_identifier,
     builtin,
   );
 });
@@ -995,7 +1011,7 @@ test("openai-compatible approved models establish models and reasoning levels, i
   const f = enablementFixture(t, { approvedModels: () => models });
   const customBody = {
     ...putBody,
-    agentProviders: [
+    agent_providers: [
       { ...provider, provider: AgentProviderKind.OpenaiCompatible },
     ],
   };
@@ -1003,7 +1019,7 @@ test("openai-compatible approved models establish models and reasoning levels, i
     () =>
       f.invoke("enablement.put", {
         ...customBody,
-        defaultConfiguration: { ...defaults, reasoningEffort: "high" },
+        default_configuration: { ...defaults, reasoning_effort: "high" },
       }),
     AgentErrorCode.ReasoningUnsupported,
   );
@@ -1026,7 +1042,7 @@ test("openai-compatible approved models establish models and reasoning levels, i
     f.invoke("enablement.put", {
       ...customBody,
       expected_revision: 1,
-      defaultConfiguration: { ...defaults, reasoningEffort: "high" },
+      default_configuration: { ...defaults, reasoning_effort: "high" },
     }).revision,
     SECOND_REVISION,
   );
@@ -1044,7 +1060,7 @@ test("null credential records permit no model; malformed metadata propagates in 
   });
   const customBody = {
     ...putBody,
-    agentProviders: [
+    agent_providers: [
       { ...provider, provider: AgentProviderKind.OpenaiCompatible },
     ],
   };
@@ -1090,7 +1106,7 @@ test("Custody refusals map to credential_unsuitable, while unexpected failures p
   const view = () =>
     f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null));
   assert.deepEqual(view()?.issues, [
-    { path: ["agentProvider"], code: AgentErrorCode.CredentialUnsuitable },
+    { path: ["agent_provider"], code: AgentErrorCode.CredentialUnsuitable },
   ]);
   failure = new CodedError(
     "system.composition.unwired",
@@ -1112,14 +1128,14 @@ test("validateEntry enforces availability, allowlist and entry forms", (t) => {
     () => validate(null),
     AgentErrorCode.Unavailable,
     HttpStatus.BadRequest,
-    { agentName: AGENT },
+    { agent_name: AGENT },
   );
   f.invoke("enablement.put", putBody);
   for (const entry of [
     null,
     defaults,
-    { modelIdentifier: MODEL },
-    { reasoningEffort: "off" },
+    { model_identifier: MODEL },
+    { reasoning_effort: "off" },
   ])
     assert.doesNotThrow(() => validate(entry));
   refuses(
@@ -1129,12 +1145,12 @@ test("validateEntry enforces availability, allowlist and entry forms", (t) => {
   );
   for (const entry of [
     {},
-    { agentProvider: provider.name },
-    { agentProvider: provider.name, modelIdentifier: MODEL },
+    { agent_provider: provider.name },
+    { agent_provider: provider.name, model_identifier: MODEL },
   ])
     refuses(() => validate(entry), AgentErrorCode.InvalidConfiguration);
   refuses(
-    () => validate({ reasoningEffort: "invented" }),
+    () => validate({ reasoning_effort: "invented" }),
     AgentErrorCode.ReasoningUnsupported,
   );
   f.invoke("enablement.disable", { expected_revision: 1 });
@@ -1148,8 +1164,8 @@ test("Agent collaborations report provider and effective model dependencies with
         ? [
             {
               ...binding,
-              workerName: "reviewer@1",
-              entry: { modelIdentifier: MODEL },
+              worker_name: "reviewer@1",
+              entry: { model_identifier: MODEL },
             },
           ]
         : [binding],
@@ -1159,12 +1175,12 @@ test("Agent collaborations report provider and effective model dependencies with
     "enablement.put",
     {
       ...putBody,
-      defaultConfiguration: {
+      default_configuration: {
         ...defaults,
-        modelIdentifier: "claude-haiku-4-5",
+        model_identifier: "claude-haiku-4-5",
       },
     },
-    { agentName: OTHER_AGENT },
+    { agent_name: OTHER_AGENT },
   );
   f.store.transaction((tx) => {
     assert.deepEqual(
@@ -1179,15 +1195,15 @@ test("Agent collaborations report provider and effective model dependencies with
       provider.credential,
       MODEL,
     );
-    assert.deepEqual(dependent.map(({ agentName }) => agentName).sort(), [
+    assert.deepEqual(dependent.map(({ agent_name }) => agent_name).sort(), [
       OTHER_AGENT,
       AGENT,
     ]);
     for (const row of dependent)
       assert.deepEqual(Object.keys(row).sort(), [
-        "agentName",
-        "agentProviders",
-        "defaultConfiguration",
+        "agent_name",
+        "agent_providers",
+        "default_configuration",
         "revision",
         "state",
       ]);
@@ -1200,7 +1216,7 @@ test("Agent collaborations report provider and effective model dependencies with
 
 test("model dependency lookup enumerates all live pages, deduplicates, and excludes tombstones", (t) => {
   const f = enablementFixture(t, {
-    entriesOfAgent: () => [{ ...binding, entry: { modelIdentifier: MODEL } }],
+    entriesOfAgent: () => [{ ...binding, entry: { model_identifier: MODEL } }],
   });
   const count = LIST_LIMIT_DEFAULT + 2;
   f.store.transaction((tx) => {
@@ -1252,18 +1268,18 @@ test("agentView resolves valid configurations and returns precise issues without
   });
   for (const [entry, path, code] of [
     [
-      { modelIdentifier: MISSING_MODEL },
-      "modelIdentifier",
+      { model_identifier: MISSING_MODEL },
+      "model_identifier",
       AgentErrorCode.ModelUnknown,
     ],
     [
-      { agentProvider: UNKNOWN },
-      "agentProvider",
+      { agent_provider: UNKNOWN },
+      "agent_provider",
       AgentErrorCode.ProviderNotFound,
     ],
     [
-      { reasoningEffort: "invented" },
-      "reasoningEffort",
+      { reasoning_effort: "invented" },
+      "reasoning_effort",
       AgentErrorCode.ReasoningUnsupported,
     ],
   ] as const)
@@ -1292,18 +1308,20 @@ test("model list answers the built-in catalog of the provider with its supported
   });
   f.invoke("enablement.put", putBody);
   const { items } = f.invoke(MODEL_LIST, null, {
-    agentName: AGENT,
-    providerName: provider.name,
+    agent_name: AGENT,
+    provider_name: provider.name,
   });
   const catalog = getBuiltinModels(AgentProviderKind.Anthropic);
   assert.deepEqual(
-    items.map(({ modelIdentifier }) => modelIdentifier),
+    items.map(({ model_identifier }) => model_identifier),
     catalog.map(({ id }) => id),
   );
-  const listed = items.find(({ modelIdentifier }) => modelIdentifier === MODEL);
+  const listed = items.find(
+    ({ model_identifier }) => model_identifier === MODEL,
+  );
   assert.ok(listed);
   assert.deepEqual(
-    listed.reasoningEfforts,
+    listed.reasoning_efforts,
     getSupportedThinkingLevels(catalog.find(({ id }) => id === MODEL)!),
   );
   assert.equal(f.commits(), SECOND_REVISION);
@@ -1323,17 +1341,17 @@ test("model list answers the approved models and reasoning levels of an openai-c
   });
   f.invoke("enablement.put", {
     ...putBody,
-    agentProviders: [
+    agent_providers: [
       { ...provider, provider: AgentProviderKind.OpenaiCompatible },
     ],
   });
-  const params = { agentName: AGENT, providerName: provider.name };
+  const params = { agent_name: AGENT, provider_name: provider.name };
   assert.deepEqual(f.invoke(MODEL_LIST, null, params).items, [
     {
-      modelIdentifier: MODEL,
-      reasoningEfforts: [DEFAULT_REASONING, "high"],
+      model_identifier: MODEL,
+      reasoning_efforts: [DEFAULT_REASONING, "high"],
     },
-    { modelIdentifier: "plain", reasoningEfforts: [] },
+    { model_identifier: "plain", reasoning_efforts: [] },
   ]);
   assert.ok(
     requested.every((credential) => credential === provider.credential),
@@ -1344,9 +1362,9 @@ test("model list answers the approved models and reasoning levels of an openai-c
 
 test("model list refuses an unknown agent, an absent enablement and an absent provider", (t) => {
   const f = enablementFixture(t);
-  const params = { agentName: AGENT, providerName: provider.name };
+  const params = { agent_name: AGENT, provider_name: provider.name };
   refuses(
-    () => f.invoke(MODEL_LIST, null, { ...params, agentName: UNKNOWN }),
+    () => f.invoke(MODEL_LIST, null, { ...params, agent_name: UNKNOWN }),
     AgentErrorCode.AgentNotFound,
     HttpStatus.NotFound,
   );
@@ -1357,7 +1375,7 @@ test("model list refuses an unknown agent, an absent enablement and an absent pr
   );
   f.invoke("enablement.put", putBody);
   refuses(
-    () => f.invoke(MODEL_LIST, null, { ...params, providerName: UNKNOWN }),
+    () => f.invoke(MODEL_LIST, null, { ...params, provider_name: UNKNOWN }),
     AgentErrorCode.ProviderNotFound,
     HttpStatus.NotFound,
   );
@@ -1381,7 +1399,7 @@ test("credential model list answers the models of a credential before any enable
     { provider: AgentProviderKind.Anthropic, credential: provider.credential },
   );
   assert.deepEqual(
-    builtin.items.map(({ modelIdentifier }) => modelIdentifier),
+    builtin.items.map(({ model_identifier }) => model_identifier),
     getBuiltinModels(AgentProviderKind.Anthropic).map(({ id }) => id),
   );
   assert.deepEqual(requested, []);
@@ -1392,7 +1410,7 @@ test("credential model list answers the models of a credential before any enable
     { provider: AgentProviderKind.OpenaiCompatible, credential: "gateway" },
   );
   assert.deepEqual(compatible.items, [
-    { modelIdentifier: MODEL, reasoningEfforts: [DEFAULT_REASONING] },
+    { model_identifier: MODEL, reasoning_efforts: [DEFAULT_REASONING] },
   ]);
   assert.deepEqual(requested, ["gateway"]);
 });
@@ -1435,23 +1453,23 @@ test("every listed model and reasoning effort passes the configuration validatio
   };
   f.invoke("enablement.put", {
     ...putBody,
-    agentProviders: [provider, custom],
+    agent_providers: [provider, custom],
   });
   const row = f.invoke("enablement.get");
-  for (const item of row.agentProviders) {
+  for (const item of row.agent_providers) {
     const { items } = f.invoke(MODEL_LIST, null, {
-      agentName: AGENT,
-      providerName: item.name,
+      agent_name: AGENT,
+      provider_name: item.name,
     });
     assert.ok(items.length);
-    for (const { modelIdentifier, reasoningEfforts } of items)
-      for (const reasoningEffort of reasoningEfforts)
+    for (const { model_identifier, reasoning_efforts } of items)
+      for (const reasoningEffort of reasoning_efforts)
         f.store.transaction((tx) =>
           assert.doesNotThrow(() =>
             f.agent.validateEntry(tx, AGENT, {
-              agentProvider: item.name,
-              modelIdentifier,
-              reasoningEffort,
+              agent_provider: item.name,
+              model_identifier,
+              reasoning_effort: reasoningEffort,
             }),
           ),
         );
@@ -1460,8 +1478,8 @@ test("every listed model and reasoning effort passes the configuration validatio
 
 const PROMPT_TARGETS = [
   { scope: PromptScope.System },
-  { scope: PromptScope.Agent, agentName: AGENT },
-  { scope: PromptScope.Workbench, agentName: AGENT },
+  { scope: PromptScope.Agent, agent_name: AGENT },
+  { scope: PromptScope.Workbench, agent_name: AGENT },
 ] as const;
 
 function allOn(scope: PromptScope) {
@@ -1476,14 +1494,14 @@ test("prompt settings of an absent row answer every switch on and an empty text"
         promptSettings(
           tx,
           target.scope,
-          "agentName" in target ? target.agentName : undefined,
+          "agent_name" in target ? target.agent_name : undefined,
         ),
       ),
       {
         scope: target.scope,
-        agentName: "agentName" in target ? target.agentName : "",
+        agent_name: "agent_name" in target ? target.agent_name : "",
         switches: allOn(target.scope),
-        customText: "",
+        custom_text: "",
         system_layer: target.scope === PromptScope.Agent ? "inherit" : null,
         revision: 0,
       },
@@ -1493,17 +1511,17 @@ test("prompt settings of an absent row answer every switch on and an empty text"
 test("prompt writes create the row at revision one and replace it at the expected revision", (t) => {
   const f = enablementFixture(t);
   for (const target of PROMPT_TARGETS) {
-    const agentName = "agentName" in target ? target.agentName : "";
+    const agentName = "agent_name" in target ? target.agent_name : "";
     const created = f.invoke(
       "prompt.put",
-      { ...target, customText: "one" },
+      { ...target, custom_text: "one" },
       {},
     );
     assert.deepEqual(created, {
       scope: target.scope,
-      agentName,
+      agent_name: agentName,
       switches: allOn(target.scope),
-      customText: "one",
+      custom_text: "one",
       system_layer: target.scope === PromptScope.Agent ? "inherit" : null,
       revision: 1,
     });
@@ -1519,11 +1537,11 @@ test("prompt writes create the row at revision one and replace it at the expecte
     });
     const replaced = f.invoke(
       "prompt.put",
-      { ...target, expected_revision: 2, customText: "two" },
+      { ...target, expected_revision: 2, custom_text: "two" },
       {},
     );
     assert.deepEqual(
-      [replaced.customText, replaced.revision],
+      [replaced.custom_text, replaced.revision],
       ["two", THIRD_REVISION],
     );
     assert.deepEqual(replaced.switches, switched.switches);
@@ -1534,23 +1552,23 @@ const CUSTOM_A = "a";
 
 test("prompt read answers the settings of a scope, the absent row included", (t) => {
   const f = enablementFixture(t);
-  const target = { scope: PromptScope.Agent, agentName: AGENT };
+  const target = { scope: PromptScope.Agent, agent_name: AGENT };
   assert.deepEqual(f.invoke("prompt.get", null, {}, target), {
     ...target,
     switches: allOn(PromptScope.Agent),
-    customText: "",
+    custom_text: "",
     system_layer: "inherit",
     revision: 0,
   });
-  f.invoke("prompt.put", { ...target, customText: CUSTOM_A }, {});
-  assert.equal(f.invoke("prompt.get", null, {}, target).customText, CUSTOM_A);
+  f.invoke("prompt.put", { ...target, custom_text: CUSTOM_A }, {});
+  assert.equal(f.invoke("prompt.get", null, {}, target).custom_text, CUSTOM_A);
   assert.equal(
     f.invoke("prompt.get", null, {}, { scope: PromptScope.System })
       .system_layer,
     null,
   );
   refuses(
-    () => f.invoke("prompt.get", null, {}, { ...target, agentName: UNKNOWN }),
+    () => f.invoke("prompt.get", null, {}, { ...target, agent_name: UNKNOWN }),
     AgentErrorCode.AgentNotFound,
     HttpStatus.NotFound,
   );
@@ -1564,7 +1582,7 @@ test("the system layer switch and the override of an agent decide its system lay
       .parse(
         await f.registry.get(operation.id).handler(
           operation.input.parse({
-            params: { agentName: AGENT },
+            params: { agent_name: AGENT },
             query: {},
             body: null,
           }),
@@ -1583,7 +1601,7 @@ test("the system layer switch and the override of an agent decide its system lay
   assert.ok(
     inherited?.sources.every(({ state }) => state === PromptSourceState.Off),
   );
-  const target = { scope: PromptScope.Agent, agentName: AGENT };
+  const target = { scope: PromptScope.Agent, agent_name: AGENT };
   const on = f.invoke("prompt.switch", { ...target, system_layer: "on" }, {});
   assert.deepEqual([on.system_layer, on.revision], ["on", FIRST_REVISION]);
   assert.equal((await systemLayer())?.enabled, true);
@@ -1607,13 +1625,13 @@ test("the system layer switch and the override of an agent decide its system lay
 
 test("a prompt switch takes either a source switch or the override of an agent scope", () => {
   const body = agentOperations["prompt.switch"].input.shape.body;
-  const agent = { scope: PromptScope.Agent, agentName: AGENT };
+  const agent = { scope: PromptScope.Agent, agent_name: AGENT };
   for (const invalid of [
     agent,
     { ...agent, switch: "custom", enabled: false, system_layer: "on" },
     { ...agent, switch: "custom" },
     { scope: PromptScope.System, system_layer: "on" },
-    { scope: PromptScope.Workbench, agentName: AGENT, system_layer: "off" },
+    { scope: PromptScope.Workbench, agent_name: AGENT, system_layer: "off" },
     { ...agent, switch: "layer", enabled: false },
   ])
     assert.equal(
@@ -1633,30 +1651,30 @@ test("a prompt switch takes either a source switch or the override of an agent s
 
 test("a second prompt write at one expected revision answers a conflict with the current row", (t) => {
   const f = enablementFixture(t);
-  const target = { scope: PromptScope.Agent, agentName: AGENT };
-  const first = f.invoke("prompt.put", { ...target, customText: "a" }, {});
+  const target = { scope: PromptScope.Agent, agent_name: AGENT };
+  const first = f.invoke("prompt.put", { ...target, custom_text: "a" }, {});
   f.invoke(
     "prompt.put",
-    { ...target, expected_revision: 1, customText: "b" },
+    { ...target, expected_revision: 1, custom_text: "b" },
     {},
   );
   refuses(
     () =>
       f.invoke(
         "prompt.put",
-        { ...target, expected_revision: 1, customText: "c" },
+        { ...target, expected_revision: 1, custom_text: "c" },
         {},
       ),
     AgentErrorCode.PromptRevisionConflict,
     HttpStatus.Conflict,
     {
       scope: target.scope,
-      agentName: AGENT,
-      current: { ...first, customText: "b", revision: 2 },
+      agent_name: AGENT,
+      current: { ...first, custom_text: "b", revision: 2 },
     },
   );
   refuses(
-    () => f.invoke("prompt.put", { ...target, customText: "d" }, {}),
+    () => f.invoke("prompt.put", { ...target, custom_text: "d" }, {}),
     AgentErrorCode.PromptRevisionConflict,
     HttpStatus.Conflict,
   );
@@ -1679,12 +1697,12 @@ test("a second prompt write at one expected revision answers a conflict with the
 
 test("prompt writes refuse an oversized text, an empty agent layer and an unknown agent", (t) => {
   const f = enablementFixture(t);
-  const target = { scope: PromptScope.Agent, agentName: AGENT };
+  const target = { scope: PromptScope.Agent, agent_name: AGENT };
   refuses(
     () =>
       f.invoke(
         "prompt.put",
-        { ...target, customText: "a".repeat(PROMPT_TEXT_MAX_BYTES + 1) },
+        { ...target, custom_text: "a".repeat(PROMPT_TEXT_MAX_BYTES + 1) },
         {},
       ),
     AgentErrorCode.PromptTooLarge,
@@ -1692,7 +1710,7 @@ test("prompt writes refuse an oversized text, an empty agent layer and an unknow
   assert.equal(
     f.invoke(
       "prompt.put",
-      { ...target, customText: "\u00e9".repeat(PROMPT_TEXT_MAX_BYTES / 2) },
+      { ...target, custom_text: "\u00e9".repeat(PROMPT_TEXT_MAX_BYTES / 2) },
       {},
     ).revision,
     FIRST_REVISION,
@@ -1721,7 +1739,7 @@ test("prompt writes refuse an oversized text, an empty agent layer and an unknow
     () =>
       f.invoke(
         "prompt.put",
-        { scope: PromptScope.Workbench, agentName: UNKNOWN, customText: "x" },
+        { scope: PromptScope.Workbench, agent_name: UNKNOWN, custom_text: "x" },
         {},
       ),
     AgentErrorCode.AgentNotFound,
@@ -1743,14 +1761,19 @@ test("prompt inputs refuse an unknown switch and a wrong agent name", () => {
   assert.equal(
     input({
       scope: "workbench",
-      agentName: AGENT,
+      agent_name: AGENT,
       switch: "bogus",
       enabled: true,
     }),
     false,
   );
   assert.equal(
-    input({ scope: "system", agentName: AGENT, switch: "base", enabled: true }),
+    input({
+      scope: "system",
+      agent_name: AGENT,
+      switch: "base",
+      enabled: true,
+    }),
     false,
   );
   assert.equal(
@@ -1760,7 +1783,7 @@ test("prompt inputs refuse an unknown switch and a wrong agent name", () => {
   assert.equal(
     input({
       scope: "agent",
-      agentName: AGENT,
+      agent_name: AGENT,
       switch: "custom",
       enabled: true,
     }),

@@ -27,25 +27,25 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 `P` means proposed; `I` means implemented syntax and operation. `[R]`, `[M]` and `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
 `human` authenticates a human JWT.
 
-| Status | Command after `kanthord agent`                                                                                                                               | Route                                                               | Operation ID                           | Access  |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------- | ------- |
-| P      | `list [L]`                                                                                                                                                   | `GET /api/agent`                                                    | `agent.list`                           | `human` |
-| I      | `get <agent-name> [--view final] [--project <project-id> --binding <binding-id>]`                                                                            | `GET /api/agent/:agentName`                                         | `agent.get`                            | `human` |
-| I      | `enablement list [L] [R]`                                                                                                                                    | `GET /api/agent/enablement`                                         | `agent.enablement.list`                | `human` |
-| I      | `enablement get <agent-name> [R]`                                                                                                                            | `GET /api/agent/enablement/:agentName`                              | `agent.enablement.get`                 | `human` |
-| I      | `enablement put <agent-name> --file <path> [M] [R]`                                                                                                          | `PUT /api/agent/enablement/:agentName`                              | `agent.enablement.put`                 | `human` |
-| I      | `enablement enable <agent-name> --expected-revision <revision> [M] [R]`                                                                                      | `POST /api/agent/enablement/:agentName/enable`                      | `agent.enablement.enable`              | `human` |
-| I      | `enablement disable <agent-name> --expected-revision <revision> [M] [R]`                                                                                     | `POST /api/agent/enablement/:agentName/disable`                     | `agent.enablement.disable`             | `human` |
-| I      | `enablement remove <agent-name> --expected-revision <revision> [M] [R]`                                                                                      | `DELETE /api/agent/enablement/:agentName`                           | `agent.enablement.remove`              | `human` |
-| I      | `enablement provider add <agent-name> --file <path> [M] [R]`                                                                                                 | `POST /api/agent/enablement/:agentName/provider`                    | `agent.enablement.provider.add`        | `human` |
-| I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]`                                                             | `DELETE /api/agent/enablement/:agentName/provider/:providerName`    | `agent.enablement.provider.remove`     | `human` |
-| I      | `enablement provider model list <agent-name> <provider-name>`                                                                                                | `GET /api/agent/enablement/:agentName/provider/:providerName/model` | `agent.enablement.provider.model.list` | `human` |
-| I      | `model list --provider <provider> --credential <credential>`                                                                                                 | `GET /api/agent/model`                                              | `agent.model.list`                     | `human` |
-| I      | `prompt put --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --file <path> [M]`                                                       | `PUT /api/agent/prompt`                                             | `agent.prompt.put`                     | `human` |
-| I      | `prompt get --scope <scope> [--agent <agent-name>]`                                                                                                          | `GET /api/agent/prompt`                                             | `agent.prompt.get`                     | `human` |
-| I      | `prompt switch --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] (--switch <source> (--on \| --off) \| --system-layer <override>) [M]` | `POST /api/agent/prompt/switch`                                     | `agent.prompt.switch`                  | `human` |
+| Status | Command after `kanthord agent`                                                                                                                               | Route                                                                 | Operation ID                           | Access  |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------- | ------- |
+| P      | `list [L]`                                                                                                                                                   | `GET /api/agent`                                                      | `agent.list`                           | `human` |
+| I      | `get <agent-name> [--view final] [--project <project-id> --binding <binding-id>]`                                                                            | `GET /api/agent/:agent_name`                                          | `agent.get`                            | `human` |
+| I      | `enablement list [L] [R]`                                                                                                                                    | `GET /api/agent/enablement`                                           | `agent.enablement.list`                | `human` |
+| I      | `enablement get <agent-name> [R]`                                                                                                                            | `GET /api/agent/enablement/:agent_name`                               | `agent.enablement.get`                 | `human` |
+| I      | `enablement put <agent-name> --file <path> [M] [R]`                                                                                                          | `PUT /api/agent/enablement/:agent_name`                               | `agent.enablement.put`                 | `human` |
+| I      | `enablement enable <agent-name> --expected-revision <revision> [M] [R]`                                                                                      | `POST /api/agent/enablement/:agent_name/enable`                       | `agent.enablement.enable`              | `human` |
+| I      | `enablement disable <agent-name> --expected-revision <revision> [M] [R]`                                                                                     | `POST /api/agent/enablement/:agent_name/disable`                      | `agent.enablement.disable`             | `human` |
+| I      | `enablement remove <agent-name> --expected-revision <revision> [M] [R]`                                                                                      | `DELETE /api/agent/enablement/:agent_name`                            | `agent.enablement.remove`              | `human` |
+| I      | `enablement provider add <agent-name> --file <path> [M] [R]`                                                                                                 | `POST /api/agent/enablement/:agent_name/provider`                     | `agent.enablement.provider.add`        | `human` |
+| I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]`                                                             | `DELETE /api/agent/enablement/:agent_name/provider/:provider_name`    | `agent.enablement.provider.remove`     | `human` |
+| I      | `enablement provider model list <agent-name> <provider-name>`                                                                                                | `GET /api/agent/enablement/:agent_name/provider/:provider_name/model` | `agent.enablement.provider.model.list` | `human` |
+| I      | `model list --provider <provider> --credential <credential>`                                                                                                 | `GET /api/agent/model`                                                | `agent.model.list`                     | `human` |
+| I      | `prompt put --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --file <path> [M]`                                                       | `PUT /api/agent/prompt`                                               | `agent.prompt.put`                     | `human` |
+| I      | `prompt get --scope <scope> [--agent <agent-name>]`                                                                                                          | `GET /api/agent/prompt`                                               | `agent.prompt.get`                     | `human` |
+| I      | `prompt switch --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] (--switch <source> (--on \| --off) \| --system-layer <override>) [M]` | `POST /api/agent/prompt/switch`                                       | `agent.prompt.switch`                  | `human` |
 
-The static `/api/agent/enablement` path takes precedence over `/:agentName`.
+The static `/api/agent/enablement` path takes precedence over `/:agent_name`.
 
 The two catalog reads follow [the agent catalog](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.impl.md#the-agent-catalog).
 Each is `unary`, has `mutation: false` and a default timeout of 30 s.
@@ -56,9 +56,9 @@ Each is `unary`, has `mutation: false` and a default timeout of 30 s.
 
 This command remains proposed. It uses `[L]`, no positional arguments and no filters.
 Required token: human JWT. Query holds `limit` and optional `cursor`. Returns
-`{ items, next_cursor }`, paged by `agentName` in ascending alphabetical order.
+`{ items, next_cursor }`, paged by `agent_name` in ascending alphabetical order.
 It lists every catalog agent, also an agent without an enablement. Each item holds
-`agentName: AgentName`, `workerNames: WorkerName[]` and `enablement`, the
+`agent_name: AgentName`, `worker_names: WorkerName[]` and `enablement`, the
 [agent enablement record](#agent-enablement-record) or `null` when no record exists.
 
 ### `get <agent-name>`
@@ -68,37 +68,37 @@ kanthord agent get <agent-name> [--view final] [--project <project-id> --binding
 ```
 
 `agent-name` is required `AgentName`, with no default, and maps to
-`params.agentName`. The key names one catalog declaration, not a worker binding.
+`params.agent_name`. The key names one catalog declaration, not a worker binding.
 Required token: human JWT. Absent body. HTTP `200` returns
-`agentName` and the following declaration/configuration fields:
+`agent_name` and the following declaration/configuration fields:
 
-| Option                   | Query       | Meaning                                                                                                                                       |
-| ------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--view final`           | `view`      | Optional. The only value is `final`. The `prompt` answer holds `final` only and no `layers`.                                                  |
-| `--project <project-id>` | `projectId` | Optional, and only together with `--binding`. Selects the repository binding of the working layer.                                            |
-| `--binding <binding-id>` | `bindingId` | Optional, and only together with `--project`. A binding that is no repository binding of the project answers `404 project.binding.not_found`. |
+| Option                   | Query        | Meaning                                                                                                                                       |
+| ------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--view final`           | `view`       | Optional. The only value is `final`. The `prompt` answer holds `final` only and no `layers`.                                                  |
+| `--project <project-id>` | `project_id` | Optional, and only together with `--binding`. Selects the repository binding of the working layer.                                            |
+| `--binding <binding-id>` | `binding_id` | Optional, and only together with `--project`. A binding that is no repository binding of the project answers `404 project.binding.not_found`. |
 
 Without `--project` and `--binding`, the working layer is the workbench working layer of the agent.
 
-| Result field          | Type and meaning                                                                                                                                                                                                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `configurationSchema` | JSON Schema draft 2020-12 object describing the effective configuration: every allowed field, its type, requiredness and enumeration. Its `description` states the whole-configuration constraint that the Agent component checks; JSON Schema validates no cross-field lookup. |
-| `overridableFields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agentProvider", "modelIdentifier", "reasoningEffort"]`.                                                                                               |
-| `enablement`          | The [agent enablement record](#agent-enablement-record), or `null` when no record exists.                                                                                                                                                                                       |
-| `prompt`              | Required object `{ layers, final }`. The [prompt answer](#the-prompt-answer) below defines both fields.                                                                                                                                                                         |
-| `tools`               | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`) and `inputSchema: object`. Project-added tools are inspected through Project configuration instead.                                                     |
+| Result field           | Type and meaning                                                                                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `configuration_schema` | JSON Schema draft 2020-12 object describing the effective configuration: every allowed field, its type, requiredness and enumeration. Its `description` states the whole-configuration constraint that the Agent component checks; JSON Schema validates no cross-field lookup. |
+| `overridable_fields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agent_provider", "model_identifier", "reasoning_effort"]`.                                                                                            |
+| `enablement`           | The [agent enablement record](#agent-enablement-record), or `null` when no record exists.                                                                                                                                                                                       |
+| `prompt`               | Required object `{ layers, final }`. The [prompt answer](#the-prompt-answer) below defines both fields.                                                                                                                                                                         |
+| `tools`                | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`) and `input_schema: object`. Project-added tools are inspected through Project configuration instead.                                                    |
 
 The [configuration schema](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#configuration-schema)
 is emitted by `z.toJSONSchema` of `zod` at 4.4.3 from the effective-configuration
 schema. Its root is an object with `additionalProperties: false` and five required properties:
 
-| Property          | Schema                                                                    |
-| ----------------- | ------------------------------------------------------------------------- |
-| `agentProvider`   | `string`; name of an agent provider in the enablement                     |
-| `provider`        | `string`, enum of every platform of the [platform list](llm.md#platforms) |
-| `credential`      | `string`; a credential name                                               |
-| `modelIdentifier` | `string`                                                                  |
-| `reasoningEffort` | enum `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`            |
+| Property           | Schema                                                                    |
+| ------------------ | ------------------------------------------------------------------------- |
+| `agent_provider`   | `string`; name of an agent provider in the enablement                     |
+| `provider`         | `string`, enum of every platform of the [platform list](llm.md#platforms) |
+| `credential`       | `string`; a credential name                                               |
+| `model_identifier` | `string`                                                                  |
+| `reasoning_effort` | enum `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`            |
 
 No property carries a `default`; the schema holds no `options`.
 Its `description` requires model membership in `getBuiltinModels(provider)` of
@@ -149,7 +149,7 @@ kanthord agent get swe@1 --project project_01ARZ3NDEKTSV4RRFFQ69G5FAV --binding 
 The system layer holds the sources `host_file`, `base` and `custom`, and the layer switch `layer`.
 The agent layer holds `agent_file`, `shipped` and `custom`.
 The workbench working layer holds `agents_md`, `agents_local_md`, `claude_md`, `claude_local_md`, `shipped` and `custom`.
-The settings of a scope are `{ scope, agentName, switches, customText, system_layer, revision }`.
+The settings of a scope are `{ scope, agent_name, switches, custom_text, system_layer, revision }`.
 `system_layer` is the system layer override of an `agent` scope: `inherit`, `on` or `off`. It is `null` for another scope.
 `inherit` takes the `layer` switch of the system scope. `on` and `off` decide the system layer of that agent only.
 
@@ -199,18 +199,18 @@ kanthord agent prompt switch --scope agent --agent swe@1 --expected-revision 1 -
 The [agent configuration rules](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.md#agent-configuration)
 own these implemented records and command spellings.
 An enablement is global to the server, belongs to no project and is keyed by
-`agentName: AgentName`. It holds:
+`agent_name: AgentName`. It holds:
 
-| Field                  | Type and meaning                                                                                                                                                                                                                                                                                            |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agentName`            | Exact catalog key; no separate enablement identity.                                                                                                                                                                                                                                                         |
-| `state`                | `enabled` or `disabled`. An absent record also denies use.                                                                                                                                                                                                                                                  |
-| `agentProviders`       | Nonempty array of `{ name, provider, credential }`. Each name is nonblank and unique inside this enablement. `provider` is a platform in the [platform list](llm.md#platforms). `credential` is a credential name in custody; its platform must equal the provider. No model list or secret is stored here. |
-| `defaultConfiguration` | Required `{ agentProvider, modelIdentifier, reasoningEffort }`. The human supplies all three; no catalog default applies. The name selects an agent provider of this enablement.                                                                                                                            |
-| `revision`             | Positive safe integer; every change creates a revision.                                                                                                                                                                                                                                                     |
+| Field                   | Type and meaning                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent_name`            | Exact catalog key; no separate enablement identity.                                                                                                                                                                                                                                                         |
+| `state`                 | `enabled` or `disabled`. An absent record also denies use.                                                                                                                                                                                                                                                  |
+| `agent_providers`       | Nonempty array of `{ name, provider, credential }`. Each name is nonblank and unique inside this enablement. `provider` is a platform in the [platform list](llm.md#platforms). `credential` is a credential name in custody; its platform must equal the provider. No model list or secret is stored here. |
+| `default_configuration` | Required `{ agent_provider, model_identifier, reasoning_effort }`. The human supplies all three; no catalog default applies. The name selects an agent provider of this enablement.                                                                                                                         |
+| `revision`              | Positive safe integer; every change creates a revision.                                                                                                                                                                                                                                                     |
 
-`modelIdentifier` is a nonblank string. The reasoning-effort enum is the one in
-`configurationSchema`. All request objects are closed. An agent provider's
+`model_identifier` is a nonblank string. The reasoning-effort enum is the one in
+`configuration_schema`. All request objects are closed. An agent provider's
 `provider` is fixed; another provider needs another agent provider. A change of
 its `credential` through `put` creates a revision.
 
@@ -229,8 +229,8 @@ A change that invalidates a dependent binding fails and lists those bindings.
 A tuning entry follows unchanged default fields at its next resolution.
 
 All commands below use `human` access. Required names have no default.
-`<agent-name>` maps to `params.agentName`; `<provider-name>` maps to
-`params.providerName`. Mutations use the shared replay key and print it.
+`<agent-name>` maps to `params.agent_name`; `<provider-name>` maps to
+`params.provider_name`. Mutations use the shared replay key and print it.
 Reads and writes are unary. Unless stated otherwise, query is empty and success
 answers HTTP `200` with the enablement record. Reads have no body. Enable,
 disable, remove and provider remove send `{ expected_revision }` from
@@ -251,8 +251,8 @@ Uses `[R]`. Returns one enablement. An absent record answers
 ### `enablement put <agent-name> --file <path>`
 
 Uses `[M] [R]`. The required file supplies exactly
-`{ expected_revision, agentProviders, defaultConfiguration }`. `agentProviders`
-and `defaultConfiguration` are required with no default. `expected_revision` is
+`{ expected_revision, agent_providers, default_configuration }`. `agent_providers`
+and `default_configuration` are required with no default. `expected_revision` is
 the latest revision of the agent that the human read, and it is absent only when
 the agent holds no row. It creates or replaces the complete configuration. Creation
 sets `state: enabled`; replacement preserves the record's state. The explicit
@@ -282,7 +282,7 @@ The required `--expected-revision` names the latest revision of the agent that t
 Uses `[M] [R]`. Removal fails while any worker binding of a worker that references
 this agent exists. The refusal lists those bindings. The dependency check and
 removal commit in one transaction. Success is
-`{ agentName, removed: true }`, not an enablement record.
+`{ agent_name, removed: true }`, not an enablement record.
 
 ### `enablement provider add <agent-name> --file <path>`
 
@@ -305,8 +305,8 @@ Uses `[R]`, no query and no body. Required token: human JWT. The
 [model list](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.impl.md#model-list)
 is `unary` with `mutation: false`. It reads the agent provider named
 `<provider-name>` of the latest enablement record of the agent. HTTP `200` returns
-`{ items }`. Each item holds `modelIdentifier: string` and
-`reasoningEfforts: string[]`. A built-in platform lists its pi-ai models with the
+`{ items }`. Each item holds `model_identifier: string` and
+`reasoning_efforts: string[]`. A built-in platform lists its pi-ai models with the
 supported thinking levels of each model. An `openai-compatible` provider lists the
 approved models of its credential with their `reasoning_levels`. Every listed pair
 passes the configuration validation. An absent catalog agent, enablement or

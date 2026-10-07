@@ -102,7 +102,7 @@ export async function executionSetup(
         HttpStatus.BadRequest,
         issue.code,
         "Agent configuration is unavailable or invalid.",
-        { agentName, issues: view.issues },
+        { agent_name: agentName, issues: view.issues },
       );
     }
     assert.ok(view.effective);

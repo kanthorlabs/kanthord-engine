@@ -53,10 +53,15 @@ const CONTENT = {
   bindings: [],
 };
 const CONFIGURATION = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off" as const,
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off" as const,
 };
+const entryOf = (configuration: typeof CONFIGURATION) => ({
+  agentProvider: configuration.agent_provider,
+  modelIdentifier: configuration.model_identifier,
+  reasoningEffort: configuration.reasoning_effort,
+});
 type Adapter = "direct" | "http";
 const HTTP_ADAPTER = "http";
 const MAX_WAIT_TURNS = 100;
@@ -155,13 +160,13 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
   for (const agentName of ["swe@1", "re@1"])
     completed(
       await call(agentOperations["enablement.put"], {
-        params: { agentName },
+        params: { agent_name: agentName },
         query: {},
         body: {
-          agentProviders: [
+          agent_providers: [
             { name: "default", provider: "anthropic", credential: "anthro" },
           ],
-          defaultConfiguration: CONFIGURATION,
+          default_configuration: CONFIGURATION,
         },
       }),
     );
@@ -195,7 +200,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             config: {
               worker: "general@1",
               instanceCount: 2,
-              entries: [{ agent: "swe@1", ...CONFIGURATION }],
+              entries: [{ agent: "swe@1", ...entryOf(CONFIGURATION) }],
             },
           },
           reviewer: {
@@ -203,7 +208,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             config: {
               worker: "reviewer@1",
               instanceCount: 1,
-              entries: [{ agent: "re@1", ...CONFIGURATION }],
+              entries: [{ agent: "re@1", ...entryOf(CONFIGURATION) }],
             },
           },
         },

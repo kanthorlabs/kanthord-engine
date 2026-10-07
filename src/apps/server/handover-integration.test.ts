@@ -74,10 +74,15 @@ const EMPTY_OUTPUT = "";
 const API_KEY_FIELD = "key";
 const NO_INPUT = { params: {}, query: {}, body: null };
 const CONFIGURATION = {
-  agentProvider: "default",
-  modelIdentifier: "claude-sonnet-4-5",
-  reasoningEffort: "off" as const,
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off" as const,
 };
+const entryOf = (configuration: typeof CONFIGURATION) => ({
+  agentProvider: configuration.agent_provider,
+  modelIdentifier: configuration.model_identifier,
+  reasoningEffort: configuration.reasoning_effort,
+});
 const CONTENT = {
   name: "Work",
   requirement: "Do work",
@@ -210,7 +215,10 @@ for (const adapter of ["direct", "http"] as const) {
           secret: { key: ROTATED },
           metadata: {
             base_url: "http://localhost:12345/v2",
-            models: [{ id: CONFIGURATION.modelIdentifier }, { id: newerModel }],
+            models: [
+              { id: CONFIGURATION.model_identifier },
+              { id: newerModel },
+            ],
           },
         },
       }),
@@ -218,20 +226,20 @@ for (const adapter of ["direct", "http"] as const) {
     assert.deepEqual(completed(await read()), before);
     completed(
       await h.call(agentOperations["enablement.put"], {
-        params: { agentName: "swe@1" },
+        params: { agent_name: "swe@1" },
         query: {},
         body: {
           expected_revision: FIRST_REVISION,
-          agentProviders: [
+          agent_providers: [
             {
               name: "default",
               provider: "openai-compatible",
               credential: "anthro-1",
             },
           ],
-          defaultConfiguration: {
+          default_configuration: {
             ...CONFIGURATION,
-            modelIdentifier: newerModel,
+            model_identifier: newerModel,
           },
         },
       }),
@@ -243,7 +251,7 @@ for (const adapter of ["direct", "http"] as const) {
     );
     completed(
       await h.call(agentOperations["enablement.disable"], {
-        params: { agentName: "swe@1" },
+        params: { agent_name: "swe@1" },
         query: {},
         body: { expected_revision: TWO_REVISIONS },
       }),
@@ -354,7 +362,7 @@ async function setup(
       ? "github-copilot"
       : "anthropic";
   const configuration = oauth
-    ? { ...CONFIGURATION, modelIdentifier: "claude-sonnet-4.6" }
+    ? { ...CONFIGURATION, model_identifier: "claude-sonnet-4.6" }
     : CONFIGURATION;
   const f = await gatewayFixture(t, {
     repositoryConnector: {
@@ -415,7 +423,7 @@ async function setup(
             base_url: "http://localhost:12345/v1",
             models: [
               {
-                id: CONFIGURATION.modelIdentifier,
+                id: CONFIGURATION.model_identifier,
                 reasoning_levels: ["off", "low"],
               },
             ],
@@ -454,13 +462,13 @@ async function setup(
   );
   completed(
     await call(agentOperations["enablement.put"], {
-      params: { agentName: "swe@1" },
+      params: { agent_name: "swe@1" },
       query: {},
       body: {
-        agentProviders: [
+        agent_providers: [
           { name: "default", provider: platform, credential: "anthro-1" },
         ],
-        defaultConfiguration: configuration,
+        default_configuration: configuration,
       },
     }),
   );
@@ -499,7 +507,7 @@ async function setup(
               entries:
                 setupOptions.workerName || setupOptions.noEntries
                   ? undefined
-                  : [{ agent: "swe@1", ...configuration }],
+                  : [{ agent: "swe@1", ...entryOf(configuration) }],
             },
           },
         },

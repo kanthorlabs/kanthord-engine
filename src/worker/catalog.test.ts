@@ -77,7 +77,7 @@ test("worker agent lookup returns a fresh array", () => {
 test("every native worker names an agent of the agent catalog", () => {
   for (const name of Object.keys(WORKER_CATALOG))
     for (const agentName of agentsOfWorker(name))
-      assert.equal(getAgentDeclaration(agentName)?.agentName, agentName);
+      assert.equal(getAgentDeclaration(agentName)?.agent_name, agentName);
 });
 
 test("unknown and inherited names are not declarations", () => {

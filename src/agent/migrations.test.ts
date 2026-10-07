@@ -175,3 +175,60 @@ test("agent migration sets the system layer override of an existing agent row to
     store.close();
   }
 });
+
+test("agent migration renames the keys of the default configuration of every enablement row", () => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    store.migrate([
+      {
+        service: AGENT_COMPONENT_NAME,
+        migrations: agentMigrations.slice(0, 3),
+      },
+    ]);
+    const insert = store.database.prepare(
+      `INSERT INTO agent_enablement
+       (id, agent_name, revision, state, agent_providers, default_configuration, created_at, removed_at)
+       VALUES (?, ?, ?, 'enabled', ?, ?, 0, ?)`,
+    );
+    const providers = JSON.stringify([
+      { name: "default", provider: "anthropic", credential: "anthro-1" },
+    ]);
+    insert.run(
+      "agent_enablement_a",
+      "swe@1",
+      1,
+      providers,
+      '{"agentProvider":"default","modelIdentifier":"claude-sonnet-4-5","reasoningEffort":"off"}',
+      null,
+    );
+    insert.run(
+      "agent_enablement_b",
+      "re@1",
+      2,
+      providers,
+      '{"agentProvider":"default","modelIdentifier":"claude-opus-4-5","reasoningEffort":"high"}',
+      5,
+    );
+    store.migrate([
+      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
+    ]);
+    const rows = store.database
+      .prepare(
+        "SELECT id, agent_providers, default_configuration FROM agent_enablement ORDER BY id",
+      )
+      .all();
+    assert.deepEqual(
+      rows.map((row) => row.default_configuration),
+      [
+        '{"agent_provider":"default","model_identifier":"claude-sonnet-4-5","reasoning_effort":"off"}',
+        '{"agent_provider":"default","model_identifier":"claude-opus-4-5","reasoning_effort":"high"}',
+      ],
+    );
+    assert.deepEqual(
+      rows.map((row) => row.agent_providers),
+      [providers, providers],
+    );
+  } finally {
+    store.close();
+  }
+});

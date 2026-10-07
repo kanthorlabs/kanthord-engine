@@ -75,7 +75,7 @@ import {
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
-import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
+import { AGENT_COMPONENT_NAME, type AgentEntry } from "../../agent/contract.ts";
 import {
   RepositoryComponent,
   RepositoryCredentials,
@@ -92,6 +92,23 @@ import {
 } from "../../kernel/context.ts";
 
 export type { RepositoryConnector } from "../../project/contract.ts";
+
+const AGENT_ENTRY_FIELDS: Readonly<Record<string, string>> = {
+  agentProvider: "agent_provider",
+  modelIdentifier: "model_identifier",
+  reasoningEffort: "reasoning_effort",
+};
+
+function agentEntryOf(entry: object | null): AgentEntry | null {
+  return entry === null
+    ? null
+    : (Object.fromEntries(
+        Object.entries(entry).map(([key, value]) => [
+          AGENT_ENTRY_FIELDS[key] ?? key,
+          value,
+        ]),
+      ) as AgentEntry);
+}
 
 export function composeServices(options: {
   config: ServerConfig;
@@ -229,9 +246,7 @@ export function composeServices(options: {
     agentProvidersDependentOn: (tx, name) =>
       agent.agentProvidersDependentOn(tx, name),
     enablementsDependentOnModel: (tx, name, model) =>
-      agent
-        .enablementsDependentOnModel(tx, name, model)
-        .map(({ agentName }) => ({ agent_name: agentName })),
+      agent.enablementsDependentOnModel(tx, name, model),
   });
   const agent: AgentComponent = new AgentComponent({
     store: options.store,
@@ -243,7 +258,12 @@ export function composeServices(options: {
     approvedModels: (tx, name) => llm.approvedModels(tx, name),
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
     providerCapability: (tx, name) => llm.providerCapability(tx, name),
-    entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
+    entriesOfAgent: (tx, name) =>
+      project.entriesOfAgent(tx, name).map((binding) => ({
+        binding_id: binding.bindingId,
+        worker_name: binding.workerName,
+        entry: agentEntryOf(binding.entry),
+      })),
     repositoryWorkingOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     toolDeclarations: (name) => toolDeclarations(name),
   });
@@ -299,9 +319,10 @@ export function composeServices(options: {
     health: options.health,
     registrations: options.registrations,
     agentConfiguration: {
-      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
+      validateEntry: (tx, name, entry) =>
+        agent.validateEntry(tx, name, agentEntryOf(entry)),
       agentView: (tx, name, entry, models) =>
-        agent.agentView(tx, name, entry, models),
+        agent.agentView(tx, name, agentEntryOf(entry), models),
     },
   });
   const mission: MissionService = new MissionService({
@@ -365,8 +386,10 @@ export function composeServices(options: {
       compose: (name, context) => agent.composePrompt(name, context),
     },
     agentConfiguration: {
-      validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
-      agentView: (tx, name, entry) => agent.agentView(tx, name, entry),
+      validateEntry: (tx, name, entry) =>
+        agent.validateEntry(tx, name, agentEntryOf(entry)),
+      agentView: (tx, name, entry) =>
+        agent.agentView(tx, name, agentEntryOf(entry)),
     },
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
     workbenchCredentials: (input) => custody.workbenchCredentials(input),

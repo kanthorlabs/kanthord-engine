@@ -18,10 +18,10 @@ import {
 import { AgentProviderKind } from "./enablements.ts";
 
 const issueFields: Readonly<Record<string, string>> = {
-  [AgentErrorCode.ProviderNotFound]: "agentProvider",
-  [AgentErrorCode.CredentialUnsuitable]: "agentProvider",
-  [AgentErrorCode.ModelUnknown]: "modelIdentifier",
-  [AgentErrorCode.ReasoningUnsupported]: "reasoningEffort",
+  [AgentErrorCode.ProviderNotFound]: "agent_provider",
+  [AgentErrorCode.CredentialUnsuitable]: "agent_provider",
+  [AgentErrorCode.ModelUnknown]: "model_identifier",
+  [AgentErrorCode.ReasoningUnsupported]: "reasoning_effort",
 };
 
 export type ConfigurationDependencies = {
@@ -41,7 +41,7 @@ export function configurationError(
     status,
     code,
     "Agent configuration is unavailable or invalid.",
-    { agentName },
+    { agent_name: agentName },
   );
 }
 
@@ -50,9 +50,9 @@ export function effectiveConfiguration(
   entry: AgentEntry | null,
 ): DefaultConfiguration {
   return {
-    agentProvider: entry?.agentProvider ?? defaults.agentProvider,
-    modelIdentifier: entry?.modelIdentifier ?? defaults.modelIdentifier,
-    reasoningEffort: entry?.reasoningEffort ?? defaults.reasoningEffort,
+    agent_provider: entry?.agent_provider ?? defaults.agent_provider,
+    model_identifier: entry?.model_identifier ?? defaults.model_identifier,
+    reasoning_effort: entry?.reasoning_effort ?? defaults.reasoning_effort,
   };
 }
 
@@ -110,7 +110,9 @@ export function validateEffectiveConfig(
   agentProviders: AgentProviderItem[],
   config: DefaultConfiguration,
 ): void {
-  const item = agentProviders.find(({ name }) => name === config.agentProvider);
+  const item = agentProviders.find(
+    ({ name }) => name === config.agent_provider,
+  );
   if (!item)
     throw configurationError(agentName, AgentErrorCode.ProviderNotFound);
   validateProvider(dependencies, tx, agentName, item);
@@ -119,11 +121,11 @@ export function validateEffectiveConfig(
     tx,
     agentName,
     item,
-    config.modelIdentifier,
+    config.model_identifier,
   );
   if (
-    !reasoningEffortSchema.safeParse(config.reasoningEffort).success ||
-    !levels.includes(config.reasoningEffort)
+    !reasoningEffortSchema.safeParse(config.reasoning_effort).success ||
+    !levels.includes(config.reasoning_effort)
   )
     throw configurationError(agentName, AgentErrorCode.ReasoningUnsupported);
 }

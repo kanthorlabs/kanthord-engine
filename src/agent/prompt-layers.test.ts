@@ -60,11 +60,11 @@ function settings(
 ): PromptSettings {
   return {
     scope,
-    agentName: scope === PromptScope.System ? "" : AGENT,
+    agent_name: scope === PromptScope.System ? "" : AGENT,
     switches: Object.fromEntries(
       PROMPT_SWITCHES[scope].map((name) => [name, !off.includes(name)]),
     ),
-    customText,
+    custom_text: customText,
     system_layer: scope === PromptScope.Agent ? "inherit" : null,
     revision: 1,
   };
@@ -150,7 +150,7 @@ test("every origin resolves present with its path, digest and text", async (t) =
   assert.equal(custom.text, SYSTEM_CUSTOM);
   assert.equal(
     source(layers, "agent", "shipped").text,
-    declaration.agentPrompt,
+    declaration.agent_prompt,
   );
   assert.equal(source(layers, "agent", "custom").text, AGENT_CUSTOM);
   assert.equal(source(layers, "working", "agents_md").text, WORKING_FILE);
@@ -331,12 +331,12 @@ test("working files read in order as messages after a plain system prompt", asyn
   const system = systemPrompt(layers, PromptConsumer.Workbench);
   assert.ok(!system.includes("CLAUDE.local.md"));
   assert.ok(!system.includes(WORKBENCH_PROMPT));
-  assert.ok(system.includes(declaration.agentPrompt));
+  assert.ok(system.includes(declaration.agent_prompt));
   assert.ok(system.includes(BASE_PROMPT));
   assert.ok(!system.includes("<prompt-layer"));
   assert.ok(system.endsWith(framing(PromptConsumer.Workbench)));
   assert.ok(
-    system.indexOf(BASE_PROMPT) < system.indexOf(declaration.agentPrompt),
+    system.indexOf(BASE_PROMPT) < system.indexOf(declaration.agent_prompt),
   );
   assert.match(
     framing(PromptConsumer.Workbench),

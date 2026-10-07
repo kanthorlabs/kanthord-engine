@@ -50,6 +50,7 @@ import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   scriptedActions,
+  agentDefaultsOf,
 } from "./test-support.ts";
 
 const SUCCESSFUL_EXIT = 0;
@@ -154,10 +155,10 @@ test(
     });
     for (const agent of ["swe@1", "re@1"])
       await write(["agent", "enablement", "put", agent], {
-        agentProviders: [
+        agent_providers: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
-        defaultConfiguration: DEFAULTS,
+        default_configuration: agentDefaultsOf(DEFAULTS),
       });
     const project = await read<{ id: string }>([
       "project",

@@ -93,7 +93,7 @@ components:
         effectiveConfiguration:
           type: object
           properties:
-            agentProvider:
+            agent_provider:
               type: string
               minLength: 1
             provider:
@@ -143,10 +143,10 @@ components:
             credential:
               type: string
               minLength: 1
-            modelIdentifier:
+            model_identifier:
               type: string
               minLength: 1
-            reasoningEffort:
+            reasoning_effort:
               type: string
               enum:
                 - off
@@ -157,16 +157,16 @@ components:
                 - xhigh
                 - max
           required:
-            - agentProvider
+            - agent_provider
             - provider
             - credential
-            - modelIdentifier
-            - reasoningEffort
+            - model_identifier
+            - reasoning_effort
           additionalProperties: false
           description: The Agent component validates the whole configuration.
-            `modelIdentifier` belongs to `getBuiltinModels(provider)` of pi-ai
+            `model_identifier` belongs to `getBuiltinModels(provider)` of pi-ai
             0.86.0 or to the `models` metadata of the `openai-compatible`
-            credential. `reasoningEffort` belongs to the supported reasoning
+            credential. `reasoning_effort` belongs to the supported reasoning
             levels of that model. JSON Schema validates neither lookup.
         credentialId:
           type: string

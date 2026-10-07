@@ -31,8 +31,8 @@ import {
 
 const agentEnablementPutBodySchema = z.strictObject({
   expected_revision: z.number().int().positive().optional(),
-  agentProviders: z.array(agentProviderItemSchema).min(1),
-  defaultConfiguration: defaultConfigurationSchema,
+  agent_providers: z.array(agentProviderItemSchema).min(1),
+  default_configuration: defaultConfigurationSchema,
 });
 const providerAddBodySchema = z.strictObject({
   expected_revision: z.number().int().positive(),
@@ -163,11 +163,11 @@ async function agentGet(agentName: string, command: Command): Promise<void> {
   const { endpoint, token } = resolveClient(options);
   requireToken(token, "cli.agent.get.token_required");
   const result = await httpClient(agentOperations, endpoint, token).get({
-    params: { agentName },
+    params: { agent_name: agentName },
     query: {
       ...(options.view !== undefined ? { view: options.view } : {}),
       ...(options.project !== undefined
-        ? { projectId: options.project, bindingId: options.binding }
+        ? { project_id: options.project, binding_id: options.binding }
         : {}),
     },
     body: null,
@@ -199,7 +199,7 @@ function promptTarget(
     throw new Diagnostic(codes.agentRequired, "the scope requires --agent");
   return {
     scope,
-    ...(options.agent !== undefined ? { agentName: options.agent } : {}),
+    ...(options.agent !== undefined ? { agent_name: options.agent } : {}),
     ...(options.expectedRevision !== undefined
       ? {
           expected_revision: parsePositiveInt(
@@ -229,7 +229,7 @@ async function promptPut(command: Command): Promise<void> {
     {
       params: {},
       query: {},
-      body: { ...target, customText },
+      body: { ...target, custom_text: customText },
     },
     { idempotencyKey: key },
   );
@@ -288,8 +288,8 @@ async function promptGet(command: Command): Promise<void> {
     params: {},
     query: {
       scope: target.scope,
-      ...(target.agentName !== undefined
-        ? { agentName: target.agentName }
+      ...(target.agent_name !== undefined
+        ? { agent_name: target.agent_name }
         : {}),
     },
     body: null,
@@ -342,7 +342,7 @@ async function get(agentName: string, command: Command): Promise<void> {
   requireToken(token, GET_TOKEN_REQUIRED);
   const result = await httpClient(agentOperations, endpoint, token)[
     "enablement.get"
-  ]({ params: { agentName }, query: {}, body: null });
+  ]({ params: { agent_name: agentName }, query: {}, body: null });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, GET_INDETERMINATE))}\n`,
   );
@@ -356,7 +356,10 @@ async function put(agentName: string, command: Command): Promise<void> {
   const body = readJsonFileAs(options.file, agentEnablementPutBodySchema);
   const result = await httpClient(agentOperations, endpoint, token)[
     "enablement.put"
-  ]({ params: { agentName }, query: {}, body }, { idempotencyKey: key });
+  ](
+    { params: { agent_name: agentName }, query: {}, body },
+    { idempotencyKey: key },
+  );
   const data = handleMutationResult(result, PUT_INDETERMINATE, key);
   process.stdout.write(
     `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
@@ -376,7 +379,7 @@ async function enable(agentName: string, command: Command): Promise<void> {
     "enablement.enable"
   ](
     {
-      params: { agentName },
+      params: { agent_name: agentName },
       query: {},
       body: { expected_revision: expectedRevision },
     },
@@ -401,7 +404,7 @@ async function disable(agentName: string, command: Command): Promise<void> {
     "enablement.disable"
   ](
     {
-      params: { agentName },
+      params: { agent_name: agentName },
       query: {},
       body: { expected_revision: expectedRevision },
     },
@@ -426,7 +429,7 @@ async function remove(agentName: string, command: Command): Promise<void> {
     "enablement.remove"
   ](
     {
-      params: { agentName },
+      params: { agent_name: agentName },
       query: {},
       body: { expected_revision: expectedRevision },
     },
@@ -434,7 +437,7 @@ async function remove(agentName: string, command: Command): Promise<void> {
   );
   const data = handleMutationResult(result, REMOVE_INDETERMINATE, key);
   process.stdout.write(
-    `${JSON.stringify({ agentName: data.agentName, idempotency_key: key })}\n`,
+    `${JSON.stringify({ agent_name: data.agent_name, idempotency_key: key })}\n`,
   );
 }
 
@@ -446,7 +449,10 @@ async function providerAdd(agentName: string, command: Command): Promise<void> {
   const body = readJsonFileAs(options.file, providerAddBodySchema);
   const result = await httpClient(agentOperations, endpoint, token)[
     "enablement.provider.add"
-  ]({ params: { agentName }, query: {}, body }, { idempotencyKey: key });
+  ](
+    { params: { agent_name: agentName }, query: {}, body },
+    { idempotencyKey: key },
+  );
   const data = handleMutationResult(result, ADD_INDETERMINATE, key);
   process.stdout.write(
     `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
@@ -470,7 +476,7 @@ async function providerRemove(
     "enablement.provider.remove"
   ](
     {
-      params: { agentName, providerName },
+      params: { agent_name: agentName, provider_name: providerName },
       query: {},
       body: { expected_revision: expectedRevision },
     },
@@ -491,7 +497,11 @@ async function providerModelList(
   requireToken(token, MODEL_LIST_TOKEN_REQUIRED);
   const result = await httpClient(agentOperations, endpoint, token)[
     "enablement.provider.model.list"
-  ]({ params: { agentName, providerName }, query: {}, body: null });
+  ]({
+    params: { agent_name: agentName, provider_name: providerName },
+    query: {},
+    body: null,
+  });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, MODEL_LIST_INDETERMINATE))}\n`,
   );

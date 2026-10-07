@@ -58,6 +58,11 @@ const RESOURCE_IDENTITY = `${BindingKind.Repository}:${REPOSITORY_PLATFORM}:owne
 const BASE_BRANCH = "main";
 const ENABLEMENT_COMMAND = ["agent", "enablement"];
 const CONFIGURATION = {
+  agent_provider: DEFAULT,
+  model_identifier: SONNET,
+  reasoning_effort: OFF,
+};
+const ENTRY_CONFIGURATION = {
   agentProvider: DEFAULT,
   modelIdentifier: SONNET,
   reasoningEffort: OFF,
@@ -88,7 +93,7 @@ const WORKER_BINDING = {
   config: {
     worker: WORKER,
     instanceCount: SINGLE_INSTANCE,
-    entries: [{ agent: AGENT, ...CONFIGURATION }],
+    entries: [{ agent: AGENT, ...ENTRY_CONFIGURATION }],
   },
 };
 
@@ -311,8 +316,8 @@ async function enableAgent(
 ): Promise<AgentEnablement> {
   await createCredential(fixture);
   const path = file(fixture.directory, "enablement.json", {
-    agentProviders: PROVIDERS,
-    defaultConfiguration,
+    agent_providers: PROVIDERS,
+    default_configuration: defaultConfiguration,
   });
   const answer = success<AgentEnablement>(
     await kanthord(
@@ -596,7 +601,7 @@ test("E05.17 removing an enablement used by a binding is refused", async (t) => 
     await kanthord([...ENABLEMENT_COMMAND, "get", AGENT], fixture.env),
   );
   assert.equal(read.revision, enablement.revision);
-  assert.deepEqual(read.agentProviders, enablement.agentProviders);
+  assert.deepEqual(read.agent_providers, enablement.agent_providers);
   await readAgent(fixture, project.id, binding.id);
 });
 
@@ -605,10 +610,10 @@ test("E05.18 replacing a referenced provider is refused atomically", async (t) =
   const { project, binding, enablement } = await boundAgent(fixture);
   const path = file(fixture.directory, "invalidating.json", {
     expected_revision: enablement.revision,
-    agentProviders: [
+    agent_providers: [
       { name: BACKUP, provider: ANTHROPIC, credential: CREDENTIAL },
     ],
-    defaultConfiguration: { ...CONFIGURATION, agentProvider: BACKUP },
+    default_configuration: { ...CONFIGURATION, agent_provider: BACKUP },
   });
   refusal(
     await kanthord(
@@ -621,18 +626,18 @@ test("E05.18 replacing a referenced provider is refused atomically", async (t) =
     await kanthord([...ENABLEMENT_COMMAND, "get", AGENT], fixture.env),
   );
   assert.equal(read.revision, enablement.revision);
-  assert.deepEqual(read.agentProviders, enablement.agentProviders);
-  assert.deepEqual(read.defaultConfiguration, CONFIGURATION);
+  assert.deepEqual(read.agent_providers, enablement.agent_providers);
+  assert.deepEqual(read.default_configuration, CONFIGURATION);
   assert.equal(read.state, ENABLED);
   const agent = await readAgent(fixture, project.id, binding.id);
   assert.equal(agent.bindingSetVersion, SECOND_BINDING_VERSION);
-  assert.deepEqual(agent.entry, CONFIGURATION);
+  assert.deepEqual(agent.entry, ENTRY_CONFIGURATION);
 });
 
 test("E05.19 changing defaults that invalidate a tuning entry is refused atomically", async (t) => {
   const fixture = await setup(t);
   const project = await createProject(fixture);
-  const defaults = { ...CONFIGURATION, modelIdentifier: SONNET_MAX };
+  const defaults = { ...CONFIGURATION, model_identifier: SONNET_MAX };
   const enablement = await enableAgent(fixture, defaults);
   const entry = { reasoningEffort: MAX };
   const applied = await apply(fixture, project.id, {
@@ -655,8 +660,8 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
   assert.deepEqual(before.entry, entry);
   const path = file(fixture.directory, "invalidating.json", {
     expected_revision: enablement.revision,
-    agentProviders: PROVIDERS,
-    defaultConfiguration: CONFIGURATION,
+    agent_providers: PROVIDERS,
+    default_configuration: CONFIGURATION,
   });
   refusal(
     await kanthord(
@@ -669,9 +674,9 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
     await kanthord([...ENABLEMENT_COMMAND, "get", AGENT], fixture.env),
   );
   assert.equal(read.revision, enablement.revision);
-  assert.deepEqual(read.agentProviders, enablement.agentProviders);
-  assert.deepEqual(read.defaultConfiguration, defaults);
-  assert.equal(read.defaultConfiguration.modelIdentifier, SONNET_MAX);
+  assert.deepEqual(read.agent_providers, enablement.agent_providers);
+  assert.deepEqual(read.default_configuration, defaults);
+  assert.equal(read.default_configuration.model_identifier, SONNET_MAX);
   const after = await readAgent(fixture, project.id, binding.id);
   assert.deepEqual(after.entry, entry);
   assert.deepEqual(after, before);

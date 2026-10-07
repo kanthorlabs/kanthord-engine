@@ -2188,16 +2188,16 @@ test("binding reads preserve ownership and paginate filtered current, removed an
 test("agent views page sorted declarations and copy worker views with stripped entries", async (t) => {
   const calls: Array<{ agent: string; entry: WorkerEntry | null }> = [];
   const defaults = {
-    agentProvider: "default",
-    modelIdentifier: MODEL,
-    reasoningEffort: "low",
+    agent_provider: "default",
+    model_identifier: MODEL,
+    reasoning_effort: "low",
   };
   const effective = {
     ...defaults,
     provider: "provider",
     credential: "credential",
   };
-  const issues = [{ path: ["modelIdentifier"], code: "example.issue" }];
+  const issues = [{ path: ["model_identifier"], code: "example.issue" }];
   const view = { defaults, effective, valid: false, issues };
   const f = writeFixture(t, {
     workerAgentsOf: (worker) => {

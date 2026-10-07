@@ -27,13 +27,13 @@ export const AgentProviderKind = {
 
 export type EnablementRow = {
   id: string;
-  agentName: string;
+  agent_name: string;
   revision: number;
   state: EnablementState;
-  agentProviders: AgentProviderItem[];
-  defaultConfiguration: DefaultConfiguration;
-  createdAt: number;
-  removedAt: number | null;
+  agent_providers: AgentProviderItem[];
+  default_configuration: DefaultConfiguration;
+  created_at: number;
+  removed_at: number | null;
 };
 
 type DatabaseRow = {
@@ -60,15 +60,15 @@ const ALL_ROWS_LIMIT = -1;
 function toEnablement(row: DatabaseRow): EnablementRow {
   return {
     id: row.id,
-    agentName: row.agent_name,
+    agent_name: row.agent_name,
     revision: row.revision,
     state: row.state,
-    agentProviders: JSON.parse(row.agent_providers) as AgentProviderItem[],
-    defaultConfiguration: JSON.parse(
+    agent_providers: JSON.parse(row.agent_providers) as AgentProviderItem[],
+    default_configuration: JSON.parse(
       row.default_configuration,
     ) as DefaultConfiguration,
-    createdAt: row.created_at,
-    removedAt: row.removed_at,
+    created_at: row.created_at,
+    removed_at: row.removed_at,
   };
 }
 
@@ -115,7 +115,7 @@ export function listEnablements(
   const items = rows.slice(FIRST_ROW, limit);
   const nextCursor =
     rows.length > limit
-      ? Buffer.from(items.at(-1)!.agentName, TEXT_ENCODING).toString(
+      ? Buffer.from(items.at(-1)!.agent_name, TEXT_ENCODING).toString(
           CURSOR_ENCODING,
         )
       : null;
@@ -164,13 +164,13 @@ export function insertEnablementRevision(
   const createdAt = Date.now();
   const row: EnablementRow = {
     id,
-    agentName,
+    agent_name: agentName,
     revision,
     state,
-    agentProviders,
-    defaultConfiguration,
-    createdAt,
-    removedAt: removedAt ?? null,
+    agent_providers: agentProviders,
+    default_configuration: defaultConfiguration,
+    created_at: createdAt,
+    removed_at: removedAt ?? null,
   };
   tx.database
     .prepare(
@@ -186,7 +186,7 @@ export function insertEnablementRevision(
       canonicalJSON(agentProviders),
       canonicalJSON(defaultConfiguration),
       createdAt,
-      row.removedAt,
+      row.removed_at,
     );
   return row;
 }
@@ -196,9 +196,12 @@ export function agentProvidersDependentOn(
   credentialName: string,
 ): AgentProviderDependent[] {
   return liveEnablements(tx).flatMap((row) =>
-    row.agentProviders
+    row.agent_providers
       .filter((item) => item.credential === credentialName)
-      .map((item) => ({ agent_name: row.agentName, provider_name: item.name })),
+      .map((item) => ({
+        agent_name: row.agent_name,
+        provider_name: item.name,
+      })),
   );
 }
 
@@ -209,10 +212,10 @@ export function enablementsByModel(
 ): EnablementRow[] {
   return liveEnablements(tx).filter(
     (row) =>
-      row.defaultConfiguration.modelIdentifier === modelId &&
-      row.agentProviders.some(
+      row.default_configuration.model_identifier === modelId &&
+      row.agent_providers.some(
         (item) =>
-          item.name === row.defaultConfiguration.agentProvider &&
+          item.name === row.default_configuration.agent_provider &&
           item.credential === credentialName,
       ),
   );

@@ -28,11 +28,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { AGENT_DECLARATIONS, getAgentDeclaration } from "../agent/catalog.ts";
-import {
-  AgentErrorCode,
-  type AgentEntry,
-  type AgentView,
-} from "../agent/contract.ts";
+import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
@@ -99,11 +95,15 @@ export interface Dependencies {
     compose(agentName: string, context: Context): Promise<ResolvedLayer[]>;
   };
   agentConfiguration: {
-    validateEntry(tx: Transaction, agentName: string, entry: AgentEntry): void;
+    validateEntry(
+      tx: Transaction,
+      agentName: string,
+      entry: WorkbenchConfiguration,
+    ): void;
     agentView(
       tx: Transaction,
       agentName: string,
-      entry: AgentEntry,
+      entry: WorkbenchConfiguration,
     ): AgentView | null;
   };
   credentialMetadata: CredentialMetadataFn;
@@ -183,7 +183,7 @@ function requireAgent(agentName: string): void {
       HttpStatus.NotFound,
       AgentErrorCode.AgentNotFound,
       "Agent not found.",
-      { agentName },
+      { agent_name: agentName },
     );
 }
 
@@ -332,9 +332,10 @@ export class WorkbenchService implements Service {
           },
           credentialId: resolved.credentialId,
           configuration: {
-            ...session.configuration,
+            agent_provider: session.configuration.agentProvider,
             provider: resolved.provider,
-            reasoningEffort: session.configuration
+            model_identifier: session.configuration.modelIdentifier,
+            reasoning_effort: session.configuration
               .reasoningEffort as ReasoningLevel,
           },
           metadata: resolved.metadata,

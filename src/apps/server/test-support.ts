@@ -630,3 +630,15 @@ export async function gatewayFixture(
     logs,
   };
 }
+
+export function agentDefaultsOf(configuration: {
+  agentProvider: string;
+  modelIdentifier: string;
+  reasoningEffort: string;
+}) {
+  return {
+    agent_provider: configuration.agentProvider,
+    model_identifier: configuration.modelIdentifier,
+    reasoning_effort: configuration.reasoningEffort,
+  };
+}

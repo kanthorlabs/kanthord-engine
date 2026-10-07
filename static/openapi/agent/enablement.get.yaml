@@ -12,12 +12,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: agentName
+      - name: agent_name
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/agent.enablement.get.Input/properties/params/proper\
-            ties/agentName"
+            ties/agent_name"
     responses:
       "200":
         description: Completed result
@@ -57,12 +57,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: agentName
+      - name: agent_name
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/agent.enablement.put.Input/properties/params/proper\
-            ties/agentName"
+            ties/agent_name"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
@@ -109,12 +109,12 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: agentName
+      - name: agent_name
         in: path
         required: true
         schema:
           $ref: "#/components/schemas/agent.enablement.remove.Input/properties/params/pro\
-            perties/agentName"
+            perties/agent_name"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
@@ -157,11 +157,11 @@ components:
         params:
           type: object
           properties:
-            agentName:
+            agent_name:
               type: string
               minLength: 1
           required:
-            - agentName
+            - agent_name
           additionalProperties: false
         query:
           type: object
@@ -177,14 +177,14 @@ components:
     agent.enablement.get.Output:
       type: object
       properties:
-        agentName:
+        agent_name:
           type: string
         state:
           type: string
           enum:
             - enabled
             - disabled
-        agentProviders:
+        agent_providers:
           type: array
           items:
             type: object
@@ -244,16 +244,16 @@ components:
               - provider
               - credential
             additionalProperties: false
-        defaultConfiguration:
+        default_configuration:
           type: object
           properties:
-            agentProvider:
+            agent_provider:
               type: string
               minLength: 1
-            modelIdentifier:
+            model_identifier:
               type: string
               minLength: 1
-            reasoningEffort:
+            reasoning_effort:
               type: string
               enum:
                 - off
@@ -264,19 +264,19 @@ components:
                 - xhigh
                 - max
           required:
-            - agentProvider
-            - modelIdentifier
-            - reasoningEffort
+            - agent_provider
+            - model_identifier
+            - reasoning_effort
           additionalProperties: false
         revision:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
       required:
-        - agentName
+        - agent_name
         - state
-        - agentProviders
-        - defaultConfiguration
+        - agent_providers
+        - default_configuration
         - revision
       additionalProperties: false
     agent.enablement.put.Input:
@@ -285,11 +285,11 @@ components:
         params:
           type: object
           properties:
-            agentName:
+            agent_name:
               type: string
               minLength: 1
           required:
-            - agentName
+            - agent_name
           additionalProperties: false
         query:
           type: object
@@ -302,7 +302,7 @@ components:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
-            agentProviders:
+            agent_providers:
               minItems: 1
               type: array
               items:
@@ -363,16 +363,16 @@ components:
                   - provider
                   - credential
                 additionalProperties: false
-            defaultConfiguration:
+            default_configuration:
               type: object
               properties:
-                agentProvider:
+                agent_provider:
                   type: string
                   minLength: 1
-                modelIdentifier:
+                model_identifier:
                   type: string
                   minLength: 1
-                reasoningEffort:
+                reasoning_effort:
                   type: string
                   enum:
                     - off
@@ -383,13 +383,13 @@ components:
                     - xhigh
                     - max
               required:
-                - agentProvider
-                - modelIdentifier
-                - reasoningEffort
+                - agent_provider
+                - model_identifier
+                - reasoning_effort
               additionalProperties: false
           required:
-            - agentProviders
-            - defaultConfiguration
+            - agent_providers
+            - default_configuration
           additionalProperties: false
       required:
         - params
@@ -399,14 +399,14 @@ components:
     agent.enablement.put.Output:
       type: object
       properties:
-        agentName:
+        agent_name:
           type: string
         state:
           type: string
           enum:
             - enabled
             - disabled
-        agentProviders:
+        agent_providers:
           type: array
           items:
             type: object
@@ -466,16 +466,16 @@ components:
               - provider
               - credential
             additionalProperties: false
-        defaultConfiguration:
+        default_configuration:
           type: object
           properties:
-            agentProvider:
+            agent_provider:
               type: string
               minLength: 1
-            modelIdentifier:
+            model_identifier:
               type: string
               minLength: 1
-            reasoningEffort:
+            reasoning_effort:
               type: string
               enum:
                 - off
@@ -486,19 +486,19 @@ components:
                 - xhigh
                 - max
           required:
-            - agentProvider
-            - modelIdentifier
-            - reasoningEffort
+            - agent_provider
+            - model_identifier
+            - reasoning_effort
           additionalProperties: false
         revision:
           type: integer
           exclusiveMinimum: 0
           maximum: 9007199254740991
       required:
-        - agentName
+        - agent_name
         - state
-        - agentProviders
-        - defaultConfiguration
+        - agent_providers
+        - default_configuration
         - revision
       additionalProperties: false
     agent.enablement.remove.Input:
@@ -507,11 +507,11 @@ components:
         params:
           type: object
           properties:
-            agentName:
+            agent_name:
               type: string
               minLength: 1
           required:
-            - agentName
+            - agent_name
           additionalProperties: false
         query:
           type: object
@@ -535,12 +535,12 @@ components:
     agent.enablement.remove.Output:
       type: object
       properties:
-        agentName:
+        agent_name:
           type: string
         removed:
           type: boolean
           const: true
       required:
-        - agentName
+        - agent_name
         - removed
       additionalProperties: false

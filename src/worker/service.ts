@@ -80,7 +80,7 @@ function invalidWorkerConfiguration(workerName: string): OperationError {
     HttpStatus.BadRequest,
     AgentErrorCode.InvalidConfiguration,
     "Agent configuration is unavailable or invalid.",
-    { agentName: workerName },
+    { agent_name: workerName },
   );
 }
 

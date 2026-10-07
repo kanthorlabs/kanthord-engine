@@ -165,7 +165,7 @@ export async function openNativeAgent(
       cwd: input.workspace,
       modelRuntime: runtime,
       model,
-      thinkingLevel: input.setup.effectiveConfiguration.reasoningEffort,
+      thinkingLevel: input.setup.effectiveConfiguration.reasoning_effort,
       systemPrompt: input.setup.prompt.final,
       ...sessionTools(
         pi,

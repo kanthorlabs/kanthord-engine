@@ -142,10 +142,10 @@ async function workbenchFixture(
   completed(
     await agent["enablement.put"](
       {
-        params: { agentName: AGENT },
+        params: { agent_name: AGENT },
         query: {},
         body: {
-          agentProviders: [
+          agent_providers: [
             {
               name: DEFAULT,
               provider: ANTHROPIC,
@@ -157,10 +157,10 @@ async function workbenchFixture(
               credential: BACKUP_CREDENTIAL,
             },
           ],
-          defaultConfiguration: {
-            agentProvider: DEFAULT,
-            modelIdentifier: SONNET,
-            reasoningEffort: OFF,
+          default_configuration: {
+            agent_provider: DEFAULT,
+            model_identifier: SONNET,
+            reasoning_effort: OFF,
           },
         },
       },
@@ -525,14 +525,14 @@ test("the workbench credential view exposes only the credential of the configure
   });
   const enablement = completed(
     await fixture.agent["enablement.get"](
-      { params: { agentName: AGENT }, query: {}, body: null },
+      { params: { agent_name: AGENT }, query: {}, body: null },
       fixture.options,
     ),
   );
   completed(
     await fixture.agent["enablement.disable"](
       {
-        params: { agentName: AGENT },
+        params: { agent_name: AGENT },
         query: {},
         body: { expected_revision: enablement.revision },
       },
@@ -785,7 +785,7 @@ function toolResults(entries: readonly Entry[]) {
 }
 
 const addSpare = {
-  params: { agentName: AGENT },
+  params: { agent_name: AGENT },
   query: {},
   body: {
     expected_revision: 1,
@@ -818,11 +818,11 @@ async function untilApproval(fixture: Fixture, sessionId: string) {
 async function providerNames(fixture: Fixture): Promise<string[]> {
   const enablement = completed(
     await fixture.agent["enablement.get"](
-      { params: { agentName: AGENT }, query: {}, body: null },
+      { params: { agent_name: AGENT }, query: {}, body: null },
       fixture.options,
     ),
   );
-  return enablement.agentProviders.map(({ name }) => name);
+  return enablement.agent_providers.map(({ name }) => name);
 }
 
 test("a poll answers at once when the snapshot changed after the version that the client holds", async (t) => {
@@ -910,12 +910,12 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
 test("a read tool and a built-in tool run at once and a refusal returns the owning service code", async (t) => {
   const fixture = await workbenchFixture(t, [
     toolCall(toolName("agent.enablement.get"), {
-      params: { agentName: AGENT },
+      params: { agent_name: AGENT },
       query: {},
       body: null,
     }),
     toolCall(toolName("agent.get"), {
-      params: { agentName: "unknown@1" },
+      params: { agent_name: "unknown@1" },
       query: {},
       body: null,
     }),

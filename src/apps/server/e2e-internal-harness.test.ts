@@ -26,6 +26,7 @@ import {
   scriptedCheck,
   scriptedActions,
   inProcessWorker,
+  agentDefaultsOf,
 } from "./test-support.ts";
 import {
   fauxAssistantMessage,
@@ -168,10 +169,10 @@ async function setupInternal(t: TestContext) {
   cli.secrets.push("test_journey_access", "test_journey_secret");
   for (const agent of ["swe@1", "re@1"])
     await cli.write(["agent", "enablement", "put", agent], {
-      agentProviders: [
+      agent_providers: [
         { name: "default", provider: "anthropic", credential: "anthro-1" },
       ],
-      defaultConfiguration: DEFAULTS,
+      default_configuration: agentDefaultsOf(DEFAULTS),
     });
   const project = await cli.read<{ id: string }>([
     "project",

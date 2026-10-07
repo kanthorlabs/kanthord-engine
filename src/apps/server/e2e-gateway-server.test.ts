@@ -186,11 +186,11 @@ function enablementFile(
   assert.ok(credential);
   assert.ok(modelIdentifier);
   return file(fixture.directory, "enablement.json", {
-    agentProviders: [{ name: DEFAULT_PROVIDER, provider, credential }],
-    defaultConfiguration: {
-      agentProvider: DEFAULT_PROVIDER,
-      modelIdentifier,
-      reasoningEffort: REASONING_OFF,
+    agent_providers: [{ name: DEFAULT_PROVIDER, provider, credential }],
+    default_configuration: {
+      agent_provider: DEFAULT_PROVIDER,
+      model_identifier: modelIdentifier,
+      reasoning_effort: REASONING_OFF,
     },
   });
 }
@@ -496,7 +496,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
       fixture.env,
     ),
   );
-  assert.equal(put.defaultConfiguration.modelIdentifier, GPT);
+  assert.equal(put.default_configuration.model_identifier, GPT);
   const remove = file(fixture.directory, "remove-model.json", {
     expected_revision: SECOND_REVISION,
     metadata: { base_url: BASE_URL, models: [] },

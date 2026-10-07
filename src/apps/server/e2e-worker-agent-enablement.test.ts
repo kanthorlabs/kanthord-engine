@@ -90,13 +90,13 @@ function enablementFile(fixture: Fixture, expectedRevision?: number): string {
       ...(expectedRevision === undefined
         ? {}
         : { expected_revision: expectedRevision }),
-      agentProviders: [
+      agent_providers: [
         { name: DEFAULT, provider: ANTHROPIC, credential: CREDENTIAL },
       ],
-      defaultConfiguration: {
-        agentProvider: DEFAULT,
-        modelIdentifier: SONNET,
-        reasoningEffort: OFF,
+      default_configuration: {
+        agent_provider: DEFAULT,
+        model_identifier: SONNET,
+        reasoning_effort: OFF,
       },
     },
   );
@@ -176,7 +176,7 @@ async function added(fixture: Fixture): Promise<void> {
     ),
   );
   assert.equal(answer.revision, FOURTH_REVISION);
-  assert.equal(answer.agentProviders.length, TWO_PROVIDERS);
+  assert.equal(answer.agent_providers.length, TWO_PROVIDERS);
 }
 
 async function providerRemoved(fixture: Fixture): Promise<void> {
@@ -196,19 +196,19 @@ async function providerRemoved(fixture: Fixture): Promise<void> {
     ),
   );
   assert.equal(answer.revision, FIFTH_REVISION);
-  assert.equal(answer.agentProviders.length, SINGLE_ITEM);
+  assert.equal(answer.agent_providers.length, SINGLE_ITEM);
 }
 
 async function removed(fixture: Fixture): Promise<void> {
   await providerRemoved(fixture);
-  const answer = success<{ agentName: string }>(
+  const answer = success<{ agent_name: string }>(
     await kanthord(
       [...COMMAND, "remove", AGENT, REVISION, String(FIFTH_REVISION)],
       fixture.env,
     ),
   );
-  assert.equal(answer.agentName, AGENT);
-  assert.ok(answer.agentName);
+  assert.equal(answer.agent_name, AGENT);
+  assert.ok(answer.agent_name);
 }
 
 test("E03.1 create credential and put enablement", async (t) => {
@@ -217,7 +217,7 @@ test("E03.1 create credential and put enablement", async (t) => {
   const answer = success<AgentEnablement>(
     await kanthord([...COMMAND, "get", AGENT], fixture.env),
   );
-  assert.equal(answer.agentName, AGENT);
+  assert.equal(answer.agent_name, AGENT);
   assert.equal(answer.state, ENABLED);
   assert.equal(answer.revision, FIRST_REVISION);
 });
@@ -230,7 +230,7 @@ test("E03.2 list enablements", async (t) => {
     next_cursor: string | null;
   }>(await kanthord([...COMMAND, "list"], fixture.env));
   assert.equal(answer.items.length, SINGLE_ITEM);
-  assert.equal(answer.items[0]?.agentName, AGENT);
+  assert.equal(answer.items[0]?.agent_name, AGENT);
   assert.equal(answer.next_cursor, null);
 });
 
@@ -240,7 +240,7 @@ test("E03.3 get enablement", async (t) => {
   const answer = success<AgentEnablement>(
     await kanthord([...COMMAND, "get", AGENT], fixture.env),
   );
-  assert.equal(answer.agentName, AGENT);
+  assert.equal(answer.agent_name, AGENT);
   assert.equal(answer.revision, FIRST_REVISION);
   assert.equal(answer.state, ENABLED);
 });
@@ -282,7 +282,7 @@ test("E03.7 add backup provider", async (t) => {
     await kanthord([...COMMAND, "get", AGENT], fixture.env),
   );
   assert.equal(answer.revision, FOURTH_REVISION);
-  assert.equal(answer.agentProviders.length, TWO_PROVIDERS);
+  assert.equal(answer.agent_providers.length, TWO_PROVIDERS);
 });
 
 test("E03.7a provider add refuses a credential that another agent provider names", async (t) => {
@@ -310,7 +310,7 @@ test("E03.8 remove backup provider", async (t) => {
     await kanthord([...COMMAND, "get", AGENT], fixture.env),
   );
   assert.equal(answer.revision, FIFTH_REVISION);
-  assert.equal(answer.agentProviders.length, SINGLE_ITEM);
+  assert.equal(answer.agent_providers.length, SINGLE_ITEM);
 });
 
 test("E03.9 remove enablement", async (t) => {
@@ -365,19 +365,19 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
   );
   assert.ok(updated.revisions[0]);
   const putFile = file(directory, "enablement-oai.json", {
-    agentProviders: [
+    agent_providers: [
       { name: DEFAULT, provider: OPENAI, credential: OPENAI_CREDENTIAL },
     ],
-    defaultConfiguration: {
-      agentProvider: DEFAULT,
-      modelIdentifier: GPT,
-      reasoningEffort: OFF,
+    default_configuration: {
+      agent_provider: DEFAULT,
+      model_identifier: GPT,
+      reasoning_effort: OFF,
     },
   });
   const put = success(
     await kanthord([...COMMAND, "put", OPENAI_AGENT, "--file", putFile], env),
   );
-  assert.equal(put.defaultConfiguration.modelIdentifier, GPT);
+  assert.equal(put.default_configuration.model_identifier, GPT);
   const dropTurbo = metadata(
     "meta-drop-turbo.json",
     updated.revisions[0].revision,
@@ -427,7 +427,7 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
   const enablement = success<AgentEnablement>(
     await kanthord([...COMMAND, "get", OPENAI_AGENT], env),
   );
-  assert.equal(enablement.defaultConfiguration.modelIdentifier, GPT);
+  assert.equal(enablement.default_configuration.model_identifier, GPT);
 });
 
 test("E03.12 put replays same idempotency key", async (t) => {
@@ -528,7 +528,7 @@ test("E03.16 last provider cannot be removed", async (t) => {
 test("E03.17 credential model list answers over HTTP before any enablement", async (t) => {
   const fixture = await setup(t);
   await createCredential(fixture);
-  const answer = success<{ items: { modelIdentifier: string }[] }>(
+  const answer = success<{ items: { model_identifier: string }[] }>(
     await kanthord(
       [
         "agent",
@@ -542,7 +542,7 @@ test("E03.17 credential model list answers over HTTP before any enablement", asy
       fixture.env,
     ),
   );
-  assert.ok(answer.items.some((item) => item.modelIdentifier === SONNET));
+  assert.ok(answer.items.some((item) => item.model_identifier === SONNET));
 });
 
 test("E03.18 prompt read answers over HTTP beside the agent name path", async (t) => {

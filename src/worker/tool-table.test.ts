@@ -30,7 +30,7 @@ test("native tool declarations preserve the catalog allowlists", async () => {
   assert.equal(swe.at(-1)!.source, ToolSource.Host);
   for (const declaration of [...swe.slice(0, -1), ...reviewer]) {
     assert.equal(declaration.source, ToolSource.Builtin);
-    assert.equal(declaration.inputSchema.type, objectType);
+    assert.equal(declaration.input_schema.type, objectType);
   }
 });
 

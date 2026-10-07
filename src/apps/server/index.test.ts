@@ -136,22 +136,22 @@ test("composed Custody and Worker share credential and enablement collaborations
   );
   assert.equal(updated.status, HttpStatus.OK, await updated.text());
   const put = await fixture.request(
-    agentOperations["enablement.put"].path.replace(":agentName", AGENT_NAME),
+    agentOperations["enablement.put"].path.replace(":agent_name", AGENT_NAME),
     {
       method: agentOperations["enablement.put"].method,
       headers: { ...headers, "Idempotency-Key": ulid() },
       body: JSON.stringify({
-        agentProviders: [
+        agent_providers: [
           {
             name: PROVIDER_NAME,
             provider: PROVIDER_KIND,
             credential: CREDENTIAL_NAME,
           },
         ],
-        defaultConfiguration: {
-          agentProvider: PROVIDER_NAME,
-          modelIdentifier: MODEL_NAME,
-          reasoningEffort: REASONING_LEVEL,
+        default_configuration: {
+          agent_provider: PROVIDER_NAME,
+          model_identifier: MODEL_NAME,
+          reasoning_effort: REASONING_LEVEL,
         },
       }),
     },

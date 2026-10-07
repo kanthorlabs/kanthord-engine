@@ -130,10 +130,10 @@ components:
           items:
             type: object
             properties:
-              modelIdentifier:
+              model_identifier:
                 type: string
                 minLength: 1
-              reasoningEfforts:
+              reasoning_efforts:
                 type: array
                 items:
                   type: string
@@ -146,8 +146,8 @@ components:
                     - xhigh
                     - max
             required:
-              - modelIdentifier
-              - reasoningEfforts
+              - model_identifier
+              - reasoning_efforts
             additionalProperties: false
       required:
         - items

@@ -67,6 +67,6 @@ export function authorizeModelInference(
     credential: view.effective.credential,
     platform: view.effective.provider,
     provider_id: view.effective.provider,
-    agent_provider: view.effective.agentProvider,
+    agent_provider: view.effective.agent_provider,
   };
 }

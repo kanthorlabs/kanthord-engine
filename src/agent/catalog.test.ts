@@ -11,18 +11,26 @@ import { AGENT_DECLARATIONS, getAgentDeclaration } from "./catalog.ts";
 test("static agent declarations", () => {
   assert.deepEqual(Object.keys(AGENT_DECLARATIONS), ["swe@1", "re@1"]);
   assert.deepEqual(getAgentDeclaration("swe@1"), {
-    agentName: "swe@1",
-    agentPrompt: SWE_AGENT_PROMPT,
-    hostTools: ["evidence-upload"],
+    agent_name: "swe@1",
+    agent_prompt: SWE_AGENT_PROMPT,
+    host_tools: ["evidence-upload"],
     tools: ["read", "edit", "write", "grep", "find", "ls", "bash"],
-    overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
+    overridable_fields: [
+      "agent_provider",
+      "model_identifier",
+      "reasoning_effort",
+    ],
   });
   assert.deepEqual(getAgentDeclaration("re@1"), {
-    agentName: "re@1",
-    agentPrompt: RE_AGENT_PROMPT,
-    hostTools: [],
+    agent_name: "re@1",
+    agent_prompt: RE_AGENT_PROMPT,
+    host_tools: [],
     tools: ["read", "grep", "find", "ls"],
-    overridableFields: ["agentProvider", "modelIdentifier", "reasoningEffort"],
+    overridable_fields: [
+      "agent_provider",
+      "model_identifier",
+      "reasoning_effort",
+    ],
   });
 });
 

@@ -125,22 +125,22 @@ export type AgentProviderItem = {
 };
 
 export type DefaultConfiguration = {
-  agentProvider: string;
-  modelIdentifier: string;
-  reasoningEffort: string;
+  agent_provider: string;
+  model_identifier: string;
+  reasoning_effort: string;
 };
 
 export type AgentEntry = {
-  agentProvider?: string;
-  modelIdentifier?: string;
-  reasoningEffort?: string;
+  agent_provider?: string;
+  model_identifier?: string;
+  reasoning_effort?: string;
 };
 
 export type AgentEnablement = {
-  agentName: string;
+  agent_name: string;
   state: string;
-  agentProviders: AgentProviderItem[];
-  defaultConfiguration: DefaultConfiguration;
+  agent_providers: AgentProviderItem[];
+  default_configuration: DefaultConfiguration;
   revision: number;
 };
 
@@ -150,19 +150,19 @@ export type AgentProviderDependent = {
 };
 
 export type AgentDependentBinding = {
-  bindingId: string;
-  workerName: string;
+  binding_id: string;
+  worker_name: string;
   entry: AgentEntry | null;
 };
 
 export type AgentView = {
   defaults: DefaultConfiguration | null;
   effective: {
-    agentProvider: string;
+    agent_provider: string;
     provider: string;
     credential: string;
-    modelIdentifier: string;
-    reasoningEffort: string;
+    model_identifier: string;
+    reasoning_effort: string;
   } | null;
   valid: boolean;
   issues: Array<{ path: string[]; code: string }>;
@@ -218,7 +218,7 @@ export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
 export const toolDeclarationSchema = z.strictObject({
   name: z.string().min(1),
   source: z.enum(ToolSource),
-  inputSchema: z.record(z.string(), z.unknown()),
+  input_schema: z.record(z.string(), z.unknown()),
 });
 export type ToolDeclaration = z.infer<typeof toolDeclarationSchema>;
 
@@ -251,34 +251,34 @@ export const agentProviderItemSchema = z.strictObject({
 });
 
 export const defaultConfigurationSchema = z.strictObject({
-  agentProvider: z.string().min(1),
-  modelIdentifier: z.string().min(1),
-  reasoningEffort: reasoningEffortSchema,
+  agent_provider: z.string().min(1),
+  model_identifier: z.string().min(1),
+  reasoning_effort: reasoningEffortSchema,
 });
 
 export const agentEnablementSchema = z.strictObject({
-  agentName: z.string(),
+  agent_name: z.string(),
   state: z.enum(["enabled", "disabled"]),
-  agentProviders: z.array(agentProviderItemSchema),
-  defaultConfiguration: defaultConfigurationSchema,
+  agent_providers: z.array(agentProviderItemSchema),
+  default_configuration: defaultConfigurationSchema,
   revision: z.number().int().positive(),
 });
 
 export const CONFIGURATION_DESCRIPTION =
-  "The Agent component validates the whole configuration. `modelIdentifier` belongs to `getBuiltinModels(provider)` of pi-ai 0.86.0 or to the `models` metadata of the `openai-compatible` credential. `reasoningEffort` belongs to the supported reasoning levels of that model. JSON Schema validates neither lookup.";
+  "The Agent component validates the whole configuration. `model_identifier` belongs to `getBuiltinModels(provider)` of pi-ai 0.86.0 or to the `models` metadata of the `openai-compatible` credential. `reasoning_effort` belongs to the supported reasoning levels of that model. JSON Schema validates neither lookup.";
 export const effectiveConfigurationSchema = z
   .strictObject({
-    agentProvider: z.string().min(1),
+    agent_provider: z.string().min(1),
     provider: agentProviderKindSchema,
     credential: z.string().min(1),
-    modelIdentifier: z.string().min(1),
-    reasoningEffort: reasoningEffortSchema,
+    model_identifier: z.string().min(1),
+    reasoning_effort: reasoningEffortSchema,
   })
   .describe(CONFIGURATION_DESCRIPTION);
 
 export const agentModelSchema = z.strictObject({
-  modelIdentifier: z.string().min(1),
-  reasoningEfforts: z.array(reasoningEffortSchema),
+  model_identifier: z.string().min(1),
+  reasoning_efforts: z.array(reasoningEffortSchema),
 });
 
 export const promptSourceSchema = z.strictObject({
@@ -305,9 +305,9 @@ export const promptAnswerSchema = z.strictObject({
 });
 
 export const agentDeclarationSchema = z.strictObject({
-  agentName: z.string().min(1),
-  configurationSchema: z.record(z.string(), z.unknown()),
-  overridableFields: z.array(z.string()),
+  agent_name: z.string().min(1),
+  configuration_schema: z.record(z.string(), z.unknown()),
+  overridable_fields: z.array(z.string()),
   prompt: promptAnswerSchema,
   tools: z.array(toolDeclarationSchema),
   enablement: agentEnablementSchema.nullable(),
@@ -315,9 +315,9 @@ export const agentDeclarationSchema = z.strictObject({
 
 export const promptSettingsSchema = z.strictObject({
   scope: z.enum(PromptScope),
-  agentName: z.string(),
+  agent_name: z.string(),
   switches: z.record(z.string(), z.boolean()),
-  customText: z.string(),
+  custom_text: z.string(),
   system_layer: z.enum(SystemLayerOverride).nullable(),
   revision: z.number().int().nonnegative(),
 });
@@ -328,7 +328,7 @@ const promptSwitchNames = [
 ] as [string, ...string[]];
 const promptTarget = {
   scope: z.enum(PromptScope),
-  agentName: z.string().min(1).optional(),
+  agent_name: z.string().min(1).optional(),
   expected_revision: z.number().int().positive().optional(),
 };
 
@@ -359,14 +359,14 @@ function checkPromptSwitch(
 }
 
 function checkPromptTarget(
-  body: { scope: PromptScope; agentName?: string; switch?: string },
+  body: { scope: PromptScope; agent_name?: string; switch?: string },
   context: z.core.$RefinementCtx,
 ): void {
   const system = body.scope === PromptScope.System;
-  if (system === (body.agentName !== undefined))
+  if (system === (body.agent_name !== undefined))
     context.addIssue({
       code: "custom",
-      path: ["agentName"],
+      path: ["agent_name"],
       message: system
         ? "The system scope takes no agent name."
         : "The scope requires an agent name.",
@@ -383,7 +383,7 @@ function checkPromptTarget(
 }
 
 const emptyFields = z.strictObject({});
-const agentParams = z.strictObject({ agentName: z.string().min(1) });
+const agentParams = z.strictObject({ agent_name: z.string().min(1) });
 const revisionBody = z.strictObject({
   expected_revision: z.number().int().positive(),
 });
@@ -439,7 +439,7 @@ export const agentOperations = {
     ...enablementOperation,
     id: "agent.get",
     method: HttpMethod.Get,
-    path: "/api/agent/:agentName",
+    path: "/api/agent/:agent_name",
     mutation: false,
     body: false,
     input: z.strictObject({
@@ -447,15 +447,15 @@ export const agentOperations = {
       query: z
         .strictObject({
           view: z.enum(PromptView).optional(),
-          projectId: z.string().min(1).optional(),
-          bindingId: z.string().min(1).optional(),
+          project_id: z.string().min(1).optional(),
+          binding_id: z.string().min(1).optional(),
         })
         .refine(
-          ({ projectId, bindingId }) =>
-            (projectId === undefined) === (bindingId === undefined),
+          ({ project_id, binding_id }) =>
+            (project_id === undefined) === (binding_id === undefined),
           {
-            path: ["bindingId"],
-            message: "The queries projectId and bindingId go together.",
+            path: ["binding_id"],
+            message: "The queries project_id and binding_id go together.",
           },
         ),
       body: z.null(),
@@ -467,7 +467,7 @@ export const agentOperations = {
     ...enablementOperation,
     id: "agent.enablement.get",
     method: HttpMethod.Get,
-    path: "/api/agent/enablement/:agentName",
+    path: "/api/agent/enablement/:agent_name",
     mutation: false,
     body: false,
     input: z.strictObject({
@@ -481,14 +481,14 @@ export const agentOperations = {
     ...enablementMutation,
     id: "agent.enablement.put",
     method: HttpMethod.Put,
-    path: "/api/agent/enablement/:agentName",
+    path: "/api/agent/enablement/:agent_name",
     input: z.strictObject({
       params: agentParams,
       query: emptyFields,
       body: z.strictObject({
         expected_revision: z.number().int().positive().optional(),
-        agentProviders: z.array(agentProviderItemSchema).min(1),
-        defaultConfiguration: defaultConfigurationSchema,
+        agent_providers: z.array(agentProviderItemSchema).min(1),
+        default_configuration: defaultConfigurationSchema,
       }),
     }),
     description:
@@ -498,14 +498,14 @@ export const agentOperations = {
     ...enablementMutation,
     id: "agent.enablement.enable",
     method: HttpMethod.Post,
-    path: "/api/agent/enablement/:agentName/enable",
+    path: "/api/agent/enablement/:agent_name/enable",
     description: "Validate and enable an existing agent enablement.",
   },
   "enablement.disable": {
     ...enablementMutation,
     id: "agent.enablement.disable",
     method: HttpMethod.Post,
-    path: "/api/agent/enablement/:agentName/disable",
+    path: "/api/agent/enablement/:agent_name/disable",
     description:
       "Disable an agent enablement without validating dependent bindings.",
   },
@@ -513,15 +513,18 @@ export const agentOperations = {
     ...enablementMutation,
     id: "agent.enablement.remove",
     method: HttpMethod.Delete,
-    path: "/api/agent/enablement/:agentName",
-    output: z.strictObject({ agentName: z.string(), removed: z.literal(true) }),
+    path: "/api/agent/enablement/:agent_name",
+    output: z.strictObject({
+      agent_name: z.string(),
+      removed: z.literal(true),
+    }),
     description: "Remove an agent enablement with no dependent bindings.",
   },
   "enablement.provider.add": {
     ...enablementMutation,
     id: "agent.enablement.provider.add",
     method: HttpMethod.Post,
-    path: "/api/agent/enablement/:agentName/provider",
+    path: "/api/agent/enablement/:agent_name/provider",
     input: z.strictObject({
       params: agentParams,
       query: emptyFields,
@@ -538,11 +541,11 @@ export const agentOperations = {
     ...enablementMutation,
     id: "agent.enablement.provider.remove",
     method: HttpMethod.Delete,
-    path: "/api/agent/enablement/:agentName/provider/:providerName",
+    path: "/api/agent/enablement/:agent_name/provider/:provider_name",
     input: z.strictObject({
       params: z.strictObject({
-        agentName: z.string().min(1),
-        providerName: z.string().min(1),
+        agent_name: z.string().min(1),
+        provider_name: z.string().min(1),
       }),
       query: emptyFields,
       body: revisionBody,
@@ -554,13 +557,13 @@ export const agentOperations = {
     ...enablementOperation,
     id: "agent.enablement.provider.model.list",
     method: HttpMethod.Get,
-    path: "/api/agent/enablement/:agentName/provider/:providerName/model",
+    path: "/api/agent/enablement/:agent_name/provider/:provider_name/model",
     mutation: false,
     body: false,
     input: z.strictObject({
       params: z.strictObject({
-        agentName: z.string().min(1),
-        providerName: z.string().min(1),
+        agent_name: z.string().min(1),
+        provider_name: z.string().min(1),
       }),
       query: emptyFields,
       body: z.null(),
@@ -598,7 +601,7 @@ export const agentOperations = {
       params: emptyFields,
       query: emptyFields,
       body: z
-        .strictObject({ ...promptTarget, customText: z.string() })
+        .strictObject({ ...promptTarget, custom_text: z.string() })
         .superRefine(checkPromptTarget),
     }),
     output: promptSettingsSchema,
@@ -640,7 +643,7 @@ export const agentOperations = {
       query: z
         .strictObject({
           scope: z.enum(PromptScope),
-          agentName: z.string().min(1).optional(),
+          agent_name: z.string().min(1).optional(),
         })
         .superRefine(checkPromptTarget),
       body: z.null(),

@@ -64,11 +64,11 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
               defaults: null,
               effective: valid
                 ? {
-                    agentProvider: entry?.agentProvider ?? "default",
+                    agent_provider: entry?.agentProvider ?? "default",
                     provider: "anthropic",
                     credential: "anthro-1",
-                    modelIdentifier: "claude-sonnet-4-5",
-                    reasoningEffort: "off",
+                    model_identifier: "claude-sonnet-4-5",
+                    reasoning_effort: "off",
                   }
                 : null,
             };

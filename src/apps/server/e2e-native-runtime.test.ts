@@ -65,6 +65,7 @@ import {
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
+  agentDefaultsOf,
 } from "./test-support.ts";
 
 const SUCCESSFUL_EXIT = 0;
@@ -163,10 +164,10 @@ test(
     });
     for (const agent of ["swe@1", "re@1"])
       await write(["agent", "enablement", "put", agent], {
-        agentProviders: [
+        agent_providers: [
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
-        defaultConfiguration: DEFAULTS,
+        default_configuration: agentDefaultsOf(DEFAULTS),
       });
     const project = await read<{ id: string }>([
       "project",
@@ -357,7 +358,7 @@ test(
       const declaration = await read<
         (typeof agentOperations)["get"]["output"]["_output"]
       >(["agent", "get", "swe@1"]);
-      assert.equal(declaration.agentName, SWE);
+      assert.equal(declaration.agent_name, SWE);
       const texts = declaration.prompt.layers!.flatMap(({ sources }) =>
         sources.map((source) => source.text),
       );
@@ -382,13 +383,16 @@ test(
           { name: "evidence-upload", source: "host" },
         ],
       );
-      assert.equal(declaration.configurationSchema.additionalProperties, false);
-      assert.deepEqual(declaration.configurationSchema.required, [
-        "agentProvider",
+      assert.equal(
+        declaration.configuration_schema.additionalProperties,
+        false,
+      );
+      assert.deepEqual(declaration.configuration_schema.required, [
+        "agent_provider",
         "provider",
         "credential",
-        "modelIdentifier",
-        "reasoningEffort",
+        "model_identifier",
+        "reasoning_effort",
       ]);
       assert.equal(declaration.enablement?.revision, FIRST_REVISION);
     });
@@ -407,7 +411,7 @@ test(
     const repository = runtimeX.setup.repositories[0]!;
     await t.test("E07.3 execution setup and foreign proof", async () => {
       assert.deepEqual(runtimeX.setup.effectiveConfiguration, {
-        ...DEFAULTS,
+        ...agentDefaultsOf(DEFAULTS),
         provider: "anthropic",
         credential: "anthro-1",
       });

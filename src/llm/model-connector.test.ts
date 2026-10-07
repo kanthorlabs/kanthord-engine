@@ -47,11 +47,11 @@ const setup: ExecutionSetup = {
   agentName: "swe@1",
   credentialId: "credential",
   effectiveConfiguration: {
-    agentProvider: "default",
+    agent_provider: "default",
     provider: "anthropic",
     credential: "anthro-1",
-    modelIdentifier: "claude-sonnet-4-5",
-    reasoningEffort: "off",
+    model_identifier: "claude-sonnet-4-5",
+    reasoning_effort: "off",
   },
   metadata: null,
   resourceBudget: { turns: 200, wallTimeMs: 7200000 },
@@ -87,7 +87,7 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
   const runtime = await createModelRuntime(input);
   assert.equal(
     resolveModel(runtime, setup).id,
-    setup.effectiveConfiguration.modelIdentifier,
+    setup.effectiveConfiguration.model_identifier,
   );
   assert.ok(
     JSON.stringify(await runtime.getAuth("anthropic")).includes(
@@ -100,9 +100,9 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
     ),
   );
   for (const [patch, reason] of [
-    [{ modelIdentifier: "unknown" }, SetupRefusal.ModelUnknown],
+    [{ model_identifier: "unknown" }, SetupRefusal.ModelUnknown],
     [
-      { reasoningEffort: "max" as const },
+      { reasoning_effort: "max" as const },
       SetupRefusal.ReasoningEffortUnsupported,
     ],
   ] as const) {
@@ -140,7 +140,7 @@ test("compatible models retain metadata and exact supported reasoning levels", a
     effectiveConfiguration: {
       ...setup.effectiveConfiguration,
       provider: "openai-compatible",
-      modelIdentifier: "basic",
+      model_identifier: "basic",
     },
     metadata: {
       base_url: "https://example.invalid/v1",
@@ -197,7 +197,7 @@ test("openrouter runs with the built-in pi provider and its credential", async (
     effectiveConfiguration: {
       ...setup.effectiveConfiguration,
       provider: "openrouter",
-      modelIdentifier: "anthropic/claude-3-haiku",
+      model_identifier: "anthropic/claude-3-haiku",
     },
   };
   const credentials = new InMemoryCredentialStore();
@@ -224,7 +224,7 @@ test("openrouter runs with the built-in pi provider and its credential", async (
         ...openrouter,
         effectiveConfiguration: {
           ...openrouter.effectiveConfiguration,
-          modelIdentifier: "unknown",
+          model_identifier: "unknown",
         },
       }),
     {
@@ -243,7 +243,7 @@ test("openai-codex resolves a built-in model against its OAuth credential", asyn
     effectiveConfiguration: {
       ...setup.effectiveConfiguration,
       provider: "openai-codex",
-      modelIdentifier: "gpt-5.5",
+      model_identifier: "gpt-5.5",
     },
   };
   const credentials = new InMemoryCredentialStore();
@@ -282,7 +282,7 @@ test("groq runs with the built-in pi provider and no metadata", async (t) => {
     effectiveConfiguration: {
       ...setup.effectiveConfiguration,
       provider: "groq",
-      modelIdentifier: "llama-3.1-8b-instant",
+      model_identifier: "llama-3.1-8b-instant",
     },
   };
   const credentials = new InMemoryCredentialStore();
@@ -312,7 +312,7 @@ test("amazon-bedrock receives its metadata region as the credential env", async 
     effectiveConfiguration: {
       ...setup.effectiveConfiguration,
       provider: "amazon-bedrock",
-      modelIdentifier: "amazon.nova-2-lite-v1:0",
+      model_identifier: "amazon.nova-2-lite-v1:0",
     },
     metadata: { region: BEDROCK_REGION },
   };

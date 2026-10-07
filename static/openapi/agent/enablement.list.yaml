@@ -88,14 +88,14 @@ components:
           items:
             type: object
             properties:
-              agentName:
+              agent_name:
                 type: string
               state:
                 type: string
                 enum:
                   - enabled
                   - disabled
-              agentProviders:
+              agent_providers:
                 type: array
                 items:
                   type: object
@@ -155,16 +155,16 @@ components:
                     - provider
                     - credential
                   additionalProperties: false
-              defaultConfiguration:
+              default_configuration:
                 type: object
                 properties:
-                  agentProvider:
+                  agent_provider:
                     type: string
                     minLength: 1
-                  modelIdentifier:
+                  model_identifier:
                     type: string
                     minLength: 1
-                  reasoningEffort:
+                  reasoning_effort:
                     type: string
                     enum:
                       - off
@@ -175,19 +175,19 @@ components:
                       - xhigh
                       - max
                 required:
-                  - agentProvider
-                  - modelIdentifier
-                  - reasoningEffort
+                  - agent_provider
+                  - model_identifier
+                  - reasoning_effort
                 additionalProperties: false
               revision:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
             required:
-              - agentName
+              - agent_name
               - state
-              - agentProviders
-              - defaultConfiguration
+              - agent_providers
+              - default_configuration
               - revision
             additionalProperties: false
         next_cursor:
