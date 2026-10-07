@@ -496,9 +496,9 @@ export class CustodyComponent implements Service, CredentialRecords {
       );
       this.logger.info(
         {
-          executionId: row.execution_id,
-          workerBindingId: row.worker_binding_id,
-          credentialId: material.credential_id,
+          execution_id: row.execution_id,
+          worker_binding_id: row.worker_binding_id,
+          credential_id: material.credential_id,
         },
         "credential handover",
       );
@@ -528,7 +528,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
     const written = applyReport(tx, this.envelopeKey, report, this.platforms);
     this.logger.info(
-      { executionId: row.execution_id, credentialId: report.credential_id },
+      { execution_id: row.execution_id, credential_id: report.credential_id },
       written ? "credential report" : "credential report stale",
     );
   }
@@ -811,7 +811,10 @@ export class CustodyComponent implements Service, CredentialRecords {
         next === null ? null : canonicalJSON(next),
         Date.now(),
       );
-    this.logger.info({ credentialId: id, humanIdentity }, "credential created");
+    this.logger.info(
+      { credential_id: id, human_identity: humanIdentity },
+      "credential created",
+    );
     return answerForName(tx, name)!;
   }
 
@@ -934,7 +937,10 @@ export class CustodyComponent implements Service, CredentialRecords {
     const now = Date.now();
     this.insertRevision(tx, row, id, secret.data, metadata, now);
     this.drainRevisions(tx, row.name, now);
-    this.logger.info({ credentialId: id, humanIdentity }, "credential rotated");
+    this.logger.info(
+      { credential_id: id, human_identity: humanIdentity },
+      "credential rotated",
+    );
     return answerForName(tx, row.name)!;
   }
 
@@ -966,7 +972,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     );
     this.insertRevision(tx, row, id, secret, metadata, Date.now());
     this.logger.info(
-      { credentialId: id, humanIdentity },
+      { credential_id: id, human_identity: humanIdentity },
       "credential metadata updated",
     );
     return answerForName(tx, row.name)!;

@@ -222,8 +222,8 @@ test("handover and refresh reports preserve a single pinned revision and sanitiz
     const record = f.logs
       .map((line) => JSON.parse(line))
       .find((line) => line.msg === message);
-    assert.equal(record.executionId, f.row.execution_id);
-    assert.equal(record.credentialId, f.credentialId);
+    assert.equal(record.execution_id, f.row.execution_id);
+    assert.equal(record.credential_id, f.credentialId);
   }
   for (const value of [FIRST.key, SECOND.key])
     assert.equal(f.logs.join("").includes(value), false);

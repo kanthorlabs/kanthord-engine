@@ -110,9 +110,9 @@ function fixture(
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);
-  const logs: { credentialId: string; humanIdentity: string }[] = [];
+  const logs: { credential_id: string; human_identity: string }[] = [];
   const logger = {
-    info: (record: { credentialId: string; humanIdentity: string }) =>
+    info: (record: { credential_id: string; human_identity: string }) =>
       logs.push(record),
   } as unknown as Logger;
   const agentProvidersDependentOn =
@@ -502,8 +502,8 @@ test("metadata edits re-encrypt under new identity and enforce base URL and revi
       HttpStatus.BadRequest,
       "credential.input.invalid",
     );
-    assert.equal(f.logs.at(-1)?.credentialId, row.id);
-    assert.equal(f.logs.at(-1)?.humanIdentity, HUMAN_ACCOUNT_ID);
+    assert.equal(f.logs.at(-1)?.credential_id, row.id);
+    assert.equal(f.logs.at(-1)?.human_identity, HUMAN_ACCOUNT_ID);
     assert.ok(!JSON.stringify(f.logs).includes(secretValue));
   } finally {
     f.store.close();
@@ -887,7 +887,7 @@ test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only
     },
   );
   assert.deepEqual(f.logs, [
-    { credentialId: row.id, humanIdentity: HUMAN_ACCOUNT_ID },
+    { credential_id: row.id, human_identity: HUMAN_ACCOUNT_ID },
   ]);
   noOAuthSecret([answer, status, f.logs]);
   fails(

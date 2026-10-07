@@ -125,7 +125,7 @@ test("HTTP responses and logs share the validated prefixed request ID, including
     else assert.notEqual(id, supplied);
     const logs = fixture.logs.slice(start).map((line) => JSON.parse(line));
     assert.equal(logs.length, REQUEST_LOG_RECORD_COUNT);
-    for (const log of logs) assert.equal(log.requestId, id);
+    for (const log of logs) assert.equal(log.request_id, id);
   }
 });
 

@@ -193,9 +193,9 @@ function fixture(
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);
-  const logs: { credentialId: string; humanIdentity: string }[] = [];
+  const logs: { credential_id: string; human_identity: string }[] = [];
   const logger = {
-    info: (record: { credentialId: string; humanIdentity: string }) =>
+    info: (record: { credential_id: string; human_identity: string }) =>
       logs.push(record),
   } as unknown as Logger;
   const health = new HealthRegistry();
@@ -321,8 +321,8 @@ test("create validates platforms, schema, conflicts and encrypts each first revi
         ),
         input.secret,
       );
-      assert.equal(f.logs.at(-1)?.credentialId, answer.revisions[0]!.id);
-      assert.equal(f.logs.at(-1)?.humanIdentity, HUMAN_ACCOUNT_ID);
+      assert.equal(f.logs.at(-1)?.credential_id, answer.revisions[0]!.id);
+      assert.equal(f.logs.at(-1)?.human_identity, HUMAN_ACCOUNT_ID);
     }
     const id = (f.get("github") as { revisions: { id: string }[] })
       .revisions[0]!.id;
@@ -478,8 +478,8 @@ test("rotate copies or replaces metadata and guards revisions", () => {
       HttpStatus.BadRequest,
       "credential.input.invalid",
     );
-    assert.equal(f.logs.at(-1)?.credentialId, changed.revisions[0]!.id);
-    assert.equal(f.logs.at(-1)?.humanIdentity, HUMAN_ACCOUNT_ID);
+    assert.equal(f.logs.at(-1)?.credential_id, changed.revisions[0]!.id);
+    assert.equal(f.logs.at(-1)?.human_identity, HUMAN_ACCOUNT_ID);
     assert.ok(!JSON.stringify(f.logs).includes(secretValue));
   } finally {
     f.store.close();
@@ -561,8 +561,8 @@ test("metadata edits re-encrypt under new identity and enforce revision", () => 
       HttpStatus.BadRequest,
       "credential.input.invalid",
     );
-    assert.equal(f.logs.at(-1)?.credentialId, row.id);
-    assert.equal(f.logs.at(-1)?.humanIdentity, HUMAN_ACCOUNT_ID);
+    assert.equal(f.logs.at(-1)?.credential_id, row.id);
+    assert.equal(f.logs.at(-1)?.human_identity, HUMAN_ACCOUNT_ID);
     assert.ok(!JSON.stringify(f.logs).includes(secretValue));
   } finally {
     f.store.close();

@@ -358,7 +358,7 @@ export class LlmComponent implements Service {
     });
     this.sessions.complete(session.id);
     this.logger.info(
-      { credentialId: id, humanIdentity: session.human_identity },
+      { credential_id: id, human_identity: session.human_identity },
       "credential login completed",
     );
   }

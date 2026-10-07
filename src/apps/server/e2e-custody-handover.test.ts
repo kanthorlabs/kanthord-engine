@@ -432,8 +432,8 @@ test(
             .some(
               (record) =>
                 record.msg === HANDOVER_LOG_MESSAGE &&
-                record.executionId === X &&
-                record.credentialId === C1,
+                record.execution_id === X &&
+                record.credential_id === C1,
             ),
         );
         noSecrets(JSON.stringify(h.fixture.logs));

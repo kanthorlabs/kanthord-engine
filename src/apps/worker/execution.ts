@@ -49,8 +49,8 @@ export async function hostExecution(
     handover = await takeHandover({ ...input, context });
     input.log({
       msg: "credential handover received",
-      executionId: input.claim.execution_id,
-      credentialId: handover.handoverItem.credential_id,
+      execution_id: input.claim.execution_id,
+      credential_id: handover.handoverItem.credential_id,
     });
     const setup = completed(
       await retryIndeterminate(
@@ -109,7 +109,7 @@ export async function hostExecution(
     if (context.err()) throw context.err();
     input.log({
       msg: "execution ended",
-      executionId: input.claim.execution_id,
+      execution_id: input.claim.execution_id,
       kind: result.kind,
       ...(result.kind === ENDED ? { code: result.code } : {}),
     });

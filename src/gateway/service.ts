@@ -279,7 +279,7 @@ export class GatewayService implements Service {
       context.set("requestId", id);
       context.header("X-Request-Id", id);
       const logger = this.options.logger.child({
-        requestId: id,
+        request_id: id,
         method: context.req.method,
         route: matchedRoutes(context).at(-1)?.path ?? "unmatched",
       });

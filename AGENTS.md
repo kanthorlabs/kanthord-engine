@@ -317,7 +317,7 @@ prints the `token` and `client_secret` fragment for this file. A `master_key`
 field fails with `cli.config.invalid`.
 It checks the host tools and the server package version, opens the state-directory
 workspace root and registers its instance. It logs `Worker application ready`
-with `runtimeIdentity`, `resourceIdentity` and `workerName`.
+with `runtime_identity`, `resource_identity` and `worker_name`.
 It opens no database and reads no server configuration.
 `--config` is not supported. `kanthord serve` still starts the server.
 

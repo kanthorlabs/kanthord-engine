@@ -129,7 +129,7 @@ export function installFatalHandlers(descriptor: () => number): () => void {
       const record = {
         level: 60,
         kind,
-        errorType:
+        error_type:
           reason instanceof Error ? reason.constructor.name : typeof reason,
         // Keep frames only; multiline messages and rejection values are excluded.
         frames:
