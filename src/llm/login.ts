@@ -104,7 +104,7 @@ export class OAuthLogin {
   }
 
   requirePending(): void {
-    if (this.session.expiresAt <= this.now()) this.expire();
+    if (this.session.expires_at <= this.now()) this.expire();
     this.controller.signal.throwIfAborted();
     if (this.session.state !== LoginSessionState.Pending)
       throw new Error(LOGIN_FAILED);
@@ -226,7 +226,7 @@ export class OAuthLogin {
   ): Promise<void> {
     this.timer = setTimeout(
       () => this.expire(),
-      this.session.expiresAt - this.now(),
+      this.session.expires_at - this.now(),
     );
     this.timer.unref();
     try {
@@ -244,7 +244,7 @@ export class OAuthLogin {
       );
     } catch (error) {
       const cause = error instanceof ModelsError ? error.cause : error;
-      if (this.session.expiresAt <= this.now()) this.expire();
+      if (this.session.expires_at <= this.now()) this.expire();
       if (this.session.state === LoginSessionState.Pending) {
         this.failure =
           cause instanceof OperationError ? cause : new Error(LOGIN_FAILED);

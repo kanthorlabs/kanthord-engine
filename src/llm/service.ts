@@ -295,7 +295,7 @@ export class LlmComponent implements Service {
     const answer = this.records.get(tx, this.platformSet, credentialName);
     return {
       ...answer,
-      agentProviders: this.agentProvidersDependentOn(tx, credentialName).map(
+      agent_providers: this.agentProvidersDependentOn(tx, credentialName).map(
         ({ agent_name: agentName, provider_name: providerName }) => ({
           agent: agentName,
           name: providerName,
@@ -327,7 +327,7 @@ export class LlmComponent implements Service {
       .map(({ id: model }) => ({
         model,
         agents: this.enablementsDependentOnModel(tx, revision.name, model).map(
-          ({ agentName }) => agentName,
+          ({ agent_name }) => agent_name,
         ),
       }))
       .filter(({ agents }) => agents.length > NO_ROWS);
@@ -350,7 +350,7 @@ export class LlmComponent implements Service {
       return this.records.createLoginRevision(
         tx,
         this.platformSet,
-        session.credentialName,
+        session.credential_name,
         session.platform,
         secret,
         this.now(),
@@ -358,7 +358,7 @@ export class LlmComponent implements Service {
     });
     this.sessions.complete(session.id);
     this.logger.info(
-      { credentialId: id, humanIdentity: session.humanIdentity },
+      { credentialId: id, humanIdentity: session.human_identity },
       "credential login completed",
     );
   }
@@ -411,10 +411,10 @@ export class LlmComponent implements Service {
       )
         throw flow.failure;
       return caller.commit(() => ({
-        sessionId: session.id,
+        session_id: session.id,
         address: session.address!,
         code: session.code,
-        expiresAt: session.expiresAt,
+        expires_at: session.expires_at,
       }));
     } finally {
       unsubscribe();
@@ -425,7 +425,7 @@ export class LlmComponent implements Service {
     const session = this.sessions.get(id);
     if (!session || session.state === LoginSessionState.Expired)
       throw loginNotFound();
-    if (session.expiresAt <= this.now()) {
+    if (session.expires_at <= this.now()) {
       this.logins.get(id)?.expire();
       throw loginNotFound();
     }
@@ -436,7 +436,7 @@ export class LlmComponent implements Service {
     input: typeof llmOperations.login_code.input._output,
     caller: CallerContext,
   ): typeof llmOperations.login_code.output._output {
-    const session = this.loginSession(input.params.sessionId);
+    const session = this.loginSession(input.params.session_id);
     return caller.commit(() => {
       const flow = this.logins.get(session.id);
       if (!flow)
@@ -446,7 +446,7 @@ export class LlmComponent implements Service {
           "No login value is awaited.",
         );
       flow.supply(input.body.value);
-      return { sessionId: session.id };
+      return { session_id: session.id };
     });
   }
 
@@ -454,12 +454,12 @@ export class LlmComponent implements Service {
     input: typeof llmOperations.login_status.input._output,
     caller: CallerContext,
   ): typeof llmOperations.login_status.output._output {
-    const session = this.loginSession(input.params.sessionId);
+    const session = this.loginSession(input.params.session_id);
     return caller.commit(() => ({
-      sessionId: session.id,
+      session_id: session.id,
       state: session.state,
-      lastMessage: session.lastMessage,
-      failureReason: session.failureReason,
+      last_message: session.last_message,
+      failure_reason: session.failure_reason,
     }));
   }
 

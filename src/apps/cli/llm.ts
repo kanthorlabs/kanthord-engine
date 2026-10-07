@@ -47,7 +47,7 @@ async function loginStatus(session: string, command: Command): Promise<void> {
     credentialCode(LLM_GROUP, LOGIN_STATUS_CODE, TOKEN_REQUIRED),
   );
   const result = await httpClient(llmOperations, endpoint, token).login_status({
-    params: { sessionId: session },
+    params: { session_id: session },
     query: {},
     body: null,
   });
@@ -85,7 +85,7 @@ async function login(platform: string, command: Command): Promise<void> {
     key,
   );
   process.stdout.write(
-    `${data.sessionId}\n${data.address}\n${data.code ?? ""}\n${data.expiresAt}\n${key}\n`,
+    `${data.session_id}\n${data.address}\n${data.code ?? ""}\n${data.expires_at}\n${key}\n`,
   );
 }
 
@@ -102,7 +102,7 @@ async function loginCode(
   );
   const key = resolveKey(options);
   const result = await httpClient(llmOperations, endpoint, token).login_code(
-    { params: { sessionId: session }, query: {}, body: { value } },
+    { params: { session_id: session }, query: {}, body: { value } },
     { idempotencyKey: key },
   );
   const data = handleMutationResult(

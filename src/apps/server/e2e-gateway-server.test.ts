@@ -346,7 +346,7 @@ test("E07.1 credential create and get return the same secret-free record", async
   const read = success<CredentialAnswer>(
     await kanthord(["llm", "credential", "get", CREDENTIAL], fixture.env),
   );
-  assert.deepEqual(read, { ...created, agentProviders: [] });
+  assert.deepEqual(read, { ...created, agent_providers: [] });
 });
 
 test("E07.2 anthropic credential enables swe@1 at revision one", async (t) => {
@@ -530,7 +530,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
       ...revision,
       ended_at: read.revisions[index]!.ended_at,
     })),
-    agentProviders: [{ agent: AGENT, name: DEFAULT_PROVIDER }],
+    agent_providers: [{ agent: AGENT, name: DEFAULT_PROVIDER }],
   });
 });
 

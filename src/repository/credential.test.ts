@@ -55,9 +55,9 @@ const BINDINGS = [
 ];
 const BINDINGS_ANSWER = [
   {
-    bindingId: "binding_one",
-    projectId: "project_one",
-    projectName: "alpha",
+    binding_id: "binding_one",
+    project_id: "project_one",
+    project_name: "alpha",
     name: "repo",
   },
 ];

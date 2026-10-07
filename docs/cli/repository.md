@@ -103,7 +103,7 @@ Create, rotate and update-metadata of an `ssh` record run `ssh -G` and compare t
 - A resolution with `identitiesonly` other than `yes`, or with a number of `identityfile` lines other than 1, answers `400 repository.credential.ssh_identity_ambiguous`.
 - A resolved value that differs from the metadata answers `400 repository.credential.ssh_drift`. `details` names each differing key.
 
-`get` adds `bindings` to the credential answer: the list of `{ projectId, projectName, bindingId, name }` of every binding revision that names the credential and that is a dependent. The Project Service answers that read.
+`get` adds `bindings` to the credential answer: the list of `{ project_id, project_name, binding_id, name }` of every binding revision that names the credential and that is a dependent. The Project Service answers that read.
 
 [Suitability](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#suitability)
 compares only the platform of the record with the platform of its use, before

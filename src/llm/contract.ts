@@ -37,7 +37,7 @@ export const LlmErrorCode = {
 
 export const PROVIDER_CHECK_TIMEOUT_MS = 10000;
 
-export type AgentEnablement = { agentName: string };
+export type AgentEnablement = { agent_name: string };
 export type EnablementsDependentOnModelFn = (
   tx: Transaction,
   credentialName: string,
@@ -46,19 +46,19 @@ export type EnablementsDependentOnModelFn = (
 
 const emptyParams = z.strictObject({});
 const emptyQuery = z.strictObject({});
-const sessionParams = z.strictObject({ sessionId: z.string().min(1) });
+const sessionParams = z.strictObject({ session_id: z.string().min(1) });
 
 export const llmCredentialAnswerSchema = credentialAnswerSchema.extend({
-  agentProviders: z.array(
+  agent_providers: z.array(
     z.strictObject({ agent: z.string(), name: z.string() }),
   ),
 });
 export type LlmCredentialAnswer = z.infer<typeof llmCredentialAnswerSchema>;
 const loginAnswerSchema = z.strictObject({
-  sessionId: z.string(),
+  session_id: z.string(),
   address: z.string(),
   code: z.string().nullable(),
-  expiresAt: z.number().int(),
+  expires_at: z.number().int(),
 });
 export const providerCheckBodySchema = z.strictObject({
   credential: z.string().min(1),
@@ -76,19 +76,19 @@ export const providerCheckAnswerSchema = z.strictObject({
     .array(
       z.strictObject({
         id: z.string(),
-        ownedBy: z.string().nullable(),
+        owned_by: z.string().nullable(),
         created: z.number().int().nullable(),
       }),
     )
     .nullable(),
 });
 export type ProviderCheckAnswer = z.infer<typeof providerCheckAnswerSchema>;
-const loginCodeAnswerSchema = z.strictObject({ sessionId: z.string() });
+const loginCodeAnswerSchema = z.strictObject({ session_id: z.string() });
 const loginStatusAnswerSchema = z.strictObject({
-  sessionId: z.string(),
+  session_id: z.string(),
   state: z.string(),
-  lastMessage: z.string().nullable(),
-  failureReason: z.string().nullable(),
+  last_message: z.string().nullable(),
+  failure_reason: z.string().nullable(),
 });
 
 export const llmOperations = {
@@ -327,7 +327,7 @@ export const llmOperations = {
     id: "llm.credential.login_code",
     service: LLM_COMPONENT_NAME,
     method: HttpMethod.Post,
-    path: "/api/llm/credential/login/:sessionId/code",
+    path: "/api/llm/credential/login/:session_id/code",
     access: AccessPolicy.Human,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,
@@ -348,7 +348,7 @@ export const llmOperations = {
     id: "llm.credential.login_status",
     service: LLM_COMPONENT_NAME,
     method: HttpMethod.Get,
-    path: "/api/llm/credential/login/:sessionId",
+    path: "/api/llm/credential/login/:session_id",
     access: AccessPolicy.Human,
     store: StoreName.Operational,
     lifetime: OperationLifetime.Unary,

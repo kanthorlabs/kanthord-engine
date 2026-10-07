@@ -122,19 +122,7 @@ export class StorageComponent {
     const answer = this.records.get(tx, PLATFORM_SET, credentialName);
     return {
       ...answer,
-      bindings: this.bindingsNaming(tx, credentialName).map(
-        ({
-          project_id: projectId,
-          project_name: projectName,
-          binding_id: bindingId,
-          name,
-        }) => ({
-          projectId,
-          projectName,
-          bindingId,
-          name,
-        }),
-      ),
+      bindings: this.bindingsNaming(tx, credentialName),
     };
   }
 }

@@ -20,14 +20,14 @@ export interface LoginSession {
   id: string;
   platform: string;
   mode: string;
-  humanIdentity: string;
-  credentialName: string;
+  human_identity: string;
+  credential_name: string;
   state: LoginSessionState;
   address: string | null;
   code: string | null;
-  lastMessage: string | null;
-  failureReason: string | null;
-  expiresAt: number;
+  last_message: string | null;
+  failure_reason: string | null;
+  expires_at: number;
 }
 
 export class LoginSessionStore {
@@ -52,14 +52,14 @@ export class LoginSessionStore {
       id: createIdentity("login_session"),
       platform,
       mode,
-      humanIdentity,
-      credentialName,
+      human_identity: humanIdentity,
+      credential_name: credentialName,
       state: LoginSessionState.Pending,
       address: null,
       code: null,
-      lastMessage: null,
-      failureReason: null,
-      expiresAt: now + SESSION_EXPIRY_MS,
+      last_message: null,
+      failure_reason: null,
+      expires_at: now + SESSION_EXPIRY_MS,
     };
     this.sessions.set(session.id, session);
     return session;
@@ -77,9 +77,9 @@ export class LoginSessionStore {
     for (const session of this.sessions.values()) {
       if (
         session.platform === platform &&
-        session.humanIdentity === humanIdentity &&
+        session.human_identity === humanIdentity &&
         session.state === LoginSessionState.Pending &&
-        session.expiresAt > now
+        session.expires_at > now
       ) {
         return session;
       }
@@ -98,7 +98,7 @@ export class LoginSessionStore {
     const session = this.sessions.get(id);
     if (session) {
       session.state = LoginSessionState.Failed;
-      session.failureReason = reason;
+      session.failure_reason = reason;
     }
   }
 
@@ -120,7 +120,7 @@ export class LoginSessionStore {
   updateLastMessage(id: string, message: string): void {
     const session = this.sessions.get(id);
     if (session) {
-      session.lastMessage = message;
+      session.last_message = message;
     }
   }
 }

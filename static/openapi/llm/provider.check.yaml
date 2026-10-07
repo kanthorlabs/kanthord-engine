@@ -83,7 +83,7 @@ components:
                 properties:
                   id:
                     type: string
-                  ownedBy:
+                  owned_by:
                     anyOf:
                       - type: string
                       - type: "null"
@@ -95,7 +95,7 @@ components:
                       - type: "null"
                 required:
                   - id
-                  - ownedBy
+                  - owned_by
                   - created
                 additionalProperties: false
             - type: "null"

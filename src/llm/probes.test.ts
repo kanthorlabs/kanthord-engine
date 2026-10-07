@@ -72,8 +72,8 @@ const MODEL_LIST = {
   ],
 };
 const PROVIDER_MODELS = [
-  { id: "alpha", ownedBy: "lab", created: CREATED },
-  { id: "beta", ownedBy: null, created: null },
+  { id: "alpha", owned_by: "lab", created: CREATED },
+  { id: "beta", owned_by: null, created: null },
 ];
 const UNREACHABLE = { connection: Connection.Unreachable, models: null };
 

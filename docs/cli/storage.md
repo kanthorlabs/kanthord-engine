@@ -95,7 +95,7 @@ fix the secret shape and the metadata of each platform:
 | -------- | --------------- | ---------------------------------------- |
 | `s3`     | `s3_access_key` | Required `{ endpoint, bucket, region }`. |
 
-`get` adds `bindings` to the credential answer: the list of `{ projectId, projectName, bindingId, name }` of every binding revision that names the credential and that is a dependent. The Project Service answers that read.
+`get` adds `bindings` to the credential answer: the list of `{ project_id, project_name, binding_id, name }` of every binding revision that names the credential and that is a dependent. The Project Service answers that read.
 
 For `s3`, `endpoint` is a required URL; `bucket` and `region` are required
 nonblank strings. These fields serve the credential healthcheck.

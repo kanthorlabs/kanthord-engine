@@ -315,7 +315,7 @@ async function loginCredential(
   for (let poll = 0; poll < LOGIN_POLL_LIMIT; poll++) {
     const state = completed(
       await client.login_status({
-        params: { sessionId: pending.sessionId },
+        params: { session_id: pending.session_id },
         query: {},
         body: null,
       }),

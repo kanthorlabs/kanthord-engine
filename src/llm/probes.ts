@@ -132,7 +132,7 @@ async function httpCheck(
         connection: Connection.Ok,
         models: list.data.data.map((model) => ({
           id: model.id,
-          ownedBy: model.owned_by ?? null,
+          owned_by: model.owned_by ?? null,
           created: model.created ?? null,
         })),
       };

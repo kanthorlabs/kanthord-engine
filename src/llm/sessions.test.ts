@@ -28,16 +28,16 @@ test("start creates a pending session with a login session identity and expiry",
   const session = start(store);
 
   assert.match(session.id, /^login_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
-  assert.equal(session.expiresAt, NOW + SESSION_EXPIRY_MS);
+  assert.equal(session.expires_at, NOW + SESSION_EXPIRY_MS);
   assert.equal(session.state, LoginSessionState.Pending);
   assert.equal(session.platform, PLATFORM);
   assert.equal(session.mode, LoginSessionMode.Browser);
-  assert.equal(session.humanIdentity, HUMAN);
-  assert.equal(session.credentialName, NAME);
+  assert.equal(session.human_identity, HUMAN);
+  assert.equal(session.credential_name, NAME);
   assert.equal(session.address, null);
   assert.equal(session.code, null);
-  assert.equal(session.lastMessage, null);
-  assert.equal(session.failureReason, null);
+  assert.equal(session.last_message, null);
+  assert.equal(session.failure_reason, null);
 });
 
 test("start rejects a non-expired pending session for the same platform and human", () => {
@@ -56,7 +56,7 @@ test("start rejects a non-expired pending session for the same platform and huma
 test("start permits a pending session once its expiry time is reached", () => {
   const store = new LoginSessionStore();
   const previous = start(store);
-  const next = start(store, previous.expiresAt);
+  const next = start(store, previous.expires_at);
 
   assert.notEqual(next.id, previous.id);
   assert.equal(next.state, LoginSessionState.Pending);
@@ -116,7 +116,7 @@ test("complete, fail with reason, and expire set session state", () => {
 
   assert.equal(completed.state, LoginSessionState.Completed);
   assert.equal(failed.state, LoginSessionState.Failed);
-  assert.equal(failed.failureReason, FAILURE_REASON);
+  assert.equal(failed.failure_reason, FAILURE_REASON);
   assert.equal(expired.state, LoginSessionState.Expired);
 });
 
@@ -137,7 +137,7 @@ test("updateLastMessage sets lastMessage", () => {
   const session = start(store);
   store.updateLastMessage(session.id, PROGRESS_MESSAGE);
 
-  assert.equal(session.lastMessage, PROGRESS_MESSAGE);
+  assert.equal(session.last_message, PROGRESS_MESSAGE);
 });
 
 test("pendingForPlatformAndHuman returns only non-expired pending sessions", () => {
@@ -146,7 +146,7 @@ test("pendingForPlatformAndHuman returns only non-expired pending sessions", () 
 
   assert.equal(store.pendingForPlatformAndHuman(PLATFORM, HUMAN, NOW), session);
   assert.equal(
-    store.pendingForPlatformAndHuman(PLATFORM, HUMAN, session.expiresAt),
+    store.pendingForPlatformAndHuman(PLATFORM, HUMAN, session.expires_at),
     undefined,
   );
   assert.equal(
@@ -170,5 +170,5 @@ test("mutators on an unknown id are no-ops", () => {
   store.updateLastMessage("unknown", "waiting");
   assert.equal(session.state, LoginSessionState.Pending);
   assert.equal(session.address, null);
-  assert.equal(session.lastMessage, null);
+  assert.equal(session.last_message, null);
 });

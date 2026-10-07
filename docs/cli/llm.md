@@ -71,8 +71,8 @@ All paths below are implemented routes under the ruled `/api/llm/credential` pre
 | 4   | `rotate <credential-name> --file <path> [M] [R]`                  | `POST /api/llm/credential/:credential_name/revision`                  | `llm.credential.rotate`          | `human`; implemented |
 | 5   | `update-metadata <credential-name> --file <path> [M] [R]`         | `PUT /api/llm/credential/:credential_name/metadata`                   | `llm.credential.update_metadata` | `human`; implemented |
 | 6   | `login <platform> [--mode browser\|device] --name <name> [M] [R]` | `POST /api/llm/credential/login`                                      | `llm.credential.login`           | `human`; implemented |
-| 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/llm/credential/login/:sessionId/code`                      | `llm.credential.login_code`      | `human`; implemented |
-| 8   | `login-status <session> [R]`                                      | `GET /api/llm/credential/login/:sessionId`                            | `llm.credential.login_status`    | `human`; implemented |
+| 7   | `login-code <session> <value> [M] [R]`                            | `POST /api/llm/credential/login/:session_id/code`                     | `llm.credential.login_code`      | `human`; implemented |
+| 8   | `login-status <session> [R]`                                      | `GET /api/llm/credential/login/:session_id`                           | `llm.credential.login_status`    | `human`; implemented |
 | 9   | `revoke <credential-name> <revision> [M] [R]`                     | `POST /api/llm/credential/:credential_name/revision/:revision/revoke` | `llm.credential.revoke`          | `human`; implemented |
 | 10  | `archive <credential-name> [M] [R]`                               | `POST /api/llm/credential/:credential_name/archive`                   | `llm.credential.archive`         | `human`; implemented |
 | 11  | `platforms [R]`                                                   | `GET /api/llm/credential/platform`                                    | `llm.credential.platform_list`   | `human`; implemented |
@@ -118,7 +118,7 @@ fix the secret shape and the metadata of each platform:
 | `cloudflare-ai-gateway`  | `api_key`    | Required `{ account_id, gateway_id }`. |
 | Every other platform     | `api_key`    | None; wire value `null`.               |
 
-`get` adds `agentProviders` to the credential answer: the list of `{ agent, name }` of every agent provider that names the credential. The Worker Service answers that read.
+`get` adds `agent_providers` to the credential answer: the list of `{ agent, name }` of every agent provider that names the credential. The Worker Service answers that read.
 
 For `openai-compatible`:
 
@@ -224,7 +224,7 @@ An unknown name, or a name of another component, answers `404 credential.credent
 ## `get <credential-name>`
 
 The required `CredentialName` has no default and maps to `params.credential_name`.
-Query is empty and body absent. HTTP `200` returns one credential answer with the added list `agentProviders` of `{ agent, name }`;
+Query is empty and body absent. HTTP `200` returns one credential answer with the added list `agent_providers` of `{ agent, name }`;
 an unknown name, or a name of another component, answers `404 credential.credential.not_found`. The read transaction first drains unpinned older live revisions of that name.
 
 ## `rotate <credential-name>`
@@ -304,18 +304,18 @@ validation call.
 ## `login-code <session> <value>`
 
 Both positional values are required, with no default. `session` is a
-`LoginSessionId` and maps to `params.sessionId`. `value` is a nonempty code or
+`LoginSessionId` and maps to `params.session_id`. `value` is a nonempty code or
 redirect URL, not a record secret. The body is `{ value }`; query is empty.
 The unary mutation supplies the value awaited by the session. A remote browser
 can use this command when its loopback callback fails. The operation answers
-409 when no value is awaited. HTTP `200` returns `{ sessionId }`;
+409 when no value is awaited. HTTP `200` returns `{ session_id }`;
 the CLI adds the mutation key. It reads no prompt and outputs no token.
 
 ## `login-status <session>`
 
-The required `LoginSessionId` maps to `params.sessionId`; query is empty and
-body absent. HTTP `200` prints `{ sessionId, state, lastMessage,
-failureReason }` as JSON. `state` is `pending | completed | failed | expired`.
+The required `LoginSessionId` maps to `params.session_id`; query is empty and
+body absent. HTTP `200` prints `{ session_id, state, last_message,
+failure_reason }` as JSON. `state` is `pending | completed | failed | expired`.
 Absent message and failure reason values are `null`. This read does
 not poll until completion or change the session. No mutation key is accepted.
 
@@ -342,7 +342,7 @@ HTTP `200` answers `{ connection, models }`:
 - `ok`: the remote answers. `unauthorized`: the remote answers 401 or 403.
 - `unreachable`: a network failure or the deadline prevents the answer.
 - `invalid_response`: every other answer.
-- `models` is an array of `{ id, ownedBy, created }` for `openai-compatible` and `openai`, which read the OpenAI list shape of `GET /models`. `ownedBy` and `created` are `null` when the remote leaves them out. Every other platform answers `models: null`.
+- `models` is an array of `{ id, owned_by, created }` for `openai-compatible` and `openai`, which read the OpenAI list shape of `GET /models`. `owned_by` and `created` are `null` when the remote leaves them out. Every other platform answers `models: null`.
 
 The answer supplies model ids, not limits or reasoning levels, and no key.
 The human saves approved models through a credential metadata revision.

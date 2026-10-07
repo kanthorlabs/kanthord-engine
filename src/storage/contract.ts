@@ -31,9 +31,9 @@ const emptyQuery = z.strictObject({});
 export const storageCredentialAnswerSchema = credentialAnswerSchema.extend({
   bindings: z.array(
     z.strictObject({
-      projectId: z.string(),
-      projectName: z.string(),
-      bindingId: z.string(),
+      project_id: z.string(),
+      project_name: z.string(),
+      binding_id: z.string(),
       name: z.string(),
     }),
   ),

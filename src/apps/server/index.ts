@@ -229,7 +229,9 @@ export function composeServices(options: {
     agentProvidersDependentOn: (tx, name) =>
       agent.agentProvidersDependentOn(tx, name),
     enablementsDependentOnModel: (tx, name, model) =>
-      agent.enablementsDependentOnModel(tx, name, model),
+      agent
+        .enablementsDependentOnModel(tx, name, model)
+        .map(({ agentName }) => ({ agent_name: agentName })),
   });
   const agent: AgentComponent = new AgentComponent({
     store: options.store,

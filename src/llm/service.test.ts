@@ -215,13 +215,13 @@ function fixture(
     })) as typeof llmOperations.login.output._output;
   const loginCode = (sessionId: string, value: string) =>
     invoke(llmOperations.login_code, {
-      params: { sessionId },
+      params: { session_id: sessionId },
       query: {},
       body: { value },
     });
   const loginStatus = (sessionId: string) =>
     invoke(llmOperations.login_status, {
-      params: { sessionId },
+      params: { session_id: sessionId },
       query: {},
       body: null,
     }) as typeof llmOperations.login_status.output._output;
@@ -368,9 +368,9 @@ test("get lists the agent providers that name the credential", () => {
   try {
     f.create(inputs[0]);
     const answer = f.get("anthropic") as CredentialAnswer & {
-      agentProviders: unknown;
+      agent_providers: unknown;
     };
-    assert.deepEqual(answer.agentProviders, [
+    assert.deepEqual(answer.agent_providers, [
       { agent: "swe@1", name: "default" },
     ]);
     assert.equal(answer.revisions.length, FIRST_REVISION);
@@ -424,10 +424,10 @@ test("offline OAuth login persists the maximum aggregate credential and sanitize
       access: access + extra,
       expires: CLOCK_START,
     });
-    const status = await terminalStatus(f, pending.sessionId);
+    const status = await terminalStatus(f, pending.session_id);
     if (extra.length) {
       assert.equal(status.state, LoginSessionState.Failed);
-      assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
+      assert.equal(status.failure_reason, LOGIN_FAILED_MESSAGE);
       assert.equal(credentialCount(f), NO_CREDENTIALS);
       assert.ok(!JSON.stringify(status).includes(access));
     } else {
@@ -598,7 +598,7 @@ for (const mode of Object.values(RemovalMode)) {
       credentialName: string;
       modelId: string;
     }[] = [];
-    let dependents = [{ agentName: DEPENDENT_AGENT }];
+    let dependents = [{ agent_name: DEPENDENT_AGENT }];
     const f = fixture({
       enablementsDependentOnModel: (tx, credentialName, modelId) => {
         calls.push({ tx, credentialName, modelId });
@@ -843,16 +843,16 @@ test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only
   });
   const answer = await f.login({ ...LOGIN_BODY, mode: "browser" });
   await prompted.promise;
-  assert.match(answer.sessionId, /^login_session_[0-9A-HJKMNP-TV-Z]{26}$/);
+  assert.match(answer.session_id, /^login_session_[0-9A-HJKMNP-TV-Z]{26}$/);
   assert.equal(answer.address, LOGIN_ADDRESS);
   assert.equal(answer.code, LOGIN_CODE);
-  assert.equal(answer.expiresAt, CLOCK_START + SESSION_EXPIRY_MS);
+  assert.equal(answer.expires_at, CLOCK_START + SESSION_EXPIRY_MS);
   assert.equal(domain, EMPTY_DOMAIN);
   assert.equal(selected, DEVICE_OPTION);
-  assert.equal(f.loginStatus(answer.sessionId).lastMessage, LAST_MESSAGE);
+  assert.equal(f.loginStatus(answer.session_id).last_message, LAST_MESSAGE);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   fails(
-    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
+    () => f.loginCode(answer.session_id, MANUAL_VALUE),
     HttpStatus.Conflict,
     LOGIN_VALUE_NOT_AWAITED,
   );
@@ -861,9 +861,9 @@ test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only
     rejectsWith(HttpStatus.Conflict, LOGIN_PENDING),
   );
   finish.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.sessionId);
+  const status = await terminalStatus(f, answer.session_id);
   assert.equal(status.state, LoginSessionState.Completed);
-  assert.equal(status.failureReason, null);
+  assert.equal(status.failure_reason, null);
   assert.equal(credentialCount(f), FIRST_REVISION);
   const row = f.store.database.prepare("SELECT * FROM credential").get() as {
     id: string;
@@ -891,7 +891,7 @@ test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only
   ]);
   noOAuthSecret([answer, status, f.logs]);
   fails(
-    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
+    () => f.loginCode(answer.session_id, MANUAL_VALUE),
     HttpStatus.Conflict,
     LOGIN_VALUE_NOT_AWAITED,
   );
@@ -924,7 +924,7 @@ test("openai-codex login offers both modes and stores only refresh, access and e
     name: "codex",
     mode: "device",
   });
-  const status = await terminalStatus(f, answer.sessionId);
+  const status = await terminalStatus(f, answer.session_id);
   assert.equal(status.state, LoginSessionState.Completed);
   assert.equal(selected, DEVICE_OPTION);
   const row = f.store.database.prepare("SELECT * FROM credential").get() as {
@@ -1019,9 +1019,9 @@ test("OAuth commit-time name conflict survives pi-ai's error wrapper without sto
   const answer = await f.login(LOGIN_BODY);
   f.create({ ...inputs[0], name: LOGIN_NAME });
   gate.result.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.sessionId);
+  const status = await terminalStatus(f, answer.session_id);
   assert.equal(status.state, LoginSessionState.Failed);
-  assert.equal(status.failureReason, NAME_CONFLICT_CODE);
+  assert.equal(status.failure_reason, NAME_CONFLICT_CODE);
   assert.equal(credentialCount(f), FIRST_REVISION);
   noOAuthSecret([answer, status, f.logs]);
 });
@@ -1049,18 +1049,18 @@ for (const type of ["manual_code", "text", "secret"] as const) {
     const answer = await f.login(LOGIN_BODY);
     await awaiting.promise;
     assert.equal(
-      f.loginStatus(answer.sessionId).state,
+      f.loginStatus(answer.session_id).state,
       LoginSessionState.Pending,
     );
-    assert.deepEqual(f.loginCode(answer.sessionId, MANUAL_VALUE), {
-      sessionId: answer.sessionId,
+    assert.deepEqual(f.loginCode(answer.session_id, MANUAL_VALUE), {
+      session_id: answer.session_id,
     });
     assert.equal(await received.promise, MANUAL_VALUE);
     assert.equal(
-      (await terminalStatus(f, answer.sessionId)).state,
+      (await terminalStatus(f, answer.session_id)).state,
       LoginSessionState.Completed,
     );
-    noOAuthSecret([answer, f.loginStatus(answer.sessionId), f.logs]);
+    noOAuthSecret([answer, f.loginStatus(answer.session_id), f.logs]);
   });
 }
 
@@ -1073,9 +1073,9 @@ test("OAuth provider failure records a non-secret reason and no credential", asy
   });
   const answer = await f.login(LOGIN_BODY);
   gate.result.reject(new Error(oauthCredential.access));
-  const status = await terminalStatus(f, answer.sessionId);
+  const status = await terminalStatus(f, answer.session_id);
   assert.equal(status.state, LoginSessionState.Failed);
-  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
+  assert.equal(status.failure_reason, LOGIN_FAILED_MESSAGE);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   noOAuthSecret([answer, status, f.logs]);
 });
@@ -1095,14 +1095,14 @@ test("OAuth expiry aborts an unanswered prompt and never writes credentials", as
     f.store.close();
   });
   const answer = await f.login(LOGIN_BODY);
-  now = answer.expiresAt;
+  now = answer.expires_at;
   fails(
-    () => f.loginStatus(answer.sessionId),
+    () => f.loginStatus(answer.session_id),
     HttpStatus.NotFound,
     LOGIN_NOT_FOUND,
   );
   fails(
-    () => f.loginCode(answer.sessionId, MANUAL_VALUE),
+    () => f.loginCode(answer.session_id, MANUAL_VALUE),
     HttpStatus.NotFound,
     LOGIN_NOT_FOUND,
   );
@@ -1146,14 +1146,14 @@ test("OAuth rechecks expiry on completion before a delayed expiry timer fires", 
     f.store.close();
   });
   const answer = await f.login(LOGIN_BODY);
-  now = answer.expiresAt;
+  now = answer.expires_at;
   gate.result.resolve(oauthCredential);
   await setImmediate();
   assert.ok((await gate.entered.promise).signal.aborted);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   assert.deepEqual(f.logs, []);
   fails(
-    () => f.loginStatus(answer.sessionId),
+    () => f.loginStatus(answer.session_id),
     HttpStatus.NotFound,
     LOGIN_NOT_FOUND,
   );
@@ -1168,9 +1168,9 @@ test("OAuth rejects an invalid returned secret without logging or storing it", a
   });
   const answer = await f.login(LOGIN_BODY);
   gate.result.resolve({ ...oauthCredential, expires: Number.NaN });
-  const status = await terminalStatus(f, answer.sessionId);
+  const status = await terminalStatus(f, answer.session_id);
   assert.equal(status.state, LoginSessionState.Failed);
-  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
+  assert.equal(status.failure_reason, LOGIN_FAILED_MESSAGE);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   assert.deepEqual(f.logs, []);
   noOAuthSecret([answer, status]);
@@ -1188,9 +1188,9 @@ test("OAuth a failed insert never completes the session or emits a success log",
   );
   const answer = await f.login(LOGIN_BODY);
   gate.result.resolve(oauthCredential);
-  const status = await terminalStatus(f, answer.sessionId);
+  const status = await terminalStatus(f, answer.session_id);
   assert.equal(status.state, LoginSessionState.Failed);
-  assert.equal(status.failureReason, LOGIN_FAILED_MESSAGE);
+  assert.equal(status.failure_reason, LOGIN_FAILED_MESSAGE);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   assert.deepEqual(f.logs, []);
   noOAuthSecret([answer, status]);
@@ -1216,13 +1216,13 @@ test("OAuth the enterprise-shaped prompt after an address still requires login_c
   });
   const answer = await f.login(LOGIN_BODY);
   assert.equal(
-    f.loginStatus(answer.sessionId).state,
+    f.loginStatus(answer.session_id).state,
     LoginSessionState.Pending,
   );
-  f.loginCode(answer.sessionId, MANUAL_VALUE);
+  f.loginCode(answer.session_id, MANUAL_VALUE);
   assert.equal(await received.promise, MANUAL_VALUE);
   assert.equal(
-    (await terminalStatus(f, answer.sessionId)).state,
+    (await terminalStatus(f, answer.session_id)).state,
     LoginSessionState.Completed,
   );
 });
@@ -1239,7 +1239,7 @@ for (const shutdown of ["stop", "quiesce"] as const) {
     await f.component[shutdown]();
     assert.ok((await gate.entered.promise).signal.aborted);
     gate.result.resolve(oauthCredential);
-    const status = await terminalStatus(f, answer.sessionId);
+    const status = await terminalStatus(f, answer.session_id);
     await setImmediate();
     assert.equal(status.state, LoginSessionState.Failed);
     assert.equal(credentialCount(f), NO_CREDENTIALS);
@@ -1333,7 +1333,7 @@ test("OAuth auth_url records a browser address with a null code", async (t) => {
   assert.equal(answer.address, LOGIN_ADDRESS);
   assert.equal(answer.code, null);
   assert.equal(
-    f.loginStatus(answer.sessionId).state,
+    f.loginStatus(answer.session_id).state,
     LoginSessionState.Pending,
   );
 });
@@ -1739,7 +1739,7 @@ test("provider check answers the connection and model list of an LLM credential 
   const answer = await f.providerCheck({ credential: "compatible" });
   assert.deepEqual(answer, {
     connection: "ok",
-    models: [{ id: "alpha", ownedBy: "lab", created: 1 }],
+    models: [{ id: "alpha", owned_by: "lab", created: 1 }],
   });
   assert.deepEqual(
     requests.map(({ url }) => url),
