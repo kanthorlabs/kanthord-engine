@@ -70,6 +70,7 @@ engine/
 │   │   ├── prompt-layers.ts    # System, agent and working layer sources, switches and states
 │   │   ├── prompt-render.ts    # Framing, system prompt, pinned working texts and final prompt
 │   │   ├── prompts.ts          # agent_prompt settings reads and writes
+│   │   ├── prompt-locks.ts     # Configuration locks of prompt switches
 │   │   ├── pinned-layers.ts    # Context and inference pins across compaction
 │   │   ├── environment.ts      # Provider-free child process environment
 │   │   ├── test-support.ts     # Scripted offline provider

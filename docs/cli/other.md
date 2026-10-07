@@ -310,6 +310,7 @@ not change `gateway.bind` or `gateway.port`. Configuration is read at startup,
 and an edit takes effect on the next start. **Target requirement:** a relative
 path-valued field inside the configuration resolves against the data directory.
 `agent.prompt.system_file` and `agent.prompt.agent_directory` declare such fields.
+`agent.prompt.host_file` holds a boolean and defaults to `true`. `false` locks the `host_file` prompt switch of the `system` scope off.
 
 Reads require a user-owned regular `0600` file and a user-owned `0700` containing
 directory. Exact modes are checked, including rejection of special bits and

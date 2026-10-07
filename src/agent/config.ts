@@ -5,6 +5,7 @@ export interface AgentConfig {
   prompt: {
     system_file: string;
     agent_directory: string;
+    host_file: boolean;
   };
 }
 
@@ -23,6 +24,11 @@ export const agentConfigSchema: Schema<AgentConfig> = {
       doc: "Agent file directory path; empty means no agent file source.",
       format: pathFormat,
       default: "",
+    },
+    host_file: {
+      doc: "Host agent file source of the system prompt; false locks its switch off.",
+      format: Boolean,
+      default: true,
     },
   },
 };

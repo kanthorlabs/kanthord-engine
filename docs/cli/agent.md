@@ -149,7 +149,9 @@ kanthord agent get swe@1 --project project_01ARZ3NDEKTSV4RRFFQ69G5FAV --binding 
 The system layer holds the sources `host_file`, `base` and `custom`, and the layer switch `layer`.
 The agent layer holds `agent_file`, `shipped` and `custom`.
 The workbench working layer holds `agents_md`, `agents_local_md`, `claude_md`, `claude_local_md`, `shipped` and `custom`.
-The settings of a scope are `{ scope, agent_name, switches, custom_text, system_layer, revision }`.
+The settings of a scope are `{ scope, agent_name, switches, custom_text, system_layer, revision, locked_switches }`.
+`locked_switches` lists the switches of the scope that the configuration locks. It is empty when no lock applies.
+`agent.prompt.host_file: false` locks `host_file` of the `system` scope. The composer then resolves `host_file` as `off` for every agent and keeps the stored switch.
 `system_layer` is the system layer override of an `agent` scope: `inherit`, `on` or `off`. It is `null` for another scope.
 `inherit` takes the `layer` switch of the system scope. `on` and `off` decide the system layer of that agent only.
 
@@ -185,6 +187,7 @@ Exactly one of `--switch` and `--system-layer` is required.
 `--switch` names one source of the scope, or `layer` for the system scope. Exactly one of `--on` and `--off` is required with it.
 `--system-layer` is `inherit`, `on` or `off`, and only the `agent` scope takes it.
 A switch that turns off every source of an `agent` scope answers `409 agent.prompt.agent_layer_empty`.
+A switch in `locked_switches` answers `409 agent.prompt.switch_locked`.
 The command answers the saved settings with the `idempotency_key`.
 
 ```sh
@@ -394,6 +397,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `agent.prompt.revision_conflict`                          | The expected revision is stale or absent; `details.current` holds the current row.          | agent prompt put, agent prompt switch                                                                                                                                                                                            |
 | 400   | `agent.prompt.too_large`                                  | The custom text exceeds 32768 UTF-8 bytes.                                                  | agent prompt put                                                                                                                                                                                                                 |
 | 409   | `agent.prompt.agent_layer_empty`                          | The switch turns off every source of an `agent` scope.                                      | agent prompt switch                                                                                                                                                                                                              |
+| 409   | `agent.prompt.switch_locked`                              | The configuration locks the switch of this scope.                                           | agent prompt switch                                                                                                                                                                                                              |
 | 404   | `project.binding.not_found`                               | The `--binding` value names no repository binding of the `--project` value.                 | agent get                                                                                                                                                                                                                        |
 | 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a switch that is no source of the scope. | agent get, agent prompt get, agent prompt put, agent prompt switch                                                                                                                                                               |
 

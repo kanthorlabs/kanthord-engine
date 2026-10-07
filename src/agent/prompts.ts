@@ -5,7 +5,7 @@ import {
   PROMPT_SWITCHES,
   PromptScope,
   SystemLayerOverride,
-  type PromptSettings,
+  type StoredPromptSettings,
 } from "./contract.ts";
 
 type DatabaseRow = {
@@ -34,7 +34,7 @@ export function promptSettings(
   tx: Transaction,
   scope: PromptScope,
   agentName: string = SYSTEM_AGENT_NAME,
-): PromptSettings {
+): StoredPromptSettings {
   const row = tx.database
     .prepare(
       `SELECT scope, agent_name, switches, custom_text, system_layer, revision
@@ -62,9 +62,9 @@ export function promptSettings(
 
 export function savePromptSettings(
   tx: Transaction,
-  settings: Omit<PromptSettings, "revision">,
+  settings: Omit<StoredPromptSettings, "revision">,
   revision: number,
-): PromptSettings {
+): StoredPromptSettings {
   const now = Date.now();
   if (revision === ABSENT_REVISION)
     tx.database

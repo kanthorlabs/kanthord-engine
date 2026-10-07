@@ -57,6 +57,7 @@ const WORKER = "general@1";
 const MODEL = "claude-sonnet-4-5";
 const MISSING_MODEL = "claude-3-5-sonnet-20241022";
 const UNKNOWN = "unknown";
+const ABSENT_REVISION = 0;
 const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
 const THIRD_REVISION = 3;
@@ -80,7 +81,7 @@ const putBody = {
 };
 const binding = { binding_id: "binding", worker_name: WORKER, entry: null };
 const fakeCollaborations: Omit<Dependencies, "store"> = {
-  config: { prompt: { system_file: "", agent_directory: "" } },
+  config: { prompt: { system_file: "", agent_directory: "", host_file: true } },
   dataDirectory: "/nonexistent/data",
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
@@ -1524,6 +1525,7 @@ test("prompt writes create the row at revision one and replace it at the expecte
       custom_text: "one",
       system_layer: target.scope === PromptScope.Agent ? "inherit" : null,
       revision: 1,
+      locked_switches: [],
     });
     const switched = f.invoke(
       "prompt.switch",
@@ -1559,6 +1561,7 @@ test("prompt read answers the settings of a scope, the absent row included", (t)
     custom_text: "",
     system_layer: "inherit",
     revision: 0,
+    locked_switches: [],
   });
   f.invoke("prompt.put", { ...target, custom_text: CUSTOM_A }, {});
   assert.equal(f.invoke("prompt.get", null, {}, target).custom_text, CUSTOM_A);
@@ -1572,6 +1575,115 @@ test("prompt read answers the settings of a scope, the absent row included", (t)
     AgentErrorCode.AgentNotFound,
     HttpStatus.NotFound,
   );
+});
+
+const HOST_FILE = "host_file";
+const HOST_TEXT = "host agent file text";
+
+function lockedFixture(t: TestContext, hostFile: boolean) {
+  const root = temporary(t);
+  mkdirSync(join(root, ".agents"));
+  writeFileSync(join(root, ".agents", "AGENTS.md"), HOST_TEXT);
+  const config = (host_file: boolean) => ({
+    prompt: { system_file: "", agent_directory: "", host_file },
+  });
+  const f = enablementFixture(t, {
+    config: config(hostFile),
+    dataDirectory: root,
+    hostHome: root,
+  });
+  const composeHostFile = async (host_file: boolean) => {
+    const component = new AgentComponent({
+      store: f.store,
+      ...fakeCollaborations,
+      config: config(host_file),
+      dataDirectory: root,
+      hostHome: root,
+    });
+    const layers = await component.composePrompt(AGENT, background);
+    return layers[0]!.sources.find(({ source }) => source === HOST_FILE)!;
+  };
+  return { ...f, composeHostFile };
+}
+
+test("prompt settings answer no locked switch by default and the host file when the configuration locks it", (t) => {
+  const unlocked = lockedFixture(t, true);
+  const locked = lockedFixture(t, false);
+  for (const target of PROMPT_TARGETS) {
+    const query = { ...target };
+    assert.deepEqual(
+      unlocked.invoke("prompt.get", null, {}, query).locked_switches,
+      [],
+    );
+    assert.deepEqual(
+      locked.invoke("prompt.get", null, {}, query).locked_switches,
+      target.scope === PromptScope.System ? [HOST_FILE] : [],
+    );
+  }
+  const put = locked.invoke(
+    "prompt.put",
+    { scope: PromptScope.System, custom_text: "x" },
+    {},
+  );
+  assert.deepEqual(put.locked_switches, [HOST_FILE]);
+  assert.deepEqual(put.switches, allOn(PromptScope.System));
+});
+
+test("a locked host file switch answers a refusal after the revision check and keeps the other switches writable", (t) => {
+  const locked = lockedFixture(t, false);
+  const body = { scope: PromptScope.System, switch: HOST_FILE, enabled: false };
+  refuses(
+    () => locked.invoke("prompt.switch", body, {}),
+    AgentErrorCode.PromptSwitchLocked,
+    HttpStatus.Conflict,
+    { scope: PromptScope.System, switch: HOST_FILE },
+  );
+  assert.equal(
+    locked.store.transaction((tx) => promptSettings(tx, PromptScope.System))
+      .revision,
+    ABSENT_REVISION,
+  );
+  const base = locked.invoke("prompt.switch", { ...body, switch: "base" }, {});
+  assert.deepEqual(
+    [base.switches.base, base.locked_switches, base.revision],
+    [false, [HOST_FILE], FIRST_REVISION],
+  );
+  refuses(
+    () => locked.invoke("prompt.switch", { ...body, expected_revision: 5 }, {}),
+    AgentErrorCode.PromptRevisionConflict,
+    HttpStatus.Conflict,
+    {
+      scope: PromptScope.System,
+      agent_name: "",
+      current: base,
+    },
+  );
+  const unlocked = lockedFixture(t, true);
+  const written = unlocked.invoke("prompt.switch", body, {});
+  assert.deepEqual(
+    [written.switches[HOST_FILE], written.locked_switches],
+    [false, []],
+  );
+});
+
+test("the composer resolves the host file off while locked and keeps the stored switch", async (t) => {
+  const f = lockedFixture(t, true);
+  assert.equal(
+    (await f.composeHostFile(true)).state,
+    PromptSourceState.Present,
+  );
+  f.invoke("prompt.put", { scope: PromptScope.System, custom_text: "x" }, {});
+  const locked = await f.composeHostFile(false);
+  assert.equal(locked.state, PromptSourceState.Off);
+  assert.equal(locked.enabled, false);
+  assert.equal(
+    f.store.transaction((tx) => promptSettings(tx, PromptScope.System))
+      .switches[HOST_FILE],
+    true,
+  );
+  const restored = await f.composeHostFile(true);
+  assert.equal(restored.state, PromptSourceState.Present);
+  assert.equal(restored.text, HOST_TEXT);
 });
 
 test("the system layer switch and the override of an agent decide its system layer", async (t) => {

@@ -115,6 +115,7 @@ export const AgentErrorCode = {
   PromptRevisionConflict: "agent.prompt.revision_conflict",
   PromptTooLarge: "agent.prompt.too_large",
   PromptAgentLayerEmpty: "agent.prompt.agent_layer_empty",
+  PromptSwitchLocked: "agent.prompt.switch_locked",
 } as const;
 
 export type AgentProviderItem = {
@@ -309,8 +310,10 @@ export const promptSettingsSchema = z.strictObject({
   custom_text: z.string(),
   system_layer: z.enum(SystemLayerOverride).nullable(),
   revision: z.number().int().nonnegative(),
+  locked_switches: z.array(z.string()),
 });
 export type PromptSettings = z.infer<typeof promptSettingsSchema>;
+export type StoredPromptSettings = Omit<PromptSettings, "locked_switches">;
 
 const promptSwitchNames = [
   ...new Set(Object.values(PROMPT_SWITCHES).flat()),

@@ -12,7 +12,7 @@ import {
   SystemLayerOverride,
   SystemPromptSource,
   WorkbenchPromptSource,
-  type PromptSettings,
+  type StoredPromptSettings,
 } from "./contract.ts";
 import type { RepositoryPolicy } from "../project/contract.ts";
 import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
@@ -68,9 +68,9 @@ export interface ResolvedLayer {
 }
 
 export interface PromptSettingsSet {
-  system: PromptSettings;
-  agent: PromptSettings;
-  working: PromptSettings;
+  system: StoredPromptSettings;
+  agent: StoredPromptSettings;
+  working: StoredPromptSettings;
 }
 
 export type RepositoryLayerSource = Pick<

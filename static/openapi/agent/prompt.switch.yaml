@@ -136,6 +136,10 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        locked_switches:
+          type: array
+          items:
+            type: string
       required:
         - scope
         - agent_name
@@ -143,4 +147,5 @@ components:
         - custom_text
         - system_layer
         - revision
+        - locked_switches
       additionalProperties: false

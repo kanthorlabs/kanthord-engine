@@ -11,7 +11,7 @@ import {
   PromptScope,
   PromptSourceState,
   PROMPT_SWITCHES,
-  type PromptSettings,
+  type StoredPromptSettings,
 } from "./contract.ts";
 import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest } from "./prompt-composer.ts";
@@ -57,7 +57,7 @@ function settings(
   scope: PromptScope,
   customText = "",
   off: readonly string[] = [],
-): PromptSettings {
+): StoredPromptSettings {
   return {
     scope,
     agent_name: scope === PromptScope.System ? "" : AGENT,

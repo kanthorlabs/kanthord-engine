@@ -130,7 +130,7 @@ const fakeCollaborations = {
 };
 const PROVIDER_CAPABILITY = "model-list read";
 const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
-  config: { prompt: { system_file: "", agent_directory: "" } },
+  config: { prompt: { system_file: "", agent_directory: "", host_file: true } },
   dataDirectory: "/nonexistent/data",
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,

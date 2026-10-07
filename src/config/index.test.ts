@@ -109,16 +109,26 @@ test("agent prompt configuration defaults to empty paths and accepts strings", (
   assert.deepEqual(
     configuration({ master_key: masterKey }).getProperties().agent,
     {
-      prompt: { system_file: "", agent_directory: "" },
+      prompt: { system_file: "", agent_directory: "", host_file: true },
     },
   );
-  const prompt = { system_file: "a/AGENTS.md", agent_directory: "/agents" };
+  const prompt = {
+    system_file: "a/AGENTS.md",
+    agent_directory: "/agents",
+    host_file: false,
+  };
   assert.deepEqual(
     configuration({ master_key: masterKey, agent: { prompt } }).getProperties()
       .agent.prompt,
     prompt,
   );
-  for (const bad of [{ system_file: 1 }, { agent_directory: null }, { x: "" }])
+  for (const bad of [
+    { system_file: 1 },
+    { agent_directory: null },
+    { host_file: 1 },
+    { host_file: null },
+    { x: "" },
+  ])
     assert.throws(
       () => configuration({ master_key: masterKey, agent: { prompt: bad } }),
       (error: Error & { code?: string }) => {
