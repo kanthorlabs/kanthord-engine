@@ -235,7 +235,7 @@ The check calls the [LLM provider check](https://github.com/kanthorlabs/kanthord
 A credential whose platform has no LLM provider reports `unknown`.
 This check belongs to neither the liveness answer nor the claim path and changes no instance healthcheck.
 No check refreshes OAuth; an expired access token reports `unknown`.
-The human [provider check](./llm.md#provider-check--proposed) belongs to the LLM component.
+The human [provider check](./llm.md#provider-check) belongs to the LLM component.
 
 ## Error codes
 
