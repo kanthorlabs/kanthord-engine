@@ -91,6 +91,11 @@ export default tseslint.config(
                 ...allow("kernel"),
                 { to: file({ anyOf: ["config-global", "config"] }) },
                 { to: serviceEntry("{index,config}.ts") },
+                {
+                  to: element("component", {
+                    fileInternalPath: "{index,config}.ts",
+                  }),
+                },
               ],
             },
             {

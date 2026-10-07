@@ -28,4 +28,22 @@ const createEnablementTable: Migration = (database) => {
     `);
 };
 
-export const agentMigrations: readonly Migration[] = [createEnablementTable];
+const createPromptTable: Migration = (database) => {
+  database.exec(`
+    CREATE TABLE agent_prompt (
+      id TEXT NOT NULL PRIMARY KEY,
+      scope TEXT NOT NULL,
+      agent_name TEXT NOT NULL,
+      switches TEXT NOT NULL,
+      custom_text TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX agent_prompt_scope_agent_name ON agent_prompt (scope, agent_name);
+  `);
+};
+
+export const agentMigrations: readonly Migration[] = [
+  createEnablementTable,
+  createPromptTable,
+];

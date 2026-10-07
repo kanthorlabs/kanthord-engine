@@ -126,6 +126,7 @@ const fakeCollaborations = {
 };
 const PROVIDER_CAPABILITY = "model-list read";
 const fakeAgentCollaborations: AgentDependencies = {
+  config: { prompt: { systemFile: "", agentDirectory: "" } },
   custodySuitability: () => {},
   approvedModels: () => null,
   entriesOfAgent: () => [],

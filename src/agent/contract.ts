@@ -18,6 +18,41 @@ export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
 
+export const PROMPT_MAX_BODY_BYTES = 64 * 1024;
+export const PROMPT_TEXT_MAX_BYTES = 32768;
+
+export const PromptScope = {
+  System: "system",
+  Agent: "agent",
+  Workbench: "workbench",
+} as const;
+export type PromptScope = (typeof PromptScope)[keyof typeof PromptScope];
+
+export const SystemPromptSource = {
+  HostFile: "host_file",
+  Base: "base",
+  Custom: "custom",
+} as const;
+export const AgentPromptSource = {
+  AgentFile: "agent_file",
+  Shipped: "shipped",
+  Custom: "custom",
+} as const;
+export const WorkbenchPromptSource = {
+  AgentsMd: "agents_md",
+  AgentsLocalMd: "agents_local_md",
+  ClaudeMd: "claude_md",
+  ClaudeLocalMd: "claude_local_md",
+  Shipped: "shipped",
+  Custom: "custom",
+} as const;
+
+export const PROMPT_SWITCHES: Record<PromptScope, readonly string[]> = {
+  [PromptScope.System]: Object.values(SystemPromptSource),
+  [PromptScope.Agent]: Object.values(AgentPromptSource),
+  [PromptScope.Workbench]: Object.values(WorkbenchPromptSource),
+};
+
 export const AgentErrorCode = {
   AgentNotFound: "agent.catalog.not_found",
   NotFound: "agent.enablement.not_found",
@@ -36,6 +71,9 @@ export const AgentErrorCode = {
   ModelUnknown: "agent.configuration.model_unknown",
   ReasoningUnsupported: "agent.configuration.reasoning_effort_unsupported",
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
+  PromptVersionConflict: "agent.prompt.version_conflict",
+  PromptTooLarge: "agent.prompt.too_large",
+  PromptAgentLayerEmpty: "agent.prompt.agent_layer_empty",
 } as const;
 
 export type AgentProviderItem = {
@@ -200,6 +238,48 @@ export const agentDeclarationSchema = z.strictObject({
   tools: z.array(toolDeclarationSchema),
   enablement: agentEnablementSchema.nullable(),
 });
+
+export const promptSettingsSchema = z.strictObject({
+  scope: z.enum(PromptScope),
+  agentName: z.string(),
+  switches: z.record(z.string(), z.boolean()),
+  customText: z.string(),
+  version: z.number().int().nonnegative(),
+});
+export type PromptSettings = z.infer<typeof promptSettingsSchema>;
+
+const promptSwitchNames = [
+  ...new Set(Object.values(PROMPT_SWITCHES).flat()),
+] as [string, ...string[]];
+const promptTarget = {
+  scope: z.enum(PromptScope),
+  agentName: z.string().min(1).optional(),
+  expectedVersion: z.number().int().positive().optional(),
+};
+
+function checkPromptTarget(
+  body: { scope: PromptScope; agentName?: string; switch?: string },
+  context: z.core.$RefinementCtx,
+): void {
+  const system = body.scope === PromptScope.System;
+  if (system === (body.agentName !== undefined))
+    context.addIssue({
+      code: "custom",
+      path: ["agentName"],
+      message: system
+        ? "The system scope takes no agent name."
+        : "The scope requires an agent name.",
+    });
+  if (
+    body.switch !== undefined &&
+    !PROMPT_SWITCHES[body.scope].includes(body.switch)
+  )
+    context.addIssue({
+      code: "custom",
+      path: ["switch"],
+      message: "The switch is not a source of the scope.",
+    });
+}
 
 const emptyFields = z.strictObject({});
 const agentParams = z.strictObject({ agentName: z.string().min(1) });
@@ -374,5 +454,42 @@ export const agentOperations = {
     output: z.strictObject({ items: z.array(agentModelSchema) }),
     description:
       "List the models and reasoning efforts of one agent provider of an agent enablement.",
+  },
+  "prompt.put": {
+    ...enablementMutation,
+    id: "agent.prompt.put",
+    method: HttpMethod.Put,
+    path: "/api/agent/prompt",
+    maxBodyBytes: PROMPT_MAX_BODY_BYTES,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z
+        .strictObject({ ...promptTarget, customText: z.string() })
+        .superRefine(checkPromptTarget),
+    }),
+    output: promptSettingsSchema,
+    description:
+      "Replace the custom text of one prompt scope at its expected version.",
+  },
+  "prompt.switch": {
+    ...enablementMutation,
+    id: "agent.prompt.switch",
+    method: HttpMethod.Post,
+    path: "/api/agent/prompt/switch",
+    maxBodyBytes: PROMPT_MAX_BODY_BYTES,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z
+        .strictObject({
+          ...promptTarget,
+          switch: z.enum(promptSwitchNames),
+          enabled: z.boolean(),
+        })
+        .superRefine(checkPromptTarget),
+    }),
+    output: promptSettingsSchema,
+    description: "Set one switch of one prompt scope at its expected version.",
   },
 } as const satisfies Record<string, Operation>;

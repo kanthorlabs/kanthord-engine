@@ -36,6 +36,7 @@ const services: Migrations = [
 const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
 const AGENT_ENABLEMENT_TABLE = "agent_enablement";
+const AGENT_PROMPT_TABLE = "agent_prompt";
 const LEGACY_AGENT_ENABLEMENT_TABLE = "worker_agent_enablement";
 const WORKER_INSTANCE_TABLE = "worker_instance";
 const ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE];
@@ -79,6 +80,7 @@ const INDEX_SCHEMA_TYPE = "index";
 const UNIQUE_INDEX = 1;
 const ALL_TABLES = [
   AGENT_ENABLEMENT_TABLE,
+  AGENT_PROMPT_TABLE,
   CREDENTIAL_TABLE,
   MISSION_ASSESSMENT_TABLE,
   MISSION_ATTEMPT_TABLE,
@@ -97,6 +99,7 @@ const ALL_TABLES = [
 ];
 const ALL_INDEXES = [
   "agent_enablement_agent_name_revision",
+  "agent_prompt_scope_agent_name",
   "credential_name_revision",
   MISSION_ASSESSMENT_SEQUENCE_INDEX,
   MISSION_ATTEMPT_OPEN_INDEX,
@@ -146,6 +149,7 @@ test("service migrations own distinct prefixes and create only tables in their n
     assert.deepEqual(tables(store), [
       CREDENTIAL_TABLE,
       AGENT_ENABLEMENT_TABLE,
+      AGENT_PROMPT_TABLE,
       ...ERD2_WORKER_TABLES,
       PROJECT_PROJECT_TABLE,
       PROJECT_BINDING_TABLE,
@@ -176,7 +180,10 @@ test("each service migration set applies alone to an empty store", () => {
       if (service.service === MISSION_SERVICE_NAME)
         assert.deepEqual(tables(store), MISSION_TABLES);
       if (service.service === AGENT_COMPONENT_NAME)
-        assert.deepEqual(tables(store), [AGENT_ENABLEMENT_TABLE]);
+        assert.deepEqual(tables(store), [
+          AGENT_ENABLEMENT_TABLE,
+          AGENT_PROMPT_TABLE,
+        ]);
       if (service.service === WORKER_SERVICE_NAME)
         assert.deepEqual(tables(store), ERD2_WORKER_TABLES);
       if (service.service === PROJECT_SERVICE_NAME) {
@@ -523,6 +530,7 @@ test("an existing store moves its worker agent enablement rows into the agent ta
     assert.deepEqual(tables(store), [
       WORKER_INSTANCE_TABLE,
       AGENT_ENABLEMENT_TABLE,
+      AGENT_PROMPT_TABLE,
     ]);
     assert.deepEqual(
       store.database

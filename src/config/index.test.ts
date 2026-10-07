@@ -44,6 +44,7 @@ test("service fragments preserve the existing YAML field set", () => {
   const initial = parseMapping(initialConfig());
   const config = configuration(initial).getProperties();
   assert.deepEqual(Object.keys(initial).sort(), [
+    "agent",
     "gateway",
     "log",
     "masterKey",
@@ -111,6 +112,27 @@ test("worker configuration defaults, path strings and strict validation", () => 
       },
     );
   }
+});
+
+test("agent prompt configuration defaults to empty paths and accepts strings", () => {
+  const masterKey = randomBytes(32).toString("base64");
+  assert.deepEqual(configuration({ masterKey }).getProperties().agent, {
+    prompt: { systemFile: "", agentDirectory: "" },
+  });
+  const prompt = { systemFile: "a/AGENTS.md", agentDirectory: "/agents" };
+  assert.deepEqual(
+    configuration({ masterKey, agent: { prompt } }).getProperties().agent
+      .prompt,
+    prompt,
+  );
+  for (const bad of [{ systemFile: 1 }, { agentDirectory: null }, { x: "" }])
+    assert.throws(
+      () => configuration({ masterKey, agent: { prompt: bad } }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, INVALID_FIELD_CODE);
+        return true;
+      },
+    );
 });
 
 test("config init emits Worker and Scheduler fields", (t) => {

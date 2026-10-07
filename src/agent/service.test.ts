@@ -9,6 +9,9 @@ import { AgentComponent, type Dependencies } from "./service.ts";
 import {
   agentOperations,
   AgentErrorCode,
+  PromptScope,
+  PROMPT_SWITCHES,
+  PROMPT_TEXT_MAX_BYTES,
   AGENT_COMPONENT_NAME,
   AGENT_PROVIDER_TARGET_KIND,
   LIST_LIMIT_DEFAULT,
@@ -19,6 +22,7 @@ import {
   type ApprovedModel,
 } from "./contract.ts";
 import { agentMigrations } from "./migrations.ts";
+import { promptSettings } from "./prompts.ts";
 import {
   AgentProviderKind,
   EnablementState,
@@ -60,6 +64,7 @@ const defaults = {
 const putBody = { agentProviders: [provider], defaultConfiguration: defaults };
 const binding = { bindingId: "binding", workerName: WORKER, entry: null };
 const fakeCollaborations: Dependencies = {
+  config: { prompt: { systemFile: "", agentDirectory: "" } },
   custodySuitability: () => {},
   approvedModels: () => null,
   entriesOfAgent: () => [],
@@ -1180,4 +1185,211 @@ test("every listed model and reasoning effort passes the configuration validatio
           ),
         );
   }
+});
+
+const PROMPT_TARGETS = [
+  { scope: PromptScope.System },
+  { scope: PromptScope.Agent, agentName: AGENT },
+  { scope: PromptScope.Workbench, agentName: AGENT },
+] as const;
+
+function allOn(scope: PromptScope) {
+  return Object.fromEntries(PROMPT_SWITCHES[scope].map((name) => [name, true]));
+}
+
+test("prompt settings of an absent row answer every switch on and an empty text", (t) => {
+  const f = enablementFixture(t);
+  for (const target of PROMPT_TARGETS)
+    assert.deepEqual(
+      f.store.transaction((tx) =>
+        promptSettings(
+          tx,
+          target.scope,
+          "agentName" in target ? target.agentName : undefined,
+        ),
+      ),
+      {
+        scope: target.scope,
+        agentName: "agentName" in target ? target.agentName : "",
+        switches: allOn(target.scope),
+        customText: "",
+        version: 0,
+      },
+    );
+});
+
+test("prompt writes create the row at version one and replace it at the expected version", (t) => {
+  const f = enablementFixture(t);
+  for (const target of PROMPT_TARGETS) {
+    const agentName = "agentName" in target ? target.agentName : "";
+    const created = f.invoke(
+      "prompt.put",
+      { ...target, customText: "one" },
+      {},
+    );
+    assert.deepEqual(created, {
+      scope: target.scope,
+      agentName,
+      switches: allOn(target.scope),
+      customText: "one",
+      version: 1,
+    });
+    const switched = f.invoke(
+      "prompt.switch",
+      { ...target, expectedVersion: 1, switch: "custom", enabled: false },
+      {},
+    );
+    assert.deepEqual(switched, {
+      ...created,
+      switches: { ...allOn(target.scope), custom: false },
+      version: 2,
+    });
+    const replaced = f.invoke(
+      "prompt.put",
+      { ...target, expectedVersion: 2, customText: "two" },
+      {},
+    );
+    assert.deepEqual(
+      [replaced.customText, replaced.version],
+      ["two", THIRD_REVISION],
+    );
+    assert.deepEqual(replaced.switches, switched.switches);
+  }
+});
+
+test("a second prompt write at one expected version answers a conflict with the current row", (t) => {
+  const f = enablementFixture(t);
+  const target = { scope: PromptScope.Agent, agentName: AGENT };
+  const first = f.invoke("prompt.put", { ...target, customText: "a" }, {});
+  f.invoke(
+    "prompt.put",
+    { ...target, expectedVersion: 1, customText: "b" },
+    {},
+  );
+  refuses(
+    () =>
+      f.invoke(
+        "prompt.put",
+        { ...target, expectedVersion: 1, customText: "c" },
+        {},
+      ),
+    AgentErrorCode.PromptVersionConflict,
+    HttpStatus.Conflict,
+    {
+      scope: target.scope,
+      agentName: AGENT,
+      current: { ...first, customText: "b", version: 2 },
+    },
+  );
+  refuses(
+    () => f.invoke("prompt.put", { ...target, customText: "d" }, {}),
+    AgentErrorCode.PromptVersionConflict,
+    HttpStatus.Conflict,
+  );
+  refuses(
+    () =>
+      f.invoke(
+        "prompt.switch",
+        {
+          scope: PromptScope.System,
+          expectedVersion: 1,
+          switch: "base",
+          enabled: false,
+        },
+        {},
+      ),
+    AgentErrorCode.PromptVersionConflict,
+    HttpStatus.Conflict,
+  );
+});
+
+test("prompt writes refuse an oversized text, an empty agent layer and an unknown agent", (t) => {
+  const f = enablementFixture(t);
+  const target = { scope: PromptScope.Agent, agentName: AGENT };
+  refuses(
+    () =>
+      f.invoke(
+        "prompt.put",
+        { ...target, customText: "a".repeat(PROMPT_TEXT_MAX_BYTES + 1) },
+        {},
+      ),
+    AgentErrorCode.PromptTooLarge,
+  );
+  assert.equal(
+    f.invoke(
+      "prompt.put",
+      { ...target, customText: "\u00e9".repeat(PROMPT_TEXT_MAX_BYTES / 2) },
+      {},
+    ).version,
+    FIRST_REVISION,
+  );
+  f.invoke(
+    "prompt.switch",
+    { ...target, expectedVersion: 1, switch: "agent_file", enabled: false },
+    {},
+  );
+  f.invoke(
+    "prompt.switch",
+    { ...target, expectedVersion: 2, switch: "shipped", enabled: false },
+    {},
+  );
+  refuses(
+    () =>
+      f.invoke(
+        "prompt.switch",
+        { ...target, expectedVersion: 3, switch: "custom", enabled: false },
+        {},
+      ),
+    AgentErrorCode.PromptAgentLayerEmpty,
+    HttpStatus.Conflict,
+  );
+  refuses(
+    () =>
+      f.invoke(
+        "prompt.put",
+        { scope: PromptScope.Workbench, agentName: UNKNOWN, customText: "x" },
+        {},
+      ),
+    AgentErrorCode.AgentNotFound,
+    HttpStatus.NotFound,
+  );
+});
+
+test("prompt inputs refuse an unknown switch and a wrong agent name", () => {
+  const input = (body: unknown) =>
+    agentOperations["prompt.switch"].input.safeParse({
+      params: {},
+      query: {},
+      body,
+    }).success;
+  assert.equal(
+    input({ scope: "system", switch: "agents_md", enabled: true }),
+    false,
+  );
+  assert.equal(
+    input({
+      scope: "workbench",
+      agentName: AGENT,
+      switch: "bogus",
+      enabled: true,
+    }),
+    false,
+  );
+  assert.equal(
+    input({ scope: "system", agentName: AGENT, switch: "base", enabled: true }),
+    false,
+  );
+  assert.equal(
+    input({ scope: "agent", switch: "custom", enabled: true }),
+    false,
+  );
+  assert.equal(
+    input({
+      scope: "agent",
+      agentName: AGENT,
+      switch: "custom",
+      enabled: true,
+    }),
+    true,
+  );
 });

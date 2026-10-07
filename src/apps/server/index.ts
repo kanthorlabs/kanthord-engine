@@ -221,6 +221,7 @@ export function composeServices(options: {
       agent.enablementsDependentOnModel(tx, name, model),
   });
   const agent: AgentComponent = new AgentComponent({
+    config: options.config.agent,
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     approvedModels: (tx, name) => llm.approvedModels(tx, name),
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),

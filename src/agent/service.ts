@@ -6,6 +6,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { getAgentDeclaration } from "./catalog.ts";
+import type { AgentConfig } from "./config.ts";
 import {
   configurationError,
   configurationIssues,
@@ -17,6 +18,10 @@ import {
 import {
   agentOperations,
   agentEnablementSchema,
+  promptSettingsSchema,
+  PROMPT_TEXT_MAX_BYTES,
+  PromptScope,
+  type PromptSettings,
   agentModelSchema,
   effectiveConfigurationSchema,
   AgentErrorCode,
@@ -45,10 +50,12 @@ import {
   enablementsByModel,
   type EnablementRow,
 } from "./enablements.ts";
+import { promptSettings, savePromptSettings } from "./prompts.ts";
 
 const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
 const HEALTH_PAGE_SIZE = 100;
+const ABSENT_VERSION = 0;
 
 function wireRecord(row: EnablementRow) {
   return agentEnablementSchema.parse({
@@ -137,7 +144,70 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
   );
 }
 
+type PromptTarget = {
+  scope: PromptScope;
+  agentName?: string | undefined;
+  expectedVersion?: number | undefined;
+};
+
+function currentPrompt(tx: Transaction, target: PromptTarget): PromptSettings {
+  const agentName = target.agentName ?? "";
+  if (target.scope !== PromptScope.System) requireAgent(agentName);
+  const current = promptSettings(tx, target.scope, agentName);
+  if ((target.expectedVersion ?? ABSENT_VERSION) !== current.version)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      AgentErrorCode.PromptVersionConflict,
+      "Prompt settings version conflict.",
+      { scope: target.scope, agentName, current },
+    );
+  return current;
+}
+
+function putPrompt(
+  tx: Transaction,
+  body: PromptTarget & { customText: string },
+): PromptSettings {
+  const current = currentPrompt(tx, body);
+  if (Buffer.byteLength(body.customText) > PROMPT_TEXT_MAX_BYTES)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      AgentErrorCode.PromptTooLarge,
+      "Custom prompt text is too large.",
+      { scope: body.scope, maxBytes: PROMPT_TEXT_MAX_BYTES },
+    );
+  return promptSettingsSchema.parse(
+    savePromptSettings(
+      tx,
+      { ...current, customText: body.customText },
+      current.version,
+    ),
+  );
+}
+
+function switchPrompt(
+  tx: Transaction,
+  body: PromptTarget & { switch: string; enabled: boolean },
+): PromptSettings {
+  const current = currentPrompt(tx, body);
+  const switches = { ...current.switches, [body.switch]: body.enabled };
+  if (
+    body.scope === PromptScope.Agent &&
+    Object.values(switches).every((enabled) => !enabled)
+  )
+    throw new OperationError(
+      HttpStatus.Conflict,
+      AgentErrorCode.PromptAgentLayerEmpty,
+      "An agent prompt layer needs one source.",
+      { scope: body.scope, agentName: current.agentName, switch: body.switch },
+    );
+  return promptSettingsSchema.parse(
+    savePromptSettings(tx, { ...current, switches }, current.version),
+  );
+}
+
 export interface Dependencies {
+  config: AgentConfig;
   custodySuitability: CustodySuitability;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
@@ -636,6 +706,12 @@ export class AgentComponent {
             body.expectedRevision,
           ),
         ),
+    );
+    registry.register(agentOperations["prompt.put"], ({ body }, caller) =>
+      caller.commit((tx) => putPrompt(tx, body)),
+    );
+    registry.register(agentOperations["prompt.switch"], ({ body }, caller) =>
+      caller.commit((tx) => switchPrompt(tx, body)),
     );
     registry.register(
       agentOperations["enablement.provider.model.list"],
