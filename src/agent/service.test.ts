@@ -13,6 +13,7 @@ import {
   agentOperations,
   AgentErrorCode,
   PromptOrigin,
+  PromptLayerKind,
   PromptScope,
   PromptSourceState,
   PROMPT_SWITCHES,
@@ -1483,6 +1484,7 @@ test("prompt settings of an absent row answer every switch on and an empty text"
         agentName: "agentName" in target ? target.agentName : "",
         switches: allOn(target.scope),
         customText: "",
+        system_layer: target.scope === PromptScope.Agent ? "inherit" : null,
         revision: 0,
       },
     );
@@ -1502,6 +1504,7 @@ test("prompt writes create the row at revision one and replace it at the expecte
       agentName,
       switches: allOn(target.scope),
       customText: "one",
+      system_layer: target.scope === PromptScope.Agent ? "inherit" : null,
       revision: 1,
     });
     const switched = f.invoke(
@@ -1525,6 +1528,107 @@ test("prompt writes create the row at revision one and replace it at the expecte
     );
     assert.deepEqual(replaced.switches, switched.switches);
   }
+});
+
+const CUSTOM_A = "a";
+
+test("prompt read answers the settings of a scope, the absent row included", (t) => {
+  const f = enablementFixture(t);
+  const target = { scope: PromptScope.Agent, agentName: AGENT };
+  assert.deepEqual(f.invoke("prompt.get", null, {}, target), {
+    ...target,
+    switches: allOn(PromptScope.Agent),
+    customText: "",
+    system_layer: "inherit",
+    revision: 0,
+  });
+  f.invoke("prompt.put", { ...target, customText: CUSTOM_A }, {});
+  assert.equal(f.invoke("prompt.get", null, {}, target).customText, CUSTOM_A);
+  assert.equal(
+    f.invoke("prompt.get", null, {}, { scope: PromptScope.System })
+      .system_layer,
+    null,
+  );
+  refuses(
+    () => f.invoke("prompt.get", null, {}, { ...target, agentName: UNKNOWN }),
+    AgentErrorCode.AgentNotFound,
+    HttpStatus.NotFound,
+  );
+});
+
+test("the system layer switch and the override of an agent decide its system layer", async (t) => {
+  const f = enablementFixture(t);
+  const operation = agentOperations.get;
+  const systemLayer = async () =>
+    operation.output
+      .parse(
+        await f.registry.get(operation.id).handler(
+          operation.input.parse({
+            params: { agentName: AGENT },
+            query: {},
+            body: null,
+          }),
+          f.caller,
+        ),
+      )
+      .prompt.layers?.find(({ layer }) => layer === PromptLayerKind.System);
+  assert.equal((await systemLayer())?.enabled, true);
+  f.invoke(
+    "prompt.switch",
+    { scope: PromptScope.System, switch: "layer", enabled: false },
+    {},
+  );
+  const inherited = await systemLayer();
+  assert.equal(inherited?.enabled, false);
+  assert.ok(
+    inherited?.sources.every(({ state }) => state === PromptSourceState.Off),
+  );
+  const target = { scope: PromptScope.Agent, agentName: AGENT };
+  const on = f.invoke("prompt.switch", { ...target, system_layer: "on" }, {});
+  assert.deepEqual([on.system_layer, on.revision], ["on", FIRST_REVISION]);
+  assert.equal((await systemLayer())?.enabled, true);
+  f.invoke(
+    "prompt.switch",
+    {
+      scope: PromptScope.System,
+      expectedRevision: 1,
+      switch: "layer",
+      enabled: true,
+    },
+    {},
+  );
+  f.invoke(
+    "prompt.switch",
+    { ...target, expectedRevision: 1, system_layer: "off" },
+    {},
+  );
+  assert.equal((await systemLayer())?.enabled, false);
+});
+
+test("a prompt switch takes either a source switch or the override of an agent scope", () => {
+  const body = agentOperations["prompt.switch"].input.shape.body;
+  const agent = { scope: PromptScope.Agent, agentName: AGENT };
+  for (const invalid of [
+    agent,
+    { ...agent, switch: "custom", enabled: false, system_layer: "on" },
+    { ...agent, switch: "custom" },
+    { scope: PromptScope.System, system_layer: "on" },
+    { scope: PromptScope.Workbench, agentName: AGENT, system_layer: "off" },
+    { ...agent, switch: "layer", enabled: false },
+  ])
+    assert.equal(
+      body.safeParse(invalid).success,
+      false,
+      JSON.stringify(invalid),
+    );
+  assert.ok(body.safeParse({ ...agent, system_layer: "inherit" }).success);
+  assert.ok(
+    body.safeParse({
+      scope: PromptScope.System,
+      switch: "layer",
+      enabled: true,
+    }).success,
+  );
 });
 
 test("a second prompt write at one expected revision answers a conflict with the current row", (t) => {

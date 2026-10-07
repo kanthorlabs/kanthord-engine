@@ -4,7 +4,8 @@ pathItem:
     operationId: agent.prompt.switch
     tags:
       - agent
-    description: Set one switch of one prompt scope at its expected revision.
+    description: Set one switch of one prompt scope, or the system layer override of
+      one agent scope, at its expected revision.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -81,6 +82,7 @@ components:
                 - host_file
                 - base
                 - custom
+                - layer
                 - agent_file
                 - shipped
                 - agents_md
@@ -89,10 +91,14 @@ components:
                 - claude_local_md
             enabled:
               type: boolean
+            system_layer:
+              type: string
+              enum:
+                - inherit
+                - on
+                - off
           required:
             - scope
-            - switch
-            - enabled
           additionalProperties: false
       required:
         - params
@@ -118,6 +124,14 @@ components:
             type: boolean
         customText:
           type: string
+        system_layer:
+          anyOf:
+            - type: string
+              enum:
+                - inherit
+                - on
+                - off
+            - type: "null"
         revision:
           type: integer
           minimum: 0
@@ -127,5 +141,6 @@ components:
         - agentName
         - switches
         - customText
+        - system_layer
         - revision
       additionalProperties: false

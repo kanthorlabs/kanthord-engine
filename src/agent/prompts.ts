@@ -4,6 +4,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   PROMPT_SWITCHES,
   PromptScope,
+  SystemLayerOverride,
   type PromptSettings,
 } from "./contract.ts";
 
@@ -12,6 +13,7 @@ type DatabaseRow = {
   agent_name: string;
   switches: string;
   custom_text: string;
+  system_layer: SystemLayerOverride | null;
   revision: number;
 };
 
@@ -19,6 +21,10 @@ const AGENT_PROMPT_PREFIX = "agent_prompt";
 const ABSENT_REVISION = 0;
 const FIRST_REVISION = 1;
 const SYSTEM_AGENT_NAME = "";
+
+function defaultOverride(scope: PromptScope): SystemLayerOverride | null {
+  return scope === PromptScope.Agent ? SystemLayerOverride.Inherit : null;
+}
 
 function allOn(scope: PromptScope): Record<string, boolean> {
   return Object.fromEntries(PROMPT_SWITCHES[scope].map((name) => [name, true]));
@@ -31,7 +37,7 @@ export function promptSettings(
 ): PromptSettings {
   const row = tx.database
     .prepare(
-      `SELECT scope, agent_name, switches, custom_text, revision
+      `SELECT scope, agent_name, switches, custom_text, system_layer, revision
        FROM agent_prompt WHERE scope = ? AND agent_name = ?`,
     )
     .get(scope, agentName) as DatabaseRow | undefined;
@@ -41,6 +47,7 @@ export function promptSettings(
       agentName,
       switches: allOn(scope),
       customText: "",
+      system_layer: defaultOverride(scope),
       revision: ABSENT_REVISION,
     };
   return {
@@ -48,6 +55,7 @@ export function promptSettings(
     agentName,
     switches: { ...allOn(scope), ...JSON.parse(row.switches) },
     customText: row.custom_text,
+    system_layer: row.system_layer ?? defaultOverride(scope),
     revision: row.revision,
   };
 }
@@ -62,8 +70,8 @@ export function savePromptSettings(
     tx.database
       .prepare(
         `INSERT INTO agent_prompt
-         (id, scope, agent_name, switches, custom_text, revision, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (id, scope, agent_name, switches, custom_text, system_layer, revision, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         createIdentity(AGENT_PROMPT_PREFIX),
@@ -71,18 +79,20 @@ export function savePromptSettings(
         settings.agentName,
         canonicalJSON(settings.switches),
         settings.customText,
+        settings.system_layer,
         FIRST_REVISION,
         now,
       );
   else
     tx.database
       .prepare(
-        `UPDATE agent_prompt SET switches = ?, custom_text = ?, revision = ?, updated_at = ?
+        `UPDATE agent_prompt SET switches = ?, custom_text = ?, system_layer = ?, revision = ?, updated_at = ?
          WHERE scope = ? AND agent_name = ?`,
       )
       .run(
         canonicalJSON(settings.switches),
         settings.customText,
+        settings.system_layer,
         revision + FIRST_REVISION,
         now,
         settings.scope,

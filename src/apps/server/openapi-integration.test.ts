@@ -578,6 +578,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["agent.model.list", AccessPolicy.Human],
   ["agent.prompt.put", AccessPolicy.Human],
   ["agent.prompt.switch", AccessPolicy.Human],
+  ["agent.prompt.get", AccessPolicy.Human],
   ["worker.catalog.list", AccessPolicy.Human],
   ["worker.catalog.get", AccessPolicy.Human],
   ["agent.get", AccessPolicy.Human],
@@ -673,7 +674,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["workbench.session.events", AccessPolicy.Human],
   ["workbench.session.approve", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 146;
+const OPERATION_COUNT = 147;
 
 test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();
@@ -1123,6 +1124,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     "agent.model.list",
     "agent.prompt.put",
     "agent.prompt.switch",
+    "agent.prompt.get",
   ])
     assert.ok(emittedAgentIds.includes(id), id);
   for (const operation of [

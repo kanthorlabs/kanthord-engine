@@ -36,6 +36,7 @@ function layerOf(
   return {
     layer,
     name,
+    enabled: true,
     sources: [
       {
         source: "custom",

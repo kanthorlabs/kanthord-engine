@@ -8,6 +8,8 @@ import {
   PromptLayerKind,
   PromptOrigin,
   PromptSourceState,
+  SYSTEM_LAYER_SWITCH,
+  SystemLayerOverride,
   SystemPromptSource,
   WorkbenchPromptSource,
   type PromptSettings,
@@ -61,6 +63,7 @@ export interface ResolvedSource {
 export interface ResolvedLayer {
   layer: PromptLayerKind;
   name: PromptLayer;
+  enabled: boolean;
   sources: ResolvedSource[];
 }
 
@@ -329,12 +332,20 @@ async function resolveLayer(
   specs: SourceSpec[],
   switches: Record<string, boolean>,
   hostHome: string,
+  enabled = true,
 ): Promise<ResolvedLayer> {
   assert.ok(specs.length);
   const sources: ResolvedSource[] = [];
   for (const spec of specs)
-    sources.push(await resolveSource(spec, switches, hostHome));
-  return { layer, name, sources };
+    sources.push(await resolveSource(spec, enabled ? switches : {}, hostHome));
+  return { layer, name, enabled, sources };
+}
+
+export function systemLayerEnabled(settings: PromptSettingsSet): boolean {
+  const override = settings.agent.system_layer;
+  if (override === SystemLayerOverride.On) return true;
+  if (override === SystemLayerOverride.Off) return false;
+  return settings.system.switches[SYSTEM_LAYER_SWITCH] === true;
 }
 
 export function resolveRepositoryLayer(
@@ -362,6 +373,7 @@ export async function resolveLayers(
       systemSpecs(input),
       input.settings.system.switches,
       input.hostHome,
+      systemLayerEnabled(input.settings),
     ),
     await resolveLayer(
       PromptLayerKind.Agent,

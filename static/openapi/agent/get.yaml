@@ -126,6 +126,8 @@ components:
                       - system
                       - agent
                       - working
+                  enabled:
+                    type: boolean
                   sources:
                     type: array
                     items:
@@ -173,6 +175,7 @@ components:
                       additionalProperties: false
                 required:
                   - layer
+                  - enabled
                   - sources
                 additionalProperties: false
             final:

@@ -43,7 +43,15 @@ const createPromptTable: Migration = (database) => {
   `);
 };
 
+const addSystemLayerOverride: Migration = (database) => {
+  database.exec(`
+    ALTER TABLE agent_prompt ADD COLUMN system_layer TEXT;
+    UPDATE agent_prompt SET system_layer = 'inherit' WHERE scope = 'agent';
+  `);
+};
+
 export const agentMigrations: readonly Migration[] = [
   createEnablementTable,
   createPromptTable,
+  addSystemLayerOverride,
 ];

@@ -76,8 +76,21 @@ export type PromptSourceState =
 export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
 
+export const SYSTEM_LAYER_SWITCH = "layer";
+
+export const SystemLayerOverride = {
+  Inherit: "inherit",
+  On: "on",
+  Off: "off",
+} as const;
+export type SystemLayerOverride =
+  (typeof SystemLayerOverride)[keyof typeof SystemLayerOverride];
+
 export const PROMPT_SWITCHES: Record<PromptScope, readonly string[]> = {
-  [PromptScope.System]: Object.values(SystemPromptSource),
+  [PromptScope.System]: [
+    ...Object.values(SystemPromptSource),
+    SYSTEM_LAYER_SWITCH,
+  ],
   [PromptScope.Agent]: Object.values(AgentPromptSource),
   [PromptScope.Workbench]: Object.values(WorkbenchPromptSource),
 };
@@ -281,6 +294,7 @@ export type PromptSource = z.infer<typeof promptSourceSchema>;
 
 export const promptLayerSchema = z.strictObject({
   layer: z.enum(PromptLayerKind),
+  enabled: z.boolean(),
   sources: z.array(promptSourceSchema),
 });
 export type PromptLayerAnswer = z.infer<typeof promptLayerSchema>;
@@ -304,6 +318,7 @@ export const promptSettingsSchema = z.strictObject({
   agentName: z.string(),
   switches: z.record(z.string(), z.boolean()),
   customText: z.string(),
+  system_layer: z.enum(SystemLayerOverride).nullable(),
   revision: z.number().int().nonnegative(),
 });
 export type PromptSettings = z.infer<typeof promptSettingsSchema>;
@@ -316,6 +331,32 @@ const promptTarget = {
   agentName: z.string().min(1).optional(),
   expectedRevision: z.number().int().positive().optional(),
 };
+
+function checkPromptSwitch(
+  body: {
+    scope: PromptScope;
+    switch?: string;
+    enabled?: boolean;
+    system_layer?: SystemLayerOverride;
+  },
+  context: z.core.$RefinementCtx,
+): void {
+  const partial = body.switch !== undefined || body.enabled !== undefined;
+  const source = body.switch !== undefined && body.enabled !== undefined;
+  const override = body.system_layer !== undefined;
+  if (!(source && !override) && !(override && !partial))
+    context.addIssue({
+      code: "custom",
+      path: ["switch"],
+      message: "The body takes either switch with enabled, or system_layer.",
+    });
+  if (override && body.scope !== PromptScope.Agent)
+    context.addIssue({
+      code: "custom",
+      path: ["system_layer"],
+      message: "The system layer override belongs to the agent scope.",
+    });
+}
 
 function checkPromptTarget(
   body: { scope: PromptScope; agentName?: string; switch?: string },
@@ -576,12 +617,36 @@ export const agentOperations = {
       body: z
         .strictObject({
           ...promptTarget,
-          switch: z.enum(promptSwitchNames),
-          enabled: z.boolean(),
+          switch: z.enum(promptSwitchNames).optional(),
+          enabled: z.boolean().optional(),
+          system_layer: z.enum(SystemLayerOverride).optional(),
         })
-        .superRefine(checkPromptTarget),
+        .superRefine(checkPromptTarget)
+        .superRefine(checkPromptSwitch),
     }),
     output: promptSettingsSchema,
-    description: "Set one switch of one prompt scope at its expected revision.",
+    description:
+      "Set one switch of one prompt scope, or the system layer override of one agent scope, at its expected revision.",
+  },
+  "prompt.get": {
+    ...enablementOperation,
+    id: "agent.prompt.get",
+    method: HttpMethod.Get,
+    path: "/api/agent/prompt",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z
+        .strictObject({
+          scope: z.enum(PromptScope),
+          agentName: z.string().min(1).optional(),
+        })
+        .superRefine(checkPromptTarget),
+      body: z.null(),
+    }),
+    output: promptSettingsSchema,
+    description:
+      "Read the switches, the custom text and the system layer override of one prompt scope.",
   },
 } as const satisfies Record<string, Operation>;

@@ -119,6 +119,7 @@ test("agent migration creates the prompt settings schema", () => {
         { name: "custom_text", type: "TEXT", notnull: 1, pk: 0 },
         { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
         { name: "updated_at", type: "INTEGER", notnull: 1, pk: 0 },
+        { name: "system_layer", type: "TEXT", notnull: 0, pk: 0 },
       ],
     );
     assert.deepEqual(
@@ -136,6 +137,39 @@ test("agent migration creates the prompt settings schema", () => {
         ?.sql?.toString()
         .includes("CHECK"),
       false,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("agent migration sets the system layer override of an existing agent row to inherit", () => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    store.migrate([
+      {
+        service: AGENT_COMPONENT_NAME,
+        migrations: agentMigrations.slice(0, 2),
+      },
+    ]);
+    const insert = store.database.prepare(
+      `INSERT INTO agent_prompt (id, scope, agent_name, switches, custom_text, revision, updated_at)
+       VALUES (?, ?, ?, '{}', '', 1, 0)`,
+    );
+    insert.run("agent_prompt_a", "agent", "swe@1");
+    insert.run("agent_prompt_s", "system", "");
+    store.migrate([
+      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
+    ]);
+    assert.deepEqual(
+      store.database
+        .prepare("SELECT scope, system_layer FROM agent_prompt ORDER BY scope")
+        .all()
+        .map(({ scope, system_layer }) => ({ scope, system_layer })),
+      [
+        { scope: "agent", system_layer: "inherit" },
+        { scope: "system", system_layer: null },
+      ],
     );
   } finally {
     store.close();

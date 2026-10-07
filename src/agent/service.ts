@@ -23,6 +23,7 @@ import {
   promptSettingsSchema,
   PROMPT_TEXT_MAX_BYTES,
   PromptScope,
+  SystemLayerOverride,
   type PromptSettings,
   agentModelSchema,
   effectiveConfigurationSchema,
@@ -200,9 +201,22 @@ function putPrompt(
 
 function switchPrompt(
   tx: Transaction,
-  body: PromptTarget & { switch: string; enabled: boolean },
+  body: PromptTarget & {
+    switch?: string | undefined;
+    enabled?: boolean | undefined;
+    system_layer?: SystemLayerOverride | undefined;
+  },
 ): PromptSettings {
   const current = currentPrompt(tx, body);
+  if (body.system_layer !== undefined)
+    return promptSettingsSchema.parse(
+      savePromptSettings(
+        tx,
+        { ...current, system_layer: body.system_layer },
+        current.revision,
+      ),
+    );
+  assert.ok(body.switch !== undefined && body.enabled !== undefined);
   const switches = { ...current.switches, [body.switch]: body.enabled };
   if (
     body.scope === PromptScope.Agent &&
@@ -222,6 +236,7 @@ function switchPrompt(
 function layerAnswer(layer: ResolvedLayer): PromptLayerAnswer {
   return {
     layer: layer.layer,
+    enabled: layer.enabled,
     sources: layer.sources.map((source) => ({
       source: source.source,
       origin: source.origin,
@@ -839,6 +854,15 @@ export class AgentComponent {
     );
     registry.register(agentOperations["prompt.switch"], ({ body }, caller) =>
       caller.commit((tx) => switchPrompt(tx, body)),
+    );
+    registry.register(agentOperations["prompt.get"], ({ query }, caller) =>
+      caller.commit((tx) => {
+        const agentName = query.agentName ?? "";
+        if (query.scope !== PromptScope.System) requireAgent(agentName);
+        return promptSettingsSchema.parse(
+          promptSettings(tx, query.scope, agentName),
+        );
+      }),
     );
     registry.register(
       agentOperations["enablement.provider.model.list"],

@@ -23,7 +23,7 @@ paths:
   /api/agent/model:
     $ref: ./openapi/agent/model.list.yaml#/pathItem
   /api/agent/prompt:
-    $ref: ./openapi/agent/prompt.put.yaml#/pathItem
+    $ref: ./openapi/agent/prompt.get.yaml#/pathItem
   /api/agent/prompt/switch:
     $ref: ./openapi/agent/prompt.switch.yaml#/pathItem
   /api/healthcheck:

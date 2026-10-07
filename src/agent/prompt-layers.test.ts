@@ -65,6 +65,7 @@ function settings(
       PROMPT_SWITCHES[scope].map((name) => [name, !off.includes(name)]),
     ),
     customText,
+    system_layer: scope === PromptScope.Agent ? "inherit" : null,
     revision: 1,
   };
 }

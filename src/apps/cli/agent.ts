@@ -14,6 +14,7 @@ import {
   LIST_LIMIT_MAX,
   PROMPT_SWITCHES,
   PromptScope,
+  SystemLayerOverride,
   PromptView,
 } from "../../agent/contract.ts";
 import { resolveClient } from "../../gateway/client.ts";
@@ -72,6 +73,14 @@ const PROMPT_SWITCH_AGENT_REQUIRED = "cli.agent.prompt.switch.agent_required";
 const PROMPT_SWITCH_AGENT_REFUSED = "cli.agent.prompt.switch.agent_refused";
 const PROMPT_SWITCH_INVALID_SWITCH = "cli.agent.prompt.switch.invalid_switch";
 const PROMPT_SWITCH_STATE_REQUIRED = "cli.agent.prompt.switch.state_required";
+const PROMPT_SWITCH_TARGET_REQUIRED = "cli.agent.prompt.switch.target_required";
+const PROMPT_SWITCH_INVALID_SYSTEM_LAYER =
+  "cli.agent.prompt.switch.invalid_system_layer";
+const PROMPT_GET_TOKEN_REQUIRED = "cli.agent.prompt.get.token_required";
+const PROMPT_GET_INDETERMINATE = "cli.agent.prompt.get.indeterminate";
+const PROMPT_GET_INVALID_SCOPE = "cli.agent.prompt.get.invalid_scope";
+const PROMPT_GET_AGENT_REQUIRED = "cli.agent.prompt.get.agent_required";
+const PROMPT_GET_AGENT_REFUSED = "cli.agent.prompt.get.agent_refused";
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 const LIST_TOKEN_REQUIRED = "cli.agent.enablement.list.token_required";
@@ -228,15 +237,12 @@ async function promptPut(command: Command): Promise<void> {
   process.stdout.write(`${JSON.stringify({ ...data, idempotencyKey: key })}\n`);
 }
 
-async function promptSwitch(command: Command): Promise<void> {
-  const options = command.optsWithGlobals();
-  const target = promptTarget(options, {
-    scope: PROMPT_SWITCH_INVALID_SCOPE,
-    revision: PROMPT_SWITCH_INVALID_REVISION,
-    agentRequired: PROMPT_SWITCH_AGENT_REQUIRED,
-    agentRefused: PROMPT_SWITCH_AGENT_REFUSED,
-  });
-  if (!PROMPT_SWITCHES[target.scope].includes(options.switch))
+function sourceSwitch(
+  scope: PromptScope,
+  options: Record<string, unknown>,
+): { switch: string; enabled: boolean } {
+  const name = String(options.switch);
+  if (!PROMPT_SWITCHES[scope].includes(name))
     throw new Diagnostic(
       PROMPT_SWITCH_INVALID_SWITCH,
       "the switch is not a source of the scope",
@@ -246,6 +252,70 @@ async function promptSwitch(command: Command): Promise<void> {
       PROMPT_SWITCH_STATE_REQUIRED,
       "pass exactly one of --on and --off",
     );
+  return { switch: name, enabled: options.on === true };
+}
+
+function systemLayerOverride(
+  scope: PromptScope,
+  value: string,
+): SystemLayerOverride {
+  const override = Object.values(SystemLayerOverride).find(
+    (candidate) => candidate === value,
+  );
+  if (scope !== PromptScope.Agent || override === undefined)
+    throw new Diagnostic(
+      PROMPT_SWITCH_INVALID_SYSTEM_LAYER,
+      "--system-layer is inherit, on or off, with the agent scope",
+    );
+  return override;
+}
+
+async function promptGet(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const target = promptTarget(options, {
+    scope: PROMPT_GET_INVALID_SCOPE,
+    revision: PROMPT_GET_INVALID_SCOPE,
+    agentRequired: PROMPT_GET_AGENT_REQUIRED,
+    agentRefused: PROMPT_GET_AGENT_REFUSED,
+  });
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, PROMPT_GET_TOKEN_REQUIRED);
+  const result = await httpClient(agentOperations, endpoint, token)[
+    "prompt.get"
+  ]({
+    params: {},
+    query: {
+      scope: target.scope,
+      ...(target.agentName !== undefined
+        ? { agentName: target.agentName }
+        : {}),
+    },
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, PROMPT_GET_INDETERMINATE))}\n`,
+  );
+}
+
+async function promptSwitch(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const target = promptTarget(options, {
+    scope: PROMPT_SWITCH_INVALID_SCOPE,
+    revision: PROMPT_SWITCH_INVALID_REVISION,
+    agentRequired: PROMPT_SWITCH_AGENT_REQUIRED,
+    agentRefused: PROMPT_SWITCH_AGENT_REFUSED,
+  });
+  if ((options.switch === undefined) === (options.systemLayer === undefined))
+    throw new Diagnostic(
+      PROMPT_SWITCH_TARGET_REQUIRED,
+      "pass exactly one of --switch and --system-layer",
+    );
+  const change =
+    options.systemLayer === undefined
+      ? sourceSwitch(target.scope, options)
+      : {
+          system_layer: systemLayerOverride(target.scope, options.systemLayer),
+        };
   const { endpoint, token } = resolveClient(options);
   requireToken(token, PROMPT_SWITCH_TOKEN_REQUIRED);
   const key = resolveKey(options);
@@ -255,7 +325,7 @@ async function promptSwitch(command: Command): Promise<void> {
     {
       params: {},
       query: {},
-      body: { ...target, switch: options.switch, enabled: options.on === true },
+      body: { ...target, ...change },
     },
     { idempotencyKey: key },
   );
@@ -495,6 +565,16 @@ export function addAgentCommand(program: Command): void {
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((_options, command: Command) => promptPut(command));
   prompt
+    .command("get")
+    .description("Read the settings of a prompt scope as JSON")
+    .requiredOption(
+      "--scope <scope>",
+      "system, agent or workbench",
+      singleUse("--scope"),
+    )
+    .option("--agent <agent-name>", "Agent name", singleUse("--agent"))
+    .action((_options, command: Command) => promptGet(command));
+  prompt
     .command(SWITCH)
     .description("Turn one prompt source of a scope on or off as JSON")
     .requiredOption(
@@ -508,7 +588,12 @@ export function addAgentCommand(program: Command): void {
       "Current revision",
       singleUse(REVISION_OPTION),
     )
-    .requiredOption("--switch <source>", "Prompt source", singleUse("--switch"))
+    .option("--switch <source>", "Prompt source", singleUse("--switch"))
+    .option(
+      "--system-layer <override>",
+      "System layer override of the agent scope: inherit, on or off",
+      singleUse("--system-layer"),
+    )
     .option("--on", "Turn the source on")
     .option("--off", "Turn the source off")
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
