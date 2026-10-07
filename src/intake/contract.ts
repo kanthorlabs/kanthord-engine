@@ -33,6 +33,7 @@ export const IntakeErrorCode = {
   CursorInvalid: "system.pagination.cursor_invalid",
   OutboundRequestNotFound: "intake.outbound.request.not_found",
   OutboundRequestInFlight: "intake.outbound.request.in_flight",
+  OutboundRequestDiscarded: "intake.outbound.request.discarded",
   OutboundRequestStateConflict: "intake.outbound.request.state_conflict",
   OutboundRequestForceRequired: "intake.outbound.request.force_required",
   OutboundRequestFilterInvalid: "intake.outbound.request.filter_invalid",
@@ -75,6 +76,13 @@ export const outboundRequestStateSchema = z.enum(OutboundRequestState);
 export const outboundOperationSchema = z.enum(OutboundOperation);
 export const resultClassSchema = z.enum(ResultClass);
 
+export const errorItemSchema = z.strictObject({
+  code: z.string().min(1),
+  message: z.string(),
+  created_at: timestamp,
+});
+export type ErrorItem = z.infer<typeof errorItemSchema>;
+
 export const outboundRequestSchema = z.strictObject({
   id: identitySchema(OUTBOUND_REQUEST_ID_PREFIX),
   project_id: identitySchema("project"),
@@ -82,15 +90,7 @@ export const outboundRequestSchema = z.strictObject({
   request_key: z.string().min(1),
   state: outboundRequestStateSchema,
   result: z.unknown().nullable(),
-  error: z
-    .array(
-      z.strictObject({
-        code: z.string(),
-        message: z.string(),
-        created_at: timestamp,
-      }),
-    )
-    .nullable(),
+  error: errorItemSchema.array().nullable(),
   created_at: timestamp,
 });
 

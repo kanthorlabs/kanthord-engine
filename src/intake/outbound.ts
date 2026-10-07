@@ -5,6 +5,7 @@ import {
   abortSignal,
   CancellationContext,
   type Context,
+  DeadlineExceeded,
 } from "../kernel/context.ts";
 import { diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -12,6 +13,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
+  IntakeErrorCode,
   OutboundRequestState,
   RESULT_MAX_BYTES,
   ResultClass,
@@ -36,8 +38,6 @@ const NO_LENGTH = 0;
 const NO_DURATION = 0;
 const TIMEOUT_CODE = "timeout";
 const CODE_SEPARATOR = ": ";
-const IN_FLIGHT_CODE = "intake.outbound.request.in_flight";
-const DISCARDED_CODE = "intake.outbound.request.discarded";
 const PENDING_UNMATCHED_MESSAGE =
   "The read-back found no effect of the pending request.";
 const PENDING_SOURCES: readonly OutboundRequestStateValue[] = [
@@ -229,13 +229,13 @@ function repeat(
   if (inFlight.has(row.id))
     throw new OperationError(
       HttpStatus.Conflict,
-      IN_FLIGHT_CODE,
+      IntakeErrorCode.OutboundRequestInFlight,
       "The call of this outbound request runs.",
     );
   if (row.state === OutboundRequestState.Discarded)
     throw new OperationError(
       HttpStatus.Conflict,
-      DISCARDED_CODE,
+      IntakeErrorCode.OutboundRequestDiscarded,
       "A human discarded this outbound request.",
     );
   if (row.state === OutboundRequestState.Succeeded) {
@@ -277,28 +277,44 @@ async function callOnce<TBody>(
     request.call(material, scope),
   );
   if (race.kind === RaceKind.Rejected) throw race.error;
-  if (race.kind === RaceKind.Deadline) {
-    const message = race.reason.message;
-    return {
-      outcome: {
-        kind: OutcomeKind.Failure,
-        id,
-        item: { code: TIMEOUT_CODE, message },
-      },
-      answer: {
-        ok: false,
-        class: ResultClass.UnknownOutcome,
-        code: TIMEOUT_CODE,
-        message,
-      },
-    };
-  }
+  if (race.kind === RaceKind.Deadline) return ended(id, race.reason);
   const answer = race.value;
   if (answer.ok)
     return {
       outcome: { kind: OutcomeKind.Success, id, result: answer.result },
       answer,
     };
+  return refused(id, answer);
+}
+
+function ended(id: string, reason: Error): Settlement {
+  const message = reason.message;
+  if (!(reason instanceof DeadlineExceeded))
+    return refused(id, {
+      ok: false,
+      class: ResultClass.UnknownOutcome,
+      code: ResultClass.UnknownOutcome,
+      message,
+    });
+  return {
+    outcome: {
+      kind: OutcomeKind.Failure,
+      id,
+      item: { code: TIMEOUT_CODE, message },
+    },
+    answer: {
+      ok: false,
+      class: ResultClass.UnknownOutcome,
+      code: TIMEOUT_CODE,
+      message,
+    },
+  };
+}
+
+function refused(
+  id: string,
+  answer: Extract<OutboundAnswer, { ok: false }>,
+): Settlement {
   assert.ok(resultClassSchema.safeParse(answer.class).success);
   assert.ok(answer.code.length > NO_LENGTH, "A refusal names its code.");
   const item = {

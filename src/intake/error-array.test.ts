@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { canonicalJSON } from "../kernel/json.ts";
-import { ERROR_ARRAY_MAX_BYTES, ERROR_MESSAGE_MAX_BYTES } from "./contract.ts";
-import { appendError, type ErrorItem } from "./error-array.ts";
+import {
+  ERROR_ARRAY_MAX_BYTES,
+  ERROR_MESSAGE_MAX_BYTES,
+  type ErrorItem,
+} from "./contract.ts";
+import { appendError } from "./error-array.ts";
 
 const FIRST_CODE = "a.b";
 const FIRST_MESSAGE = "boom";

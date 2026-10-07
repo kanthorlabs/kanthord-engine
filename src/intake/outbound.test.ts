@@ -5,9 +5,10 @@ import { setImmediate as tick } from "node:timers/promises";
 import pino, { type Logger } from "pino";
 import type { Material } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { background } from "../kernel/context.ts";
+import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { temporary } from "../kernel/test-support.ts";
@@ -37,6 +38,7 @@ import {
   outboundRecord,
   type OutboundRow,
 } from "./outbound-store.ts";
+import { discardOutbound } from "./outbound-write.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const REQUEST_KEY = "request-key-1";
@@ -239,6 +241,33 @@ test("A timed-out write stores timeout, and a matched repeat stores succeeded wi
   assert.equal(h.counts.readBacks, SINGLE_RUN);
 });
 
+test("A caller cancellation during the call stores unknown_outcome, not timeout", async (t) => {
+  const h = harness(t);
+  const context = new CancellationContext(background, null);
+  const caller = { ...callerOf(h.store), context };
+  const answer = runOutbound(
+    { store: h.store, logger: h.logger, inFlight: h.inFlight },
+    caller,
+    request(h.counts, {
+      call: () => {
+        context.cancel();
+        return never();
+      },
+    }),
+  );
+  const cancelled = await answer;
+  assert.ok(!cancelled.ok);
+  assert.equal(cancelled.class, ResultClass.UnknownOutcome);
+  assert.equal(cancelled.code, ResultClass.UnknownOutcome);
+  const record = outboundRecord(stored(h.store));
+  assert.equal(record.state, OutboundRequestState.Failed);
+  assert.equal(record.error?.[0]?.code, ResultClass.UnknownOutcome);
+  const repeat = await run(h, {});
+  assert.deepEqual(repeat, cancelled);
+  assert.equal(h.counts.calls, SINGLE_RUN);
+  assert.equal(h.inFlight.size, NO_ITEMS);
+});
+
 test("A call that ignores its signal ends at the deadline, and its late answer writes nothing", async (t) => {
   const h = harness(t);
   const late = Promise.withResolvers<CallAnswer>();
@@ -317,6 +346,16 @@ test("Two concurrent runs of one key make one call, and the refused repeat keeps
   assert.ok(h.inFlight.has(id));
   await rejectsWith(run(h, {}), IN_FLIGHT);
   assert.ok(h.inFlight.has(id));
+  assert.throws(
+    () => h.store.transaction((tx) => discardOutbound(tx, h.inFlight, id)),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.Conflict);
+      assert.equal(error.code, IN_FLIGHT);
+      return true;
+    },
+  );
+  assert.equal(stored(h.store).state, OutboundRequestState.Pending);
   answer.resolve({ ok: true, result: ADDRESS });
   assert.deepEqual(await first, { ok: true, result: ADDRESS });
   assert.equal(h.counts.calls, SINGLE_RUN);

@@ -118,6 +118,7 @@ components:
                 properties:
                   code:
                     type: string
+                    minLength: 1
                   message:
                     type: string
                   created_at:

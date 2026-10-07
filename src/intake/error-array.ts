@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { canonicalJSON, timestamp } from "../kernel/json.ts";
-import { ERROR_ARRAY_MAX_BYTES, ERROR_MESSAGE_MAX_BYTES } from "./contract.ts";
-
-export const errorItemSchema = z.strictObject({
-  code: z.string().min(1),
-  message: z.string(),
-  created_at: timestamp,
-});
-export type ErrorItem = z.infer<typeof errorItemSchema>;
+import { canonicalJSON } from "../kernel/json.ts";
+import {
+  ERROR_ARRAY_MAX_BYTES,
+  ERROR_MESSAGE_MAX_BYTES,
+  errorItemSchema,
+  type ErrorItem,
+} from "./contract.ts";
 
 const errorItemsSchema = z.array(errorItemSchema);
 
