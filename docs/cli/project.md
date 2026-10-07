@@ -115,7 +115,7 @@ authenticated human has server-wide human authority, including all projects
 and their binding configuration. No project-member role, owner-only privilege,
 or per-project ACL is assumed. A machine JWT does not authorize configuration
 or secret selection. A caller-supplied project, binding, or actor field is not
-authentication; requests contain no `caller` or `humanIdentity` override.
+authentication; requests contain no `caller` or `human_identity` override.
 
 Ordinary success prints one JSON value and exits `0`. A list prints one page
 with required proposed fields `items` (array) and `next_cursor` (nonempty opaque
