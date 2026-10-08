@@ -1,5 +1,4 @@
 import type { TaskContent } from "../mission/contract.ts";
-import { EndReason } from "./execution-run.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { diffText } from "./local-git.ts";
 import {
@@ -28,6 +27,12 @@ const budgetEndAfterWork: TaskResult = {
   boundary: TaskBoundary.RunPassed,
 };
 
+const ReviewStop = {
+  BudgetEnd: "budget_end",
+  Invalid: "invalid",
+} as const;
+type ReviewStop = (typeof ReviewStop)[keyof typeof ReviewStop];
+
 export interface ReviewerSessions {
   open(directory: string): Promise<NativeAgent>;
   close(agent: NativeAgent): void;
@@ -40,7 +45,7 @@ async function reviewTask(
   base: string,
   findings: readonly Finding[],
   replies: string | null,
-): Promise<Review | null> {
+): Promise<Review | ReviewStop> {
   const budget = state.agent.budget;
   const diff = await diffText(
     state.directory,
@@ -51,15 +56,13 @@ async function reviewTask(
   );
   const agent = await reviewer.open(state.directory);
   try {
-    if (budget.exhausted()) return null;
+    if (budget.exhausted()) return ReviewStop.BudgetEnd;
     await agent.instruct(
       taskWork(state, task),
       reviewInstruction({ task, diff, findings, replies }),
     );
-    if (budget.exhausted()) return null;
-    const review = parseReview(agent.lastText());
-    if (!review) state.run.stop(EndReason.JudgementInvalid);
-    return review;
+    if (budget.exhausted()) return ReviewStop.BudgetEnd;
+    return parseReview(agent.lastText()) ?? ReviewStop.Invalid;
   } finally {
     reviewer.close(agent);
   }
@@ -83,7 +86,8 @@ export function reviewedTaskRunner(reviewer: ReviewerSessions): TaskRunner {
         findings,
         replies,
       );
-      if (!review) return budgetEndAfterWork;
+      if (review === ReviewStop.BudgetEnd) return budgetEndAfterWork;
+      if (review === ReviewStop.Invalid) return result;
       findings = review.findings;
       if (findings.length === NO_FINDINGS) return result;
       if (budget.exhausted()) return budgetEndAfterWork;

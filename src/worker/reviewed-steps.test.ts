@@ -20,7 +20,7 @@ import {
   unusedHostTools,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
-import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import {
@@ -281,22 +281,19 @@ test("the review stops after the round cap while a blocker stands", async (t) =>
   assert.equal(reviewer.closed(), REVIEW_ROUNDS);
 });
 
-test("a review without the review line stops the execution with an invalid judgement", async (t) => {
+test("a review without the review line ends the review and keeps the task result", async (t) => {
   const h = await fixture(t, [
     write("a.txt"),
     fauxAssistantMessage("done"),
     fauxAssistantMessage(JUDGEMENT),
   ]);
   const reviewer = fakeReviewer(h.budget, ["no verdict"]);
-  await assert.rejects(
-    reviewedTaskRunner(reviewer.sessions)(
-      h.state,
-      task,
-      TaskBoundary.InProgress,
-    ),
-    (error: unknown) =>
-      error instanceof ExecutionStop &&
-      error.reason === EndReason.JudgementInvalid,
+  const result = await reviewedTaskRunner(reviewer.sessions)(
+    h.state,
+    task,
+    TaskBoundary.InProgress,
   );
+  assert.deepEqual(result, { kind: TaskResultKind.Complete });
+  assert.equal(reviewer.instructions.length, FIRST_ROUND);
   assert.equal(reviewer.closed(), FIRST_ROUND);
 });
