@@ -211,6 +211,60 @@ export function discardEventFrom(
   return Number(changes) === ONE_ROW;
 }
 
+export function pendingEventAmong(
+  tx: Transaction,
+  ids: readonly string[],
+): string | null {
+  assert.ok(ids.length > NO_LENGTH, "An identity list is not empty.");
+  assert.ok(tx.database, "A read runs inside a transaction.");
+  const marks = ids.map(() => "?").join(", ");
+  const row = tx.database
+    .prepare(
+      `SELECT id FROM intake_inbound_event WHERE id IN (${marks}) AND state = ? ORDER BY id LIMIT 1`,
+    )
+    .get(...ids, InboundEventState.Pending) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+export function deleteSettledEvents(
+  tx: Transaction,
+  ids: readonly string[],
+): number {
+  assert.ok(ids.length > NO_LENGTH, "An identity list is not empty.");
+  assert.ok(tx.database, "A delete runs inside a transaction.");
+  const marks = ids.map(() => "?").join(", ");
+  const changes = tx.database
+    .prepare(
+      `DELETE FROM intake_inbound_event WHERE id IN (${marks}) AND state != ?`,
+    )
+    .run(...ids, InboundEventState.Pending).changes;
+  assert.ok(Number(changes) <= ids.length, "A delete removes named rows only.");
+  return Number(changes);
+}
+
+export function deleteEventsInRange(
+  tx: Transaction,
+  state: InboundEventStateValue,
+  from: string,
+  to: string,
+): number {
+  assert.notEqual(
+    state,
+    InboundEventState.Pending,
+    "No delete removes a pending event.",
+  );
+  assert.ok(
+    from.length > NO_LENGTH && to.length > NO_LENGTH,
+    "A range has two bounds.",
+  );
+  const changes = tx.database
+    .prepare(
+      "DELETE FROM intake_inbound_event WHERE state = ? AND id >= ? AND id <= ?",
+    )
+    .run(state, from, to).changes;
+  return Number(changes);
+}
+
 export function eventRecord(row: InboundEventProjectionRow): InboundEvent {
   return inboundEventSchema.parse({
     id: row.id,

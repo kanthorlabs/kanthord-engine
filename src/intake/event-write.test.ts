@@ -42,6 +42,9 @@ const CREATED_AT = 100;
 const NOT_FOUND = "intake.inbound.event.not_found";
 const IN_FLIGHT = "intake.inbound.event.in_flight";
 const STATE_CONFLICT = "intake.inbound.event.state_conflict";
+const FILTER_INVALID = "intake.inbound.event.filter_invalid";
+const RANGE_SIZE = 7;
+const RANGE_DELETED = 3;
 const ERROR_ITEM = {
   code: "indeterminate",
   message: "The consumer answer is indeterminate.",
@@ -152,6 +155,23 @@ function harness(t: TestContext) {
       return id;
     });
   const stateOf = (id: string) => store.transaction((tx) => eventState(tx, id));
+  const setState = (id: string, state: InboundEventStateValue) =>
+    store.transaction((tx) =>
+      tx.database
+        .prepare("UPDATE intake_inbound_event SET state = ? WHERE id = ?")
+        .run(state, id),
+    );
+  const deleteEvents = async (body: unknown) => {
+    const operation = intakeOperations["inbound.event.delete"];
+    return operation.output.parse(
+      await registry
+        .get(operation.id)
+        .handler(
+          operation.input.parse({ params: {}, query: {}, body }),
+          caller,
+        ),
+    );
+  };
   return {
     store,
     intake,
@@ -159,6 +179,8 @@ function harness(t: TestContext) {
     answers,
     addEvent,
     stateOf,
+    setState,
+    deleteEvents,
     retry: write("inbound.event.retry"),
     discard: write("inbound.event.discard"),
   };
@@ -311,4 +333,80 @@ test("A retry or a discard write from a stale state changes no row", (t) => {
   });
   assert.equal(h.stateOf(pending), InboundEventState.Pending);
   assert.equal(h.stateOf(succeeded), InboundEventState.Succeeded);
+});
+
+test("A delete without a filter, with both filters or with the state pending answers 400 filter_invalid", async (t) => {
+  const h = harness(t);
+  const id = h.addEvent(InboundEventState.Failed);
+  const bodies = [
+    {},
+    { state: InboundEventState.Failed, from: id },
+    { from: id, to: id },
+    { state: InboundEventState.Failed, from: id, to: id, ids: [id] },
+    { state: InboundEventState.Failed, ids: [id] },
+    { state: InboundEventState.Pending, from: id, to: id },
+  ];
+  for (const body of bodies)
+    await assert.rejects(
+      h.deleteEvents(body),
+      refusal(HttpStatus.BadRequest, FILTER_INVALID),
+    );
+  assert.equal(h.stateOf(id), InboundEventState.Failed);
+});
+
+test("A delete list that names a succeeded and a pending event answers 409 state_conflict and deletes neither", async (t) => {
+  const h = harness(t);
+  const succeeded = h.addEvent(InboundEventState.Succeeded);
+  const pending = h.addEvent();
+  await assert.rejects(
+    h.deleteEvents({ ids: [succeeded, pending] }),
+    refusal(HttpStatus.Conflict, STATE_CONFLICT),
+  );
+  assert.equal(h.stateOf(succeeded), InboundEventState.Succeeded);
+  assert.equal(h.stateOf(pending), InboundEventState.Pending);
+});
+
+test("A delete list removes the named settled events and answers their count", async (t) => {
+  const h = harness(t);
+  const named = [
+    h.addEvent(InboundEventState.Succeeded),
+    h.addEvent(InboundEventState.Failed),
+    h.addEvent(InboundEventState.Discarded),
+  ];
+  const kept = h.addEvent(InboundEventState.Succeeded);
+  const absent = createIdentity(INBOUND_EVENT_ID_PREFIX);
+  const answer = await h.deleteEvents({ ids: [...named, absent] });
+  assert.deepEqual(answer, { count: named.length });
+  for (const id of named) assert.equal(h.stateOf(id), null);
+  assert.equal(h.stateOf(kept), InboundEventState.Succeeded);
+});
+
+test("Each state filter over a range of mixed states removes that state alone, both bounds included", async (t) => {
+  for (const state of [
+    InboundEventState.Succeeded,
+    InboundEventState.Failed,
+    InboundEventState.Discarded,
+  ]) {
+    const h = harness(t);
+    const ids = Array.from({ length: RANGE_SIZE }, () => h.addEvent()).sort();
+    const [first, pending, succeeded, failed, discarded, last, outside] = ids;
+    assert.ok(first && pending && succeeded && failed && discarded);
+    assert.ok(last && outside);
+    const states = new Map<string, InboundEventStateValue>([
+      [first, state],
+      [pending, InboundEventState.Pending],
+      [succeeded, InboundEventState.Succeeded],
+      [failed, InboundEventState.Failed],
+      [discarded, InboundEventState.Discarded],
+      [last, state],
+      [outside, state],
+    ]);
+    for (const [id, value] of states) h.setState(id, value);
+    const answer = await h.deleteEvents({ state, from: first, to: last });
+    assert.deepEqual(answer, { count: RANGE_DELETED });
+    for (const [id, value] of states) {
+      const removed: boolean = id !== outside && value === state;
+      assert.equal(h.stateOf(id), removed ? null : value);
+    }
+  }
 });

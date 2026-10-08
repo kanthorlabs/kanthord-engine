@@ -62,6 +62,7 @@ export const IntakeErrorCode = {
   InboundEventNotFound: "intake.inbound.event.not_found",
   InboundEventInFlight: "intake.inbound.event.in_flight",
   InboundEventStateConflict: "intake.inbound.event.state_conflict",
+  InboundEventFilterInvalid: "intake.inbound.event.filter_invalid",
   InboundEventSignatureInvalid: "intake.inbound.event.signature_invalid",
   InboundEventCapacityExceeded: "intake.inbound.event.capacity_exceeded",
 } as const;
@@ -259,6 +260,17 @@ export const outboundDeleteSchema = z.strictObject({
     .optional(),
 });
 
+export const inboundEventDeleteSchema = z.strictObject({
+  state: inboundEventStateSchema.optional(),
+  from: identitySchema(INBOUND_EVENT_ID_PREFIX).optional(),
+  to: identitySchema(INBOUND_EVENT_ID_PREFIX).optional(),
+  ids: z
+    .array(identitySchema(INBOUND_EVENT_ID_PREFIX))
+    .min(1)
+    .max(DELETE_IDS_MAX)
+    .optional(),
+});
+
 export type InboundKindValue = z.infer<typeof inboundKindSchema>;
 export type InboundPlatformValue = z.infer<typeof inboundPlatformSchema>;
 export type ConsumerValue = z.infer<typeof consumerSchema>;
@@ -274,6 +286,7 @@ export type Inbound = z.infer<typeof inboundSchema>;
 export type WebhookInbound = z.infer<typeof webhookInboundSchema>;
 export type InboundCreate = z.infer<typeof inboundCreateSchema>;
 export type OutboundDelete = z.infer<typeof outboundDeleteSchema>;
+export type InboundEventDelete = z.infer<typeof inboundEventDeleteSchema>;
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
 export type ResultClassAnswer = z.infer<typeof resultClassAnswerSchema>;
 export type ActionReadMethodValue = z.infer<typeof actionReadMethodSchema>;
@@ -574,6 +587,20 @@ export const intakeOperations = {
     output: inboundEventSchema,
     description:
       "Discard a pending or a failed inbound event whose handoff does not run.",
+  },
+  "inbound.event.delete": {
+    ...mutationOperation,
+    id: "intake.inbound.event.delete",
+    path: "/api/intake/event/delete",
+    body: true,
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: inboundEventDeleteSchema,
+    }),
+    output: z.strictObject({ count: z.number().int().nonnegative() }),
+    description:
+      "Delete settled inbound events by a state with an identity range or by a list of identities.",
   },
   "inbound.event.receive": {
     ...baseOperation,

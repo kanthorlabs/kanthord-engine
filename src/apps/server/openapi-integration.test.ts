@@ -711,6 +711,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.inbound.event.get", AccessPolicy.Human],
   ["intake.inbound.event.retry", AccessPolicy.Human],
   ["intake.inbound.event.discard", AccessPolicy.Human],
+  ["intake.inbound.event.delete", AccessPolicy.Human],
   ["intake.inbound.event.receive", AccessPolicy.Delivery],
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
@@ -721,7 +722,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 169;
+const OPERATION_COUNT = 170;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1520,6 +1521,26 @@ test("published inbound event retry and discard are human mutation routes", asyn
     intakeOperations["inbound.event.discard"].id,
   );
   assert.equal(discard?.["x-access-policy"], AccessPolicy.Human);
+});
+
+test("published inbound event delete is a human mutation route that answers a count", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const remove = resolved.paths?.["/api/intake/event/delete"]?.post as
+    | (ResolvedOperation & {
+        responses?: Record<
+          number,
+          { content?: Record<string, { schema: ResolvedSchema }> }
+        >;
+      })
+    | undefined;
+  assert.equal(
+    remove?.operationId,
+    intakeOperations["inbound.event.delete"].id,
+  );
+  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
+  const schema =
+    remove?.responses?.[HttpStatus.OK]?.content?.["application/json"]?.schema;
+  assert.deepEqual(schema?.required, ["count"]);
 });
 
 test("published inbound create is a human mutation route with a 201 inbound", async () => {
