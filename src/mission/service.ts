@@ -68,8 +68,10 @@ import { actionContextOf } from "./action-context.ts";
 import {
   authorizeAction,
   authorizeFrozenAction,
+  authorizeObjectPut,
   authorizeRequest,
   authorizeRequestEvidence,
+  type ObjectPutInput,
 } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
 import {
@@ -861,6 +863,14 @@ export class MissionService
       evidenceId,
       claim,
     );
+  }
+  authorizeObjectPut(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    input: ObjectPutInput,
+  ) {
+    return authorizeObjectPut(tx, this.dependencies, identity, claim, input);
   }
 
   repositoryBindingIdsOf(

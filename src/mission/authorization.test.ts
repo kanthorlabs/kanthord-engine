@@ -6,9 +6,12 @@ import {
 } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
+  AssetKind,
   MissionErrorCode,
+  OBJECT_SIZE_MAX,
   NodeState,
   PlatformAddressKind,
   RepositoryAction,
@@ -18,7 +21,8 @@ import {
   authorizeBinding,
   authorizeClaim,
 } from "./authorization.ts";
-import { closeAttempt } from "./record-store.ts";
+import { objectLocation } from "./evidence-content.ts";
+import { closeAttempt, insertEvidence } from "./record-store.ts";
 import { setNodeState } from "./store.ts";
 import {
   ASSESSED_COMMIT,
@@ -313,4 +317,136 @@ test("a request evidence refuses another node, a missing claim, a dead claim and
     h.evidence(id).facts.address.kind,
     PlatformAddressKind.PullRequest,
   );
+});
+
+const UPLOAD_EXPIRED_AT = Date.now() + 3600000;
+const OBJECT_SIZE = 7;
+const OBJECT_VERSION = "v1";
+const SHA256 = "c".repeat(64);
+const VALIDATION_FAILED = "gateway.request.validation_failed";
+
+function assetHarness(t: TestContext) {
+  const h = actionHarness(t);
+  const put = (
+    input: Partial<{
+      nodeId: string;
+      assetId: string;
+      storageBindingId: string;
+      size: number;
+    }> = {},
+  ) =>
+    h.store.transaction((tx) =>
+      h.service.authorizeObjectPut(tx, h.machine, h.claim, {
+        nodeId: h.node_id,
+        assetId: createIdentity("evidence_asset"),
+        storageBindingId: h.storageId,
+        size: OBJECT_SIZE,
+        sha256: SHA256,
+        ...input,
+      }),
+    );
+  const object = (
+    fields: Partial<{
+      nodeId: string;
+      attempt: number;
+      published: boolean;
+      expiredAt: number;
+    }> = {},
+  ) => {
+    const evidenceId = createIdentity("evidence");
+    const assetId = createIdentity("evidence_asset");
+    const published = fields.published ?? false;
+    h.store.transaction((tx) =>
+      insertEvidence(
+        tx,
+        {
+          id: evidenceId,
+          node_id: fields.nodeId ?? h.node_id,
+          attempt: fields.attempt ?? h.claim.attempt,
+          subject: "Object",
+          requirement_key: null,
+          end_state: null,
+          verification: null,
+          provenance: canonicalJSON(h.executionActor),
+          created_at: Date.now(),
+        },
+        [
+          {
+            id: assetId,
+            evidence_id: evidenceId,
+            kind: AssetKind.Object,
+            content: canonicalJSON({
+              location: objectLocation(h.storage, `prefix/${assetId}`),
+              size: OBJECT_SIZE,
+              media_type: "text/plain",
+              storage_binding_id: h.storageId,
+              ...(published ? { object_version: OBJECT_VERSION } : {}),
+            }),
+            published_at: published ? Date.now() : null,
+            expired_at: published
+              ? null
+              : (fields.expiredAt ?? UPLOAD_EXPIRED_AT),
+          },
+        ],
+      ),
+    );
+    return { evidenceId, assetId };
+  };
+  return { ...h, put, object };
+}
+
+test("an object PUT names the server key of the claim attempt and the storage credential", (t) => {
+  const h = assetHarness(t);
+  const assetId = createIdentity("evidence_asset");
+  const granted = h.put({ assetId });
+  const key = [
+    h.storage.prefix,
+    h.project_id,
+    h.mission_id,
+    h.node_id,
+    h.claim.attempt,
+    assetId,
+  ].join("/");
+  assert.deepEqual(granted, {
+    credential: h.storage.credential,
+    platform: "s3",
+    project_id: h.project_id,
+    facts: {
+      storage: {
+        binding_id: h.storageId,
+        endpoint: h.storage.endpoint,
+        bucket: h.storage.bucket,
+        region: h.storage.region,
+      },
+      key,
+      location: `s3://${h.storage.bucket}/${key}`,
+      version: null,
+      size: OBJECT_SIZE,
+      sha256: SHA256,
+    },
+  });
+  assert.equal(h.put({ size: OBJECT_SIZE_MAX }).facts.size, OBJECT_SIZE_MAX);
+});
+
+test("an object PUT refuses another node, a recorded asset, another storage binding and a size above the limit", (t) => {
+  const h = assetHarness(t);
+  refuses(() => h.put({ nodeId: h.otherNode() }), "node_mismatch");
+  refuses(() => h.put({ assetId: h.object().assetId }), "node_mismatch");
+  refuses(
+    () => h.put({ storageBindingId: createIdentity("binding") }),
+    "node_mismatch",
+  );
+  assert.throws(() => h.put({ size: OBJECT_SIZE_MAX + 1 }), {
+    status: 400,
+    code: VALIDATION_FAILED,
+  });
+  const live = h.dependencies.schedulerClaims.liveExecutionOf;
+  h.dependencies.schedulerClaims.liveExecutionOf = () => null;
+  refuses(() => h.put(), "claim_not_live");
+  h.dependencies.schedulerClaims.liveExecutionOf = live;
+});
+
+test("a disabled or removed storage binding refuses an object PUT", (t) => {
+  const h = assetHarness(t);
+  bindingRefusals(h, () => h.put());
 });

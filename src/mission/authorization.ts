@@ -15,6 +15,7 @@ import {
   MISSION_SERVICE_NAME,
   MissionErrorCode,
   NodeState,
+  OBJECT_SIZE_MAX,
   PlatformAddressKind,
   RepositoryAction,
   platformAddressSchema,
@@ -27,14 +28,23 @@ import {
   type PullRequestAddress,
   type RepositoryFacts,
   type RequestFacts,
+  type StorageBinding,
 } from "./contract.ts";
 import { currentAssessmentOf } from "./currency.ts";
+import {
+  objectKey,
+  objectLocation,
+  storageBindingIdOf,
+} from "./evidence-content.ts";
+import { invalidExecutionInput } from "./execution.ts";
 import { requiredActionsOf } from "./frozen-action.ts";
+import { getRevision } from "./node-read.ts";
 import {
   readOpenAttempt,
   readAttempt,
   readEvidence,
   readAssets,
+  type AssetRow,
 } from "./record-store.ts";
 import { readNode } from "./store.ts";
 import type { Dependencies } from "./service.ts";
@@ -332,4 +342,105 @@ export function authorizeRequestEvidence(
     project_id: policy.project_id,
     facts: { frozen_action: action, address, repository },
   };
+}
+
+export type AssetFacts = {
+  storage: {
+    binding_id: string;
+    endpoint: string;
+    bucket: string;
+    region: string;
+  };
+  key: string;
+  location: string;
+  version: string | null;
+  size: number;
+  sha256: string | null;
+};
+export type ObjectPutInput = {
+  nodeId: string;
+  assetId: string;
+  storageBindingId: string;
+  size: number;
+  sha256: string | null;
+};
+const OBJECT_PLATFORM = "s3";
+const OBJECT_SIZE_MIN = 0;
+
+function assetAuthorized(
+  binding: StorageBinding,
+  fields: {
+    key: string;
+    location: string;
+    version: string | null;
+    size: number;
+    sha256: string | null;
+  },
+): Authorized<AssetFacts> {
+  assert.ok(binding.credential);
+  assert.ok(
+    Number.isSafeInteger(fields.size) && fields.size >= OBJECT_SIZE_MIN,
+  );
+  return {
+    credential: binding.credential,
+    platform: OBJECT_PLATFORM,
+    project_id: binding.project_id,
+    facts: {
+      storage: {
+        binding_id: binding.binding_id,
+        endpoint: binding.endpoint,
+        bucket: binding.bucket,
+        region: binding.region,
+      },
+      ...fields,
+    },
+  };
+}
+
+function readAssetRow(tx: Transaction, assetId: string): AssetRow | null {
+  assert.ok(tx.database.isTransaction);
+  assert.ok(assetId);
+  return (
+    (tx.database
+      .prepare("SELECT * FROM mission_evidence_asset WHERE id = ?")
+      .get(assetId) as AssetRow | undefined) ?? null
+  );
+}
+
+export function authorizeObjectPut(
+  tx: Transaction,
+  dependencies: AuthorizationDependencies,
+  identity: MachineIdentity,
+  claim: ExecutionClaim,
+  input: ObjectPutInput,
+): Authorized<AssetFacts> {
+  assert.equal(identity.kind, IdentityKind.Client);
+  assert.equal(identity.projectId, claim.projectId);
+  assert.ok(Number.isSafeInteger(input.size) && input.size >= OBJECT_SIZE_MIN);
+  const attempt = authorizeClaim(tx, dependencies, claim, input.nodeId);
+  if (readAssetRow(tx, input.assetId))
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  if (input.size > OBJECT_SIZE_MAX) invalidExecutionInput("size", "too_big");
+  const node = readNode(tx, input.nodeId);
+  assert.ok(node);
+  const revision = getRevision(tx, node.id, attempt.node_revision);
+  const pinned = storageBindingIdOf(tx, dependencies.bindings, revision);
+  if (pinned === null || pinned !== input.storageBindingId)
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  const binding = authorizeStorage(tx, dependencies.bindings, pinned);
+  const key = objectKey(
+    binding,
+    claim.projectId,
+    node.mission_id,
+    node.id,
+    claim.attempt,
+    input.assetId,
+  );
+  return assetAuthorized(binding, {
+    key,
+    location: objectLocation(binding, key),
+    version: null,
+    size: input.size,
+    sha256: input.sha256,
+  });
 }
