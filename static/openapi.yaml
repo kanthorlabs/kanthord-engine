@@ -40,6 +40,8 @@ paths:
     $ref: ./openapi/intake/inbound.create.yaml#/pathItem
   /api/intake/inbound/{inbound_id}:
     $ref: ./openapi/intake/inbound.delete.yaml#/pathItem
+  /api/intake/event/{inbound_event_id}/discard:
+    $ref: ./openapi/intake/inbound.event.discard.yaml#/pathItem
   /api/intake/event/{inbound_event_id}:
     $ref: ./openapi/intake/inbound.event.get.yaml#/pathItem
   /api/intake/event:

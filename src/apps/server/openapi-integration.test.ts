@@ -710,6 +710,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.inbound.event.list", AccessPolicy.Human],
   ["intake.inbound.event.get", AccessPolicy.Human],
   ["intake.inbound.event.retry", AccessPolicy.Human],
+  ["intake.inbound.event.discard", AccessPolicy.Human],
   ["intake.inbound.event.receive", AccessPolicy.Delivery],
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
@@ -720,7 +721,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 168;
+const OPERATION_COUNT = 169;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1505,12 +1506,20 @@ test("published outbound request discard and delete are human mutation routes", 
   assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
 });
 
-test("published inbound event retry is a human mutation route", async () => {
+test("published inbound event retry and discard are human mutation routes", async () => {
   const resolved = await SwaggerParser.dereference(openapiPath());
   const retry = resolved.paths?.["/api/intake/event/{inbound_event_id}/retry"]
     ?.post as ResolvedOperation | undefined;
+  const discard = resolved.paths?.[
+    "/api/intake/event/{inbound_event_id}/discard"
+  ]?.post as ResolvedOperation | undefined;
   assert.equal(retry?.operationId, intakeOperations["inbound.event.retry"].id);
   assert.equal(retry?.["x-access-policy"], AccessPolicy.Human);
+  assert.equal(
+    discard?.operationId,
+    intakeOperations["inbound.event.discard"].id,
+  );
+  assert.equal(discard?.["x-access-policy"], AccessPolicy.Human);
 });
 
 test("published inbound create is a human mutation route with a 201 inbound", async () => {

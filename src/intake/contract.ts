@@ -60,6 +60,7 @@ export const IntakeErrorCode = {
   InboundNotFound: "intake.inbound.not_found",
   InboundEventsPending: "intake.inbound.events_pending",
   InboundEventNotFound: "intake.inbound.event.not_found",
+  InboundEventInFlight: "intake.inbound.event.in_flight",
   InboundEventStateConflict: "intake.inbound.event.state_conflict",
   InboundEventSignatureInvalid: "intake.inbound.event.signature_invalid",
   InboundEventCapacityExceeded: "intake.inbound.event.capacity_exceeded",
@@ -557,6 +558,22 @@ export const intakeOperations = {
     output: inboundEventSchema,
     description:
       "Turn a failed inbound event back to pending; a pending event answers its current state.",
+  },
+  "inbound.event.discard": {
+    ...mutationOperation,
+    id: "intake.inbound.event.discard",
+    path: "/api/intake/event/:inbound_event_id/discard",
+    body: false,
+    input: z.strictObject({
+      params: z.strictObject({
+        inbound_event_id: identitySchema(INBOUND_EVENT_ID_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: inboundEventSchema,
+    description:
+      "Discard a pending or a failed inbound event whose handoff does not run.",
   },
   "inbound.event.receive": {
     ...baseOperation,

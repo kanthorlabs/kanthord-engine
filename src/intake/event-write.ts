@@ -9,6 +9,7 @@ import {
   type InboundEventStateValue,
 } from "./contract.ts";
 import {
+  discardEventFrom,
   eventRecord,
   readEventProjection,
   retryFailedEvent,
@@ -49,5 +50,30 @@ export function retryEvent(tx: Transaction, id: string): InboundEvent {
   if (row.state !== InboundEventState.Failed)
     stateConflict(row.state, "retried");
   assert.ok(retryFailedEvent(tx, id), "A failed event turns to pending.");
+  return current(tx, id);
+}
+
+export function discardEvent(
+  tx: Transaction,
+  inFlight: (id: string) => boolean,
+  id: string,
+): InboundEvent {
+  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  const row = stored(tx, id);
+  if (row.state === InboundEventState.Pending && inFlight(id))
+    throw new OperationError(
+      HttpStatus.Conflict,
+      IntakeErrorCode.InboundEventInFlight,
+      "The handoff of this inbound event runs.",
+    );
+  if (
+    row.state !== InboundEventState.Pending &&
+    row.state !== InboundEventState.Failed
+  )
+    stateConflict(row.state, "discarded");
+  assert.ok(
+    discardEventFrom(tx, id, row.state),
+    "A pending or a failed event turns to discarded.",
+  );
   return current(tx, id);
 }

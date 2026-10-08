@@ -192,6 +192,25 @@ export function retryFailedEvent(tx: Transaction, id: string): boolean {
   return Number(changes) === ONE_ROW;
 }
 
+export function discardEventFrom(
+  tx: Transaction,
+  id: string,
+  from: InboundEventStateValue,
+): boolean {
+  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    from === InboundEventState.Pending || from === InboundEventState.Failed,
+    "A discard starts from pending or failed.",
+  );
+  const changes = tx.database
+    .prepare(
+      "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
+    )
+    .run(InboundEventState.Discarded, id, from).changes;
+  assert.ok(Number(changes) <= ONE_ROW, "A write changes at most one row.");
+  return Number(changes) === ONE_ROW;
+}
+
 export function eventRecord(row: InboundEventProjectionRow): InboundEvent {
   return inboundEventSchema.parse({
     id: row.id,

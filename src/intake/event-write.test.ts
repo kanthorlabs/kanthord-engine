@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { setImmediate as tick } from "node:timers/promises";
 import pino from "pino";
 import { IdentityKind } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
@@ -25,7 +26,12 @@ import {
   type InboundEventStateValue,
   type IntakeConsumers,
 } from "./contract.ts";
-import { eventState, insertEvent, retryFailedEvent } from "./event-store.ts";
+import {
+  discardEventFrom,
+  eventState,
+  insertEvent,
+  retryFailedEvent,
+} from "./event-store.ts";
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
@@ -34,6 +40,7 @@ import { unusedActionDependencies, type ConsumerCall } from "./test-support.ts";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREATED_AT = 100;
 const NOT_FOUND = "intake.inbound.event.not_found";
+const IN_FLIGHT = "intake.inbound.event.in_flight";
 const STATE_CONFLICT = "intake.inbound.event.state_conflict";
 const ERROR_ITEM = {
   code: "indeterminate",
@@ -41,8 +48,10 @@ const ERROR_ITEM = {
   created_at: CREATED_AT,
 };
 const OK = 200;
+const NO_CALLS = 0;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
+const WAIT_TICKS = 1000;
 
 type Answer = () => Promise<OperationResult<unknown>>;
 
@@ -91,19 +100,21 @@ function harness(t: TestContext) {
     requestId: createIdentity("request"),
     commit: (write) => store.transaction(write),
   };
-  const write = (key: "inbound.event.retry") => async (id: string) => {
-    const operation = intakeOperations[key];
-    return operation.output.parse(
-      await registry.get(operation.id).handler(
-        operation.input.parse({
-          params: { inbound_event_id: id },
-          query: {},
-          body: null,
-        }),
-        caller,
-      ),
-    );
-  };
+  const write =
+    (key: "inbound.event.retry" | "inbound.event.discard") =>
+    async (id: string) => {
+      const operation = intakeOperations[key];
+      return operation.output.parse(
+        await registry.get(operation.id).handler(
+          operation.input.parse({
+            params: { inbound_event_id: id },
+            query: {},
+            body: null,
+          }),
+          caller,
+        ),
+      );
+    };
   const inboundId = allocateInboundId();
   store.transaction((tx) =>
     insertInbound(tx, inboundId, {
@@ -149,6 +160,7 @@ function harness(t: TestContext) {
     addEvent,
     stateOf,
     retry: write("inbound.event.retry"),
+    discard: write("inbound.event.discard"),
   };
 }
 
@@ -157,6 +169,12 @@ function refusal(status: number, code: string) {
     error instanceof OperationError &&
     error.status === status &&
     error.code === code;
+}
+
+async function untilCalls(calls: ConsumerCall[], count: number) {
+  for (let step = 0; step < WAIT_TICKS && calls.length < count; step++)
+    await tick();
+  assert.equal(calls.length, count);
 }
 
 test("A retry turns a failed event to pending and keeps its error", async (t) => {
@@ -192,13 +210,63 @@ test("A retry of a succeeded or a discarded event answers 409 state_conflict", a
   }
 });
 
-test("A retry of an absent event answers 404 not_found", async (t) => {
+test("A retry and a discard of an absent event answer 404 not_found", async (t) => {
   const h = harness(t);
   const absent = createIdentity(INBOUND_EVENT_ID_PREFIX);
   await assert.rejects(
     h.retry(absent),
     refusal(HttpStatus.NotFound, NOT_FOUND),
   );
+  await assert.rejects(
+    h.discard(absent),
+    refusal(HttpStatus.NotFound, NOT_FOUND),
+  );
+});
+
+test("A discard turns a pending or a failed event to discarded", async (t) => {
+  const h = harness(t);
+  for (const state of [InboundEventState.Pending, InboundEventState.Failed]) {
+    const id = h.addEvent(state);
+    const event = await h.discard(id);
+    assert.equal(event.state, InboundEventState.Discarded);
+    assert.equal(h.stateOf(id), InboundEventState.Discarded);
+  }
+});
+
+test("A discard of a succeeded or a discarded event answers 409 state_conflict", async (t) => {
+  const h = harness(t);
+  for (const state of [
+    InboundEventState.Succeeded,
+    InboundEventState.Discarded,
+  ]) {
+    const id = h.addEvent(state);
+    await assert.rejects(
+      h.discard(id),
+      refusal(HttpStatus.Conflict, STATE_CONFLICT),
+    );
+    assert.equal(h.stateOf(id), state);
+  }
+});
+
+test("A discard after the reservation of a handoff answers 409 in_flight, and the handoff writes its state", async (t) => {
+  const h = harness(t);
+  const id = h.addEvent();
+  let release: () => void = () => assert.fail("The handoff is not held.");
+  h.answers.push(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve(completed());
+      }),
+  );
+  h.intake.dispatcher.wake();
+  await untilCalls(h.calls, ONE_CALL);
+  assert.equal(h.intake.dispatcher.inFlight(id), true);
+  await assert.rejects(h.discard(id), refusal(HttpStatus.Conflict, IN_FLIGHT));
+  assert.equal(h.stateOf(id), InboundEventState.Pending);
+  release();
+  await h.intake.dispatcher.join();
+  assert.equal(h.stateOf(id), InboundEventState.Succeeded);
+  assert.equal(h.intake.dispatcher.inFlight(id), false);
 });
 
 test("A retried event is handed over once more when the dispatcher wakes", async (t) => {
@@ -220,11 +288,27 @@ test("A retried event is handed over once more when the dispatcher wakes", async
   assert.equal(h.stateOf(id), InboundEventState.Succeeded);
 });
 
-test("A retry write from a stale state changes no row", (t) => {
+test("A discarded event is handed over by no later wake", async (t) => {
+  const h = harness(t);
+  const id = h.addEvent(InboundEventState.Failed);
+  await h.discard(id);
+  h.intake.dispatcher.wake();
+  await h.intake.dispatcher.join();
+  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.stateOf(id), InboundEventState.Discarded);
+});
+
+test("A retry or a discard write from a stale state changes no row", (t) => {
   const h = harness(t);
   const pending = h.addEvent();
+  const succeeded = h.addEvent(InboundEventState.Succeeded);
   h.store.transaction((tx) => {
     assert.equal(retryFailedEvent(tx, pending), false);
+    assert.equal(
+      discardEventFrom(tx, succeeded, InboundEventState.Failed),
+      false,
+    );
   });
   assert.equal(h.stateOf(pending), InboundEventState.Pending);
+  assert.equal(h.stateOf(succeeded), InboundEventState.Succeeded);
 });
