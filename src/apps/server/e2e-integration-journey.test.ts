@@ -76,6 +76,7 @@ const PUSH_EVENT_ID = "500";
 const MERGED_DELIVERY = "d-1";
 const WEBHOOK_CAPABILITY = "webhook";
 const POLL_CAPABILITY = "poll acquisition";
+const EMPTY_OWNER = { global: {}, projects: {} };
 const REGION = "eu-central-1";
 const STORAGE_PREFIX = "kanthord";
 const OBJECT_BODY = "hello";
@@ -123,6 +124,7 @@ async function setup(t: TestContext) {
       [`git@github.com:owner/${MERGE}.git`]: mergeBare.bare,
     }),
     intake: { pollIntervalMs: POLL_INTERVAL_MS },
+    inventoryOverrides: { repository: () => [] },
   });
   const session = cliSession(t, fixture.endpoint, fixture.token, SECRET);
   const { read, write } = session;
@@ -281,7 +283,9 @@ function journey(h: Harness) {
     assert.equal(response.status, HttpStatus.OK);
     const text = await response.text();
     clean(text);
-    return gatewayOperations.healthcheck.output.parse(JSON.parse(text));
+    const report = gatewayOperations.healthcheck.output.parse(JSON.parse(text));
+    assert.deepEqual(report.shared.repository, EMPTY_OWNER);
+    return report;
   };
   const store = async (x: ExecutionRecord): Promise<Stored> => {
     const submitted = completed(
