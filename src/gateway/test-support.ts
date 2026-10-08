@@ -21,6 +21,7 @@ import { gatewayConfigSchema, type GatewayConfig } from "./config.ts";
 import type { InventoryCollector } from "./contract.ts";
 import { gatewayMigrations } from "./migrations.ts";
 import { GatewayService } from "./service.ts";
+import type { DashboardLoader } from "./dashboard.ts";
 import { createInvocation } from "./index.ts";
 import {
   generateHumanJWT,
@@ -118,6 +119,7 @@ export function composeGateway(options: {
   health?: HealthRegistry;
   lookups?: AuthenticationLookups;
   collect?: InventoryCollector;
+  dashboard?: DashboardLoader;
 }): GatewayService {
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
@@ -134,6 +136,7 @@ export function composeGateway(options: {
     registry,
     invocation,
     health: options.health,
+    dashboard: options.dashboard,
   });
   gateway.declare(
     registry,
@@ -151,6 +154,7 @@ export async function gatewayFixture(
     health?: HealthRegistry;
     lookups?: AuthenticationLookups;
     collect?: InventoryCollector;
+    dashboard?: DashboardLoader;
     path?: string;
   } = {},
 ) {

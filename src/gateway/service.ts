@@ -45,6 +45,8 @@ import { resolveRequestId } from "./request-id.ts";
 const SERVER_NOT_RUNNING = "ERR_SERVER_NOT_RUNNING";
 const SINGLE_QUERY_VALUE_COUNT = 1;
 import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
+import { dashboardResponse, type DashboardLoader } from "./dashboard.ts";
+import { dashboardAsset } from "../kernel/assets.ts";
 
 export interface GatewayDependencies {
   config: GatewayConfig;
@@ -52,6 +54,7 @@ export interface GatewayDependencies {
   registry: OperationRegistry;
   invocation: Invocation;
   health?: HealthRegistry;
+  dashboard?: DashboardLoader;
 }
 
 const PARAMETER_PREFIX = ":";
@@ -378,11 +381,21 @@ export class GatewayService implements Service {
         context.get("requestId"),
       ),
     );
-    app.notFound((context) =>
-      respondError(
-        new GatewayError(404, "gateway.routing.not_found", "Route not found."),
-        context.get("requestId"),
-      ),
+    app.notFound(
+      (context) =>
+        dashboardResponse(
+          context.req.method,
+          context.req.path,
+          this.options.dashboard ?? dashboardAsset,
+        ) ??
+        respondError(
+          new GatewayError(
+            404,
+            "gateway.routing.not_found",
+            "Route not found.",
+          ),
+          context.get("requestId"),
+        ),
     );
     return app;
   }

@@ -189,6 +189,7 @@ engine/
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
 │   │   ├── client.ts           # HTTP client, client configuration, and server version discovery
 │   │   ├── local.ts            # Local JWT issuance and OpenAPI generation without a server
+│   │   ├── dashboard.ts        # Embedded dashboard assets outside /api
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
 │   └── apps/                   # Application entries and composition roots
 │       ├── server/             # Service construction, startup, shutdown, and integration tests
