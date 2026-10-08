@@ -108,6 +108,7 @@ engine/
 │   │   ├── inbound-delete.ts   # Inbound delete that refuses a pending event and removes the events and the row
 │   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret
 │   │   ├── event-store.ts      # Inbound event rows, the repeat lookup, pending count, and the record projection
+│   │   ├── event-read.ts       # Inbound event list with a cursor and get by identity
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
 │   │   ├── outbound-read.ts    # Outbound request list and get handlers
@@ -229,6 +230,7 @@ engine/
 │       │   ├── agent.ts        # Agent command group
 │       │   ├── intake.ts       # Intake command group and outbound request commands
 │       │   ├── intake-inbound.ts # Intake inbound commands
+│       │   ├── intake-event.ts # Intake inbound event commands
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton
 │           ├── api.ts          # Server operation clients and bounded backoff

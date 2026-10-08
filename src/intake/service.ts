@@ -28,6 +28,7 @@ import {
 } from "./contract.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
 import { removeInbound } from "./inbound-delete.ts";
+import { getEvent, listEvents } from "./event-read.ts";
 import { getInbound, listInbound } from "./inbound-read.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
@@ -113,6 +114,15 @@ export class IntakeService implements Service, IntakeCollaborations {
         this.inboundRemoved(params.inbound_id);
         return answer;
       },
+    );
+    registry.register(
+      intakeOperations["inbound.event.list"],
+      ({ query }, caller) => caller.commit((tx) => listEvents(tx, query)),
+    );
+    registry.register(
+      intakeOperations["inbound.event.get"],
+      ({ params }, caller) =>
+        caller.commit((tx) => getEvent(tx, params.inbound_event_id)),
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),

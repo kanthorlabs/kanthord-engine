@@ -1290,6 +1290,49 @@ test("intake inbound commands expose offline help, reject --config and validate 
   assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
 });
 
+test("intake event commands expose offline help, reject --config and validate before I/O", (t) => {
+  const env = environment(temporary(t));
+  const eventId = "inbound_event_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  for (const args of [
+    ["intake", "event", "--help"],
+    ["intake", "event", "list", "--help"],
+    ["intake", "event", "get", "--help"],
+  ]) {
+    const help = invocation(args, env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+  }
+  for (const leaf of [["list"], ["get", eventId]]) {
+    const result = invocation(
+      ["intake", "event", ...leaf, "--config", "x.yaml"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
+  }
+  const get = invocation(["intake", "event", "get", "bad"], env);
+  assert.equal(get.status, ExitCode.Failure);
+  assert.match(
+    get.stderr,
+    /^cli\.intake\.event\.get\.invalid_inbound_event_id:/,
+  );
+  const outOfRange = invocation(
+    [
+      "intake",
+      "event",
+      "list",
+      "--limit",
+      "1001",
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "t",
+    ],
+    env,
+  );
+  assert.equal(outOfRange.status, ExitCode.Failure);
+  assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
+});
+
 test("intake outbound discard prints the generated key when the result is indeterminate", (t) => {
   const env = environment(temporary(t));
   const args = [

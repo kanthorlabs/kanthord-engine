@@ -37,6 +37,9 @@ export const INBOUND_CREATED_STATUS = 201;
 export const INBOUND_LIST_LIMIT_DEFAULT = 100;
 export const INBOUND_LIST_LIMIT_MIN = 1;
 export const INBOUND_LIST_LIMIT_MAX = 1000;
+export const INBOUND_EVENT_LIST_LIMIT_DEFAULT = 100;
+export const INBOUND_EVENT_LIST_LIMIT_MIN = 1;
+export const INBOUND_EVENT_LIST_LIMIT_MAX = 1000;
 export const WEBHOOK_ADDRESS_PREFIX = "/hooks/";
 
 export const IntakeErrorCode = {
@@ -53,6 +56,7 @@ export const IntakeErrorCode = {
   InboundCredentialInvalid: "intake.inbound.credential_invalid",
   InboundNotFound: "intake.inbound.not_found",
   InboundEventsPending: "intake.inbound.events_pending",
+  InboundEventNotFound: "intake.inbound.event.not_found",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -476,6 +480,46 @@ export const intakeOperations = {
     output: z.null(),
     description:
       "Delete an inbound and its events; a delete calls no platform and refuses while a pending event exists.",
+  },
+  "inbound.event.list": {
+    ...readOperation,
+    id: "intake.inbound.event.list",
+    method: HttpMethod.Get,
+    path: "/api/intake/event",
+    input: readInput(
+      z.strictObject({}),
+      z.strictObject({
+        inbound_id: identitySchema(INBOUND_ID_PREFIX).optional(),
+        state: inboundEventStateSchema.optional(),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(INBOUND_EVENT_LIST_LIMIT_MIN)
+          .max(INBOUND_EVENT_LIST_LIMIT_MAX)
+          .default(INBOUND_EVENT_LIST_LIMIT_DEFAULT)
+          .optional(),
+        cursor: z.string().optional(),
+      }),
+    ),
+    output: z.strictObject({
+      items: z.array(inboundEventSchema),
+      next_cursor: z.string().nullable(),
+    }),
+    description: "List inbound events, newest first.",
+  },
+  "inbound.event.get": {
+    ...readOperation,
+    id: "intake.inbound.event.get",
+    method: HttpMethod.Get,
+    path: "/api/intake/event/:inbound_event_id",
+    input: readInput(
+      z.strictObject({
+        inbound_event_id: identitySchema(INBOUND_EVENT_ID_PREFIX),
+      }),
+      z.strictObject({}),
+    ),
+    output: inboundEventSchema,
+    description: "Get one inbound event projection.",
   },
   "action.check": {
     ...serviceOperation,
