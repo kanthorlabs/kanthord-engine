@@ -378,7 +378,7 @@ test("agent declaration read exposes prompts, tools and current enablement witho
   );
   assert.ok(
     sources["system.base"]!.text?.startsWith(
-      "You are a senior software engineer.",
+      "This text is the default standard.",
     ),
   );
   assert.ok(sources["agent.shipped"]!.text?.startsWith("## Role"));
