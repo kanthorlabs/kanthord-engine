@@ -28,7 +28,7 @@ There are eight application/JWT forms below: three configuration commands,
 two `serve` application forms, two `jwt generate` modes, and `jwt inspect`.
 Help is a parser facility, not a fourth global command.
 
-1. `kanthord config init [--config <path>]` — implemented; local, no route.
+1. `kanthord config init [--allowed-host <host>]... [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
 4. `kanthord serve [server] [--config <path>]` — implemented; local application
@@ -378,12 +378,16 @@ no database. None reads or writes `cli.yaml`.
 ### `config init`
 
 ```text
-kanthord config init [--config <path>]
+kanthord config init [--allowed-host <host>]... [--config <path>]
 ```
 
 **Implemented; route/access: none, local filesystem.** The destination must be
 absent. Build a whole document with every current default and a newly generated
-master key, validate it in memory, and then publish it. The invocation itself
+master key, validate it in memory, and then publish it. Each repeatable
+`--allowed-host` value is lowercased and appended to the default
+`gateway.allowed_hosts` without duplicates. A value that is not exactly
+`<name>` or `<name>:<port>` fails with `cli.config.invalid_allowed_host` before
+any file is written. The invocation itself
 authorizes creation; stdin and stdout may both be redirected.
 
 Create the destination directory at `0700` when absent. Write a same-directory
@@ -779,6 +783,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `cli.command.required`                           | No command was supplied.                                                                                                | kanthord                                                  |
 | local           | `cli.config.invalid`                             | The stored `cli.yaml` fails the client configuration schema.                                                            | client commands, serve worker                             |
 | local           | `cli.config.invalid_endpoint`                    | The resolved endpoint is not an absolute HTTP(S) URL without credentials, query or fragment.                            | remote commands, serve worker, jwt generate               |
+| local           | `cli.config.invalid_allowed_host`                | An `--allowed-host` value is not exactly `<name>` or `<name>:<port>`.                                                   | config init                                               |
 | local           | `cli.file.duplicate_key`                         | The JSON input repeats an object key.                                                                                   | commands with `--file`                                    |
 | local           | `cli.file.encoding_invalid`                      | The input file is not valid UTF-8.                                                                                      | commands with `--file`                                    |
 | local           | `cli.file.invalid_path`                          | The `--file` value is `-`; standard input is not accepted.                                                              | commands with `--file`                                    |

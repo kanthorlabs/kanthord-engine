@@ -690,6 +690,46 @@ test("config init is non-interactive, writes validated private configuration wit
   assert.deepEqual(readdirSync(directory), ["kanthord.yaml"]);
 });
 
+test("config init appends each lowercased allowed host to the default host allowlist", (t) => {
+  const env = environment(temporary(t));
+  const result = invocation(
+    [
+      "config",
+      "init",
+      "--allowed-host",
+      "Mac.Tailnet.ts.net",
+      "--allowed-host",
+      "localhost:31415",
+      "--allowed-host",
+      "203.0.113.7:8443",
+    ],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(loadConfig(env.KANTHORD_CONFIG!).gateway.allowed_hosts, [
+    "127.0.0.1:31415",
+    "localhost:31415",
+    "mac.tailnet.ts.net",
+    "203.0.113.7:8443",
+  ]);
+});
+
+test("config init refuses an allowed host that is not a name with an optional port and writes nothing", (t) => {
+  const env = environment(temporary(t));
+  for (const value of [
+    "https://mac.tailnet.ts.net",
+    "mac.tailnet.ts.net/path",
+    "user@mac.tailnet.ts.net",
+    "mac tailnet",
+    "",
+  ]) {
+    const result = invocation(["config", "init", "--allowed-host", value], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /^cli\.config\.invalid_allowed_host:/);
+    assert.equal(existsSync(env.KANTHORD_CONFIG!), false);
+  }
+});
+
 test("removed authentication commands and excess arguments fail without prompting or creating files", (t) => {
   const env = environment(temporary(t));
   const help = invocation(["gateway", "--help"], env);

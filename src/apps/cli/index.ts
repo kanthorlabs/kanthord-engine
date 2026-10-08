@@ -38,8 +38,33 @@ import {
   SERVER_APPLICATION,
 } from "./constants.ts";
 
-export async function initConfig(path: string): Promise<void> {
-  const content = initialConfig();
+const HOST_PROBE_SCHEME = "http://";
+const HOST_PROBE_DEFAULT_PORT = ":80";
+
+function allowedHost(value: string): string {
+  const host = value.toLowerCase();
+  const parsed = URL.parse(`${HOST_PROBE_SCHEME}${host}`);
+  if (
+    parsed &&
+    (parsed.host === host ||
+      `${parsed.host}${HOST_PROBE_DEFAULT_PORT}` === host)
+  )
+    return host;
+  throw new Diagnostic(
+    "cli.config.invalid_allowed_host",
+    "config init: --allowed-host expects <name> or <name>:<port>.",
+  );
+}
+
+function collectHost(value: string, hosts: string[] | undefined): string[] {
+  return [...(hosts ?? []), value];
+}
+
+export async function initConfig(
+  path: string,
+  allowedHosts: readonly string[] = [],
+): Promise<void> {
+  const content = initialConfig(allowedHosts.map(allowedHost));
   writePrivate(path, content);
   process.stdout.write(`Created ${path}\n`);
 }
@@ -55,12 +80,22 @@ function addConfigCommand(program: Command): void {
     .option("--config <path>", "YAML configuration file");
   configHelp(config);
   config.action(() => config.help());
+  const init = config
+    .command("init")
+    .description("Create a private configuration file without prompting")
+    .option(
+      "--allowed-host <host>",
+      "Append a host to gateway.allowed_hosts (repeatable)",
+      collectHost,
+    );
+  configHelp(init);
+  init.action(() =>
+    initConfig(
+      effectivePath(init),
+      init.opts<{ allowedHost?: string[] }>().allowedHost,
+    ),
+  );
   for (const [name, description, action] of [
-    [
-      "init",
-      "Create a private configuration file without prompting",
-      (path: string) => initConfig(path),
-    ],
     [
       "validate",
       "Validate the stored configuration",
