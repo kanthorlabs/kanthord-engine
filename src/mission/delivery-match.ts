@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { identitySchema } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
@@ -12,6 +13,7 @@ import {
 
 const SINGLE_MATCH = 1;
 const NO_MATCH = 0;
+const projectIdSchema = identitySchema("project");
 
 export const MatchKind = {
   Request: "request",
@@ -33,7 +35,7 @@ function readRequestMatches(
   projectId: string,
   address: PlatformAddress,
 ): { unresolved: string[]; resolved: string[] } {
-  assert.ok(projectId.length > NO_MATCH);
+  assert.ok(projectIdSchema.safeParse(projectId).success);
   const content = canonicalJSON(platformAddressSchema.parse(address));
   const rows = tx.database
     .prepare(

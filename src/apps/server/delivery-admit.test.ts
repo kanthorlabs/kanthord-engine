@@ -30,6 +30,8 @@ const OTHER_NUMBER = 9;
 const FIRST_ATTEMPT = 1;
 const SINGLE_CALL = 1;
 const NO_CALLS = 0;
+const SINGLE_LANDED_COMMIT = 1;
+const NO_LANDED_COMMITS = 0;
 const CHECK_FAILURE_CODE = "repository.platform.github.retryable_refusal";
 const BAD_GATEWAY_STATUS = 502;
 
@@ -128,7 +130,7 @@ test("a merged pull request sets expected, writes the landed commit with the inb
   assert.deepEqual(h.checks, [h.request.id]);
   assert.equal((await requestOf(h))?.end_state, EndState.Expected);
   const landed = await landedOf(h);
-  assert.equal(landed.length, SINGLE_CALL);
+  assert.equal(landed.length, SINGLE_LANDED_COMMIT);
   assert.deepEqual(landed[0]!.provenance, {
     kind: ActorKind.Service,
     service: ActorService.Mission,
@@ -159,7 +161,7 @@ test("a closed pull request sets other and blocks the node", async (t) => {
     reason: null,
   });
   assert.equal((await requestOf(h))?.end_state, EndState.Other);
-  assert.equal((await landedOf(h)).length, NO_CALLS);
+  assert.equal((await landedOf(h)).length, NO_LANDED_COMMITS);
   assert.equal(h.node().state, NodeState.Blocked);
 });
 
@@ -283,7 +285,7 @@ function during(h: Harness, change: () => void): void {
 
 async function unchanged(h: Harness, endState: EndState | undefined) {
   assert.equal(h.checks.length, SINGLE_CALL);
-  assert.equal((await landedOf(h)).length, NO_CALLS);
+  assert.equal((await landedOf(h)).length, NO_LANDED_COMMITS);
   assert.equal((await requestOf(h))?.end_state, endState);
   assert.equal(h.node().state, NodeState.ExternalRequested);
 }
@@ -309,7 +311,7 @@ test("a live claim keeps a none result and refuses a conclusive result after one
         }),
   );
   assert.deepEqual(h.checks, [h.request.id, h.request.id]);
-  assert.equal((await landedOf(h)).length, NO_CALLS);
+  assert.equal((await landedOf(h)).length, NO_LANDED_COMMITS);
   assert.equal((await requestOf(h))?.end_state, undefined);
   assert.equal(h.node().state, NodeState.ExternalRequested);
 });
@@ -335,7 +337,7 @@ test("another request that becomes the one unresolved match answers match_change
   assert.ok(replacement);
   assert.deepEqual(h.wakes, []);
   assert.equal(h.checks.length, SINGLE_CALL);
-  assert.equal((await landedOf(h)).length, NO_CALLS);
+  assert.equal((await landedOf(h)).length, NO_LANDED_COMMITS);
   assert.equal(
     (await evidenceOf(h)).find((item) => item.id === replacement)?.end_state,
     undefined,
@@ -392,7 +394,7 @@ test("an expected result with a further required action leaves the attempt open"
     reason: null,
   });
   assert.equal((await requestOf(h))?.end_state, EndState.Expected);
-  assert.equal((await landedOf(h)).length, SINGLE_CALL);
+  assert.equal((await landedOf(h)).length, SINGLE_LANDED_COMMIT);
   const attempt = await h.invoke("attempt.get", {
     params: { node_id: h.node_id, attempt: FIRST_ATTEMPT },
     query: {},
