@@ -7,7 +7,7 @@ import { Worker, type WorkerOptions } from "../worker/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath } from "../../gateway/client.ts";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
   createServer,
   type IncomingMessage,
@@ -325,6 +325,7 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["workbenchModelRuntimeFactory"];
     stateDirectory?: string;
+    intake?: { pendingEventLimit: number };
   } = {},
 ) {
   process.umask(0o077);
@@ -374,6 +375,7 @@ export async function gatewayFixture(
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
     inventoryOverrides: options.inventoryOverrides,
+    intake: options.intake,
     logger: pino(
       { level: "info" },
       {
@@ -475,6 +477,46 @@ export async function gatewayFixture(
     config,
     accountId: KANTHORD_AUTH_USERNAME,
     logs,
+  };
+}
+
+const NO_DELIVERY_LENGTH = 0;
+
+export interface Delivery {
+  inboundId: string;
+  secret: string;
+  event: string;
+  deliveryId: string;
+  body: string | Uint8Array;
+  signature?: string | null;
+}
+
+export async function deliver(
+  fixture: Pick<Awaited<ReturnType<typeof gatewayFixture>>, "request">,
+  input: Delivery,
+): Promise<{ status: number; body: unknown }> {
+  assert.ok(input.inboundId.length > NO_DELIVERY_LENGTH);
+  assert.ok(input.secret.length > NO_DELIVERY_LENGTH);
+  const bytes = Buffer.from(input.body);
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-GitHub-Event": input.event,
+    "X-GitHub-Delivery": input.deliveryId,
+  };
+  const signature =
+    input.signature === undefined
+      ? `sha256=${createHmac("sha256", input.secret).update(bytes).digest("hex")}`
+      : input.signature;
+  if (signature !== null) headers["X-Hub-Signature-256"] = signature;
+  const response = await fixture.request(`/hooks/${input.inboundId}`, {
+    method: HttpMethod.Post,
+    headers,
+    body: bytes,
+  });
+  const text = await response.text();
+  return {
+    status: response.status,
+    body: text.length > NO_DELIVERY_LENGTH ? JSON.parse(text) : null,
   };
 }
 
