@@ -396,7 +396,7 @@ test("an expected result with a further required action leaves the attempt open"
   assert.equal(h.node().state, NodeState.ExternalRequested);
 });
 
-test("admissions run one at a time", async (t) => {
+test("admissions run one at a time and a failed admission releases the next", async (t) => {
   const h = await fixture(t);
   let open = () => {};
   const gate = new Promise<void>((resolve) => {
@@ -405,7 +405,14 @@ test("admissions run one at a time", async (t) => {
   const started: number[] = [];
   h.dependencies.intakeCheck.check = async () => {
     started.push(started.length);
-    if (started.length === SINGLE_CALL) await gate;
+    if (started.length === SINGLE_CALL) {
+      await gate;
+      throw new OperationError(
+        BAD_GATEWAY_STATUS,
+        CHECK_FAILURE_CODE,
+        "Retryable refusal.",
+      );
+    }
     return { end_state: CheckEndState.None, landed_commits: [] };
   };
   const registered = h.registry.get(missionOperations["delivery.admit"].id);
@@ -430,7 +437,7 @@ test("admissions run one at a time", async (t) => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(started.length, SINGLE_CALL);
   open();
-  for (const answer of await Promise.all([first, second]))
-    assert.equal(answer.disposition, Disposition.AcceptedObservation);
+  await rejectsWith(first, CHECK_FAILURE_CODE);
+  assert.equal((await second).disposition, Disposition.AcceptedObservation);
   assert.equal(started.length, SINGLE_CALL + SINGLE_CALL);
 });
