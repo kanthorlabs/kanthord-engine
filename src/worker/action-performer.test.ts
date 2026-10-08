@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
-import { CodedError, OperationError } from "../kernel/errors.ts";
+import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationResultType } from "../kernel/operation.ts";
@@ -32,6 +32,7 @@ const COMMIT = "b".repeat(40);
 const NOT_RUNNING = "scheduler.execution.not_running";
 const SECOND_ATTEMPT = 2;
 const DUAL_CALL_COUNT = 2;
+const UNPROCESSABLE_STATUS = 422;
 const RESOURCE = "repository:github:owner/repo";
 const PR = {
   kind: PlatformAddressKind.PullRequest,
@@ -569,7 +570,7 @@ test("another execution cannot steal an in-flight reservation or invalidate its 
   assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
 });
 
-test("unclassified perform error persists but unwired proves no effect", async (t) => {
+test("unclassified perform error persists", async (t) => {
   const h = actionable(t);
   const perform = t.mock.method(
     h.dependencies.intakeActions,
@@ -581,18 +582,45 @@ test("unclassified perform error persists but unwired proves no effect", async (
   await assert.rejects(h.perform(), /socket/);
   assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Uncertain);
   assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
-  const other = actionable(t);
-  const unwired = t.mock.method(
-    other.dependencies.intakeActions,
-    "perform",
-    async () => {
-      throw new CodedError("system.composition.unwired", "unwired");
-    },
-  );
-  await assert.rejects(other.perform(), { code: "system.composition.unwired" });
-  await assert.rejects(other.perform(), { code: "system.composition.unwired" });
-  assert.equal(unwired.mock.callCount(), DUAL_CALL_COUNT);
 });
+
+for (const [status, code] of [
+  [HttpStatus.Forbidden, "mission.authorization.refused"],
+  [UNPROCESSABLE_STATUS, "intake.outbound.request.action_unmapped"],
+] as const)
+  test(`a ${status} perform refusal removes the reservation`, async (t) => {
+    const h = actionable(t);
+    const perform = t.mock.method(
+      h.dependencies.intakeActions,
+      "perform",
+      async () => {
+        throw new OperationError(status, code, "refused");
+      },
+    );
+    await assert.rejects(h.perform(), { code });
+    await assert.rejects(h.perform(), { code });
+    assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
+  });
+
+for (const [status, code] of [
+  [HttpStatus.Conflict, "intake.outbound.request.in_flight"],
+  [HttpStatus.InternalServerError, "gateway.invocation.unknown"],
+] as const)
+  test(`a ${code} perform failure keeps the reservation uncertain`, async (t) => {
+    const h = actionable(t);
+    const perform = t.mock.method(
+      h.dependencies.intakeActions,
+      "perform",
+      async () => {
+        throw new OperationError(status, code, "failed");
+      },
+    );
+    await assert.rejects(h.perform(), { code });
+    const item = (await h.perform()).items[0];
+    assert.ok(item?.kind === ActionResultKind.Uncertain);
+    assert.equal(item.uncertainty, Uncertainty.Effect);
+    assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+  });
 
 test("same-attempt request evidence prunes uncertainty without dispatch", async (t) => {
   const h = actionable(t);

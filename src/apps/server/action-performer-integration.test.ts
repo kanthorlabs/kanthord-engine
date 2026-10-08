@@ -28,6 +28,7 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
+import { OperationError } from "../../kernel/errors.ts";
 import {
   FAKE_SSH_IDENTITY,
   fakeGitHub,
@@ -53,6 +54,7 @@ const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const UNPROCESSABLE_STATUS = 422;
 const TWO_REQUESTS = 2;
 const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
+const REVOKED_CODE = "credential.revision.revoked";
 const CONTENT = {
   name: "Work",
   requirement: "Work",
@@ -430,6 +432,20 @@ test("a GitHub refusal answers failed_before_effect and releases the reservation
     [HttpMethod.Post, HttpMethod.Get],
   );
   assert.equal(h.gitHub.pulls.length, NO_CALLS);
+});
+
+test("a revoked credential refusal removes the reservation and a repeat reaches Intake", async (t) => {
+  const h = await setup(t, HTTP);
+  const authorize = t.mock.method(h.fixture.custody, "authorizeOperation");
+  authorize.mock.mockImplementationOnce(() => {
+    throw new OperationError(HttpStatus.Conflict, REVOKED_CODE, "revoked");
+  });
+  refused(await h.request(), HttpStatus.Conflict, REVOKED_CODE);
+  assert.equal(h.creates(), NO_CALLS);
+  const [item] = completed(await h.request()).items;
+  assert.equal(item?.kind, ActionResultKind.Submitted);
+  assert.equal(authorize.mock.callCount(), TWO_REQUESTS);
+  assert.equal(h.creates(), SINGLE_CALL);
 });
 
 test("action operation keeps the long unary execution-scoped contract", () => {
