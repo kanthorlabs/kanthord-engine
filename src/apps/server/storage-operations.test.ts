@@ -8,7 +8,12 @@ import { test, type TestContext } from "node:test";
 import type { Material } from "../../custody/contract.ts";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { PRESIGN_LIFETIME_S, intakeOperations } from "../../intake/contract.ts";
+import {
+  IntakeErrorCode,
+  PRESIGN_LIFETIME_S,
+  ResultClass,
+  intakeOperations,
+} from "../../intake/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { createIdentity } from "../../kernel/identity.ts";
@@ -43,6 +48,8 @@ const SINGLE_INSTANCE = 1;
 const NO_ROWS = 0;
 const ONE_PIN = 1;
 const MS_PER_S = 1000;
+const LOST_DEADLINE_MS = 600;
+const BAD_GATEWAY_STATUS = 502;
 const TIMEOUT = 180000;
 const BUCKET = "evidence";
 const PREFIX = "kanthord";
@@ -52,6 +59,8 @@ const SECRET = "storage-operations-secret";
 const VERSION = "version-1";
 const MEDIA = "text/plain";
 const HELLO = Buffer.from("hello");
+const WORLD = Buffer.from("world");
+const SHORT = Buffer.from("hell");
 const PLAIN = Buffer.from("abcde");
 const HELLO_SHA256 = createHash("sha256").update(HELLO).digest("hex");
 const SIGNATURE_PARAMETER = "X-Amz-Signature";
@@ -59,6 +68,7 @@ const VERSION_ID_PARAMETER = "versionId";
 const CHECKSUM_MODE_HEADER = "x-amz-checksum-mode";
 const CHECKSUM_MODE_ENABLED = "ENABLED";
 const ROUTE_NOT_FOUND_CODE = "gateway.routing.not_found";
+const S3_PREFIX = "storage.platform.s3.";
 const CONTENT = {
   name: "Store objects",
   requirement: "Store objects",
@@ -69,6 +79,7 @@ type Page<T> = { items: T[] };
 type StoreCall = { method: string; path: string; version: string | null };
 type Lose = "lose";
 const LOSE: Lose = "lose";
+const HEAD = "HEAD";
 
 function completed<T>(result: OperationResult<T>): T {
   assert.ok(
@@ -373,6 +384,15 @@ async function setup(t: TestContext) {
         { params: { execution_id: executionId }, query: {}, body },
         { identity: machine },
       ),
+    check: (assetId: string) =>
+      intake["storage.check"](
+        {
+          params: { execution_id: executionId, asset_id: assetId },
+          query: {},
+          body: null,
+        },
+        { identity: machine },
+      ),
     executionGet: (assetId: string) =>
       intake["execution.storage.get"](
         {
@@ -401,7 +421,7 @@ function assertWithinLifetime(expiresAt: number, before: number) {
 }
 
 test(
-  "the presign operations reach the store through the direct adapter",
+  "the presign and check operations reach the store through the direct adapter",
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
@@ -457,6 +477,46 @@ test(
       assert.equal(h.materials.length, before);
     });
 
+    await t.test("an absent object answers the mismatch", async () => {
+      failed(
+        await h.check(h.checked),
+        HttpStatus.Conflict,
+        IntakeErrorCode.StorageObjectMismatch,
+      );
+      const call = h.store.calls.at(-1);
+      assert.equal(call?.method, HEAD);
+      assert.equal(call?.path, `/${BUCKET}/${h.keyOf(h.checked)}`);
+      assert.equal(call?.version, null);
+    });
+
+    await t.test(
+      "a short object and a wrong checksum answer the mismatch",
+      async () => {
+        const path = `/${BUCKET}/${h.keyOf(h.checked)}`;
+        for (const bytes of [SHORT, WORLD]) {
+          h.store.objects.set(path, bytes);
+          failed(
+            await h.check(h.checked),
+            HttpStatus.Conflict,
+            IntakeErrorCode.StorageObjectMismatch,
+          );
+        }
+      },
+    );
+
+    await t.test(
+      "a matching object answers its location and version",
+      async () => {
+        h.store.objects.set(`/${BUCKET}/${h.keyOf(h.checked)}`, HELLO);
+        h.store.objects.set(`/${BUCKET}/${h.keyOf(h.plain)}`, PLAIN);
+        for (const assetId of [h.checked, h.plain])
+          assert.deepEqual(completed(await h.check(assetId)), {
+            location: `s3://${BUCKET}/${h.keyOf(assetId)}`,
+            version: VERSION,
+          });
+      },
+    );
+
     await t.test(
       "an execution GET and a human GET sign the object",
       async () => {
@@ -478,6 +538,41 @@ test(
       },
     );
 
+    await t.test("a refused HEAD answers its result class", async () => {
+      h.store.script.next = HttpStatus.Forbidden;
+      try {
+        const error = failed(
+          await h.check(h.checked),
+          BAD_GATEWAY_STATUS,
+          S3_PREFIX + ResultClass.FinalRefusal,
+        );
+        assert.deepEqual(error.details, { status: HttpStatus.Forbidden });
+      } finally {
+        h.store.script.next = null;
+      }
+    });
+
+    await t.test("a lost HEAD answer has no status", async () => {
+      const headObject = h.fixture.s3.headObject.bind(h.fixture.s3);
+      h.fixture.s3.headObject = (call, target) =>
+        headObject(
+          { ...call, deadlineAt: Date.now() + LOST_DEADLINE_MS },
+          target,
+        );
+      h.store.script.next = LOSE;
+      try {
+        const error = failed(
+          await h.check(h.checked),
+          BAD_GATEWAY_STATUS,
+          S3_PREFIX + ResultClass.RetryableRefusal,
+        );
+        assert.deepEqual(error.details, { status: null });
+      } finally {
+        h.store.script.next = null;
+        h.fixture.s3.headObject = headObject;
+      }
+    });
+
     await t.test("every released material drops", () => {
       assert.ok(h.materials.length > ONE_PIN);
       dropped(h.materials, h.materials.length);
@@ -488,6 +583,11 @@ test(
         [
           HttpMethod.Post,
           `/api/intake/execution/${h.executionId}/storage/put`,
+          h.token,
+        ],
+        [
+          HttpMethod.Get,
+          `/api/intake/execution/${h.executionId}/storage/asset/${h.checked}/check`,
           h.token,
         ],
         [

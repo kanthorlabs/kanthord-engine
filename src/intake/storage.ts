@@ -13,15 +13,31 @@ import {
   type MachineIdentity,
 } from "../kernel/caller.ts";
 import { abortSignal } from "../kernel/context.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import type { S3Call, S3ObjectTarget, S3Platform } from "../storage/s3.ts";
+import {
+  S3_RESULT_CODE_PREFIX,
+  type ObjectHead,
+  type S3Call,
+  type S3Failure,
+  type S3ObjectTarget,
+  type S3Platform,
+} from "../storage/s3.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {
+  IntakeErrorCode,
   PLATFORM_CALL_DEADLINE_MS,
+  ResultClass,
+  type ObjectCheck,
   type PresignedGetAnswer,
   type PresignedPutAnswer,
 } from "./contract.ts";
+
+const BAD_GATEWAY_STATUS = 502;
+const OBJECT_MISMATCH_MESSAGE =
+  "The stored object is absent or differs from the asset size or SHA-256.";
 
 export interface StorageDependencies {
   store: Store;
@@ -80,6 +96,33 @@ export function putObject(
       sha256: facts.sha256,
     }),
   );
+}
+
+export function checkObject(
+  dependencies: StorageDependencies,
+  caller: CallerContext,
+  assetId: string,
+): Promise<ObjectCheck> {
+  const { identity, claim } = executorOf(caller);
+  assert.ok(assetId.length);
+  const request: ObjectRequest = {
+    kind: GrantKind.EvidenceAsset,
+    identity,
+    assetId,
+    claim,
+    use: AssetUse.Check,
+  };
+  return withObjectGrant(dependencies, caller, request, async (call, facts) => {
+    const head = await dependencies.s3.headObject(call, objectTarget(facts));
+    if (!head.ok) throw platformFailure(head);
+    if (!objectMatches(head.value, facts))
+      throw new OperationError(
+        HttpStatus.Conflict,
+        IntakeErrorCode.StorageObjectMismatch,
+        OBJECT_MISMATCH_MESSAGE,
+      );
+    return { location: facts.location, version: head.value.version };
+  });
 }
 
 export function executionGetObject(
@@ -195,4 +238,25 @@ function objectTarget(facts: Readonly<AssetFacts>): S3ObjectTarget {
     key: facts.key,
     version: facts.version,
   };
+}
+
+function objectMatches(
+  head: ObjectHead | null,
+  facts: Readonly<AssetFacts>,
+): head is ObjectHead {
+  assert.ok(Number.isInteger(facts.size));
+  if (head === null) return false;
+  if (head.size !== facts.size) return false;
+  return facts.sha256 === null || head.sha256 === facts.sha256;
+}
+
+function platformFailure(failure: S3Failure): OperationError {
+  assert.equal(failure.ok, false);
+  assert.ok(Object.values(ResultClass).includes(failure.class));
+  return new OperationError(
+    BAD_GATEWAY_STATUS,
+    S3_RESULT_CODE_PREFIX + failure.class,
+    failure.message,
+    { status: failure.status },
+  );
 }

@@ -41,6 +41,7 @@ export const IntakeErrorCode = {
   OutboundRequestForceRequired: "intake.outbound.request.force_required",
   OutboundRequestFilterInvalid: "intake.outbound.request.filter_invalid",
   OutboundRequestActionUnmapped: "intake.outbound.request.action_unmapped",
+  StorageObjectMismatch: "intake.storage.object_mismatch",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -165,6 +166,11 @@ export const presignedGetSchema = z.strictObject({
   get_url: z.string(),
   expires_at: timestamp,
 });
+export const objectCheckSchema = z.strictObject({
+  location: z.string(),
+  version: z.string().nullable(),
+});
+
 export const errorItemSchema = z.strictObject({
   code: z.string().min(1),
   message: z.string(),
@@ -212,6 +218,7 @@ export type ActionReadMethodValue = z.infer<typeof actionReadMethodSchema>;
 export type ActionReadPage = z.infer<typeof actionReadPageSchema>;
 export type PresignedPutAnswer = z.infer<typeof presignedPutSchema>;
 export type PresignedGetAnswer = z.infer<typeof presignedGetSchema>;
+export type ObjectCheck = z.infer<typeof objectCheckSchema>;
 
 const baseOperation = {
   service: INTAKE_SERVICE_NAME,
@@ -423,6 +430,21 @@ export const intakeOperations = {
     output: presignedPutSchema,
     description:
       "Sign a presigned PUT of an evidence asset object for an execution.",
+  },
+  "storage.check": {
+    ...executionStorageReadOperation,
+    id: "intake.storage.check",
+    path: "/api/intake/execution/:execution_id/storage/asset/:asset_id/check",
+    input: readInput(
+      z.strictObject({
+        execution_id: identitySchema("execution"),
+        asset_id: identitySchema("evidence_asset"),
+      }),
+      z.strictObject({}),
+    ),
+    output: objectCheckSchema,
+    description:
+      "Check the size and the SHA-256 of an uploaded evidence asset object for an execution.",
   },
   "execution.storage.get": {
     ...executionStorageReadOperation,

@@ -25,7 +25,12 @@ import { INTAKE_SERVICE_NAME, intakeOperations } from "./contract.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
-import { executionGetObject, getObject, putObject } from "./storage.ts";
+import {
+  checkObject,
+  executionGetObject,
+  getObject,
+  putObject,
+} from "./storage.ts";
 
 export interface Dependencies {
   store: Store;
@@ -94,6 +99,9 @@ export class IntakeService implements Service {
     );
     registry.register(intakeOperations["storage.put"], ({ body }, caller) =>
       putObject(this.dependencies, caller, body),
+    );
+    registry.register(intakeOperations["storage.check"], ({ params }, caller) =>
+      checkObject(this.dependencies, caller, params.asset_id),
     );
     registry.register(
       intakeOperations["execution.storage.get"],
