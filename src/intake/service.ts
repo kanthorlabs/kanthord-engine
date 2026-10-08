@@ -24,6 +24,7 @@ import { readAction } from "./action-read.ts";
 import {
   INTAKE_SERVICE_NAME,
   intakeOperations,
+  PENDING_EVENT_LIMIT,
   type IntakeCollaborations,
 } from "./contract.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
@@ -31,6 +32,7 @@ import { removeInbound } from "./inbound-delete.ts";
 import { getEvent, listEvents } from "./event-read.ts";
 import { getInbound, listInbound } from "./inbound-read.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
+import { receiveEvent } from "./receipt.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
 import { deleteStoredObject } from "./storage-delete.ts";
@@ -54,6 +56,7 @@ export interface Dependencies {
   s3: S3Platform;
   masterKey: string;
   projects: InboundProjects;
+  pendingEventLimit?: number;
 }
 
 export class IntakeService implements Service, IntakeCollaborations {
@@ -123,6 +126,21 @@ export class IntakeService implements Service, IntakeCollaborations {
       intakeOperations["inbound.event.get"],
       ({ params }, caller) =>
         caller.commit((tx) => getEvent(tx, params.inbound_event_id)),
+    );
+    registry.register(
+      intakeOperations["inbound.event.receive"],
+      ({ params }, caller) =>
+        receiveEvent(
+          {
+            store: this.dependencies.store,
+            masterKey: this.dependencies.masterKey,
+            pendingEventLimit:
+              this.dependencies.pendingEventLimit ?? PENDING_EVENT_LIMIT,
+            wake: () => this.wake(),
+          },
+          caller,
+          params,
+        ),
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),
@@ -233,6 +251,8 @@ export class IntakeService implements Service, IntakeCollaborations {
   inboundRemoved(inboundId: string): void {
     assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
   }
+
+  wake(): void {}
 
   inboundsNaming(
     tx: Transaction,

@@ -708,6 +708,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.inbound.delete", AccessPolicy.Human],
   ["intake.inbound.event.list", AccessPolicy.Human],
   ["intake.inbound.event.get", AccessPolicy.Human],
+  ["intake.inbound.event.receive", AccessPolicy.Delivery],
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
   ["intake.action.read", AccessPolicy.Client],
@@ -717,7 +718,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 165;
+const OPERATION_COUNT = 166;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );

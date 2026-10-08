@@ -109,6 +109,7 @@ engine/
 │   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret
 │   │   ├── event-store.ts      # Inbound event rows, the repeat lookup, pending count, and the record projection
 │   │   ├── event-read.ts       # Inbound event list with a cursor and get by identity
+│   │   ├── receipt.ts          # Webhook receipt: inbound lookup, signature check, handshake, capacity bound, and insert
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
 │   │   ├── outbound-read.ts    # Outbound request list and get handlers
@@ -121,7 +122,7 @@ engine/
 │   │   ├── storage-delete.ts   # Object delete: s3.delete_object, its read-back and its stored status
 │   │   ├── webhook-secret.ts   # Verification secret of a webhook inbound, derived from the master key
 │   │   ├── test-support.ts     # Unused action collaborations and a master key for Intake unit tests
-│   │   └── service.ts          # Lifecycle, health probe, resource inventory, the `inboundsNaming` collaboration and the inbound removal notice
+│   │   └── service.ts          # Lifecycle, health probe, resource inventory, the `inboundsNaming` collaboration, the inbound removal notice and the event wake notice
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
 │   │   ├── contract.ts         # Mission schemas, operations, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations

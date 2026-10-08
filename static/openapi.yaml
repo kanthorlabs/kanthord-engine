@@ -44,6 +44,8 @@ paths:
     $ref: ./openapi/intake/inbound.event.get.yaml#/pathItem
   /api/intake/event:
     $ref: ./openapi/intake/inbound.event.list.yaml#/pathItem
+  /hooks/{inbound_id}:
+    $ref: ./openapi/intake/inbound.event.receive.yaml#/pathItem
   /api/intake/outbound/delete:
     $ref: ./openapi/intake/outbound.request.delete.yaml#/pathItem
   /api/intake/outbound/{outbound_request_id}/discard:

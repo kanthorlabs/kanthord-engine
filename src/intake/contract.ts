@@ -57,6 +57,8 @@ export const IntakeErrorCode = {
   InboundNotFound: "intake.inbound.not_found",
   InboundEventsPending: "intake.inbound.events_pending",
   InboundEventNotFound: "intake.inbound.event.not_found",
+  InboundEventSignatureInvalid: "intake.inbound.event.signature_invalid",
+  InboundEventCapacityExceeded: "intake.inbound.event.capacity_exceeded",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -520,6 +522,24 @@ export const intakeOperations = {
     ),
     output: inboundEventSchema,
     description: "Get one inbound event projection.",
+  },
+  "inbound.event.receive": {
+    ...baseOperation,
+    id: "intake.inbound.event.receive",
+    method: HttpMethod.Post,
+    path: `${WEBHOOK_ADDRESS_PREFIX}:inbound_id`,
+    access: AccessPolicy.Delivery,
+    delivery: true,
+    mutation: false,
+    status: HttpStatus.Accepted,
+    input: z.strictObject({
+      params: z.strictObject({ inbound_id: identitySchema(INBOUND_ID_PREFIX) }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: z.null(),
+    description:
+      "Receive a signed platform delivery for a webhook inbound; store the event once and acknowledge after the commit.",
   },
   "action.check": {
     ...serviceOperation,
