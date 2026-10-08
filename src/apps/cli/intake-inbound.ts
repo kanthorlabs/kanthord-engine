@@ -6,6 +6,7 @@ import { AccessPolicy } from "../../kernel/operation.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import {
   INBOUND_ID_PREFIX,
+  INBOUND_LIST_LIMIT_MAX,
   inboundCreateSchema,
   intakeOperations,
 } from "../../intake/contract.ts";
@@ -26,6 +27,7 @@ const GET = "get";
 const DELETE = "delete";
 const KEY_OPTION = "--idempotency-key";
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
+const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 
 type Options = Record<string, string | boolean | string[] | undefined>;
 
@@ -76,6 +78,11 @@ async function list(command: Command): Promise<void> {
     options.limit === undefined
       ? undefined
       : parsePositiveInt(options.limit as string, LIMIT_INVALID);
+  if (limit !== undefined && limit > INBOUND_LIST_LIMIT_MAX)
+    throw new Diagnostic(
+      LIMIT_OUT_OF_RANGE,
+      `limit must be at most ${INBOUND_LIST_LIMIT_MAX}`,
+    );
   const result = await httpClient(intakeOperations, endpoint, token)[
     "inbound.list"
   ]({

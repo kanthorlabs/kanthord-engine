@@ -1217,6 +1217,22 @@ test("intake outbound commands expose offline help, reject --config and validate
     env,
   );
   assert.match(repeated.stderr, /^cli\.option\.duplicate:/);
+  const outOfRange = invocation(
+    [
+      "intake",
+      "outbound",
+      "list",
+      "--limit",
+      "1001",
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "t",
+    ],
+    env,
+  );
+  assert.equal(outOfRange.status, ExitCode.Failure);
+  assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
 });
 
 test("intake inbound commands expose offline help, reject --config and validate identities before I/O", (t) => {
@@ -1256,6 +1272,22 @@ test("intake inbound commands expose offline help, reject --config and validate 
   const create = invocation(["intake", "inbound", "create"], env);
   assert.equal(create.status, ExitCode.Failure);
   assert.match(create.stderr, /--file/);
+  const outOfRange = invocation(
+    [
+      "intake",
+      "inbound",
+      "list",
+      "--limit",
+      "1001",
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "t",
+    ],
+    env,
+  );
+  assert.equal(outOfRange.status, ExitCode.Failure);
+  assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
 });
 
 test("intake outbound discard prints the generated key when the result is indeterminate", (t) => {
