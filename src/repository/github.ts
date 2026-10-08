@@ -7,7 +7,7 @@ import type { CallerIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { isString } from "../kernel/values.ts";
+import { ValueType, isString } from "../kernel/values.ts";
 
 export const GITHUB_API_BASE_URL = "https://api.github.com";
 export const GITHUB_API_VERSION = "2022-11-28";
@@ -30,6 +30,14 @@ const NEXT_LINK_PATTERN = /<[^>]*>\s*;\s*rel="next"/;
 const API_VERSION_HEADER = "x-github-api-version";
 const RATE_LIMIT_REMAINING_HEADER = "x-ratelimit-remaining";
 const RATE_LIMIT_EXHAUSTED = "0";
+const IF_NONE_MATCH_HEADER = "if-none-match";
+const NOT_MODIFIED_STATUS = 304;
+const EVENT_PAGE_SIZE = 100;
+const EVENT_ID_PATTERN = /^[0-9]+$/;
+const SAME_ORDER = 0;
+const BEFORE_ORDER = -1;
+const AFTER_ORDER = 1;
+const MIN_JSON_LENGTH = 1;
 const REQUEST_TIMEOUT_STATUS = 408;
 const CAUSE_DEPTH_LIMIT = 4;
 const NO_TIME_LEFT_MS = 0;
@@ -113,6 +121,29 @@ export interface GitHubRequest {
   kind: CallKind;
   route: string;
   parameters: Record<string, unknown>;
+  headers?: Record<string, string>;
+}
+
+export const githubCheckpointSchema = z.strictObject({
+  etag: z.string().nullable(),
+  newest_event_id: z.string().regex(EVENT_ID_PATTERN).nullable(),
+});
+export type GitHubCheckpoint = z.infer<typeof githubCheckpointSchema>;
+
+export interface GitHubEvent {
+  id: string;
+  type: string;
+  body: Uint8Array;
+}
+
+export type GitHubEventsAnswer =
+  | { notModified: true }
+  | { notModified: false; etag: string | null; events: GitHubEvent[] };
+
+export interface GitHubEventsQuery {
+  owner: string;
+  repo: string;
+  etag: string | null;
 }
 
 export const CheckEndState = {
@@ -151,6 +182,10 @@ const cursorSchema = z.strictObject({
 });
 type Cursor = z.infer<typeof cursorSchema>;
 
+const eventListSchema = z.array(
+  z.looseObject({ id: z.string().regex(EVENT_ID_PATTERN), type: z.string() }),
+);
+
 const createdPullRequestSchema = z.looseObject({ number: z.int() });
 const pullRequestListSchema = z.array(z.looseObject({ number: z.int() }));
 const pullRequestStateSchema = z
@@ -175,6 +210,8 @@ export interface GitHubOptions {
 interface Exchange {
   data: unknown;
   link: string | null;
+  etag: string | null;
+  notModified: boolean;
 }
 
 type Attempt =
@@ -322,6 +359,22 @@ function unreadableBody(kind: CallKind): GitHubFailure {
   return answer;
 }
 
+function exchangeOf(
+  response: { data: unknown; headers: Record<string, unknown> },
+  notModified: boolean,
+): Exchange {
+  assert.ok(typeof notModified === ValueType.Boolean);
+  const { link, etag } = response.headers;
+  const exchange = {
+    data: notModified ? null : response.data,
+    link: isString(link) ? link : null,
+    etag: isString(etag) ? etag : null,
+    notModified,
+  };
+  assert.ok(!exchange.notModified || exchange.data === null);
+  return exchange;
+}
+
 function invalidCursor(): never {
   throw new OperationError(
     HttpStatus.BadRequest,
@@ -381,6 +434,62 @@ export function reviewCommentPage(query: ReviewCommentQuery): Cursor {
     );
   }
   return cursor;
+}
+
+function compareEventIds(left: string, right: string): number {
+  assert.ok(EVENT_ID_PATTERN.test(left));
+  assert.ok(EVENT_ID_PATTERN.test(right));
+  if (left.length !== right.length) {
+    return left.length - right.length;
+  }
+  if (left === right) {
+    return SAME_ORDER;
+  }
+  return left < right ? BEFORE_ORDER : AFTER_ORDER;
+}
+
+export function newerEvents<E extends { id: string }>(
+  events: readonly E[],
+  newest: string | null,
+): E[] {
+  assert.ok(Array.isArray(events));
+  assert.ok(newest === null || EVENT_ID_PATTERN.test(newest));
+  const kept = events.filter(
+    (event) =>
+      newest === null || compareEventIds(event.id, newest) > SAME_ORDER,
+  );
+  return kept.sort((left, right) => compareEventIds(left.id, right.id));
+}
+
+function eventsOf(data: unknown): GitHubEvent[] | null {
+  const listed = eventListSchema.safeParse(data);
+  if (!listed.success) {
+    return null;
+  }
+  const events: GitHubEvent[] = [];
+  for (const event of listed.data) {
+    const body = canonicalEventBody(event);
+    if (body === null) {
+      return null;
+    }
+    events.push({ id: event.id, type: event.type, body });
+  }
+  assert.equal(events.length, listed.data.length);
+  return events;
+}
+
+function canonicalEventBody(event: object): Uint8Array | null {
+  assert.ok(typeof event === ValueType.Object && event !== null);
+  try {
+    const text = canonicalJSON(event);
+    assert.ok(text.length >= MIN_JSON_LENGTH);
+    return new Uint8Array(Buffer.from(text, TEXT_ENCODING));
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export function hasNextLink(link: string | null): boolean {
@@ -497,6 +606,40 @@ export class GitHubPlatform {
     return { ok: true, value: { body: answer.value.data, next_cursor: next } };
   }
 
+  async listEvents(
+    call: GitHubCall,
+    query: GitHubEventsQuery,
+  ): Promise<GitHubAnswer<GitHubEventsAnswer>> {
+    assert.ok(call.token.length >= MIN_TOKEN_LENGTH);
+    assert.ok(query.owner.length >= MIN_SEGMENT_LENGTH);
+    assert.ok(query.repo.length >= MIN_SEGMENT_LENGTH);
+    assert.ok(Number.isFinite(call.deadlineAt));
+    const answer = await this.#read(
+      call,
+      { owner: query.owner, repo: query.repo },
+      {
+        kind: CallKind.Read,
+        route: "GET /repos/{owner}/{repo}/events",
+        parameters: { per_page: EVENT_PAGE_SIZE },
+        headers:
+          query.etag === null ? {} : { [IF_NONE_MATCH_HEADER]: query.etag },
+      },
+    );
+    if (!answer.ok) {
+      return answer;
+    }
+    if (answer.value.notModified) {
+      return { ok: true, value: { notModified: true } };
+    }
+    const events = eventsOf(answer.value.data);
+    return events === null
+      ? unreadableBody(CallKind.Read)
+      : {
+          ok: true,
+          value: { notModified: false, etag: answer.value.etag, events },
+        };
+  }
+
   foldPullRequest(
     body: unknown,
     expectedEndState: ExpectedEndState,
@@ -585,15 +728,21 @@ export class GitHubPlatform {
       const response = await client.request(request.route, {
         ...request.parameters,
         ...repository,
-        headers: { [API_VERSION_HEADER]: GITHUB_API_VERSION },
+        headers: {
+          ...request.headers,
+          [API_VERSION_HEADER]: GITHUB_API_VERSION,
+        },
         request: { signal },
       });
-      const link = response.headers.link;
-      return {
-        ok: true,
-        value: { data: response.data, link: isString(link) ? link : null },
-      };
+      return { ok: true, value: exchangeOf(response, false) };
     } catch (error) {
+      if (
+        error instanceof RequestError &&
+        error.status === NOT_MODIFIED_STATUS &&
+        error.response !== undefined
+      ) {
+        return { ok: true, value: exchangeOf(error.response, true) };
+      }
       if (!(error instanceof RequestError) && !signal.aborted) {
         throw error;
       }

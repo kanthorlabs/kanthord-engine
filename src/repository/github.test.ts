@@ -26,6 +26,8 @@ import {
   classifyDelivery,
   decodeCursor,
   encodeCursor,
+  githubCheckpointSchema,
+  newerEvents,
   repositoryOf,
   type GitHubCall,
   type GitHubRequest,
@@ -697,4 +699,176 @@ test("an unexpected success body answers the class of a lost answer", async (t) 
   });
   assert.equal(!listed.ok && listed.class, ResultClass.RetryableRefusal);
   assert.equal(server.requests.length, CREATE_AND_LIST_REQUESTS);
+});
+
+const EVENTS_PATH = "/repos/octo/widgets/events?per_page=100";
+const EVENTS_QUERY = { owner: "octo", repo: "widgets" };
+const FIRST_ETAG = '"etag-first"';
+const SECOND_ETAG = '"etag-second"';
+const NOT_MODIFIED = 304;
+const INTERNAL_SERVER_ERROR = 500;
+const PUSH_EVENT = {
+  id: "41",
+  type: "PushEvent",
+  payload: { ref: "refs/heads/main" },
+  actor: { login: "octo" },
+};
+const PUSH_EVENT_BODY =
+  '{"actor":{"login":"octo"},"id":"41","payload":{"ref":"refs/heads/main"},"type":"PushEvent"}';
+const ISSUE_EVENT = { id: "42", type: "IssuesEvent", payload: {} };
+
+function bodyText(body: Uint8Array): string {
+  return Buffer.from(body).toString("utf8");
+}
+
+test("listEvents sends the ETag back and answers the ETag of each answer", async (t) => {
+  const server = await platform(t, (request, response, count) => {
+    const etag = count === SINGLE_REQUEST ? FIRST_ETAG : SECOND_ETAG;
+    answer(200, [ISSUE_EVENT, PUSH_EVENT], { etag })(request, response, count);
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const first = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: null,
+  });
+  assert.ok(first.ok && !first.value.notModified);
+  assert.equal(first.value.etag, FIRST_ETAG);
+  assert.deepEqual(
+    first.value.events.map((event) => [event.id, event.type]),
+    [
+      ["42", "IssuesEvent"],
+      ["41", "PushEvent"],
+    ],
+  );
+  assert.equal(
+    bodyText(first.value.events[1]?.body ?? new Uint8Array()),
+    PUSH_EVENT_BODY,
+  );
+  const second = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: first.value.etag,
+  });
+  assert.ok(second.ok && !second.value.notModified);
+  assert.equal(second.value.etag, SECOND_ETAG);
+  assert.equal(server.requests[0]?.url, EVENTS_PATH);
+  assert.equal(server.requests[0]?.headers["if-none-match"], undefined);
+  assert.equal(server.requests[1]?.headers["if-none-match"], FIRST_ETAG);
+  assert.equal(server.requests[1]?.headers.authorization, `token ${TOKEN}`);
+});
+
+test("listEvents answers notModified for a 304", async (t) => {
+  const server = await platform(t, (_request, response) => {
+    response.writeHead(NOT_MODIFIED, { etag: FIRST_ETAG });
+    response.end();
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: FIRST_ETAG,
+  });
+  assert.deepEqual(result, { ok: true, value: { notModified: true } });
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  assert.equal(server.requests[0]?.headers["if-none-match"], FIRST_ETAG);
+});
+
+test("listEvents answers retryable_refusal for a 500 after one request", async (t) => {
+  const server = await platform(
+    t,
+    answer(INTERNAL_SERVER_ERROR, { message: "broken" }),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: null,
+  });
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+  assert.equal(!result.ok && result.status, INTERNAL_SERVER_ERROR);
+});
+
+test("listEvents retries a closed connection inside its deadline", async (t) => {
+  const server = await platform(t, (request, response, count) => {
+    if (count < RETRIED_REQUESTS) {
+      lose(request, response, count);
+      return;
+    }
+    answer(200, [PUSH_EVENT], { etag: FIRST_ETAG })(request, response, count);
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: null,
+  });
+  assert.equal(server.requests.length, RETRIED_REQUESTS);
+  assert.ok(result.ok && !result.value.notModified);
+  assert.equal(result.value.etag, FIRST_ETAG);
+  assert.equal(result.value.events.length, SINGLE_REQUEST);
+});
+
+test("listEvents refuses a malformed body as a lost read", async (t) => {
+  const bodies: unknown[] = [
+    [{ id: 41, type: "PushEvent" }],
+    [{ id: "41", type: "PushEvent", payload: { text: "\ud800" } }],
+  ];
+  const server = await platform(t, (request, response, count) => {
+    answer(200, bodies[count - SINGLE_REQUEST])(request, response, count);
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  for (let index = 0; index < bodies.length; index += 1) {
+    const result = await github.listEvents(call(), {
+      ...EVENTS_QUERY,
+      etag: null,
+    });
+    assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+    assert.equal(!result.ok && result.status, null);
+  }
+  assert.equal(server.requests.length, bodies.length);
+});
+
+test("newerEvents keeps every event for a null checkpoint in ascending order", () => {
+  const events = [{ id: "12" }, { id: "9" }, { id: "100" }];
+  assert.deepEqual(
+    newerEvents(events, null).map((event) => event.id),
+    ["9", "12", "100"],
+  );
+});
+
+test("newerEvents drops the event equal to the checkpoint and older ones", () => {
+  const events = [{ id: "43" }, { id: "42" }, { id: "41" }];
+  assert.deepEqual(
+    newerEvents(events, "42").map((event) => event.id),
+    ["43"],
+  );
+});
+
+test("newerEvents compares identities of different length by number", () => {
+  const events = [{ id: "100" }, { id: "99" }, { id: "1000" }, { id: "8" }];
+  assert.deepEqual(
+    newerEvents(events, "99").map((event) => event.id),
+    ["100", "1000"],
+  );
+});
+
+test("githubCheckpointSchema admits the checkpoint fields and refuses others", () => {
+  assert.ok(
+    githubCheckpointSchema.safeParse({ etag: null, newest_event_id: null })
+      .success,
+  );
+  assert.ok(
+    githubCheckpointSchema.safeParse({
+      etag: FIRST_ETAG,
+      newest_event_id: "41",
+    }).success,
+  );
+  assert.ok(
+    !githubCheckpointSchema.safeParse({ etag: null, newest_event_id: "4a" })
+      .success,
+  );
+  assert.ok(
+    !githubCheckpointSchema.safeParse({
+      etag: null,
+      newest_event_id: null,
+      extra: 1,
+    }).success,
+  );
 });
