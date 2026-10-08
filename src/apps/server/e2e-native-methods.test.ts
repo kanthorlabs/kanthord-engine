@@ -48,8 +48,8 @@ import {
 import { environment, kanthord } from "./cli-support.ts";
 import {
   FAKE_SSH_IDENTITY,
+  fakeGitHub,
   gatewayFixture,
-  scriptedActions,
 } from "./test-support.ts";
 
 const SUCCESSFUL_EXIT = 0;
@@ -102,13 +102,13 @@ test(
   "E08 native methods execute, checkpoint, assess and request actions over HTTP",
   { timeout: 180000 },
   async (t) => {
-    const actions = scriptedActions();
+    const gitHub = await fakeGitHub(t);
     const f = await gatewayFixture(t, {
       repositoryConnector: {
         gitLsRemote: async () => {},
         resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
       },
-      standIns: { intakeActions: actions.seam },
+      github: { baseUrl: gitHub.endpoint },
     });
     const directory = temporary(t);
     const human = {
@@ -595,27 +595,39 @@ test(
     await t.test(
       "E08.5 passing reviewer requests the gated action before release",
       async () => {
-        actions.performAnswers.push({
-          kind: "pull_request",
-          resource_identity: gatedResource,
-          number: 42,
-        });
         const answer = await execute(reviewer, C, review());
         assert.deepEqual(answer.result, {
           kind: "released",
           furtherWork: false,
         });
-        assert.deepEqual(actions.performCalls[0]!.operands, {
-          nodeBranch: `kanthord/${C}`,
-          baseBranch: "main",
-          commit: headC,
-          reusedAddress: null,
-        });
-        assert.ok(
-          (await evidence(C)).items.some(
-            (item) => item.requirement_key === GATED_REQUIREMENT,
-          ),
+        assert.deepEqual(
+          gitHub.calls.map((call) => ({
+            method: call.method,
+            path: call.path,
+            body: call.body,
+            token: call.token,
+          })),
+          [
+            {
+              method: "POST",
+              path: "/repos/owner/gated/pulls",
+              body: {
+                head: `kanthord/${C}`,
+                base: "main",
+                title: `kanthord ${C}`,
+              },
+              token: "test_methods_github",
+            },
+          ],
         );
+        const requested = (await evidence(C)).items.find(
+          (item) => item.requirement_key === GATED_REQUIREMENT,
+        );
+        assert.deepEqual(requested?.assets[0]?.address, {
+          kind: "pull_request",
+          resource_identity: gatedResource,
+          number: gitHub.pulls[0]!.number,
+        });
         const REQUESTED = "External.Requested";
         assert.equal(await state(C), REQUESTED);
       },

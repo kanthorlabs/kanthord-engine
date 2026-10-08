@@ -14,8 +14,6 @@ const UNWIRED_SEAMS = [
   "IntakeStorage.get",
   "IntakeStorage.executionGet",
   "IntakeStorage.delete",
-  "IntakeActions.perform",
-  "IntakeActions.read",
 ];
 const NO_SEAMS = 0;
 const TYPESCRIPT_EXTENSION = ".ts";

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
+import { ulid } from "ulid";
 import { deriveClientSecret } from "../../gateway/local.ts";
 import {
   directories,
@@ -38,10 +39,7 @@ import type {
   ProjectBindings,
   RepositoryConnector,
 } from "../../project/contract.ts";
-import type {
-  WorkerRegistrations,
-  IntakeActions,
-} from "../../worker/contract.ts";
+import type { WorkerRegistrations } from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
 import {
   Diagnostic,
@@ -149,7 +147,6 @@ export function composeServices(options: {
   inventoryOverrides?: Partial<ResourceInventories>;
   standIns?: {
     intakeStorage?: IntakeStorage;
-    intakeActions?: IntakeActions;
     inboundsNaming?: InboundsNamingFn;
   };
 }) {
@@ -306,9 +303,41 @@ export function composeServices(options: {
       request: (input, options) =>
         missionClient["evidence.request"](input, options),
     },
-    intakeActions: options.standIns?.intakeActions ?? {
-      perform: unwired("IntakeActions.perform"),
-      read: unwired("IntakeActions.read"),
+    intakeActions: {
+      perform: async (call, action, requestKey) =>
+        resultOf(
+          await intakeClient["action.perform"](
+            {
+              params: { execution_id: call.executionId },
+              query: {},
+              body: {
+                key: action.key,
+                commit: action.commit,
+                reused_evidence_id: action.reusedEvidenceId,
+                request_key: requestKey,
+              },
+            },
+            {
+              identity: call.identity,
+              context: call.context,
+              idempotencyKey: ulid(),
+            },
+          ),
+        ),
+      read: async (call, method, evidenceId, page) =>
+        resultOf(
+          await intakeClient["action.read"](
+            {
+              params: {
+                execution_id: call.executionId,
+                evidence_id: evidenceId,
+              },
+              query: { method, ...page },
+              body: null,
+            },
+            { identity: call.identity, context: call.context },
+          ),
+        ),
     },
     custodyHandover: {
       handover: (...args) => custody.handover(...args),

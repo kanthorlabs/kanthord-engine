@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { simpleGit } from "simple-git";
 import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { HttpStatus } from "../../kernel/http.ts";
+import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
+import { OutboundRequestState } from "../../intake/contract.ts";
 import {
   OperationResultType,
   type OperationResult,
@@ -26,17 +29,18 @@ import {
   ACTION_REQUEST_TOOL_NAME,
   ActionResultKind,
   RefusalClass,
-  ResultClass,
   Uncertainty,
   WorkerErrorCode,
   PlatformAddressKind,
-  ActionReadMethod,
+  type PlatformAddress,
 } from "../../worker/contract.ts";
 import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
-  scriptedActions,
   fakeGitHub,
+  bareRepository,
+  mappedTransport,
+  remoteHead,
 } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
@@ -53,20 +57,23 @@ const FAILURE_EXIT = 1;
 const SECOND_REVISION = 2;
 const PUSHED_PRIORITY = 2;
 const TWO_CALLS = 2;
+const UNAUTHORIZED_STATUS = 401;
+const HOOK_MODE = 0o755;
 const SECOND_ATTEMPT = 2;
 const THIRD_MISSION_VERSION = 3;
 const GATED_PRIORITY = 3;
 const FOURTH_MISSION_VERSION = 4;
-const FOUR_CALLS = 4;
 const NO_OUTPUT = "";
 const TIMEOUT = 180000;
 const GATED = "gated";
 const PUSHED = "pushed";
 const GATED_KEY = "gated.pull_request";
 const PUSHED_KEY = "pushed.merge_push";
-const B = "b".repeat(40);
-const D = "d".repeat(40);
-const E = "e".repeat(40);
+const GITHUB_KEY = "test-secret";
+const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
+const PULL_REQUEST_OPERATION = "github.pull_request";
+const PUSH_COUNTER = "pre-receive.count";
+const MAIN_REF = "refs/heads/main";
 const CONTENT = {
   name: "Ship accounts",
   requirement: "Ship accounts",
@@ -75,6 +82,10 @@ const CONTENT = {
   bindings: [],
 };
 type Page<T> = { items: T[] };
+type PullRequestAddress = Extract<
+  PlatformAddress,
+  { kind: typeof PlatformAddressKind.PullRequest }
+>;
 type Submission = { evidence: Evidence };
 type Assessment = { node: { state: string }; outcome: unknown };
 
@@ -95,17 +106,64 @@ function refused<T>(result: OperationResult<T>, status: number, code: string) {
   assert.equal(result.error.error.code, code);
 }
 
+async function commitOnBranch(
+  t: TestContext,
+  bare: string,
+  branch: string,
+  content: string,
+) {
+  const directory = join(temporary(t), "node");
+  await simpleGit().clone(bare, directory);
+  const git = simpleGit(directory);
+  await git.addConfig("user.name", "Test Node");
+  await git.addConfig("user.email", "test_node@example.invalid");
+  await git.raw(["checkout", "-b", branch]);
+  writeFileSync(join(directory, "node.md"), content);
+  await git.add("node.md");
+  await git.commit(content);
+  await git.push("origin", branch);
+  const head = (await git.revparse(["HEAD"])).trim();
+  assert.match(head, /^[a-f0-9]{40}$/);
+  return head;
+}
+
+function rejectPushes(bare: string) {
+  const hook = join(bare, "hooks", "pre-receive");
+  writeFileSync(
+    hook,
+    `#!/bin/sh\necho push >> "${join(bare, PUSH_COUNTER)}"\nexit 1\n`,
+  );
+  chmodSync(hook, HOOK_MODE);
+  assert.equal(existsSync(join(bare, PUSH_COUNTER)), false);
+}
+
+function rejectedPushes(bare: string): number {
+  const counter = join(bare, PUSH_COUNTER);
+  assert.ok(bare.startsWith("/"));
+  if (!existsSync(counter)) return NO_CALLS;
+  return readFileSync(counter, "utf8").split("\n").filter(Boolean).length;
+}
+
 async function setup(t: TestContext) {
-  const actions = scriptedActions();
   const gitHub = await fakeGitHub(t);
+  const gatedBare = await bareRepository(t, GATED);
+  const pushedBare = await bareRepository(t, PUSHED);
+  const B = await commitOnBranch(t, gatedBare.bare, "work-1", "attempt 1\n");
+  const D = await commitOnBranch(t, gatedBare.bare, "work-2", "attempt 2\n");
+  const E = await commitOnBranch(t, pushedBare.bare, "work", "pushed\n");
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
-    standIns: { intakeActions: actions.seam },
+    repositoryTransport: mappedTransport({
+      [`git@github.com:owner/${GATED}.git`]: gatedBare.bare,
+      [`git@github.com:owner/${PUSHED}.git`]: pushedBare.bare,
+    }),
   });
+  const creates = () =>
+    gitHub.calls.filter((call) => call.method === HttpMethod.Post).length;
   const directory = temporary(t);
   const H = {
     ...environment(directory),
@@ -347,8 +405,13 @@ async function setup(t: TestContext) {
   const node = (nodeId: string) =>
     read<{ state: string }>(["mission", "node", "get", nodeId]);
   return {
-    actions,
     gitHub,
+    creates,
+    gatedBare,
+    pushedBare,
+    B,
+    D,
+    E,
     file,
     read,
     write,
@@ -376,16 +439,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     e4: ExecutionRecord,
     e6: ExecutionRecord;
   let gWork1: Evidence, gWork2: Evidence, request1: Evidence;
-  const pr = {
-    kind: PlatformAddressKind.PullRequest,
-    resource_identity: h.gated.resource_identity,
-    number: h.gitHub.open({
-      owner: "owner",
-      repo: GATED,
-      head: `kanthord/${h.G}`,
-      base: "main",
-    }),
-  };
+  let pr: PullRequestAddress;
 
   await t.test("E06.1 steps claim selects G attempt 1", async () => {
     e1 = await h.pull(h.G, FIRST_ATTEMPT);
@@ -396,12 +450,12 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       HttpStatus.Conflict,
       WorkerErrorCode.ClaimNotEvaluation,
     );
-    assert.equal(h.actions.performCalls.length, NO_CALLS);
+    assert.equal(h.gitHub.calls.length, NO_CALLS);
   });
   await t.test(
     "E06.3 steps publishes the repository snapshot and releases",
     async () => {
-      gWork1 = (await h.work(e1, h.gated.id, B)).evidence;
+      gWork1 = (await h.work(e1, h.gated.id, h.B)).evidence;
       await h.release(e1);
     },
   );
@@ -419,67 +473,78 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   await t.test(
     "E06.5 passing assessment keeps the required action eligible",
     async () => {
-      const run = (await h.run(e2, h.gated.id, B)).evidence;
-      const assessment = await h.pass(e2, [run.id, gWork1.id], h.gated.id, B);
+      const run = (await h.run(e2, h.gated.id, h.B)).evidence;
+      const assessment = await h.pass(e2, [run.id, gWork1.id], h.gated.id, h.B);
       assert.equal(assessment.node.state, NodeState.Evaluating);
       assert.equal(assessment.outcome, null);
     },
   );
   await t.test("E06.6 no-effect refusal returns derived operands", async () => {
-    h.actions.performAnswers.push({
-      class: RefusalClass.FinalRefusal,
-      code: "repository.platform.github.final_refusal",
-      message: "Bad credentials",
-    });
+    h.gitHub.respondNext(UNAUTHORIZED_STATUS, { message: "Bad credentials" });
     const result = completed(await h.request(e2));
     assert.equal(result.tool_name, ACTION_REQUEST_TOOL_NAME);
-    assert.deepEqual(result.items[0], {
-      kind: ActionResultKind.FailedBeforeEffect,
-      action: { key: GATED_KEY, binding_id: h.gated.id },
-      refusal: {
-        class: RefusalClass.FinalRefusal,
-        code: "repository.platform.github.final_refusal",
-        message: "Bad credentials",
+    const [item] = result.items;
+    assert.ok(item?.kind === ActionResultKind.FailedBeforeEffect);
+    assert.deepEqual(item.action, { key: GATED_KEY, binding_id: h.gated.id });
+    assert.equal(item.refusal.class, RefusalClass.FinalRefusal);
+    assert.equal(item.refusal.code, FINAL_REFUSAL_CODE);
+    assert.deepEqual(h.gitHub.calls, [
+      {
+        method: HttpMethod.Post,
+        path: `/repos/owner/${GATED}/pulls`,
+        body: {
+          head: `kanthord/${h.G}`,
+          base: "main",
+          title: `kanthord ${h.G}`,
+        },
+        token: GITHUB_KEY,
       },
-    });
-    assert.deepEqual(h.actions.performCalls[0]?.operands, {
-      nodeBranch: "kanthord/" + h.G,
-      baseBranch: "main",
-      commit: B,
-      reusedAddress: null,
-    });
+    ]);
   });
   await t.test(
-    "E06.7 human removes the failed fake outbound request before a successful write",
+    "E06.7 human removes the failed outbound request before a successful write",
     async () => {
       const requestKey = `${h.G}/${FIRST_ATTEMPT}/${GATED_KEY}`;
-      assert.equal(h.actions.performCalls[0]?.requestKey, requestKey);
       assert.equal(
         completed(await h.request(e2)).items[0]?.kind,
         ActionResultKind.FailedBeforeEffect,
       );
-      assert.deepEqual(h.actions.readBackCalls, [requestKey]);
-      assert.equal(h.actions.performCalls.length, SINGLE_CALL);
-      // Intake is a stand-in: model the human removal of its failed request.
-      assert.equal(
-        h.actions.requests.delete(`pull_request/${requestKey}`),
-        true,
+      assert.equal(h.creates(), SINGLE_CALL);
+      const outbound = await h.read<
+        Page<{ id: string; request_key: string; state: string }>
+      >(["intake", "outbound", "list", "--operation", PULL_REQUEST_OPERATION]);
+      assert.deepEqual(
+        outbound.items.map((item) => [item.request_key, item.state]),
+        [[requestKey, OutboundRequestState.Failed]],
       );
-      h.actions.performAnswers.push(pr);
+      await h.read([
+        "intake",
+        "outbound",
+        "delete",
+        "--force",
+        "--id",
+        outbound.items[0]!.id,
+      ]);
       const item = completed(await h.request(e2)).items[0];
       assert.ok(item?.kind === ActionResultKind.Submitted);
+      pr = {
+        kind: PlatformAddressKind.PullRequest,
+        resource_identity: h.gated.resource_identity,
+        number: h.gitHub.pulls[FIRST_INDEX]!.number,
+      };
       request1 = item.evidence as Evidence;
       assert.equal(request1.requirement_key, GATED_KEY);
       assert.equal(request1.attempt, FIRST_ATTEMPT);
       assert.deepEqual(request1.assets[0]?.address, pr);
-      assert.equal(h.actions.performCalls.length, TWO_CALLS);
+      assert.equal(h.creates(), TWO_CALLS);
+      assert.equal(h.gitHub.pulls.length, SINGLE_ITEM);
     },
   );
   await t.test(
     "E06.8 repeat dispatches nothing and reviewer releases externally",
     async () => {
       assert.deepEqual(completed(await h.request(e2)).items, []);
-      assert.equal(h.actions.performCalls.length, TWO_CALLS);
+      assert.equal(h.creates(), TWO_CALLS);
       await h.release(e2);
       assert.equal((await h.node(h.G)).state, NodeState.ExternalRequested);
     },
@@ -517,7 +582,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       assert.equal(unblock.node.state, NodeState.Available);
       assert.equal(unblock.attempt.attempt, SECOND_ATTEMPT);
       e3 = await h.pull(h.G, SECOND_ATTEMPT);
-      gWork2 = (await h.work(e3, h.gated.id, D)).evidence;
+      gWork2 = (await h.work(e3, h.gated.id, h.D)).evidence;
       await h.release(e3);
     },
   );
@@ -525,9 +590,9 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     "E06.11 attempt 2 publishes its own passing assessment",
     async () => {
       e4 = await h.pull(h.G, SECOND_ATTEMPT);
-      const run = (await h.run(e4, h.gated.id, D)).evidence;
+      const run = (await h.run(e4, h.gated.id, h.D)).evidence;
       assert.equal(
-        (await h.pass(e4, [run.id, gWork2.id], h.gated.id, D)).node.state,
+        (await h.pass(e4, [run.id, gWork2.id], h.gated.id, h.D)).node.state,
         NodeState.Evaluating,
       );
     },
@@ -535,26 +600,41 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   await t.test(
     "E06.12 open earlier request is reused with the new commit",
     async () => {
-      h.actions.readAnswers.push({
-        body: {
-          state: "open",
-          head: { ref: "kanthord/" + h.G, repo: { full_name: "owner/gated" } },
-          base: { ref: "main", repo: { full_name: "owner/gated" } },
-        },
-      });
-      h.actions.performAnswers.push(pr);
+      h.gitHub.reopen(pr.number);
+      const before = h.gitHub.calls.length;
       const item = completed(await h.request(e4)).items[0];
       assert.ok(item?.kind === ActionResultKind.Submitted);
       const evidence = item.evidence as Evidence;
       assert.equal(evidence.attempt, SECOND_ATTEMPT);
       assert.deepEqual(evidence.assets[0]?.address, pr);
-      assert.equal(
-        h.actions.readCalls[0]?.method,
-        ActionReadMethod.PullRequestGet,
+      assert.deepEqual(
+        h.gitHub.calls
+          .slice(before)
+          .map((call) => [call.method, call.path, call.token]),
+        [
+          [
+            HttpMethod.Get,
+            `/repos/owner/${GATED}/pulls/${pr.number}`,
+            GITHUB_KEY,
+          ],
+        ],
       );
-      assert.deepEqual(h.actions.readCalls[0]?.address, pr);
-      assert.deepEqual(h.actions.performCalls[2]?.operands.reusedAddress, pr);
-      assert.equal(h.actions.performCalls[2]?.operands.commit, D);
+      assert.equal(h.creates(), TWO_CALLS);
+      assert.equal(
+        await remoteHead(h.gatedBare.bare, `refs/heads/kanthord/${h.G}`),
+        h.D,
+      );
+      const outbound = await h.read<
+        Page<{ request_key: string; state: string }>
+      >(["intake", "outbound", "list", "--operation", PULL_REQUEST_OPERATION]);
+      assert.ok(
+        outbound.items.some(
+          (row) =>
+            row.request_key ===
+              `${h.G}/${SECOND_ATTEMPT}/${GATED_KEY}/${pr.number}/${h.D}` &&
+            row.state === OutboundRequestState.Succeeded,
+        ),
+      );
     },
   );
   await t.test("E06.13 reused request belongs to attempt 2", async () => {
@@ -575,21 +655,17 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   });
   await t.test("E06.14 P reaches a passing evaluation claim", async () => {
     const e5 = await h.pull(h.P, FIRST_ATTEMPT);
-    const work = (await h.work(e5, h.pushed.id, E)).evidence;
+    const work = (await h.work(e5, h.pushed.id, h.E)).evidence;
     await h.release(e5);
     e6 = await h.pull(h.P, FIRST_ATTEMPT);
-    const run = (await h.run(e6, h.pushed.id, E)).evidence;
+    const run = (await h.run(e6, h.pushed.id, h.E)).evidence;
     assert.equal(
-      (await h.pass(e6, [run.id, work.id], h.pushed.id, E)).node.state,
+      (await h.pass(e6, [run.id, work.id], h.pushed.id, h.E)).node.state,
       NodeState.Evaluating,
     );
   });
   await t.test("E06.15 unknown effect is not redispatched", async () => {
-    h.actions.performAnswers.push({
-      class: ResultClass.UnknownOutcome,
-      code: "repository.platform.github.unknown_outcome",
-      message: "No response",
-    });
+    rejectPushes(h.pushedBare.bare);
     const expected = {
       kind: ActionResultKind.Uncertain,
       action: { key: PUSHED_KEY, binding_id: h.pushed.id },
@@ -597,7 +673,11 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     };
     assert.deepEqual(completed(await h.request(e6)).items, [expected]);
     assert.deepEqual(completed(await h.request(e6)).items, [expected]);
-    assert.equal(h.actions.performCalls.length, FOUR_CALLS);
+    assert.equal(rejectedPushes(h.pushedBare.bare), SINGLE_CALL);
+    assert.equal(
+      await remoteHead(h.pushedBare.bare, MAIN_REF),
+      h.pushedBare.head,
+    );
   });
   await t.test(
     "E06.16 uncertain action cannot satisfy reviewer release",
@@ -640,7 +720,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       const item = completed(await h.request(e7)).items[0];
       assert.ok(item?.kind === ActionResultKind.Uncertain);
       assert.equal(item.uncertainty, Uncertainty.Effect);
-      assert.equal(h.actions.performCalls.length, FOUR_CALLS);
+      assert.equal(rejectedPushes(h.pushedBare.bare), SINGLE_CALL);
       refused(
         await h.request(e1),
         HttpStatus.Forbidden,

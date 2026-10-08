@@ -248,8 +248,11 @@ export class ActionPerformer {
     try {
       return await this.dependencies.intakeActions.perform(
         call,
-        pending.entry.action,
-        pending.operands,
+        {
+          key: pending.entry.action.key,
+          commit: pending.operands.commit,
+          reusedEvidenceId: pending.operands.reusedEvidenceId,
+        },
         requestKeyOf(pending),
       );
     } catch (error) {
@@ -280,12 +283,14 @@ export class ActionPerformer {
       const answer = await this.dependencies.intakeActions.read(
         call,
         ActionReadMethod.PullRequestGet,
-        candidate.address,
+        candidate.evidence_id,
+        {},
       );
       if (isResultClass(answer))
         return readRefusalItem(pending.key.action, answer);
       if (!fulfils(answer.body, operands, entry.resource_identity)) continue;
       operands.reusedAddress = candidate.address;
+      operands.reusedEvidenceId = candidate.evidence_id;
       break;
     }
     return null;

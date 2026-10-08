@@ -13,7 +13,6 @@ import { GitHubPlatform, GitHubTargetKind } from "../../repository/github.ts";
 import {
   objectSink,
   sinkStorage,
-  scriptedActions,
   fakeGitHub,
   FakePullState,
   gatewayFixture,
@@ -28,7 +27,6 @@ const BYTES = "hello";
 const SHA256 = "a".repeat(64);
 const LIFETIME = 3600000;
 const NO_OBJECTS = 0;
-const TWO_CALLS = 2;
 const ONE_CALL = 1;
 const binding: StorageBinding = {
   binding_id: "binding",
@@ -78,52 +76,6 @@ test("Intake storage fixture transfers bytes, checks length and removes objects"
   assert.equal(missing.status, HttpStatus.NotFound);
   await missing.arrayBuffer();
   assert.equal(sink.objects.size, NO_OBJECTS);
-});
-
-test("the Intake action fake reads failed keys back and never redispatches a retained request", async () => {
-  const fake = scriptedActions();
-  const action = {
-    key: "repo.pull_request",
-    binding_id: "binding",
-    action: "pull_request",
-    expected_end_state: "pull_request_merged",
-    follows: null,
-    configuration: { base_branch: "main" },
-  } as const;
-  const operands = {
-    nodeBranch: "kanthord/node",
-    baseBranch: "main",
-    commit: "a".repeat(40),
-    reusedAddress: null,
-  };
-  const requestKey = "node/1/repo.pull_request";
-  const failure = {
-    class: ResultClass.UnknownOutcome,
-    code: "timeout",
-    message: "timeout",
-  };
-  const address = {
-    kind: "pull_request",
-    resource_identity: "repository:github:owner/repo",
-    number: 42,
-  } as const;
-  fake.performAnswers.push(failure);
-  const perform = () =>
-    fake.seam.perform(
-      { ...call, executionId: "execution" },
-      action,
-      operands,
-      requestKey,
-    );
-  assert.deepEqual(await perform(), failure);
-  assert.deepEqual(await perform(), failure);
-  assert.equal(fake.performCalls.length, ONE_CALL);
-  assert.deepEqual(fake.readBackCalls, [requestKey]);
-  fake.readBackAnswers.push(address);
-  assert.deepEqual(await perform(), address);
-  assert.deepEqual(await perform(), address);
-  assert.equal(fake.performCalls.length, ONE_CALL);
-  assert.equal(fake.readBackCalls.length, TWO_CALLS);
 });
 
 const GITHUB_TOKEN = "test-secret";

@@ -10,6 +10,7 @@ const operands = {
   baseBranch: "main",
   commit: "b".repeat(40),
   reusedAddress: null,
+  reusedEvidenceId: null,
 };
 const body = {
   state: "open",

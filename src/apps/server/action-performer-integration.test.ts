@@ -19,7 +19,7 @@ import {
   workerOperations,
   ActionResultKind,
   ACTION_REQUEST_TIMEOUT_MS,
-  PlatformAddressKind,
+  RefusalClass,
 } from "../../worker/contract.ts";
 import {
   OperationResultType,
@@ -27,11 +27,11 @@ import {
   type Operation,
   type OperationResult,
 } from "../../kernel/operation.ts";
-import { HttpStatus } from "../../kernel/http.ts";
+import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import {
   FAKE_SSH_IDENTITY,
+  fakeGitHub,
   gatewayFixture,
-  scriptedActions,
 } from "./test-support.ts";
 
 const HTTP = "http";
@@ -50,7 +50,9 @@ const COMMIT = "b".repeat(40);
 const REPOSITORY_BINDING = "repo";
 const NO_INPUT = { params: {}, query: {}, body: null };
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
-const UNKNOWN = "gateway.invocation.unknown";
+const UNPROCESSABLE_STATUS = 422;
+const TWO_REQUESTS = 2;
+const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
 const CONTENT = {
   name: "Work",
   requirement: "Work",
@@ -78,19 +80,17 @@ function refused<T>(result: OperationResult<T>, status: number, code: string) {
   assert.ok(result.error.request_id);
 }
 
-async function setup(
-  t: TestContext,
-  adapter: typeof HTTP | typeof DIRECT,
-  wired = true,
-) {
-  const actions = scriptedActions();
+async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
+  const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
-    standIns: wired ? { intakeActions: actions.seam } : {},
+    github: { baseUrl: gitHub.endpoint },
   });
+  const creates = () =>
+    gitHub.calls.filter((item) => item.method === HttpMethod.Post).length;
   async function call<T extends Operation>(
     operation: T,
     input: z.input<T["input"]>,
@@ -357,7 +357,8 @@ async function setup(
     );
   return {
     fixture,
-    actions,
+    gitHub,
+    creates,
     call,
     request,
     token,
@@ -368,28 +369,24 @@ async function setup(
 
 test("both adapters serialize one execution and replay the completed request", async (t) => {
   const h = await setup(t, DIRECT);
-  const release = h.actions.hold();
-  h.actions.performAnswers.push({
-    kind: PlatformAddressKind.PullRequest,
-    resource_identity: "repository:github:owner/repo",
-    number: 42,
-  });
+  const release = h.gitHub.hold();
   const key = ulid();
   const first = h.request(HTTP, key);
   for (
     let poll = INITIAL_POLL_COUNT;
-    poll < POLLS && h.actions.performCalls.length === NO_CALLS;
+    poll < POLLS && h.creates() === NO_CALLS;
     poll++
   )
     await setImmediate();
-  assert.equal(h.actions.performCalls.length, SINGLE_CALL);
+  assert.equal(h.creates(), SINGLE_CALL);
   const second = h.request(DIRECT);
   release();
   const [one, two] = await Promise.all([first, second]);
   const items = [...completed(one).items, ...completed(two).items];
   assert.equal(items.length, SINGLE_CALL);
   assert.equal(items[0]?.kind, ActionResultKind.Submitted);
-  assert.equal(h.actions.performCalls.length, SINGLE_CALL);
+  assert.equal(h.creates(), SINGLE_CALL);
+  assert.equal(h.gitHub.pulls.length, SINGLE_CALL);
   const evidence = completed(
     await h.call(missionOperations["evidence.list"], {
       params: { node_id: h.node_id },
@@ -402,7 +399,7 @@ test("both adapters serialize one execution and replay the completed request", a
     SINGLE_CALL,
   );
   assert.deepEqual(completed(await h.request(DIRECT, key)), completed(one));
-  assert.equal(h.actions.performCalls.length, SINGLE_CALL);
+  assert.equal(h.creates(), SINGLE_CALL);
 });
 
 test("another registration fails the execution proof through both adapters", async (t) => {
@@ -415,14 +412,24 @@ test("another registration fails the execution proof through both adapters", asy
       HttpStatus.Forbidden,
       PROOF_FAILED,
     );
-  assert.equal(h.actions.performCalls.length, NO_CALLS);
+  assert.equal(h.gitHub.calls.length, NO_CALLS);
 });
 
-test("unwired production Intake answers the shared internal-error envelope on every call", async (t) => {
-  const h = await setup(t, HTTP, false);
-  refused(await h.request(), HttpStatus.InternalServerError, UNKNOWN);
-  refused(await h.request(), HttpStatus.InternalServerError, UNKNOWN);
-  assert.equal(h.actions.performCalls.length, NO_CALLS);
+test("a GitHub refusal answers failed_before_effect and releases the reservation", async (t) => {
+  const h = await setup(t, HTTP);
+  h.gitHub.respondNext(UNPROCESSABLE_STATUS, { message: "Validation Failed" });
+  for (let round = 0; round < TWO_REQUESTS; round++) {
+    const [item] = completed(await h.request()).items;
+    assert.ok(item?.kind === ActionResultKind.FailedBeforeEffect);
+    assert.equal(item.refusal.class, RefusalClass.FinalRefusal);
+    assert.equal(item.refusal.code, FINAL_REFUSAL_CODE);
+  }
+  assert.equal(h.creates(), SINGLE_CALL);
+  assert.deepEqual(
+    h.gitHub.calls.map((item) => item.method),
+    [HttpMethod.Post, HttpMethod.Get],
+  );
+  assert.equal(h.gitHub.pulls.length, NO_CALLS);
 });
 
 test("action operation keeps the long unary execution-scoped contract", () => {

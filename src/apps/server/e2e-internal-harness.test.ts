@@ -22,7 +22,6 @@ import {
   FAKE_SSH_IDENTITY,
   sinkStorage,
   fakeGitHub,
-  scriptedActions,
   inProcessWorker,
   bareRepository,
   mappedTransport,
@@ -115,7 +114,6 @@ async function waitForNode(cli: CLI, nodeId: string, state: string) {
 
 async function setupInternal(t: TestContext) {
   const sink = await objectSink(t);
-  const actions = scriptedActions();
   const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
@@ -125,7 +123,6 @@ async function setupInternal(t: TestContext) {
     github: { baseUrl: gitHub.endpoint },
     standIns: {
       intakeStorage: sinkStorage(sink),
-      intakeActions: actions.seam,
     },
   });
   const cli = journeyClient(t, fixture.endpoint, fixture.token);
@@ -295,7 +292,6 @@ async function setupInternal(t: TestContext) {
     generalAuth,
     reviewAuth,
     sink,
-    actions,
     gitHub,
   };
 }
@@ -335,17 +331,11 @@ test(
       [REPOSITORY_ADDRESS]: repo.bare,
       [GATED_ADDRESS]: gatedRepo.bare,
     });
-    const pr = {
-      kind: "pull_request" as const,
-      resource_identity: f.bindings.gated!.resource_identity,
-      number: f.gitHub.open({
-        owner: "owner",
-        repo: "gated",
-        head: `kanthord/${f.gated}`,
-        base: "main",
-      }),
+    let pr!: {
+      kind: "pull_request";
+      resource_identity: string;
+      number: number;
     };
-    f.actions.performAnswers.push(pr);
     const generalProvider = scriptedProvider([
       tool("bash", { command: "printf hello > hello.txt" }),
       tool(UPLOAD, { path: FILE_NAME }),
@@ -518,6 +508,12 @@ test(
         const request = evidence.items.find(
           (item) => item.requirement_key === REQUIREMENT,
         )!;
+        assert.equal(f.gitHub.pulls.length, SINGLE_ITEM);
+        pr = {
+          kind: "pull_request",
+          resource_identity: f.bindings.gated!.resource_identity,
+          number: f.gitHub.pulls[0]!.number,
+        };
         const asset = request.assets[0]!;
         assert.ok(asset.kind === AssetKind.Platform);
         assert.deepEqual(asset.address, pr);
@@ -530,13 +526,18 @@ test(
           "1",
         ]);
         assert.equal(actions.items[0]!.resolution, UNRESOLVED);
-        assert.equal(f.actions.performCalls.length, SINGLE_ITEM);
-        assert.deepEqual(f.actions.performCalls[0]!.operands, {
-          nodeBranch: `kanthord/${f.gated}`,
-          baseBranch: "main",
-          commit: head,
-          reusedAddress: null,
-        });
+        assert.deepEqual(f.gitHub.calls, [
+          {
+            method: "POST",
+            path: "/repos/owner/gated/pulls",
+            body: {
+              head: `kanthord/${f.gated}`,
+              base: "main",
+              title: `kanthord ${f.gated}`,
+            },
+            token: GITHUB_KEY,
+          },
+        ]);
       },
     );
     let outcomeC!: string;
@@ -567,7 +568,7 @@ test(
         );
         outcomeC = outcomes.items[0]!.id;
         assert.deepEqual(
-          f.gitHub.calls.map(({ method, path, token }) => ({
+          f.gitHub.calls.slice(SINGLE_ITEM).map(({ method, path, token }) => ({
             method,
             path,
             token,

@@ -53,10 +53,7 @@ import {
   workerResourceIdentity,
   type ProjectBindings,
 } from "../../project/contract.ts";
-import type {
-  WorkerRegistrations,
-  IntakeActions,
-} from "../../worker/contract.ts";
+import type { WorkerRegistrations } from "../../worker/contract.ts";
 export interface MachineDependencies {
   project: ProjectBindings;
   worker: WorkerRegistrations;
@@ -284,90 +281,6 @@ export function sinkStorage(sink: ObjectSink): IntakeStorage {
       if (deletedRequests.has(requestKey)) return;
       sink.objects.delete(key);
       deletedRequests.add(requestKey);
-    },
-  };
-}
-
-export function scriptedActions() {
-  const performAnswers: Awaited<ReturnType<IntakeActions["perform"]>>[] = [];
-  type Answer = Awaited<ReturnType<IntakeActions["perform"]>>;
-  const requests = new Map<string, Answer | null>();
-  const readBackAnswers: (Answer | null)[] = [];
-  const readBackCalls: string[] = [];
-  const readAnswers: Awaited<ReturnType<IntakeActions["read"]>>[] = [];
-  const performCalls: {
-    call: { executionId: string };
-    action: Parameters<IntakeActions["perform"]>[1];
-    operands: Parameters<IntakeActions["perform"]>[2];
-    requestKey: string;
-  }[] = [];
-  const readCalls: {
-    call: { executionId: string };
-    method: Parameters<IntakeActions["read"]>[1];
-    address: Parameters<IntakeActions["read"]>[2];
-  }[] = [];
-  let gate: Promise<void> | null = null;
-  const seam: IntakeActions = {
-    async perform(call, action, operands, requestKey) {
-      assert.ok(requestKey);
-      const key = `${action.action}/${requestKey}`;
-      const previous = requests.get(key);
-      if (previous === null)
-        throw new GatewayError(
-          HttpStatus.Conflict,
-          "intake.outbound.request.in_flight",
-          "Request is running.",
-        );
-      if (previous !== undefined) {
-        if (!("class" in previous)) return structuredClone(previous);
-        readBackCalls.push(requestKey);
-        const match = readBackAnswers.shift();
-        if (match && !("class" in match)) requests.set(key, match);
-        return structuredClone(match ?? previous);
-      }
-      requests.set(key, null);
-      performCalls.push({
-        call: { executionId: call.executionId },
-        action,
-        operands,
-        requestKey,
-      });
-      if (gate) await gate;
-      const answer = performAnswers.shift();
-      if (!answer) throw new Error("no scripted answer");
-      requests.set(key, structuredClone(answer));
-      return answer;
-    },
-    async read(call, method, address) {
-      readCalls.push({
-        call: { executionId: call.executionId },
-        method,
-        address,
-      });
-      if (gate) await gate;
-      const answer = readAnswers.shift();
-      if (!answer) throw new Error("no scripted answer");
-      return answer;
-    },
-  };
-  return {
-    seam,
-    performAnswers,
-    readBackAnswers,
-    readBackCalls,
-    requests,
-    readAnswers,
-    performCalls,
-    readCalls,
-    hold() {
-      assert.equal(gate, null);
-      const pending = Promise.withResolvers<void>();
-      gate = pending.promise;
-      return () => {
-        assert.equal(gate, pending.promise);
-        gate = null;
-        pending.resolve();
-      };
     },
   };
 }
@@ -756,8 +669,15 @@ function pullBody(pull: FakePullRequest) {
     state: pull.state,
     merged: pull.merged,
     merge_commit_sha: pull.merge_commit_sha,
-    head: { ref: pull.head, label: `${pull.owner}:${pull.head}` },
-    base: { ref: pull.base },
+    head: {
+      ref: pull.head,
+      label: `${pull.owner}:${pull.head}`,
+      repo: { full_name: `${pull.owner}/${pull.repo}` },
+    },
+    base: {
+      ref: pull.base,
+      repo: { full_name: `${pull.owner}/${pull.repo}` },
+    },
   };
 }
 
@@ -951,6 +871,13 @@ export async function fakeGitHub(t: TestContext) {
     },
     close(number: number): void {
       changePull(state, number).state = FakePullState.Closed;
+    },
+    reopen(number: number): void {
+      const pull = state.pulls.find((item) => item.number === number);
+      assert.ok(pull, "Unknown fake pull request");
+      assert.equal(pull.state, FakePullState.Closed);
+      assert.equal(pull.merged, false);
+      pull.state = FakePullState.Open;
     },
     respondNext(status: number, body: unknown): void {
       assert.ok(Number.isInteger(status));

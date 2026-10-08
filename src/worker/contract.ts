@@ -252,7 +252,14 @@ export type ActionOperands = {
   baseBranch: string;
   commit: string;
   reusedAddress: PlatformAddress | null;
+  reusedEvidenceId: string | null;
 };
+export type ActionPerformInput = {
+  key: string;
+  commit: string;
+  reusedEvidenceId: string | null;
+};
+export type ActionReadPage = { limit?: number; cursor?: string };
 export type ResultClassAnswer = {
   class: ResultClass;
   code: string;
@@ -261,15 +268,15 @@ export type ResultClassAnswer = {
 export interface IntakeActions {
   perform(
     call: IntakeActionCall,
-    action: FrozenAction,
-    operands: ActionOperands,
+    action: ActionPerformInput,
     requestKey: string,
   ): Promise<PlatformAddress | ResultClassAnswer>;
   read(
     call: IntakeActionCall,
     method: ActionReadMethod,
-    address: PlatformAddress,
-  ): Promise<{ body: unknown } | ResultClassAnswer>;
+    evidenceId: string,
+    page: ActionReadPage,
+  ): Promise<{ body: unknown; next_cursor: string | null } | ResultClassAnswer>;
 }
 export interface EvidenceRequests {
   request(
