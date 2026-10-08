@@ -259,13 +259,13 @@ export async function cliMachine(
   input: { masterKey: string; projectId: string; resourceIdentity: string },
 ) {
   assert.ok(input.masterKey && input.projectId && input.resourceIdentity);
-  const token = generateMachineToken({
+  const { token, client_secret } = generateMachineToken({
     env: session.H,
     masterKey: input.masterKey,
     projectId: input.projectId,
     bindingName: HARNESS_BINDING,
     name: "Harness",
-  }).token;
+  });
   session.secrets.push(token);
   const T = { ...session.H, KANTHORD_TOKEN: token };
   const { runtime_identity: rid } = await session.read<{
@@ -294,7 +294,7 @@ export async function cliMachine(
       { further_work: false },
       T,
     );
-  return { token, T, node, pull, release };
+  return { token, client_secret, T, node, pull, release };
 }
 
 export function executionContext(execution: ExecutionRecord) {
