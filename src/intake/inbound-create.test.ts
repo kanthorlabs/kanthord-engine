@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { ulid } from "ulid";
+import {
+  GrantKind,
+  type GrantOf,
+  type GrantRequest,
+  type Material,
+} from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -13,19 +19,33 @@ import {
   OperationResultType,
   type CallerContext,
 } from "../kernel/operation.ts";
-import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import {
+  IN_MEMORY_DATABASE,
+  Store,
+  type Transaction,
+} from "../kernel/store.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
+import {
+  GitHubPlatform,
+  type GitHubAnswer,
+  type GitHubCall,
+  type GitHubEventsAnswer,
+  type GitHubEventsQuery,
+} from "../repository/github.ts";
+import type { IntakeCustody } from "./action-check.ts";
 import {
   Consumer,
   INTAKE_SERVICE_NAME,
   InboundKind,
   InboundPlatform,
   intakeOperations,
+  ResultClass,
   type InboundCreate,
 } from "./contract.ts";
 import { commitInbound, credentialRefusal } from "./inbound-create.ts";
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
+import type { Dependencies } from "./service.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -42,6 +62,14 @@ const ONE_ROW = 1;
 const TWO_ROWS = 2;
 const ONE_CALL = 1;
 const CREDENTIAL_NAME = "token";
+const PLATFORM_REFUSED = "intake.inbound.platform_refused";
+const POLL_CREDENTIAL = "github-poll";
+const OTHER_PLATFORM_CREDENTIAL = "s3-store";
+const UNKNOWN_CREDENTIAL = "missing";
+const POLL_TOKEN = "ghp_poll-token";
+const UNAUTHORIZED_STATUS = 401;
+const ETAG = '"etag-1"';
+const CLOSED_LOCAL_PORT = "http://127.0.0.1:9";
 
 const WEBHOOK: InboundCreate = {
   project_id: PROJECT_ID,
@@ -51,7 +79,10 @@ const WEBHOOK: InboundCreate = {
   configuration: { resource: RESOURCE },
 };
 
-function harness(t: TestContext) {
+function harness(
+  t: TestContext,
+  collaborations: Partial<Pick<Dependencies, "custody" | "github">> = {},
+) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
@@ -64,6 +95,7 @@ function harness(t: TestContext) {
     health: new HealthRegistry(),
     identity: { kind: IdentityKind.Service, service: INTAKE_SERVICE_NAME },
     ...unusedActionDependencies(),
+    ...collaborations,
     projects: {
       get: async (input, options) => {
         projectCalls.push({
@@ -127,7 +159,7 @@ function harness(t: TestContext) {
           checkpoint: string | null;
         }[],
     );
-  return { store, identity, projectCalls, create, rows };
+  return { store, intake, identity, projectCalls, create, rows };
 }
 
 async function refusesWith(
@@ -177,13 +209,17 @@ test("a webhook with a credential answers 400 and inserts nothing", async (t) =>
   assert.equal(h.rows().length, NO_ROWS);
 });
 
-test("a poll answers 400 until the poll create exists and inserts nothing", async (t) => {
+test("a poll without a credential answers 400 and inserts nothing", async (t) => {
   const h = harness(t);
-  await refusesWith(
-    h.create({ ...WEBHOOK, kind: InboundKind.Poll, credential: "token" }),
+  const error = await refusesWith(
+    h.create({ ...WEBHOOK, kind: InboundKind.Poll }),
     HttpStatus.BadRequest,
     VALIDATION_FAILED,
   );
+  assert.deepEqual(error.details, [
+    { path: ["body", "credential"], code: "custom" },
+  ]);
+  assert.equal(h.projectCalls.length, NO_ROWS);
   assert.equal(h.rows().length, NO_ROWS);
 });
 
@@ -307,4 +343,176 @@ test("the insert step checks a named credential and inserts the row", async (t) 
     { credential: "token", platform: InboundPlatform.GitHub },
   ]);
   assert.equal(h.rows().length, ONE_ROW);
+});
+
+const POLL: InboundCreate = {
+  ...WEBHOOK,
+  kind: InboundKind.Poll,
+  credential: POLL_CREDENTIAL,
+};
+
+type EventsAnswer = GitHubAnswer<GitHubEventsAnswer>;
+
+function fakeCustody(credentials: Map<string, string>) {
+  const drops: string[] = [];
+  const refuse = (code: string): never => {
+    throw new OperationError(HttpStatus.BadRequest, code, "Refused.");
+  };
+  const custodySuitability = (
+    _tx: Transaction,
+    request: { credential: string; platform: string },
+  ): void => {
+    const platform = credentials.get(request.credential);
+    if (platform === undefined) refuse(CREDENTIAL_NOT_FOUND);
+    if (platform !== request.platform) refuse(PLATFORM_MISMATCH);
+  };
+  const custody: IntakeCustody = {
+    custodySuitability,
+    authorizeOperation<R extends GrantRequest>(
+      tx: Transaction,
+      request: R,
+    ): GrantOf<R["kind"]> {
+      const inbound: GrantRequest = request;
+      assert.ok(inbound.kind === GrantKind.Inbound);
+      assert.equal(inbound.identity.service, INTAKE_SERVICE_NAME);
+      custodySuitability(tx, inbound.inbound);
+      const grant: GrantOf<typeof GrantKind.Inbound> = {
+        kind: GrantKind.Inbound,
+        credential: inbound.inbound.credential,
+        platform: inbound.inbound.platform,
+        project_id: inbound.inbound.projectId,
+        execution: null,
+        facts: {
+          inbound_id: inbound.inbound.inboundId,
+          resource: inbound.inbound.resource,
+        },
+      };
+      return grant as GrantOf<R["kind"]>;
+    },
+    release(tx, grant): Material {
+      const credential = grant.credential;
+      assert.ok(credential !== null);
+      custodySuitability(tx, { credential, platform: grant.platform });
+      tx.database
+        .prepare("INSERT INTO test_drain (credential) VALUES (?)")
+        .run(credential);
+      return {
+        credential_id: "credential_1",
+        platform: grant.platform,
+        value: () => ({ key: POLL_TOKEN }),
+        drop: () => drops.push(credential),
+      };
+    },
+    consume: () => assert.fail("A poll create consumes no grant."),
+    grantFacts: () => assert.fail("A poll create reads no grant facts."),
+  };
+  return { custody, drops };
+}
+
+function pollHarness(
+  t: TestContext,
+  answer: (call: GitHubCall, query: GitHubEventsQuery) => Promise<EventsAnswer>,
+) {
+  const credentials = new Map([
+    [POLL_CREDENTIAL, InboundPlatform.GitHub],
+    [OTHER_PLATFORM_CREDENTIAL, "s3"],
+  ]);
+  const { custody, drops } = fakeCustody(credentials);
+  const github = new GitHubPlatform({ baseUrl: CLOSED_LOCAL_PORT });
+  const listEvents = t.mock.method(github, "listEvents", answer);
+  const h = harness(t, { custody, github });
+  h.store.transaction((tx) =>
+    tx.database.exec("CREATE TABLE test_drain (credential TEXT NOT NULL)"),
+  );
+  const drained = () =>
+    h.store.transaction(
+      (tx) =>
+        tx.database.prepare("SELECT credential FROM test_drain").all().length,
+    );
+  return { ...h, credentials, drops, listEvents, drained };
+}
+
+const modified: EventsAnswer = {
+  ok: true,
+  value: { notModified: false, etag: ETAG, events: [] },
+};
+
+test("a poll create performs one request with the credential and inserts one row", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  const inbound = await h.create(POLL);
+  assert.equal(inbound.kind, InboundKind.Poll);
+  assert.equal(inbound.credential, POLL_CREDENTIAL);
+  assert.equal(inbound.checkpoint, null);
+  assert.deepEqual(
+    h.rows().map((row) => ({ ...row })),
+    [{ id: inbound.id, credential: POLL_CREDENTIAL, checkpoint: null }],
+  );
+  assert.equal(h.listEvents.mock.callCount(), ONE_CALL);
+  const [call, query] = h.listEvents.mock.calls[0]?.arguments ?? [];
+  assert.equal(call?.token, POLL_TOKEN);
+  assert.equal(call?.requester, h.identity);
+  assert.deepEqual(query, { owner: "owner", repo: "repo", etag: null });
+  assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
+  assert.equal(h.drained(), ONE_ROW);
+});
+
+test("a failed first request answers 422 platform_refused and inserts no row", async (t) => {
+  const h = pollHarness(t, async () => ({
+    ok: false,
+    class: ResultClass.FinalRefusal,
+    code: "repository.platform.github.final_refusal",
+    status: UNAUTHORIZED_STATUS,
+    message: "Bad credentials",
+  }));
+  const error = await refusesWith(
+    h.create(POLL),
+    CREDENTIAL_INVALID_STATUS,
+    PLATFORM_REFUSED,
+  );
+  assert.deepEqual(error.details, { status: UNAUTHORIZED_STATUS });
+  assert.equal(h.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(h.rows().length, NO_ROWS);
+  assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
+});
+
+test("an unknown credential and a credential of another platform answer 422 with no platform call", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  for (const credential of [UNKNOWN_CREDENTIAL, OTHER_PLATFORM_CREDENTIAL])
+    await refusesWith(
+      h.create({ ...POLL, credential }),
+      CREDENTIAL_INVALID_STATUS,
+      CREDENTIAL_INVALID,
+    );
+  assert.equal(h.listEvents.mock.callCount(), NO_ROWS);
+  assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.drained(), NO_ROWS);
+  assert.deepEqual(h.drops, []);
+});
+
+test("a credential archive between the first request and the insert refuses the insert and leaves no row", async (t) => {
+  const credentials: { map?: Map<string, string> } = {};
+  const h = pollHarness(t, async () => {
+    credentials.map?.delete(POLL_CREDENTIAL);
+    return modified;
+  });
+  credentials.map = h.credentials;
+  await refusesWith(
+    h.create(POLL),
+    CREDENTIAL_INVALID_STATUS,
+    CREDENTIAL_INVALID,
+  );
+  assert.equal(h.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(h.rows().length, NO_ROWS);
+  assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
+});
+
+test("a failure after the release keeps the committed drain and drops the material", async (t) => {
+  const failure = new Error("transport closed");
+  const h = pollHarness(t, async () => {
+    throw failure;
+  });
+  await assert.rejects(h.create(POLL), failure);
+  assert.equal(h.drained(), ONE_ROW);
+  assert.equal(h.rows().length, NO_ROWS);
+  assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
 });

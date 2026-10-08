@@ -54,6 +54,7 @@ export const IntakeErrorCode = {
   StorageObjectMismatch: "intake.storage.object_mismatch",
   InboundProjectNotFound: "intake.inbound.project_not_found",
   InboundCredentialInvalid: "intake.inbound.credential_invalid",
+  InboundPlatformRefused: "intake.inbound.platform_refused",
   InboundNotFound: "intake.inbound.not_found",
   InboundEventsPending: "intake.inbound.events_pending",
   InboundEventNotFound: "intake.inbound.event.not_found",
@@ -425,7 +426,7 @@ export const intakeOperations = {
     }),
     output: inboundSchema,
     description:
-      "Create an inbound of a project; a webhook inbound calls no platform.",
+      "Create an inbound of a project; a poll inbound performs one platform request before the insert, and a webhook inbound calls no platform.",
   },
   "inbound.list": {
     ...readOperation,

@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
 import type { z } from "zod";
+import {
+  apiKeySecretSchema,
+  GrantKind,
+  InboundOperation,
+  type Material,
+} from "../custody/contract.ts";
+import type { ServiceIdentity } from "../kernel/caller.ts";
+import { abortSignal } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
@@ -7,13 +15,25 @@ import {
   type CallerContext,
   type ServiceClient,
 } from "../kernel/operation.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import type { projectOperations } from "../project/contract.ts";
+import {
+  GitHubTargetKind,
+  repositoryOf,
+  type GitHubAnswer,
+  type GitHubEventsAnswer,
+  type GitHubFailure,
+  type GitHubPlatform,
+} from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
-import { configurationSchemaOf } from "./configuration.ts";
+import {
+  configurationSchemaOf,
+  type GitHubConfiguration,
+} from "./configuration.ts";
 import {
   InboundKind,
   IntakeErrorCode,
+  PLATFORM_CALL_DEADLINE_MS,
   type Inbound,
   type InboundCreate,
 } from "./contract.ts";
@@ -27,6 +47,7 @@ import {
 const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 const OPERATION_UNKNOWN_CODE = "system.operation.unknown";
 const CREDENTIAL_INVALID_STATUS = 422;
+const PLATFORM_REFUSED_STATUS = 422;
 const BODY_PATH = "body";
 const NO_LENGTH = 0;
 const CREDENTIAL_REFUSAL_CODES: ReadonlySet<string> = new Set([
@@ -39,9 +60,21 @@ export type InboundProjects = Pick<
   "get"
 >;
 
+export type InboundSuitability = Pick<IntakeCustody, "custodySuitability">;
+
 export interface InboundCreateDependencies {
-  custody: Pick<IntakeCustody, "custodySuitability">;
+  store: Store;
+  identity: ServiceIdentity;
+  custody: Pick<
+    IntakeCustody,
+    "custodySuitability" | "authorizeOperation" | "release"
+  >;
+  github: Pick<GitHubPlatform, "listEvents">;
   projects: InboundProjects;
+}
+
+interface Hold {
+  material: Material | null;
 }
 
 function validationFailed(
@@ -65,10 +98,9 @@ function configurationIssues(error: z.ZodError): OperationError {
   );
 }
 
-function admitWebhook(input: InboundCreate): void {
-  if (input.kind !== InboundKind.Webhook)
-    throw validationFailed([{ path: [BODY_PATH, "kind"], code: "custom" }]);
-  if (input.credential !== undefined)
+function admitInbound(input: InboundCreate): GitHubConfiguration {
+  const credentialRequired = input.kind === InboundKind.Poll;
+  if (credentialRequired !== (input.credential !== undefined))
     throw validationFailed([
       { path: [BODY_PATH, "credential"], code: "custom" },
     ]);
@@ -76,6 +108,7 @@ function admitWebhook(input: InboundCreate): void {
     input.configuration,
   );
   if (!parsed.success) throw configurationIssues(parsed.error);
+  return parsed.data;
 }
 
 async function requireProject(
@@ -120,7 +153,7 @@ export function credentialRefusal(error: unknown): unknown {
 }
 
 function checkCredential(
-  custody: InboundCreateDependencies["custody"],
+  custody: InboundSuitability,
   tx: Transaction,
   input: InboundCreate,
 ): void {
@@ -136,7 +169,7 @@ function checkCredential(
 }
 
 export function commitInbound(
-  custody: InboundCreateDependencies["custody"],
+  custody: InboundSuitability,
   tx: Transaction,
   id: string,
   input: InboundCreate,
@@ -160,14 +193,117 @@ export function commitInbound(
   return inboundRecord(row);
 }
 
+function releasePoll(
+  dependencies: InboundCreateDependencies,
+  tx: Transaction,
+  inbound: { id: string; input: InboundCreate; resource: string },
+  hold: Hold,
+): void {
+  assert.equal(hold.material, null, "A poll create releases once.");
+  const { id, input, resource } = inbound;
+  assert.ok(input.credential !== undefined, "A poll names a credential.");
+  const now = Date.now();
+  const grant = dependencies.custody.authorizeOperation(
+    tx,
+    {
+      kind: GrantKind.Inbound,
+      identity: dependencies.identity,
+      inbound: {
+        inboundId: id,
+        projectId: input.project_id,
+        credential: input.credential,
+        platform: input.platform,
+        resource,
+      },
+      operation: InboundOperation.Poll,
+    },
+    now,
+  );
+  assert.equal(grant.execution, null, "A poll release pins nothing.");
+  hold.material = dependencies.custody.release(tx, grant, now);
+}
+
+async function firstRequest(
+  github: InboundCreateDependencies["github"],
+  caller: CallerContext,
+  material: Material,
+  resource: string,
+): Promise<GitHubAnswer<GitHubEventsAnswer>> {
+  assert.ok(caller.identity, "A human operation holds an identity.");
+  const token = apiKeySecretSchema.parse(material.value()).key;
+  const { owner, repo } = repositoryOf({
+    kind: GitHubTargetKind.Inbound,
+    resource,
+  });
+  const { signal, dispose } = abortSignal(caller.context);
+  try {
+    return await github.listEvents(
+      {
+        token,
+        requester: caller.identity,
+        signal,
+        deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
+      },
+      { owner, repo, etag: null },
+    );
+  } finally {
+    dispose();
+  }
+}
+
+function platformRefused(failure: GitHubFailure): OperationError {
+  assert.equal(failure.ok, false);
+  assert.ok(failure.message.length > NO_LENGTH, "A failure names a reason.");
+  return new OperationError(
+    PLATFORM_REFUSED_STATUS,
+    IntakeErrorCode.InboundPlatformRefused,
+    failure.message,
+    { status: failure.status },
+  );
+}
+
+async function validatePoll(
+  dependencies: InboundCreateDependencies,
+  caller: CallerContext,
+  inbound: { id: string; input: InboundCreate; resource: string },
+): Promise<void> {
+  assert.equal(inbound.input.kind, InboundKind.Poll);
+  const hold: Hold = { material: null };
+  try {
+    try {
+      dependencies.store.transaction((tx) =>
+        releasePoll(dependencies, tx, inbound, hold),
+      );
+    } catch (error) {
+      throw credentialRefusal(error);
+    }
+    assert.ok(hold.material, "A committed release holds the material.");
+    const answer = await firstRequest(
+      dependencies.github,
+      caller,
+      hold.material,
+      inbound.resource,
+    );
+    if (!answer.ok) throw platformRefused(answer);
+  } finally {
+    hold.material?.drop();
+  }
+}
+
 export async function createInbound(
   dependencies: InboundCreateDependencies,
   caller: CallerContext,
   input: InboundCreate,
 ): Promise<Inbound> {
-  admitWebhook(input);
+  const configuration = admitInbound(input);
   await requireProject(dependencies.projects, caller, input.project_id);
   const id = allocateInboundId();
+  if (input.kind === InboundKind.Poll)
+    await validatePoll(dependencies, caller, {
+      id,
+      input,
+      resource: configuration.resource,
+    });
   const inbound = caller.commit((tx) =>
     commitInbound(dependencies.custody, tx, id, input, null),
   );

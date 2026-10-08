@@ -4,7 +4,9 @@ pathItem:
     operationId: intake.inbound.create
     tags:
       - intake
-    description: Create an inbound of a project; a webhook inbound calls no platform.
+    description: Create an inbound of a project; a poll inbound performs one
+      platform request before the insert, and a webhook inbound calls no
+      platform.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
