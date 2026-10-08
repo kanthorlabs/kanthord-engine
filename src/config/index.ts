@@ -23,7 +23,7 @@ import {
 } from "./global.ts";
 import { gatewayConfigSchema, type GatewayConfig } from "../gateway/config.ts";
 import { missionConfigSchema, type MissionConfig } from "../mission/config.ts";
-import { agentConfigSchema, type AgentConfig } from "../agent/index.ts";
+import { agentConfigSchema, type AgentConfig } from "../agent/config.ts";
 import { projectConfigSchema } from "../project/index.ts";
 import { workerConfigSchema, type WorkerConfig } from "../worker/config.ts";
 import {
