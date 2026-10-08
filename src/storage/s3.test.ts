@@ -290,15 +290,16 @@ test("deleteObject answers unknown_outcome with a null status for a lost answer"
   assertNoSecret(answer);
 });
 
-test("deleteObject answers retryable_refusal for a 429 and a SlowDown", async (t) => {
+test("deleteObject answers retryable_refusal for a 429, a 408 and a SlowDown", async (t) => {
   const limited = await store(t, status(HttpStatus.TooManyRequests));
+  const timedOut = await store(t, status(HttpStatus.RequestTimeout));
   const slow = await store(t, (_request, response) => {
     response.writeHead(HttpStatus.ServiceUnavailable, {
       "content-type": "application/xml",
     });
     response.end("<Error><Code>SlowDown</Code><Message>slow</Message></Error>");
   });
-  for (const s3 of [limited, slow]) {
+  for (const s3 of [limited, timedOut, slow]) {
     const answer = await new S3Platform().deleteObject(call(), {
       ...location(s3.endpoint),
       key: KEY,

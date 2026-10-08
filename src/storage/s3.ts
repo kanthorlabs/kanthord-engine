@@ -189,7 +189,10 @@ function transportClass(
 function statusClass(status: number, kind: S3CallKind): ResultClassValue {
   assert.ok(Number.isInteger(status));
   assert.ok(Object.values(S3CallKind).includes(kind));
-  if (status === HttpStatus.TooManyRequests) {
+  if (
+    status === HttpStatus.TooManyRequests ||
+    status === HttpStatus.RequestTimeout
+  ) {
     return ResultClass.RetryableRefusal;
   }
   if (status >= HttpStatus.InternalServerError) {
