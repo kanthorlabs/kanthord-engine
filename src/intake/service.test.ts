@@ -39,7 +39,11 @@ import {
   type InboundCreate,
   type InboundKindValue,
 } from "./contract.ts";
-import { allocateInboundId, insertInbound } from "./inbound-store.ts";
+import {
+  allocateInboundId,
+  insertInbound,
+  readInbound,
+} from "./inbound-store.ts";
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
 import { unusedActionDependencies } from "./test-support.ts";
@@ -50,6 +54,8 @@ const CREDENTIAL = "github-poll";
 const OTHER_CREDENTIAL = "github-other";
 const CREATED_AT = 1000;
 const NO_CALLS = 0;
+const NO_EVENTS = 0;
+const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const INTERVAL_MS = 1000;
 const SETTLE_TURNS = 20;
@@ -180,6 +186,15 @@ test("inboundsNaming opens no transaction", (t) => {
 });
 
 type EventsAnswer = GitHubAnswer<GitHubEventsAnswer>;
+
+const POLL: InboundCreate = {
+  project_id: PROJECT_ID,
+  kind: InboundKind.Poll,
+  platform: InboundPlatform.GitHub,
+  consumer: Consumer.MissionDeliveryAdmit,
+  credential: CREDENTIAL,
+  configuration: { resource: RESOURCE },
+};
 
 function modified(etag: string | null, events: GitHubEvent[]): EventsAnswer {
   return { ok: true, value: { notModified: false, etag, events } };
@@ -331,6 +346,25 @@ async function shutDown(
   assert.equal(await running, null);
 }
 
+function checkpointOf(store: Store, inboundId: string): string | null {
+  return store.transaction((tx) => {
+    const row = readInbound(tx, inboundId);
+    assert.ok(row);
+    return row.checkpoint;
+  });
+}
+
+function eventCount(store: Store): number {
+  return store.transaction(
+    (tx) =>
+      (
+        tx.database
+          .prepare("SELECT COUNT(*) AS total FROM intake_inbound_event")
+          .get() as { total: number }
+      ).total,
+  );
+}
+
 test("run starts one poll loop per poll inbound and none for a webhook", async (t) => {
   const store = pollStore(t);
   insertNaming(store, InboundKind.Poll, CREDENTIAL);
@@ -360,6 +394,69 @@ test("an inbound delete stops its poll loop", async (t) => {
   await s.interval();
   assert.equal(s.listEvents.mock.callCount(), NO_CALLS);
   await shutDown(s.intake, running);
+});
+
+test("after drain no poll request runs and no poll timer fires", async (t) => {
+  const store = pollStore(t);
+  insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  const s = pollService(t, store);
+  const slow = Promise.withResolvers<EventsAnswer>();
+  s.answers.next = () => slow.promise;
+  const running = s.intake.run();
+  await settle();
+  await s.interval();
+  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(await s.intake.quiesce(), null);
+  assert.equal(s.signals()[0]?.aborted, true);
+  let drained = false;
+  const drain = s.intake.drain().then(() => {
+    drained = true;
+  });
+  await settle();
+  assert.equal(drained, false);
+  slow.resolve(modified(ETAG_FIRST, []));
+  await drain;
+  s.answers.next = async () => modified(ETAG_FIRST, []);
+  await s.interval();
+  await s.interval();
+  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  await shutDown(s.intake, running);
+});
+
+test("a platform answer after quiesce commits nothing", async (t) => {
+  const store = pollStore(t);
+  const id = insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  const s = pollService(t, store);
+  const slow = Promise.withResolvers<EventsAnswer>();
+  s.answers.next = () => slow.promise;
+  const running = s.intake.run();
+  await settle();
+  await s.interval();
+  assert.equal(await s.intake.quiesce(), null);
+  slow.resolve(modified(ETAG_FIRST, [ev("101")]));
+  await s.intake.drain();
+  assert.equal(eventCount(store), NO_EVENTS);
+  assert.equal(checkpointOf(store, id), null);
+  await shutDown(s.intake, running);
+});
+
+test("a create that ends after quiesce starts no poll loop", async (t) => {
+  const store = pollStore(t);
+  const s = pollService(t, store);
+  const held = Promise.withResolvers<EventsAnswer>();
+  s.answers.next = () => held.promise;
+  const creating = s.create(POLL);
+  await settle();
+  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(await s.intake.quiesce(), null);
+  held.resolve(modified(ETAG_FIRST, []));
+  const inbound = await creating;
+  assert.equal(inbound.kind, InboundKind.Poll);
+  await s.intake.drain();
+  s.answers.next = async () => modified(ETAG_FIRST, []);
+  await s.interval();
+  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(await s.intake.stop(), null);
 });
 
 test("a restart starts the poll loops again from the stored checkpoint", async (t) => {

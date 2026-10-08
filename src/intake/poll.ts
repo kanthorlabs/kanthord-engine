@@ -266,6 +266,8 @@ export async function pollCycle(
 export class PollLoops {
   readonly #dependencies: PollDependencies;
   readonly #loops = new Map<string, Loop>();
+  readonly #cycles = new Set<Promise<void>>();
+  #quiescent = false;
 
   constructor(dependencies: PollDependencies) {
     assert.ok(Number.isSafeInteger(dependencies.pollIntervalMs));
@@ -277,7 +279,7 @@ export class PollLoops {
 
   start(inboundId: string): void {
     assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
-    if (this.#loops.has(inboundId)) return;
+    if (this.#quiescent || this.#loops.has(inboundId)) return;
     const loop: Loop = {
       timer: null,
       context: new CancellationContext(this.#dependencies.context),
@@ -297,14 +299,21 @@ export class PollLoops {
     loop.context.cancel();
   }
 
-  async stopAll(): Promise<void> {
-    const cycles: Promise<void>[] = [];
-    for (const [inboundId, loop] of [...this.#loops]) {
-      if (loop.cycle !== null) cycles.push(loop.cycle);
-      this.stop(inboundId);
-    }
+  quiesce(): void {
+    this.#quiescent = true;
+    for (const inboundId of [...this.#loops.keys()]) this.stop(inboundId);
     assert.equal(this.#loops.size, NO_LENGTH, "Every loop stops.");
-    await Promise.all(cycles);
+  }
+
+  async drain(): Promise<void> {
+    assert.ok(this.#quiescent, "A drain follows the quiescence.");
+    await Promise.all([...this.#cycles]);
+    assert.equal(this.#cycles.size, NO_LENGTH, "Every cycle ends.");
+  }
+
+  async stopAll(): Promise<void> {
+    this.quiesce();
+    await this.drain();
   }
 
   #arm(inboundId: string, loop: Loop): void {
@@ -320,11 +329,14 @@ export class PollLoops {
   #tick(inboundId: string, loop: Loop): void {
     assert.notEqual(loop.timer, null, "A tick follows an armed timer.");
     loop.timer = null;
-    loop.cycle = this.#cycle(inboundId, loop.context).then((outcome) => {
+    const cycle = this.#cycle(inboundId, loop.context).then((outcome) => {
+      this.#cycles.delete(cycle);
       loop.cycle = null;
       if (outcome === CycleOutcome.Gone) this.#forget(inboundId, loop);
       else this.#arm(inboundId, loop);
     });
+    this.#cycles.add(cycle);
+    loop.cycle = cycle;
   }
 
   #forget(inboundId: string, loop: Loop): void {

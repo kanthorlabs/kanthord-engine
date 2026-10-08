@@ -242,10 +242,13 @@ export class IntakeService implements Service, IntakeCollaborations {
   }
 
   quiesce(): Promise<Error | null> {
+    this.pollLoops.quiesce();
     return this.quiesceTask;
   }
 
-  async drain(): Promise<void> {}
+  async drain(): Promise<void> {
+    await this.pollLoops.drain();
+  }
 
   stop(): Promise<Error | null> {
     this.shutdown.cancel();
