@@ -100,7 +100,7 @@ engine/
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
 │   ├── intake/                 # Intake Service: inbound events and outbound requests
-│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, and operations
+│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, inbound schemas, inbound operations, the inbound collaboration type, and operations
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── configuration.ts    # Inbound configuration schema per kind and platform, and resource identity
 │   │   ├── inbound-store.ts    # Inbound rows, the record projection, pending event count, and delete with events
@@ -119,7 +119,7 @@ engine/
 │   │   ├── storage-delete.ts   # Object delete: s3.delete_object, its read-back and its stored status
 │   │   ├── webhook-secret.ts   # Verification secret of a webhook inbound, derived from the master key
 │   │   ├── test-support.ts     # Unused action collaborations and a master key for Intake unit tests
-│   │   └── service.ts          # Lifecycle, health probe, and resource inventory
+│   │   └── service.ts          # Lifecycle, health probe, resource inventory, the `inboundsNaming` collaboration and the inbound removal notice
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
 │   │   ├── contract.ts         # Mission schemas, operations, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
