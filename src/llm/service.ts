@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import type { Provider } from "@earendil-works/pi-ai";
+import { registerBunOAuthFlows as registerOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import {
@@ -110,6 +111,7 @@ export class LlmComponent implements Service {
   private readonly platformSet: CredentialPlatformSet;
 
   constructor(dependencies: Dependencies) {
+    registerOAuthFlows();
     this.records = dependencies.records;
     this.store = dependencies.store;
     this.logger = dependencies.logger;

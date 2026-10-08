@@ -341,7 +341,7 @@ The implemented fields are:
 - `log.destination`: optional enum `stderr|file`, default `stderr`; `file` uses
   `kanthord.log` in the XDG state directory.
 - `gateway.bind`: optional IP-address string, default `127.0.0.1`; validation
-  accepts any IPv4 or IPv6 address, for example `0.0.0.0` in a container.
+  accepts any IPv4 or IPv6 address, for example `::` in a container.
 - `gateway.port`: optional Convict `port`, default `31415`.
 - `gateway.allowed_hosts`: optional array of nonempty strings, default
   `["127.0.0.1:31415", "localhost:31415"]`.
