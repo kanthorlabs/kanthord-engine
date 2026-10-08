@@ -1,13 +1,9 @@
-import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { packageManifest } from "./assets.ts";
 
 const version = z
   .object({ version: z.string().min(1) })
-  .parse(
-    JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-    ),
-  ).version;
+  .parse(JSON.parse(packageManifest())).version;
 
 export function packageVersion(): string {
   return version;
