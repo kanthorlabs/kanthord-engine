@@ -867,6 +867,8 @@ export async function remoteHead(
 }
 
 const S3_BUCKET = "evidence";
+const ZERO_LOSSES = 0;
+const ONE_LOSS = 1;
 const S3_BODY_MAX = 16 * 1024 ** 2;
 const S3_FIRST_VERSION = 1;
 const S3_VERSION_PREFIX = "v";
@@ -907,6 +909,7 @@ interface FakeS3State {
   versions: Map<string, FakeS3Object[]>;
   calls: FakeS3Call[];
   nextFailure: number | null;
+  losses: number;
 }
 
 interface FakeS3Target {
@@ -1048,6 +1051,10 @@ async function s3Request(
     version: target.version,
   });
   const body = await readS3Body(request);
+  if (state.losses > ZERO_LOSSES) {
+    state.losses -= 1;
+    return request.socket.destroy();
+  }
   const scripted = state.nextFailure;
   if (scripted !== null) {
     state.nextFailure = null;
@@ -1068,6 +1075,7 @@ export async function fakeS3(t: TestContext) {
     versions: new Map(),
     calls: [],
     nextFailure: null,
+    losses: ZERO_LOSSES,
   };
   const failures: unknown[] = [];
   const server = createServer((request, response) => {
@@ -1101,6 +1109,11 @@ export async function fakeS3(t: TestContext) {
       assert.ok(Number.isInteger(status));
       assert.equal(state.nextFailure, null);
       state.nextFailure = status;
+    },
+    loseNext(count = ONE_LOSS): void {
+      assert.ok(Number.isSafeInteger(count) && count >= ZERO_LOSSES);
+      assert.ok(count === ZERO_LOSSES || state.losses === ZERO_LOSSES);
+      state.losses = count;
     },
   };
 }

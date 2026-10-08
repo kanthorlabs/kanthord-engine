@@ -461,6 +461,26 @@ test("fake S3 scripts one failure status", async (t) => {
   assert.equal(s3.calls.length, TWO_CALLS);
 });
 
+test("fake S3 loses the next answers and then answers again", async (t) => {
+  const s3 = await fakeS3(t);
+  const platform = new S3Platform();
+  const target = {
+    endpoint: s3.endpoint,
+    bucket: s3.bucket,
+    region: S3_REGION,
+    key: S3_KEY,
+    version: null,
+  };
+  s3.loseNext();
+  const lost = await platform.deleteObject(s3Call(), target);
+  assert.ok(!lost.ok);
+  assert.equal(lost.class, ResultClass.UnknownOutcome);
+  assert.equal(lost.status, null);
+  const answered = await platform.deleteObject(s3Call(), target);
+  assert.ok(answered.ok);
+  assert.equal(s3.calls.length, TWO_CALLS);
+});
+
 test("fake S3 transfers, reads and removes a key with reserved characters", async (t) => {
   const s3 = await fakeS3(t);
   const platform = new S3Platform();
