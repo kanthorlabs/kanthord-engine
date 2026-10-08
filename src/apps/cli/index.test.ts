@@ -469,7 +469,10 @@ test("agent get and prompt commands expose help and refuse invalid options befor
   const env = environment(temporary(t));
   const remote = ["--endpoint", "http://127.0.0.1:1", "--token", "t"];
   for (const [path, flags] of [
-    [["get"], /--view <view>[\s\S]*--project <project-id>[\s\S]*--binding/],
+    [
+      ["get"],
+      /--view <view>[\s\S]*--project <project-id>[\s\S]*--binding-id <binding-id>/,
+    ],
     [["prompt", "put"], /--scope <scope>[\s\S]*--file <path>/],
     [["prompt", "switch"], /--switch <source>[\s\S]*--on[\s\S]*--off/],
   ] as const) {
@@ -484,7 +487,7 @@ test("agent get and prompt commands expose help and refuse invalid options befor
       "cli.agent.get.project_binding_pair_required",
     ],
     [
-      ["get", "swe@1", "--binding", BINDING_ID],
+      ["get", "swe@1", "--binding-id", BINDING_ID],
       "cli.agent.get.project_binding_pair_required",
     ],
     [["get", "swe@1", "--view", "final"], "cli.agent.get.token_required"],
@@ -707,11 +710,11 @@ test("config init appends each lowercased allowed host to the default host allow
     [
       "config",
       "init",
-      "--allowed-host",
+      "--gateway-allowed-host",
       "Mac.Tailnet.ts.net",
-      "--allowed-host",
+      "--gateway-allowed-host",
       "localhost:31415",
-      "--allowed-host",
+      "--gateway-allowed-host",
       "203.0.113.7:8443",
     ],
     env,
@@ -728,7 +731,10 @@ test("config init appends each lowercased allowed host to the default host allow
 test("config init sets the gateway bind address", (t) => {
   for (const address of ["0.0.0.0", "::", "127.0.0.1"]) {
     const env = environment(temporary(t));
-    const result = invocation(["config", "init", "--bind", address], env);
+    const result = invocation(
+      ["config", "init", "--gateway-bind", address],
+      env,
+    );
     assert.equal(result.status, ExitCode.Success, result.stderr);
     assert.equal(loadConfig(env.KANTHORD_CONFIG!).gateway.bind, address);
   }
@@ -737,7 +743,7 @@ test("config init sets the gateway bind address", (t) => {
 test("config init refuses a bind value that is not an IP address and writes nothing", (t) => {
   const env = environment(temporary(t));
   for (const value of ["localhost", "0.0.0.0:31415", ""]) {
-    const result = invocation(["config", "init", "--bind", value], env);
+    const result = invocation(["config", "init", "--gateway-bind", value], env);
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /^system\.config\.invalid_field:/);
     assert.equal(existsSync(env.KANTHORD_CONFIG!), false);
@@ -753,7 +759,10 @@ test("config init refuses an allowed host that is not a name with an optional po
     "mac tailnet",
     "",
   ]) {
-    const result = invocation(["config", "init", "--allowed-host", value], env);
+    const result = invocation(
+      ["config", "init", "--gateway-allowed-host", value],
+      env,
+    );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /^cli\.config\.invalid_allowed_host:/);
     assert.equal(existsSync(env.KANTHORD_CONFIG!), false);

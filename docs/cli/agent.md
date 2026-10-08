@@ -30,7 +30,7 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 | Status | Command after `kanthord agent`                                                                                                                               | Route                                                                 | Operation ID                           | Access  |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------- | ------- |
 | P      | `list [L]`                                                                                                                                                   | `GET /api/agent`                                                      | `agent.list`                           | `human` |
-| I      | `get <agent-name> [--view final] [--project <project-id> --binding <binding-id>]`                                                                            | `GET /api/agent/:agent_name`                                          | `agent.get`                            | `human` |
+| I      | `get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id>]`                                                                         | `GET /api/agent/:agent_name`                                          | `agent.get`                            | `human` |
 | I      | `enablement list [L] [R]`                                                                                                                                    | `GET /api/agent/enablement`                                           | `agent.enablement.list`                | `human` |
 | I      | `enablement get <agent-name> [R]`                                                                                                                            | `GET /api/agent/enablement/:agent_name`                               | `agent.enablement.get`                 | `human` |
 | I      | `enablement put <agent-name> --file <path> [M] [R]`                                                                                                          | `PUT /api/agent/enablement/:agent_name`                               | `agent.enablement.put`                 | `human` |
@@ -64,7 +64,7 @@ It lists every catalog agent, also an agent without an enablement. Each item hol
 ### `get <agent-name>`
 
 ```text
-kanthord agent get <agent-name> [--view final] [--project <project-id> --binding <binding-id>]
+kanthord agent get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id>]
 ```
 
 `agent-name` is required `AgentName`, with no default, and maps to
@@ -72,13 +72,13 @@ kanthord agent get <agent-name> [--view final] [--project <project-id> --binding
 Required token: human JWT. Absent body. HTTP `200` returns
 `agent_name` and the following declaration/configuration fields:
 
-| Option                   | Query        | Meaning                                                                                                                                       |
-| ------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--view final`           | `view`       | Optional. The only value is `final`. The `prompt` answer holds `final` only and no `layers`.                                                  |
-| `--project <project-id>` | `project_id` | Optional, and only together with `--binding`. Selects the repository binding of the working layer.                                            |
-| `--binding <binding-id>` | `binding_id` | Optional, and only together with `--project`. A binding that is no repository binding of the project answers `404 project.binding.not_found`. |
+| Option                      | Query        | Meaning                                                                                                                                       |
+| --------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--view final`              | `view`       | Optional. The only value is `final`. The `prompt` answer holds `final` only and no `layers`.                                                  |
+| `--project <project-id>`    | `project_id` | Optional, and only together with `--binding-id`. Selects the repository binding of the working layer.                                         |
+| `--binding-id <binding-id>` | `binding_id` | Optional, and only together with `--project`. A binding that is no repository binding of the project answers `404 project.binding.not_found`. |
 
-Without `--project` and `--binding`, the working layer is the workbench working layer of the agent.
+Without `--project` and `--binding-id`, the working layer is the workbench working layer of the agent.
 
 | Result field           | Type and meaning                                                                                                                                                                                                                                                                |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -141,7 +141,7 @@ With `--view final`, `layers` is absent.
 
 ```sh
 kanthord agent get swe@1 --view final
-kanthord agent get swe@1 --project project_01ARZ3NDEKTSV4RRFFQ69G5FAV --binding binding_01ARZ3NDEKTSV4RRFFQ69G5FAV
+kanthord agent get swe@1 --project project_01ARZ3NDEKTSV4RRFFQ69G5FAV --binding-id binding_01ARZ3NDEKTSV4RRFFQ69G5FAV
 ```
 
 ## Prompt settings commands
@@ -350,7 +350,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.agent.get.token_required`                            | No option, environment variable or `cli.yaml` supplies a token.                             | agent get                                                                                                                                                                                                  |
 | local | `cli.agent.get.indeterminate`                             | The read result is indeterminate.                                                           | agent get                                                                                                                                                                                                  |
 | local | `cli.agent.get.invalid_view`                              | The `--view` value is not `final`.                                                          | agent get                                                                                                                                                                                                  |
-| local | `cli.agent.get.project_binding_pair_required`             | One of `--project` and `--binding` is present without the other.                            | agent get                                                                                                                                                                                                  |
+| local | `cli.agent.get.project_binding_pair_required`             | One of `--project` and `--binding-id` is present without the other.                         | agent get                                                                                                                                                                                                  |
 | local | `cli.agent.prompt.put.token_required`                     | No option, environment variable or `cli.yaml` supplies a token.                             | agent prompt put                                                                                                                                                                                           |
 | local | `cli.agent.prompt.put.indeterminate`                      | The write result is indeterminate; retry with the same key.                                 | agent prompt put                                                                                                                                                                                           |
 | local | `cli.agent.prompt.put.invalid_scope`                      | The `--scope` value is not `system`, `agent` or `workbench`.                                | agent prompt put                                                                                                                                                                                           |
@@ -402,7 +402,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `agent.prompt.too_large`                                  | The custom text exceeds 32768 UTF-8 bytes.                                                  | agent prompt put                                                                                                                                                                                           |
 | 409   | `agent.prompt.agent_layer_empty`                          | The switch turns off every source of an `agent` scope.                                      | agent prompt switch                                                                                                                                                                                        |
 | 409   | `agent.prompt.switch_locked`                              | The configuration locks the switch of this scope.                                           | agent prompt switch                                                                                                                                                                                        |
-| 404   | `project.binding.not_found`                               | The `--binding` value names no repository binding of the `--project` value.                 | agent get                                                                                                                                                                                                  |
+| 404   | `project.binding.not_found`                               | The `--binding-id` value names no repository binding of the `--project` value.              | agent get                                                                                                                                                                                                  |
 | 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a switch that is no source of the scope. | agent get, agent prompt get, agent prompt put, agent prompt switch                                                                                                                                         |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.

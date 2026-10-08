@@ -53,7 +53,7 @@ function allowedHost(value: string): string {
     return host;
   throw new Diagnostic(
     "cli.config.invalid_allowed_host",
-    "config init: --allowed-host expects <name> or <name>:<port>.",
+    "config init: --gateway-allowed-host expects <name> or <name>:<port>.",
   );
 }
 
@@ -86,15 +86,22 @@ function addConfigCommand(program: Command): void {
     .command("init")
     .description("Create a private configuration file without prompting")
     .option(
-      "--allowed-host <host>",
+      "--gateway-allowed-host <host>",
       "Append a host to gateway.allowed_hosts (repeatable)",
       collectHost,
     )
-    .option("--bind <address>", "Set gateway.bind to this IP address");
+    .option("--gateway-bind <address>", "Set gateway.bind to this IP address");
   configHelp(init);
   init.action(() => {
-    const options = init.opts<{ allowedHost?: string[]; bind?: string }>();
-    return initConfig(effectivePath(init), options.allowedHost, options.bind);
+    const options = init.opts<{
+      gatewayAllowedHost?: string[];
+      gatewayBind?: string;
+    }>();
+    return initConfig(
+      effectivePath(init),
+      options.gatewayAllowedHost,
+      options.gatewayBind,
+    );
   });
   for (const [name, description, action] of [
     [
