@@ -340,7 +340,12 @@ function verificationRun(bindingId: string, commit: string) {
 export async function passingEvaluation(
   session: CliSession,
   machine: CliMachine,
-  input: { nodeId: string; bindingId: string; commit: string },
+  input: {
+    nodeId: string;
+    bindingId: string;
+    commit: string;
+    executing?: (execution: ExecutionRecord) => Promise<void>;
+  },
 ): Promise<ExecutionRecord> {
   const { nodeId, bindingId, commit } = input;
   assert.ok(nodeId && bindingId && commit);
@@ -351,6 +356,7 @@ export async function passingEvaluation(
       machine.T,
     );
   const x1 = await machine.pull(nodeId, NodeState.Executing);
+  await input.executing?.(x1);
   const w1 = await submit(x1, {
     subject: "head commit",
     assets: [

@@ -1,18 +1,33 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { ulid } from "ulid";
+import { httpClient } from "../../gateway/client.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import {
   Consumer,
+  InboundEventState,
   InboundKind,
   InboundPlatform,
+  OutboundRequestState,
 } from "../../intake/contract.ts";
 import { ResourceStatus } from "../../kernel/health.ts";
-import { HttpStatus } from "../../kernel/http.ts";
+import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { isString } from "../../kernel/values.ts";
-import { type Revision } from "../../mission/contract.ts";
+import {
+  ActorKind,
+  ActorService,
+  AssetKind,
+  NodeState,
+  missionOperations,
+  type Evidence,
+  type Revision,
+} from "../../mission/contract.ts";
+import { type ExecutionRecord } from "../../scheduler/contract.ts";
+import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
 import {
   FAKE_SSH_IDENTITY,
   bareRepository,
+  deliver,
   fakeGitHub,
   fakeS3,
   gatewayFixture,
@@ -21,14 +36,21 @@ import {
 import {
   cliMachine,
   cliSession,
+  completed,
   createCredentials,
+  executionContext,
+  passingEvaluation,
   pushNodeBranch,
   repositoryBinding,
+  until,
 } from "./cli-support.ts";
 
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
+const FIRST_ATTEMPT = 1;
 const WORKER_INSTANCE_COUNT = 1;
+const SINGLE_ITEM = 1;
+const FIRST_PULL_REQUEST = 1;
 const POLL_INTERVAL_MS = 50;
 const JOURNEY_TIMEOUT = 120000;
 const SECRET = "test-secret";
@@ -38,10 +60,16 @@ const GATED = "gated";
 const MERGE = "merge";
 const GATED_RESOURCE = "owner/gated";
 const MERGE_RESOURCE = "owner/merge";
+const MERGED_COMMIT = "e".repeat(40);
+const MERGED_DELIVERY = "d-1";
 const WEBHOOK_CAPABILITY = "webhook";
 const POLL_CAPABILITY = "poll acquisition";
 const REGION = "eu-central-1";
 const STORAGE_PREFIX = "kanthord";
+const OBJECT_BODY = "hello";
+const OBJECT_MEDIA = "text/plain";
+const SIGNATURE_PARAMETER = "X-Amz-Signature";
+const PULL_REQUEST_OPERATION = "github.pull_request";
 const CONTENT = {
   name: "Ship accounts",
   requirement: "Ship accounts",
@@ -51,6 +79,18 @@ const CONTENT = {
 };
 type Page<T> = { items: T[] };
 type Binding = { id: string; name: string; resource_identity: string };
+type Event = { id: string; event_id: string; state: string; error: unknown };
+type Outbound = { request_key: string; state: string; result: unknown };
+type Stored = { evidenceId: string; assetId: string; key: string };
+
+function closed(number: number): string {
+  return JSON.stringify({
+    action: "closed",
+    number,
+    pull_request: { merged: true },
+    repository: { full_name: GATED_RESOURCE },
+  });
+}
 
 async function setup(t: TestContext) {
   const gitHub = await fakeGitHub(t);
@@ -203,11 +243,21 @@ async function setup(t: TestContext) {
 type Harness = Awaited<ReturnType<typeof setup>>;
 
 function journey(h: Harness) {
-  const { read, secrets } = h.session;
+  const { read, write, secrets } = h.session;
   const clean = (value: unknown) => {
     const text = isString(value) ? value : JSON.stringify(value);
     for (const secret of secrets) assert.ok(!text.includes(secret));
   };
+  const performer = httpClient(
+    workerOperations,
+    h.fixture.endpoint,
+    h.machine.token,
+  );
+  const api = httpClient(
+    missionOperations,
+    h.fixture.endpoint,
+    h.machine.token,
+  );
   const health = async () => {
     const response = await h.fixture.request(
       gatewayOperations.healthcheck.path,
@@ -218,10 +268,109 @@ function journey(h: Harness) {
     clean(text);
     return gatewayOperations.healthcheck.output.parse(JSON.parse(text));
   };
+  const store = async (x: ExecutionRecord): Promise<Stored> => {
+    const submitted = completed(
+      await api["evidence.submit"](
+        {
+          params: { node_id: h.P },
+          query: {},
+          body: {
+            ...executionContext(x),
+            subject: "hello object",
+            assets: [
+              {
+                kind: AssetKind.Object,
+                media_type: OBJECT_MEDIA,
+                size: OBJECT_BODY.length,
+              },
+            ],
+          },
+        },
+        { idempotencyKey: ulid() },
+      ),
+    );
+    const upload = submitted.uploads[FIRST_INDEX];
+    assert.ok(upload);
+    const prefix = `${STORAGE_PREFIX}/${h.projectId}/${h.missionId}/${h.P}/${FIRST_ATTEMPT}/`;
+    assert.ok(
+      upload.put_url.startsWith(`${h.s3.endpoint}/${h.s3.bucket}/${prefix}`),
+    );
+    clean(submitted);
+    secrets.push(upload.put_url, SIGNATURE_PARAMETER);
+    const put = await fetch(upload.put_url, {
+      method: HttpMethod.Put,
+      headers: upload.headers,
+      body: OBJECT_BODY,
+    });
+    assert.equal(put.status, HttpStatus.OK);
+    await put.arrayBuffer();
+    const o = completed(
+      await api["evidence.asset.complete"](
+        {
+          params: { asset_id: upload.asset_id },
+          query: {},
+          body: executionContext(x),
+        },
+        { idempotencyKey: ulid() },
+      ),
+    );
+    clean(o);
+    const key = `${prefix}${upload.asset_id}`;
+    return { evidenceId: submitted.evidence.id, assetId: upload.asset_id, key };
+  };
+  const objective = async (
+    nodeId: string,
+    bindingId: string,
+    commit: string,
+    executing?: (x: ExecutionRecord) => Promise<void>,
+  ) => {
+    const e = await passingEvaluation(h.session, h.machine, {
+      nodeId,
+      bindingId,
+      commit,
+      executing,
+    });
+    const answer = completed(
+      await performer["action.request"](
+        { params: { execution_id: e.execution_id }, query: {}, body: null },
+        { idempotencyKey: ulid() },
+      ),
+    );
+    clean(answer);
+    assert.equal(answer.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+    await h.machine.release(e.execution_id);
+  };
+  const outbound = async (operation: string) =>
+    (
+      await read<Page<Outbound>>([
+        "intake",
+        "outbound",
+        "list",
+        "--operation",
+        operation,
+      ])
+    ).items;
+  const events = async (inboundId: string) =>
+    (
+      await read<Page<Event>>([
+        "intake",
+        "event",
+        "list",
+        "--inbound",
+        inboundId,
+      ])
+    ).items;
+  const state = async (nodeId: string) => (await h.machine.node(nodeId)).state;
   return {
     read,
+    write,
     clean,
     health,
+    store,
+    objective,
+    outbound,
+    events,
+    state,
   };
 }
 
@@ -239,6 +388,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       capability: WEBHOOK_CAPABILITY,
     },
   });
+  let stored!: Stored;
 
   await t.test(
     "EJ10.1 the health report holds the three inbounds",
@@ -254,4 +404,60 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       );
     },
   );
+  await t.test("EJ10.2 P opens a pull request", async () => {
+    await j.objective(h.P, h.gated.id, h.p, async (x) => {
+      stored = await j.store(x);
+    });
+    assert.equal(h.s3.objects(stored.key).length, SINGLE_ITEM);
+    assert.equal(await j.state(h.P), NodeState.ExternalRequested);
+    const rows = await j.outbound(PULL_REQUEST_OPERATION);
+    assert.deepEqual(
+      rows.map((row) => row.state),
+      [OutboundRequestState.Succeeded],
+    );
+  });
+  await t.test("EJ10.3 a merged pull request event completes P", async () => {
+    h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
+    const delivered = await deliver(h.fixture, {
+      inboundId: h.W,
+      secret: h.S,
+      event: "pull_request",
+      deliveryId: MERGED_DELIVERY,
+      body: closed(FIRST_PULL_REQUEST),
+    });
+    assert.equal(delivered.status, HttpStatus.Accepted);
+    j.clean(delivered.body);
+    const items = await until(
+      () => j.events(h.W),
+      (list) =>
+        list.some(
+          (item) =>
+            item.event_id === MERGED_DELIVERY &&
+            item.state !== InboundEventState.Pending,
+        ),
+    );
+    const E1 = items.find((item) => item.event_id === MERGED_DELIVERY)!;
+    assert.equal(E1.state, InboundEventState.Succeeded);
+    assert.equal(E1.error, null);
+    assert.equal(await j.state(h.P), NodeState.Completed);
+    const evidence = await j.read<Page<Evidence>>([
+      "mission",
+      "evidence",
+      "list",
+      h.P,
+      "--attempt",
+      String(FIRST_ATTEMPT),
+    ]);
+    const landed = evidence.items.filter(
+      (item) =>
+        item.provenance.kind === ActorKind.Service &&
+        item.provenance.service === ActorService.Mission,
+    );
+    assert.equal(landed.length, SINGLE_ITEM);
+    assert.deepEqual(landed[FIRST_INDEX]!.provenance, {
+      kind: ActorKind.Service,
+      service: ActorService.Mission,
+      inbound_event_id: E1.id,
+    });
+  });
 });
