@@ -17,6 +17,7 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { GitHubPlatform } from "../repository/github.ts";
 import type { GitWriter } from "../repository/index.ts";
+import type { S3Platform } from "../storage/index.ts";
 import { checkAction, type IntakeCustody } from "./action-check.ts";
 import { performAction } from "./action-perform.ts";
 import { readAction } from "./action-read.ts";
@@ -24,6 +25,7 @@ import { INTAKE_SERVICE_NAME, intakeOperations } from "./contract.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
+import { executionGetObject, getObject, putObject } from "./storage.ts";
 
 export interface Dependencies {
   store: Store;
@@ -33,6 +35,7 @@ export interface Dependencies {
   custody: IntakeCustody;
   github: GitHubPlatform;
   gitWriter: GitWriter;
+  s3: S3Platform;
 }
 
 export class IntakeService implements Service {
@@ -88,6 +91,17 @@ export class IntakeService implements Service {
       intakeOperations["action.read"],
       ({ params, query }, caller) =>
         readAction(this.dependencies, caller, params.evidence_id, query),
+    );
+    registry.register(intakeOperations["storage.put"], ({ body }, caller) =>
+      putObject(this.dependencies, caller, body),
+    );
+    registry.register(
+      intakeOperations["execution.storage.get"],
+      ({ params }, caller) =>
+        executionGetObject(this.dependencies, caller, params.asset_id),
+    );
+    registry.register(intakeOperations["storage.get"], ({ params }, caller) =>
+      getObject(this.dependencies, caller, params.asset_id),
     );
   }
 

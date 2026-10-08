@@ -95,7 +95,11 @@ import {
   type GitWriter,
 } from "../../repository/index.ts";
 import { LlmComponent, LLM_PLATFORMS } from "../../llm/index.ts";
-import { StorageComponent, STORAGE_PLATFORMS } from "../../storage/index.ts";
+import {
+  StorageComponent,
+  STORAGE_PLATFORMS,
+  storageImplementations,
+} from "../../storage/index.ts";
 import {
   OperationRegistry,
   OperationResultType,
@@ -154,6 +158,7 @@ export function composeServices(options: {
     options.repositoryConnector ??
     new RepositoryComponent({ health: options.health });
   const github = new platformImplementations.github(options.github);
+  const s3 = new storageImplementations.s3();
   const gitWriter: GitWriter =
     options.repositoryTransport ??
     (repoConnector instanceof RepositoryComponent
@@ -447,6 +452,7 @@ export function composeServices(options: {
     },
     github,
     gitWriter,
+    s3,
   });
   const workbench = new WorkbenchService({
     store: options.store,
@@ -535,6 +541,7 @@ export function composeServices(options: {
     repoConnector,
     github,
     gitWriter,
+    s3,
   };
 }
 

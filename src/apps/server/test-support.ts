@@ -464,6 +464,7 @@ export async function gatewayFixture(
     repoConnector,
     github,
     gitWriter,
+    s3,
   } = composeServices({
     config,
     store,
@@ -548,6 +549,7 @@ export async function gatewayFixture(
     repoConnector,
     github,
     gitWriter,
+    s3,
     project,
     intake,
     scheduler,

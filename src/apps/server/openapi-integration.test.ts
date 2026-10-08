@@ -690,8 +690,11 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
   ["intake.action.read", AccessPolicy.Client],
+  ["intake.storage.put", AccessPolicy.Client],
+  ["intake.execution.storage.get", AccessPolicy.Client],
+  ["intake.storage.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 154;
+const OPERATION_COUNT = 157;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1409,11 +1412,14 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   }
 });
 
-test("the direct action operations have no OpenAPI path", async () => {
+test("the direct intake operations have no OpenAPI path", async () => {
   const resolved = await SwaggerParser.dereference(openapiPath());
   const directIds = new Set<string>([
     intakeOperations["action.perform"].id,
     intakeOperations["action.read"].id,
+    intakeOperations["storage.put"].id,
+    intakeOperations["execution.storage.get"].id,
+    intakeOperations["storage.get"].id,
   ]);
   const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
     Object.values(path ?? {}).filter(
@@ -1429,6 +1435,12 @@ test("the direct action operations have no OpenAPI path", async () => {
   assert.equal(
     Object.keys(resolved.paths ?? {}).some((path) =>
       path.startsWith("/api/intake/execution/"),
+    ),
+    false,
+  );
+  assert.equal(
+    Object.keys(resolved.paths ?? {}).some((path) =>
+      path.startsWith("/api/intake/storage/"),
     ),
     false,
   );

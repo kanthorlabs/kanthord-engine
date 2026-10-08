@@ -30,6 +30,7 @@ export const ACTION_PERFORM_TIMEOUT_MS = 600000;
 export const ADMISSION_CONCURRENCY = 1;
 export const ACTION_READ_LIMIT_MIN = 1;
 export const ACTION_READ_LIMIT_MAX = 100;
+export const OBJECT_MAX_BYTES = 5 * 1024 ** 3;
 
 export const IntakeErrorCode = {
   CursorInvalid: "system.pagination.cursor_invalid",
@@ -125,6 +126,7 @@ export const outboundOperationSchema = z.enum(OutboundOperation);
 export const resultClassSchema = z.enum(ResultClass);
 export const checkEndStateSchema = z.enum(CheckEndState);
 export const actionReadMethodSchema = z.enum(ActionReadMethod);
+export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
 export const actionKeySchema = z
@@ -154,6 +156,15 @@ export const actionReadPageSchema = z.strictObject({
   next_cursor: z.string().nullable(),
 });
 
+export const presignedPutSchema = z.strictObject({
+  put_url: z.string(),
+  headers: z.record(z.string(), z.string()),
+  expires_at: timestamp,
+});
+export const presignedGetSchema = z.strictObject({
+  get_url: z.string(),
+  expires_at: timestamp,
+});
 export const errorItemSchema = z.strictObject({
   code: z.string().min(1),
   message: z.string(),
@@ -199,6 +210,8 @@ export type PlatformAddress = z.infer<typeof platformAddressSchema>;
 export type ResultClassAnswer = z.infer<typeof resultClassAnswerSchema>;
 export type ActionReadMethodValue = z.infer<typeof actionReadMethodSchema>;
 export type ActionReadPage = z.infer<typeof actionReadPageSchema>;
+export type PresignedPutAnswer = z.infer<typeof presignedPutSchema>;
+export type PresignedGetAnswer = z.infer<typeof presignedGetSchema>;
 
 const baseOperation = {
   service: INTAKE_SERVICE_NAME,
@@ -241,6 +254,16 @@ const actionReadOperation = {
   direct: true,
   requiresExecution: true,
   method: HttpMethod.Get,
+} as const;
+const storageReadOperation = {
+  ...readOperation,
+  direct: true,
+  method: HttpMethod.Get,
+} as const;
+const executionStorageReadOperation = {
+  ...storageReadOperation,
+  access: AccessPolicy.Client,
+  requiresExecution: true,
 } as const;
 const readInput = <P extends z.ZodType, Q extends z.ZodType>(
   params: P,
@@ -375,5 +398,57 @@ export const intakeOperations = {
     output: z.union([actionReadPageSchema, resultClassAnswerSchema]),
     description:
       "Read the platform body of a request evidence for an execution and answer it unchanged or its result class.",
+  },
+  "storage.put": {
+    ...baseOperation,
+    access: AccessPolicy.Client,
+    direct: true,
+    requiresExecution: true,
+    method: HttpMethod.Post,
+    mutation: false,
+    body: true,
+    id: "intake.storage.put",
+    path: "/api/intake/execution/:execution_id/storage/put",
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        node_id: identitySchema("node"),
+        asset_id: identitySchema("evidence_asset"),
+        storage_binding_id: identitySchema("binding"),
+        size: z.number().int().nonnegative().max(OBJECT_MAX_BYTES),
+        sha256: sha256Schema.nullable(),
+      }),
+    }),
+    output: presignedPutSchema,
+    description:
+      "Sign a presigned PUT of an evidence asset object for an execution.",
+  },
+  "execution.storage.get": {
+    ...executionStorageReadOperation,
+    id: "intake.execution.storage.get",
+    path: "/api/intake/execution/:execution_id/storage/asset/:asset_id",
+    input: readInput(
+      z.strictObject({
+        execution_id: identitySchema("execution"),
+        asset_id: identitySchema("evidence_asset"),
+      }),
+      z.strictObject({}),
+    ),
+    output: presignedGetSchema,
+    description:
+      "Sign a presigned GET of an evidence asset object for an execution.",
+  },
+  "storage.get": {
+    ...storageReadOperation,
+    id: "intake.storage.get",
+    path: "/api/intake/storage/asset/:asset_id",
+    input: readInput(
+      z.strictObject({ asset_id: identitySchema("evidence_asset") }),
+      z.strictObject({}),
+    ),
+    output: presignedGetSchema,
+    description:
+      "Sign a presigned GET of an evidence asset object for a human.",
   },
 } as const;
