@@ -112,7 +112,21 @@ function commitAdmission(
   return ACCEPTED;
 }
 
-export async function admitDelivery(
+let admissionTail: Promise<unknown> = Promise.resolve();
+
+export function admitDelivery(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  input: AdmissionInput,
+): Promise<AdmissionAnswer> {
+  const admission = admissionTail.then(() =>
+    admitOne(dependencies, caller, input),
+  );
+  admissionTail = Promise.allSettled([admission]);
+  return admission;
+}
+
+async function admitOne(
   dependencies: Dependencies,
   caller: CallerContext,
   input: AdmissionInput,

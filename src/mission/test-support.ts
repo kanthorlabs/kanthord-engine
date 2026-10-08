@@ -427,17 +427,33 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
 
 const REQUEST_RESOURCE = "repository:github:owner/repo";
 export const REQUEST_NUMBER = 1;
+const NEXT_RESOURCE = "repository:github:owner/next";
 const SUCCESS_EXIT_CODE = 0;
 
 export async function externalRequestHarness(
   t: TestContext,
   identity: CallerIdentity,
+  nextRepository = false,
 ) {
   const h = evidenceHarness(t, identity);
+  const nextId = createIdentity("binding");
+  const repositories = nextRepository
+    ? [h.repositoryId, nextId]
+    : [h.repositoryId];
+  const revisionOf = h.dependencies.bindings.getBindingRevision;
+  h.dependencies.bindings.getBindingRevision = (tx, bindingId) =>
+    bindingId === nextId
+      ? {
+          ...revisionOf(tx, h.repositoryId)!,
+          binding_id: nextId,
+          name: "next",
+          resource_identity: NEXT_RESOURCE,
+        }
+      : revisionOf(tx, bindingId);
   h.dependencies.bindings.repositoryPolicyOf = (_tx, bindingId) => ({
     binding_id: bindingId,
     project_id: h.project_id,
-    name: "repo",
+    name: bindingId === nextId ? "next" : "repo",
     address: "git@github.com:owner/repo.git",
     platform: "github",
     ssh_credential: "github-ssh",
@@ -486,6 +502,13 @@ export async function externalRequestHarness(
       tested_input: testedInput,
     },
   });
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([...repositories, h.storageId]), h.node_id),
+  );
   const address: PlatformAddress = {
     kind: PlatformAddressKind.PullRequest,
     resource_identity: REQUEST_RESOURCE,

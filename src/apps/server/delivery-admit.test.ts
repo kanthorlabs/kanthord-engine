@@ -3,17 +3,20 @@ import { test, type TestContext } from "node:test";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import { OperationError } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
+import { canonicalJSON } from "../../kernel/json.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   ActorKind,
   ActorService,
   AdmissionRefusal,
+  AssetKind,
   CheckEndState,
   Disposition,
   EndState,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
   NodeState,
+  missionOperations,
 } from "../../mission/contract.ts";
 import {
   REQUEST_NUMBER,
@@ -41,10 +44,11 @@ function closed(number: number, merged: boolean): string {
   ).toString("base64");
 }
 
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, nextRepository = false) {
   const h = await externalRequestHarness(
     t,
     mintServiceIdentity(INTAKE_SERVICE_NAME),
+    nextRepository,
   );
   h.dependencies.decoder = {
     decode: ({ resource, event, metadata }) =>
@@ -217,4 +221,216 @@ test("another service identity refuses with service_mismatch", async (t) => {
         JSON.stringify({ reason: "service_mismatch" }),
   );
   assert.equal(h.checks.length, NO_CALLS);
+});
+
+function insertRequest(h: Harness, requirementKey: string): string {
+  const id = createIdentity("evidence");
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare(
+        "INSERT INTO mission_evidence (id, node_id, attempt, subject, requirement_key, end_state, verification, provenance, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
+      )
+      .run(
+        id,
+        h.node_id,
+        FIRST_ATTEMPT,
+        requirementKey,
+        requirementKey,
+        canonicalJSON(h.executionActor),
+        Date.now(),
+      );
+    tx.database
+      .prepare(
+        "INSERT INTO mission_evidence_asset (id, evidence_id, kind, content, published_at, expired_at) VALUES (?, ?, ?, ?, ?, NULL)",
+      )
+      .run(
+        createIdentity("evidence_asset"),
+        id,
+        AssetKind.Platform,
+        canonicalJSON(h.address),
+        Date.now(),
+      );
+  });
+  return id;
+}
+
+function deleteRequest(h: Harness): void {
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare("DELETE FROM mission_evidence_asset WHERE evidence_id = ?")
+      .run(h.request.id);
+    tx.database
+      .prepare("DELETE FROM mission_evidence WHERE id = ?")
+      .run(h.request.id);
+  });
+}
+
+function during(h: Harness, change: () => void): void {
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
+    h.checks.push(evidenceId);
+    change();
+    return {
+      end_state: CheckEndState.Expected,
+      landed_commits: [MERGE_COMMIT],
+    };
+  };
+}
+
+async function unchanged(h: Harness, endState: EndState | undefined) {
+  assert.equal(h.checks.length, SINGLE_CALL);
+  assert.equal((await landedOf(h)).length, NO_CALLS);
+  assert.equal((await requestOf(h))?.end_state, endState);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+}
+
+test("a live claim keeps a none result and refuses a conclusive result after one check", async (t) => {
+  const h = await fixture(t);
+  h.dependencies.schedulerClaims.liveExecutionOf = h.claim;
+  h.answer(CheckEndState.None);
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.AcceptedObservation,
+    reason: null,
+  });
+  h.answer(CheckEndState.Expected, [MERGE_COMMIT]);
+  await assert.rejects(
+    h.admit(),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.ClaimLive &&
+      JSON.stringify(error.details) ===
+        JSON.stringify({
+          node_id: h.node_id,
+          execution_id: h.context.execution_id,
+        }),
+  );
+  assert.deepEqual(h.checks, [h.request.id, h.request.id]);
+  assert.equal((await landedOf(h)).length, NO_CALLS);
+  assert.equal((await requestOf(h))?.end_state, undefined);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("a delete of the checked request during the check answers unmatched", async (t) => {
+  const h = await fixture(t);
+  during(h, () => deleteRequest(h));
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Unmatched,
+  });
+  await unchanged(h, undefined);
+});
+
+test("another request that becomes the one unresolved match answers match_changed", async (t) => {
+  const h = await fixture(t);
+  let replacement = "";
+  during(h, () => {
+    deleteRequest(h);
+    replacement = insertRequest(h, "repo.pull_request");
+  });
+  await rejectsWith(h.admit(), MissionErrorCode.DeliveryMatchChanged);
+  assert.ok(replacement);
+  assert.equal(h.checks.length, SINGLE_CALL);
+  assert.equal((await landedOf(h)).length, NO_CALLS);
+  assert.equal(
+    (await evidenceOf(h)).find((item) => item.id === replacement)?.end_state,
+    undefined,
+  );
+});
+
+test("an attempt that closes during the check writes no end state", async (t) => {
+  const h = await fixture(t);
+  during(h, () =>
+    h.store.transaction((tx) =>
+      tx.database
+        .prepare("UPDATE mission_attempt SET closed_at = ? WHERE node_id = ?")
+        .run(Date.now(), h.node_id),
+    ),
+  );
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Unmatched,
+  });
+  await unchanged(h, undefined);
+});
+
+test("a second matching request that appears during the check answers ambiguous", async (t) => {
+  const h = await fixture(t);
+  during(h, () => insertRequest(h, "next.pull_request"));
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Ambiguous,
+  });
+  await unchanged(h, undefined);
+});
+
+test("a human check that resolves the request during the check answers duplicate", async (t) => {
+  const h = await fixture(t);
+  during(h, () =>
+    h.store.transaction((tx) =>
+      tx.database
+        .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
+        .run(EndState.Other, h.request.id),
+    ),
+  );
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.Duplicate,
+    reason: null,
+  });
+  await unchanged(h, EndState.Other);
+});
+
+test("an expected result with a further required action leaves the attempt open", async (t) => {
+  const h = await fixture(t, true);
+  h.answer(CheckEndState.Expected, [MERGE_COMMIT]);
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.AcceptedObservation,
+    reason: null,
+  });
+  assert.equal((await requestOf(h))?.end_state, EndState.Expected);
+  assert.equal((await landedOf(h)).length, SINGLE_CALL);
+  const attempt = await h.invoke("attempt.get", {
+    params: { node_id: h.node_id, attempt: FIRST_ATTEMPT },
+    query: {},
+    body: null,
+  });
+  assert.equal(attempt.closed_at, null);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("admissions run one at a time", async (t) => {
+  const h = await fixture(t);
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const started: number[] = [];
+  h.dependencies.intakeCheck.check = async () => {
+    started.push(started.length);
+    if (started.length === SINGLE_CALL) await gate;
+    return { end_state: CheckEndState.None, landed_commits: [] };
+  };
+  const registered = h.registry.get(missionOperations["delivery.admit"].id);
+  const admit = () =>
+    registered.handler(
+      missionOperations["delivery.admit"].input.parse({
+        params: {},
+        query: {},
+        body: {
+          inbound_event_id: createIdentity("inbound_event"),
+          project_id: h.project_id,
+          platform: "github",
+          resource: RESOURCE,
+          event: closed(REQUEST_NUMBER, true),
+          metadata: { event: "pull_request" },
+        },
+      }),
+      h.caller,
+    ) as Promise<{ disposition: string }>;
+  const first = admit();
+  const second = admit();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(started.length, SINGLE_CALL);
+  open();
+  for (const answer of await Promise.all([first, second]))
+    assert.equal(answer.disposition, Disposition.AcceptedObservation);
+  assert.equal(started.length, SINGLE_CALL + SINGLE_CALL);
 });
