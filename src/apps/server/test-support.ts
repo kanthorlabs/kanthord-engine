@@ -325,7 +325,7 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["workbenchModelRuntimeFactory"];
     stateDirectory?: string;
-    intake?: { pendingEventLimit: number };
+    intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
   } = {},
 ) {
   process.umask(0o077);

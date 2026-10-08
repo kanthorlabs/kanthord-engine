@@ -11,6 +11,7 @@ import type { HealthRegistry, ResourceEntry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
   HealthStatus,
+  lifecycle,
   type Healthcheck,
   type Service,
 } from "../kernel/service.ts";
@@ -23,6 +24,7 @@ import { performAction } from "./action-perform.ts";
 import { readAction } from "./action-read.ts";
 import {
   INTAKE_SERVICE_NAME,
+  InboundKind,
   intakeOperations,
   PENDING_EVENT_LIMIT,
   POLL_INTERVAL_MS,
@@ -59,6 +61,7 @@ export interface Dependencies {
   masterKey: string;
   projects: InboundProjects;
   pendingEventLimit?: number;
+  pollIntervalMs?: number;
 }
 
 export class IntakeService implements Service, IntakeCollaborations {
@@ -81,7 +84,7 @@ export class IntakeService implements Service, IntakeCollaborations {
       github: dependencies.github,
       context: this.shutdown,
       pendingEventLimit: dependencies.pendingEventLimit ?? PENDING_EVENT_LIMIT,
-      pollIntervalMs: POLL_INTERVAL_MS,
+      pollIntervalMs: dependencies.pollIntervalMs ?? POLL_INTERVAL_MS,
       wake: () => this.wake(),
     });
   }
@@ -247,7 +250,7 @@ export class IntakeService implements Service, IntakeCollaborations {
   stop(): Promise<Error | null> {
     this.shutdown.cancel();
     this.started = false;
-    this.stopTask ??= Promise.resolve(null);
+    this.stopTask ??= lifecycle(() => this.pollLoops.stopAll());
     return this.stopTask;
   }
 
@@ -259,6 +262,7 @@ export class IntakeService implements Service, IntakeCollaborations {
       if (context.err()) return (await this.stop()) ?? context.err();
       const error = await this.start();
       if (error) return error;
+      this.startPollLoops();
       await this.shutdown.done();
       return (await this.stop()) ?? context.err();
     } finally {
@@ -266,8 +270,20 @@ export class IntakeService implements Service, IntakeCollaborations {
     }
   }
 
+  private startPollLoops(): void {
+    if (this.shutdown.err()) return;
+    const rows = this.dependencies.store.transaction(
+      (tx) =>
+        tx.database
+          .prepare("SELECT id FROM intake_inbound WHERE kind = ? ORDER BY id")
+          .all(InboundKind.Poll) as { id: string }[],
+    );
+    for (const { id } of rows) this.pollLoops.start(id);
+  }
+
   inboundRemoved(inboundId: string): void {
     assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
+    this.pollLoops.stop(inboundId);
   }
 
   wake(): void {}

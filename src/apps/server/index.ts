@@ -145,7 +145,7 @@ export function composeServices(options: {
   registrations?: WorkerRegistrations;
   workbenchModelRuntimeFactory?: WorkbenchModelRuntimeFactory;
   inventoryOverrides?: Partial<ResourceInventories>;
-  intake?: { pendingEventLimit?: number };
+  intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -505,6 +505,7 @@ export function composeServices(options: {
     masterKey: options.config.master_key,
     projects: { get: projectClient.get },
     pendingEventLimit: options.intake?.pendingEventLimit,
+    pollIntervalMs: options.intake?.pollIntervalMs,
   });
   const workbench = new WorkbenchService({
     store: options.store,
