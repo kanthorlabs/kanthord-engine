@@ -466,7 +466,7 @@ test("an object PUT refuses another node, a recorded asset, another storage bind
   h.dependencies.schedulerClaims.liveExecutionOf = live;
 });
 
-test("a check admits a pending asset of the claim attempt and answers its key", (t) => {
+test("a check admits a pending or a published asset of the claim attempt and answers its key", (t) => {
   const h = assetHarness(t);
   const { assetId } = h.object();
   const granted = h.asset(assetId, AssetUse.Check);
@@ -478,10 +478,12 @@ test("a check admits a pending asset of the claim attempt and answers its key", 
     () => h.asset(h.object({ nodeId: h.otherNode() }).assetId, AssetUse.Check),
     "node_mismatch",
   );
-  refuses(
-    () => h.asset(h.object({ published: true }).assetId, AssetUse.Check),
-    "node_mismatch",
+  const published = h.asset(
+    h.object({ published: true }).assetId,
+    AssetUse.Check,
   );
+  assert.equal(published.facts.version, OBJECT_VERSION);
+  assert.equal(published.facts.size, OBJECT_SIZE);
   assert.throws(
     () => h.asset(h.object({ expiredAt: 1 }).assetId, AssetUse.Check),
     { status: 409, code: MissionErrorCode.EvidenceUploadExpired },

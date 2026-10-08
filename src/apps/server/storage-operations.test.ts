@@ -403,6 +403,16 @@ async function setup(t: TestContext) {
         { params: { asset_id: assetId }, query: {}, body: null },
         { identity: human },
       ),
+    complete: (assetId: string) =>
+      api["evidence.asset.complete"]({
+        params: { asset_id: assetId },
+        query: {},
+        body: {
+          execution_id: execution.execution_id,
+          attempt: execution.attempt,
+          node_revision: execution.pinned_revision,
+        },
+      }),
   };
 }
 
@@ -531,6 +541,19 @@ test(
         }
         assert.equal(h.store.calls.length, calls);
         assert.equal(h.pins().length, ONE_PIN);
+      },
+    );
+
+    await t.test(
+      "a check of a published asset answers its recorded version",
+      async () => {
+        const location = `s3://${BUCKET}/${h.keyOf(h.checked)}`;
+        assert.equal(completed(await h.complete(h.checked)).uri, location);
+        assert.deepEqual(completed(await h.check(h.checked)), {
+          location,
+          version: VERSION,
+        });
+        assert.equal(h.store.calls.at(-1)?.version, VERSION);
       },
     );
 
