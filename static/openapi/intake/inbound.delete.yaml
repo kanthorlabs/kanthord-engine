@@ -1,5 +1,48 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
+  delete:
+    operationId: intake.inbound.delete
+    tags:
+      - intake
+    description: Delete an inbound and its events; a delete calls no platform and
+      refuses while a pending event exists.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: inbound_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/intake.inbound.delete.Input/properties/params/prope\
+            rties/inbound_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "204":
+        description: Completed result
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
   get:
     operationId: intake.inbound.get
     tags:
@@ -48,6 +91,34 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
+    intake.inbound.delete.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            inbound_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^inbound_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: inbound_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - inbound_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    intake.inbound.delete.Output:
+      type: "null"
     intake.inbound.get.Input:
       type: object
       properties:

@@ -55,6 +55,8 @@ const INBOUND_ONE_ROW = 1;
 const INBOUND_NO_LOGS = 0;
 const INBOUND_VALIDATION_FAILED = "gateway.request.validation_failed";
 const INBOUND_UNAUTHORIZED = "gateway.authentication.unauthorized";
+const INBOUND_NOT_FOUND = "intake.inbound.not_found";
+const INBOUND_EMPTY_BODY = "";
 
 test("published native setup is an execution-scoped bodyless read", () => {
   const operation = workerOperations["execution.setup.get"];
@@ -703,6 +705,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.inbound.create", AccessPolicy.Human],
   ["intake.inbound.list", AccessPolicy.Human],
   ["intake.inbound.get", AccessPolicy.Human],
+  ["intake.inbound.delete", AccessPolicy.Human],
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
   ["intake.action.read", AccessPolicy.Client],
@@ -712,7 +715,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 162;
+const OPERATION_COUNT = 163;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1688,4 +1691,79 @@ test("inbound get answers the webhook secret over HTTP, refuses another prefix a
   assert.ok(fixture.logs.length > INBOUND_NO_LOGS);
   for (const line of fixture.logs)
     assert.equal(line.includes(answer.secret), false);
+});
+
+test("published inbound delete is a human route with a bodyless 204 response", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const remove = resolved.paths?.["/api/intake/inbound/{inbound_id}"]
+    ?.delete as ResolvedOperation | undefined;
+  assert.equal(remove?.operationId, intakeOperations["inbound.delete"].id);
+  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/intake/inbound.delete.yaml"),
+      "utf8",
+    ),
+  );
+  assert.equal(fragment.pathItem.delete["x-mutation"], true);
+  assert.equal(
+    fragment.pathItem.delete.responses[HttpStatus.NoContent].content,
+    undefined,
+  );
+});
+
+test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const authorization = `Bearer ${fixture.token}`;
+  const project = projectOperations.create.output.parse(
+    await (
+      await fixture.request(projectOperations.create.path, {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+          "Idempotency-Key": ulid(),
+        },
+        body: JSON.stringify({ name: "inbound-deletes" }),
+      })
+    ).json(),
+  );
+  const inbound = intakeOperations["inbound.create"].output.parse(
+    await (
+      await fixture.request(intakeOperations["inbound.create"].path, {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+          "Idempotency-Key": ulid(),
+        },
+        body: JSON.stringify({
+          project_id: project.id,
+          kind: "webhook",
+          platform: "github",
+          consumer: "mission.delivery.admit",
+          configuration: { resource: "owner/repo" },
+        }),
+      })
+    ).json(),
+  );
+  const path = `/api/intake/inbound/${inbound.id}`;
+  const remove = () =>
+    fixture.request(path, {
+      method: "DELETE",
+      headers: { Authorization: authorization, "Idempotency-Key": ulid() },
+    });
+  const deleted = await remove();
+  assert.equal(deleted.status, HttpStatus.NoContent);
+  assert.equal(await deleted.text(), INBOUND_EMPTY_BODY);
+  for (const response of [
+    await fixture.request(path, { headers: { Authorization: authorization } }),
+    await remove(),
+  ]) {
+    assert.equal(response.status, HttpStatus.NotFound);
+    assert.equal(
+      errorSchema.parse(await response.json()).error.code,
+      INBOUND_NOT_FOUND,
+    );
+  }
 });

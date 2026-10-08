@@ -52,6 +52,7 @@ export const IntakeErrorCode = {
   InboundProjectNotFound: "intake.inbound.project_not_found",
   InboundCredentialInvalid: "intake.inbound.credential_invalid",
   InboundNotFound: "intake.inbound.not_found",
+  InboundEventsPending: "intake.inbound.events_pending",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -448,6 +449,22 @@ export const intakeOperations = {
     output: z.union([webhookInboundSchema, inboundSchema]),
     description:
       "Get one inbound; a webhook inbound adds its address and its verification secret.",
+  },
+  "inbound.delete": {
+    ...baseOperation,
+    id: "intake.inbound.delete",
+    method: HttpMethod.Delete,
+    path: "/api/intake/inbound/:inbound_id",
+    mutation: true,
+    body: false,
+    status: HttpStatus.NoContent,
+    input: readInput(
+      z.strictObject({ inbound_id: identitySchema(INBOUND_ID_PREFIX) }),
+      z.strictObject({}),
+    ),
+    output: z.null(),
+    description:
+      "Delete an inbound and its events; a delete calls no platform and refuses while a pending event exists.",
   },
   "action.check": {
     ...serviceOperation,

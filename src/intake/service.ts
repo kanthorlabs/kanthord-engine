@@ -27,6 +27,7 @@ import {
   type IntakeCollaborations,
 } from "./contract.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
+import { removeInbound } from "./inbound-delete.ts";
 import { getInbound, listInbound } from "./inbound-read.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
@@ -102,6 +103,16 @@ export class IntakeService implements Service, IntakeCollaborations {
       caller.commit((tx) =>
         getInbound(tx, this.dependencies.masterKey, params.inbound_id),
       ),
+    );
+    registry.register(
+      intakeOperations["inbound.delete"],
+      ({ params }, caller) => {
+        const answer = caller.commit((tx) =>
+          removeInbound(tx, params.inbound_id),
+        );
+        this.inboundRemoved(params.inbound_id);
+        return answer;
+      },
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),
@@ -207,6 +218,10 @@ export class IntakeService implements Service, IntakeCollaborations {
     } finally {
       unsubscribe();
     }
+  }
+
+  inboundRemoved(inboundId: string): void {
+    assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
   }
 
   inboundsNaming(

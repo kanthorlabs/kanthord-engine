@@ -39,7 +39,7 @@ paths:
   /api/intake/inbound:
     $ref: ./openapi/intake/inbound.create.yaml#/pathItem
   /api/intake/inbound/{inbound_id}:
-    $ref: ./openapi/intake/inbound.get.yaml#/pathItem
+    $ref: ./openapi/intake/inbound.delete.yaml#/pathItem
   /api/intake/outbound/delete:
     $ref: ./openapi/intake/outbound.request.delete.yaml#/pathItem
   /api/intake/outbound/{outbound_request_id}/discard:
