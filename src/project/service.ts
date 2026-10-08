@@ -31,7 +31,8 @@ import {
   isPlatformSshHost,
 } from "../repository/platform.ts";
 import { WORKING_FILES } from "../agent/prompt-layers.ts";
-import { validateText } from "../agent/prompt-source.ts";
+import { InvalidReason, validateText } from "../agent/prompt-source.ts";
+import { RepositoryFileState } from "../repository/contract.ts";
 import {
   assertPinned,
   sshPinSchema,
@@ -217,12 +218,18 @@ function requireRepositoryBinding(
   };
 }
 
+const INVALID_REASON_OF_FILE_STATE: Record<string, InvalidReason> = {
+  [RepositoryFileState.NotRegularFile]: InvalidReason.NotRegularFile,
+  [RepositoryFileState.OutsideRoot]: InvalidReason.OutsideWorkspace,
+  [RepositoryFileState.Unreadable]: InvalidReason.Unreadable,
+};
+
 function instructionFileEntry(
   source: (typeof WORKING_FILES)[number][0],
-  path: string,
-  text: string | null,
+  read: { path: string; state: string; text: string | null },
 ) {
-  if (text === null)
+  const { path, text } = read;
+  if (read.state === RepositoryFileState.Absent)
     return {
       source,
       path,
@@ -230,7 +237,12 @@ function instructionFileEntry(
       reason: null,
       text: null,
     };
-  const reason = validateText(text);
+  let reason: InvalidReason | null | undefined;
+  if (read.state === RepositoryFileState.Present) {
+    assert.ok(text !== null);
+    reason = validateText(text);
+  } else reason = INVALID_REASON_OF_FILE_STATE[read.state];
+  assert.ok(reason !== undefined);
   return reason === null
     ? { source, path, state: InstructionFileState.Present, reason, text }
     : { source, path, state: InstructionFileState.Invalid, reason, text: null };
@@ -506,7 +518,7 @@ export class ProjectService implements Service, ProjectBindings {
         read_at: Date.now(),
         files: WORKING_FILES.map(([source, path], index) => {
           assert.equal(files[index]!.path, path);
-          return instructionFileEntry(source, path, files[index]!.text);
+          return instructionFileEntry(source, files[index]!);
         }),
       };
       this.instructionFiles.set(id, { commit, answer });

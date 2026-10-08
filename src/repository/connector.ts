@@ -3,11 +3,15 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import { SSH_RESOLVE_FAILED_STATUS } from "./contract.ts";
+import {
+  RepositoryFileState,
+  SSH_RESOLVE_FAILED_STATUS,
+  type RepositoryFile,
+} from "./contract.ts";
 import {
   parseSshIdentity,
   SshErrorCode,
@@ -20,7 +24,16 @@ const EXPIRED = 0;
 const REPOSITORY_FILES_DIRECTORY_PREFIX = "kanthord-repository-files-";
 const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LS_REMOTE_FIELD_SEPARATOR = "\t";
-const LS_TREE_NAME_SEPARATOR = "\0";
+const LS_TREE_ENTRY_SEPARATOR = "\0";
+const LS_TREE_NAME_SEPARATOR = "\t";
+const LS_TREE_MODE_FIELD = 0;
+const NOT_FOUND_INDEX = -1;
+const NEXT_INDEX = 1;
+const REGULAR_FILE_MODES = ["100644", "100755"];
+const SYMLINK_MODE = "120000";
+const SYMLINK_HOPS_MAX = 40;
+const REPOSITORY_ROOT = ".";
+const PARENT_DIRECTORY = "..";
 const COMMIT_FIELD = 0;
 const REF_FIELD = 1;
 const execFileAsync = promisify(execFile);
@@ -232,6 +245,62 @@ export async function resolveBranchCommit(
   return null;
 }
 
+type GitRun = (args: string[]) => Promise<string>;
+
+async function treeMode(
+  run: GitRun,
+  commit: string,
+  path: string,
+): Promise<string | null> {
+  const listing = await run(["ls-tree", "-z", commit, "--", path]);
+  for (const entry of listing.split(LS_TREE_ENTRY_SEPARATOR)) {
+    const nameIndex = entry.indexOf(LS_TREE_NAME_SEPARATOR);
+    if (nameIndex === NOT_FOUND_INDEX) continue;
+    if (entry.slice(nameIndex + NEXT_INDEX) === path)
+      return entry.slice(LS_TREE_MODE_FIELD, entry.indexOf(" "));
+  }
+  return null;
+}
+
+function repositoryFile(
+  path: string,
+  state: RepositoryFileState,
+  text: string | null = null,
+): RepositoryFile {
+  return { path, state, text };
+}
+
+async function resolveRepositoryFile(
+  run: GitRun,
+  commit: string,
+  path: string,
+): Promise<RepositoryFile> {
+  let current = path;
+  for (let hops = 0; hops <= SYMLINK_HOPS_MAX; hops++) {
+    const mode = await treeMode(run, commit, current);
+    if (mode === null) return repositoryFile(path, RepositoryFileState.Absent);
+    const content = async () => run(["show", `${commit}:${current}`]);
+    if (REGULAR_FILE_MODES.includes(mode))
+      return repositoryFile(path, RepositoryFileState.Present, await content());
+    if (mode !== SYMLINK_MODE)
+      return repositoryFile(path, RepositoryFileState.NotRegularFile);
+    const target = await content();
+    const resolved = posix.normalize(
+      posix.join(posix.dirname(current), target),
+    );
+    if (
+      posix.isAbsolute(target) ||
+      resolved === PARENT_DIRECTORY ||
+      resolved.startsWith(`${PARENT_DIRECTORY}/`)
+    )
+      return repositoryFile(path, RepositoryFileState.OutsideRoot);
+    if (resolved === REPOSITORY_ROOT)
+      return repositoryFile(path, RepositoryFileState.NotRegularFile);
+    current = resolved;
+  }
+  return repositoryFile(path, RepositoryFileState.Unreadable);
+}
+
 export async function readFilesAtCommit(
   address: string,
   commit: string,
@@ -239,7 +308,7 @@ export async function readFilesAtCommit(
   context: Context,
   deadlineMs: number,
   parent: string = tmpdir(),
-): Promise<Array<{ path: string; text: string | null }>> {
+): Promise<RepositoryFile[]> {
   assert.ok(address !== EMPTY_STRING);
   assert.match(commit, OBJECT_ID_PATTERN);
   assert.ok(paths.length);
@@ -247,7 +316,7 @@ export async function readFilesAtCommit(
   const directory = await mkdtemp(
     join(parent, REPOSITORY_FILES_DIRECTORY_PREFIX),
   );
-  const run = (args: string[]) =>
+  const run: GitRun = (args) =>
     runGit(
       directory,
       args,
@@ -266,19 +335,9 @@ export async function readFilesAtCommit(
       "origin",
       commit,
     ]);
-    const present = new Set(
-      (
-        await run(["ls-tree", "-z", "--name-only", commit, "--", ...paths])
-      ).split(LS_TREE_NAME_SEPARATOR),
-    );
-    const files: Array<{ path: string; text: string | null }> = [];
+    const files: RepositoryFile[] = [];
     for (const path of paths)
-      files.push({
-        path,
-        text: present.has(path)
-          ? await run(["show", `${commit}:${path}`])
-          : null,
-      });
+      files.push(await resolveRepositoryFile(run, commit, path));
     return files;
   } finally {
     await rm(directory, { recursive: true, force: true });

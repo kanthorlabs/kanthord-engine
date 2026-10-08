@@ -370,7 +370,7 @@ export type RepositoryFiles = {
     paths: readonly string[],
     context: Context,
     deadlineMs: number,
-  ): Promise<Array<{ path: string; text: string | null }>>;
+  ): Promise<Array<{ path: string; state: string; text: string | null }>>;
 };
 export type WorkerAgentsOfFn = (workerName: string) => string[];
 export type WorkerAgentViewFn = (

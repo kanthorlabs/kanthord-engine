@@ -61,6 +61,7 @@ import {
   ProjectErrorCode,
   projectOperations,
 } from "./contract.ts";
+import { RepositoryFileState } from "../repository/contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import { SshErrorCode, type SshIdentity } from "../repository/ssh-identity.ts";
 import {
@@ -3563,6 +3564,7 @@ function instructionFixture(
   behavior: {
     commits?: Array<string | null>;
     texts?: InstructionTexts;
+    states?: string[];
     resolveFails?: boolean;
     readFails?: boolean;
     hang?: boolean;
@@ -3604,10 +3606,18 @@ function instructionFixture(
       async readFilesAtCommit(address, commit, paths, _context, timeout) {
         readCalls.push({ address, commit, paths, timeout });
         if (behavior.readFails) throw new Error("fetch failed");
-        return paths.map((path, index) => ({
-          path,
-          text: behavior.texts?.[index] ?? null,
-        }));
+        return paths.map((path, index) => {
+          const text = behavior.texts?.[index] ?? null;
+          return {
+            path,
+            state:
+              behavior.states?.[index] ??
+              (text === null
+                ? RepositoryFileState.Absent
+                : RepositoryFileState.Present),
+            text,
+          };
+        });
       },
     },
   });
@@ -3692,6 +3702,27 @@ test("binding.instruction_files.get answers the four files with their states", a
   assert.equal(readCalls.length, ONE_CALL);
   assert.equal(readCalls[NO_ITEMS]?.commit, INSTRUCTION_COMMIT);
   assert.deepEqual(readCalls[NO_ITEMS]?.paths, INSTRUCTION_PATHS);
+});
+
+test("binding.instruction_files.get maps the connector reasons of unreadable files to the invalid reasons of the working layer", async (t) => {
+  const { f, saved } = instructionFixture(t, {
+    states: [
+      RepositoryFileState.NotRegularFile,
+      RepositoryFileState.OutsideRoot,
+      RepositoryFileState.Unreadable,
+      RepositoryFileState.Absent,
+    ],
+  });
+  const result = await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.deepEqual(
+    result.files.map(({ state, reason, text }) => [state, reason, text]),
+    [
+      [InstructionFileState.Invalid, InvalidReason.NotRegularFile, null],
+      [InstructionFileState.Invalid, InvalidReason.OutsideWorkspace, null],
+      [InstructionFileState.Invalid, InvalidReason.Unreadable, null],
+      [InstructionFileState.Absent, null, null],
+    ],
+  );
 });
 
 test("binding.instruction_files.get answers four absent files for a repository without instructions", async (t) => {

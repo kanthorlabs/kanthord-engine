@@ -27,6 +27,21 @@ export const REPOSITORY_COMPONENT_NAME = "repository";
 export const SSH_RESOLVE_FAILED_STATUS = 422;
 export const SSH_CONFIG_UNREADABLE_STATUS = 422;
 
+export const RepositoryFileState = {
+  Present: "present",
+  Absent: "absent",
+  NotRegularFile: "not_regular_file",
+  OutsideRoot: "outside_root",
+  Unreadable: "unreadable",
+} as const;
+export type RepositoryFileState =
+  (typeof RepositoryFileState)[keyof typeof RepositoryFileState];
+export type RepositoryFile = {
+  path: string;
+  state: RepositoryFileState;
+  text: string | null;
+};
+
 const emptyParams = z.strictObject({});
 const emptyQuery = z.strictObject({});
 

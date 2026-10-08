@@ -4,14 +4,16 @@ import {
   readdirSync,
   rmSync,
   mkdirSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { RepositoryFileState } from "./contract.ts";
 import {
   gitLsRemote,
   resolveSshHostname,
@@ -22,6 +24,7 @@ import {
   resolveBranchCommit,
   readFilesAtCommit,
 } from "./connector.ts";
+import { isString } from "../kernel/values.ts";
 import { temporary } from "../kernel/test-support.ts";
 
 const DEADLINE_MS = 5000;
@@ -188,10 +191,15 @@ async function instructionOrigin(t: TestContext) {
   await git.init();
   await git.raw(["checkout", "-b", "main"]);
   await git.addRemote("origin", origin);
-  const commit = async (files: Record<string, string>) => {
-    for (const [name, text] of Object.entries(files))
-      writeFileSync(join(seed, name), text);
-    await git.add(".");
+  const commit = async (files: Record<string, string | { link: string }>) => {
+    for (const [name, entry] of Object.entries(files)) {
+      const path = join(seed, name);
+      mkdirSync(dirname(path), { recursive: true });
+      rmSync(path, { force: true });
+      if (isString(entry)) writeFileSync(path, entry);
+      else symlinkSync(entry.link, path);
+    }
+    await git.raw(["add", "--force", "."]);
     await git.raw([
       "-c",
       "user.name=Test",
@@ -248,12 +256,103 @@ test("readFilesAtCommit reads the present files of a commit and answers null for
     scratch,
   );
   assert.deepEqual(files, [
-    { path: "AGENTS.md", text: "second\n" },
-    { path: "AGENTS.local.md", text: null },
-    { path: "CLAUDE.md", text: "claude\n\n" },
-    { path: "CLAUDE.local.md", text: null },
+    { path: "AGENTS.md", state: RepositoryFileState.Present, text: "second\n" },
+    { path: "AGENTS.local.md", state: RepositoryFileState.Absent, text: null },
+    {
+      path: "CLAUDE.md",
+      state: RepositoryFileState.Present,
+      text: "claude\n\n",
+    },
+    { path: "CLAUDE.local.md", state: RepositoryFileState.Absent, text: null },
   ]);
   assert.equal(readdirSync(scratch).length, NO_ENTRIES);
+});
+
+async function readStates(
+  t: TestContext,
+  files: Record<string, string | { link: string }>,
+) {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const head = await commit(files);
+  const read = await readFilesAtCommit(
+    address,
+    head,
+    INSTRUCTION_PATHS,
+    background,
+    DEADLINE_MS,
+    scratch,
+  );
+  return read.map(({ state, text }) => [state, text]);
+}
+
+test("readFilesAtCommit follows a symlink and a chain of two symlinks", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      "AGENTS.md": "agents\n",
+      "CLAUDE.md": { link: "AGENTS.md" },
+      "docs/target.md": "target\n",
+      "AGENTS.local.md": { link: "docs/middle.md" },
+      "docs/middle.md": { link: "target.md" },
+    }),
+    [
+      [RepositoryFileState.Present, "agents\n"],
+      [RepositoryFileState.Present, "target\n"],
+      [RepositoryFileState.Present, "agents\n"],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
+});
+
+test("readFilesAtCommit refuses a symlink that leaves the repository root", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      "AGENTS.md": { link: "../outside" },
+      "CLAUDE.md": { link: "/etc/passwd" },
+      "CLAUDE.local.md": { link: "docs/../../outside" },
+    }),
+    [
+      [RepositoryFileState.OutsideRoot, null],
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.OutsideRoot, null],
+      [RepositoryFileState.OutsideRoot, null],
+    ],
+  );
+});
+
+test("readFilesAtCommit answers absent for a dangling symlink", async (t) => {
+  assert.deepEqual(
+    await readStates(t, { "AGENTS.md": { link: "missing.md" } }),
+    [
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
+});
+
+test("readFilesAtCommit answers unreadable for a symlink loop", async (t) => {
+  const [loop] = await readStates(t, {
+    "AGENTS.md": { link: "CLAUDE.md" },
+    "CLAUDE.md": { link: "AGENTS.md" },
+  });
+  assert.deepEqual(loop, [RepositoryFileState.Unreadable, null]);
+});
+
+test("readFilesAtCommit refuses a directory and a symlink to a directory", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      "AGENTS.md/inner.md": "inner\n",
+      "CLAUDE.md": { link: "AGENTS.md" },
+      "AGENTS.local.md": { link: "." },
+    }),
+    [
+      [RepositoryFileState.NotRegularFile, null],
+      [RepositoryFileState.NotRegularFile, null],
+      [RepositoryFileState.NotRegularFile, null],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
 });
 
 test("readFilesAtCommit reads the named commit after the branch moved", async (t) => {
