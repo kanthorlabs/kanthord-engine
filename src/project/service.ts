@@ -151,6 +151,7 @@ const PAGE_EXTRA = 1;
 const FIRST_INDEX = 0;
 const LAST_INDEX = 1;
 const MINIMUM_LIMIT = 1;
+const NO_LENGTH = 0;
 type BindingEdit = typeof bindingEditSchema._output;
 type BindingSetWrite = typeof bindingSetWriteInputSchema._output;
 
@@ -981,6 +982,13 @@ export class ProjectService implements Service, ProjectBindings {
       project_prompt: config.project_prompt ?? null,
       working_layer: config.working_layer,
     };
+  }
+  projectNameOf(tx: Transaction, projectId: string): string {
+    assert.ok(tx.database.isTransaction);
+    assert.ok(projectId.length > NO_LENGTH, "A project identity is required.");
+    const project = requireProject(tx, projectId);
+    assert.equal(project.id, projectId);
+    return project.name;
   }
   workerBindingOf(
     tx: Transaction,

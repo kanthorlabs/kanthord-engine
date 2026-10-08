@@ -544,6 +544,36 @@ test("get and rename reject an absent project", (t) => {
   );
 });
 
+test("projectNameOf answers the current name after a rename", (t) => {
+  const f = fixture(t, { createMission: allowMission });
+  const project = f.invoke("create", { name: PROJECT_NAME });
+  const nameOf = () =>
+    f.store.transaction((tx) => f.project.projectNameOf(tx, project.id));
+  assert.equal(nameOf(), PROJECT_NAME);
+  f.invoke("rename", { name: RENAMED_NAME }, { project_id: project.id });
+  assert.equal(nameOf(), RENAMED_NAME);
+});
+
+test("projectNameOf throws for an absent project", (t) => {
+  const f = fixture(t);
+  const projectId = createIdentity(PROJECT_ID_PREFIX);
+  refuses(
+    () => f.store.transaction((tx) => f.project.projectNameOf(tx, projectId)),
+    HttpStatus.NotFound,
+    ProjectErrorCode.ProjectNotFound,
+  );
+});
+
+test("projectNameOf opens no transaction", (t) => {
+  const f = fixture(t, { createMission: allowMission });
+  const project = f.invoke("create", { name: PROJECT_NAME });
+  f.store.transaction((tx) => {
+    const transactions = t.mock.method(f.store, "transaction");
+    assert.equal(f.project.projectNameOf(tx, project.id), PROJECT_NAME);
+    assert.equal(transactions.mock.callCount(), NO_CALLS);
+  });
+});
+
 test("rename preserves fields, accepts its current name, and rejects another holder", (t) => {
   const f = fixture(t, { createMission: allowMission });
   const project = f.invoke("create", { name: PROJECT_NAME });

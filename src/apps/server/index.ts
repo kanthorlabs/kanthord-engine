@@ -53,8 +53,12 @@ import {
 } from "../../kernel/service.ts";
 import { OperationalLog } from "../../kernel/log.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { Store } from "../../kernel/store.ts";
-import { HealthRegistry } from "../../kernel/health.ts";
+import { Store, type Transaction } from "../../kernel/store.ts";
+import {
+  HealthRegistry,
+  HealthScope,
+  type ResourceEntry,
+} from "../../kernel/health.ts";
 import { GatewayService } from "../../gateway/index.ts";
 import type { ResourceInventories } from "../../gateway/contract.ts";
 import {
@@ -129,6 +133,23 @@ function resultOf<T>(result: OperationResult<T>): T {
     "system.operation.unknown",
     "Operation failed.",
   );
+}
+
+function projectScopedIntakeInventory(
+  intake: IntakeService,
+  project: ProjectService,
+): (tx: Transaction) => ResourceEntry[] {
+  return (tx) => {
+    assert.ok(tx.database.isTransaction);
+    const entries = intake.resourceInventory(tx);
+    const scoped = entries.map(({ project_id, ...entry }) => ({
+      ...entry,
+      scope: HealthScope.Project,
+      project: project.projectNameOf(tx, project_id),
+    }));
+    assert.equal(scoped.length, entries.length);
+    return scoped;
+  };
 }
 
 export function composeServices(options: {
@@ -585,7 +606,7 @@ export function composeServices(options: {
             ((tx) => project.resourceInventory(tx)),
           intake:
             options.inventoryOverrides?.intake ??
-            ((tx) => intake.resourceInventory(tx)),
+            projectScopedIntakeInventory(intake, project),
         }),
       ),
     options.logger,

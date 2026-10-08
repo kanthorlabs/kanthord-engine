@@ -7,7 +7,7 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
-import type { HealthRegistry, ResourceEntry } from "../kernel/health.ts";
+import type { HealthRegistry } from "../kernel/health.ts";
 import type { CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
   HealthStatus,
@@ -31,6 +31,7 @@ import {
   POLL_INTERVAL_MS,
   type IntakeCollaborations,
   type IntakeConsumers,
+  type IntakeInventoryEntry,
 } from "./contract.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
@@ -356,7 +357,7 @@ export class IntakeService implements Service, IntakeCollaborations {
     return rows.map(({ id }) => ({ inbound_id: id }));
   }
 
-  resourceInventory(tx: Transaction): ResourceEntry[] {
+  resourceInventory(tx: Transaction): IntakeInventoryEntry[] {
     assert.ok(tx);
     return [];
   }

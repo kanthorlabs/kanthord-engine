@@ -26,11 +26,20 @@ import {
 } from "./test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { gatewayOperations } from "../../gateway/contract.ts";
-import { HealthRegistry } from "../../kernel/health.ts";
+import { gatewayOperations, OWNER_INTAKE } from "../../gateway/contract.ts";
+import { HealthRegistry, ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { IntakeService } from "../../intake/index.ts";
-import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
+import {
+  INTAKE_SERVICE_NAME,
+  type IntakeInventoryEntry,
+} from "../../intake/contract.ts";
+import {
+  PROJECT_ID_PREFIX,
+  projectOperations,
+} from "../../project/contract.ts";
+import { createIdentity } from "../../kernel/identity.ts";
+import { errorSchema } from "../../kernel/errors.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 import { HttpStatus } from "../../kernel/http.ts";
@@ -47,6 +56,11 @@ const MODEL_NAME = "composition-model";
 const FIRST_REVISION = 1;
 const REASONING_LEVEL = "off";
 const BASE_URL = "https://example.com/v1";
+const INVENTORY_PROJECT_NAME = "inventory";
+const INBOUND_NAME = "inbound";
+const INBOUND_TARGET = "inbound:composition";
+const WEBHOOK_CAPABILITY = "webhook";
+const INVENTORY_FAILED = "gateway.healthcheck.inventory_failed";
 const entry = new URL("../../main.ts", import.meta.url).href;
 function layout(directory: string) {
   const env: NodeJS.ProcessEnv = {
@@ -94,6 +108,70 @@ test("composed services hold Intake and start its probe", async (t) => {
   assert.deepEqual(checks[INTAKE_SERVICE_NAME], {
     events: HealthStatus.Healthy,
   });
+});
+
+function inboundEntry(projectId: string): IntakeInventoryEntry {
+  return {
+    project_id: projectId,
+    name: INBOUND_NAME,
+    target: INBOUND_TARGET,
+    capability: WEBHOOK_CAPABILITY,
+    check: async () => ResourceStatus.Unknown,
+  };
+}
+
+async function requestHealthReport(
+  fixture: Awaited<ReturnType<typeof gatewayFixture>>,
+) {
+  return fixture.request(gatewayOperations.healthcheck.path, {
+    headers: { Authorization: `Bearer ${fixture.token}` },
+  });
+}
+
+test("the composition root reports an Intake entry under the name of its project", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const created = await fixture.request(projectOperations.create.path, {
+    method: projectOperations.create.method,
+    headers: {
+      Authorization: `Bearer ${fixture.token}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": ulid(),
+    },
+    body: JSON.stringify({ name: INVENTORY_PROJECT_NAME }),
+  });
+  assert.equal(created.status, HttpStatus.OK);
+  const project = projectOperations.create.output.parse(await created.json());
+  t.mock.method(fixture.intake, "resourceInventory", () => [
+    inboundEntry(project.id),
+  ]);
+  const response = await requestHealthReport(fixture);
+  assert.equal(response.status, HttpStatus.OK);
+  const body = gatewayOperations.healthcheck.output.parse(
+    await response.json(),
+  );
+  assert.deepEqual(body.services.intake, {
+    global: {},
+    projects: {
+      [INVENTORY_PROJECT_NAME]: {
+        [INBOUND_NAME]: {
+          status: ResourceStatus.Unknown,
+          capability: WEBHOOK_CAPABILITY,
+        },
+      },
+    },
+  });
+});
+
+test("an Intake entry of an unknown project reports intake in missing_inventories", async (t) => {
+  const fixture = await gatewayFixture(t);
+  t.mock.method(fixture.intake, "resourceInventory", () => [
+    inboundEntry(createIdentity(PROJECT_ID_PREFIX)),
+  ]);
+  const response = await requestHealthReport(fixture);
+  assert.equal(response.status, HttpStatus.ServiceUnavailable);
+  const { error } = errorSchema.parse(await response.json());
+  assert.equal(error.code, INVENTORY_FAILED);
+  assert.deepEqual(error.details, { missing_inventories: [OWNER_INTAKE] });
 });
 
 test("injected repository connector skips the tool gate and probe", async (t) => {

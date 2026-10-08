@@ -9,6 +9,7 @@ import {
   type ClientOptions,
   type OperationResult,
 } from "../kernel/operation.ts";
+import type { ResourceEntry } from "../kernel/health.ts";
 import type { Transaction } from "../kernel/store.ts";
 
 export const INTAKE_SERVICE_NAME = "intake";
@@ -309,6 +310,10 @@ export type IntakeConsumers = Record<
     options: ClientOptions,
   ) => Promise<OperationResult<unknown>>
 >;
+
+export type IntakeInventoryEntry = Omit<ResourceEntry, "project" | "scope"> & {
+  project_id: string;
+};
 
 export interface IntakeCollaborations {
   inboundsNaming(
