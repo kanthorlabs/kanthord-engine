@@ -1,6 +1,5 @@
 import { z } from "zod";
 import type { KnownProvider } from "@earendil-works/pi-ai";
-import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import type { ResourceCheck } from "../kernel/health.ts";
 import {
@@ -219,9 +218,51 @@ export type ToolDeclarationsFn = (
 export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible";
 export type AgentProviderKind =
   KnownProvider | typeof OPENAI_COMPATIBLE_PROVIDER;
+const BUILTIN_PROVIDERS = [
+  "amazon-bedrock",
+  "ant-ling",
+  "anthropic",
+  "azure-openai-responses",
+  "baseten",
+  "cerebras",
+  "cloudflare-ai-gateway",
+  "cloudflare-workers-ai",
+  "deepseek",
+  "fireworks",
+  "github-copilot",
+  "google",
+  "google-vertex",
+  "groq",
+  "huggingface",
+  "kimi-coding",
+  "minimax",
+  "minimax-cn",
+  "mistral",
+  "moonshotai",
+  "moonshotai-cn",
+  "nvidia",
+  "openai",
+  "openai-codex",
+  "opencode",
+  "opencode-go",
+  "openrouter",
+  "qwen-token-plan",
+  "qwen-token-plan-cn",
+  "qwen-token-plan-individual",
+  "radius",
+  "together",
+  "vercel-ai-gateway",
+  "xai",
+  "xiaomi",
+  "xiaomi-token-plan-ams",
+  "xiaomi-token-plan-cn",
+  "xiaomi-token-plan-sgp",
+  "zai",
+  "zai-coding-cn",
+] as const satisfies readonly KnownProvider[];
 export const agentProviderKindSchema = z.enum([
   OPENAI_COMPATIBLE_PROVIDER,
-  ...getBuiltinProviders(),
+  ...BUILTIN_PROVIDERS,
 ] as [AgentProviderKind, ...AgentProviderKind[]]);
 
 export const reasoningEffortSchema = z.enum([
