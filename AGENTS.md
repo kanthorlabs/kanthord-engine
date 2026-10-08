@@ -43,7 +43,7 @@ engine/
 │   │   ├── probe.ts            # Remote HTTP probe and failure-reason redaction
 │   │   ├── assets.ts           # Shipped assets from the single binary or static/
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
-│   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, and repository credentials
+│   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, server-side git write and landing read, and repository credentials
 │   │   ├── contract.ts         # Repository credential route group
 │   │   ├── credential-platform.ts # github platform validator and GitHub probe
 │   │   ├── credential.ts       # Repository credential routes over custody records and binding dependents
@@ -99,14 +99,14 @@ engine/
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
 │   ├── intake/                 # Intake Service: inbound events and outbound requests
-│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, and operations
+│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, and operations
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
 │   │   ├── outbound-read.ts    # Outbound request list and get handlers
 │   │   ├── outbound-write.ts   # Outbound request discard and delete handlers
 │   │   ├── action-check.ts     # Check of a request evidence: authorization, release, and platform fold
-│   │   ├── action-perform.ts   # Configured action: action table, authorization, platform write, and read-backs
+│   │   ├── action-perform.ts   # Configured action: action table lookup, authorization, platform write, and read-backs
 │   │   ├── action-read.ts      # Read of a request evidence: authorization, release, and platform body
 │   │   ├── address-codec.ts    # Stored form of a platform address in an outbound result
 │   │   ├── test-support.ts     # Unused action collaborations for Intake unit tests
