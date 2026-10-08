@@ -1,16 +1,27 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { TestContext } from "node:test";
+import { simpleGit } from "simple-git";
 import { isNumber, isString } from "../../kernel/values.ts";
 import { parse, stringify } from "yaml";
 import { configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
+import { HttpStatus } from "../../kernel/http.ts";
+import {
+  OperationResultType,
+  type OperationResult,
+} from "../../kernel/operation.ts";
+import { temporary } from "../../kernel/test-support.ts";
+import { FAKE_SSH_CREDENTIAL_BODY, remoteHead } from "./test-support.ts";
 
 const EMPTY_ARGUMENT_COUNT = 0;
 const COMMAND_TIMEOUT_MS = 10000;
 const SUCCESS_EXIT_CODE = 0;
 const EMPTY_OUTPUT = "";
+const INITIAL_SEQUENCE = 0;
+const CREDENTIAL_NAME = "github";
 
 export function generateMachineToken(input: {
   env: NodeJS.ProcessEnv;
@@ -101,5 +112,115 @@ export function environment(directory: string): NodeJS.ProcessEnv {
     KANTHORD_CONFIG: join(directory, "absent.yaml"),
     KANTHORD_ENDPOINT: "http://127.0.0.1:1",
     KANTHORD_TOKEN: undefined,
+  };
+}
+
+export function completed<T>(result: OperationResult<T>): T {
+  assert.ok(
+    result.type === OperationResultType.Completed,
+    JSON.stringify(result),
+  );
+  assert.equal(result.status, HttpStatus.OK);
+  return result.data;
+}
+
+export async function pushNodeBranch(
+  t: TestContext,
+  bare: string,
+  nodeId: string,
+  content: string,
+): Promise<string> {
+  assert.ok(bare && nodeId && content);
+  const directory = join(temporary(t), "node");
+  await simpleGit().clone(bare, directory);
+  const git = simpleGit(directory);
+  await git.addConfig("user.name", "Test Node");
+  await git.addConfig("user.email", "test_node@example.invalid");
+  await git.raw(["checkout", "-b", `kanthord/${nodeId}`]);
+  writeFileSync(join(directory, "node.md"), content);
+  await git.add("node.md");
+  await git.commit(content);
+  await git.push("origin", `kanthord/${nodeId}`);
+  const head = (await git.revparse(["HEAD"])).trim();
+  assert.match(head, /^[a-f0-9]{40}$/);
+  assert.equal(await remoteHead(bare, `refs/heads/kanthord/${nodeId}`), head);
+  return head;
+}
+
+export type CliSession = {
+  H: NodeJS.ProcessEnv;
+  secrets: string[];
+  read: <T>(args: string[], env?: NodeJS.ProcessEnv) => Promise<T>;
+  write: <T>(
+    args: string[],
+    body: unknown,
+    env?: NodeJS.ProcessEnv,
+  ) => Promise<T>;
+};
+
+export function cliSession(
+  t: TestContext,
+  endpoint: string,
+  token: string,
+  secret: string,
+): CliSession {
+  assert.ok(endpoint && token && secret);
+  const directory = temporary(t);
+  const H: NodeJS.ProcessEnv = {
+    ...environment(directory),
+    KANTHORD_ENDPOINT: endpoint,
+    KANTHORD_TOKEN: token,
+  };
+  const secrets = [secret, token];
+  let sequence = INITIAL_SEQUENCE;
+  const file = (body: unknown) => {
+    const path = join(directory, `${++sequence}.json`);
+    writePrivate(path, JSON.stringify(body));
+    return path;
+  };
+  const read = async <T>(args: string[], env = H): Promise<T> => {
+    const result = await kanthord(args, env);
+    assert.equal(result.code, SUCCESS_EXIT_CODE, result.stderr);
+    assert.equal(result.stderr, EMPTY_OUTPUT);
+    for (const known of secrets) assert.ok(!result.stdout.includes(known));
+    return JSON.parse(result.stdout) as T;
+  };
+  const write = <T>(args: string[], body: unknown, env = H) =>
+    read<T>([...args, "--file", file(body)], env);
+  return { H, secrets, read, write };
+}
+
+export async function createCredentials(
+  session: CliSession,
+  secret: string,
+): Promise<void> {
+  assert.ok(session.secrets.includes(secret));
+  await session.write(["repository", "credential", "create"], {
+    name: CREDENTIAL_NAME,
+    platform: "github",
+    metadata: null,
+    secret: { key: secret },
+  });
+  await session.write(
+    ["repository", "credential", "create"],
+    FAKE_SSH_CREDENTIAL_BODY,
+  );
+}
+
+export function repositoryBinding(name: string, action: string) {
+  assert.ok(name && action);
+  return {
+    kind: "repository",
+    config: {
+      available: true,
+      platform: "github",
+      address: `git@github.com:owner/${name}.git`,
+      strategy: {
+        base_branch: "main",
+        action: { name: action, follows: { type: "assessment_passed" } },
+      },
+      ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+      credential: CREDENTIAL_NAME,
+    },
   };
 }

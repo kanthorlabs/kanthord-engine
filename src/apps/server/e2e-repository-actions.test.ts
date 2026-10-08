@@ -1,18 +1,10 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
-import { writePrivate } from "../../kernel/files.ts";
-import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
+import { HttpMethod } from "../../kernel/http.ts";
 import { OutboundRequestState } from "../../intake/contract.ts";
-import {
-  OperationResultType,
-  type OperationResult,
-} from "../../kernel/operation.ts";
-import { temporary } from "../../kernel/test-support.ts";
 import {
   ActorKind,
   ActorService,
@@ -33,7 +25,6 @@ import {
   PlatformAddressKind,
 } from "../../worker/contract.ts";
 import {
-  FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   fakeGitHub,
@@ -41,9 +32,15 @@ import {
   mappedTransport,
   remoteHead,
 } from "./test-support.ts";
-import { environment, generateMachineToken, kanthord } from "./cli-support.ts";
+import {
+  cliSession,
+  completed,
+  createCredentials,
+  generateMachineToken,
+  pushNodeBranch,
+  repositoryBinding,
+} from "./cli-support.ts";
 
-const INITIAL_SEQUENCE = 0;
 const SUCCESSFUL_EXIT = 0;
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
@@ -52,7 +49,6 @@ const FIRST_ATTEMPT = 1;
 const SINGLE_CALL = 1;
 const SINGLE_ITEM = 1;
 const FIRST_PULL_REQUEST = 1;
-const NO_OUTPUT = "";
 const TIMEOUT = 180000;
 const SECRET = "test-secret";
 const GATED = "gated";
@@ -82,37 +78,6 @@ type Outbound = {
   result: unknown;
 };
 
-function completed<T>(result: OperationResult<T>): T {
-  assert.ok(
-    result.type === OperationResultType.Completed,
-    JSON.stringify(result),
-  );
-  assert.equal(result.status, HttpStatus.OK);
-  return result.data;
-}
-
-async function pushNodeBranch(
-  t: TestContext,
-  bare: string,
-  nodeId: string,
-  content: string,
-) {
-  const directory = join(temporary(t), "node");
-  await simpleGit().clone(bare, directory);
-  const git = simpleGit(directory);
-  await git.addConfig("user.name", "Test Node");
-  await git.addConfig("user.email", "test_node@example.invalid");
-  await git.raw(["checkout", "-b", `kanthord/${nodeId}`]);
-  writeFileSync(join(directory, "node.md"), content);
-  await git.add("node.md");
-  await git.commit(content);
-  await git.push("origin", `kanthord/${nodeId}`);
-  const head = (await git.revparse(["HEAD"])).trim();
-  assert.match(head, /^[a-f0-9]{40}$/);
-  assert.equal(await remoteHead(bare, `refs/heads/kanthord/${nodeId}`), head);
-  return head;
-}
-
 async function setup(t: TestContext) {
   const gitHub = await fakeGitHub(t);
   const gatedBare = await bareRepository(t, GATED);
@@ -130,35 +95,9 @@ async function setup(t: TestContext) {
   });
   const creates = () =>
     gitHub.calls.filter((call) => call.method === HttpMethod.Post).length;
-  const directory = temporary(t);
-  const H = {
-    ...environment(directory),
-    KANTHORD_ENDPOINT: fixture.endpoint,
-    KANTHORD_TOKEN: fixture.token,
-  };
-  const secrets = [SECRET, fixture.token];
-  let sequence = INITIAL_SEQUENCE;
-  const file = (body: unknown) => {
-    const path = join(directory, `${++sequence}.json`);
-    writePrivate(path, JSON.stringify(body));
-    return path;
-  };
-  const read = async <T>(args: string[], env = H): Promise<T> => {
-    const result = await kanthord(args, env);
-    assert.equal(result.code, SUCCESSFUL_EXIT, result.stderr);
-    assert.equal(result.stderr, NO_OUTPUT);
-    for (const secret of secrets) assert.ok(!result.stdout.includes(secret));
-    return JSON.parse(result.stdout) as T;
-  };
-  const write = <T>(args: string[], body: unknown, env = H) =>
-    read<T>([...args, "--file", file(body)], env);
-  await write(["repository", "credential", "create"], {
-    name: "github",
-    platform: "github",
-    metadata: null,
-    secret: { key: SECRET },
-  });
-  await write(["repository", "credential", "create"], FAKE_SSH_CREDENTIAL_BODY);
+  const session = cliSession(t, fixture.endpoint, fixture.token, SECRET);
+  const { H, secrets, read, write } = session;
+  await createCredentials(session, SECRET);
   const project = await read<{ id: string }>([
     "project",
     "create",
@@ -168,25 +107,11 @@ async function setup(t: TestContext) {
   const mission = await read<{ id: string }>(["mission", "get", project.id]);
   const missionVersion = async () =>
     (await read<{ version: number }>(["mission", "get", project.id])).version;
-  const repository = (name: string, action: string) => ({
-    kind: "repository",
-    config: {
-      available: true,
-      platform: "github",
-      address: `git@github.com:owner/${name}.git`,
-      strategy: {
-        base_branch: "main",
-        action: { name: action, follows: { type: "assessment_passed" } },
-      },
-      ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
-      credential: "github",
-    },
-  });
   await write(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
     bindings: {
-      gated: repository(GATED, "pull_request"),
-      merge: repository(MERGE, "merge_push"),
+      gated: repositoryBinding(GATED, "pull_request"),
+      merge: repositoryBinding(MERGE, "merge_push"),
       harness: {
         kind: "worker",
         config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
