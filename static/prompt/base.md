@@ -1,5 +1,3 @@
-This text is the default standard. It binds every agent and every work product.
-
 ## Principles
 
 1. **Think before you act.** Investigate the evidence first. When an ambiguity does not affect correctness, state the assumption, record it in your report and proceed. When an ambiguity affects correctness, do not guess: stop the work and record the unresolved ambiguity as your finding. When several interpretations exist, name them and name the one that you chose. When a simpler approach exists, say so and record the objection.
