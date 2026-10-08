@@ -32,6 +32,7 @@ import {
   type IntakeCollaborations,
   type IntakeConsumers,
 } from "./contract.ts";
+import { Dispatcher } from "./dispatcher.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
 import { removeInbound } from "./inbound-delete.ts";
 import { getEvent, listEvents } from "./event-read.ts";
@@ -84,9 +85,16 @@ export class IntakeService implements Service, IntakeCollaborations {
   private started = false;
   private readonly outboundInFlight = new Set<string>();
   readonly pollLoops: PollLoops;
+  readonly dispatcher: Dispatcher;
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.dispatcher = new Dispatcher({
+      store: dependencies.store,
+      identity: dependencies.identity,
+      consumers: dependencies.consumers,
+      context: this.shutdown,
+    });
     this.pollLoops = new PollLoops({
       store: dependencies.store,
       logger: dependencies.logger,
