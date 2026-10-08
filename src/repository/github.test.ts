@@ -809,6 +809,7 @@ test("listEvents refuses a malformed body as a lost read", async (t) => {
   const bodies: unknown[] = [
     [{ id: 41, type: "PushEvent" }],
     [{ id: "41", type: "PushEvent", payload: { text: "\ud800" } }],
+    [{ id: "0101", type: "PushEvent" }],
   ];
   const server = await platform(t, (request, response, count) => {
     answer(200, bodies[count - SINGLE_REQUEST])(request, response, count);
@@ -862,6 +863,10 @@ test("githubCheckpointSchema admits the checkpoint fields and refuses others", (
   );
   assert.ok(
     !githubCheckpointSchema.safeParse({ etag: null, newest_event_id: "4a" })
+      .success,
+  );
+  assert.ok(
+    !githubCheckpointSchema.safeParse({ etag: null, newest_event_id: "0101" })
       .success,
   );
   assert.ok(
