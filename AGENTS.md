@@ -107,7 +107,7 @@ engine/
 │   │   ├── inbound-create.ts   # Inbound create: admission of a webhook and a poll, project check, the poll release and first request, credential check, insert step, and loop start
 │   │   ├── inbound-delete.ts   # Inbound delete that refuses a pending event and removes the events and the row
 │   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret
-│   │   ├── event-store.ts      # Inbound event rows, the repeat lookup, pending count, and the record projection
+│   │   ├── event-store.ts      # Inbound event rows, the repeat lookup, pending count, the oldest pending read, conditional state writes, and the record projection
 │   │   ├── event-read.ts       # Inbound event list with a cursor and get by identity
 │   │   ├── poll.ts             # Poll loops: one loop per inbound, the cycle with its capacity pause and release, and the batch with its checkpoint
 │   │   ├── receipt.ts          # Webhook receipt: inbound lookup, signature check, handshake, capacity bound, and insert

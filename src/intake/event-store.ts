@@ -6,12 +6,15 @@ import {
   INBOUND_EVENT_ID_PREFIX,
   InboundEventState,
   inboundEventSchema,
+  type ErrorItem,
   type InboundEvent,
   type InboundEventStateValue,
 } from "./contract.ts";
+import { appendError } from "./error-array.ts";
 
 const NO_LENGTH = 0;
 const EARLIEST_TIME = 0;
+const ONE_ROW = 1;
 
 export interface NewInboundEvent {
   inbound_id: string;
@@ -111,6 +114,71 @@ export function pendingCount(tx: Transaction): number {
     )
     .get(InboundEventState.Pending) as { total: number | bigint };
   return Number(row.total);
+}
+
+export function oldestPendingEvent(
+  tx: Transaction,
+  excluded: ReadonlySet<string>,
+): string | null {
+  const exclusion = canonicalJSON([...excluded].sort());
+  assert.ok(exclusion.length > NO_LENGTH, "An exclusion encodes to JSON.");
+  const row = tx.database
+    .prepare(
+      `SELECT id FROM intake_inbound_event
+    WHERE state = ? AND id NOT IN (SELECT value FROM json_each(?))
+    ORDER BY id LIMIT 1`,
+    )
+    .get(InboundEventState.Pending, exclusion) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+export function eventState(
+  tx: Transaction,
+  id: string,
+): InboundEventStateValue | null {
+  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  const row = tx.database
+    .prepare("SELECT state FROM intake_inbound_event WHERE id = ?")
+    .get(id) as { state: InboundEventStateValue } | undefined;
+  return row?.state ?? null;
+}
+
+export function succeedEvent(tx: Transaction, id: string): boolean {
+  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  const changes = tx.database
+    .prepare(
+      "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
+    )
+    .run(InboundEventState.Succeeded, id, InboundEventState.Pending).changes;
+  assert.ok(Number(changes) <= ONE_ROW, "A write changes at most one row.");
+  return Number(changes) === ONE_ROW;
+}
+
+export function failEvent(
+  tx: Transaction,
+  id: string,
+  item: ErrorItem,
+): boolean {
+  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(Number.isSafeInteger(item.created_at));
+  const current = tx.database
+    .prepare(
+      "SELECT error FROM intake_inbound_event WHERE id = ? AND state = ?",
+    )
+    .get(id, InboundEventState.Pending) as { error: string | null } | undefined;
+  if (current === undefined) return false;
+  const changes = tx.database
+    .prepare(
+      "UPDATE intake_inbound_event SET state = ?, error = ? WHERE id = ? AND state = ?",
+    )
+    .run(
+      InboundEventState.Failed,
+      appendError(current.error, item),
+      id,
+      InboundEventState.Pending,
+    ).changes;
+  assert.equal(Number(changes), ONE_ROW, "A failed write changes one row.");
+  return true;
 }
 
 export function eventRecord(row: InboundEventProjectionRow): InboundEvent {
