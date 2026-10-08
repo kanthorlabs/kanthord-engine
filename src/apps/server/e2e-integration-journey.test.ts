@@ -16,6 +16,7 @@ import { isString } from "../../kernel/values.ts";
 import {
   ActorKind,
   ActorService,
+  AssessmentResult,
   AssetKind,
   NodeState,
   missionOperations,
@@ -23,7 +24,11 @@ import {
   type Revision,
 } from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
-import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
+import {
+  ActionResultKind,
+  PlatformAddressKind,
+  workerOperations,
+} from "../../worker/contract.ts";
 import {
   FAKE_SSH_IDENTITY,
   bareRepository,
@@ -32,6 +37,7 @@ import {
   fakeS3,
   gatewayFixture,
   mappedTransport,
+  remoteHead,
 } from "./test-support.ts";
 import {
   cliMachine,
@@ -42,6 +48,7 @@ import {
   passingEvaluation,
   pushNodeBranch,
   repositoryBinding,
+  repositorySnapshot,
   until,
 } from "./cli-support.ts";
 
@@ -52,6 +59,7 @@ const WORKER_INSTANCE_COUNT = 1;
 const SINGLE_ITEM = 1;
 const FIRST_PULL_REQUEST = 1;
 const POLL_INTERVAL_MS = 50;
+const PASSING_EXIT_CODE = 0;
 const JOURNEY_TIMEOUT = 120000;
 const SECRET = "test-secret";
 const STORAGE_SECRET = "e2e-journey-storage-secret";
@@ -60,7 +68,11 @@ const GATED = "gated";
 const MERGE = "merge";
 const GATED_RESOURCE = "owner/gated";
 const MERGE_RESOURCE = "owner/merge";
+const MERGE_IDENTITY = "repository:github:owner/merge";
+const MAIN_BRANCH = "main";
+const MAIN_REF = "refs/heads/main";
 const MERGED_COMMIT = "e".repeat(40);
+const PUSH_EVENT_ID = "500";
 const MERGED_DELIVERY = "d-1";
 const WEBHOOK_CAPABILITY = "webhook";
 const POLL_CAPABILITY = "poll acquisition";
@@ -70,6 +82,9 @@ const OBJECT_BODY = "hello";
 const OBJECT_MEDIA = "text/plain";
 const SIGNATURE_PARAMETER = "X-Amz-Signature";
 const PULL_REQUEST_OPERATION = "github.pull_request";
+const MERGE_PUSH_OPERATION = "git.merge_push";
+const DELETE_OBJECT_OPERATION = "s3.delete_object";
+const EVENTS_PATH = /^\/repos\/owner\/merge\/events(\?|$)/;
 const CONTENT = {
   name: "Ship accounts",
   requirement: "Ship accounts",
@@ -361,6 +376,22 @@ function journey(h: Harness) {
       ])
     ).items;
   const state = async (nodeId: string) => (await h.machine.node(nodeId)).state;
+  const outcome = async (nodeId: string) => {
+    const page = await read<Page<{ id: string }>>([
+      "mission",
+      "outcome",
+      "list",
+      nodeId,
+    ]);
+    assert.equal(page.items.length, SINGLE_ITEM);
+    return page.items[FIRST_INDEX]!.id;
+  };
+  const submit = (nodeId: string, x: ExecutionRecord, body: object) =>
+    write<{ evidence: Evidence }>(
+      ["mission", "evidence", "submit", nodeId],
+      { ...executionContext(x), ...body },
+      h.machine.T,
+    );
   return {
     read,
     write,
@@ -371,6 +402,8 @@ function journey(h: Harness) {
     outbound,
     events,
     state,
+    outcome,
+    submit,
   };
 }
 
@@ -389,6 +422,8 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     },
   });
   let stored!: Stored;
+  let Q = "";
+  let c = "";
 
   await t.test(
     "EJ10.1 the health report holds the three inbounds",
@@ -460,4 +495,160 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       inbound_event_id: E1.id,
     });
   });
+  await t.test("EJ10.4 a merge push lands Q on main", async () => {
+    Q = await h.create("objective-q.md", "objective", [MERGE], h.I);
+    const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "objective q\n");
+    await j.objective(Q, h.merge.id, q);
+    const rows = await j.outbound(MERGE_PUSH_OPERATION);
+    assert.equal(rows.length, SINGLE_ITEM);
+    const [row] = rows;
+    assert.equal(row!.state, OutboundRequestState.Succeeded);
+    c = (row!.result as { commit: string }).commit;
+    assert.deepEqual(row!.result, {
+      kind: PlatformAddressKind.BranchPush,
+      branch: MAIN_BRANCH,
+      commit: c,
+      resource_identity: MERGE_IDENTITY,
+    });
+    assert.equal(await remoteHead(h.mergeBare.bare, MAIN_REF), c);
+  });
+  await t.test("EJ10.5 a polled push event completes Q", async () => {
+    h.gitHub.events("owner", MERGE, [
+      {
+        id: PUSH_EVENT_ID,
+        type: "PushEvent",
+        repo: { name: MERGE_RESOURCE },
+        payload: { ref: MAIN_REF, head: c },
+      },
+    ]);
+    const items = await until(
+      () => j.events(h.L),
+      (list) =>
+        list.length === SINGLE_ITEM &&
+        list[FIRST_INDEX]!.state !== InboundEventState.Pending,
+    );
+    assert.deepEqual(
+      items.map((item) => [item.event_id, item.state]),
+      [[PUSH_EVENT_ID, InboundEventState.Succeeded]],
+    );
+    assert.equal(await j.state(Q), NodeState.Completed);
+  });
+  await t.test("EJ10.6 the initiative assessment completes I", async () => {
+    const g = await remoteHead(h.gatedBare.bare, MAIN_REF);
+    assert.ok(g);
+    const oP = await j.outcome(h.P);
+    const oQ = await j.outcome(Q);
+    const x = await h.machine.pull(h.I, NodeState.Executing);
+    const rep = await j.submit(h.I, x, {
+      subject: "report",
+      assets: [
+        {
+          kind: "produced",
+          content: {
+            media_type: "text/markdown",
+            encoding: "base64",
+            data: Buffer.from("P and Q are complete.").toString("base64"),
+          },
+        },
+      ],
+    });
+    await h.machine.release(x.execution_id);
+    const x2 = await h.machine.pull(h.I, NodeState.Evaluating);
+    const testedInput = [
+      repositorySnapshot(h.gated.id, g),
+      repositorySnapshot(h.merge.id, c),
+    ];
+    const ir = await j.submit(h.I, x2, {
+      subject: "verification run",
+      assets: [
+        {
+          kind: "produced",
+          content: {
+            media_type: "text/plain",
+            encoding: "base64",
+            data: "b2s=",
+          },
+        },
+      ],
+      verification: {
+        tested_input: testedInput,
+        results: [
+          {
+            command: "true",
+            exit_code: PASSING_EXIT_CODE,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    });
+    const assessed = await j.write<{
+      node: { state: string };
+      outcome: { result: string };
+    }>(
+      ["mission", "assessment", "submit", h.I],
+      {
+        ...executionContext(x2),
+        evidence_ids: [ir.evidence.id, rep.evidence.id],
+        child_outcome_ids: [oP, oQ],
+        result: AssessmentResult.Success,
+        rationale: "P and Q are complete.",
+        tested_input: testedInput,
+      },
+      h.machine.T,
+    );
+    assert.equal(assessed.node.state, NodeState.Completed);
+    assert.equal(assessed.outcome.result, AssessmentResult.Success);
+    assert.equal(await j.state(h.I), NodeState.Completed);
+  });
+  await t.test(
+    "EJ10.7 the health report keeps the inbound checks",
+    async () => {
+      const report = await j.health();
+      assert.deepEqual(
+        report.services.intake.projects[PROJECT_NAME],
+        inbounds(ResourceStatus.Healthy),
+      );
+    },
+  );
+  await t.test("EJ10.8 the evidence delete removes the object", async () => {
+    const M = await h.missionVersion();
+    await j.read([
+      "mission",
+      "evidence",
+      "delete",
+      stored.evidenceId,
+      "--force",
+      "--reason",
+      "journey",
+      "--expected-mission-version",
+      String(M),
+    ]);
+    const rows = await j.outbound(DELETE_OBJECT_OPERATION);
+    assert.deepEqual(
+      rows.map((row) => [row.request_key, row.state]),
+      [[stored.assetId, OutboundRequestState.Succeeded]],
+    );
+    assert.deepEqual(h.s3.objects(stored.key), []);
+  });
+  await t.test(
+    "EJ10.9 the inbound deletes empty the Intake report",
+    async () => {
+      const gitHubCalls = h.gitHub.calls.length;
+      const s3Calls = h.s3.calls.length;
+      for (const id of [h.W, h.L, h.V])
+        await j.read(["intake", "inbound", "delete", id]);
+      const deleteCalls = h.gitHub.calls
+        .slice(gitHubCalls)
+        .filter(
+          (call) =>
+            !(call.method === HttpMethod.Get && EVENTS_PATH.test(call.path)),
+        );
+      assert.deepEqual(deleteCalls, []);
+      assert.equal(h.s3.calls.length, s3Calls);
+      const report = await j.health();
+      assert.deepEqual(report.services.intake.projects, {});
+      for (const line of h.fixture.logs) j.clean(line);
+    },
+  );
 });
