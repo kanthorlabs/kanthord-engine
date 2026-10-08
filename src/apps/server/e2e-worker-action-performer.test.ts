@@ -11,7 +11,6 @@ import {
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
-  CheckEndState,
   NodeState,
   Resolution,
   type Evidence,
@@ -37,7 +36,7 @@ import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   scriptedActions,
-  scriptedCheck,
+  fakeGitHub,
 } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
@@ -98,18 +97,14 @@ function refused<T>(result: OperationResult<T>, status: number, code: string) {
 
 async function setup(t: TestContext) {
   const actions = scriptedActions();
+  const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
-    standIns: {
-      intakeActions: actions.seam,
-      intakeCheck: scriptedCheck({
-        end_state: CheckEndState.Other,
-        landed_commits: [],
-      }),
-    },
+    github: { baseUrl: gitHub.endpoint },
+    standIns: { intakeActions: actions.seam },
   });
   const directory = temporary(t);
   const H = {
@@ -353,6 +348,7 @@ async function setup(t: TestContext) {
     read<{ state: string }>(["mission", "node", "get", nodeId]);
   return {
     actions,
+    gitHub,
     file,
     read,
     write,
@@ -380,10 +376,15 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     e4: ExecutionRecord,
     e6: ExecutionRecord;
   let gWork1: Evidence, gWork2: Evidence, request1: Evidence;
-  const pr42 = {
+  const pr = {
     kind: PlatformAddressKind.PullRequest,
     resource_identity: h.gated.resource_identity,
-    number: 42,
+    number: h.gitHub.open({
+      owner: "owner",
+      repo: GATED,
+      head: `kanthord/${h.G}`,
+      base: "main",
+    }),
   };
 
   await t.test("E06.1 steps claim selects G attempt 1", async () => {
@@ -464,13 +465,13 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
         h.actions.requests.delete(`pull_request/${requestKey}`),
         true,
       );
-      h.actions.performAnswers.push(pr42);
+      h.actions.performAnswers.push(pr);
       const item = completed(await h.request(e2)).items[0];
       assert.ok(item?.kind === ActionResultKind.Submitted);
       request1 = item.evidence as Evidence;
       assert.equal(request1.requirement_key, GATED_KEY);
       assert.equal(request1.attempt, FIRST_ATTEMPT);
-      assert.deepEqual(request1.assets[0]?.address, pr42);
+      assert.deepEqual(request1.assets[0]?.address, pr);
       assert.equal(h.actions.performCalls.length, TWO_CALLS);
     },
   );
@@ -494,6 +495,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     ]);
     assert.equal(actions.items[0]?.resolution, Resolution.Unresolved);
     assert.equal(actions.items[0]?.request_evidence_id, request1.id);
+    h.gitHub.close(pr.number);
     const check = await h.write<{ results: { resolution: string }[] }>(
       ["mission", "node", "check", h.G],
       { expected_mission_version: h.M },
@@ -540,18 +542,18 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
           base: { ref: "main", repo: { full_name: "owner/gated" } },
         },
       });
-      h.actions.performAnswers.push(pr42);
+      h.actions.performAnswers.push(pr);
       const item = completed(await h.request(e4)).items[0];
       assert.ok(item?.kind === ActionResultKind.Submitted);
       const evidence = item.evidence as Evidence;
       assert.equal(evidence.attempt, SECOND_ATTEMPT);
-      assert.deepEqual(evidence.assets[0]?.address, pr42);
+      assert.deepEqual(evidence.assets[0]?.address, pr);
       assert.equal(
         h.actions.readCalls[0]?.method,
         ActionReadMethod.PullRequestGet,
       );
-      assert.deepEqual(h.actions.readCalls[0]?.address, pr42);
-      assert.deepEqual(h.actions.performCalls[2]?.operands.reusedAddress, pr42);
+      assert.deepEqual(h.actions.readCalls[0]?.address, pr);
+      assert.deepEqual(h.actions.performCalls[2]?.operands.reusedAddress, pr);
       assert.equal(h.actions.performCalls[2]?.operands.commit, D);
     },
   );
@@ -569,7 +571,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       (item) => item.requirement_key === GATED_KEY,
     );
     assert.equal(requests.length, SINGLE_ITEM);
-    assert.deepEqual(requests[0]?.assets[0]?.address, pr42);
+    assert.deepEqual(requests[0]?.assets[0]?.address, pr);
   });
   await t.test("E06.14 P reaches a passing evaluation claim", async () => {
     const e5 = await h.pull(h.P, FIRST_ATTEMPT);

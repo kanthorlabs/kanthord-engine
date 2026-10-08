@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import { deriveClientSecret } from "../../gateway/local.ts";
@@ -12,6 +13,7 @@ import {
   CustodyComponent,
   custodyMigrations,
   deriveEnvelopeKey,
+  grantFacts,
 } from "../../custody/index.ts";
 import {
   CUSTODY_SERVICE_NAME,
@@ -30,7 +32,6 @@ import {
   MISSION_SERVICE_NAME,
   missionOperations,
   type IntakeStorage,
-  type IntakeCheck,
 } from "../../mission/contract.ts";
 import { unwired } from "./unwired.ts";
 import type {
@@ -42,7 +43,12 @@ import type {
   IntakeActions,
 } from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
-import { Diagnostic, diagnostic, asError } from "../../kernel/errors.ts";
+import {
+  Diagnostic,
+  diagnostic,
+  asError,
+  OperationError,
+} from "../../kernel/errors.ts";
 import {
   healthy,
   HealthStatus,
@@ -51,6 +57,7 @@ import {
   type Service,
 } from "../../kernel/service.ts";
 import { OperationalLog } from "../../kernel/log.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import { Store } from "../../kernel/store.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 import { GatewayService } from "../../gateway/index.ts";
@@ -63,7 +70,10 @@ import {
 } from "../../gateway/index.ts";
 import { ProjectService, projectMigrations } from "../../project/index.ts";
 import { IntakeService, intakeMigrations } from "../../intake/index.ts";
-import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
+import {
+  INTAKE_SERVICE_NAME,
+  intakeOperations,
+} from "../../intake/contract.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   WorkerService,
@@ -88,7 +98,12 @@ import {
 } from "../../repository/index.ts";
 import { LlmComponent, LLM_PLATFORMS } from "../../llm/index.ts";
 import { StorageComponent, STORAGE_PLATFORMS } from "../../storage/index.ts";
-import { OperationRegistry, StoreName } from "../../kernel/operation.ts";
+import {
+  OperationRegistry,
+  OperationResultType,
+  StoreName,
+  type OperationResult,
+} from "../../kernel/operation.ts";
 import {
   background,
   CancellationContext,
@@ -97,6 +112,23 @@ import {
 } from "../../kernel/context.ts";
 
 export type { RepositoryConnector } from "../../project/contract.ts";
+
+function resultOf<T>(result: OperationResult<T>): T {
+  if (result.type === OperationResultType.Completed) return result.data;
+  if (result.type === OperationResultType.Failure)
+    throw new OperationError(
+      result.status,
+      result.error.error.code,
+      result.error.error.message,
+      result.error.error.details,
+    );
+  assert.equal(result.type, OperationResultType.Indeterminate);
+  throw new OperationError(
+    HttpStatus.InternalServerError,
+    "system.operation.unknown",
+    "Operation failed.",
+  );
+}
 
 export function composeServices(options: {
   config: ServerConfig;
@@ -117,7 +149,6 @@ export function composeServices(options: {
   inventoryOverrides?: Partial<ResourceInventories>;
   standIns?: {
     intakeStorage?: IntakeStorage;
-    intakeCheck?: IntakeCheck;
     intakeActions?: IntakeActions;
     inboundsNaming?: InboundsNamingFn;
   };
@@ -160,6 +191,8 @@ export function composeServices(options: {
     },
   });
   const missionClient = directClient(missionOperations, invocation);
+  const intakeClient = directClient(intakeOperations, invocation);
+  const missionIdentity = mintServiceIdentity(MISSION_SERVICE_NAME);
   const scheduler: SchedulerService = new SchedulerService({
     config: options.config.scheduler,
     store: options.store,
@@ -318,8 +351,14 @@ export function composeServices(options: {
       executionGet: unwired("IntakeStorage.executionGet"),
       delete: unwired("IntakeStorage.delete"),
     },
-    intakeCheck: options.standIns?.intakeCheck ?? {
-      check: unwired("IntakeCheck.check"),
+    intakeCheck: {
+      check: async (context, evidenceId) =>
+        resultOf(
+          await intakeClient["action.check"](
+            { params: {}, query: {}, body: { evidence_id: evidenceId } },
+            { identity: missionIdentity, context },
+          ),
+        ),
     },
     config: options.config.mission,
     health: options.health,
@@ -369,6 +408,14 @@ export function composeServices(options: {
     logger: options.logger,
     health: options.health,
     identity: intakeIdentity,
+    custody: {
+      authorizeOperation: (...args) => custody.authorizeOperation(...args),
+      release: (...args) => custody.release(...args),
+      consume: (...args) => custody.consume(...args),
+      grantFacts,
+    },
+    github,
+    gitWriter,
   });
   const workbench = new WorkbenchService({
     store: options.store,

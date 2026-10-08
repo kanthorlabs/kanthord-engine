@@ -6,3 +6,4 @@ export type {
 export { custodyMigrations } from "./migrations.ts";
 export { CustodyComponent, type Dependencies } from "./service.ts";
 export { executionCredentialStore } from "./client.ts";
+export { grantFacts } from "./facility.ts";

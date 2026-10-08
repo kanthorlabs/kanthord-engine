@@ -105,6 +105,8 @@ engine/
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
 │   │   ├── outbound-read.ts    # Outbound request list and get handlers
 │   │   ├── outbound-write.ts   # Outbound request discard and delete handlers
+│   │   ├── action-check.ts     # Check of a request evidence: authorization, release, and platform fold
+│   │   ├── test-support.ts     # Unused action collaborations for Intake unit tests
 │   │   └── service.ts          # Lifecycle, health probe, and resource inventory
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
 │   │   ├── contract.ts         # Mission schemas, operations, and collaboration types

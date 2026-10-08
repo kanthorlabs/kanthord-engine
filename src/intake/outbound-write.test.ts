@@ -27,6 +27,7 @@ import {
   succeed,
 } from "./outbound-store.ts";
 import { FinalizationKind, type CallAnswer } from "./outbound.ts";
+import { unusedActionDependencies } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREATED_AT = 100;
@@ -54,6 +55,7 @@ function harness(t: TestContext) {
     logger: pino({ enabled: false }),
     health: new HealthRegistry(),
     identity: { kind: IdentityKind.Service, service: INTAKE_SERVICE_NAME },
+    ...unusedActionDependencies(),
   });
   const registry = new OperationRegistry();
   intake.declare(registry);

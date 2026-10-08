@@ -8,6 +8,7 @@ import { HealthStatus } from "../kernel/service.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { INTAKE_SERVICE_NAME } from "./contract.ts";
 import { IntakeService } from "./index.ts";
+import { unusedActionDependencies } from "./test-support.ts";
 
 const STOPPED_CODE = "intake.lifecycle.stopped";
 
@@ -24,6 +25,7 @@ function fixture(t: TestContext, service = INTAKE_SERVICE_NAME) {
     logger: pino({ enabled: false }),
     health,
     identity: identity(service),
+    ...unusedActionDependencies(),
   });
   return { intake, health, store };
 }

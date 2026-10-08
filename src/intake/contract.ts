@@ -67,6 +67,11 @@ export const ResultClass = {
   FinalRefusal: "final_refusal",
   UnknownOutcome: "unknown_outcome",
 } as const;
+export const CheckEndState = {
+  Expected: "expected",
+  Other: "other",
+  None: "none",
+} as const;
 
 export const inboundKindSchema = z.enum(InboundKind);
 export const inboundPlatformSchema = z.enum(InboundPlatform);
@@ -75,6 +80,8 @@ export const inboundEventStateSchema = z.enum(InboundEventState);
 export const outboundRequestStateSchema = z.enum(OutboundRequestState);
 export const outboundOperationSchema = z.enum(OutboundOperation);
 export const resultClassSchema = z.enum(ResultClass);
+export const checkEndStateSchema = z.enum(CheckEndState);
+export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
 export const errorItemSchema = z.strictObject({
   code: z.string().min(1),
@@ -135,6 +142,13 @@ const mutationOperation = {
   ...baseOperation,
   method: HttpMethod.Post,
   mutation: true,
+} as const;
+const serviceOperation = {
+  ...baseOperation,
+  access: AccessPolicy.Service,
+  method: HttpMethod.Post,
+  mutation: false,
+  body: true,
 } as const;
 const readInput = <P extends z.ZodType, Q extends z.ZodType>(
   params: P,
@@ -211,5 +225,21 @@ export const intakeOperations = {
     output: z.strictObject({ count: z.number().int().nonnegative() }),
     description:
       "Delete settled outbound requests by a state with an identity range or by a list of identities.",
+  },
+  "action.check": {
+    ...serviceOperation,
+    id: "intake.action.check",
+    path: "/api/intake/action/check",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({ evidence_id: identitySchema("evidence") }),
+    }),
+    output: z.strictObject({
+      end_state: checkEndStateSchema,
+      landed_commits: z.array(commitSchema),
+    }),
+    description:
+      "Check the platform end state of a request evidence for the Mission Service.",
   },
 } as const;

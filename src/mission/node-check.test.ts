@@ -30,6 +30,7 @@ const SUCCESS_EXIT_CODE = 0;
 const FIRST_RESULT_INDEX = 0;
 const NO_LANDED_COMMITS = 0;
 const SINGLE_FAILURE = 1;
+const SINGLE_CALL = 1;
 const PULL_REQUEST_NUMBER = 1;
 const FIRST_MISSION_VERSION = 1;
 const FIRST_ATTEMPT = 1;
@@ -183,6 +184,25 @@ async function fixture(t: TestContext) {
   assert.ok(request.requirement_key);
   return { ...h, request, check, claim };
 }
+
+test("node check passes the context and the request evidence identity to Intake", async (t) => {
+  const h = await fixture(t);
+  const remote = t.mock.method(
+    h.dependencies.intakeCheck,
+    "check",
+    async () => ({ end_state: CheckEndState.None, landed_commits: [] }),
+  );
+  const answer = await h.check();
+  assert.equal(
+    answer.results[FIRST_RESULT_INDEX]!.resolution,
+    Resolution.Unresolved,
+  );
+  assert.equal(remote.mock.callCount(), SINGLE_CALL);
+  const [context, evidenceId] =
+    remote.mock.calls[FIRST_RESULT_INDEX]!.arguments;
+  assert.equal(context?.err(), null);
+  assert.equal(evidenceId, h.request.id);
+});
 
 test("expected checks write every landed commit and close successful external attempts without changing mission version", async (t) => {
   const h = await fixture(t);

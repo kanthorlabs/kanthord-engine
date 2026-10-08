@@ -20,6 +20,7 @@ import {
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
 import { discard, insertPending } from "./outbound-store.ts";
+import { unusedActionDependencies } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const OTHER_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAW";
@@ -41,6 +42,7 @@ function harness(t: TestContext) {
     logger: pino({ enabled: false }),
     health: new HealthRegistry(),
     identity: { kind: IdentityKind.Service, service: INTAKE_SERVICE_NAME },
+    ...unusedActionDependencies(),
   });
   const registry = new OperationRegistry();
   intake.declare(registry);

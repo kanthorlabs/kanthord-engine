@@ -13,7 +13,6 @@ import { GitHubPlatform, GitHubTargetKind } from "../../repository/github.ts";
 import {
   objectSink,
   sinkStorage,
-  scriptedCheck,
   scriptedActions,
   fakeGitHub,
   FakePullState,
@@ -125,36 +124,6 @@ test("the Intake action fake reads failed keys back and never redispatches a ret
   assert.deepEqual(await perform(), address);
   assert.equal(fake.performCalls.length, ONE_CALL);
   assert.equal(fake.readBackCalls.length, TWO_CALLS);
-});
-
-test("scripted Intake check retains calls and isolates returned arrays", async () => {
-  const fake = scriptedCheck({
-    end_state: CheckEndState.None,
-    landed_commits: [],
-  });
-  const request = {
-    frozen_action: {
-      key: "repo.pull_request",
-      binding_id: "binding",
-      action: "pull_request",
-      expected_end_state: "pull_request_merged",
-      follows: null,
-      configuration: { base_branch: "main" },
-    },
-    address: {
-      kind: "pull_request",
-      resource_identity: "repository:github:owner/repo",
-      number: 42,
-    },
-  } as const;
-  const answer = await fake.check(background, request);
-  answer.landed_commits.push(SHA256);
-  assert.deepEqual(await fake.check(background, request), {
-    end_state: CheckEndState.None,
-    landed_commits: [],
-  });
-  assert.equal(fake.calls.length, TWO_CALLS);
-  assert.equal(fake.calls[0]?.[1], request);
 });
 
 const GITHUB_TOKEN = "test-secret";
@@ -287,6 +256,23 @@ test("fake GitHub closes a pull request and scripts the failures", async (t) => 
   assert.ok(
     (await platform.getPullRequest(gitHubCall(), target, { number: 1 })).ok,
   );
+});
+
+test("fake GitHub opens a pull request without a recorded call", async (t) => {
+  const gitHub = await fakeGitHub(t);
+  const platform = new GitHubPlatform({ baseUrl: gitHub.endpoint });
+  const number = gitHub.open({ owner: "owner", repo: "repo", ...branches });
+  assert.equal(number, ONE_PULL);
+  assert.equal(gitHub.calls.length, NO_CALLS);
+  const opened = await platform.getPullRequest(gitHubCall(), target, {
+    number,
+  });
+  assert.ok(opened.ok);
+  assert.equal(
+    platform.foldPullRequest(opened.value, "pull_request_merged").end_state,
+    CheckEndState.None,
+  );
+  assert.equal(gitHub.calls.length, ONE_CALL);
 });
 
 test("fake GitHub holds every answer until the release", async (t) => {

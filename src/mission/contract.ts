@@ -164,7 +164,7 @@ export const checkEndStateSchema = z.enum(CheckEndState);
 export interface IntakeCheck {
   check(
     context: Context,
-    request: { frozen_action: FrozenAction; address: PlatformAddress },
+    evidenceId: string,
   ): Promise<{
     end_state: z.infer<typeof checkEndStateSchema>;
     landed_commits: string[];

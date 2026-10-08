@@ -14,7 +14,6 @@ const UNWIRED_SEAMS = [
   "IntakeStorage.get",
   "IntakeStorage.executionGet",
   "IntakeStorage.delete",
-  "IntakeCheck.check",
   "IntakeActions.perform",
   "IntakeActions.read",
 ];

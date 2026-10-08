@@ -33,7 +33,11 @@ import {
   serializeOpenAPIFile,
 } from "../../gateway/local.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { AccessPolicy, OperationRegistry } from "../../kernel/operation.ts";
+import {
+  AccessPolicy,
+  hasHttpRoute,
+  OperationRegistry,
+} from "../../kernel/operation.ts";
 import { ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
@@ -683,8 +687,12 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.outbound.request.get", AccessPolicy.Human],
   ["intake.outbound.request.discard", AccessPolicy.Human],
   ["intake.outbound.request.delete", AccessPolicy.Human],
+  ["intake.action.check", AccessPolicy.Service],
 ];
-const OPERATION_COUNT = 151;
+const OPERATION_COUNT = 152;
+const routedOperationIds = new Set<string>(
+  apiOperations.filter(hasHttpRoute).map(({ id }) => id),
+);
 
 test("the operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();
@@ -702,7 +710,10 @@ test("the operation inventory agrees with contracts, OpenAPI and live registry",
       )
       .map((item) => [item.operationId, item["x-access-policy"]]),
   );
-  assert.deepEqual(published.sort(), expected);
+  assert.deepEqual(
+    published.sort(),
+    expected.filter(([id]) => routedOperationIds.has(id)),
+  );
   const registry = new OperationRegistry();
   await gatewayFixture(t, { registry });
   assert.deepEqual(
@@ -984,7 +995,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   assert.equal(new Set(emittedIds).size, emittedIds.length);
   assert.deepEqual(
     [...new Set(emittedIds)].sort(),
-    [...new Set(apiOperations.map(({ id }) => id))].sort(),
+    [...routedOperationIds].sort(),
   );
   assert.equal(gatewayOperations.liveness.path, LIVENESS_PATH);
   assert.equal(gatewayOperations.healthcheck.path, HEALTHCHECK_PATH);

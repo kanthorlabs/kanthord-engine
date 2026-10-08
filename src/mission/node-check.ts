@@ -220,10 +220,7 @@ export async function checkNode(
         authorizeRequest(tx, dependencies, item.request.id),
       );
       answer = checkAnswerSchema.parse(
-        await dependencies.intakeCheck.check(caller.context, {
-          frozen_action: item.frozen_action,
-          address: item.address,
-        }),
+        await dependencies.intakeCheck.check(caller.context, item.request.id),
       );
     } catch (error) {
       failures.push({

@@ -21,7 +21,7 @@ import {
   objectSink,
   FAKE_SSH_IDENTITY,
   sinkStorage,
-  scriptedCheck,
+  fakeGitHub,
   scriptedActions,
   inProcessWorker,
   bareRepository,
@@ -73,6 +73,7 @@ const REPORT = "A and C are complete.";
 const REQUIREMENT = "gated.pull_request";
 const UNRESOLVED = "unresolved";
 const EXPECTED_END = "expected-end";
+const LANDED_COMMIT = "c".repeat(40);
 const TOOL_RESULT = "toolResult";
 const UPLOAD = "evidence-upload";
 const DEFAULTS = {
@@ -115,18 +116,15 @@ async function waitForNode(cli: CLI, nodeId: string, state: string) {
 async function setupInternal(t: TestContext) {
   const sink = await objectSink(t);
   const actions = scriptedActions();
-  const check = scriptedCheck({
-    end_state: "expected",
-    landed_commits: ["c".repeat(40)],
-  });
+  const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
+    github: { baseUrl: gitHub.endpoint },
     standIns: {
       intakeStorage: sinkStorage(sink),
-      intakeCheck: check,
       intakeActions: actions.seam,
     },
   });
@@ -298,7 +296,7 @@ async function setupInternal(t: TestContext) {
     reviewAuth,
     sink,
     actions,
-    check,
+    gitHub,
   };
 }
 
@@ -337,12 +335,17 @@ test(
       [REPOSITORY_ADDRESS]: repo.bare,
       [GATED_ADDRESS]: gatedRepo.bare,
     });
-    const pr42 = {
+    const pr = {
       kind: "pull_request" as const,
       resource_identity: f.bindings.gated!.resource_identity,
-      number: 42,
+      number: f.gitHub.open({
+        owner: "owner",
+        repo: "gated",
+        head: `kanthord/${f.gated}`,
+        base: "main",
+      }),
     };
-    f.actions.performAnswers.push(pr42);
+    f.actions.performAnswers.push(pr);
     const generalProvider = scriptedProvider([
       tool("bash", { command: "printf hello > hello.txt" }),
       tool(UPLOAD, { path: FILE_NAME }),
@@ -517,7 +520,7 @@ test(
         )!;
         const asset = request.assets[0]!;
         assert.ok(asset.kind === AssetKind.Platform);
-        assert.deepEqual(asset.address, pr42);
+        assert.deepEqual(asset.address, pr);
         const actions = await f.cli.read<Page<{ resolution: string }>>([
           "mission",
           "external-action",
@@ -540,6 +543,7 @@ test(
     await t.test(
       "EI10.4 on-demand Intake check closes the external request",
       async () => {
+        f.gitHub.merge(pr.number, LANDED_COMMIT);
         const mission = await f.cli.read<{ version: number }>([
           "mission",
           "get",
@@ -562,7 +566,20 @@ test(
           ClosingEvent.ExternalSuccess,
         );
         outcomeC = outcomes.items[0]!.id;
-        assert.equal(f.check.calls.length, SINGLE_ITEM);
+        assert.deepEqual(
+          f.gitHub.calls.map(({ method, path, token }) => ({
+            method,
+            path,
+            token,
+          })),
+          [
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}`,
+              token: GITHUB_KEY,
+            },
+          ],
+        );
       },
     );
     await t.test(

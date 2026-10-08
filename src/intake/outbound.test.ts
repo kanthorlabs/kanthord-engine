@@ -39,6 +39,7 @@ import {
   type OutboundRow,
 } from "./outbound-store.ts";
 import { discardOutbound } from "./outbound-write.ts";
+import { unusedActionDependencies } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const REQUEST_KEY = "request-key-1";
@@ -305,6 +306,7 @@ test("A restart after the insert calls nothing, and a repeat with no match answe
     logger,
     health: new HealthRegistry(),
     identity: { kind: IdentityKind.Service, service: INTAKE_SERVICE_NAME },
+    ...unusedActionDependencies(),
   });
   const crashed = before.runOutbound(
     callerOf(first),
@@ -323,6 +325,7 @@ test("A restart after the insert calls nothing, and a repeat with no match answe
     logger,
     health: new HealthRegistry(),
     identity: { kind: IdentityKind.Service, service: INTAKE_SERVICE_NAME },
+    ...unusedActionDependencies(),
   });
   assert.equal(await after.start(), null);
   t.after(() => after.stop());

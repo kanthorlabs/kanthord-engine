@@ -32,7 +32,6 @@ import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import {
   MISSION_SERVICE_NAME,
   type IntakeStorage,
-  type IntakeCheck,
 } from "../../mission/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { agentMigrations } from "../../agent/index.ts";
@@ -287,21 +286,6 @@ export function sinkStorage(sink: ObjectSink): IntakeStorage {
       deletedRequests.add(requestKey);
     },
   };
-}
-
-export function scriptedCheck(
-  answer: Awaited<ReturnType<IntakeCheck["check"]>>,
-) {
-  const calls: Parameters<IntakeCheck["check"]>[] = [];
-  return {
-    calls,
-    async check(...args: Parameters<IntakeCheck["check"]>) {
-      throwIfCancelled(args[0]);
-      assert.ok(args[1].frozen_action.key);
-      calls.push(args);
-      return structuredClone(answer);
-    },
-  } satisfies IntakeCheck & { calls: typeof calls };
 }
 
 export function scriptedActions() {
@@ -783,7 +767,18 @@ function createPull(
   repo: string,
   body: unknown,
 ): FakeGitHubAnswer {
-  const input = createPullSchema.parse(body);
+  const pull = insertPull(state, owner, repo, createPullSchema.parse(body));
+  return { status: GITHUB_CREATED_STATUS, body: pullBody(pull) };
+}
+
+function insertPull(
+  state: FakeGitHubState,
+  owner: string,
+  repo: string,
+  input: { head: string; base: string; title: string },
+): FakePullRequest {
+  assert.ok(owner.length >= GITHUB_MIN_SEGMENT_LENGTH);
+  assert.ok(repo.length >= GITHUB_MIN_SEGMENT_LENGTH);
   const pull: FakePullRequest = {
     owner,
     repo,
@@ -797,7 +792,7 @@ function createPull(
   };
   state.pulls.push(pull);
   assert.equal(state.pulls.at(-1), pull);
-  return { status: GITHUB_CREATED_STATUS, body: pullBody(pull) };
+  return pull;
 }
 
 function listPulls(
@@ -935,6 +930,18 @@ export async function fakeGitHub(t: TestContext) {
     endpoint: `http://127.0.0.1:${address.port}`,
     pulls: state.pulls as readonly FakePullRequest[],
     calls: state.calls as readonly FakeGitHubCall[],
+    open(pull: {
+      owner: string;
+      repo: string;
+      head: string;
+      base: string;
+    }): number {
+      return insertPull(state, pull.owner, pull.repo, {
+        head: pull.head,
+        base: pull.base,
+        title: pull.head,
+      }).number;
+    },
     merge(number: number, sha: string): void {
       assert.match(sha, GITHUB_MERGE_SHA);
       const pull = changePull(state, number);

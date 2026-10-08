@@ -15,7 +15,7 @@ import {
   ActorService,
   AssessmentResult,
   AssetKind,
-  CheckEndState,
+  PlatformAddressKind,
   ClosingEvent,
   NodeState,
   Resolution,
@@ -38,7 +38,7 @@ import {
   gatewayFixture,
   objectSink,
   sinkStorage,
-  scriptedCheck,
+  fakeGitHub,
 } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
@@ -102,18 +102,14 @@ function completed<T>(result: OperationResult<T>): T {
 
 async function setup(t: TestContext) {
   const sink = await objectSink(t);
+  const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
-    standIns: {
-      intakeStorage: sinkStorage(sink),
-      intakeCheck: scriptedCheck({
-        end_state: CheckEndState.Expected,
-        landed_commits: [LANDED],
-      }),
-    },
+    github: { baseUrl: gitHub.endpoint },
+    standIns: { intakeStorage: sinkStorage(sink) },
   });
   const directory = temporary(t);
   const H = {
@@ -298,6 +294,7 @@ async function setup(t: TestContext) {
   assert.ok(binding("repo").id);
   return {
     sink,
+    gitHub,
     read,
     write,
     refuses,
@@ -713,14 +710,20 @@ test(
       assert.equal(answer.outcome, null);
     });
     await t.test("E04.23 action request and duplicate refusal", async () => {
+      const number = h.gitHub.open({
+        owner: "owner",
+        repo: "gated",
+        head: `kanthord/${h.objectiveB}`,
+        base: "main",
+      });
       const body = {
         ...ctx(e4),
         requirement_key: "gated.pull_request",
-        subject: "pull request 42",
+        subject: `pull request ${number}`,
         address: {
           kind: "pull_request" as const,
           resource_identity: h.binding("gated").resource_identity,
-          number: 42,
+          number,
         },
       };
       request = completed(
@@ -801,6 +804,10 @@ test(
       );
     });
     await t.test("E04.26 observed expected end closes B", async () => {
+      const address = request.assets[FIRST_ITEM_INDEX]!;
+      assert.ok(address.kind === AssetKind.Platform);
+      assert.ok(address.address.kind === PlatformAddressKind.PullRequest);
+      h.gitHub.merge(address.address.number, LANDED);
       const answer = await h.write<{
         results: { resolution: string }[];
         failures: unknown[];
