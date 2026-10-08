@@ -27,6 +27,7 @@ import {
   type IntakeCollaborations,
 } from "./contract.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
+import { getInbound, listInbound } from "./inbound-read.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
@@ -93,6 +94,14 @@ export class IntakeService implements Service, IntakeCollaborations {
     );
     registry.register(intakeOperations["inbound.create"], ({ body }, caller) =>
       createInbound(this.dependencies, caller, body),
+    );
+    registry.register(intakeOperations["inbound.list"], ({ query }, caller) =>
+      caller.commit((tx) => listInbound(tx, query)),
+    );
+    registry.register(intakeOperations["inbound.get"], ({ params }, caller) =>
+      caller.commit((tx) =>
+        getInbound(tx, this.dependencies.masterKey, params.inbound_id),
+      ),
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),

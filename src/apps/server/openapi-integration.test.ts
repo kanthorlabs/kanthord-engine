@@ -25,7 +25,10 @@ import {
   missionSchema,
 } from "../../mission/contract.ts";
 import { workbenchOperations } from "../../workbench/contract.ts";
-import { intakeOperations } from "../../intake/contract.ts";
+import {
+  intakeOperations,
+  webhookInboundSchema,
+} from "../../intake/contract.ts";
 import {
   openapiPath,
   emitOpenAPI,
@@ -49,6 +52,7 @@ import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
 const INBOUND_CREATED = 201;
 const INBOUND_ONE_ROW = 1;
+const INBOUND_NO_LOGS = 0;
 const INBOUND_VALIDATION_FAILED = "gateway.request.validation_failed";
 const INBOUND_UNAUTHORIZED = "gateway.authentication.unauthorized";
 
@@ -697,6 +701,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.outbound.request.discard", AccessPolicy.Human],
   ["intake.outbound.request.delete", AccessPolicy.Human],
   ["intake.inbound.create", AccessPolicy.Human],
+  ["intake.inbound.list", AccessPolicy.Human],
+  ["intake.inbound.get", AccessPolicy.Human],
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
   ["intake.action.read", AccessPolicy.Client],
@@ -706,7 +712,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 160;
+const OPERATION_COUNT = 162;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1602,4 +1608,84 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
   assert.equal(machine.status, HttpStatus.Unauthorized);
   assert.equal(machine.error.error.code, INBOUND_UNAUTHORIZED);
   assert.equal(inboundCount(), INBOUND_ONE_ROW);
+});
+
+test("published inbound reads are human unary routes", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const list = resolved.paths?.["/api/intake/inbound"]?.get as
+    ResolvedOperation | undefined;
+  const get = resolved.paths?.["/api/intake/inbound/{inbound_id}"]?.get as
+    ResolvedOperation | undefined;
+  assert.equal(list?.operationId, intakeOperations["inbound.list"].id);
+  assert.equal(list?.["x-access-policy"], AccessPolicy.Human);
+  assert.equal(get?.operationId, intakeOperations["inbound.get"].id);
+  assert.equal(get?.["x-access-policy"], AccessPolicy.Human);
+});
+
+test("inbound get answers the webhook secret over HTTP, refuses another prefix and logs no secret", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const authorization = `Bearer ${fixture.token}`;
+  const project = projectOperations.create.output.parse(
+    await (
+      await fixture.request(projectOperations.create.path, {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+          "Idempotency-Key": ulid(),
+        },
+        body: JSON.stringify({ name: "inbound-reads" }),
+      })
+    ).json(),
+  );
+  const created = await fixture.request(
+    intakeOperations["inbound.create"].path,
+    {
+      method: "POST",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json",
+        "Idempotency-Key": ulid(),
+      },
+      body: JSON.stringify({
+        project_id: project.id,
+        kind: "webhook",
+        platform: "github",
+        consumer: "mission.delivery.admit",
+        configuration: { resource: "owner/repo" },
+      }),
+    },
+  );
+  assert.equal(created.status, INBOUND_CREATED);
+  const inbound = intakeOperations["inbound.create"].output.parse(
+    await created.json(),
+  );
+  const read = (path: string) =>
+    fixture.request(path, { headers: { Authorization: authorization } });
+  const got = await read(`/api/intake/inbound/${inbound.id}`);
+  assert.equal(got.status, HttpStatus.OK);
+  const answer = webhookInboundSchema.parse(await got.json());
+  assert.equal(answer.address, `/hooks/${inbound.id}`);
+  const listed = await read(
+    `/api/intake/inbound?project_id=${project.id}&kind=webhook`,
+  );
+  assert.equal(listed.status, HttpStatus.OK);
+  const page = intakeOperations["inbound.list"].output.parse(
+    await listed.json(),
+  );
+  assert.deepEqual(
+    page.items.map((item) => item.id),
+    [inbound.id],
+  );
+  const other = await read(
+    `/api/intake/inbound/${createIdentity("outbound_request")}`,
+  );
+  assert.equal(other.status, HttpStatus.BadRequest);
+  assert.equal(
+    errorSchema.parse(await other.json()).error.code,
+    INBOUND_VALIDATION_FAILED,
+  );
+  assert.ok(fixture.logs.length > INBOUND_NO_LOGS);
+  for (const line of fixture.logs)
+    assert.equal(line.includes(answer.secret), false);
 });

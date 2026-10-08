@@ -34,6 +34,10 @@ export const ACTION_READ_LIMIT_MIN = 1;
 export const ACTION_READ_LIMIT_MAX = 100;
 export const OBJECT_MAX_BYTES = 5 * 1024 ** 3;
 export const INBOUND_CREATED_STATUS = 201;
+export const INBOUND_LIST_LIMIT_DEFAULT = 100;
+export const INBOUND_LIST_LIMIT_MIN = 1;
+export const INBOUND_LIST_LIMIT_MAX = 1000;
+export const WEBHOOK_ADDRESS_PREFIX = "/hooks/";
 
 export const IntakeErrorCode = {
   CursorInvalid: "system.pagination.cursor_invalid",
@@ -47,6 +51,7 @@ export const IntakeErrorCode = {
   StorageObjectMismatch: "intake.storage.object_mismatch",
   InboundProjectNotFound: "intake.inbound.project_not_found",
   InboundCredentialInvalid: "intake.inbound.credential_invalid",
+  InboundNotFound: "intake.inbound.not_found",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -403,6 +408,46 @@ export const intakeOperations = {
     output: inboundSchema,
     description:
       "Create an inbound of a project; a webhook inbound calls no platform.",
+  },
+  "inbound.list": {
+    ...readOperation,
+    id: "intake.inbound.list",
+    method: HttpMethod.Get,
+    path: "/api/intake/inbound",
+    input: readInput(
+      z.strictObject({}),
+      z.strictObject({
+        project_id: identitySchema("project").optional(),
+        kind: inboundKindSchema.optional(),
+        platform: inboundPlatformSchema.optional(),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(INBOUND_LIST_LIMIT_MIN)
+          .max(INBOUND_LIST_LIMIT_MAX)
+          .default(INBOUND_LIST_LIMIT_DEFAULT)
+          .optional(),
+        cursor: z.string().optional(),
+      }),
+    ),
+    output: z.strictObject({
+      items: z.array(inboundSchema),
+      next_cursor: z.string().nullable(),
+    }),
+    description: "List inbounds, newest first.",
+  },
+  "inbound.get": {
+    ...readOperation,
+    id: "intake.inbound.get",
+    method: HttpMethod.Get,
+    path: "/api/intake/inbound/:inbound_id",
+    input: readInput(
+      z.strictObject({ inbound_id: identitySchema(INBOUND_ID_PREFIX) }),
+      z.strictObject({}),
+    ),
+    output: z.union([webhookInboundSchema, inboundSchema]),
+    description:
+      "Get one inbound; a webhook inbound adds its address and its verification secret.",
   },
   "action.check": {
     ...serviceOperation,

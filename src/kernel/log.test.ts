@@ -38,6 +38,21 @@ test("every enumerated pino redaction path hides the secret", () => {
   }
 });
 
+test("the redaction paths hide the verification secret of a webhook inbound", () => {
+  assert.ok(redactionPaths.includes("secret"));
+  let output = "";
+  pino(
+    { redact: { paths: redactionPaths, censor: "[Redacted]" } },
+    {
+      write: (line) => {
+        output += line;
+      },
+    },
+  ).info({ address: "/hooks/inbound", secret: "secret-marker" });
+  assert.doesNotMatch(output, /secret-marker/);
+  assert.match(output, /\/hooks\/inbound/);
+});
+
 test("logger keeps the validated descriptor and reopens a rotated file, rejecting an unsafe replacement", async (t) => {
   const directory = temporary(t);
   const path = join(directory, "kanthord.log");

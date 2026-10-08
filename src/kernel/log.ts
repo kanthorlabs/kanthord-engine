@@ -20,6 +20,7 @@ export const redactionPaths = [
   "token",
   "clientSecret",
   "client_secret",
+  "secret",
   "credential",
   "payload",
   "material",
