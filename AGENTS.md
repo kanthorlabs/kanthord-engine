@@ -83,6 +83,7 @@ engine/
 │   │   ├── index.ts            # Component and platform table exports
 │   │   ├── platforms.ts        # s3 platform validator and metadata schema
 │   │   ├── probe.ts            # S3 HeadBucket probe
+│   │   ├── s3.ts               # S3 implementation: presigned PUT and GET, object metadata read, object delete and result classes
 │   │   └── service.ts          # Storage credential routes over custody records and binding dependents
 │   ├── custody/                # Custody component: credential store, envelope, revisions, record functions, release, and handover
 │   │   ├── contract.ts         # Secret shapes, record schemas, platform set types, and record functions
@@ -99,7 +100,7 @@ engine/
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
 │   ├── intake/                 # Intake Service: inbound events and outbound requests
-│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, and operations
+│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, and operations
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
@@ -109,6 +110,8 @@ engine/
 │   │   ├── action-perform.ts   # Configured action: action table lookup, authorization, platform write, and read-backs
 │   │   ├── action-read.ts      # Read of a request evidence: authorization, release, and platform body
 │   │   ├── address-codec.ts    # Stored form of a platform address in an outbound result
+│   │   ├── storage.ts          # Presigned PUT and GET and the object check: authorization, release and Storage call
+│   │   ├── storage-delete.ts   # Object delete: s3.delete_object, its read-back and its stored status
 │   │   ├── test-support.ts     # Unused action collaborations for Intake unit tests
 │   │   └── service.ts          # Lifecycle, health probe, and resource inventory
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
