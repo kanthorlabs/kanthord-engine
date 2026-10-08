@@ -35,6 +35,7 @@ const INDETERMINATE_CODE = "indeterminate";
 const INDETERMINATE_MESSAGE = "The consumer call answered no result.";
 const DEFECT_CODE = "system.operation.unknown";
 const DEFECT_MESSAGE = "The consumer call failed.";
+const INPUT_DEFECT_MESSAGE = "The handoff input of the event failed to build.";
 
 export interface DispatcherDependencies {
   store: Store;
@@ -151,10 +152,12 @@ export class Dispatcher {
       this.again = true;
       return;
     }
-    this.drainTask = this.drain().finally(() => {
-      this.drainTask = null;
-      if (this.again && !this.halted()) this.wake();
-    });
+    this.drainTask = this.drain()
+      .catch((error: unknown) => this.drainFailed(error))
+      .finally(() => {
+        this.drainTask = null;
+        if (this.again && !this.halted()) this.wake();
+      });
   }
 
   inFlight(id: string): boolean {
@@ -169,6 +172,13 @@ export class Dispatcher {
 
   async join(): Promise<void> {
     while (this.drainTask !== null) await this.drainTask;
+  }
+
+  private drainFailed(error: unknown): void {
+    this.dependencies.logger.error(
+      { reason: diagnostic(error) },
+      "intake: a drain of the event dispatcher failed.",
+    );
   }
 
   private halted(): boolean {
@@ -211,12 +221,30 @@ export class Dispatcher {
     assert.ok(this.running.has(id), "A handoff owns its reservation.");
     const store = this.dependencies.store;
     try {
-      const handoff = store.transaction((tx) => handoffOf(tx, id));
-      const outcome = await this.call(handoff);
+      const outcome = await this.attempt(id);
       store.transaction((tx) => settle(tx, id, outcome));
     } finally {
       this.running.delete(id);
     }
+  }
+
+  private async attempt(id: string): Promise<Outcome> {
+    const { store, logger } = this.dependencies;
+    let handoff: Handoff;
+    try {
+      handoff = store.transaction((tx) => handoffOf(tx, id));
+    } catch (error) {
+      logger.error(
+        { inbound_event_id: id, reason: diagnostic(error) },
+        "intake: the handoff input of an inbound event failed.",
+      );
+      return {
+        succeeded: false,
+        code: DEFECT_CODE,
+        message: INPUT_DEFECT_MESSAGE,
+      };
+    }
+    return this.call(handoff);
   }
 
   private async call(handoff: Handoff): Promise<Outcome> {

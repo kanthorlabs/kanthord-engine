@@ -440,6 +440,52 @@ test("A thrown consumer call writes failed with system.operation.unknown and no 
   assert.equal(h.calls.length, ONE_CALL);
 });
 
+test("A configuration that fails to parse sets failed, and a later event is handed over", async (t) => {
+  const h = harness(t);
+  const broken = addInbound(h.store);
+  h.store.database
+    .prepare("UPDATE intake_inbound SET configuration = ? WHERE id = ?")
+    .run(canonicalJSON({ resource: RESOURCE, extra: SECRET }), broken);
+  const failed = addEvent(h.store, broken, "d-1");
+  const handed = addEvent(h.store, h.inboundId, "d-2");
+  h.answers.push(completed({ disposition: "duplicate", reason: null }));
+  await handOver(h);
+  const record = recordOf(h.store, failed);
+  assert.equal(record.state, InboundEventState.Failed);
+  assert.deepEqual(
+    record.error?.map((item) => item.code),
+    [DEFECT],
+  );
+  assert.ok(!h.lines.join("").includes(SECRET));
+  assert.deepEqual(
+    h.calls.map((call) => call.input.inbound_event_id),
+    [handed],
+  );
+  assert.equal(recordOf(h.store, handed).state, InboundEventState.Succeeded);
+});
+
+test("A store failure during a drain raises no unhandled rejection", async (t) => {
+  const h = harness(t);
+  const rejections: unknown[] = [];
+  const collect = (reason: unknown) => rejections.push(reason);
+  process.on("unhandledRejection", collect);
+  t.after(() => process.off("unhandledRejection", collect));
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  const answer = Promise.withResolvers<OperationResult<unknown>>();
+  h.answers.push(() => answer.promise);
+  h.dispatcher.wake();
+  await tick();
+  h.store.database.exec("DROP TABLE intake_inbound_event");
+  answer.resolve({ type: OperationResultType.Completed, status: OK, data: {} });
+  await h.dispatcher.join();
+  await tick();
+  assert.deepEqual(rejections, []);
+  assert.ok(!h.dispatcher.inFlight(id));
+  assert.ok(
+    h.lines.join("").includes("a drain of the event dispatcher failed"),
+  );
+});
+
 test("A start hands an event over again after a kill of the process during its handoff", async (t) => {
   const path = join(temporary(t), "kanthord.db");
   const seed = new Store(path);
