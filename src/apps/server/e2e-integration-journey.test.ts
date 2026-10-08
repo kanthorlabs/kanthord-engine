@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
+import type { ClientRequest } from "node:http";
 import { test, type TestContext } from "node:test";
 import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
@@ -86,6 +88,9 @@ const PULL_REQUEST_OPERATION = "github.pull_request";
 const MERGE_PUSH_OPERATION = "git.merge_push";
 const DELETE_OBJECT_OPERATION = "s3.delete_object";
 const EVENTS_PATH = /^\/repos\/owner\/merge\/events(\?|$)/;
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+const HTTP_REQUEST_CHANNEL = "http.client.request.start";
+const UNOBSERVED_REQUEST_COUNT = 0;
 const CONTENT = {
   name: "Ship accounts",
   requirement: "Ship accounts",
@@ -108,7 +113,34 @@ function closed(number: number): string {
   });
 }
 
+function outboundHosts(t: TestContext) {
+  const hosts = {
+    remote: [] as string[],
+    fetch: [] as string[],
+    http: [] as string[],
+  };
+  const record = (seen: string[], host: string) => {
+    seen.push(host);
+    if (!LOOPBACK_HOSTS.has(host)) hosts.remote.push(host);
+  };
+  const fetch = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", (...args: Parameters<typeof fetch>) => {
+    const [input] = args;
+    const url = input instanceof Request ? input.url : input;
+    record(hosts.fetch, new URL(url).hostname);
+    return fetch(...args);
+  });
+  const onRequest = (message: unknown) => {
+    const { request } = message as { request: ClientRequest };
+    record(hosts.http, request.host);
+  };
+  subscribe(HTTP_REQUEST_CHANNEL, onRequest);
+  t.after(() => unsubscribe(HTTP_REQUEST_CHANNEL, onRequest));
+  return hosts;
+}
+
 async function setup(t: TestContext) {
+  const hosts = outboundHosts(t);
   const gitHub = await fakeGitHub(t);
   const s3 = await fakeS3(t);
   const gatedBare = await bareRepository(t, GATED);
@@ -226,6 +258,11 @@ async function setup(t: TestContext) {
   session.secrets.push(S);
   const L = await inbound(InboundKind.Poll, MERGE_RESOURCE);
   const V = await inbound(InboundKind.Webhook, GATED_RESOURCE);
+  const secretOfV = (
+    await read<{ secret: string }>(["intake", "inbound", "get", V.id])
+  ).secret;
+  assert.ok(!V.output.includes(secretOfV));
+  session.secrets.push(secretOfV);
   const machine = await cliMachine(session, {
     masterKey: fixture.config.master_key,
     projectId: project.id,
@@ -234,6 +271,7 @@ async function setup(t: TestContext) {
   session.secrets.push(machine.client_secret);
   return {
     t,
+    hosts,
     gitHub,
     s3,
     gatedBare,
@@ -653,6 +691,9 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       const report = await j.health();
       assert.deepEqual(report.services.intake.projects, {});
       for (const line of h.fixture.logs) j.clean(line);
+      assert.ok(h.hosts.fetch.length > UNOBSERVED_REQUEST_COUNT);
+      assert.ok(h.hosts.http.length > UNOBSERVED_REQUEST_COUNT);
+      assert.deepEqual(h.hosts.remote, []);
     },
   );
 });
