@@ -14,6 +14,15 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
+import {
+  AssessmentResult,
+  NodeState,
+  type Evidence,
+} from "../../mission/contract.ts";
+import {
+  WorkPullKind,
+  type ExecutionRecord,
+} from "../../scheduler/contract.ts";
 import { FAKE_SSH_CREDENTIAL_BODY, remoteHead } from "./test-support.ts";
 
 const EMPTY_ARGUMENT_COUNT = 0;
@@ -21,7 +30,9 @@ const COMMAND_TIMEOUT_MS = 10000;
 const SUCCESS_EXIT_CODE = 0;
 const EMPTY_OUTPUT = "";
 const INITIAL_SEQUENCE = 0;
+const FIRST_ATTEMPT = 1;
 const CREDENTIAL_NAME = "github";
+const HARNESS_BINDING = "harness";
 
 export function generateMachineToken(input: {
   env: NodeJS.ProcessEnv;
@@ -223,4 +234,128 @@ export function repositoryBinding(name: string, action: string) {
       credential: CREDENTIAL_NAME,
     },
   };
+}
+
+export type CliMachine = Awaited<ReturnType<typeof cliMachine>>;
+
+export async function cliMachine(
+  session: CliSession,
+  input: { masterKey: string; projectId: string; resourceIdentity: string },
+) {
+  assert.ok(input.masterKey && input.projectId && input.resourceIdentity);
+  const token = generateMachineToken({
+    env: session.H,
+    masterKey: input.masterKey,
+    projectId: input.projectId,
+    bindingName: HARNESS_BINDING,
+    name: "Harness",
+  }).token;
+  session.secrets.push(token);
+  const T = { ...session.H, KANTHORD_TOKEN: token };
+  const { runtime_identity: rid } = await session.read<{
+    runtime_identity: string;
+  }>(["worker", "register"], T);
+  const node = (nodeId: string) =>
+    session.read<{ state: string }>(["mission", "node", "get", nodeId]);
+  const pull = async (nodeId: string, state: string) => {
+    const result = await session.write<{
+      kind: string;
+      execution: ExecutionRecord;
+    }>(
+      ["scheduler", "work", "pull"],
+      { resource_identity: input.resourceIdentity, runtime_identity: rid },
+      T,
+    );
+    assert.equal(result.kind, WorkPullKind.Claimed);
+    assert.equal(result.execution.node_id, nodeId);
+    assert.equal(result.execution.attempt, FIRST_ATTEMPT);
+    assert.equal((await node(nodeId)).state, state);
+    return result.execution;
+  };
+  const release = (executionId: string) =>
+    session.write<{ ended_at: number }>(
+      ["scheduler", "execution", "release", executionId],
+      { further_work: false },
+      T,
+    );
+  return { token, T, node, pull, release };
+}
+
+export function executionContext(execution: ExecutionRecord) {
+  assert.ok(execution.execution_id);
+  assert.ok(execution.pinned_revision);
+  return {
+    execution_id: execution.execution_id,
+    attempt: FIRST_ATTEMPT,
+    node_revision: execution.pinned_revision,
+  };
+}
+
+export function repositorySnapshot(bindingId: string, commit: string) {
+  assert.ok(bindingId);
+  assert.match(commit, /^[a-f0-9]{40}$/);
+  return { kind: "repository", binding_id: bindingId, commit };
+}
+
+function verificationRun(bindingId: string, commit: string) {
+  assert.ok(bindingId && commit);
+  return {
+    subject: "verification run",
+    assets: [
+      {
+        kind: "produced",
+        content: { media_type: "text/plain", encoding: "base64", data: "b2s=" },
+      },
+    ],
+    verification: {
+      tested_input: repositorySnapshot(bindingId, commit),
+      results: [
+        {
+          command: "true",
+          exit_code: SUCCESS_EXIT_CODE,
+          signal: null,
+          timed_out: false,
+        },
+      ],
+    },
+  };
+}
+
+export async function passingEvaluation(
+  session: CliSession,
+  machine: CliMachine,
+  input: { nodeId: string; bindingId: string; commit: string },
+): Promise<ExecutionRecord> {
+  const { nodeId, bindingId, commit } = input;
+  assert.ok(nodeId && bindingId && commit);
+  const submit = (x: ExecutionRecord, body: object) =>
+    session.write<{ evidence: Evidence }>(
+      ["mission", "evidence", "submit", nodeId],
+      { ...executionContext(x), ...body },
+      machine.T,
+    );
+  const x1 = await machine.pull(nodeId, NodeState.Executing);
+  const w1 = await submit(x1, {
+    subject: "head commit",
+    assets: [
+      { kind: "repository", address: repositorySnapshot(bindingId, commit) },
+    ],
+  });
+  await machine.release(x1.execution_id);
+  const x2 = await machine.pull(nodeId, NodeState.Evaluating);
+  const r1 = await submit(x2, verificationRun(bindingId, commit));
+  const assessment = await session.write<{ assessment: { result: string } }>(
+    ["mission", "assessment", "submit", nodeId],
+    {
+      ...executionContext(x2),
+      evidence_ids: [r1.evidence.id, w1.evidence.id],
+      child_outcome_ids: [],
+      result: "success",
+      rationale: "verified",
+      tested_input: repositorySnapshot(bindingId, commit),
+    },
+    machine.T,
+  );
+  assert.equal(assessment.assessment.result, AssessmentResult.Success);
+  return x2;
 }

@@ -8,17 +8,13 @@ import { OutboundRequestState } from "../../intake/contract.ts";
 import {
   ActorKind,
   ActorService,
-  AssessmentResult,
   AssetKind,
   NodeState,
   Resolution,
   type Evidence,
   type Revision,
 } from "../../mission/contract.ts";
-import {
-  WorkPullKind,
-  type ExecutionRecord,
-} from "../../scheduler/contract.ts";
+import { type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   workerOperations,
   ActionResultKind,
@@ -33,15 +29,15 @@ import {
   remoteHead,
 } from "./test-support.ts";
 import {
+  cliMachine,
   cliSession,
   completed,
   createCredentials,
-  generateMachineToken,
+  passingEvaluation,
   pushNodeBranch,
   repositoryBinding,
 } from "./cli-support.ts";
 
-const SUCCESSFUL_EXIT = 0;
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
 const SINGLE_INSTANCE = 1;
@@ -96,7 +92,7 @@ async function setup(t: TestContext) {
   const creates = () =>
     gitHub.calls.filter((call) => call.method === HttpMethod.Post).length;
   const session = cliSession(t, fixture.endpoint, fixture.token, SECRET);
-  const { H, secrets, read, write } = session;
+  const { read, write } = session;
   await createCredentials(session, SECRET);
   const project = await read<{ id: string }>([
     "project",
@@ -153,35 +149,12 @@ async function setup(t: TestContext) {
   const I = await create("initiative-1.md", "initiative", []);
   const P = await create("objective-p.md", "objective", [GATED], I);
   const p = await pushNodeBranch(t, gatedBare.bare, P, "objective p\n");
-  const token = generateMachineToken({
-    env: H,
+  const machine = await cliMachine(session, {
     masterKey: fixture.config.master_key,
     projectId: project.id,
-    bindingName: "harness",
-    name: "Harness",
-  }).token;
-  secrets.push(token);
-  const T = { ...H, KANTHORD_TOKEN: token };
-  const { runtime_identity: rid } = await read<{ runtime_identity: string }>(
-    ["worker", "register"],
-    T,
-  );
-  const harness = binding("harness");
-  const node = (nodeId: string) =>
-    read<{ state: string }>(["mission", "node", "get", nodeId]);
-  const pull = async (nodeId: string, state: string) => {
-    const result = await write<{ kind: string; execution: ExecutionRecord }>(
-      ["scheduler", "work", "pull"],
-      { resource_identity: harness.resource_identity, runtime_identity: rid },
-      T,
-    );
-    assert.equal(result.kind, WorkPullKind.Claimed);
-    assert.equal(result.execution.node_id, nodeId);
-    assert.equal(result.execution.attempt, FIRST_ATTEMPT);
-    assert.equal((await node(nodeId)).state, state);
-    return result.execution;
-  };
-  const client = httpClient(workerOperations, fixture.endpoint, token);
+    resourceIdentity: binding("harness").resource_identity,
+  });
+  const client = httpClient(workerOperations, fixture.endpoint, machine.token);
   const request = async (execution: ExecutionRecord) =>
     completed(
       await client["action.request"](
@@ -193,94 +166,8 @@ async function setup(t: TestContext) {
         { idempotencyKey: ulid() },
       ),
     );
-  const ctx = (execution: ExecutionRecord) => ({
-    execution_id: execution.execution_id,
-    attempt: FIRST_ATTEMPT,
-    node_revision: execution.pinned_revision,
-  });
-  const snapshot = (bindingId: string, commit: string) => ({
-    kind: "repository",
-    binding_id: bindingId,
-    commit,
-  });
-  const work = (x: ExecutionRecord, bindingId: string, commit: string) =>
-    write<{ evidence: Evidence }>(
-      ["mission", "evidence", "submit", x.node_id],
-      {
-        ...ctx(x),
-        subject: "head commit",
-        assets: [{ kind: "repository", address: snapshot(bindingId, commit) }],
-      },
-      T,
-    );
-  const run = (x: ExecutionRecord, bindingId: string, commit: string) =>
-    write<{ evidence: Evidence }>(
-      ["mission", "evidence", "submit", x.node_id],
-      {
-        ...ctx(x),
-        subject: "verification run",
-        assets: [
-          {
-            kind: "produced",
-            content: {
-              media_type: "text/plain",
-              encoding: "base64",
-              data: "b2s=",
-            },
-          },
-        ],
-        verification: {
-          tested_input: snapshot(bindingId, commit),
-          results: [
-            {
-              command: "true",
-              exit_code: SUCCESSFUL_EXIT,
-              signal: null,
-              timed_out: false,
-            },
-          ],
-        },
-      },
-      T,
-    );
-  const pass = (
-    x: ExecutionRecord,
-    bindingId: string,
-    commit: string,
-    evidenceIds: string[],
-  ) =>
-    write<{ assessment: { result: string } }>(
-      ["mission", "assessment", "submit", x.node_id],
-      {
-        ...ctx(x),
-        evidence_ids: evidenceIds,
-        child_outcome_ids: [],
-        result: "success",
-        rationale: "verified",
-        tested_input: snapshot(bindingId, commit),
-      },
-      T,
-    );
-  const release = (executionId: string) =>
-    write<{ ended_at: number }>(
-      ["scheduler", "execution", "release", executionId],
-      { further_work: false },
-      T,
-    );
-  const passingEvaluation = async (
-    nodeId: string,
-    bindingId: string,
-    commit: string,
-  ) => {
-    const x1 = await pull(nodeId, NodeState.Executing);
-    const w1 = (await work(x1, bindingId, commit)).evidence;
-    await release(x1.execution_id);
-    const x2 = await pull(nodeId, NodeState.Evaluating);
-    const r1 = (await run(x2, bindingId, commit)).evidence;
-    const assessment = await pass(x2, bindingId, commit, [r1.id, w1.id]);
-    assert.equal(assessment.assessment.result, AssessmentResult.Success);
-    return x2;
-  };
+  const evaluate = (nodeId: string, bindingId: string, commit: string) =>
+    passingEvaluation(session, machine, { nodeId, bindingId, commit });
   const check = async (nodeId: string) =>
     write<Check>(["mission", "node", "check", nodeId], {
       expected_mission_version: await missionVersion(),
@@ -306,10 +193,10 @@ async function setup(t: TestContext) {
     merge: binding(MERGE),
     read,
     create,
-    node,
+    node: machine.node,
     request,
-    release,
-    passingEvaluation,
+    release: machine.release,
+    passingEvaluation: evaluate,
     check,
     outbound,
   };
