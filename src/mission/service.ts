@@ -54,6 +54,7 @@ import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
 import { checkNode } from "./node-check.ts";
+import { admitDelivery } from "./delivery-admit.ts";
 import { deleteEvidenceAsset, removeEvidence } from "./evidence-delete.ts";
 import {
   executionRevision,
@@ -275,6 +276,9 @@ export class MissionService
           params.node_id,
           body.expected_mission_version,
         ),
+    );
+    registry.register(missionOperations["delivery.admit"], ({ body }, caller) =>
+      admitDelivery(this.dependencies, caller, body),
     );
     registry.register(
       missionOperations["assessment.submit"],

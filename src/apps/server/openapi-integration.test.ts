@@ -664,6 +664,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.node.override", AccessPolicy.Human],
   ["mission.node.discard", AccessPolicy.Human],
   ["mission.node.check", AccessPolicy.Human],
+  ["mission.delivery.admit", AccessPolicy.Service],
   ["mission.attempt.list", AccessPolicy.Human],
   ["mission.attempt.get", AccessPolicy.Human],
   ["mission.evidence.list", AccessPolicy.Human],
@@ -718,7 +719,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 166;
+const OPERATION_COUNT = 167;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1769,4 +1770,32 @@ test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
       INBOUND_NOT_FOUND,
     );
   }
+});
+
+test("delivery admission has no HTTP route and no OpenAPI operation", async (t) => {
+  const operation = missionOperations["delivery.admit"];
+  assert.equal(routedOperationIds.has(operation.id), false);
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
+    Object.values(path ?? {})
+      .filter((item) => isObject(item) && "operationId" in item)
+      .map((item) => (item as ResolvedOperation).operationId),
+  );
+  assert.equal(published.includes(operation.id), false);
+  assert.equal(
+    Object.keys(resolved.paths ?? {}).includes(operation.path),
+    false,
+  );
+  const fixture = await gatewayFixture(t);
+  const response = await fixture.request(operation.path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${fixture.token}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": ulid(),
+    },
+    body: JSON.stringify({}),
+  });
+  assert.equal(response.status, HttpStatus.NotFound);
+  await response.body?.cancel();
 });

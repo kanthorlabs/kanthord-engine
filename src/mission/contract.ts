@@ -239,6 +239,7 @@ export const MissionErrorCode = {
   RequestAddressMismatch: "mission.request.address_mismatch",
   ExecutionRevisionAbovePin: "mission.execution.revision_above_pin",
   ClaimLive: "mission.node.claim_live",
+  DeliveryMatchChanged: "mission.delivery.match_changed",
   MissionNotFound: "mission.mission.not_found",
   NodeNotFound: "mission.node.not_found",
   VersionConflict: "mission.version.conflict",
@@ -1432,6 +1433,21 @@ export const missionOperations = {
     }),
     output: nodeCheckResultSchema,
     description: "Check unresolved external requests on demand.",
+  },
+  "delivery.admit": {
+    ...writeOperation,
+    access: AccessPolicy.Service,
+    id: "mission.delivery.admit",
+    method: HttpMethod.Post,
+    path: "/api/mission/delivery/admit",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: deliveryAdmitSchema,
+    }),
+    output: admissionAnswerSchema,
+    description:
+      "Admit an inbound platform event as the end state of one request evidence for the Intake Service.",
   },
   "assessment.submit": {
     ...writeOperation,

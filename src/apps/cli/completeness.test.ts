@@ -47,6 +47,7 @@ const API_ONLY_OPERATIONS = [
   "worker.execution.setup.get",
   "mission.evidence.asset.complete",
   "mission.evidence.request",
+  "mission.delivery.admit",
 ];
 const TOP_LEVEL_NAMES = new Set([
   "config",
@@ -71,7 +72,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 138;
-const OPERATION_COUNT = 139;
+const OPERATION_COUNT = 140;
 const PAGE_COUNTS = {
   llm: 14,
   repository: 11,
