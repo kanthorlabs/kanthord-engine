@@ -109,6 +109,15 @@ export function pollInboundIds(tx: Transaction): string[] {
   return ids;
 }
 
+export function allInbounds(tx: Transaction): InboundRow[] {
+  assert.ok(tx.database, "A transaction holds a database.");
+  const rows = tx.database
+    .prepare("SELECT * FROM intake_inbound ORDER BY id")
+    .all() as unknown as InboundRow[];
+  assert.ok(rows.every((row) => row.id.length > NO_LENGTH));
+  return rows;
+}
+
 export function inboundRecord(row: InboundRow): Inbound {
   return inboundSchema.parse({
     id: row.id,

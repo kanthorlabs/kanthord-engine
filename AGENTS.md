@@ -103,7 +103,7 @@ engine/
 │   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, inbound schemas, inbound operations, the inbound collaboration type, the inbound event schema, the event operations and the receipt, and operations
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── configuration.ts    # Inbound configuration schema per kind and platform, and resource identity
-│   │   ├── inbound-store.ts    # Inbound rows, the record projection, the checkpoint write, the poll inbound list, pending event count, and delete with events
+│   │   ├── inbound-store.ts    # Inbound rows, the record projection, the checkpoint write, the poll inbound list, the list of every inbound, pending event count, and delete with events
 │   │   ├── inbound-create.ts   # Inbound create: admission of a webhook and a poll, project check, the poll release and first request, credential check, insert step, and loop start
 │   │   ├── inbound-delete.ts   # Inbound delete that refuses a pending event and removes the events and the row
 │   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret
@@ -112,6 +112,7 @@ engine/
 │   │   ├── event-write.ts      # Inbound event retry, discard and delete, with the in-flight refusal of a discard
 │   │   ├── dispatcher.ts       # Event handoff: oldest pending selection, reservation in the in-flight set, consumer call, and conditional state write
 │   │   ├── poll.ts             # Poll loops: one loop per inbound, the cycle with its capacity pause and release, and the batch with its checkpoint
+│   │   ├── health.ts           # Inbound resource inventory: one entry per inbound, the poll check with its release and request, and the webhook check
 │   │   ├── receipt.ts          # Webhook receipt: inbound lookup, signature check, handshake, capacity bound, and insert
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit

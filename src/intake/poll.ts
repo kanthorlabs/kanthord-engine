@@ -85,7 +85,7 @@ interface Hold {
   material: Material | null;
 }
 
-function checkpointOf(text: string | null): GitHubCheckpoint {
+export function checkpointOf(text: string | null): GitHubCheckpoint {
   if (text === null) return EMPTY_CHECKPOINT;
   return githubCheckpointSchema.parse(JSON.parse(text));
 }
