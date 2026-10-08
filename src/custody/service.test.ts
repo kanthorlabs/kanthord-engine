@@ -27,13 +27,18 @@ import {
 import { decrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent, type Dependencies } from "./service.ts";
-import { testMachineIdentity } from "../kernel/test-identity.ts";
+import {
+  testHumanIdentity,
+  testMachineIdentity,
+} from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { FacilityError, grantFacts } from "./facility.ts";
 import {
+  AssetUse,
   GrantKind,
   type ActionFacts,
+  type AssetFacts,
   type CustodyExecution,
   type Grant,
 } from "./contract.ts";
@@ -156,6 +161,8 @@ const unusedExecutionDependencies = {
   missionAuthorization: {
     frozenAction: unexpectedCollaboration,
     requestEvidence: unexpectedCollaboration,
+    evidenceAsset: unexpectedCollaboration,
+    objectPut: unexpectedCollaboration,
   },
   clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
 };
@@ -824,6 +831,21 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
 });
 
 const EVIDENCE_ID = createIdentity("evidence");
+const ASSET_ID = createIdentity("evidence_asset");
+const human = testHumanIdentity("ulrich", "Ulrich", "token");
+const assetFacts: AssetFacts = {
+  storage: {
+    binding_id: createIdentity("binding"),
+    endpoint: "https://storage.example",
+    bucket: "bucket",
+    region: "region",
+  },
+  key: "prefix/object",
+  location: "s3://bucket/prefix/object",
+  version: null,
+  size: 1,
+  sha256: null,
+};
 
 function missionGrantFixture() {
   const pins = new Map<string, string[]>();
@@ -883,6 +905,18 @@ function missionGrantFixture() {
         assert.equal(evidenceId, EVIDENCE_ID);
         return { ...answer(), facts: facts as never };
       },
+      evidenceAsset: (tx, _identity, assetId, received, use) => {
+        assert(tx.database.isTransaction);
+        assert.equal(assetId, ASSET_ID);
+        assert.equal(received === null, use === AssetUse.Get);
+        return { ...answer(), facts: assetFacts };
+      },
+      objectPut: (tx, _identity, received, input) => {
+        assert(tx.database.isTransaction);
+        assert.equal(received, claim);
+        assert.equal(input.assetId, ASSET_ID);
+        return { ...answer(), facts: assetFacts };
+      },
     },
     executions: {
       requireRunning: (_tx, executionId, runtimeIdentity) => {
@@ -923,6 +957,33 @@ function missionGrantFixture() {
       },
       Date.now(),
     );
+  const evidenceAsset = (tx: Transaction, use: AssetUse) =>
+    f.component.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.EvidenceAsset,
+        identity: use === AssetUse.Get ? human : identity,
+        assetId: ASSET_ID,
+        claim: use === AssetUse.Get ? null : claim,
+        use,
+      },
+      Date.now(),
+    );
+  const objectPut = (tx: Transaction) =>
+    f.component.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.ObjectPut,
+        identity,
+        claim,
+        nodeId: claim.nodeId,
+        assetId: ASSET_ID,
+        storageBindingId: assetFacts.storage.binding_id,
+        size: assetFacts.size,
+        sha256: null,
+      },
+      Date.now(),
+    );
   const releaseId = (grant: Grant, tx: Transaction) => {
     const material = f.component.release(tx, grant, Date.now());
     try {
@@ -932,7 +993,18 @@ function missionGrantFixture() {
       material.drop();
     }
   };
-  return { f, row, state, facts, frozenAction, requestEvidence, releaseId };
+  return {
+    f,
+    row,
+    state,
+    facts,
+    assetFacts,
+    frozenAction,
+    requestEvidence,
+    evidenceAsset,
+    objectPut,
+    releaseId,
+  };
 }
 
 test("a grant under a claim pins once and reads the pin after a rotation", () => {
@@ -983,6 +1055,49 @@ test("a grant without an execution pins nothing and releases the newest live rev
       ({ ended_at }) => ended_at !== null,
     );
     assert.equal(ended.length, FIRST_REVISION);
+  } finally {
+    m.f.store.close();
+  }
+});
+
+test("a storage grant under a claim pins the credential and a storage grant of a human pins nothing", () => {
+  const m = missionGrantFixture();
+  try {
+    const created = m.f.create(inputs[0]) as CredentialAnswer;
+    const first = created.revisions[0]!.id;
+    for (const authorize of [
+      (tx: Transaction) => m.objectPut(tx),
+      (tx: Transaction) => m.evidenceAsset(tx, AssetUse.Check),
+      (tx: Transaction) => m.evidenceAsset(tx, AssetUse.ExecutionGet),
+    ])
+      m.f.store.transaction((tx) => {
+        const grant = authorize(tx);
+        assert.equal(grant.execution?.execution_id, m.row.execution_id);
+        assert.deepEqual(grantFacts(grant), {
+          project_id: m.row.project_id,
+          credential: "github",
+          facts: m.assetFacts,
+        });
+        assert.equal(m.releaseId(grant, tx), first);
+      });
+    assert.deepEqual(m.row.credentials, [first]);
+    const rotated = m.f.rotate("github", {
+      expected_revision: FIRST_REVISION,
+      secret: apiSecret,
+    }) as CredentialAnswer;
+    const released = m.f.store.transaction((tx) => {
+      const grant = m.evidenceAsset(tx, AssetUse.Get);
+      assert.equal(grant.kind, GrantKind.EvidenceAsset);
+      assert.equal(grant.execution, null);
+      return m.releaseId(grant, tx);
+    });
+    assert.equal(released, rotated.revisions[0]!.id);
+    assert.deepEqual(m.row.credentials, [first]);
+    m.state.refused = true;
+    assert.throws(
+      () => m.f.store.transaction((tx) => m.objectPut(tx)),
+      /mission authorization refused/,
+    );
   } finally {
     m.f.store.close();
   }

@@ -89,6 +89,8 @@ function fixture(
     missionAuthorization: {
       frozenAction: unexpected,
       requestEvidence: unexpected,
+      evidenceAsset: unexpected,
+      objectPut: unexpected,
     },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,

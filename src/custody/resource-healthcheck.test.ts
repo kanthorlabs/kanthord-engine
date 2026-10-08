@@ -90,6 +90,12 @@ function fixture(t: TestContext) {
       requestEvidence: () => {
         throw new Error("UNEXPECTED_COLLABORATION");
       },
+      evidenceAsset: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      objectPut: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
     },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,

@@ -246,6 +246,8 @@ export function composeServices(options: {
     missionAuthorization: {
       frozenAction: (...args) => mission.authorizeFrozenAction(...args),
       requestEvidence: (...args) => mission.authorizeRequestEvidence(...args),
+      evidenceAsset: (...args) => mission.authorizeEvidenceAsset(...args),
+      objectPut: (...args) => mission.authorizeObjectPut(...args),
     },
     clientSecret: (clientId) =>
       deriveClientSecret(options.config.master_key, clientId),

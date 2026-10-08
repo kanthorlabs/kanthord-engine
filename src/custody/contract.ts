@@ -181,6 +181,33 @@ export type RequestFacts = {
   address: PlatformAddressFacts;
   repository: RepositoryFacts;
 };
+export type AssetFacts = {
+  storage: {
+    binding_id: string;
+    endpoint: string;
+    bucket: string;
+    region: string;
+  };
+  key: string;
+  location: string;
+  version: string | null;
+  size: number;
+  sha256: string | null;
+};
+export const AssetUse = {
+  Check: "check",
+  Get: "get",
+  ExecutionGet: "execution_get",
+  Delete: "delete",
+} as const;
+export type AssetUse = (typeof AssetUse)[keyof typeof AssetUse];
+export type ObjectPutInput = {
+  nodeId: string;
+  assetId: string;
+  storageBindingId: string;
+  size: number;
+  sha256: string | null;
+};
 export type Authorized<F> = {
   credential: string | null;
   platform: string;
@@ -200,12 +227,27 @@ export interface MissionAuthorization {
     evidenceId: string,
     claim: ExecutionClaim | null,
   ): Authorized<RequestFacts>;
+  evidenceAsset(
+    tx: Transaction,
+    identity: CallerIdentity,
+    assetId: string,
+    claim: ExecutionClaim | null,
+    use: AssetUse,
+  ): Authorized<AssetFacts>;
+  objectPut(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    input: ObjectPutInput,
+  ): Authorized<AssetFacts>;
 }
 
 export const GrantKind = {
   ModelInference: "model_inference",
   FrozenAction: "frozen_action",
   RequestEvidence: "request_evidence",
+  EvidenceAsset: "evidence_asset",
+  ObjectPut: "object_put",
 } as const;
 export type GrantKind = (typeof GrantKind)[keyof typeof GrantKind];
 export type GrantRequest =
@@ -227,7 +269,19 @@ export type GrantRequest =
       identity: CallerIdentity;
       evidenceId: string;
       claim: ExecutionClaim | null;
-    };
+    }
+  | {
+      kind: typeof GrantKind.EvidenceAsset;
+      identity: CallerIdentity;
+      assetId: string;
+      claim: ExecutionClaim | null;
+      use: AssetUse;
+    }
+  | ({
+      kind: typeof GrantKind.ObjectPut;
+      identity: MachineIdentity;
+      claim: ExecutionClaim;
+    } & ObjectPutInput);
 export type ModelInferenceFacts = {
   provider_id: string;
   agent_provider: string;
@@ -236,6 +290,8 @@ type GrantFactsOfKind = {
   [GrantKind.ModelInference]: ModelInferenceFacts;
   [GrantKind.FrozenAction]: ActionFacts;
   [GrantKind.RequestEvidence]: RequestFacts;
+  [GrantKind.EvidenceAsset]: AssetFacts;
+  [GrantKind.ObjectPut]: AssetFacts;
 };
 export type GrantExecution = Readonly<
   Omit<CustodyExecution, "credentials"> & { credentials: readonly string[] }

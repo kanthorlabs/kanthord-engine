@@ -131,6 +131,12 @@ function fixture(t: TestContext) {
       requestEvidence: () => {
         throw new Error("UNEXPECTED_COLLABORATION");
       },
+      evidenceAsset: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      objectPut: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
     },
   });
   const created = store.transaction((tx) =>

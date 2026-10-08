@@ -377,23 +377,58 @@ export class CustodyComponent implements Service, CredentialRecords {
       request.claim === null
         ? null
         : this.claimedExecution(tx, request.claim, now);
-    if (request.kind === GrantKind.FrozenAction) {
-      const { key, commit, reusedEvidenceId } = request;
-      const authorized = this.missionAuthorization.frozenAction(
-        tx,
-        request.identity,
-        request.claim,
-        { key, commit, reusedEvidenceId },
-      );
-      return mintGrant({ kind: request.kind, execution, ...authorized });
+    return this.missionGrant(tx, request, execution);
+  }
+
+  private missionGrant(
+    tx: Transaction,
+    request: Exclude<GrantRequest, { kind: typeof GrantKind.ModelInference }>,
+    execution: CustodyExecution | null,
+  ): Grant {
+    assert(tx.database.isTransaction);
+    assert(execution === null || request.claim !== null);
+    const mission = this.missionAuthorization;
+    switch (request.kind) {
+      case GrantKind.FrozenAction: {
+        const { key, commit, reusedEvidenceId } = request;
+        const authorized = mission.frozenAction(
+          tx,
+          request.identity,
+          request.claim,
+          { key, commit, reusedEvidenceId },
+        );
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
+      case GrantKind.RequestEvidence: {
+        const authorized = mission.requestEvidence(
+          tx,
+          request.identity,
+          request.evidenceId,
+          request.claim,
+        );
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
+      case GrantKind.EvidenceAsset: {
+        const authorized = mission.evidenceAsset(
+          tx,
+          request.identity,
+          request.assetId,
+          request.claim,
+          request.use,
+        );
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
+      case GrantKind.ObjectPut: {
+        const { nodeId, assetId, storageBindingId, size, sha256 } = request;
+        const authorized = mission.objectPut(
+          tx,
+          request.identity,
+          request.claim,
+          { nodeId, assetId, storageBindingId, size, sha256 },
+        );
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
     }
-    const authorized = this.missionAuthorization.requestEvidence(
-      tx,
-      request.identity,
-      request.evidenceId,
-      request.claim,
-    );
-    return mintGrant({ kind: request.kind, execution, ...authorized });
   }
 
   private claimedExecution(
