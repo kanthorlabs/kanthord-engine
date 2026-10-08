@@ -23,17 +23,24 @@ import {
   AssessmentResult,
   AssetKind,
   Disposition,
+  MISSION_SERVICE_NAME,
+  MissionErrorCode,
   NodeState,
   Resolution,
   missionOperations,
   type Evidence,
+  type ExternalAction,
   type Revision,
 } from "../../mission/contract.ts";
 import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
-import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
+import {
+  ActionResultKind,
+  PlatformAddressKind,
+  workerOperations,
+} from "../../worker/contract.ts";
 import {
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
@@ -54,15 +61,18 @@ const FIRST_ATTEMPT = 1;
 const SINGLE_ITEM = 1;
 const FIRST_PULL_REQUEST = 1;
 const UNMATCHED_PULL_REQUEST = 9;
+const SHARED_PULL_REQUEST = 7;
 const ISSUE_NUMBER = 3;
 const BAD_GATEWAY_STATUS = 502;
 const NO_OUTPUT = "";
 const TIMEOUT = 300000;
 const SECRET = "test-secret";
 const GATED = "gated";
+const GATED_KEY = "gated.pull_request";
 const GATED_RESOURCE = "repository:github:owner/gated";
 const RESOURCE = "owner/gated";
 const MERGED_COMMIT = "e".repeat(40);
+const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
 const CONTENT = {
   name: "Ship accounts",
@@ -363,6 +373,27 @@ async function setup(t: TestContext) {
     );
     return { nodeId, x2: await passingEvaluation(nodeId, head) };
   };
+  const worker = httpClient(missionOperations, c.fixture.endpoint, token);
+  const requestPullRequest = async (x: ExecutionRecord, number: number) =>
+    completed(
+      await worker["evidence.request"](
+        {
+          params: { node_id: x.node_id },
+          query: {},
+          body: {
+            ...ctx(x),
+            requirement_key: GATED_KEY,
+            subject: GATED_KEY,
+            address: {
+              kind: PlatformAddressKind.PullRequest,
+              resource_identity: GATED_RESOURCE,
+              number,
+            },
+          },
+        },
+        { idempotencyKey: ulid() },
+      ),
+    );
   const performer = httpClient(workerOperations, c.fixture.endpoint, token);
   const actionRequest = async (x: ExecutionRecord) =>
     completed(
@@ -404,6 +435,7 @@ async function setup(t: TestContext) {
     objective,
     node,
     release,
+    requestPullRequest,
     actionRequest,
     check,
     admit,
@@ -498,6 +530,56 @@ test("E08 delivery admission journey", { timeout: TIMEOUT }, async (t) => {
     assert.deepEqual(answer, {
       disposition: Disposition.Duplicate,
       reason: null,
+    });
+  });
+  await t.test("E08.6 two requests of one address are ambiguous", async () => {
+    const objectives = [];
+    for (const filename of ["objective-r.md", "objective-u.md"]) {
+      const o = await h.objective(filename, I);
+      const request = await h.requestPullRequest(o.x2, SHARED_PULL_REQUEST);
+      assert.equal(request.requirement_key, GATED_KEY);
+      await h.release(o.x2.execution_id);
+      assert.equal((await h.node(o.nodeId)).state, NodeState.ExternalRequested);
+      objectives.push(o.nodeId);
+    }
+    const R = objectives[FIRST_INDEX]!;
+    const answer = completed(
+      await h.admit(
+        closed(SHARED_PULL_REQUEST, true),
+        createIdentity("inbound_event"),
+      ),
+    );
+    assert.deepEqual(answer, {
+      disposition: Disposition.Refused,
+      reason: AdmissionRefusal.Ambiguous,
+    });
+    const actions = await h.read<Page<ExternalAction>>([
+      "mission",
+      "external-action",
+      "list",
+      R,
+      "--attempt",
+      String(FIRST_ATTEMPT),
+    ]);
+    assert.equal(actions.items[FIRST_INDEX]?.resolution, Resolution.Unresolved);
+  });
+  await t.test("E08.7 a service other than intake is refused", async () => {
+    const result = await h.admit(
+      closed(SHARED_PULL_REQUEST, true),
+      createIdentity("inbound_event"),
+      MISSION_SERVICE_NAME,
+    );
+    assert.ok(
+      result.type === OperationResultType.Failure,
+      JSON.stringify(result),
+    );
+    assert.equal(result.status, HttpStatus.Forbidden);
+    assert.equal(
+      result.error.error.code,
+      MissionErrorCode.AuthorizationRefused,
+    );
+    assert.deepEqual(result.error.error.details, {
+      reason: SERVICE_MISMATCH,
     });
   });
 });
