@@ -24,7 +24,6 @@ import { performAction } from "./action-perform.ts";
 import { readAction } from "./action-read.ts";
 import {
   INTAKE_SERVICE_NAME,
-  InboundKind,
   intakeOperations,
   PENDING_EVENT_LIMIT,
   POLL_INTERVAL_MS,
@@ -38,6 +37,7 @@ import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { receiveEvent } from "./receipt.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
+import { pollInboundIds } from "./inbound-store.ts";
 import { PollLoops } from "./poll.ts";
 import { deleteStoredObject } from "./storage-delete.ts";
 import {
@@ -275,13 +275,8 @@ export class IntakeService implements Service, IntakeCollaborations {
 
   private startPollLoops(): void {
     if (this.shutdown.err()) return;
-    const rows = this.dependencies.store.transaction(
-      (tx) =>
-        tx.database
-          .prepare("SELECT id FROM intake_inbound WHERE kind = ? ORDER BY id")
-          .all(InboundKind.Poll) as { id: string }[],
-    );
-    for (const { id } of rows) this.pollLoops.start(id);
+    const ids = this.dependencies.store.transaction((tx) => pollInboundIds(tx));
+    for (const id of ids) this.pollLoops.start(id);
   }
 
   inboundRemoved(inboundId: string): void {

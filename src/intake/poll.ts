@@ -34,7 +34,11 @@ import {
   PLATFORM_CALL_DEADLINE_MS,
 } from "./contract.ts";
 import { findEvent, insertEvent, pendingCount } from "./event-store.ts";
-import { readInbound, type InboundRow } from "./inbound-store.ts";
+import {
+  readInbound,
+  writeCheckpoint,
+  type InboundRow,
+} from "./inbound-store.ts";
 
 const NO_LENGTH = 0;
 const NO_ROOM = 0;
@@ -87,21 +91,6 @@ interface Hold {
 function checkpointOf(text: string | null): GitHubCheckpoint {
   if (text === null) return EMPTY_CHECKPOINT;
   return githubCheckpointSchema.parse(JSON.parse(text));
-}
-
-function writeCheckpoint(
-  tx: Transaction,
-  inboundId: string,
-  checkpoint: GitHubCheckpoint,
-): void {
-  assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
-  const changes = tx.database
-    .prepare("UPDATE intake_inbound SET checkpoint = ? WHERE id = ?")
-    .run(
-      canonicalJSON(githubCheckpointSchema.parse(checkpoint)),
-      inboundId,
-    ).changes;
-  assert.equal(Number(changes), ONE_ROW, "A checkpoint writes one row.");
 }
 
 function releasePoll(
@@ -211,10 +200,16 @@ export function storeBatch(
     newest = event.id;
     room -= ONE_ROW;
   }
-  writeCheckpoint(tx, inboundId, {
-    etag: unstored ? null : answer.etag,
-    newest_event_id: newest,
-  });
+  writeCheckpoint(
+    tx,
+    inboundId,
+    canonicalJSON(
+      githubCheckpointSchema.parse({
+        etag: unstored ? null : answer.etag,
+        newest_event_id: newest,
+      }),
+    ),
+  );
   return true;
 }
 

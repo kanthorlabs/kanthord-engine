@@ -103,7 +103,7 @@ engine/
 │   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, inbound schemas, inbound operations, the inbound collaboration type, the inbound event schema, the event operations and the receipt, and operations
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── configuration.ts    # Inbound configuration schema per kind and platform, and resource identity
-│   │   ├── inbound-store.ts    # Inbound rows, the record projection, pending event count, and delete with events
+│   │   ├── inbound-store.ts    # Inbound rows, the record projection, the checkpoint write, the poll inbound list, pending event count, and delete with events
 │   │   ├── inbound-create.ts   # Inbound create: webhook admission, project check, credential check, and insert step
 │   │   ├── inbound-delete.ts   # Inbound delete that refuses a pending event and removes the events and the row
 │   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret

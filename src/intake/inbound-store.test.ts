@@ -16,7 +16,9 @@ import {
   inboundRecord,
   insertInbound,
   pendingEventCount,
+  pollInboundIds,
   readInbound,
+  writeCheckpoint,
   type NewInbound,
 } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
@@ -190,5 +192,32 @@ test("pendingEventCount counts pending events alone", (t) => {
   assert.equal(
     store.transaction((tx) => pendingEventCount(tx, id)),
     TWO_EVENTS,
+  );
+});
+
+test("a checkpoint write replaces the stored checkpoint of one row", (t) => {
+  const store = migratedStore(t);
+  const id = insert(store);
+  const text = JSON.stringify(CHECKPOINT);
+  store.transaction((tx) => writeCheckpoint(tx, id, text));
+  assert.equal(
+    store.transaction((tx) => readInbound(tx, id)!.checkpoint),
+    text,
+  );
+  assert.throws(() =>
+    store.transaction((tx) => writeCheckpoint(tx, allocateInboundId(), text)),
+  );
+});
+
+test("the poll inbound list answers only the poll identities in order", (t) => {
+  const store = migratedStore(t);
+  insert(store);
+  const polls = [
+    insert(store, { ...newInbound(), kind: InboundKind.Poll }),
+    insert(store, { ...newInbound(), kind: InboundKind.Poll }),
+  ].sort();
+  assert.deepEqual(
+    store.transaction((tx) => pollInboundIds(tx)),
+    polls,
   );
 });

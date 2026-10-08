@@ -6,6 +6,7 @@ import { configurationSchemaOf } from "./configuration.ts";
 import {
   INBOUND_ID_PREFIX,
   InboundEventState,
+  InboundKind,
   inboundSchema,
   type ConsumerValue,
   type Inbound,
@@ -83,6 +84,29 @@ export function readInbound(tx: Transaction, id: string): InboundRow | null {
       .prepare("SELECT * FROM intake_inbound WHERE id = ?")
       .get(id) as InboundRow | undefined) ?? null
   );
+}
+
+export function writeCheckpoint(
+  tx: Transaction,
+  id: string,
+  text: string,
+): void {
+  assert.ok(id.length > NO_LENGTH, "An inbound identity is required.");
+  assert.ok(text.length > NO_LENGTH, "A checkpoint is required.");
+  const changes = tx.database
+    .prepare("UPDATE intake_inbound SET checkpoint = ? WHERE id = ?")
+    .run(text, id).changes;
+  assert.equal(Number(changes), ONE_ROW, "A checkpoint writes one row.");
+}
+
+export function pollInboundIds(tx: Transaction): string[] {
+  assert.ok(tx.database, "A transaction holds a database.");
+  const rows = tx.database
+    .prepare("SELECT id FROM intake_inbound WHERE kind = ? ORDER BY id")
+    .all(InboundKind.Poll) as { id: string }[];
+  const ids = rows.map((row) => row.id);
+  assert.ok(ids.every((id) => id.length > NO_LENGTH));
+  return ids;
 }
 
 export function inboundRecord(row: InboundRow): Inbound {
