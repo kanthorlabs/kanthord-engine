@@ -32,19 +32,26 @@ import {
 } from "./contract.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import {
+  keyOfLocation,
   objectKey,
   objectLocation,
   storageBindingIdOf,
 } from "./evidence-content.ts";
-import { invalidExecutionInput } from "./execution.ts";
+import {
+  executionContentBound,
+  objectContentSchema,
+} from "./evidence-content-read.ts";
+import { executionMismatch, invalidExecutionInput } from "./execution.ts";
 import { requiredActionsOf } from "./frozen-action.ts";
 import { getRevision } from "./node-read.ts";
+import { recordNotFound } from "./record-list.ts";
 import {
   readOpenAttempt,
   readAttempt,
   readEvidence,
   readAssets,
   type AssetRow,
+  type EvidenceRow,
 } from "./record-store.ts";
 import { readNode } from "./store.ts";
 import type { Dependencies } from "./service.ts";
@@ -344,6 +351,13 @@ export function authorizeRequestEvidence(
   };
 }
 
+export const AssetUse = {
+  Check: "check",
+  Get: "get",
+  ExecutionGet: "execution_get",
+  Delete: "delete",
+} as const;
+export type AssetUse = (typeof AssetUse)[keyof typeof AssetUse];
 export type AssetFacts = {
   storage: {
     binding_id: string;
@@ -366,6 +380,26 @@ export type ObjectPutInput = {
 };
 const OBJECT_PLATFORM = "s3";
 const OBJECT_SIZE_MIN = 0;
+
+export function pendingObjectAdmitted(
+  evidence: EvidenceRow,
+  asset: AssetRow,
+  claim: ExecutionClaim,
+  now: number,
+): boolean {
+  assert.equal(asset.evidence_id, evidence.id);
+  assert.equal(asset.kind, AssetKind.Object);
+  if (evidence.attempt !== claim.attempt) executionMismatch("attempt");
+  if (asset.published_at !== null) return false;
+  assert.ok(asset.expired_at !== null);
+  if (asset.expired_at <= now)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      MissionErrorCode.EvidenceUploadExpired,
+      "Evidence upload has expired.",
+    );
+  return true;
+}
 
 function assetAuthorized(
   binding: StorageBinding,
@@ -442,5 +476,81 @@ export function authorizeObjectPut(
     version: null,
     size: input.size,
     sha256: input.sha256,
+  });
+}
+
+function machineClaim(
+  identity: CallerIdentity,
+  claim: ExecutionClaim | null,
+): ExecutionClaim {
+  if (identity.kind !== IdentityKind.Client || claim === null)
+    authorizationRefused(AuthorizationRefusal.ClaimNotLive);
+  assert.equal(identity.projectId, claim.projectId);
+  assert.ok(claim.executionId);
+  return claim;
+}
+
+function requireHuman(identity: CallerIdentity, claim: ExecutionClaim | null) {
+  if (identity.kind === IdentityKind.Service)
+    authorizationRefused(AuthorizationRefusal.ServiceMismatch);
+  if (identity.kind !== IdentityKind.Human)
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  assert.equal(claim, null);
+}
+
+function admitAssetUse(
+  tx: Transaction,
+  dependencies: Dependencies,
+  input: {
+    identity: CallerIdentity;
+    claim: ExecutionClaim | null;
+    use: AssetUse;
+  },
+  evidence: EvidenceRow,
+  asset: AssetRow,
+) {
+  assert.ok(tx.database.isTransaction);
+  assert.equal(asset.evidence_id, evidence.id);
+  if (input.use === AssetUse.Get || input.use === AssetUse.Delete)
+    return requireHuman(input.identity, input.claim);
+  const claim = machineClaim(input.identity, input.claim);
+  if (input.use === AssetUse.ExecutionGet) {
+    if (!executionContentBound(dependencies, claim)(tx, evidence))
+      recordNotFound();
+    return;
+  }
+  authorizeClaim(tx, dependencies, claim, evidence.node_id);
+  if (!pendingObjectAdmitted(evidence, asset, claim, Date.now()))
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+}
+
+export function authorizeEvidenceAsset(
+  tx: Transaction,
+  dependencies: Dependencies,
+  identity: CallerIdentity,
+  assetId: string,
+  claim: ExecutionClaim | null,
+  use: AssetUse,
+): Authorized<AssetFacts> {
+  assert.ok(Object.values(AssetUse).includes(use));
+  const asset = readAssetRow(tx, assetId);
+  if (!asset) recordNotFound();
+  if (asset.kind !== AssetKind.Object)
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  const evidence = readEvidence(tx, asset.evidence_id);
+  assert.ok(evidence);
+  admitAssetUse(tx, dependencies, { identity, claim, use }, evidence, asset);
+  const content = objectContentSchema.parse(JSON.parse(asset.content));
+  const binding = authorizeStorage(
+    tx,
+    dependencies.bindings,
+    content.storage_binding_id,
+  );
+  return assetAuthorized(binding, {
+    key: keyOfLocation(binding, content.location),
+    location: content.location,
+    version: content.object_version ?? null,
+    size: content.size,
+    sha256: content.sha256 ?? null,
   });
 }

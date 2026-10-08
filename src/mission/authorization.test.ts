@@ -7,6 +7,7 @@ import {
 import { createIdentity } from "../kernel/identity.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import type { CallerIdentity } from "../kernel/caller.ts";
 import {
   AssessmentResult,
   AssetKind,
@@ -17,12 +18,19 @@ import {
   RepositoryAction,
 } from "./contract.ts";
 import {
+  AssetUse,
   authorizeAction,
   authorizeBinding,
   authorizeClaim,
 } from "./authorization.ts";
 import { objectLocation } from "./evidence-content.ts";
-import { closeAttempt, insertEvidence } from "./record-store.ts";
+import {
+  closeAttempt,
+  insertAssessment,
+  insertEvidence,
+  insertOutcome,
+  openAttempt,
+} from "./record-store.ts";
 import { setNodeState } from "./store.ts";
 import {
   ASSESSED_COMMIT,
@@ -327,6 +335,7 @@ const VALIDATION_FAILED = "gateway.request.validation_failed";
 
 function assetHarness(t: TestContext) {
   const h = actionHarness(t);
+  const human = testHumanIdentity("ulrich", "Ulrich", "token");
   const put = (
     input: Partial<{
       nodeId: string;
@@ -392,7 +401,18 @@ function assetHarness(t: TestContext) {
     );
     return { evidenceId, assetId };
   };
-  return { ...h, put, object };
+  const asset = (
+    assetId: string,
+    use: AssetUse,
+    identity: CallerIdentity = use === AssetUse.Get || use === AssetUse.Delete
+      ? human
+      : h.machine,
+    claim: ExecutionClaim | null = identity === human ? null : h.claim,
+  ) =>
+    h.store.transaction((tx) =>
+      h.service.authorizeEvidenceAsset(tx, identity, assetId, claim, use),
+    );
+  return { ...h, human, put, object, asset };
 }
 
 test("an object PUT names the server key of the claim attempt and the storage credential", (t) => {
@@ -446,7 +466,116 @@ test("an object PUT refuses another node, a recorded asset, another storage bind
   h.dependencies.schedulerClaims.liveExecutionOf = live;
 });
 
-test("a disabled or removed storage binding refuses an object PUT", (t) => {
+test("a check admits a pending asset of the claim attempt and answers its key", (t) => {
   const h = assetHarness(t);
+  const { assetId } = h.object();
+  const granted = h.asset(assetId, AssetUse.Check);
+  assert.equal(granted.credential, h.storage.credential);
+  assert.equal(granted.facts.key, `prefix/${assetId}`);
+  assert.equal(granted.facts.version, null);
+  assert.equal(granted.facts.size, OBJECT_SIZE);
+  refuses(
+    () => h.asset(h.object({ nodeId: h.otherNode() }).assetId, AssetUse.Check),
+    "node_mismatch",
+  );
+  refuses(
+    () => h.asset(h.object({ published: true }).assetId, AssetUse.Check),
+    "node_mismatch",
+  );
+  assert.throws(
+    () => h.asset(h.object({ expiredAt: 1 }).assetId, AssetUse.Check),
+    { status: 409, code: MissionErrorCode.EvidenceUploadExpired },
+  );
+  assert.throws(
+    () => h.asset(createIdentity("evidence_asset"), AssetUse.Check),
+    {
+      status: 404,
+      code: MissionErrorCode.RecordNotFound,
+    },
+  );
+});
+
+test("a check refuses a pending asset of an earlier attempt", (t) => {
+  const h = assetHarness(t);
+  const { assetId } = h.object();
+  h.store.transaction((tx) => {
+    closeAttempt(tx, h.node_id, h.claim.attempt, Date.now());
+    openAttempt(tx, h.node_id, h.claim.pinnedRevision, h.executionActor, 1);
+  });
+  h.claim.attempt += 1;
+  assert.throws(() => h.asset(assetId, AssetUse.Check), {
+    status: 409,
+    code: MissionErrorCode.ExecutionContextMismatch,
+    details: { field: "attempt" },
+  });
+});
+
+test("an initiative claim reads the object of a current objective outcome and nothing outside its bound", (t) => {
+  const h = assetHarness(t);
+  const named = h.object({ published: true });
+  const unnamed = h.object({ published: true });
+  h.store.transaction((tx) => {
+    const assessmentId = createIdentity("assessment");
+    insertAssessment(tx, {
+      id: assessmentId,
+      node_id: h.node_id,
+      attempt: h.claim.attempt,
+      result: AssessmentResult.Undetermined,
+      rationale: "Blocked",
+      evidence_ids: canonicalJSON([named.evidenceId]),
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: null,
+      actor: canonicalJSON(h.actor),
+      node_revision: h.claim.pinnedRevision,
+      created_at: Date.now(),
+    });
+    insertOutcome(tx, {
+      id: createIdentity("outcome"),
+      node_id: h.node_id,
+      assessment_id: assessmentId,
+      result: AssessmentResult.Undetermined,
+      evidence_ids: "[]",
+      created_at: Date.now(),
+    });
+  });
+  h.claim.nodeId = h.otherNode();
+  const granted = h.asset(named.assetId, AssetUse.ExecutionGet);
+  assert.equal(granted.facts.version, OBJECT_VERSION);
+  assert.equal(granted.facts.key, `prefix/${named.assetId}`);
+  assert.throws(() => h.asset(unnamed.assetId, AssetUse.ExecutionGet), {
+    status: 404,
+    code: MissionErrorCode.RecordNotFound,
+  });
+});
+
+test("a human reads and deletes an object with the newest binding and refuses the machine uses", (t) => {
+  const h = assetHarness(t);
+  const { assetId } = h.object({ published: true });
+  for (const use of [AssetUse.Get, AssetUse.Delete]) {
+    const granted = h.asset(assetId, use);
+    assert.equal(granted.credential, h.storage.credential);
+    assert.equal(granted.facts.version, OBJECT_VERSION);
+    refuses(() => h.asset(assetId, use, h.machine, h.claim), "node_mismatch");
+  }
+  for (const use of [AssetUse.Check, AssetUse.ExecutionGet])
+    refuses(() => h.asset(assetId, use, h.human, null), "claim_not_live");
+  const evidenceId = h.request();
+  const platform = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT id FROM mission_evidence_asset WHERE evidence_id = ?")
+        .get(evidenceId) as { id: string },
+  );
+  refuses(() => h.asset(platform.id, AssetUse.Get), "node_mismatch");
+});
+
+test("a disabled or removed storage binding refuses every use of an object", (t) => {
+  const h = assetHarness(t);
+  const pending = h.object().assetId;
+  const published = h.object({ published: true }).assetId;
   bindingRefusals(h, () => h.put());
+  bindingRefusals(h, () => h.asset(pending, AssetUse.Check));
+  for (const use of [AssetUse.Get, AssetUse.ExecutionGet, AssetUse.Delete])
+    bindingRefusals(h, () => h.asset(published, use));
 });

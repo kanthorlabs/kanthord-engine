@@ -10,11 +10,15 @@ import {
   MissionErrorCode,
   type ExecutionContext,
 } from "./contract.ts";
-import { admitExecution, executionMismatch } from "./execution.ts";
+import { admitExecution } from "./execution.ts";
 import { keyOfLocation } from "./evidence-content.ts";
 import { readEvidence, type AssetRow } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
-import { authorizeClaim, authorizeStorage } from "./authorization.ts";
+import {
+  authorizeClaim,
+  authorizeStorage,
+  pendingObjectAdmitted,
+} from "./authorization.ts";
 
 const objectContentSchema = z.strictObject({
   location: z.string(),
@@ -48,21 +52,14 @@ export function prepareComplete(
   assert.ok(evidence);
   authorizeClaim(tx, dependencies, claim, evidence.node_id);
   admitExecution(tx, dependencies, claim, evidence.node_id, context, now);
-  if (evidence.attempt !== claim.attempt) executionMismatch("attempt");
+  const pending = pendingObjectAdmitted(evidence, asset, claim, now);
   const content = objectContentSchema.parse(JSON.parse(asset.content));
   const result = {
     asset_id: asset.id,
     evidence_id: evidence.id,
     uri: content.location,
   };
-  if (asset.published_at !== null) return { result, pending: null };
-  assert.notEqual(asset.expired_at, null);
-  if (asset.expired_at! <= now)
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.EvidenceUploadExpired,
-      "Evidence upload has expired.",
-    );
+  if (!pending) return { result, pending: null };
   const binding = authorizeStorage(
     tx,
     dependencies.bindings,

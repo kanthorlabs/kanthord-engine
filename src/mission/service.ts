@@ -67,10 +67,12 @@ import { claim, release, loss } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
 import {
   authorizeAction,
+  authorizeEvidenceAsset,
   authorizeFrozenAction,
   authorizeObjectPut,
   authorizeRequest,
   authorizeRequestEvidence,
+  type AssetUse,
   type ObjectPutInput,
 } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
@@ -862,6 +864,22 @@ export class MissionService
       identity,
       evidenceId,
       claim,
+    );
+  }
+  authorizeEvidenceAsset(
+    tx: Transaction,
+    identity: CallerIdentity,
+    assetId: string,
+    claim: ExecutionClaim | null,
+    use: AssetUse,
+  ) {
+    return authorizeEvidenceAsset(
+      tx,
+      this.dependencies,
+      identity,
+      assetId,
+      claim,
+      use,
     );
   }
   authorizeObjectPut(
