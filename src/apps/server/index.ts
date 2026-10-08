@@ -503,6 +503,7 @@ export function composeServices(options: {
     github,
     gitWriter,
     s3,
+    masterKey: options.config.master_key,
   });
   const workbench = new WorkbenchService({
     store: options.store,

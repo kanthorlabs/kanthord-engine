@@ -42,6 +42,7 @@ export interface Dependencies {
   github: GitHubPlatform;
   gitWriter: GitWriter;
   s3: S3Platform;
+  masterKey: string;
 }
 
 export class IntakeService implements Service {

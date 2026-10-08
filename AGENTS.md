@@ -114,7 +114,8 @@ engine/
 │   │   ├── address-codec.ts    # Stored form of a platform address in an outbound result
 │   │   ├── storage.ts          # Presigned PUT and GET and the object check: authorization, release and Storage call
 │   │   ├── storage-delete.ts   # Object delete: s3.delete_object, its read-back and its stored status
-│   │   ├── test-support.ts     # Unused action collaborations for Intake unit tests
+│   │   ├── webhook-secret.ts   # Verification secret of a webhook inbound, derived from the master key
+│   │   ├── test-support.ts     # Unused action collaborations and a master key for Intake unit tests
 │   │   └── service.ts          # Lifecycle, health probe, and resource inventory
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
 │   │   ├── contract.ts         # Mission schemas, operations, and collaboration types
