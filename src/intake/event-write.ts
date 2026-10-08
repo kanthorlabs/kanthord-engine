@@ -22,7 +22,7 @@ import {
 } from "./event-store.ts";
 
 const NO_LENGTH = 0;
-const NO_COUNT = 0;
+const MIN_DELETE_COUNT = 0;
 
 type DeleteFilter =
   | { ids: string[] }
@@ -100,7 +100,7 @@ function deleteFilter(body: InboundEventDelete): DeleteFilter {
   const { state, from, to, ids } = body;
   const rangeFields = [state, from, to].filter((value) => value !== undefined);
   if (ids !== undefined) {
-    if (rangeFields.length > NO_COUNT) filterInvalid();
+    if (rangeFields.length > NO_LENGTH) filterInvalid();
     return { ids };
   }
   if (state === undefined || from === undefined || to === undefined)
@@ -132,6 +132,6 @@ export function deleteEvents(
     "ids" in filter
       ? deleteByIds(tx, filter.ids)
       : deleteEventsInRange(tx, filter.state, filter.from, filter.to);
-  assert.ok(Number.isSafeInteger(count) && count >= NO_COUNT);
+  assert.ok(Number.isSafeInteger(count) && count >= MIN_DELETE_COUNT);
   return { count };
 }

@@ -47,9 +47,11 @@ const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
-const SINGLE_INSTANCE = 1;
+const WORKER_INSTANCE_COUNT = 1;
 const FIRST_ATTEMPT = 1;
-const SINGLE_ITEM = 1;
+const ERROR_ITEMS_PER_FAILURE = 1;
+const EVIDENCE_PER_COMPLETION = 1;
+const IDS_IN_DELETE = 1;
 const FIRST_PULL_REQUEST = 1;
 const SECOND_PULL_REQUEST = 2;
 const SETTLED_COUNT = 3;
@@ -126,7 +128,7 @@ async function setup(t: TestContext) {
       gated: repositoryBinding(GATED, "pull_request"),
       harness: {
         kind: "worker",
-        config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
+        config: { worker: "claude@1", instance_count: WORKER_INSTANCE_COUNT },
       },
     },
   });
@@ -266,7 +268,7 @@ test("E09 event handoff journey", { timeout: TIMEOUT }, async (t) => {
     const first = await settled(E1);
     assert.equal(first.state, InboundEventState.Failed);
     assert.ok(first.error);
-    assert.equal(first.error.length, SINGLE_ITEM);
+    assert.equal(first.error.length, ERROR_ITEMS_PER_FAILURE);
     assert.equal(first.error[FIRST_INDEX]!.code, RETRYABLE_REFUSAL);
     assert.equal(await nodeState(h.P), NodeState.ExternalRequested);
 
@@ -286,7 +288,7 @@ test("E09 event handoff journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(second.error, null);
     assert.equal(await nodeState(h.P), NodeState.Completed);
     const evidence = await landed();
-    assert.equal(evidence.length, SINGLE_ITEM);
+    assert.equal(evidence.length, EVIDENCE_PER_COMPLETION);
     assert.deepEqual(evidence[FIRST_INDEX]!.provenance, {
       kind: ActorKind.Service,
       service: ActorService.Mission,
@@ -301,7 +303,7 @@ test("E09 event handoff journey", { timeout: TIMEOUT }, async (t) => {
     const third = await settled(E3);
     assert.equal(third.state, InboundEventState.Succeeded);
     assert.equal(third.error, null);
-    assert.equal((await landed()).length, SINGLE_ITEM);
+    assert.equal((await landed()).length, EVIDENCE_PER_COMPLETION);
 
     const before = h.gitHub.calls.length;
     release = h.gitHub.hold();
@@ -369,7 +371,7 @@ test("E09 event handoff journey", { timeout: TIMEOUT }, async (t) => {
       "--id",
       E1,
     ]);
-    assert.equal(listed.count, SINGLE_ITEM);
+    assert.equal(listed.count, IDS_IN_DELETE);
     await read(["intake", "inbound", "delete", h.W]);
     assert.equal(h.gitHub.calls.length, calls);
   });

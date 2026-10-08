@@ -14,7 +14,7 @@ import { appendError } from "./error-array.ts";
 
 const NO_LENGTH = 0;
 const EARLIEST_TIME = 0;
-const ONE_ROW = 1;
+const ROWS_PER_EVENT_WRITE = 1;
 
 export interface NewInboundEvent {
   inbound_id: string;
@@ -150,8 +150,11 @@ export function succeedEvent(tx: Transaction, id: string): boolean {
       "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
     )
     .run(InboundEventState.Succeeded, id, InboundEventState.Pending).changes;
-  assert.ok(Number(changes) <= ONE_ROW, "A write changes at most one row.");
-  return Number(changes) === ONE_ROW;
+  assert.ok(
+    Number(changes) <= ROWS_PER_EVENT_WRITE,
+    "A write changes at most one row.",
+  );
+  return Number(changes) === ROWS_PER_EVENT_WRITE;
 }
 
 export function failEvent(
@@ -177,7 +180,11 @@ export function failEvent(
       id,
       InboundEventState.Pending,
     ).changes;
-  assert.equal(Number(changes), ONE_ROW, "A failed write changes one row.");
+  assert.equal(
+    Number(changes),
+    ROWS_PER_EVENT_WRITE,
+    "A failed write changes one row.",
+  );
   return true;
 }
 
@@ -188,8 +195,11 @@ export function retryFailedEvent(tx: Transaction, id: string): boolean {
       "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
     )
     .run(InboundEventState.Pending, id, InboundEventState.Failed).changes;
-  assert.ok(Number(changes) <= ONE_ROW, "A write changes at most one row.");
-  return Number(changes) === ONE_ROW;
+  assert.ok(
+    Number(changes) <= ROWS_PER_EVENT_WRITE,
+    "A write changes at most one row.",
+  );
+  return Number(changes) === ROWS_PER_EVENT_WRITE;
 }
 
 export function discardEventFrom(
@@ -207,8 +217,11 @@ export function discardEventFrom(
       "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
     )
     .run(InboundEventState.Discarded, id, from).changes;
-  assert.ok(Number(changes) <= ONE_ROW, "A write changes at most one row.");
-  return Number(changes) === ONE_ROW;
+  assert.ok(
+    Number(changes) <= ROWS_PER_EVENT_WRITE,
+    "A write changes at most one row.",
+  );
+  return Number(changes) === ROWS_PER_EVENT_WRITE;
 }
 
 export function pendingEventAmong(

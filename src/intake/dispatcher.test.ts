@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import pino, { type Logger } from "pino";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   OperationResultType,
@@ -54,13 +55,13 @@ const TIMEOUT = "gateway.invocation.timeout";
 const CLAIM_LIVE = "mission.node.claim_live";
 const MATCH_CHANGED = "mission.delivery.match_changed";
 const REQUEST_ID = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-const CONFLICT = 409;
-const GATEWAY_TIMEOUT = 504;
-const OK = 200;
-const NO_CALLS = 0;
-const ONE_CALL = 1;
-const TWO_CALLS = 2;
-const THREE_EVENTS = 3;
+const RESERVATIONS_AFTER_LOST_RACE = 0;
+const HANDOFFS_AFTER_DISCARD = 0;
+const LINE_START = 0;
+const HANDOFFS_PER_EVENT = 1;
+const ERROR_ITEMS_PER_FAILURE = 1;
+const HANDOFFS_AFTER_RETRY = 2;
+const PENDING_EVENTS_AT_START = 3;
 const FILL_MESSAGE_LENGTH = 100;
 const WAKE_OFFSETS = 12;
 const EVENT_ENCODING = "base64";
@@ -111,7 +112,11 @@ function addEvent(store: Store, inboundId: string, eventId: string): string {
 
 function completed(data: unknown): ConsumerAnswer {
   return () =>
-    Promise.resolve({ type: OperationResultType.Completed, status: OK, data });
+    Promise.resolve({
+      type: OperationResultType.Completed,
+      status: HttpStatus.OK,
+      data,
+    });
 }
 
 function failure(
@@ -226,9 +231,9 @@ test("A discard that wins before the reservation starts no handoff", async (t) =
     h.store.transaction((tx) => reserve(tx, inFlight, id)),
     false,
   );
-  assert.equal(inFlight.size, NO_CALLS);
+  assert.equal(inFlight.size, RESERVATIONS_AFTER_LOST_RACE);
   await handOver(h);
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, HANDOFFS_AFTER_DISCARD);
   assert.equal(recordOf(h.store, id).state, InboundEventState.Discarded);
 });
 
@@ -237,7 +242,7 @@ test("Pending events at a start reach the consumer in the order of id, each once
   const ids = ["d-1", "d-2", "d-3"].map((d) =>
     addEvent(h.store, h.inboundId, d),
   );
-  for (let index = 0; index < THREE_EVENTS; index++)
+  for (let index = 0; index < PENDING_EVENTS_AT_START; index++)
     h.answers.push(completed({ disposition: "refused", reason: "unmatched" }));
   await handOver(h);
   assert.deepEqual(
@@ -277,11 +282,15 @@ test("Repeated wakes during a handoff start no second handoff of the event", asy
   h.dispatcher.wake();
   h.dispatcher.wake();
   await tick();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
   assert.ok(h.dispatcher.inFlight(id));
-  answer.resolve({ type: OperationResultType.Completed, status: OK, data: {} });
+  answer.resolve({
+    type: OperationResultType.Completed,
+    status: HttpStatus.OK,
+    data: {},
+  });
   await h.dispatcher.join();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
   assert.ok(!h.dispatcher.inFlight(id));
   assert.equal(recordOf(h.store, id).state, InboundEventState.Succeeded);
 });
@@ -304,7 +313,9 @@ test("A 409 claim_live or match_changed answer sets failed with that code", asyn
   const h = harness(t);
   for (const code of [CLAIM_LIVE, MATCH_CHANGED]) {
     const id = addEvent(h.store, h.inboundId, code);
-    h.answers.push(failure(CONFLICT, code, "The admission refused."));
+    h.answers.push(
+      failure(HttpStatus.Conflict, code, "The admission refused."),
+    );
     await handOver(h);
     const record = recordOf(h.store, id);
     assert.equal(record.state, InboundEventState.Failed);
@@ -318,13 +329,15 @@ test("A 409 claim_live or match_changed answer sets failed with that code", asyn
 test("Two failures and one retry leave two error items; a failed event stays untouched without a retry", async (t) => {
   const h = harness(t);
   const id = addEvent(h.store, h.inboundId, "d-1");
-  h.answers.push(failure(CONFLICT, CLAIM_LIVE, "A claim is live."));
+  h.answers.push(failure(HttpStatus.Conflict, CLAIM_LIVE, "A claim is live."));
   await handOver(h);
   await handOver(h);
-  assert.equal(h.calls.length, ONE_CALL);
-  assert.equal(recordOf(h.store, id).error?.length, ONE_CALL);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
+  assert.equal(recordOf(h.store, id).error?.length, ERROR_ITEMS_PER_FAILURE);
   retry(h.store, id);
-  h.answers.push(failure(CONFLICT, MATCH_CHANGED, "The match changed."));
+  h.answers.push(
+    failure(HttpStatus.Conflict, MATCH_CHANGED, "The match changed."),
+  );
   await handOver(h);
   const record = recordOf(h.store, id);
   assert.equal(record.state, InboundEventState.Failed);
@@ -384,7 +397,7 @@ test("A first handoff and one after a retry carry two keys and one event identit
   retry(h.store, id);
   h.answers.push(completed({ disposition: "duplicate", reason: null }));
   await handOver(h);
-  assert.equal(h.calls.length, TWO_CALLS);
+  assert.equal(h.calls.length, HANDOFFS_AFTER_RETRY);
   const [first, second] = h.calls;
   assert.deepEqual(first?.input, second?.input);
   assert.equal(first?.input.inbound_event_id, id);
@@ -398,7 +411,10 @@ test("A first handoff and one after a retry carry two keys and one event identit
 test("A timeout or an indeterminate answer sets failed, and the retry answers duplicate", async (t) => {
   const h = harness(t);
   const cases: [string, ConsumerAnswer][] = [
-    [TIMEOUT, failure(GATEWAY_TIMEOUT, TIMEOUT, "Request timed out.")],
+    [
+      TIMEOUT,
+      failure(HttpStatus.GatewayTimeout, TIMEOUT, "Request timed out."),
+    ],
     [INDETERMINATE, indeterminate()],
   ];
   for (const [code, answer] of cases) {
@@ -433,7 +449,7 @@ test("A thrown consumer call writes failed with system.operation.unknown and no 
   assert.ok(!canonicalJSON(record.error).includes(SECRET));
   assert.ok(!h.lines.join("").includes(SECRET));
   await handOver(h);
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
 });
 
 test("A configuration that fails to parse sets failed, and a later event is handed over", async (t) => {
@@ -472,7 +488,11 @@ test("A store failure during a drain raises no unhandled rejection", async (t) =
   h.dispatcher.wake();
   await tick();
   h.store.database.exec("DROP TABLE intake_inbound_event");
-  answer.resolve({ type: OperationResultType.Completed, status: OK, data: {} });
+  answer.resolve({
+    type: OperationResultType.Completed,
+    status: HttpStatus.OK,
+    data: {},
+  });
   await h.dispatcher.join();
   await tick();
   assert.deepEqual(rejections, []);
@@ -518,7 +538,7 @@ test("A start hands an event over again after a kill of the process during its h
   );
   dispatcher.wake();
   await dispatcher.join();
-  assert.equal(calls.length, ONE_CALL);
+  assert.equal(calls.length, HANDOFFS_PER_EVENT);
   assert.deepEqual(calls[0]?.input, report.input);
   assert.equal(calls[0]?.input.inbound_event_id, id);
   assert.notEqual(calls[0]?.options.idempotencyKey, report.key);
@@ -559,7 +579,7 @@ async function firstLine(stream: NodeJS.ReadableStream): Promise<string> {
   for await (const chunk of stream) {
     text += String(chunk);
     const end = text.indexOf("\n");
-    if (end >= NO_CALLS) return text.slice(0, end);
+    if (end >= LINE_START) return text.slice(0, end);
   }
   throw new Error("The child ended before it reported a handoff.");
 }

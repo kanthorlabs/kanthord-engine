@@ -54,16 +54,16 @@ const ERROR_ITEM = {
   message: "The consumer answer is indeterminate.",
   created_at: CREATED_AT,
 };
-const OK = 200;
-const NO_CALLS = 0;
-const ONE_CALL = 1;
-const TWO_CALLS = 2;
+const HANDOFFS_AFTER_DISCARD = 0;
+const HANDOFFS_PER_EVENT = 1;
+const RETRY_HANDOFF_INDEX = 1;
+const HANDOFFS_AFTER_RETRY = 2;
 const WAIT_TICKS = 1000;
 
 function completed(): Promise<OperationResult<unknown>> {
   return Promise.resolve({
     type: OperationResultType.Completed,
-    status: OK,
+    status: HttpStatus.OK,
     data: { disposition: "refused", reason: "unmatched" },
   });
 }
@@ -269,7 +269,7 @@ test("A discard after the reservation of a handoff answers 409 in_flight, and th
       }),
   );
   h.intake.dispatcher.wake();
-  await untilCalls(h.calls, ONE_CALL);
+  await untilCalls(h.calls, HANDOFFS_PER_EVENT);
   assert.equal(h.intake.dispatcher.inFlight(id), true);
   await assert.rejects(h.discard(id), refusal(HttpStatus.Conflict, IN_FLIGHT));
   assert.equal(h.stateOf(id), InboundEventState.Pending);
@@ -289,12 +289,12 @@ test("A retried event is handed over once more when the dispatcher wakes", async
   h.intake.dispatcher.wake();
   await h.intake.dispatcher.join();
   assert.equal(h.stateOf(id), InboundEventState.Failed);
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
   assert.equal((await h.retry(id)).state, InboundEventState.Pending);
   h.intake.dispatcher.wake();
   await h.intake.dispatcher.join();
-  assert.equal(h.calls.length, TWO_CALLS);
-  assert.equal(h.calls[ONE_CALL]?.input.inbound_event_id, id);
+  assert.equal(h.calls.length, HANDOFFS_AFTER_RETRY);
+  assert.equal(h.calls[RETRY_HANDOFF_INDEX]?.input.inbound_event_id, id);
   assert.equal(h.stateOf(id), InboundEventState.Succeeded);
 });
 
@@ -305,7 +305,7 @@ test("A retry on a started service hands the event over once more through the li
   h.answers.push(completed);
   assert.equal((await h.retry(id)).state, InboundEventState.Pending);
   await h.intake.dispatcher.join();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
   assert.equal(h.calls[0]?.input.inbound_event_id, id);
   assert.equal(h.stateOf(id), InboundEventState.Succeeded);
   assert.equal(await h.intake.stop(), null);
@@ -317,7 +317,7 @@ test("A discarded event is handed over by no later wake", async (t) => {
   await h.discard(id);
   h.intake.dispatcher.wake();
   await h.intake.dispatcher.join();
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, HANDOFFS_AFTER_DISCARD);
   assert.equal(h.stateOf(id), InboundEventState.Discarded);
 });
 
