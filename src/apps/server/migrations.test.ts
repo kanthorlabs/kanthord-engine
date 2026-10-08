@@ -74,10 +74,13 @@ const MISSION_TABLES = [
   MISSION_DEPENDENCY_TABLE,
   ...ERD2_MISSION_TABLES,
 ];
+const INTAKE_INBOUND_TABLE = "intake_inbound";
+const INTAKE_INBOUND_EVENT_TABLE = "intake_inbound_event";
+const INTAKE_OUTBOUND_REQUEST_TABLE = "intake_outbound_request";
 const INTAKE_TABLES = [
-  "intake_inbound",
-  "intake_inbound_event",
-  "intake_outbound_request",
+  INTAKE_INBOUND_TABLE,
+  INTAKE_INBOUND_EVENT_TABLE,
+  INTAKE_OUTBOUND_REQUEST_TABLE,
 ];
 const INTEGRITY_OK = "ok";
 const NO_PREFIX_MATCHES = 0;
@@ -292,7 +295,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all service migrations produce exactly the expected tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the nineteen tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -371,6 +374,7 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
   );
   for (const row of schema) assert.doesNotMatch(String(row.sql), /\bCHECK\b/i);
   const executionReferences: string[] = [];
+  const intakeReferences: string[] = [];
   for (const table of ALL_TABLES) {
     const indexes = store.database
       .prepare("SELECT * FROM pragma_index_list(?)")
@@ -392,9 +396,25 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
         ),
       );
     }
-    if (table === WORKER_INSTANCE_TABLE || table === SCHEDULER_EXECUTION_TABLE)
+    if (INTAKE_TABLES.includes(table)) {
+      intakeReferences.push(
+        ...references.map(
+          (row) =>
+            `${table}.${String(row.from)}->${String(row.table)}.${String(row.to)}`,
+        ),
+      );
+    }
+    if (
+      table === WORKER_INSTANCE_TABLE ||
+      table === SCHEDULER_EXECUTION_TABLE ||
+      table === INTAKE_INBOUND_TABLE ||
+      table === INTAKE_OUTBOUND_REQUEST_TABLE
+    )
       assert.deepEqual(references, []);
   }
+  assert.deepEqual(intakeReferences, [
+    `${INTAKE_INBOUND_EVENT_TABLE}.inbound_id->${INTAKE_INBOUND_TABLE}.id`,
+  ]);
   assert.deepEqual(executionReferences.sort(), [
     "mission_assessment.node_id->mission_node.id",
     "mission_attempt.node_id->mission_node.id",
