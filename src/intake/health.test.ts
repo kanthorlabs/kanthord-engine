@@ -59,6 +59,7 @@ const CHECK_DEADLINE_MS = 20;
 const CHECK_BUDGET_MS = 5000;
 const CREATED_AT = 1;
 const NO_CALLS = 0;
+const MALFORMED_CONFIGURATION = "{";
 const SERVICE_IDENTITY = {
   kind: IdentityKind.Service,
   service: INTAKE_SERVICE_NAME,
@@ -178,6 +179,12 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
     assert.ok(entry, "The inventory answers the inbound.");
     return entry;
   };
+  const corrupt = (id: string) =>
+    store.transaction((tx) =>
+      tx.database
+        .prepare("UPDATE intake_inbound SET configuration = ? WHERE id = ?")
+        .run(MALFORMED_CONFIGURATION, id),
+    );
   const stored = () =>
     store.transaction((tx) => ({
       inbounds: tx.database
@@ -192,6 +199,7 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
     calls,
     answers,
     insert,
+    corrupt,
     inventory,
     entryOf,
     stored,
@@ -377,4 +385,18 @@ test("a cancelled context sends no request and releases nothing", async (t) => {
   );
   assert.deepEqual(h.grants, []);
   assert.equal(h.calls.length, NO_CALLS);
+});
+
+test("a malformed poll row answers its entry and only its check rejects", async (t) => {
+  const h = harness(t);
+  const good = h.entryOf(h.insert(InboundKind.Poll));
+  const malformed = h.insert(InboundKind.Poll);
+  h.corrupt(malformed);
+  const entry = h.entryOf(malformed);
+  assert.equal(entry.capability, InboundCapability.PollAcquisition);
+  await assert.rejects(entry.check(checkContext(t)), SyntaxError);
+  assert.deepEqual(h.grants, []);
+  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(await good.check(checkContext(t)), ResourceStatus.Healthy);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
 });

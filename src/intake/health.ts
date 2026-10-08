@@ -55,12 +55,19 @@ function releaseRefusal(
 
 function pollCheck(
   dependencies: InboundHealthDependencies,
-  target: PollTarget,
+  row: InboundRow,
 ): ResourceCheck {
-  assert.ok(target.owner.length > NO_LENGTH, "A target names an owner.");
-  assert.ok(target.repo.length > NO_LENGTH, "A target names a repository.");
+  assert.equal(
+    row.kind,
+    InboundKind.Poll,
+    "A poll check reads a poll inbound.",
+  );
+  assert.ok(row.id.length > NO_LENGTH, "A poll check names its inbound.");
   return async (context, observe) => {
     throwIfCancelled(context);
+    const target = pollTargetOf(row);
+    assert.ok(target.owner.length > NO_LENGTH, "A target names an owner.");
+    assert.ok(target.repo.length > NO_LENGTH, "A target names a repository.");
     const hold: Hold = { material: null };
     try {
       const refusal = releaseRefusal(dependencies, target, hold);
@@ -96,7 +103,7 @@ function checkOf(
     return { capability: InboundCapability.Webhook, check: webhookCheck };
   return {
     capability: InboundCapability.PollAcquisition,
-    check: pollCheck(dependencies, pollTargetOf(row)),
+    check: pollCheck(dependencies, row),
   };
 }
 

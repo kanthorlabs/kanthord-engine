@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -22,6 +22,7 @@ import { ulid } from "ulid";
 import {
   domainHealth,
   FAKE_SSH_IDENTITY,
+  fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
@@ -31,9 +32,15 @@ import { HealthRegistry, ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { IntakeService } from "../../intake/index.ts";
 import {
+  Consumer,
+  INBOUND_CREATED_STATUS,
+  InboundKind,
+  InboundPlatform,
+  intakeOperations,
   INTAKE_SERVICE_NAME,
   type IntakeInventoryEntry,
 } from "../../intake/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
 import {
   PROJECT_ID_PREFIX,
   projectOperations,
@@ -61,6 +68,12 @@ const INBOUND_NAME = "inbound";
 const INBOUND_TARGET = "inbound:composition";
 const WEBHOOK_CAPABILITY = "webhook";
 const INVENTORY_FAILED = "gateway.healthcheck.inventory_failed";
+const POLL_CAPABILITY = "poll acquisition";
+const POLL_CREDENTIAL = "health-github";
+const POLL_KEY = "health_poll_github_key";
+const POLL_OWNER = "owner";
+const POLL_REPO = "repo";
+const MALFORMED_CONFIGURATION = "{";
 const entry = new URL("../../main.ts", import.meta.url).href;
 function layout(directory: string) {
   const env: NodeJS.ProcessEnv = {
@@ -172,6 +185,93 @@ test("an Intake entry of an unknown project reports intake in missing_inventorie
   const { error } = errorSchema.parse(await response.json());
   assert.equal(error.code, INVENTORY_FAILED);
   assert.deepEqual(error.details, { missing_inventories: [OWNER_INTAKE] });
+});
+
+type Fixture = Awaited<ReturnType<typeof gatewayFixture>>;
+
+async function created(
+  fixture: Fixture,
+  operation: { path: string; method: string },
+  status: number,
+  body: unknown,
+): Promise<unknown> {
+  const response = await fixture.request(operation.path, {
+    method: operation.method,
+    headers: {
+      Authorization: `Bearer ${fixture.token}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": ulid(),
+    },
+    body: JSON.stringify(body),
+  });
+  assert.equal(response.status, status, await response.clone().text());
+  return response.json();
+}
+
+async function pollFixture(t: TestContext) {
+  const gitHub = await fakeGitHub(t);
+  const fixture = await gatewayFixture(t, {
+    github: { baseUrl: gitHub.endpoint },
+  });
+  await created(fixture, repositoryOperations.create, HttpStatus.OK, {
+    name: POLL_CREDENTIAL,
+    platform: InboundPlatform.GitHub,
+    metadata: null,
+    secret: { key: POLL_KEY },
+  });
+  const project = projectOperations.create.output.parse(
+    await created(fixture, projectOperations.create, HttpStatus.OK, {
+      name: INVENTORY_PROJECT_NAME,
+    }),
+  );
+  const pollInbound = async () =>
+    intakeOperations["inbound.create"].output.parse(
+      await created(
+        fixture,
+        intakeOperations["inbound.create"],
+        INBOUND_CREATED_STATUS,
+        {
+          project_id: project.id,
+          kind: InboundKind.Poll,
+          platform: InboundPlatform.GitHub,
+          consumer: Consumer.MissionDeliveryAdmit,
+          credential: POLL_CREDENTIAL,
+          configuration: { resource: `${POLL_OWNER}/${POLL_REPO}` },
+        },
+      ),
+    ).id;
+  return { gitHub, fixture, pollInbound };
+}
+
+test("a malformed poll inbound answers unknown for its own entry and the report answers the other entries", async (t) => {
+  const { fixture, pollInbound } = await pollFixture(t);
+  const good = await pollInbound();
+  const malformed = await pollInbound();
+  fixture.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE intake_inbound SET configuration = ? WHERE id = ?")
+      .run(MALFORMED_CONFIGURATION, malformed),
+  );
+  const response = await requestHealthReport(fixture);
+  assert.equal(response.status, HttpStatus.OK);
+  const body = gatewayOperations.healthcheck.output.parse(
+    await response.json(),
+  );
+  assert.deepEqual(body.services.intake, {
+    global: {},
+    projects: {
+      [INVENTORY_PROJECT_NAME]: {
+        [encodeURIComponent(good)]: {
+          status: ResourceStatus.Healthy,
+          capability: POLL_CAPABILITY,
+        },
+        [encodeURIComponent(malformed)]: {
+          status: ResourceStatus.Unknown,
+          capability: POLL_CAPABILITY,
+        },
+      },
+    },
+  });
 });
 
 test("injected repository connector skips the tool gate and probe", async (t) => {
