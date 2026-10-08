@@ -24,6 +24,7 @@ import type { ActionCheckDependencies, IntakeCustody } from "./action-check.ts";
 import {
   ActionReadMethod,
   PLATFORM_CALL_DEADLINE_MS,
+  READ_ANSWER_MARGIN_MS,
   ResultClass,
   type ActionReadMethodValue,
   type ActionReadPage,
@@ -126,13 +127,18 @@ async function readPlatform(
   request: { reader: Reader; read: ReadTarget; query: ReadQuery },
   material: Material,
 ): Promise<ReadAnswer> {
+  const deadline = caller.context.deadline();
+  const callDeadlineAt = Date.now() + PLATFORM_CALL_DEADLINE_MS;
   const { signal, dispose } = abortSignal(caller.context);
   try {
     const call: GitHubCall = {
       token: apiKeySecretSchema.parse(material.value()).key,
       requester: request.reader.identity,
       signal,
-      deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
+      deadlineAt:
+        deadline === null
+          ? callDeadlineAt
+          : Math.min(callDeadlineAt, deadline - READ_ANSWER_MARGIN_MS),
     };
     if (request.query.method === ActionReadMethod.PullRequestGet)
       return await pullRequest(github, call, request.read);

@@ -11,9 +11,15 @@ import { httpClient } from "../../gateway/client.ts";
 import {
   IntakeErrorCode,
   PRESIGN_LIFETIME_S,
+  READ_ANSWER_MARGIN_MS,
   ResultClass,
   intakeOperations,
 } from "../../intake/contract.ts";
+import {
+  CancellationContext,
+  background,
+  type Context,
+} from "../../kernel/context.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { createIdentity } from "../../kernel/identity.ts";
@@ -380,14 +386,14 @@ async function setup(t: TestContext) {
         { params: { execution_id: executionId }, query: {}, body },
         { identity: machine },
       ),
-    check: (assetId: string) =>
+    check: (assetId: string, context?: Context) =>
       intake["storage.check"](
         {
           params: { execution_id: executionId, asset_id: assetId },
           query: {},
           body: null,
         },
-        { identity: machine },
+        { identity: machine, ...(context ? { context } : {}) },
       ),
     executionGet: (assetId: string) =>
       intake["execution.storage.get"](
@@ -571,26 +577,28 @@ test(
       }
     });
 
-    await t.test("a lost HEAD answer has no status", async () => {
-      const headObject = h.fixture.s3.headObject.bind(h.fixture.s3);
-      h.fixture.s3.headObject = (call, target) =>
-        headObject(
-          { ...call, deadlineAt: Date.now() + LOST_DEADLINE_MS },
-          target,
+    await t.test(
+      "a lost HEAD answer has no status before the caller deadline",
+      async () => {
+        const context = new CancellationContext(
+          background,
+          Date.now() + READ_ANSWER_MARGIN_MS + LOST_DEADLINE_MS,
         );
-      h.store.script.next = LOSE;
-      try {
-        const error = failed(
-          await h.check(h.checked),
-          BAD_GATEWAY_STATUS,
-          S3_PREFIX + ResultClass.RetryableRefusal,
-        );
-        assert.deepEqual(error.details, { status: null });
-      } finally {
-        h.store.script.next = null;
-        h.fixture.s3.headObject = headObject;
-      }
-    });
+        h.store.script.next = LOSE;
+        try {
+          const error = failed(
+            await h.check(h.checked, context),
+            BAD_GATEWAY_STATUS,
+            S3_PREFIX + ResultClass.RetryableRefusal,
+          );
+          assert.deepEqual(error.details, { status: null });
+          assert.equal(context.err(), null);
+        } finally {
+          h.store.script.next = null;
+          context.cancel();
+        }
+      },
+    );
 
     await t.test("every released material drops", () => {
       assert.ok(h.materials.length > ONE_PIN);

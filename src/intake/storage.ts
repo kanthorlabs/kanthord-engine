@@ -29,6 +29,7 @@ import type { IntakeCustody } from "./action-check.ts";
 import {
   IntakeErrorCode,
   PLATFORM_CALL_DEADLINE_MS,
+  READ_ANSWER_MARGIN_MS,
   ResultClass,
   type ObjectCheck,
   type PresignedGetAnswer,
@@ -215,13 +216,18 @@ async function callStorage<T>(
 ): Promise<T> {
   const secret = s3AccessKeySecretSchema.parse(material.value());
   assert.ok(secret.access_key_id.length);
+  const deadline = caller.context.deadline();
+  const callDeadlineAt = Date.now() + PLATFORM_CALL_DEADLINE_MS;
   const { signal, dispose } = abortSignal(caller.context);
   try {
     return await run({
       accessKeyId: secret.access_key_id,
       secretAccessKey: secret.secret_access_key,
       signal,
-      deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
+      deadlineAt:
+        deadline === null
+          ? callDeadlineAt
+          : Math.min(callDeadlineAt, deadline - READ_ANSWER_MARGIN_MS),
     });
   } finally {
     dispose();
