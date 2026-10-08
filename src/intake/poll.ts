@@ -4,9 +4,10 @@ import {
   apiKeySecretSchema,
   GrantKind,
   InboundOperation,
+  type InboundGrantInput,
   type Material,
 } from "../custody/contract.ts";
-import type { ServiceIdentity } from "../kernel/caller.ts";
+import type { CallerIdentity, ServiceIdentity } from "../kernel/caller.ts";
 import {
   abortSignal,
   CancellationContext,
@@ -34,11 +35,7 @@ import {
   PLATFORM_CALL_DEADLINE_MS,
 } from "./contract.ts";
 import { findEvent, insertEvent, pendingCount } from "./event-store.ts";
-import {
-  readInbound,
-  writeCheckpoint,
-  type InboundRow,
-} from "./inbound-store.ts";
+import { readInbound, writeCheckpoint } from "./inbound-store.ts";
 
 const NO_LENGTH = 0;
 const NO_ROOM = 0;
@@ -93,32 +90,64 @@ function checkpointOf(text: string | null): GitHubCheckpoint {
   return githubCheckpointSchema.parse(JSON.parse(text));
 }
 
-function releasePoll(
-  dependencies: PollCycleDependencies,
+export interface PollReleaseDependencies {
+  identity: ServiceIdentity;
+  custody: Pick<IntakeCustody, "authorizeOperation" | "release">;
+}
+
+export interface PollEventsRequest {
+  requester: CallerIdentity;
+  context: Context;
+  material: Material;
+  owner: string;
+  repo: string;
+  etag: string | null;
+}
+
+export function releasePollGrant(
+  dependencies: PollReleaseDependencies,
   tx: Transaction,
-  row: InboundRow,
-  resource: string,
+  facts: InboundGrantInput,
 ): Material {
-  assert.ok(row.credential !== null, "A poll names a credential.");
+  assert.ok(facts.inboundId.length > NO_LENGTH, "A poll names its inbound.");
+  assert.ok(facts.credential.length > NO_LENGTH, "A poll names a credential.");
   const now = Date.now();
   const grant = dependencies.custody.authorizeOperation(
     tx,
     {
       kind: GrantKind.Inbound,
       identity: dependencies.identity,
-      inbound: {
-        inboundId: row.id,
-        projectId: row.project_id,
-        credential: row.credential,
-        platform: row.platform,
-        resource,
-      },
+      inbound: facts,
       operation: InboundOperation.Poll,
     },
     now,
   );
   assert.equal(grant.execution, null, "A poll release pins nothing.");
   return dependencies.custody.release(tx, grant, now);
+}
+
+export async function requestPollEvents(
+  github: Pick<GitHubPlatform, "listEvents">,
+  request: PollEventsRequest,
+): Promise<GitHubAnswer<GitHubEventsAnswer>> {
+  assert.ok(request.owner.length > NO_LENGTH, "A poll names an owner.");
+  assert.ok(request.repo.length > NO_LENGTH, "A poll names a repository.");
+  const token = apiKeySecretSchema.parse(request.material.value()).key;
+  assert.ok(token.length > NO_LENGTH, "A poll request carries a token.");
+  const { signal, dispose } = abortSignal(request.context);
+  try {
+    return await github.listEvents(
+      {
+        token,
+        requester: request.requester,
+        signal,
+        deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
+      },
+      { owner: request.owner, repo: request.repo, etag: request.etag },
+    );
+  } finally {
+    dispose();
+  }
 }
 
 function prepareCycle(
@@ -142,32 +171,15 @@ function prepareCycle(
     kind: GitHubTargetKind.Inbound,
     resource,
   });
-  hold.material = releasePoll(dependencies, tx, row, resource);
+  assert.ok(row.credential !== null, "A poll names a credential.");
+  hold.material = releasePollGrant(dependencies, tx, {
+    inboundId: row.id,
+    projectId: row.project_id,
+    credential: row.credential,
+    platform: row.platform,
+    resource,
+  });
   return { ready: true, target: { inboundId, owner, repo, checkpoint } };
-}
-
-async function requestEvents(
-  dependencies: PollCycleDependencies,
-  context: Context,
-  material: Material,
-  target: PollTarget,
-): Promise<GitHubAnswer<GitHubEventsAnswer>> {
-  const token = apiKeySecretSchema.parse(material.value()).key;
-  assert.ok(token.length > NO_LENGTH, "A poll request carries a token.");
-  const { signal, dispose } = abortSignal(context);
-  try {
-    return await dependencies.github.listEvents(
-      {
-        token,
-        requester: dependencies.identity,
-        signal,
-        deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
-      },
-      { owner: target.owner, repo: target.repo, etag: target.checkpoint.etag },
-    );
-  } finally {
-    dispose();
-  }
 }
 
 export function storeBatch(
@@ -234,12 +246,15 @@ export async function pollCycle(
     );
     if (!preparation.ready) return preparation.outcome;
     assert.ok(hold.material, "A committed release holds the material.");
-    const answer = await requestEvents(
-      dependencies,
+    const { target } = preparation;
+    const answer = await requestPollEvents(dependencies.github, {
+      requester: dependencies.identity,
       context,
-      hold.material,
-      preparation.target,
-    );
+      material: hold.material,
+      owner: target.owner,
+      repo: target.repo,
+      etag: target.checkpoint.etag,
+    });
     if (context.err()) return CycleOutcome.Continue;
     if (!answer.ok) {
       logFailure(dependencies.logger, inboundId, answer.code);
