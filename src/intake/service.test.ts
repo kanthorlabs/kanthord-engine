@@ -43,6 +43,7 @@ import {
   type IntakeConsumers,
 } from "./contract.ts";
 import { eventState, insertEvent } from "./event-store.ts";
+import { INBOUND_TARGET_KIND, InboundCapability } from "./health.ts";
 import {
   allocateInboundId,
   insertInbound,
@@ -154,14 +155,6 @@ test("Intake probe answers 200 while running and 503 after stop", async (t) => {
   });
 });
 
-test("Intake answers no resource inventory entry", (t) => {
-  const { intake, store } = fixture(t);
-  assert.deepEqual(
-    store.transaction((tx) => intake.resourceInventory(tx)),
-    [],
-  );
-});
-
 function insertNaming(
   store: Store,
   kind: InboundKindValue,
@@ -191,6 +184,36 @@ function migratedFixture(t: TestContext) {
   ]);
   return h;
 }
+
+test("Intake answers one resource inventory entry per inbound", (t) => {
+  const { intake, store } = migratedFixture(t);
+  assert.deepEqual(
+    store.transaction((tx) => intake.resourceInventory(tx)),
+    [],
+  );
+  const webhook = insertNaming(store, InboundKind.Webhook, null);
+  const poll = insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  const entries = store.transaction((tx) => intake.resourceInventory(tx));
+  assert.deepEqual(
+    entries.map(({ project_id, target, capability }) => ({
+      project_id,
+      target,
+      capability,
+    })),
+    [
+      {
+        project_id: PROJECT_ID,
+        target: `${INBOUND_TARGET_KIND}:${webhook}`,
+        capability: InboundCapability.Webhook,
+      },
+      {
+        project_id: PROJECT_ID,
+        target: `${INBOUND_TARGET_KIND}:${poll}`,
+        capability: InboundCapability.PollAcquisition,
+      },
+    ].sort((left, right) => (left.target < right.target ? -1 : 1)),
+  );
+});
 
 test("inboundsNaming answers each inbound that names the credential", (t) => {
   const { intake, store } = migratedFixture(t);

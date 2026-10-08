@@ -34,6 +34,7 @@ import {
   type IntakeInventoryEntry,
 } from "./contract.ts";
 import { Dispatcher } from "./dispatcher.ts";
+import { inboundInventory } from "./health.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
 import { removeInbound } from "./inbound-delete.ts";
 import { getEvent, listEvents } from "./event-read.ts";
@@ -358,8 +359,7 @@ export class IntakeService implements Service, IntakeCollaborations {
   }
 
   resourceInventory(tx: Transaction): IntakeInventoryEntry[] {
-    assert.ok(tx);
-    return [];
+    return inboundInventory(this.dependencies, tx);
   }
 
   async healthcheck(): Promise<Healthcheck> {
