@@ -104,7 +104,7 @@ engine/
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── configuration.ts    # Inbound configuration schema per kind and platform, and resource identity
 │   │   ├── inbound-store.ts    # Inbound rows, the record projection, the checkpoint write, the poll inbound list, pending event count, and delete with events
-│   │   ├── inbound-create.ts   # Inbound create: webhook admission, project check, credential check, and insert step
+│   │   ├── inbound-create.ts   # Inbound create: admission of a webhook and a poll, project check, the poll release and first request, credential check, insert step, and loop start
 │   │   ├── inbound-delete.ts   # Inbound delete that refuses a pending event and removes the events and the row
 │   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret
 │   │   ├── event-store.ts      # Inbound event rows, the repeat lookup, pending count, and the record projection
