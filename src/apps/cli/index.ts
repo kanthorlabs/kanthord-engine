@@ -19,6 +19,7 @@ import { gatewayOperations } from "../../gateway/contract.ts";
 import { openapiPath } from "../../gateway/local.ts";
 import { writeOpenAPI } from "../../gateway/local.ts";
 import { httpClient } from "../../gateway/client.ts";
+import { packageVersion } from "../../kernel/version.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
@@ -182,6 +183,11 @@ export function createProgram(
     .name(PROGRAM_NAME)
     .description("kanthord work orchestration server and CLI");
   program.option("--verbose", "Show verbose output", false);
+  program.version(
+    packageVersion(),
+    "-V, --version",
+    "Print the package version",
+  );
   program.exitOverride();
   program.allowExcessArguments(false);
   program.configureHelp({ showGlobalOptions: true });

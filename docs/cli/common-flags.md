@@ -20,6 +20,7 @@ validation in command documents. Heading anchors remain usable when lines move.
 | [`--token`](#--token)                     | Supply a bearer credential.                     |
 | [`--verbose`](#--verbose)                 | Show extra output where supported.              |
 | [`--help`](#--help)                       | Display usage without running the command.      |
+| [`--version`](#--version)                 | Print the package version.                      |
 | [`--config`](#--config)                   | Select the local server configuration file.     |
 | [`--file`](#--file)                       | Read a named structured-input file.             |
 | [`--idempotency-key`](#--idempotency-key) | Identify one logical remote mutation for retry. |
@@ -139,6 +140,14 @@ Every group and leaf has help. The target help contract includes arguments,
 requiredness, validation, defaults, and applicable inherited options. See
 [help semantics](./other.md#help-semantics) for bare-command exit behavior and
 command-specific path annotations. Help is not a separate root command.
+
+## `--version`
+
+**Implemented root option:** `-V, --version` prints the package version of
+`package.json`, for example `26.10.1`, followed by a newline to stdout, and
+exits `0`. It performs no command work, reads no configuration and calls no
+server. The single binary prints the version that its embedded package
+manifest carries.
 
 ## `--config`
 

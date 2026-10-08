@@ -748,6 +748,8 @@ parser option and its no-work behavior. Command-specific forms are:
   List exactly the three global names, four component groups and six service
   groups. There is no
   top-level `help` command; `kanthord help` currently fails as excess input.
+- `kanthord -V` or `kanthord --version`: print the package version to stdout
+  and exit `0`. See [`--version`](./common-flags.md#--version).
 - `kanthord` with no command: print root help to stdout and exit `1`; start no
   application. This differs deliberately from an explicit help request.
 - `kanthord <group> --help`: print that group's commands and applicable options

@@ -12,6 +12,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
+import { packageVersion } from "../../kernel/version.ts";
 import { IdentityKind, CLIENT_IDENTITY_PREFIX } from "../../kernel/caller.ts";
 import {
   deriveClientSecret,
@@ -671,6 +672,16 @@ test("serve worker with a client_secret reports an unavailable server without ch
   assert.match(unavailable.stderr, /^worker\.version\.unavailable:/);
   assert.deepEqual(readdirSync(directory, { recursive: true }), filesBefore);
   assert.equal(readFileSync(path, "utf8"), content);
+});
+
+test("--version prints the package version and exits without work", (t) => {
+  const env = environment(temporary(t));
+  for (const flag of ["--version", "-V"]) {
+    const result = invocation([flag], env);
+    assert.equal(result.status, ExitCode.Success, result.stderr);
+    assert.equal(result.stdout, `${packageVersion()}\n`);
+  }
+  assert.equal(existsSync(env.KANTHORD_CONFIG!), false);
 });
 
 test("config init is non-interactive, writes validated private configuration without displaying secrets and preserves existing files", (t) => {
