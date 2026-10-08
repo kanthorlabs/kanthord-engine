@@ -94,6 +94,7 @@ export interface CallerContext {
   /** Exact delivery bytes and headers; never reconstructed from parsed JSON. */
   delivery?: { bytes: ArrayBuffer; headers: Headers };
   request?: Request;
+  host?: string;
   commit<T>(write: (transaction: Transaction) => T): T;
 }
 export type Handler<I extends z.ZodType, O extends z.ZodType> = (

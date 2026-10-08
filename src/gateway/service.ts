@@ -504,6 +504,7 @@ export class GatewayService implements Service {
                 delivery,
                 rejection,
                 request: context.req.raw,
+                host: context.req.header("host"),
                 traceparent: context.req.header("traceparent"),
                 tracestate: context.req.header("tracestate"),
               },

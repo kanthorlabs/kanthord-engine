@@ -4,7 +4,14 @@ import { directClient } from "./index.ts";
 import { generateHumanJWT } from "./local.ts";
 import { gatewayOperations } from "./contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { OperationResultType } from "../kernel/operation.ts";
+import { z } from "zod";
+import {
+  emptyInput,
+  OperationLifetime,
+  OperationRegistry,
+  OperationResultType,
+  StoreName,
+} from "../kernel/operation.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { gatewayFixture } from "./test-support.ts";
 
@@ -38,4 +45,35 @@ test("one direct client forwards each call's identity without retaining a previo
       assert.equal(refused.status, HttpStatus.Unauthorized);
     }
   }
+});
+
+test("HTTP invocations forward the Host header and direct invocations forward none", async (t) => {
+  const registry = new OperationRegistry();
+  const operation = {
+    id: "test.host",
+    service: "test",
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    method: "GET",
+    path: "/api/test/host",
+    access: "public",
+    timeoutMs: 1000,
+    mutation: false,
+    input: emptyInput,
+    output: z.strictObject({ host: z.string().nullable() }),
+    status: 200,
+    description: "Expose the Host header seen by a test handler.",
+  } as const;
+  registry.register(operation, (_input, caller) => ({
+    host: caller.host ?? null,
+  }));
+  const fixture = await gatewayFixture(t, { registry });
+  const response = await fixture.request(operation.path);
+  assert.equal(response.status, HttpStatus.OK);
+  assert.deepEqual(operation.output.parse(await response.json()), {
+    host: new URL(fixture.endpoint).host,
+  });
+  const result = await fixture.gateway.invocation.invoke(operation.id, input);
+  assert.equal(result.status, HttpStatus.OK);
+  assert.deepEqual(result.body, { host: null });
 });

@@ -287,6 +287,12 @@ default; absence leaves selection to the platform's supported flow. Custody
 maps `device` to pi-ai interaction value `device_code`. A platform with one
 mode ignores the requested mode. No terminal prompt is permitted.
 
+Browser mode needs a browser on the server host, because the provider returns
+the browser to a fixed `localhost` callback. The server reads the `Host` header
+of the request. A host that is not `localhost`, `127.*` or `[::1]` refuses
+`--mode browser` with `400 credential.login.browser_unavailable`. With no
+`--mode`, that host selects `device`.
+
 The unary mutation starts a session and answers its identity, address, code
 and expiry. The command prints those values, one per line, plus the mutation
 key, and exits `0`. This line output is an exception to ordinary JSON output.
@@ -362,6 +368,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.login.pending`                   | Another login is pending for this platform and human.                                           | login                                                                  |
 | 404   | `credential.login.not_found`                 | The login session does not exist.                                                               | login-code, login-status                                               |
 | 400   | `credential.login.mode_unsupported`          | The platform does not support the selected login mode.                                          | login                                                                  |
+| 400   | `credential.login.browser_unavailable`       | Browser mode is requested through a `Host` that is not a loopback name.                         | login                                                                  |
 | 503   | `credential.login.failed`                    | The login flow fails before it answers an address.                                              | login                                                                  |
 | 404   | `credential.credential.not_found`            | The credential does not exist, or its platform is not an LLM platform.                          | get, rotate, update-metadata, revoke, archive, verify, worker handover |
 | local | `cli.llm.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.                                           | login                                                                  |

@@ -39,6 +39,7 @@ import {
   type ProviderCheckAnswer,
 } from "./contract.ts";
 import {
+  isLoopbackHost,
   loginMode,
   loginNotFound,
   LOGIN_VALUE_NOT_AWAITED,
@@ -389,7 +390,11 @@ export class LlmComponent implements Service {
         "Unsupported credential entry.",
       );
     this.store.transaction((tx) => this.records.requireAvailableName(tx, name));
-    const mode = loginMode(platform, requested);
+    const mode = loginMode(
+      platform,
+      requested,
+      caller.host === undefined || isLoopbackHost(caller.host),
+    );
     if (caller.identity?.kind !== IdentityKind.Human) throw invalidInput();
     const session = this.sessions.start(
       platform,

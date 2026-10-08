@@ -43,14 +43,28 @@ const PUBLIC_GITHUB_DOMAIN = "";
 const LOGIN_FAILED = "login failed";
 const LOGIN_FAILED_CODE = "credential.login.failed";
 const MODE_UNSUPPORTED = "credential.login.mode_unsupported";
+export const BROWSER_UNAVAILABLE = "credential.login.browser_unavailable";
+const HOST_PROBE_SCHEME = "http://";
+const IPV4_LOOPBACK_PREFIX = "127.";
+const LOOPBACK_NAMES: readonly string[] = ["localhost", "[::1]"];
 const INVALID_INPUT = "credential.input.invalid";
 export const LOGIN_NOT_FOUND = "credential.login.not_found";
 export const LOGIN_VALUE_NOT_AWAITED = "credential.login.value_not_awaited";
 export type OAuthSecret = { refresh: string; access: string; expires: number };
 
+export function isLoopbackHost(host: string): boolean {
+  const hostname = URL.parse(`${HOST_PROBE_SCHEME}${host}`)?.hostname;
+  if (hostname === undefined) return false;
+  return (
+    LOOPBACK_NAMES.includes(hostname) ||
+    hostname.startsWith(IPV4_LOOPBACK_PREFIX)
+  );
+}
+
 export function loginMode(
   platform: Platform,
-  requested?: string,
+  requested: string | undefined,
+  browserReachable: boolean,
 ): LoginSessionMode {
   if (
     requested !== undefined &&
@@ -62,15 +76,24 @@ export function loginMode(
       "Invalid input.",
     );
   const modes = LLM_PLATFORMS[platform].login_modes;
+  const usable = browserReachable
+    ? modes
+    : modes.filter((mode) => mode !== LoginSessionMode.Browser);
   const selected =
     modes.length === SINGLE_MODE
       ? modes[FIRST_MODE]
-      : (requested ?? modes[FIRST_MODE]);
+      : (requested ?? usable[FIRST_MODE]);
   if (!selected || !modes.includes(selected as LoginSessionMode))
     throw new OperationError(
       HttpStatus.BadRequest,
       MODE_UNSUPPORTED,
       "Unsupported login mode.",
+    );
+  if (!usable.includes(selected as LoginSessionMode))
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      BROWSER_UNAVAILABLE,
+      "Browser login needs a browser on the server host. Use device mode.",
     );
   return selected as LoginSessionMode;
 }

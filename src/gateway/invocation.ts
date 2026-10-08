@@ -42,6 +42,7 @@ export interface InvocationOptions {
   delivery?: CallerContext["delivery"];
   rejection?: GatewayError;
   request?: Request;
+  host?: string;
 }
 
 export interface ExecutionLookup {
@@ -378,6 +379,7 @@ export class Invocation {
         tracestate: options.tracestate,
         delivery: options.delivery,
         request,
+        host: options.host,
         commit: <T>(
           write: (transaction: import("../kernel/store.ts").Transaction) => T,
         ): T => {
