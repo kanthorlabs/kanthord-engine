@@ -281,10 +281,28 @@ function remainingMs(deadlineAt: number): number {
   return deadlineAt - Date.now();
 }
 
+function freshDirectory(): Promise<string> {
+  return mkdtemp(join(tmpdir(), FRESH_CLONE_PREFIX));
+}
+
+async function freshWriteDirectory(): Promise<string> {
+  try {
+    return await freshDirectory();
+  } catch (error) {
+    throw new GitWriteError(
+      GitStage.BeforePush,
+      new Diagnostic(GIT_FAILED, "The fresh directory is not available.", {
+        cause: error,
+      }),
+    );
+  }
+}
+
 async function inFreshDirectory<T>(
+  create: () => Promise<string>,
   work: (directory: string) => Promise<T>,
 ): Promise<T> {
-  const directory = await mkdtemp(join(tmpdir(), FRESH_CLONE_PREFIX));
+  const directory = await create();
   try {
     assert.equal(
       (await stat(directory)).mode & PERMISSION_BITS,
@@ -336,7 +354,7 @@ export async function mergePushFresh(
 ): Promise<{ commit: string }> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.base_branch.startsWith("-"));
-  return inFreshDirectory(async (directory) => {
+  return inFreshDirectory(freshWriteDirectory, async (directory) => {
     const git = gitIn(directory, context, deadlineAt, "merge push");
     await atStage(GitStage.BeforePush, async () => {
       await clone(input.address, directory, context, remainingMs(deadlineAt));
@@ -370,7 +388,7 @@ export async function pushSnapshotFresh(
 ): Promise<void> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.branch.startsWith("-"));
-  await inFreshDirectory(async (directory) => {
+  await inFreshDirectory(freshWriteDirectory, async (directory) => {
     const git = gitIn(directory, context, deadlineAt, "push snapshot");
     await atStage(GitStage.BeforePush, async () => {
       await clone(input.address, directory, context, remainingMs(deadlineAt));
@@ -390,7 +408,7 @@ export async function landedOn(
 ): Promise<Landing> {
   assert.match(input.commit, COMMIT_PATTERN);
   assert.ok(!input.branch.startsWith("-"));
-  return inFreshDirectory(async (directory) => {
+  return inFreshDirectory(freshDirectory, async (directory) => {
     const operation = "landed on";
     const git = gitIn(directory, context, deadlineAt, operation);
     await clone(input.address, directory, context, remainingMs(deadlineAt));

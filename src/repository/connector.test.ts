@@ -325,6 +325,32 @@ test("pushSnapshotFresh throws before_push for a commit that the remote lacks", 
   assertNoClone(scratch);
 });
 
+test("a missing temporary directory throws before_push for both git writes", async (t) => {
+  const { origin, snapshot, scratch } = await remote(t);
+  process.env.TMPDIR = join(scratch, "missing");
+  const beforePush = (error: unknown) =>
+    error instanceof GitWriteError &&
+    error.stage === GitStage.BeforePush &&
+    error.code === GIT_FAILED;
+  await assert.rejects(
+    mergePushFresh(
+      { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
+      background,
+      deadlineAt(),
+    ),
+    beforePush,
+  );
+  await assert.rejects(
+    pushSnapshotFresh(
+      { address: origin, branch: NODE_BRANCH, commit: snapshot },
+      background,
+      deadlineAt(),
+    ),
+    beforePush,
+  );
+  assertNoClone(scratch);
+});
+
 test("landedOn answers the oldest first-parent commit that contains the snapshot", async (t) => {
   const { origin, seed, snapshot, scratch, commit } = await remote(t);
   const { commit: merge } = await mergePushFresh(
