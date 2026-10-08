@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setImmediate as tick } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import pino, { type Logger } from "pino";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
@@ -10,6 +13,7 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import { temporary } from "../kernel/test-support.ts";
 import {
   Consumer,
   ERROR_ARRAY_MAX_BYTES,
@@ -420,3 +424,83 @@ test("A thrown consumer call writes failed with system.operation.unknown and no 
   await handOver(h);
   assert.equal(h.calls.length, ONE_CALL);
 });
+
+test("A start hands an event over again after a kill of the process during its handoff", async (t) => {
+  const path = join(temporary(t), "kanthord.db");
+  const seed = new Store(path);
+  migrate(seed);
+  const id = addEvent(seed, addInbound(seed), "d-1");
+  seed.close();
+  const child = spawn(
+    process.execPath,
+    ["--input-type=module", "-e", childScript(path)],
+    { cwd: import.meta.dirname, stdio: ["ignore", "pipe", "inherit"] },
+  );
+  t.after(() => {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  });
+  const first = await firstLine(child.stdout);
+  const report = JSON.parse(first) as {
+    input: ConsumerCall["input"];
+    key: string;
+    state: string;
+  };
+  assert.equal(report.state, InboundEventState.Pending);
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGKILL");
+  await exited;
+  const store = new Store(path);
+  t.after(() => store.close());
+  const calls: ConsumerCall[] = [];
+  const dispatcher = dispatcherOver(
+    store,
+    pino({ enabled: false }),
+    consumersOf(calls, [completed({ disposition: "duplicate", reason: null })]),
+  );
+  dispatcher.wake();
+  await dispatcher.join();
+  assert.equal(calls.length, ONE_CALL);
+  assert.deepEqual(calls[0]?.input, report.input);
+  assert.equal(calls[0]?.input.inbound_event_id, id);
+  assert.notEqual(calls[0]?.options.idempotencyKey, report.key);
+  assert.equal(recordOf(store, id).state, InboundEventState.Succeeded);
+});
+
+function childScript(path: string): string {
+  const url = (file: string) =>
+    pathToFileURL(join(import.meta.dirname, file)).href;
+  return `
+const { Store } = await import(${JSON.stringify(url("../kernel/store.ts"))});
+const { background } = await import(${JSON.stringify(url("../kernel/context.ts"))});
+const { Dispatcher } = await import(${JSON.stringify(url("./dispatcher.ts"))});
+const { default: pino } = await import("pino");
+const store = new Store(${JSON.stringify(path)});
+setInterval(() => {}, 1000);
+const dispatcher = new Dispatcher({
+  store,
+  logger: pino({ enabled: false }),
+  identity: ${JSON.stringify(IDENTITY)},
+  context: background,
+  consumers: {
+    ${JSON.stringify(Consumer.MissionDeliveryAdmit)}: (input, options) => {
+      const { state } = store.database
+        .prepare("SELECT state FROM intake_inbound_event WHERE id = ?")
+        .get(input.inbound_event_id);
+      process.stdout.write(JSON.stringify({ input, key: options.idempotencyKey, state }) + "\\n");
+      return new Promise(() => {});
+    },
+  },
+});
+dispatcher.wake();
+`;
+}
+
+async function firstLine(stream: NodeJS.ReadableStream): Promise<string> {
+  let text = "";
+  for await (const chunk of stream) {
+    text += String(chunk);
+    const end = text.indexOf("\n");
+    if (end >= NO_CALLS) return text.slice(0, end);
+  }
+  throw new Error("The child ended before it reported a handoff.");
+}
