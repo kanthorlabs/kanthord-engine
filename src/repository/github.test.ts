@@ -616,6 +616,14 @@ test("foldPullRequest folds the three states of a pull request", () => {
     ),
   );
   assert.throws(() => github.foldPullRequest({ number: 7 }, merged));
+  assert.throws(
+    () =>
+      github.foldPullRequest(
+        { ...PULL_REQUEST_BODY, state: "closed", merged: true },
+        merged,
+      ),
+    { name: "ZodError" },
+  );
 });
 
 test("an unexpected success body answers the class of a lost answer", async (t) => {

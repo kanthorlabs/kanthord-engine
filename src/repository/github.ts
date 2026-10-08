@@ -134,11 +134,20 @@ type Cursor = z.infer<typeof cursorSchema>;
 
 const createdPullRequestSchema = z.looseObject({ number: z.int() });
 const pullRequestListSchema = z.array(z.looseObject({ number: z.int() }));
-const pullRequestStateSchema = z.looseObject({
-  state: z.string(),
-  merged: z.boolean(),
-  merge_commit_sha: z.string().nullable(),
-});
+const pullRequestStateSchema = z
+  .looseObject({
+    state: z.string(),
+    merged: z.boolean(),
+    merge_commit_sha: z.string().nullable(),
+  })
+  .superRefine((pullRequest, context) => {
+    if (pullRequest.merged && pullRequest.merge_commit_sha === null)
+      context.addIssue({
+        code: "custom",
+        path: ["merge_commit_sha"],
+        message: "A merged pull request names its merge commit.",
+      });
+  });
 
 export interface GitHubOptions {
   baseUrl?: string;

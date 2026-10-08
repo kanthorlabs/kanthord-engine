@@ -488,17 +488,29 @@ test(
         failed(await pullRequest(), BAD_GATEWAY_STATUS, RETRYABLE_CODE, {
           status: null,
         });
+        h.gitHub.respondNext(HttpStatus.OK, { ...closed, merged: true });
+        failed(await pullRequest(), BAD_GATEWAY_STATUS, RETRYABLE_CODE, {
+          status: null,
+        });
         dropped(h.materials, h.materials.length);
       },
     );
 
     await t.test("a thrown error drops the material", async () => {
       const before = h.materials.length;
-      h.gitHub.respondNext(HttpStatus.OK, {
-        ...closed,
-        merged: true,
-      });
-      failed(await pullRequest(), HttpStatus.InternalServerError, UNKNOWN_CODE);
+      const getPullRequest = h.fixture.github.getPullRequest;
+      h.fixture.github.getPullRequest = async () => {
+        throw new Error("thrown read");
+      };
+      try {
+        failed(
+          await pullRequest(),
+          HttpStatus.InternalServerError,
+          UNKNOWN_CODE,
+        );
+      } finally {
+        h.fixture.github.getPullRequest = getPullRequest;
+      }
       assert.equal(h.materials.length, before + SINGLE_INSTANCE);
       dropped(h.materials, h.materials.length);
     });
