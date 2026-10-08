@@ -1,6 +1,15 @@
 import { randomBytes } from "node:crypto";
+import {
+  OperationResultType,
+  type ClientOptions,
+} from "../kernel/operation.ts";
 import { GitHubPlatform } from "../repository/github.ts";
 import { S3Platform } from "../storage/index.ts";
+import {
+  Consumer,
+  type ConsumerValue,
+  type IntakeConsumers,
+} from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 
 const CLOSED_LOCAL_PORT = "http://127.0.0.1:9";
@@ -10,9 +19,37 @@ function unexpectedCollaboration(): never {
   throw new Error("Unexpected collaboration.");
 }
 
+export interface ConsumerCall {
+  consumer: ConsumerValue;
+  input: Parameters<IntakeConsumers[keyof IntakeConsumers]>[0];
+  options: ClientOptions;
+}
+
+export function recordingConsumers(): {
+  consumers: IntakeConsumers;
+  calls: ConsumerCall[];
+} {
+  const calls: ConsumerCall[] = [];
+  return {
+    calls,
+    consumers: {
+      [Consumer.MissionDeliveryAdmit]: (input, options) => {
+        calls.push({ consumer: Consumer.MissionDeliveryAdmit, input, options });
+        return Promise.resolve({ type: OperationResultType.Indeterminate });
+      },
+    },
+  };
+}
+
 export function unusedActionDependencies(): Pick<
   Dependencies,
-  "custody" | "github" | "gitWriter" | "s3" | "masterKey" | "projects"
+  | "custody"
+  | "github"
+  | "gitWriter"
+  | "s3"
+  | "masterKey"
+  | "projects"
+  | "consumers"
 > {
   return {
     custody: {
@@ -31,5 +68,6 @@ export function unusedActionDependencies(): Pick<
     s3: new S3Platform(),
     masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
     projects: { get: unexpectedCollaboration },
+    consumers: recordingConsumers().consumers,
   };
 }

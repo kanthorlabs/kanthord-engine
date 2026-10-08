@@ -66,6 +66,7 @@ import {
 import { ProjectService, projectMigrations } from "../../project/index.ts";
 import { IntakeService, intakeMigrations } from "../../intake/index.ts";
 import {
+  Consumer,
   INTAKE_SERVICE_NAME,
   intakeOperations,
 } from "../../intake/contract.ts";
@@ -512,6 +513,13 @@ export function composeServices(options: {
     s3,
     masterKey: options.config.master_key,
     projects: { get: projectClient.get },
+    consumers: {
+      [Consumer.MissionDeliveryAdmit]: (input, consumerOptions) =>
+        missionClient["delivery.admit"](
+          { params: {}, query: {}, body: input },
+          consumerOptions,
+        ),
+    },
     pendingEventLimit: options.intake?.pendingEventLimit,
     pollIntervalMs: options.intake?.pollIntervalMs,
   });

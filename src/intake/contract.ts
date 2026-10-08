@@ -6,6 +6,8 @@ import {
   AccessPolicy,
   OperationLifetime,
   StoreName,
+  type ClientOptions,
+  type OperationResult,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 
@@ -277,6 +279,21 @@ export type ActionReadPage = z.infer<typeof actionReadPageSchema>;
 export type PresignedPutAnswer = z.infer<typeof presignedPutSchema>;
 export type PresignedGetAnswer = z.infer<typeof presignedGetSchema>;
 export type ObjectCheck = z.infer<typeof objectCheckSchema>;
+
+export type IntakeConsumers = Record<
+  ConsumerValue,
+  (
+    input: {
+      inbound_event_id: string;
+      project_id: string;
+      platform: string;
+      resource: string;
+      event: string;
+      metadata: Record<string, unknown>;
+    },
+    options: ClientOptions,
+  ) => Promise<OperationResult<unknown>>
+>;
 
 export interface IntakeCollaborations {
   inboundsNaming(

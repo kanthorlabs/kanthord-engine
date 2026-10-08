@@ -38,6 +38,7 @@ import {
   intakeOperations,
   type InboundCreate,
   type InboundKindValue,
+  type IntakeConsumers,
 } from "./contract.ts";
 import {
   allocateInboundId,
@@ -46,7 +47,10 @@ import {
 } from "./inbound-store.ts";
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
-import { unusedActionDependencies } from "./test-support.ts";
+import {
+  recordingConsumers,
+  unusedActionDependencies,
+} from "./test-support.ts";
 
 const STOPPED_CODE = "intake.lifecycle.stopped";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -97,6 +101,38 @@ test("Intake runs each lifecycle phase once and refuses a restart", async (t) =>
 
 test("Intake start refuses the identity of another service", async (t) => {
   const { intake } = fixture(t, "mission");
+  await assert.rejects(intake.start(), assert.AssertionError);
+});
+
+function consumerFixture(t: TestContext, consumers: IntakeConsumers) {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  return new IntakeService({
+    store,
+    logger: pino({ enabled: false }),
+    health: new HealthRegistry(),
+    identity: identity(INTAKE_SERVICE_NAME),
+    ...unusedActionDependencies(),
+    consumers,
+  });
+}
+
+test("Intake start accepts one consumer function per Consumer value and calls none", async (t) => {
+  const { consumers, calls } = recordingConsumers();
+  const intake = consumerFixture(t, consumers);
+  assert.equal(await intake.start(), null);
+  assert.equal(calls.length, NO_CALLS);
+});
+
+test("Intake start refuses consumers without a function for a Consumer value", async (t) => {
+  const intake = consumerFixture(t, {} as IntakeConsumers);
+  await assert.rejects(intake.start(), assert.AssertionError);
+});
+
+test("Intake start refuses a consumer that is not a function", async (t) => {
+  const intake = consumerFixture(t, {
+    [Consumer.MissionDeliveryAdmit]: Consumer.MissionDeliveryAdmit,
+  } as unknown as IntakeConsumers);
   await assert.rejects(intake.start(), assert.AssertionError);
 });
 

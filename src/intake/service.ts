@@ -16,6 +16,7 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
+import { ValueType } from "../kernel/values.ts";
 import type { GitHubPlatform } from "../repository/github.ts";
 import type { GitWriter } from "../repository/index.ts";
 import type { S3Platform } from "../storage/index.ts";
@@ -23,11 +24,13 @@ import { checkAction, type IntakeCustody } from "./action-check.ts";
 import { performAction } from "./action-perform.ts";
 import { readAction } from "./action-read.ts";
 import {
+  Consumer,
   INTAKE_SERVICE_NAME,
   intakeOperations,
   PENDING_EVENT_LIMIT,
   POLL_INTERVAL_MS,
   type IntakeCollaborations,
+  type IntakeConsumers,
 } from "./contract.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
 import { removeInbound } from "./inbound-delete.ts";
@@ -49,6 +52,13 @@ import {
 
 const NO_LENGTH = 0;
 
+function assertConsumers(consumers: IntakeConsumers): void {
+  const expected = Object.values(Consumer);
+  assert.deepEqual(Object.keys(consumers).sort(), [...expected].sort());
+  for (const consumer of expected)
+    assert.equal(typeof consumers[consumer], ValueType.Function);
+}
+
 export interface Dependencies {
   store: Store;
   logger: Logger;
@@ -60,6 +70,7 @@ export interface Dependencies {
   s3: S3Platform;
   masterKey: string;
   projects: InboundProjects;
+  consumers: IntakeConsumers;
   pendingEventLimit?: number;
   pollIntervalMs?: number;
 }
@@ -219,6 +230,7 @@ export class IntakeService implements Service, IntakeCollaborations {
 
   private async open(): Promise<Error | null> {
     assert.equal(this.dependencies.identity.service, INTAKE_SERVICE_NAME);
+    assertConsumers(this.dependencies.consumers);
     this.dependencies.health.register(INTAKE_SERVICE_NAME, () =>
       this.healthcheck(),
     );
