@@ -10,15 +10,21 @@ import {
   intakeOperations,
 } from "../../intake/contract.ts";
 import {
+  handleMutationResult,
   handleReadResult,
   parsePositiveInt,
   requireToken,
+  resolveKey,
   singleUse,
 } from "./shared.ts";
 
 const EVENT = "event";
 const LIST = "list";
 const GET = "get";
+const RETRY = "retry";
+const DISCARD = "discard";
+const DELETE = "delete";
+const KEY_OPTION = "--idempotency-key";
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 
@@ -26,6 +32,14 @@ type Options = Record<string, string | boolean | string[] | undefined>;
 
 function code(leaf: string, suffix: string): string {
   return `cli.intake.${EVENT}.${leaf}.${suffix}`;
+}
+
+function requireIdentity(value: string, leaf: string): void {
+  if (!identitySchema(INBOUND_EVENT_ID_PREFIX).safeParse(value).success)
+    throw new Diagnostic(
+      code(leaf, "invalid_inbound_event_id"),
+      "Expected a canonical inbound_event identity.",
+    );
 }
 
 function present<T extends Record<string, unknown>>(fields: T): Partial<T> {
@@ -86,6 +100,61 @@ async function get(eventId: string, command: Command): Promise<void> {
   );
 }
 
+async function transition(
+  operationName: "inbound.event.retry" | "inbound.event.discard",
+  leaf: string,
+  eventId: string,
+  command: Command,
+): Promise<void> {
+  const operation = intakeOperations[operationName];
+  assert.equal(operation.access, AccessPolicy.Human);
+  assert.equal(operation.mutation, true);
+  requireIdentity(eventId, leaf);
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, code(leaf, "token_required"));
+  const key = resolveKey(options);
+  const result = await httpClient(intakeOperations, endpoint, token)[
+    operationName
+  ](
+    { params: { inbound_event_id: eventId }, query: {}, body: null },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(result, code(leaf, "indeterminate"), key);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
+async function remove(command: Command): Promise<void> {
+  const operation = intakeOperations["inbound.event.delete"];
+  assert.equal(operation.access, AccessPolicy.Human);
+  assert.equal(operation.mutation, true);
+  const options = command.optsWithGlobals<Options>();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, code(DELETE, "token_required"));
+  const key = resolveKey(options as { idempotencyKey?: string });
+  const result = await httpClient(intakeOperations, endpoint, token)[
+    "inbound.event.delete"
+  ](
+    {
+      params: {},
+      query: {},
+      body: present({
+        state: options.state as never,
+        from: options.from as never,
+        to: options.to as never,
+        ids: options.id as never,
+      }),
+    },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(result, code(DELETE, "indeterminate"), key);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
 export function addEventCommands(intake: Command): void {
   const event = intake.command(EVENT).description("Inbound event commands");
   event.action(() => event.help());
@@ -106,4 +175,33 @@ export function addEventCommands(intake: Command): void {
     .description("Get an inbound event as JSON")
     .argument("<inbound-event-id>", "Inbound event identity")
     .action((id: string, _options, command: Command) => get(id, command));
+  event
+    .command(RETRY)
+    .description("Turn a failed inbound event back to pending")
+    .argument("<inbound-event-id>", "Inbound event identity")
+    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .action((id: string, _options, command: Command) =>
+      transition("inbound.event.retry", RETRY, id, command),
+    );
+  event
+    .command(DISCARD)
+    .description("Discard a pending or a failed inbound event")
+    .argument("<inbound-event-id>", "Inbound event identity")
+    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .action((id: string, _options, command: Command) =>
+      transition("inbound.event.discard", DISCARD, id, command),
+    );
+  event
+    .command(DELETE)
+    .description("Delete settled inbound events")
+    .option("--state <state>", "State of the range", singleUse("--state"))
+    .option("--from <id>", "First identity of the range", singleUse("--from"))
+    .option("--to <id>", "Last identity of the range", singleUse("--to"))
+    .option(
+      "--id <id>",
+      "Identity to delete; repeatable",
+      (value: string, previous: string[] = []) => [...previous, value],
+    )
+    .option("--idempotency-key <ulid>", "Mutation key", singleUse(KEY_OPTION))
+    .action((_options, command: Command) => remove(command));
 }

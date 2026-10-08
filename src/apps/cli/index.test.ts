@@ -1297,11 +1297,20 @@ test("intake event commands expose offline help, reject --config and validate be
     ["intake", "event", "--help"],
     ["intake", "event", "list", "--help"],
     ["intake", "event", "get", "--help"],
+    ["intake", "event", "retry", "--help"],
+    ["intake", "event", "discard", "--help"],
+    ["intake", "event", "delete", "--help"],
   ]) {
     const help = invocation(args, env);
     assert.equal(help.status, ExitCode.Success, help.stderr);
   }
-  for (const leaf of [["list"], ["get", eventId]]) {
+  for (const leaf of [
+    ["list"],
+    ["get", eventId],
+    ["retry", eventId],
+    ["discard", eventId],
+    ["delete", "--id", eventId],
+  ]) {
     const result = invocation(
       ["intake", "event", ...leaf, "--config", "x.yaml"],
       env,
@@ -1315,6 +1324,22 @@ test("intake event commands expose offline help, reject --config and validate be
     get.stderr,
     /^cli\.intake\.event\.get\.invalid_inbound_event_id:/,
   );
+  for (const leaf of ["retry", "discard"]) {
+    const bad = invocation(["intake", "event", leaf, "bad"], env);
+    assert.equal(bad.status, ExitCode.Failure);
+    assert.match(
+      bad.stderr,
+      new RegExp(`^cli\\.intake\\.event\\.${leaf}\\.invalid_inbound_event_id:`),
+    );
+  }
+  for (const leaf of [["retry", eventId], ["discard", eventId], ["delete"]]) {
+    const result = invocation(["intake", "event", ...leaf], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(
+      result.stderr,
+      new RegExp(`^cli\\.intake\\.event\\.${leaf[0]}\\.token_required:`),
+    );
+  }
   const outOfRange = invocation(
     [
       "intake",
@@ -1355,4 +1380,26 @@ test("intake outbound discard prints the generated key when the result is indete
     result.stderr,
     /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
   );
+});
+
+test("intake event mutations print the generated key when the result is indeterminate", (t) => {
+  const env = environment(temporary(t));
+  const eventId = "inbound_event_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const server = ["--endpoint", "http://127.0.0.1:1", "--token", "t"];
+  for (const leaf of [
+    ["retry", eventId],
+    ["discard", eventId],
+    ["delete", "--id", eventId],
+  ]) {
+    const result = invocation(["intake", "event", ...leaf, ...server], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(
+      result.stderr,
+      new RegExp(`^cli\\.intake\\.event\\.${leaf[0]}\\.indeterminate:`),
+    );
+    assert.match(
+      result.stderr,
+      /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
+    );
+  }
 });
