@@ -536,8 +536,11 @@ test("a gone inbound ends its loop", async (t) => {
   const h = loopHarness(t);
   h.loops.start(h.inboundId);
   h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
+  const transaction = t.mock.method(h.store, "transaction");
   await h.interval();
+  assert.equal(transaction.mock.callCount(), ONE_CALL);
   await h.interval();
+  assert.equal(transaction.mock.callCount(), ONE_CALL);
   assert.equal(h.calls.length, NO_CALLS);
   assert.deepEqual(h.grants, []);
 });
