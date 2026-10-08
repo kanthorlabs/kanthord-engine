@@ -58,6 +58,7 @@ const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const THREE_EVENTS = 3;
 const FILL_MESSAGE_LENGTH = 100;
+const WAKE_OFFSETS = 12;
 const EVENT_ENCODING = "base64";
 
 type Answer = () => Promise<OperationResult<unknown>>;
@@ -287,6 +288,20 @@ test("Repeated wakes during a handoff start no second handoff of the event", asy
   assert.equal(h.calls.length, ONE_CALL);
   assert.ok(!h.dispatcher.inFlight(id));
   assert.equal(recordOf(h.store, id).state, InboundEventState.Succeeded);
+});
+
+test("A wake at any microtask of an ending drain hands the new event over", async (t) => {
+  const h = harness(t);
+  for (let offset = 0; offset < WAKE_OFFSETS; offset++) {
+    h.dispatcher.wake();
+    for (let step = 0; step < offset; step++) await Promise.resolve();
+    const id = addEvent(h.store, h.inboundId, `d-${offset}`);
+    h.answers.push(completed({ disposition: "duplicate", reason: null }));
+    h.dispatcher.wake();
+    await h.dispatcher.join();
+    assert.equal(recordOf(h.store, id).state, InboundEventState.Succeeded);
+  }
+  assert.equal(h.calls.length, WAKE_OFFSETS);
 });
 
 test("A 409 claim_live or match_changed answer sets failed with that code", async (t) => {

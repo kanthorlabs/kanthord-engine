@@ -153,6 +153,7 @@ export class Dispatcher {
     }
     this.drainTask = this.drain().finally(() => {
       this.drainTask = null;
+      if (this.again && !this.halted()) this.wake();
     });
   }
 
@@ -167,7 +168,7 @@ export class Dispatcher {
   }
 
   async join(): Promise<void> {
-    await this.drainTask;
+    while (this.drainTask !== null) await this.drainTask;
   }
 
   private halted(): boolean {
