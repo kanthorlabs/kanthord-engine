@@ -14,6 +14,7 @@ import {
   ResultClass,
   intakeOperations,
 } from "../../intake/contract.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import {
@@ -29,6 +30,7 @@ import {
   type Revision,
 } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
+import { GitStage, GitWriteError } from "../../repository/index.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
@@ -52,6 +54,16 @@ const ONE_CREATE = 1;
 const WAIT_ATTEMPTS = 400;
 const WAIT_STEP_MS = 25;
 const UNPROCESSABLE_STATUS = 422;
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+const ONE_PUSH = 1;
+const TWO_PUSHES = 2;
+const EXECUTABLE_MODE = 0o755;
+const REJECTING_HOOK = "#!/bin/sh\nexit 1\n";
+const SNAPSHOT_BRANCH = "work";
+const LANDED = "landed";
+const NOT_LANDED = "not_landed";
+const THREW = "threw";
 const TIMEOUT = 240000;
 const GITHUB_KEY = "test-secret";
 const GITHUB_CREDENTIAL = "github";
@@ -60,7 +72,6 @@ const PUSHED_ADDRESS = "git@github.com:owner/pushed.git";
 const GITHUB_PREFIX = "repository.platform.github.";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const UNKNOWN_CODE = "gateway.invocation.unknown";
-const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 const ROUTE_NOT_FOUND_CODE = "gateway.routing.not_found";
 const PULLS_PATH = "/repos/owner/gated/pulls";
 const MAIN_REF = "refs/heads/main";
@@ -125,13 +136,17 @@ async function until(condition: () => boolean) {
 async function setup(t: TestContext) {
   const gitHub = await fakeGitHub(t);
   const pushed = await bareRepository(t, "pushed");
+  const gated = await bareRepository(t, "gated");
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
-    repositoryTransport: mappedTransport({ [PUSHED_ADDRESS]: pushed.bare }),
+    repositoryTransport: mappedTransport({
+      [PUSHED_ADDRESS]: pushed.bare,
+      [GATED_ADDRESS]: gated.bare,
+    }),
   });
   const directory = temporary(t);
   const H = {
@@ -349,12 +364,12 @@ async function setup(t: TestContext) {
     );
     return evaluation;
   };
-  const requested = async (
+  const request = async (
     nodeId: string,
     execution: ExecutionRecord,
     key: string,
     address: PlatformAddress,
-  ) => {
+  ) =>
     completed(
       await api["evidence.request"]({
         params: { node_id: nodeId },
@@ -366,8 +381,16 @@ async function setup(t: TestContext) {
           address,
         },
       }),
-    );
+    ).id;
+  const requested = async (
+    nodeId: string,
+    execution: ExecutionRecord,
+    key: string,
+    address: PlatformAddress,
+  ) => {
+    const evidenceId = await request(nodeId, execution, key, address);
     await release(execution);
+    return evidenceId;
   };
   const intake = directClient(intakeOperations, fixture.invocation);
   const perform = (
@@ -412,10 +435,14 @@ async function setup(t: TestContext) {
     fixture,
     gitHub,
     pushed,
+    gated,
     snapshot,
     nodes: { gated: gatedNode, pushed: pushedNode },
     resource: (name: string) => binding(name).resource_identity,
+    write,
+    version,
     evaluated,
+    request,
     requested,
     perform,
     materials,
@@ -486,15 +513,6 @@ test(
         assert.equal(h.materials.length, NO_ROWS);
       },
     );
-
-    await t.test("a reused evidence answers 400 until the reuse", async () => {
-      failed(
-        await h.perform(gated, gatedBody("reused"), `evidence_${ulid()}`),
-        HttpStatus.BadRequest,
-        VALIDATION_FAILED_CODE,
-      );
-      assert.equal(h.rows().length, NO_ROWS);
-    });
 
     await t.test(
       "a lost create answers unknown_outcome and a repeat finds the pull request",
@@ -692,6 +710,226 @@ test(
         assert.equal(repeat.class, ResultClass.ConfirmedFailure);
         assert.equal(repeat.code, GIT_FAILED_CODE);
         assert.equal(h.row("lost")?.state, OutboundRequestState.Failed);
+      },
+    );
+  },
+);
+
+test(
+  "intake.action.perform reuses a pull request by a push of the snapshot",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const G = h.nodes.gated;
+    const nodeRef = `refs/heads/kanthord/${G}`;
+    const bare = simpleGit(h.gated.bare);
+    const open = () =>
+      h.gitHub.open({
+        owner: "owner",
+        repo: "gated",
+        head: `kanthord/${G}`,
+        base: "main",
+      });
+    const address = (number: number): PlatformAddress => ({
+      kind: PlatformAddressKind.PullRequest,
+      resource_identity: h.resource("gated"),
+      number,
+    });
+    const first = await h.evaluated(G, "gated", h.gated.head);
+    const closed = open();
+    const closedEvidence = await h.requested(
+      G,
+      first,
+      "gated.pull_request",
+      address(closed),
+    );
+    h.gitHub.close(closed);
+    await h.write(["mission", "node", "check", G], {
+      expected_mission_version: await h.version(),
+    });
+    await h.write(["mission", "node", "unblock", G], {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_REVISION,
+      expected_mission_version: await h.version(),
+    });
+    const snapshot = await commitOnBranch(t, h.gated.bare, SNAPSHOT_BRANCH);
+    const second = await h.evaluated(G, "gated", snapshot);
+    assert.equal(second.attempt, SECOND_ATTEMPT);
+    const later = open();
+    const laterEvidence = await h.request(
+      G,
+      second,
+      "gated.pull_request",
+      address(later),
+    );
+    const keyOf = (number: number) =>
+      `${G}/${SECOND_ATTEMPT}/gated.pull_request/${number}/${snapshot}`;
+    const body = (requestKey: string) => ({
+      key: "gated.pull_request",
+      commit: snapshot,
+      request_key: requestKey,
+    });
+    const writer = h.fixture.gitWriter;
+    const pushSnapshotFresh = writer.pushSnapshotFresh;
+    const landedOn = writer.landedOn;
+    const pushes: string[] = [];
+    const landings: string[] = [];
+    writer.pushSnapshotFresh = (input, ...args) => {
+      pushes.push(input.branch);
+      return pushSnapshotFresh(input, ...args);
+    };
+    writer.landedOn = async (input, ...args) => {
+      try {
+        const landing = await landedOn(input, ...args);
+        landings.push(landing.landed ? LANDED : NOT_LANDED);
+        return landing;
+      } catch (error) {
+        landings.push(THREW);
+        throw error;
+      }
+    };
+    const refusal = (answer: Answer) => {
+      assert.ok("class" in answer, JSON.stringify(answer));
+      assert.equal(answer.class, ResultClass.UnknownOutcome);
+      assert.equal(answer.code, GIT_FAILED_CODE);
+    };
+
+    await t.test(
+      "a reuse pushes the snapshot to the node branch and answers the reused address",
+      async () => {
+        assert.equal(await remoteHead(h.gated.bare, nodeRef), null);
+        const calls = h.gitHub.calls.length;
+        const answer = completed(
+          await h.perform(second, body(keyOf(closed)), closedEvidence),
+        );
+        assert.deepEqual(answer, address(closed));
+        assert.equal(await remoteHead(h.gated.bare, nodeRef), snapshot);
+        assert.deepEqual(pushes, [`kanthord/${G}`]);
+        const stored = h.row(keyOf(closed));
+        assert.equal(stored?.operation, OutboundOperation.GitHubPullRequest);
+        assert.equal(stored?.state, OutboundRequestState.Succeeded);
+        assert.equal(stored?.credential, null);
+        assert.deepEqual(JSON.parse(stored!.result!), answer);
+        assert.equal(h.gitHub.calls.length, calls);
+        dropped(h.materials);
+      },
+    );
+
+    await t.test(
+      "a candidate change with one snapshot gives two keys and two requests",
+      async () => {
+        const answer = completed(
+          await h.perform(second, body(keyOf(later)), laterEvidence),
+        );
+        assert.deepEqual(answer, address(later));
+        assert.deepEqual(
+          h
+            .rows()
+            .filter(
+              (item) => item.operation === OutboundOperation.GitHubPullRequest,
+            )
+            .map((item) => item.request_key),
+          [keyOf(closed), keyOf(later)],
+        );
+        assert.equal(pushes.length, TWO_PUSHES);
+      },
+    );
+
+    await t.test(
+      "a landed push that loses its answer repeats to the reused address with one push",
+      async () => {
+        await bare.raw(["update-ref", "-d", nodeRef]);
+        const before = pushes.length;
+        writer.pushSnapshotFresh = async (input, ...args) => {
+          pushes.push(input.branch);
+          await pushSnapshotFresh(input, ...args);
+          throw new GitWriteError(
+            GitStage.Push,
+            new Diagnostic(GIT_FAILED_CODE, "The push answer is lost."),
+          );
+        };
+        try {
+          refusal(
+            completed(await h.perform(second, body("lost"), closedEvidence)),
+          );
+        } finally {
+          writer.pushSnapshotFresh = (input, ...args) => {
+            pushes.push(input.branch);
+            return pushSnapshotFresh(input, ...args);
+          };
+        }
+        assert.equal(h.row("lost")?.state, OutboundRequestState.Failed);
+        assert.deepEqual(
+          completed(await h.perform(second, body("lost"), closedEvidence)),
+          address(closed),
+        );
+        assert.equal(pushes.length, before + ONE_PUSH);
+        assert.equal(landings.at(-1), LANDED);
+        assert.equal(h.row("lost")?.state, OutboundRequestState.Succeeded);
+        assert.equal(await remoteHead(h.gated.bare, nodeRef), snapshot);
+      },
+    );
+
+    await t.test(
+      "a push-stage failure answers unknown_outcome with git_failed and records no credential",
+      async () => {
+        await bare.raw(["update-ref", "-d", nodeRef]);
+        const hook = join(h.gated.bare, "hooks", "pre-receive");
+        writeFileSync(hook, REJECTING_HOOK, { mode: EXECUTABLE_MODE });
+        try {
+          refusal(
+            completed(
+              await h.perform(second, body("rejected"), closedEvidence),
+            ),
+          );
+        } finally {
+          rmSync(hook);
+        }
+        assert.equal(await remoteHead(h.gated.bare, nodeRef), null);
+        const stored = h.row("rejected");
+        assert.equal(stored?.state, OutboundRequestState.Failed);
+        assert.equal(stored?.credential, null);
+        dropped(h.materials);
+      },
+    );
+
+    await t.test(
+      "a rebased node branch without the snapshot keeps the request failed",
+      async () => {
+        await bare.raw(["update-ref", nodeRef, h.gated.head]);
+        refusal(
+          completed(await h.perform(second, body("rejected"), closedEvidence)),
+        );
+        assert.equal(landings.at(-1), NOT_LANDED);
+        assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
+      },
+    );
+
+    await t.test(
+      "a missing commit object throws and keeps the request failed",
+      async () => {
+        await bare.raw(["update-ref", "-d", `refs/heads/${SNAPSHOT_BRANCH}`]);
+        await bare.raw(["reflog", "expire", "--expire=now", "--all"]);
+        await bare.raw(["gc", "--prune=now"]);
+        refusal(
+          completed(await h.perform(second, body("rejected"), closedEvidence)),
+        );
+        assert.equal(landings.at(-1), THREW);
+        assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
+      },
+    );
+
+    await t.test(
+      "a transport failure of the landing read throws and keeps the request failed",
+      async () => {
+        rmSync(h.gated.bare, { recursive: true, force: true });
+        refusal(
+          completed(await h.perform(second, body("rejected"), closedEvidence)),
+        );
+        assert.equal(landings.at(-1), THREW);
+        assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
+        writer.pushSnapshotFresh = pushSnapshotFresh;
+        writer.landedOn = landedOn;
       },
     );
   },

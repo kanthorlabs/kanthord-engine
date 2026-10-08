@@ -7,7 +7,6 @@ import {
 } from "../custody/contract.ts";
 import { isMachineIdentity, type MachineIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
@@ -46,7 +45,6 @@ import {
 const NODE_BRANCH_PREFIX = "kanthord/";
 const PULL_REQUEST_TITLE_PREFIX = "kanthord ";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
-const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 const ACTION_UNMAPPED_STATUS = 422;
 const SINGLE_MATCH = 1;
 const NO_DURATION = 0;
@@ -88,12 +86,6 @@ export function performAction(
   const claim = caller.execution;
   assert.ok(identity && isMachineIdentity(identity), "A client performs.");
   assert.ok(claim, "A perform holds a proven execution claim.");
-  if (body.reused_evidence_id !== null)
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      VALIDATION_FAILED_CODE,
-      "The reuse of a pull request is not admitted.",
-    );
   const performer: Performer = { identity, claim };
   const held: Held = { operation: null, facts: null };
   return run({
@@ -147,6 +139,7 @@ function authorizePerform(
   );
   held.operation = operation;
   held.facts = granted.facts;
+  const reuse = reusesPullRequest({ operation, facts: granted.facts });
   const material =
     operation === OutboundOperation.GitHubPullRequest
       ? custody.release(tx, grant, now)
@@ -155,9 +148,16 @@ function authorizePerform(
   return {
     operation,
     project_id: granted.project_id,
-    credential: granted.credential,
+    credential: reuse ? null : granted.credential,
     material,
   };
+}
+
+function reusesPullRequest(action: Bound): boolean {
+  return (
+    action.operation === OutboundOperation.GitHubPullRequest &&
+    action.facts.reused_address !== null
+  );
 }
 
 function operationOf(action: string, platform: string): OutboundOperationValue {
@@ -182,6 +182,8 @@ function callAction(
   material: Material | null,
   scope: OutboundScope,
 ): Promise<CallAnswer> {
+  if (reusesPullRequest(action))
+    return pushSnapshot(dependencies, performer, action.facts, scope);
   if (action.operation === OutboundOperation.GitHubPullRequest)
     return createPullRequest(dependencies, performer, action.facts, {
       material,
@@ -237,17 +239,44 @@ async function mergePush(
     );
     return { ok: true, result: branchPushAddress(facts, commit) };
   } catch (error) {
-    if (!(error instanceof GitWriteError)) throw error;
-    return {
-      ok: false,
-      class:
-        error.stage === GitStage.BeforePush
-          ? ResultClass.ConfirmedFailure
-          : ResultClass.UnknownOutcome,
-      code: error.code,
-      message: error.message,
-    };
+    return gitFailure(error);
   }
+}
+
+async function pushSnapshot(
+  dependencies: ActionCheckDependencies,
+  performer: Performer,
+  facts: Readonly<ActionFacts>,
+  scope: OutboundScope,
+): Promise<CallAnswer> {
+  const reused = reusedAddressOf(facts);
+  try {
+    await dependencies.gitWriter.pushSnapshotFresh(
+      {
+        address: facts.repository.address,
+        branch: NODE_BRANCH_PREFIX + performer.claim.nodeId,
+        commit: facts.snapshot_commit,
+      },
+      scope.context,
+      deadlineOf(scope, GIT_WRITE_DEADLINE_MS),
+    );
+    return { ok: true, result: reused };
+  } catch (error) {
+    return gitFailure(error);
+  }
+}
+
+function gitFailure(error: unknown): CallAnswer {
+  if (!(error instanceof GitWriteError)) throw error;
+  return {
+    ok: false,
+    class:
+      error.stage === GitStage.BeforePush
+        ? ResultClass.ConfirmedFailure
+        : ResultClass.UnknownOutcome,
+    code: error.code,
+    message: error.message,
+  };
 }
 
 function readBackAction(
@@ -257,6 +286,8 @@ function readBackAction(
   material: Material | null,
   scope: OutboundScope,
 ): Promise<ReadBack> {
+  if (reusesPullRequest(action))
+    return landedSnapshot(dependencies, performer, action.facts, scope);
   if (action.operation === OutboundOperation.GitHubPullRequest)
     return openPullRequest(dependencies, performer, action.facts, {
       material,
@@ -313,6 +344,26 @@ async function landedMerge(
   };
 }
 
+async function landedSnapshot(
+  dependencies: ActionCheckDependencies,
+  performer: Performer,
+  facts: Readonly<ActionFacts>,
+  scope: OutboundScope,
+): Promise<ReadBack> {
+  const reused = reusedAddressOf(facts);
+  const landing = await dependencies.gitWriter.landedOn(
+    {
+      address: facts.repository.address,
+      branch: NODE_BRANCH_PREFIX + performer.claim.nodeId,
+      commit: facts.snapshot_commit,
+    },
+    scope.context,
+    deadlineOf(scope, GIT_WRITE_DEADLINE_MS),
+  );
+  if (!landing.landed) return { match: false };
+  return { match: true, result: reused };
+}
+
 function finalizePerform(
   action: Bound,
   answer: OutboundAnswer,
@@ -326,20 +377,18 @@ function finalizePerform(
     kind: FinalizationKind.Answer,
     body: {
       class: answer.class,
-      code: resultCodeOf(action.operation, answer.class),
+      code: resultCodeOf(action, answer.class),
       message: answer.message,
     },
   };
 }
 
-function resultCodeOf(
-  operation: OutboundOperationValue,
-  resultClass: ResultClassValue,
-): string {
+function resultCodeOf(action: Bound, resultClass: ResultClassValue): string {
   assert.ok(Object.values(ResultClass).includes(resultClass));
-  if (operation === OutboundOperation.GitHubPullRequest)
+  if (reusesPullRequest(action)) return GIT_FAILED_CODE;
+  if (action.operation === OutboundOperation.GitHubPullRequest)
     return GITHUB_RESULT_CODE_PREFIX + resultClass;
-  assert.equal(operation, OutboundOperation.GitMergePush);
+  assert.equal(action.operation, OutboundOperation.GitMergePush);
   return GIT_FAILED_CODE;
 }
 
@@ -379,6 +428,13 @@ function pullRequestAddress(
     resource_identity: facts.repository.resource_identity,
     number,
   };
+}
+
+function reusedAddressOf(facts: Readonly<ActionFacts>): PlatformAddress {
+  const reused = facts.reused_address;
+  assert.ok(reused !== null, "A reuse names its pull request.");
+  assert.equal(reused.resource_identity, facts.repository.resource_identity);
+  return pullRequestAddress(facts, reused.number);
 }
 
 function branchPushAddress(

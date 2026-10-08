@@ -422,6 +422,27 @@ test("closed pull request dispatches fresh and a later matching candidate is sel
   );
 });
 
+test("a candidate change from 42 to 43 with one snapshot gives two request keys", async (t) => {
+  const h = reusable(t);
+  h.dependencies.intakeActions.read = async () => ({ body: h.body });
+  await h.perform();
+  const second = { ...PR, number: 43 };
+  h.entry.reuse_candidates.push({
+    evidence_id: createIdentity("evidence"),
+    attempt: FIRST_ATTEMPT,
+    address: second,
+  });
+  h.dependencies.intakeActions.read = async (_call, _method, address) => ({
+    body: address === second ? h.body : { ...h.body, state: "closed" },
+  });
+  await h.perform();
+  const base = `${h.claim.nodeId}/${SECOND_ATTEMPT}/${h.entry.action.key}`;
+  assert.deepEqual(
+    h.performSpy.mock.calls.map((call) => call.arguments[3]),
+    [`${base}/${PR.number}/${COMMIT}`, `${base}/${second.number}/${COMMIT}`],
+  );
+});
+
 test("read refusal and unknown read outcome dispatch nothing and release the reservation", async (t) => {
   const h = reusable(t);
   h.dependencies.intakeActions.read = async () => ({
