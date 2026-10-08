@@ -16,12 +16,14 @@ import {
   CURSOR_PAGE_SIZE_MISMATCH_CODE,
   CallKind,
   CheckEndState,
+  DeliveryKind,
   DispatchPhase,
   GITHUB_API_VERSION,
   GitHubPlatform,
   GitHubTargetKind,
   ExpectedEndState,
   classify,
+  classifyDelivery,
   decodeCursor,
   encodeCursor,
   repositoryOf,
@@ -360,6 +362,59 @@ test("classify maps a transport error by phase and kind", () => {
   assert.equal(
     classify(error, DispatchPhase.AfterDispatch, CallKind.Read).status,
     null,
+  );
+});
+
+test("classifyDelivery answers a ping as a handshake with status 204", () => {
+  assert.deepEqual(
+    classifyDelivery(new Headers({ "X-GitHub-Event": "ping" })),
+    { kind: DeliveryKind.Handshake, status: HttpStatus.NoContent },
+  );
+});
+
+test("classifyDelivery answers a push as an event with its delivery and metadata", () => {
+  assert.deepEqual(
+    classifyDelivery(
+      new Headers({ "X-GitHub-Event": "push", "X-GitHub-Delivery": "d-1" }),
+    ),
+    { kind: DeliveryKind.Event, event_id: "d-1", metadata: { event: "push" } },
+  );
+});
+
+test("classifyDelivery answers invalid for a missing header", () => {
+  assert.deepEqual(
+    classifyDelivery(new Headers({ "X-GitHub-Event": "push" })),
+    { kind: DeliveryKind.Invalid },
+  );
+  assert.deepEqual(
+    classifyDelivery(new Headers({ "X-GitHub-Delivery": "d-1" })),
+    { kind: DeliveryKind.Invalid },
+  );
+  assert.deepEqual(
+    classifyDelivery(
+      new Headers({ "X-GitHub-Event": "push", "X-GitHub-Delivery": "" }),
+    ),
+    { kind: DeliveryKind.Invalid },
+  );
+});
+
+test("classifyDelivery answers invalid for a repeated header", () => {
+  const repeated = (name: string, other: [string, string]) =>
+    classifyDelivery(new Headers([[name, "a"], [name, "b"], other]));
+  assert.deepEqual(repeated("X-GitHub-Delivery", ["X-GitHub-Event", "push"]), {
+    kind: DeliveryKind.Invalid,
+  });
+  assert.deepEqual(repeated("X-GitHub-Event", ["X-GitHub-Delivery", "d-1"]), {
+    kind: DeliveryKind.Invalid,
+  });
+  assert.deepEqual(
+    classifyDelivery(
+      new Headers([
+        ["X-GitHub-Event", "ping"],
+        ["X-GitHub-Event", "ping"],
+      ]),
+    ),
+    { kind: DeliveryKind.Invalid },
   );
 });
 

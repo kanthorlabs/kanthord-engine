@@ -38,6 +38,10 @@ const MIN_TOKEN_LENGTH = 1;
 const BINDING_ADDRESS_PATTERN =
   /^git@[A-Za-z0-9][A-Za-z0-9.-]*:([^/\s:]+)\/([^/\s:]+)\.git(?![\s\S])/;
 const INBOUND_RESOURCE_PATTERN = /^([^/\s:]+)\/([^/\s:]+)(?![\s\S])/;
+const EVENT_HEADER = "x-github-event";
+const DELIVERY_HEADER = "x-github-delivery";
+const PING_EVENT = "ping";
+const singleHeaderValueSchema = z.string().regex(/^[^,]+$/);
 const BEFORE_DISPATCH_CODES: ReadonlySet<string> = new Set([
   "ECONNREFUSED",
   "ENOTFOUND",
@@ -63,6 +67,21 @@ export const DispatchPhase = {
   AfterDispatch: "after_dispatch",
 } as const;
 export type DispatchPhase = (typeof DispatchPhase)[keyof typeof DispatchPhase];
+
+export const DeliveryKind = {
+  Handshake: "handshake",
+  Event: "event",
+  Invalid: "invalid",
+} as const;
+
+export type DeliveryClassification =
+  | { kind: typeof DeliveryKind.Handshake; status: typeof HttpStatus.NoContent }
+  | {
+      kind: typeof DeliveryKind.Event;
+      event_id: string;
+      metadata: { event: string };
+    }
+  | { kind: typeof DeliveryKind.Invalid };
 
 export interface GitHubCall {
   token: string;
@@ -194,6 +213,30 @@ export function classify(
     error.status,
     message,
   );
+}
+
+function singleHeaderValue(headers: Headers, name: string): string | null {
+  assert.ok(headers instanceof Headers);
+  assert.ok(name.length >= MIN_SEGMENT_LENGTH);
+  const parsed = singleHeaderValueSchema.safeParse(headers.get(name));
+  return parsed.success ? parsed.data : null;
+}
+
+export function classifyDelivery(headers: Headers): DeliveryClassification {
+  assert.ok(headers instanceof Headers);
+  const event = singleHeaderValue(headers, EVENT_HEADER);
+  if (event === null) {
+    return { kind: DeliveryKind.Invalid };
+  }
+  if (event === PING_EVENT) {
+    return { kind: DeliveryKind.Handshake, status: HttpStatus.NoContent };
+  }
+  const eventId = singleHeaderValue(headers, DELIVERY_HEADER);
+  if (eventId === null) {
+    return { kind: DeliveryKind.Invalid };
+  }
+  assert.ok(event.length >= MIN_SEGMENT_LENGTH);
+  return { kind: DeliveryKind.Event, event_id: eventId, metadata: { event } };
 }
 
 function transportClass(phase: DispatchPhase, kind: CallKind) {
