@@ -91,6 +91,7 @@ export class IntakeService implements Service, IntakeCollaborations {
     this.dependencies = dependencies;
     this.dispatcher = new Dispatcher({
       store: dependencies.store,
+      logger: dependencies.logger,
       identity: dependencies.identity,
       consumers: dependencies.consumers,
       context: this.shutdown,

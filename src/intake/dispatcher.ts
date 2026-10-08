@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import type { Logger } from "pino";
 import { ulid } from "ulid";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
+import { diagnostic } from "../kernel/errors.ts";
 import {
   OperationResultType,
   type OperationResult,
@@ -31,9 +33,12 @@ const MAX_IN_FLIGHT = 1;
 const EVENT_ENCODING = "base64";
 const INDETERMINATE_CODE = "indeterminate";
 const INDETERMINATE_MESSAGE = "The consumer call answered no result.";
+const DEFECT_CODE = "system.operation.unknown";
+const DEFECT_MESSAGE = "The consumer call failed.";
 
 export interface DispatcherDependencies {
   store: Store;
+  logger: Logger;
   identity: ServiceIdentity;
   consumers: IntakeConsumers;
   context: Context;
@@ -204,13 +209,25 @@ export class Dispatcher {
   }
 
   private async call(handoff: Handoff): Promise<Outcome> {
-    const { consumers, identity, context } = this.dependencies;
+    const { consumers, identity, context, logger } = this.dependencies;
     assert.equal(typeof consumers[handoff.consumer], ValueType.Function);
-    const result = await consumers[handoff.consumer](handoff.input, {
-      identity,
-      idempotencyKey: ulid(),
-      context,
-    });
-    return outcomeOf(result);
+    try {
+      const result = await consumers[handoff.consumer](handoff.input, {
+        identity,
+        idempotencyKey: ulid(),
+        context,
+      });
+      return outcomeOf(result);
+    } catch (error) {
+      logger.error(
+        {
+          inbound_event_id: handoff.input.inbound_event_id,
+          consumer: handoff.consumer,
+          reason: diagnostic(error),
+        },
+        "intake: the consumer call of an inbound event failed.",
+      );
+      return { succeeded: false, code: DEFECT_CODE, message: DEFECT_MESSAGE };
+    }
   }
 }

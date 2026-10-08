@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { setImmediate as tick } from "node:timers/promises";
+import pino, { type Logger } from "pino";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import {
   OperationResultType,
   type OperationResult,
@@ -10,10 +12,12 @@ import {
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Consumer,
+  ERROR_ARRAY_MAX_BYTES,
   INTAKE_SERVICE_NAME,
   InboundEventState,
   InboundKind,
   InboundPlatform,
+  type ErrorItem,
   type IntakeConsumers,
 } from "./contract.ts";
 import { Dispatcher, nextCandidate, reserve } from "./dispatcher.ts";
@@ -35,14 +39,21 @@ const IDENTITY: ServiceIdentity = {
   kind: IdentityKind.Service,
   service: INTAKE_SERVICE_NAME,
 };
+const SECRET = "ghp_fakeCredentialMaterialValue";
+const INDETERMINATE = "indeterminate";
+const DEFECT = "system.operation.unknown";
+const TIMEOUT = "gateway.invocation.timeout";
 const CLAIM_LIVE = "mission.node.claim_live";
 const MATCH_CHANGED = "mission.delivery.match_changed";
 const REQUEST_ID = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CONFLICT = 409;
+const GATEWAY_TIMEOUT = 504;
 const OK = 200;
 const NO_CALLS = 0;
 const ONE_CALL = 1;
+const TWO_CALLS = 2;
 const THREE_EVENTS = 3;
+const FILL_MESSAGE_LENGTH = 100;
 const EVENT_ENCODING = "base64";
 
 type Answer = () => Promise<OperationResult<unknown>>;
@@ -51,6 +62,7 @@ interface Harness {
   store: Store;
   dispatcher: Dispatcher;
   calls: ConsumerCall[];
+  lines: string[];
   answers: Answer[];
   inboundId: string;
 }
@@ -107,6 +119,10 @@ function failure(status: number, code: string, message: string): Answer {
     });
 }
 
+function indeterminate(): Answer {
+  return () => Promise.resolve({ type: OperationResultType.Indeterminate });
+}
+
 function consumersOf(
   calls: ConsumerCall[],
   answers: Answer[],
@@ -121,9 +137,14 @@ function consumersOf(
   };
 }
 
-function dispatcherOver(store: Store, consumers: IntakeConsumers): Dispatcher {
+function dispatcherOver(
+  store: Store,
+  logger: Logger,
+  consumers: IntakeConsumers,
+): Dispatcher {
   return new Dispatcher({
     store,
+    logger,
     identity: IDENTITY,
     consumers,
     context: background,
@@ -139,14 +160,34 @@ function memoryStore(t: TestContext): Store {
 
 function harness(t: TestContext): Harness {
   const store = memoryStore(t);
+  const lines: string[] = [];
+  const logger = pino(
+    { level: "trace" },
+    { write: (line) => lines.push(line) },
+  );
   const calls: ConsumerCall[] = [];
   const answers: Answer[] = [];
-  const dispatcher = dispatcherOver(store, consumersOf(calls, answers));
-  return { store, dispatcher, calls, answers, inboundId: addInbound(store) };
+  const dispatcher = dispatcherOver(store, logger, consumersOf(calls, answers));
+  return {
+    store,
+    dispatcher,
+    calls,
+    lines,
+    answers,
+    inboundId: addInbound(store),
+  };
 }
 
 function recordOf(store: Store, id: string) {
   return store.transaction((tx) => eventRecord(readEventProjection(tx, id)!));
+}
+
+function retry(store: Store, id: string): void {
+  store.database
+    .prepare(
+      "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
+    )
+    .run(InboundEventState.Pending, id, InboundEventState.Failed);
 }
 
 async function handOver(h: Harness): Promise<void> {
@@ -257,4 +298,125 @@ test("A 409 claim_live or match_changed answer sets failed with that code", asyn
       [code],
     );
   }
+});
+
+test("Two failures and one retry leave two error items; a failed event stays untouched without a retry", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.answers.push(failure(CONFLICT, CLAIM_LIVE, "A claim is live."));
+  await handOver(h);
+  await handOver(h);
+  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(recordOf(h.store, id).error?.length, ONE_CALL);
+  retry(h.store, id);
+  h.answers.push(failure(CONFLICT, MATCH_CHANGED, "The match changed."));
+  await handOver(h);
+  const record = recordOf(h.store, id);
+  assert.equal(record.state, InboundEventState.Failed);
+  assert.deepEqual(
+    record.error?.map((item) => item.code),
+    [CLAIM_LIVE, MATCH_CHANGED],
+  );
+});
+
+test("An append to a full error array drops the oldest item and sets failed", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  const items = fullErrorArray();
+  h.store.database
+    .prepare("UPDATE intake_inbound_event SET error = ? WHERE id = ?")
+    .run(canonicalJSON(items), id);
+  h.answers.push(indeterminate());
+  await handOver(h);
+  const record = recordOf(h.store, id);
+  assert.equal(record.state, InboundEventState.Failed);
+  assert.deepEqual(record.error?.[0], items[1]);
+  assert.equal(record.error?.at(-1)?.code, INDETERMINATE);
+});
+
+function fullErrorArray(): ErrorItem[] {
+  const items: ErrorItem[] = [];
+  for (let index = 0; index < ERROR_ARRAY_MAX_BYTES; index++) {
+    const next = {
+      code: `old_${index}`,
+      message: "x".repeat(FILL_MESSAGE_LENGTH),
+      created_at: index,
+    };
+    if (canonicalJSON([...items, next]).length > ERROR_ARRAY_MAX_BYTES) break;
+    items.push(next);
+  }
+  return items;
+}
+
+test("An indeterminate answer sets failed with the code indeterminate", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.answers.push(indeterminate());
+  await handOver(h);
+  const record = recordOf(h.store, id);
+  assert.equal(record.state, InboundEventState.Failed);
+  assert.deepEqual(
+    record.error?.map((item) => item.code),
+    [INDETERMINATE],
+  );
+});
+
+test("A first handoff and one after a retry carry two keys and one event identity and content", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.answers.push(indeterminate());
+  await handOver(h);
+  retry(h.store, id);
+  h.answers.push(completed({ disposition: "duplicate", reason: null }));
+  await handOver(h);
+  assert.equal(h.calls.length, TWO_CALLS);
+  const [first, second] = h.calls;
+  assert.deepEqual(first?.input, second?.input);
+  assert.equal(first?.input.inbound_event_id, id);
+  assert.ok(first?.options.idempotencyKey);
+  assert.notEqual(
+    first?.options.idempotencyKey,
+    second?.options.idempotencyKey,
+  );
+});
+
+test("A timeout or an indeterminate answer sets failed, and the retry answers duplicate", async (t) => {
+  const h = harness(t);
+  const cases: [string, Answer][] = [
+    [TIMEOUT, failure(GATEWAY_TIMEOUT, TIMEOUT, "Request timed out.")],
+    [INDETERMINATE, indeterminate()],
+  ];
+  for (const [code, answer] of cases) {
+    const id = addEvent(h.store, h.inboundId, code);
+    h.answers.push(answer);
+    await handOver(h);
+    assert.equal(recordOf(h.store, id).state, InboundEventState.Failed);
+    retry(h.store, id);
+    h.answers.push(completed({ disposition: "duplicate", reason: null }));
+    await handOver(h);
+    const record = recordOf(h.store, id);
+    assert.equal(record.state, InboundEventState.Succeeded);
+    assert.deepEqual(
+      record.error?.map((item) => item.code),
+      [code],
+    );
+  }
+});
+
+test("A thrown consumer call writes failed with system.operation.unknown and no credential material", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.answers.push(() => Promise.reject(new Error(`token ${SECRET} leaked`)));
+  await handOver(h);
+  assert.ok(!h.dispatcher.inFlight(id));
+  const record = recordOf(h.store, id);
+  assert.equal(record.state, InboundEventState.Failed);
+  assert.deepEqual(
+    record.error?.map((item) => item.code),
+    [DEFECT],
+  );
+  assert.ok(!canonicalJSON(record.error).includes(SECRET));
+  assert.ok(!h.lines.join("").includes(SECRET));
+  await handOver(h);
+  assert.equal(h.calls.length, ONE_CALL);
 });
