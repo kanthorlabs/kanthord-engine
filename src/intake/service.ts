@@ -21,7 +21,11 @@ import type { S3Platform } from "../storage/index.ts";
 import { checkAction, type IntakeCustody } from "./action-check.ts";
 import { performAction } from "./action-perform.ts";
 import { readAction } from "./action-read.ts";
-import { INTAKE_SERVICE_NAME, intakeOperations } from "./contract.ts";
+import {
+  INTAKE_SERVICE_NAME,
+  intakeOperations,
+  type IntakeCollaborations,
+} from "./contract.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
@@ -32,6 +36,8 @@ import {
   getObject,
   putObject,
 } from "./storage.ts";
+
+const NO_LENGTH = 0;
 
 export interface Dependencies {
   store: Store;
@@ -45,7 +51,7 @@ export interface Dependencies {
   masterKey: string;
 }
 
-export class IntakeService implements Service {
+export class IntakeService implements Service, IntakeCollaborations {
   private readonly dependencies: Dependencies;
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
@@ -187,6 +193,21 @@ export class IntakeService implements Service {
     } finally {
       unsubscribe();
     }
+  }
+
+  inboundsNaming(
+    tx: Transaction,
+    credentialName: string,
+  ): { inbound_id: string }[] {
+    assert.ok(tx);
+    assert.ok(
+      credentialName.length > NO_LENGTH,
+      "A credential name is required.",
+    );
+    const rows = tx.database
+      .prepare("SELECT id FROM intake_inbound WHERE credential = ? ORDER BY id")
+      .all(credentialName) as { id: string }[];
+    return rows.map(({ id }) => ({ inbound_id: id }));
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {

@@ -7,6 +7,7 @@ import {
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
+import type { Transaction } from "../kernel/store.ts";
 
 export const INTAKE_SERVICE_NAME = "intake";
 export const INBOUND_ID_PREFIX = "inbound";
@@ -239,6 +240,13 @@ export type ActionReadPage = z.infer<typeof actionReadPageSchema>;
 export type PresignedPutAnswer = z.infer<typeof presignedPutSchema>;
 export type PresignedGetAnswer = z.infer<typeof presignedGetSchema>;
 export type ObjectCheck = z.infer<typeof objectCheckSchema>;
+
+export interface IntakeCollaborations {
+  inboundsNaming(
+    tx: Transaction,
+    credentialName: string,
+  ): { inbound_id: string }[];
+}
 
 const baseOperation = {
   service: INTAKE_SERVICE_NAME,

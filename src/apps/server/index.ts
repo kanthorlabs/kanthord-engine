@@ -16,10 +16,7 @@ import {
   deriveEnvelopeKey,
   grantFacts,
 } from "../../custody/index.ts";
-import {
-  CUSTODY_SERVICE_NAME,
-  type InboundsNamingFn,
-} from "../../custody/contract.ts";
+import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import {
   SchedulerService,
   schedulerMigrations,
@@ -147,9 +144,6 @@ export function composeServices(options: {
   registrations?: WorkerRegistrations;
   workbenchModelRuntimeFactory?: WorkbenchModelRuntimeFactory;
   inventoryOverrides?: Partial<ResourceInventories>;
-  standIns?: {
-    inboundsNaming?: InboundsNamingFn;
-  };
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -260,7 +254,7 @@ export function composeServices(options: {
     agentProvidersDependentOn: (tx, name) =>
       agent.agentProvidersDependentOn(tx, name),
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
-    inboundsNaming: options.standIns?.inboundsNaming ?? (() => []),
+    inboundsNaming: (tx, name) => intake.inboundsNaming(tx, name),
     intakeServiceName: INTAKE_SERVICE_NAME,
   });
   const llm = new LlmComponent({
@@ -490,7 +484,7 @@ export function composeServices(options: {
     bindings: options.bindings,
   });
   const intakeIdentity = mintServiceIdentity(INTAKE_SERVICE_NAME);
-  const intake = new IntakeService({
+  const intake: IntakeService = new IntakeService({
     store: options.store,
     logger: options.logger,
     health: options.health,

@@ -321,7 +321,6 @@ export async function gatewayFixture(
     path?: string;
     scheduler?: Partial<SchedulerConfig>;
     oauthProviders?: Parameters<typeof composeServices>[0]["oauthProviders"];
-    standIns?: Parameters<typeof composeServices>[0]["standIns"];
     workbenchModelRuntimeFactory?: Parameters<
       typeof composeServices
     >[0]["workbenchModelRuntimeFactory"];
@@ -375,7 +374,6 @@ export async function gatewayFixture(
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
     inventoryOverrides: options.inventoryOverrides,
-    standIns: options.standIns,
     logger: pino(
       { level: "info" },
       {

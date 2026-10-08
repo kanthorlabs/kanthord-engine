@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { ulid } from "ulid";
 import {
   GrantKind,
   InboundOperation,
   type CredentialPlatformSet,
 } from "../../custody/contract.ts";
-import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
+import {
+  Consumer,
+  INTAKE_SERVICE_NAME,
+  InboundKind,
+  InboundPlatform,
+} from "../../intake/contract.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import type { ServiceIdentity } from "../../kernel/caller.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
@@ -26,6 +33,8 @@ const FIRST_REVISION = 1;
 const HUMAN = "ulrich";
 const NO_CALLS = 0;
 const FACILITY_REFUSAL = { name: "FacilityError" };
+const CREATED_AT = 1000;
+const IN_USE_CODE = "credential.credential.in_use";
 const SET: CredentialPlatformSet = { platforms: REPOSITORY_PLATFORMS };
 
 async function releaseFixture(t: TestContext) {
@@ -144,4 +153,46 @@ test("a consumed inbound grant refuses a second release", async (t) => {
     () => h.store.transaction((tx) => h.custody.release(tx, grant, Date.now())),
     FACILITY_REFUSAL,
   );
+});
+
+test("credential.archive of a credential that a poll inbound names answers 409 with the inbound", async (t) => {
+  const h = await releaseFixture(t);
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        `INSERT INTO intake_inbound
+        (id, project_id, kind, platform, consumer, credential, configuration, checkpoint, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      )
+      .run(
+        INBOUND_ID,
+        TEST_PROJECT_ID,
+        InboundKind.Poll,
+        InboundPlatform.GitHub,
+        Consumer.MissionDeliveryAdmit,
+        CREDENTIAL,
+        JSON.stringify({ resource: RESOURCE }),
+        CREATED_AT,
+      ),
+  );
+  const response = await h.request(
+    `/api/repository/credential/${CREDENTIAL}/archive`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${h.token}`,
+        "Idempotency-Key": ulid(),
+      },
+    },
+  );
+  assert.equal(response.status, HttpStatus.Conflict);
+  const body = (await response.json()) as {
+    error: { code: string; details: unknown };
+  };
+  assert.equal(body.error.code, IN_USE_CODE);
+  assert.deepEqual(body.error.details, {
+    agent_providers: [],
+    bindings: [],
+    inbounds: [{ inbound_id: INBOUND_ID }],
+  });
 });

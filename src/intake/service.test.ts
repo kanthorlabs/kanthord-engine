@@ -6,11 +6,24 @@ import { CodedError } from "../kernel/errors.ts";
 import { HealthRegistry } from "../kernel/health.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { INTAKE_SERVICE_NAME } from "./contract.ts";
+import {
+  Consumer,
+  INTAKE_SERVICE_NAME,
+  InboundKind,
+  InboundPlatform,
+  type InboundKindValue,
+} from "./contract.ts";
+import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { IntakeService } from "./index.ts";
+import { intakeMigrations } from "./migrations.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 
 const STOPPED_CODE = "intake.lifecycle.stopped";
+const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const CREDENTIAL = "github-poll";
+const OTHER_CREDENTIAL = "github-other";
+const CREATED_AT = 1000;
+const NO_CALLS = 0;
 
 function identity(service: string): ServiceIdentity {
   return { kind: IdentityKind.Service, service };
@@ -68,4 +81,65 @@ test("Intake answers no resource inventory entry", (t) => {
     store.transaction((tx) => intake.resourceInventory(tx)),
     [],
   );
+});
+
+function insertNaming(
+  store: Store,
+  kind: InboundKindValue,
+  credential: string | null,
+): string {
+  const id = allocateInboundId();
+  store.transaction((tx) =>
+    insertInbound(tx, id, {
+      project_id: PROJECT_ID,
+      kind,
+      platform: InboundPlatform.GitHub,
+      consumer: Consumer.MissionDeliveryAdmit,
+      credential,
+      configuration: { resource: "acme/app" },
+      checkpoint: null,
+      created_at: CREATED_AT,
+    }),
+  );
+  return id;
+}
+
+function migratedFixture(t: TestContext) {
+  const h = fixture(t);
+  h.store.migrate([
+    { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
+  ]);
+  return h;
+}
+
+test("inboundsNaming answers each inbound that names the credential", (t) => {
+  const { intake, store } = migratedFixture(t);
+  const first = insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  const second = insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  insertNaming(store, InboundKind.Poll, OTHER_CREDENTIAL);
+  assert.deepEqual(
+    store.transaction((tx) => intake.inboundsNaming(tx, CREDENTIAL)),
+    [first, second].sort().map((inbound_id) => ({ inbound_id })),
+  );
+});
+
+test("inboundsNaming answers no webhook inbound, which names no credential", (t) => {
+  const { intake, store } = migratedFixture(t);
+  insertNaming(store, InboundKind.Webhook, null);
+  assert.deepEqual(
+    store.transaction((tx) => intake.inboundsNaming(tx, CREDENTIAL)),
+    [],
+  );
+});
+
+test("inboundsNaming opens no transaction", (t) => {
+  const { intake, store } = migratedFixture(t);
+  const id = insertNaming(store, InboundKind.Poll, CREDENTIAL);
+  store.transaction((tx) => {
+    const transactions = t.mock.method(store, "transaction");
+    assert.deepEqual(intake.inboundsNaming(tx, CREDENTIAL), [
+      { inbound_id: id },
+    ]);
+    assert.equal(transactions.mock.callCount(), NO_CALLS);
+  });
 });
