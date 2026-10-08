@@ -163,10 +163,9 @@ export class OperationRegistry {
       operation.timeoutMs <= NO_TIMEOUT_MS
     )
       throw new Error("Every route requires a positive timeout.");
-    if (
-      operation.delivery &&
-      (operation.access !== AccessPolicy.Delivery || operation.mutation)
-    )
+    if (operation.delivery && operation.access !== AccessPolicy.Delivery)
+      throw new Error("The exact-byte adapter requires the delivery policy.");
+    if (operation.delivery && operation.mutation)
       throw new Error("A delivery operation is no mutation.");
     if (operation.access === AccessPolicy.Delivery && !operation.delivery)
       throw new Error("A delivery requires the exact-byte adapter.");

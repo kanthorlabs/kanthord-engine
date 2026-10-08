@@ -160,6 +160,14 @@ test("registry admits /hooks for a delivery operation alone", () => {
     () => registry.register({ ...delivery, mutation: true }, unused),
     /A delivery operation is no mutation/,
   );
+  assert.throws(
+    () =>
+      registry.register(
+        { ...delivery, path: "/api/human", access: AccessPolicy.Human },
+        unused,
+      ),
+    /The exact-byte adapter requires the delivery policy/,
+  );
   registry.register(delivery, unused);
   assert.deepEqual(
     registry.all().map(({ operation }) => operation.path),
