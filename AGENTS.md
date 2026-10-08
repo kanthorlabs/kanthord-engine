@@ -227,6 +227,7 @@ engine/
 │       │   ├── storage.ts      # Storage command group
 │       │   ├── agent.ts        # Agent command group
 │       │   ├── intake.ts       # Intake command group and outbound request commands
+│       │   ├── intake-inbound.ts # Intake inbound commands
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton
 │           ├── api.ts          # Server operation clients and bounded backoff

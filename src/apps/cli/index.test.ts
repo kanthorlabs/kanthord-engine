@@ -1219,6 +1219,45 @@ test("intake outbound commands expose offline help, reject --config and validate
   assert.match(repeated.stderr, /^cli\.option\.duplicate:/);
 });
 
+test("intake inbound commands expose offline help, reject --config and validate identities before I/O", (t) => {
+  const env = environment(temporary(t));
+  const inboundId = "inbound_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  for (const args of [
+    ["intake", "inbound", "--help"],
+    ["intake", "inbound", "create", "--help"],
+    ["intake", "inbound", "list", "--help"],
+    ["intake", "inbound", "get", "--help"],
+    ["intake", "inbound", "delete", "--help"],
+  ]) {
+    const help = invocation(args, env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+  }
+  for (const leaf of [
+    ["create", "--file", "x.json"],
+    ["list"],
+    ["get", inboundId],
+    ["delete", inboundId],
+  ]) {
+    const result = invocation(
+      ["intake", "inbound", ...leaf, "--config", "x.yaml"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
+  }
+  const get = invocation(["intake", "inbound", "get", "bad"], env);
+  assert.equal(get.status, ExitCode.Failure);
+  assert.match(get.stderr, /^cli\.intake\.inbound\.get\.invalid_inbound_id:/);
+  const remove = invocation(["intake", "inbound", "delete", "bad"], env);
+  assert.match(
+    remove.stderr,
+    /^cli\.intake\.inbound\.delete\.invalid_inbound_id:/,
+  );
+  const create = invocation(["intake", "inbound", "create"], env);
+  assert.equal(create.status, ExitCode.Failure);
+  assert.match(create.stderr, /--file/);
+});
+
 test("intake outbound discard prints the generated key when the result is indeterminate", (t) => {
   const env = environment(temporary(t));
   const args = [

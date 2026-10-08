@@ -9,6 +9,7 @@ import {
   intakeOperations,
 } from "../../intake/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
+import { addInboundCommands } from "./intake-inbound.ts";
 import {
   handleMutationResult,
   handleReadResult,
@@ -173,6 +174,7 @@ export function addIntakeCommand(program: Command): void {
       singleUse("--token"),
     );
   intake.action(() => intake.help());
+  addInboundCommands(intake);
   const outbound = intake
     .command(OUTBOUND)
     .description("Outbound request commands");
