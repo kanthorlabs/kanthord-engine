@@ -41,6 +41,10 @@ export interface IntakeCustody {
   release(tx: Transaction, grant: Grant, now: number): Material;
   consume(grant: Grant): void;
   grantFacts<G extends Grant>(grant: G): GrantFacts<G>;
+  custodySuitability(
+    tx: Transaction,
+    request: { credential: string; platform: string },
+  ): void;
 }
 
 export interface ActionCheckDependencies {

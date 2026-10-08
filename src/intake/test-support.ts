@@ -12,7 +12,7 @@ function unexpectedCollaboration(): never {
 
 export function unusedActionDependencies(): Pick<
   Dependencies,
-  "custody" | "github" | "gitWriter" | "s3" | "masterKey"
+  "custody" | "github" | "gitWriter" | "s3" | "masterKey" | "projects"
 > {
   return {
     custody: {
@@ -20,6 +20,7 @@ export function unusedActionDependencies(): Pick<
       release: unexpectedCollaboration,
       consume: unexpectedCollaboration,
       grantFacts: unexpectedCollaboration,
+      custodySuitability: unexpectedCollaboration,
     },
     github: new GitHubPlatform({ baseUrl: CLOSED_LOCAL_PORT }),
     gitWriter: {
@@ -29,5 +30,6 @@ export function unusedActionDependencies(): Pick<
     },
     s3: new S3Platform(),
     masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    projects: { get: unexpectedCollaboration },
   };
 }

@@ -26,6 +26,7 @@ import {
   intakeOperations,
   type IntakeCollaborations,
 } from "./contract.ts";
+import { createInbound, type InboundProjects } from "./inbound-create.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
@@ -49,6 +50,7 @@ export interface Dependencies {
   gitWriter: GitWriter;
   s3: S3Platform;
   masterKey: string;
+  projects: InboundProjects;
 }
 
 export class IntakeService implements Service, IntakeCollaborations {
@@ -88,6 +90,9 @@ export class IntakeService implements Service, IntakeCollaborations {
     registry.register(
       intakeOperations["outbound.request.delete"],
       ({ body }, caller) => caller.commit((tx) => deleteOutbound(tx, body)),
+    );
+    registry.register(intakeOperations["inbound.create"], ({ body }, caller) =>
+      createInbound(this.dependencies, caller, body),
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),

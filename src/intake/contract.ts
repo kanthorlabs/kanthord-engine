@@ -33,6 +33,7 @@ export const ADMISSION_CONCURRENCY = 1;
 export const ACTION_READ_LIMIT_MIN = 1;
 export const ACTION_READ_LIMIT_MAX = 100;
 export const OBJECT_MAX_BYTES = 5 * 1024 ** 3;
+export const INBOUND_CREATED_STATUS = 201;
 
 export const IntakeErrorCode = {
   CursorInvalid: "system.pagination.cursor_invalid",
@@ -44,6 +45,8 @@ export const IntakeErrorCode = {
   OutboundRequestFilterInvalid: "intake.outbound.request.filter_invalid",
   OutboundRequestActionUnmapped: "intake.outbound.request.action_unmapped",
   StorageObjectMismatch: "intake.storage.object_mismatch",
+  InboundProjectNotFound: "intake.inbound.project_not_found",
+  InboundCredentialInvalid: "intake.inbound.credential_invalid",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -208,6 +211,15 @@ export const webhookInboundSchema = inboundSchema.extend({
   secret: z.string().min(1),
 });
 
+export const inboundCreateSchema = z.strictObject({
+  project_id: identitySchema("project"),
+  kind: inboundKindSchema,
+  platform: inboundPlatformSchema,
+  consumer: consumerSchema,
+  credential: z.string().min(1).optional(),
+  configuration: z.record(z.string(), z.unknown()),
+});
+
 export const outboundDeleteSchema = z.strictObject({
   force: z.boolean().optional(),
   state: outboundRequestStateSchema.optional(),
@@ -232,6 +244,7 @@ export type ResultClassValue = z.infer<typeof resultClassSchema>;
 export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
 export type Inbound = z.infer<typeof inboundSchema>;
 export type WebhookInbound = z.infer<typeof webhookInboundSchema>;
+export type InboundCreate = z.infer<typeof inboundCreateSchema>;
 export type OutboundDelete = z.infer<typeof outboundDeleteSchema>;
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
 export type ResultClassAnswer = z.infer<typeof resultClassAnswerSchema>;
@@ -375,6 +388,21 @@ export const intakeOperations = {
     output: z.strictObject({ count: z.number().int().nonnegative() }),
     description:
       "Delete settled outbound requests by a state with an identity range or by a list of identities.",
+  },
+  "inbound.create": {
+    ...mutationOperation,
+    id: "intake.inbound.create",
+    path: "/api/intake/inbound",
+    body: true,
+    status: INBOUND_CREATED_STATUS,
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: inboundCreateSchema,
+    }),
+    output: inboundSchema,
+    description:
+      "Create an inbound of a project; a webhook inbound calls no platform.",
   },
   "action.check": {
     ...serviceOperation,

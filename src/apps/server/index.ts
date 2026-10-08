@@ -30,9 +30,10 @@ import {
   MISSION_SERVICE_NAME,
   missionOperations,
 } from "../../mission/contract.ts";
-import type {
-  ProjectBindings,
-  RepositoryConnector,
+import {
+  projectOperations,
+  type ProjectBindings,
+  type RepositoryConnector,
 } from "../../project/contract.ts";
 import type { WorkerRegistrations } from "../../worker/contract.ts";
 import { audit, ensureDirectory } from "../../kernel/files.ts";
@@ -185,6 +186,7 @@ export function composeServices(options: {
   });
   const missionClient = directClient(missionOperations, invocation);
   const intakeClient = directClient(intakeOperations, invocation);
+  const projectClient = directClient(projectOperations, invocation);
   const missionIdentity = mintServiceIdentity(MISSION_SERVICE_NAME);
   const scheduler: SchedulerService = new SchedulerService({
     config: options.config.scheduler,
@@ -494,11 +496,13 @@ export function composeServices(options: {
       release: (...args) => custody.release(...args),
       consume: (...args) => custody.consume(...args),
       grantFacts,
+      custodySuitability: (...args) => custody.custodySuitability(...args),
     },
     github,
     gitWriter,
     s3,
     masterKey: options.config.master_key,
+    projects: { get: projectClient.get },
   });
   const workbench = new WorkbenchService({
     store: options.store,

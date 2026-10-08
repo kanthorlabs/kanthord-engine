@@ -104,6 +104,7 @@ engine/
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── configuration.ts    # Inbound configuration schema per kind and platform, and resource identity
 │   │   ├── inbound-store.ts    # Inbound rows, the record projection, pending event count, and delete with events
+│   │   ├── inbound-create.ts   # Inbound create: webhook admission, project check, credential check, and insert step
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
 │   │   ├── outbound-read.ts    # Outbound request list and get handlers

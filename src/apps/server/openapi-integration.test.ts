@@ -32,16 +32,25 @@ import {
   emitOpenAPIFiles,
   serializeOpenAPIFile,
 } from "../../gateway/local.ts";
+import { errorSchema } from "../../kernel/errors.ts";
+import { createIdentity } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   AccessPolicy,
   hasHttpRoute,
   OperationRegistry,
+  OperationResultType,
 } from "../../kernel/operation.ts";
+import { testMachineIdentity } from "../../kernel/test-identity.ts";
+import { directClient } from "../../gateway/index.ts";
 import { ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
+const INBOUND_CREATED = 201;
+const INBOUND_ONE_ROW = 1;
+const INBOUND_VALIDATION_FAILED = "gateway.request.validation_failed";
+const INBOUND_UNAUTHORIZED = "gateway.authentication.unauthorized";
 
 test("published native setup is an execution-scoped bodyless read", () => {
   const operation = workerOperations["execution.setup.get"];
@@ -687,6 +696,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.outbound.request.get", AccessPolicy.Human],
   ["intake.outbound.request.discard", AccessPolicy.Human],
   ["intake.outbound.request.delete", AccessPolicy.Human],
+  ["intake.inbound.create", AccessPolicy.Human],
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
   ["intake.action.read", AccessPolicy.Client],
@@ -696,7 +706,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 159;
+const OPERATION_COUNT = 160;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1479,4 +1489,117 @@ test("published outbound request discard and delete are human mutation routes", 
     intakeOperations["outbound.request.delete"].id,
   );
   assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
+});
+
+test("published inbound create is a human mutation route with a 201 inbound", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const create = resolved.paths?.["/api/intake/inbound"]?.post as
+    | (ResolvedOperation & {
+        responses?: Record<
+          number,
+          { content?: Record<string, { schema: ResolvedSchema }> }
+        >;
+      })
+    | undefined;
+  assert.equal(create?.operationId, intakeOperations["inbound.create"].id);
+  assert.equal(create?.["x-access-policy"], AccessPolicy.Human);
+  const created = create?.responses?.[INBOUND_CREATED];
+  assert.deepEqual(
+    Object.keys(
+      created?.content?.["application/json"]?.schema.properties ?? {},
+    ).sort(),
+    [
+      "checkpoint",
+      "configuration",
+      "consumer",
+      "created_at",
+      "credential",
+      "id",
+      "kind",
+      "platform",
+      "project_id",
+    ],
+  );
+});
+
+test("inbound create answers 201, replays a repeated key, refuses an unknown consumer and a machine identity", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const authorization = `Bearer ${fixture.token}`;
+  const post = (path: string, key: string, body: unknown) =>
+    fixture.request(path, {
+      method: "POST",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json",
+        "Idempotency-Key": key,
+      },
+      body: JSON.stringify(body),
+    });
+  const project = projectOperations.create.output.parse(
+    await (
+      await post(projectOperations.create.path, ulid(), { name: "inbounds" })
+    ).json(),
+  );
+  const webhook = {
+    project_id: project.id,
+    kind: "webhook",
+    platform: "github",
+    consumer: "mission.delivery.admit",
+    configuration: { resource: "owner/repo" },
+  } as const;
+  const path = intakeOperations["inbound.create"].path;
+  const key = ulid();
+  const first = await post(path, key, webhook);
+  assert.equal(first.status, INBOUND_CREATED);
+  const inbound = intakeOperations["inbound.create"].output.parse(
+    await first.json(),
+  );
+  const repeat = await post(path, key, webhook);
+  assert.equal(repeat.status, INBOUND_CREATED);
+  assert.deepEqual(
+    intakeOperations["inbound.create"].output.parse(await repeat.json()),
+    inbound,
+  );
+  const inboundCount = () =>
+    fixture.store.transaction(
+      (tx) =>
+        (
+          tx.database
+            .prepare("SELECT COUNT(*) AS total FROM intake_inbound")
+            .get() as { total: number }
+        ).total,
+    );
+  assert.equal(inboundCount(), INBOUND_ONE_ROW);
+  const consumer = await post(path, ulid(), {
+    ...webhook,
+    consumer: "mission.node.check",
+  });
+  assert.equal(consumer.status, HttpStatus.BadRequest);
+  assert.equal(
+    errorSchema.parse(await consumer.json()).error.code,
+    INBOUND_VALIDATION_FAILED,
+  );
+  const machine = await directClient(intakeOperations, fixture.invocation)[
+    "inbound.create"
+  ](
+    { params: {}, query: {}, body: webhook },
+    {
+      identity: testMachineIdentity(
+        {
+          clientId: createIdentity("client_identity"),
+          name: "harness",
+          resourceIdentity: "worker:kanthord:binding",
+          issuedAt: Date.now(),
+          projectId: project.id,
+        },
+        ulid(),
+      ),
+      idempotencyKey: ulid(),
+    },
+  );
+  assert.equal(machine.type, OperationResultType.Failure);
+  if (machine.type !== OperationResultType.Failure) return;
+  assert.equal(machine.status, HttpStatus.Unauthorized);
+  assert.equal(machine.error.error.code, INBOUND_UNAUTHORIZED);
+  assert.equal(inboundCount(), INBOUND_ONE_ROW);
 });
