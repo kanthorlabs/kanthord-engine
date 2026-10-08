@@ -532,6 +532,8 @@ test(
               title: `kanthord ${f.gated}`,
             },
             token: GITHUB_KEY,
+            if_none_match: null,
+            status: 201,
           },
         ]);
       },

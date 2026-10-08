@@ -498,6 +498,8 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
           title: `kanthord ${h.G}`,
         },
         token: GITHUB_KEY,
+        if_none_match: null,
+        status: UNAUTHORIZED_STATUS,
       },
     ]);
   });

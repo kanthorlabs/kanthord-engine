@@ -38,6 +38,9 @@ const call = {
 const GITHUB_TOKEN = "test-secret";
 const VALIDATION_FAILED_STATUS = 422;
 const NO_PULLS = 0;
+const NOT_MODIFIED_STATUS = 304;
+const CREATED_STATUS = 201;
+const EVENTS_PATH = "/repos/owner/repo/events?per_page=100";
 const ONE_PULL = 1;
 const NO_CALLS = 0;
 const GITHUB_DEADLINE_MS = 5000;
@@ -119,6 +122,8 @@ test("fake GitHub serves the pull-request routes and records each call", async (
     path: "/repos/owner/repo/pulls",
     body: { ...branches, title: "kanthord node" },
     token: GITHUB_TOKEN,
+    if_none_match: null,
+    status: CREATED_STATUS,
   });
   assert.ok(gitHub.calls.every((item) => item.token === GITHUB_TOKEN));
 });
@@ -205,6 +210,86 @@ test("fake GitHub holds every answer until the release", async (t) => {
   assert.equal(settled, false);
   release();
   assert.deepEqual(await pending, { ok: true, value: { number: 1 } });
+});
+
+const eventsQuery = (etag: string | null) => ({
+  owner: "owner",
+  repo: "repo",
+  etag,
+});
+const gitHubEvent = (id: string) => ({ id, type: "PushEvent", payload: {} });
+
+test("fake GitHub changes the ETag with the list and answers 304 for a match", async (t) => {
+  const gitHub = await fakeGitHub(t);
+  const platform = new GitHubPlatform({ baseUrl: gitHub.endpoint });
+  gitHub.events("owner", "repo", [gitHubEvent("101")]);
+  const first = await platform.listEvents(gitHubCall(), eventsQuery(null));
+  assert.ok(first.ok && !first.value.notModified);
+  assert.deepEqual(
+    first.value.events.map((event) => event.id),
+    ["101"],
+  );
+  assert.ok(first.value.etag);
+  const again = await platform.listEvents(
+    gitHubCall(),
+    eventsQuery(first.value.etag),
+  );
+  assert.deepEqual(again, { ok: true, value: { notModified: true } });
+  gitHub.events("owner", "repo", [gitHubEvent("102"), gitHubEvent("101")]);
+  const changed = await platform.listEvents(
+    gitHubCall(),
+    eventsQuery(first.value.etag),
+  );
+  assert.ok(changed.ok && !changed.value.notModified);
+  assert.notEqual(changed.value.etag, first.value.etag);
+  assert.deepEqual(
+    gitHub.calls.map((item) => [item.if_none_match, item.status]),
+    [
+      [null, HttpStatus.OK],
+      [first.value.etag, NOT_MODIFIED_STATUS],
+      [first.value.etag, HttpStatus.OK],
+    ],
+  );
+  assert.equal(gitHub.calls[0]?.path, EVENTS_PATH);
+});
+
+test("fake GitHub scripts the events failures and holds the later events calls", async (t) => {
+  const gitHub = await fakeGitHub(t);
+  const platform = new GitHubPlatform({ baseUrl: gitHub.endpoint });
+  gitHub.events("owner", "repo", [gitHubEvent("101")]);
+  gitHub.respondNext(HttpStatus.Unauthorized, { message: "Bad credentials" });
+  const refused = await platform.listEvents(gitHubCall(), eventsQuery(null));
+  assert.ok(!refused.ok);
+  assert.equal(refused.status, HttpStatus.Unauthorized);
+  gitHub.failEvents(HttpStatus.InternalServerError);
+  const release = gitHub.holdEvents({ pass: ONE_CALL });
+  const passed = await platform.listEvents(gitHubCall(), eventsQuery(null));
+  assert.ok(!passed.ok);
+  assert.equal(passed.status, HttpStatus.InternalServerError);
+  let settled = false;
+  const held = platform
+    .listEvents(gitHubCall(), eventsQuery(null))
+    .finally(() => {
+      settled = true;
+    });
+  for (
+    let poll = 0;
+    poll < HOLD_POLL_LIMIT && gitHub.calls.length < LAST_CALLS;
+    poll++
+  )
+    await delay(HOLD_POLL_MS);
+  assert.equal(gitHub.calls.length, LAST_CALLS);
+  await delay(HOLD_POLL_MS);
+  assert.equal(settled, false);
+  assert.equal(gitHub.calls[TWO_CALLS]?.status, null);
+  gitHub.failEvents(null);
+  release();
+  const released = await held;
+  assert.ok(released.ok && !released.value.notModified);
+  assert.deepEqual(
+    gitHub.calls.map((item) => item.status),
+    [HttpStatus.Unauthorized, HttpStatus.InternalServerError, HttpStatus.OK],
+  );
 });
 
 test("gatewayFixture passes the GitHub base URL and the repository transport", async (t) => {

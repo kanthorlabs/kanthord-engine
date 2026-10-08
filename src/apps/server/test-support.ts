@@ -522,6 +522,10 @@ export async function deliver(
 
 const GITHUB_VERSION_HEADER = "x-github-api-version";
 const GITHUB_BODY_MAX = 1024 ** 2;
+const GITHUB_EVENTS_ROUTE = /^\/repos\/([^/]+)\/([^/]+)\/events$/;
+const GITHUB_NOT_MODIFIED_STATUS = 304;
+const NO_HOLD_PASS = 0;
+const HOLD_PASS_STEP = 1;
 const GITHUB_PULL_ROUTE =
   /^\/repos\/([^/]+)\/([^/]+)\/pulls(?:\/([1-9][0-9]*)(\/comments)?)?$/;
 const GITHUB_TOKEN_SCHEME = /^(?:token|bearer) /i;
@@ -557,6 +561,13 @@ export interface FakeGitHubCall {
   path: string;
   body: unknown;
   token: string | null;
+  if_none_match: string | null;
+  status: number | null;
+}
+
+interface FakeEventsHold {
+  pass: number;
+  gate: Promise<void>;
 }
 
 interface FakeGitHubState {
@@ -566,6 +577,9 @@ interface FakeGitHubState {
   failPulls: number | null;
   dropNext: boolean;
   gate: Promise<void> | null;
+  events: Map<string, unknown[]>;
+  failEvents: number | null;
+  eventsHold: FakeEventsHold | null;
 }
 
 interface FakeGitHubAnswer {
@@ -696,12 +710,63 @@ function routePull(
   return { status: HttpStatus.OK, body: comments ? [] : pullBody(pull) };
 }
 
-function replyGitHub(response: ServerResponse, answer: FakeGitHubAnswer) {
+function eventsEtag(events: unknown[]): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify(events))
+    .digest("hex");
+  return `"${digest}"`;
+}
+
+function eventsKey(owner: string, repo: string): string {
+  assert.ok(owner.length >= GITHUB_MIN_SEGMENT_LENGTH);
+  assert.ok(repo.length >= GITHUB_MIN_SEGMENT_LENGTH);
+  return `${owner}/${repo}`;
+}
+
+function listEvents(
+  state: FakeGitHubState,
+  owner: string,
+  repo: string,
+  ifNoneMatch: string | null,
+): FakeGitHubAnswer & { etag: string } {
+  const events = state.events.get(eventsKey(owner, repo)) ?? [];
+  const etag = eventsEtag(events);
+  return ifNoneMatch === etag
+    ? { status: GITHUB_NOT_MODIFIED_STATUS, body: null, etag }
+    : { status: HttpStatus.OK, body: events, etag };
+}
+
+async function awaitEventsHold(state: FakeGitHubState) {
+  const hold = state.eventsHold;
+  if (!hold) return;
+  if (hold.pass > NO_HOLD_PASS) {
+    hold.pass -= HOLD_PASS_STEP;
+    return;
+  }
+  await hold.gate;
+}
+
+function replyGitHub(
+  response: ServerResponse,
+  answer: FakeGitHubAnswer,
+  headers: Record<string, string> = {},
+) {
   assert.ok(Number.isInteger(answer.status));
   assert.ok(!response.headersSent);
-  response
-    .writeHead(answer.status, { "content-type": "application/json" })
-    .end(JSON.stringify(answer.body));
+  const head = writeHead(response, answer.status, headers);
+  if (answer.status === GITHUB_NOT_MODIFIED_STATUS) head.end();
+  else head.end(JSON.stringify(answer.body));
+}
+
+function writeHead(
+  response: ServerResponse,
+  status: number,
+  headers: Record<string, string>,
+): ServerResponse {
+  return response.writeHead(status, {
+    "content-type": "application/json",
+    ...headers,
+  });
 }
 
 async function gitHubRequest(
@@ -713,35 +778,49 @@ async function gitHubRequest(
   assert.equal(request.headers[GITHUB_VERSION_HEADER], GITHUB_API_VERSION);
   const body = await readGitHubBody(request);
   const method = request.method;
-  state.calls.push({
+  const url = new URL(request.url, "http://127.0.0.1");
+  const eventsRoute =
+    method === HttpMethod.Get ? GITHUB_EVENTS_ROUTE.exec(url.pathname) : null;
+  const call: FakeGitHubCall = {
     method,
     path: request.url,
     body,
     token: gitHubToken(request),
-  });
+    if_none_match: request.headers["if-none-match"] ?? null,
+    status: null,
+  };
+  state.calls.push(call);
+  if (eventsRoute) await awaitEventsHold(state);
   if (state.gate) await state.gate;
+  const reply = (
+    answer: FakeGitHubAnswer,
+    headers?: Record<string, string>,
+  ) => {
+    call.status = answer.status;
+    replyGitHub(response, answer, headers);
+  };
   const scripted = state.next;
   if (scripted) {
     state.next = null;
-    return replyGitHub(response, scripted);
+    return reply(scripted);
+  }
+  if (eventsRoute) {
+    const [, owner, repo] = eventsRoute;
+    assert.ok(owner && repo);
+    if (state.failEvents !== null)
+      return reply({ status: state.failEvents, body: GITHUB_SCRIPTED_FAILURE });
+    const listed = listEvents(state, owner, repo, call.if_none_match);
+    return reply(listed, { etag: listed.etag });
   }
   if (method === HttpMethod.Get && state.failPulls !== null)
-    return replyGitHub(response, {
-      status: state.failPulls,
-      body: GITHUB_SCRIPTED_FAILURE,
-    });
-  const answer = routePull(
-    state,
-    method,
-    new URL(request.url, "http://127.0.0.1"),
-    body,
-  );
+    return reply({ status: state.failPulls, body: GITHUB_SCRIPTED_FAILURE });
+  const answer = routePull(state, method, url, body);
   if (method !== HttpMethod.Get && state.dropNext) {
     state.dropNext = false;
     response.destroy();
     return;
   }
-  replyGitHub(response, answer);
+  reply(answer);
 }
 
 function changePull(state: FakeGitHubState, number: number): FakePullRequest {
@@ -759,9 +838,13 @@ export async function fakeGitHub(t: TestContext) {
     failPulls: null,
     dropNext: false,
     gate: null,
+    events: new Map(),
+    failEvents: null,
+    eventsHold: null,
   };
   const failures: unknown[] = [];
   let releaseGate = () => {};
+  let releaseEvents = () => {};
   const server = createServer((request, response) => {
     void gitHubRequest(state, request, response).catch((error: unknown) => {
       failures.push(error);
@@ -772,6 +855,7 @@ export async function fakeGitHub(t: TestContext) {
   });
   t.after(async () => {
     releaseGate();
+    releaseEvents();
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
@@ -829,6 +913,24 @@ export async function fakeGitHub(t: TestContext) {
     dropNextAfterApply(): void {
       assert.equal(state.dropNext, false);
       state.dropNext = true;
+    },
+    events(owner: string, repo: string, events: readonly unknown[]): void {
+      state.events.set(eventsKey(owner, repo), [...events]);
+    },
+    failEvents(status: number | null): void {
+      assert.ok(status === null || Number.isInteger(status));
+      state.failEvents = status;
+    },
+    holdEvents(options: { pass: number }): () => void {
+      assert.ok(Number.isInteger(options.pass) && options.pass >= NO_HOLD_PASS);
+      assert.equal(state.eventsHold, null);
+      const gate = Promise.withResolvers<void>();
+      state.eventsHold = { pass: options.pass, gate: gate.promise };
+      releaseEvents = () => {
+        state.eventsHold = null;
+        gate.resolve();
+      };
+      return releaseEvents;
     },
     hold(): () => void {
       assert.equal(state.gate, null);
