@@ -56,7 +56,7 @@ const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
 const FIRST_ATTEMPT = 1;
 const WORKER_INSTANCE_COUNT = 1;
-const SINGLE_ITEM = 1;
+const JOURNEY_MATCH_COUNT = 1;
 const FIRST_PULL_REQUEST = 1;
 const POLL_INTERVAL_MS = 50;
 const PASSING_EXIT_CODE = 0;
@@ -387,7 +387,7 @@ function journey(h: Harness) {
       "list",
       nodeId,
     ]);
-    assert.equal(page.items.length, SINGLE_ITEM);
+    assert.equal(page.items.length, JOURNEY_MATCH_COUNT);
     return page.items[FIRST_INDEX]!.id;
   };
   const submit = (nodeId: string, x: ExecutionRecord, body: object) =>
@@ -447,7 +447,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     await j.objective(h.P, h.gated.id, h.p, async (x) => {
       stored = await j.store(x);
     });
-    assert.equal(h.s3.objects(stored.key).length, SINGLE_ITEM);
+    assert.equal(h.s3.objects(stored.key).length, JOURNEY_MATCH_COUNT);
     assert.equal(await j.state(h.P), NodeState.ExternalRequested);
     const rows = await j.outbound(PULL_REQUEST_OPERATION);
     assert.deepEqual(
@@ -492,7 +492,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
         item.provenance.kind === ActorKind.Service &&
         item.provenance.service === ActorService.Mission,
     );
-    assert.equal(landed.length, SINGLE_ITEM);
+    assert.equal(landed.length, JOURNEY_MATCH_COUNT);
     assert.deepEqual(landed[FIRST_INDEX]!.provenance, {
       kind: ActorKind.Service,
       service: ActorService.Mission,
@@ -504,7 +504,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "objective q\n");
     await j.objective(Q, h.merge.id, q);
     const rows = await j.outbound(MERGE_PUSH_OPERATION);
-    assert.equal(rows.length, SINGLE_ITEM);
+    assert.equal(rows.length, JOURNEY_MATCH_COUNT);
     const [row] = rows;
     assert.equal(row!.state, OutboundRequestState.Succeeded);
     c = (row!.result as { commit: string }).commit;
@@ -528,7 +528,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     const items = await until(
       () => j.events(h.L),
       (list) =>
-        list.length === SINGLE_ITEM &&
+        list.length === JOURNEY_MATCH_COUNT &&
         list[FIRST_INDEX]!.state !== InboundEventState.Pending,
     );
     assert.deepEqual(

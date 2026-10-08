@@ -16,7 +16,7 @@ import {
   type PollTarget,
 } from "./poll.ts";
 
-const NO_LENGTH = 0;
+const EMPTY_IDENTIFIER_LENGTH = 0;
 
 export const INBOUND_TARGET_KIND = "inbound";
 export const InboundCapability = {
@@ -41,7 +41,7 @@ function releaseRefusal(
   hold: Hold,
 ): string | null {
   assert.equal(hold.material, null, "A check releases once.");
-  assert.ok(target.facts.inboundId.length > NO_LENGTH);
+  assert.ok(target.facts.inboundId.length > EMPTY_IDENTIFIER_LENGTH);
   try {
     dependencies.store.transaction((tx) => {
       hold.material = releasePollGrant(dependencies, tx, target.facts);
@@ -62,12 +62,21 @@ function pollCheck(
     InboundKind.Poll,
     "A poll check reads a poll inbound.",
   );
-  assert.ok(row.id.length > NO_LENGTH, "A poll check names its inbound.");
+  assert.ok(
+    row.id.length > EMPTY_IDENTIFIER_LENGTH,
+    "A poll check names its inbound.",
+  );
   return async (context, observe) => {
     throwIfCancelled(context);
     const target = pollTargetOf(row);
-    assert.ok(target.owner.length > NO_LENGTH, "A target names an owner.");
-    assert.ok(target.repo.length > NO_LENGTH, "A target names a repository.");
+    assert.ok(
+      target.owner.length > EMPTY_IDENTIFIER_LENGTH,
+      "A target names an owner.",
+    );
+    assert.ok(
+      target.repo.length > EMPTY_IDENTIFIER_LENGTH,
+      "A target names a repository.",
+    );
     const hold: Hold = { material: null };
     try {
       const refusal = releaseRefusal(dependencies, target, hold);

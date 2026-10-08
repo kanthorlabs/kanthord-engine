@@ -58,7 +58,7 @@ const UNAUTHORIZED_STATUS = 401;
 const CHECK_DEADLINE_MS = 20;
 const CHECK_BUDGET_MS = 5000;
 const CREATED_AT = 1;
-const NO_CALLS = 0;
+const UNCALLED_PLATFORM_COUNT = 0;
 const MALFORMED_CONFIGURATION = "{";
 const SERVICE_IDENTITY = {
   kind: IdentityKind.Service,
@@ -241,7 +241,7 @@ test("the inventory answers one entry per inbound and calls no facility and no p
     ].sort((left, right) => (left.target < right.target ? -1 : 1)),
   );
   assert.deepEqual(h.grants, []);
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
 });
 
 test("a webhook check answers unknown with no call", async (t) => {
@@ -249,7 +249,7 @@ test("a webhook check answers unknown with no call", async (t) => {
   const entry = h.entryOf(h.insert(InboundKind.Webhook));
   assert.equal(await entry.check(checkContext(t)), ResourceStatus.Unknown);
   assert.deepEqual(h.grants, []);
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
 });
 
 test("a poll check releases one poll grant, sends the stored ETag and answers healthy for a 200", async (t) => {
@@ -332,7 +332,7 @@ test("a refused release answers unhealthy with no platform call and no material 
   );
   assert.deepEqual(reasons, [REFUSAL_CODE]);
   assert.ok(reasons.every((reason) => !reason.includes(TOKEN)));
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
   assert.deepEqual(h.drops, []);
 });
 
@@ -344,7 +344,7 @@ test("a release failure that is no refusal propagates with no platform call", as
     entry.check(checkContext(t)),
     (error) => error === failure,
   );
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
 });
 
 test("the check deadline propagates and drops the material", async (t) => {
@@ -384,7 +384,7 @@ test("a cancelled context sends no request and releases nothing", async (t) => {
     (error) => error === context.err(),
   );
   assert.deepEqual(h.grants, []);
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
 });
 
 test("a malformed poll row answers its entry and only its check rejects", async (t) => {
@@ -396,7 +396,7 @@ test("a malformed poll row answers its entry and only its check rejects", async 
   assert.equal(entry.capability, InboundCapability.PollAcquisition);
   await assert.rejects(entry.check(checkContext(t)), SyntaxError);
   assert.deepEqual(h.grants, []);
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
   assert.equal(await good.check(checkContext(t)), ResourceStatus.Healthy);
   assert.deepEqual(h.drops, [CREDENTIAL]);
 });
