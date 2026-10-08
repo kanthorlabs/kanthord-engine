@@ -78,7 +78,7 @@ engine/
 │   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
 │   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
 │   │   └── service.ts          # Enablement routes, entry validation, agent views, and provider healthchecks
-│   ├── storage/                # Storage component: storage platforms and credential routes
+│   ├── storage/                # Storage component: storage platforms, credential routes, and the S3 presign, object read and object delete
 │   │   ├── contract.ts         # Storage credential route group
 │   │   ├── index.ts            # Component and platform table exports
 │   │   ├── platforms.ts        # s3 platform validator and metadata schema

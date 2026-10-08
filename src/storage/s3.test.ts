@@ -36,9 +36,11 @@ const SIGNED_HEADERS = "X-Amz-SignedHeaders";
 const EXPIRES = "X-Amz-Expires";
 const VERSION_ID = "versionId";
 const HEAD = "HEAD";
+const DELETE = "DELETE";
 const CRC32_PARAMETER = "x-amz-checksum-crc32";
 const CHECKSUM_MODE_HEADER = "x-amz-checksum-mode";
 const CHECKSUM_MODE_ENABLED = "ENABLED";
+const UNKNOWN_OUTCOME_CODE = "storage.platform.s3.unknown_outcome";
 
 type Handler = (request: IncomingMessage, response: ServerResponse) => void;
 
@@ -215,4 +217,91 @@ test("headObject retries a lost answer until the deadline and answers retryable_
   assert.equal(answer.class, ResultClass.RetryableRefusal);
   assert.equal(answer.status, null);
   assert.ok(s3.requests.length > ONE_REQUEST);
+});
+
+test("deleteObject sends the version and answers the deleted version", async (t) => {
+  const s3 = await store(
+    t,
+    status(HttpStatus.NoContent, { "x-amz-version-id": VERSION }),
+  );
+  const answer = await new S3Platform().deleteObject(call(), {
+    ...location(s3.endpoint),
+    key: KEY,
+    version: VERSION,
+  });
+  assert.deepEqual(answer, { ok: true, value: { version: VERSION } });
+  assert.equal(s3.requests.length, ONE_REQUEST);
+  const request = s3.requests[0];
+  assert.ok(request);
+  assert.equal(request.method, DELETE);
+  const url = new URL(request.url ?? "", s3.endpoint);
+  assert.equal(url.pathname, `/${BUCKET}/${KEY}`);
+  assert.equal(url.searchParams.get(VERSION_ID), VERSION);
+});
+
+test("deleteObject sends one request for a 503 and answers unknown_outcome with the status", async (t) => {
+  const s3 = await store(t, status(HttpStatus.ServiceUnavailable));
+  const answer = await new S3Platform().deleteObject(call(), {
+    ...location(s3.endpoint),
+    key: KEY,
+    version: VERSION,
+  });
+  assert.ok(!answer.ok);
+  assert.equal(answer.class, ResultClass.UnknownOutcome);
+  assert.equal(answer.code, UNKNOWN_OUTCOME_CODE);
+  assert.equal(answer.status, HttpStatus.ServiceUnavailable);
+  assert.equal(s3.requests.length, ONE_REQUEST);
+  assertNoSecret(answer);
+});
+
+test("deleteObject answers unknown_outcome with a null status for a lost answer", async (t) => {
+  const s3 = await store(t, lose);
+  const answer = await new S3Platform().deleteObject(call(), {
+    ...location(s3.endpoint),
+    key: KEY,
+    version: VERSION,
+  });
+  assert.ok(!answer.ok);
+  assert.equal(answer.class, ResultClass.UnknownOutcome);
+  assert.equal(answer.status, null);
+  assert.equal(s3.requests.length, ONE_REQUEST);
+  assertNoSecret(answer);
+});
+
+test("deleteObject answers retryable_refusal for a 429 and a SlowDown", async (t) => {
+  const limited = await store(t, status(HttpStatus.TooManyRequests));
+  const slow = await store(t, (_request, response) => {
+    response.writeHead(HttpStatus.ServiceUnavailable, {
+      "content-type": "application/xml",
+    });
+    response.end("<Error><Code>SlowDown</Code><Message>slow</Message></Error>");
+  });
+  for (const s3 of [limited, slow]) {
+    const answer = await new S3Platform().deleteObject(call(), {
+      ...location(s3.endpoint),
+      key: KEY,
+      version: null,
+    });
+    assert.ok(!answer.ok);
+    assert.equal(answer.class, ResultClass.RetryableRefusal);
+    assert.equal(s3.requests.length, ONE_REQUEST);
+  }
+});
+
+test("deleteObject answers confirmed_failure when the connection fails before dispatch", async () => {
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const { port } = server.address() as AddressInfo;
+  server.close();
+  await once(server, "close");
+  const answer = await new S3Platform().deleteObject(call(), {
+    ...location(`http://127.0.0.1:${port}`),
+    key: KEY,
+    version: VERSION,
+  });
+  assert.ok(!answer.ok);
+  assert.equal(answer.class, ResultClass.ConfirmedFailure);
+  assert.equal(answer.status, null);
+  assertNoSecret(answer);
 });

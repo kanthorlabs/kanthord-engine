@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -113,6 +114,10 @@ const headAnswerSchema = z.object({
   ContentLength: z.number().int().nonnegative(),
   ChecksumSHA256: z.string().regex(SHA256_BASE64_PATTERN).optional(),
   ChecksumType: z.string().optional(),
+  VersionId: z.string().min(MIN_KEY_LENGTH).optional(),
+});
+
+const deleteAnswerSchema = z.object({
   VersionId: z.string().min(MIN_KEY_LENGTH).optional(),
 });
 
@@ -415,5 +420,31 @@ export class S3Platform {
       return { ok: true, value: null };
     }
     return classify(call, result.error, result.phase, S3CallKind.Read);
+  }
+
+  async deleteObject(
+    call: S3Call,
+    target: S3ObjectTarget,
+  ): Promise<S3Answer<{ version: string | null }>> {
+    assert.ok(target.key.length >= MIN_KEY_LENGTH);
+    assert.ok(
+      target.version === null || target.version.length >= MIN_KEY_LENGTH,
+    );
+    const command = new DeleteObjectCommand({
+      Bucket: target.bucket,
+      Key: target.key,
+      ...(target.version === null ? {} : { VersionId: target.version }),
+    });
+    const result = await attempt(call, target, (client, abortSignal) =>
+      client.send(command, { abortSignal }),
+    );
+    if (!result.ok) {
+      return classify(call, result.error, result.phase, S3CallKind.Write);
+    }
+    const parsed = deleteAnswerSchema.safeParse(result.value);
+    if (!parsed.success) {
+      return unexpectedBody(statusOf(result.value), S3CallKind.Write);
+    }
+    return { ok: true, value: { version: parsed.data.VersionId ?? null } };
   }
 }
