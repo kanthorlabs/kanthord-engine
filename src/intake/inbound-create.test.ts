@@ -424,12 +424,13 @@ function pollHarness(
   h.store.transaction((tx) =>
     tx.database.exec("CREATE TABLE test_drain (credential TEXT NOT NULL)"),
   );
+  const start = t.mock.method(h.intake.pollLoops, "start");
   const drained = () =>
     h.store.transaction(
       (tx) =>
         tx.database.prepare("SELECT credential FROM test_drain").all().length,
     );
-  return { ...h, credentials, drops, listEvents, drained };
+  return { ...h, credentials, drops, listEvents, start, drained };
 }
 
 const modified: EventsAnswer = {
@@ -456,7 +457,16 @@ test("a poll create performs one request with the credential and inserts one row
   assert.equal(h.drained(), ONE_ROW);
 });
 
-test("a failed first request answers 422 platform_refused and inserts no row", async (t) => {
+test("a poll create starts one loop after the insert and a webhook starts none", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  await h.create(WEBHOOK);
+  assert.equal(h.start.mock.callCount(), NO_ROWS);
+  const inbound = await h.create(POLL);
+  assert.equal(h.start.mock.callCount(), ONE_CALL);
+  assert.deepEqual(h.start.mock.calls[0]?.arguments, [inbound.id]);
+});
+
+test("a failed first request answers 422 platform_refused, inserts no row and starts no loop", async (t) => {
   const h = pollHarness(t, async () => ({
     ok: false,
     class: ResultClass.FinalRefusal,
@@ -472,6 +482,7 @@ test("a failed first request answers 422 platform_refused and inserts no row", a
   assert.deepEqual(error.details, { status: UNAUTHORIZED_STATUS });
   assert.equal(h.listEvents.mock.callCount(), ONE_CALL);
   assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.start.mock.callCount(), NO_ROWS);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
 });
 
@@ -503,6 +514,7 @@ test("a credential archive between the first request and the insert refuses the 
   );
   assert.equal(h.listEvents.mock.callCount(), ONE_CALL);
   assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.start.mock.callCount(), NO_ROWS);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
 });
 

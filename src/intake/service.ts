@@ -27,7 +27,11 @@ import {
   PENDING_EVENT_LIMIT,
   type IntakeCollaborations,
 } from "./contract.ts";
-import { createInbound, type InboundProjects } from "./inbound-create.ts";
+import {
+  createInbound,
+  type InboundPollLoops,
+  type InboundProjects,
+} from "./inbound-create.ts";
 import { removeInbound } from "./inbound-delete.ts";
 import { getEvent, listEvents } from "./event-read.ts";
 import { getInbound, listInbound } from "./inbound-read.ts";
@@ -67,6 +71,14 @@ export class IntakeService implements Service, IntakeCollaborations {
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   private readonly outboundInFlight = new Set<string>();
+  readonly pollLoops: InboundPollLoops = {
+    start: (inboundId) => {
+      assert.ok(
+        inboundId.length > NO_LENGTH,
+        "An inbound identity is required.",
+      );
+    },
+  };
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -98,7 +110,11 @@ export class IntakeService implements Service, IntakeCollaborations {
       ({ body }, caller) => caller.commit((tx) => deleteOutbound(tx, body)),
     );
     registry.register(intakeOperations["inbound.create"], ({ body }, caller) =>
-      createInbound(this.dependencies, caller, body),
+      createInbound(
+        { ...this.dependencies, pollLoops: this.pollLoops },
+        caller,
+        body,
+      ),
     );
     registry.register(intakeOperations["inbound.list"], ({ query }, caller) =>
       caller.commit((tx) => listInbound(tx, query)),

@@ -62,6 +62,10 @@ export type InboundProjects = Pick<
 
 export type InboundSuitability = Pick<IntakeCustody, "custodySuitability">;
 
+export interface InboundPollLoops {
+  start(inboundId: string): void;
+}
+
 export interface InboundCreateDependencies {
   store: Store;
   identity: ServiceIdentity;
@@ -71,6 +75,7 @@ export interface InboundCreateDependencies {
   >;
   github: Pick<GitHubPlatform, "listEvents">;
   projects: InboundProjects;
+  pollLoops: InboundPollLoops;
 }
 
 interface Hold {
@@ -308,5 +313,6 @@ export async function createInbound(
     commitInbound(dependencies.custody, tx, id, input, null),
   );
   assert.equal(inbound.id, id, "The answer names the allocated identity.");
+  if (inbound.kind === InboundKind.Poll) dependencies.pollLoops.start(id);
   return inbound;
 }
