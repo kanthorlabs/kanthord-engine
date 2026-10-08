@@ -92,6 +92,7 @@ export const ProjectErrorCode = {
   VersionConflict: "project.binding_set.version_conflict",
   DuplicateResource: "project.bindings.duplicate_resource",
   RepositoryAddressInvalid: "project.bindings.repository.address_invalid",
+  RepositoryBaseBranchAbsent: "project.bindings.repository.base_branch_absent",
   RepositoryPromptTooLarge:
     "project.bindings.repository.project_prompt_too_large",
   RepositorySshUnreachable: "project.bindings.repository.ssh_unreachable",
@@ -124,6 +125,12 @@ export function workerResourceIdentity(bindingName: string): string {
 export function isNonblank(s: string): boolean {
   return s.trim().length > EMPTY_LENGTH;
 }
+
+export const InstructionFileState = {
+  Present: "present",
+  Absent: "absent",
+  Invalid: "invalid",
+} as const;
 
 export const WorkingLayerSwitch = {
   AgentsMd: "agents_md",
@@ -350,6 +357,21 @@ export type RepositoryConnector = {
     deadlineMs: number,
   ): Promise<void>;
 };
+export type RepositoryFiles = {
+  resolveBranchCommit(
+    address: string,
+    branch: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<string | null>;
+  readFilesAtCommit(
+    address: string,
+    commit: string,
+    paths: readonly string[],
+    context: Context,
+    deadlineMs: number,
+  ): Promise<Array<{ path: string; text: string | null }>>;
+};
 export type WorkerAgentsOfFn = (workerName: string) => string[];
 export type WorkerAgentViewFn = (
   tx: Transaction,
@@ -422,6 +444,18 @@ const projectParams = z.strictObject({ project_id: z.string().min(1) });
 const bindingParams = z.strictObject({
   project_id: z.string().min(1),
   binding_id: z.string().min(1),
+});
+const instructionFileEntry = z.strictObject({
+  source: z.enum([
+    WorkingLayerSwitch.AgentsMd,
+    WorkingLayerSwitch.AgentsLocalMd,
+    WorkingLayerSwitch.ClaudeMd,
+    WorkingLayerSwitch.ClaudeLocalMd,
+  ]),
+  path: z.string().min(1),
+  state: z.enum(InstructionFileState),
+  reason: z.string().min(1).nullable(),
+  text: z.string().nullable(),
 });
 const nameBody = z.strictObject({ name: projectNameSchema });
 const pageQuery = z.strictObject({
@@ -646,6 +680,20 @@ export const projectOperations = {
       credential: bindingVerifyAnswerEntrySchema.nullable(),
     }),
     description: "Verify one repository binding address and credential.",
+  },
+  "binding.instruction_files.get": {
+    ...readOperation,
+    id: "project.binding.instruction_files.get",
+    method: HttpMethod.Get,
+    path: "/api/project/:project_id/binding/:binding_id/instruction_files",
+    input: readInput(bindingParams, emptyFields),
+    output: z.strictObject({
+      commit: z.string().min(1),
+      read_at: z.number().int(),
+      files: z.array(instructionFileEntry),
+    }),
+    description:
+      "Read the instruction files of one repository binding at its base branch.",
   },
   "binding.check": {
     ...readOperation,

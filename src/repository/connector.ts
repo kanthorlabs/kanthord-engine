@@ -1,6 +1,9 @@
 import { simpleGit } from "simple-git";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
@@ -14,6 +17,12 @@ import {
 const GIT_FAILED = "repository.connector.git_failed";
 const EMPTY_STRING = "";
 const EXPIRED = 0;
+const REPOSITORY_FILES_DIRECTORY_PREFIX = "kanthord-repository-files-";
+const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const LS_REMOTE_FIELD_SEPARATOR = "\t";
+const LS_TREE_NAME_SEPARATOR = "\0";
+const COMMIT_FIELD = 0;
+const REF_FIELD = 1;
 const execFileAsync = promisify(execFile);
 
 async function runGit(
@@ -195,4 +204,83 @@ export async function cloneSnapshot(
       "clone snapshot",
     )
   ).trim();
+}
+
+export async function resolveBranchCommit(
+  address: string,
+  branch: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string | null> {
+  assert.ok(address !== EMPTY_STRING);
+  assert.ok(branch !== EMPTY_STRING);
+  const ref = `refs/heads/${branch}`;
+  const listing = await runGit(
+    undefined,
+    ["ls-remote", "--heads", "--", address, ref],
+    context,
+    deadlineMs,
+    "resolve branch commit",
+  );
+  for (const line of listing.split("\n")) {
+    const fields = line.split(LS_REMOTE_FIELD_SEPARATOR);
+    if (fields[REF_FIELD] !== ref) continue;
+    const commit = fields[COMMIT_FIELD]!;
+    assert.match(commit, OBJECT_ID_PATTERN);
+    return commit;
+  }
+  return null;
+}
+
+export async function readFilesAtCommit(
+  address: string,
+  commit: string,
+  paths: readonly string[],
+  context: Context,
+  deadlineMs: number,
+  parent: string = tmpdir(),
+): Promise<Array<{ path: string; text: string | null }>> {
+  assert.ok(address !== EMPTY_STRING);
+  assert.match(commit, OBJECT_ID_PATTERN);
+  assert.ok(paths.length);
+  const end = performance.now() + deadlineMs;
+  const directory = await mkdtemp(
+    join(parent, REPOSITORY_FILES_DIRECTORY_PREFIX),
+  );
+  const run = (args: string[]) =>
+    runGit(
+      directory,
+      args,
+      context,
+      end - performance.now(),
+      "read repository files",
+    );
+  try {
+    await run(["init", "--quiet"]);
+    await run(["remote", "add", "origin", "--", address]);
+    await run([
+      "fetch",
+      "--depth=1",
+      "--filter=blob:none",
+      "--no-tags",
+      "origin",
+      commit,
+    ]);
+    const present = new Set(
+      (
+        await run(["ls-tree", "-z", "--name-only", commit, "--", ...paths])
+      ).split(LS_TREE_NAME_SEPARATOR),
+    );
+    const files: Array<{ path: string; text: string | null }> = [];
+    for (const path of paths)
+      files.push({
+        path,
+        text: present.has(path)
+          ? await run(["show", `${commit}:${path}`])
+          : null,
+      });
+    return files;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }

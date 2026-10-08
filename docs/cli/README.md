@@ -30,7 +30,7 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
-The Project inventory has 13 implemented leaves. The LLM inventory has 14 implemented leaves.
+The Project inventory has 14 implemented leaves. The LLM inventory has 14 implemented leaves.
 The Repository inventory has 11 implemented leaves and the Storage inventory has 10.
 The Worker inventory has 9 implemented leaves. These five groups contain 57 leaves in total.
 

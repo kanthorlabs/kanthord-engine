@@ -31,7 +31,7 @@ const SHIPPED_BASE_NAME = "base.md";
 const SHIPPED_WORKBENCH_NAME = "workbench.md";
 const MARKDOWN_EXTENSION = ".md";
 const PROJECT_PROMPT_SOURCE = "project_prompt";
-const WORKING_FILES = [
+export const WORKING_FILES = [
   [WorkbenchPromptSource.AgentsMd, "AGENTS.md"],
   [WorkbenchPromptSource.AgentsLocalMd, "AGENTS.local.md"],
   [WorkbenchPromptSource.ClaudeMd, "CLAUDE.md"],

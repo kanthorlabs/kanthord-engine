@@ -631,6 +631,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["project.binding.list", AccessPolicy.Human],
   ["project.binding.get", AccessPolicy.Human],
   ["project.binding.verify", AccessPolicy.Human],
+  ["project.binding.instruction_files.get", AccessPolicy.Human],
   ["project.binding.check", AccessPolicy.Human],
   ["project.bindingSet.get", AccessPolicy.Human],
   ["project.bindingSet.write", AccessPolicy.Human],
@@ -699,7 +700,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["workbench.session.events", AccessPolicy.Human],
   ["workbench.session.approve", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 147;
+const OPERATION_COUNT = 148;
 
 test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();

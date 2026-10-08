@@ -84,6 +84,7 @@ import {
   RepositoryComponent,
   RepositoryCredentials,
   REPOSITORY_PLATFORMS,
+  repositoryFiles,
 } from "../../repository/index.ts";
 import { LlmComponent, LLM_PLATFORMS } from "../../llm/index.ts";
 import { StorageComponent, STORAGE_PLATFORMS } from "../../storage/index.ts";
@@ -336,6 +337,7 @@ export function composeServices(options: {
     validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     repositoryConnector: repoConnector,
+    repositoryFiles,
     verifyRepositoryCredential: (name, context) =>
       repositoryCredentials.verifyCredential(name, context),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),

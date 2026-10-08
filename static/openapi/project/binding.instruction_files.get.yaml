@@ -1,0 +1,134 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: project.binding.instruction_files.get
+    tags:
+      - project
+    description: Read the instruction files of one repository binding at its base branch.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.instruction_files.get.Input/propert\
+            ies/params/properties/project_id"
+      - name: binding_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.instruction_files.get.Input/propert\
+            ies/params/properties/binding_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.binding.instruction_files.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.binding.instruction_files.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 1
+            binding_id:
+              type: string
+              minLength: 1
+          required:
+            - project_id
+            - binding_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.binding.instruction_files.get.Output:
+      type: object
+      properties:
+        commit:
+          type: string
+          minLength: 1
+        read_at:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              source:
+                type: string
+                enum:
+                  - agents_md
+                  - agents_local_md
+                  - claude_md
+                  - claude_local_md
+              path:
+                type: string
+                minLength: 1
+              state:
+                type: string
+                enum:
+                  - present
+                  - absent
+                  - invalid
+              reason:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              text:
+                anyOf:
+                  - type: string
+                  - type: "null"
+            required:
+              - source
+              - path
+              - state
+              - reason
+              - text
+            additionalProperties: false
+      required:
+        - commit
+        - read_at
+        - files
+      additionalProperties: false

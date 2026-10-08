@@ -10,6 +10,8 @@ import {
   cloneSnapshot,
   fetchAndCheckout,
   pushNodeBranch,
+  resolveBranchCommit,
+  readFilesAtCommit,
 } from "./connector.ts";
 import type { SshIdentity, SshPin } from "./ssh-identity.ts";
 import { proveSshPin } from "./credential-platform.ts";
@@ -18,6 +20,8 @@ export {
   type CredentialDependencies,
 } from "./credential.ts";
 export { REPOSITORY_PLATFORMS } from "./credential-platform.ts";
+
+export const repositoryFiles = { resolveBranchCommit, readFilesAtCommit };
 
 export interface Dependencies {
   health?: HealthRegistry;
