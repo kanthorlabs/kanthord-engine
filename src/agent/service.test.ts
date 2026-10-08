@@ -376,7 +376,11 @@ test("agent declaration read exposes prompts, tools and current enablement witho
       sources.map((source) => [`${layer}.${source.source}`, source]),
     ),
   );
-  assert.ok(sources["system.base"]!.text?.startsWith("## Principles"));
+  assert.ok(
+    sources["system.base"]!.text?.startsWith(
+      "This text is the default standard.",
+    ),
+  );
   assert.ok(sources["agent.shipped"]!.text?.startsWith("## Role"));
   assert.equal(declaration.configuration_schema.$schema, schemaVersion);
   assert.equal(declaration.configuration_schema.additionalProperties, false);
