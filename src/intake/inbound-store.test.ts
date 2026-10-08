@@ -155,6 +155,32 @@ test("deleteInbound removes the events and the row", (t) => {
   assert.equal(left.total, NO_EVENTS);
 });
 
+test("deleteInbound refuses an inbound with a pending event and keeps the row and the events", (t) => {
+  const store = migratedStore(t);
+  const id = insert(store);
+  insertEvent(store, id, "e1", InboundEventState.Pending);
+  insertEvent(store, id, "e2", InboundEventState.Succeeded);
+  assert.throws(
+    () => store.transaction((tx) => deleteInbound(tx, id)),
+    assert.AssertionError,
+  );
+  assert.notEqual(
+    store.transaction((tx) => readInbound(tx, id)),
+    null,
+  );
+  const left = store.transaction(
+    (tx) =>
+      tx.database
+        .prepare(
+          "SELECT COUNT(*) AS total FROM intake_inbound_event WHERE inbound_id = ?",
+        )
+        .get(id) as {
+        total: number;
+      },
+  );
+  assert.equal(left.total, TWO_EVENTS);
+});
+
 test("pendingEventCount counts pending events alone", (t) => {
   const store = migratedStore(t);
   const id = insert(store);
