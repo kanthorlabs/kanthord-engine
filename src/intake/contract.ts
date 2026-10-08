@@ -473,4 +473,21 @@ export const intakeOperations = {
     description:
       "Sign a presigned GET of an evidence asset object for a human.",
   },
+  "storage.delete": {
+    ...baseOperation,
+    direct: true,
+    method: HttpMethod.Delete,
+    mutation: true,
+    body: false,
+    status: HttpStatus.NoContent,
+    id: "intake.storage.delete",
+    path: "/api/intake/storage/asset/:asset_id",
+    input: readInput(
+      z.strictObject({ asset_id: identitySchema("evidence_asset") }),
+      z.strictObject({}),
+    ),
+    output: z.null(),
+    description:
+      "Delete the stored object of an evidence asset at its recorded version for a human.",
+  },
 } as const;

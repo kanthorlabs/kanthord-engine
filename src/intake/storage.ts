@@ -228,7 +228,7 @@ async function callStorage<T>(
   }
 }
 
-function objectTarget(facts: Readonly<AssetFacts>): S3ObjectTarget {
+export function objectTarget(facts: Readonly<AssetFacts>): S3ObjectTarget {
   assert.ok(facts.key.length);
   assert.ok(facts.storage.bucket.length);
   return {

@@ -25,6 +25,7 @@ import { INTAKE_SERVICE_NAME, intakeOperations } from "./contract.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
+import { deleteStoredObject } from "./storage-delete.ts";
 import {
   checkObject,
   executionGetObject,
@@ -110,6 +111,16 @@ export class IntakeService implements Service {
     );
     registry.register(intakeOperations["storage.get"], ({ params }, caller) =>
       getObject(this.dependencies, caller, params.asset_id),
+    );
+    registry.register(
+      intakeOperations["storage.delete"],
+      ({ params }, caller) =>
+        deleteStoredObject(
+          this.dependencies,
+          (request) => this.runOutbound(caller, request),
+          caller,
+          params.asset_id,
+        ),
     );
   }
 

@@ -694,8 +694,9 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.check", AccessPolicy.Client],
   ["intake.execution.storage.get", AccessPolicy.Client],
   ["intake.storage.get", AccessPolicy.Human],
+  ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 158;
+const OPERATION_COUNT = 159;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1422,6 +1423,7 @@ test("the direct intake operations have no OpenAPI path", async () => {
     intakeOperations["storage.check"].id,
     intakeOperations["execution.storage.get"].id,
     intakeOperations["storage.get"].id,
+    intakeOperations["storage.delete"].id,
   ]);
   const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
     Object.values(path ?? {}).filter(
