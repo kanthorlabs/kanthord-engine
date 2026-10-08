@@ -135,7 +135,7 @@ function resultOf<T>(result: OperationResult<T>): T {
   );
 }
 
-function projectScopedIntakeInventory(
+export function projectScopedIntakeInventory(
   intake: IntakeService,
   project: ProjectService,
 ): (tx: Transaction) => ResourceEntry[] {

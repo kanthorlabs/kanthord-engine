@@ -15,9 +15,19 @@ import { configuration } from "../../config/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { createServer } from "node:http";
 import { writePrivate } from "../../kernel/files.ts";
-import { Store } from "../../kernel/store.ts";
+import { Store, type Transaction } from "../../kernel/store.ts";
+import { CancellationContext } from "../../kernel/context.ts";
 import { isString } from "../../kernel/values.ts";
-import { GATEWAY_STARTED_MESSAGE } from "../../gateway/index.ts";
+import {
+  collectInventories,
+  GATEWAY_STARTED_MESSAGE,
+  resourceHealthReport,
+} from "../../gateway/index.ts";
+import { projectScopedIntakeInventory } from "./index.ts";
+import { until } from "./cli-support.ts";
+import { testHumanIdentity } from "../../kernel/test-identity.ts";
+import type { Material } from "../../custody/contract.ts";
+import pino from "pino";
 import { ulid } from "ulid";
 import {
   domainHealth,
@@ -74,6 +84,14 @@ const POLL_KEY = "health_poll_github_key";
 const POLL_OWNER = "owner";
 const POLL_REPO = "repo";
 const MALFORMED_CONFIGURATION = "{";
+const HELD_EVENTS_PASS = 0;
+const HELD_CHECK_RELEASES = 1;
+const DEADLINE_LIMITS = {
+  maxConcurrent: 1,
+  checkDeadlineMs: 50,
+  reportBudgetMs: 5000,
+};
+const EVENTS_PATH = /^\/repos\/owner\/repo\/events(\?|$)/;
 const entry = new URL("../../main.ts", import.meta.url).href;
 function layout(directory: string) {
   const env: NodeJS.ProcessEnv = {
@@ -240,7 +258,11 @@ async function pollFixture(t: TestContext) {
         },
       ),
     ).id;
-  return { gitHub, fixture, pollInbound };
+  const inboundRow = (id: string) =>
+    fixture.store.transaction((tx) =>
+      tx.database.prepare("SELECT * FROM intake_inbound WHERE id = ?").get(id),
+    );
+  return { gitHub, fixture, pollInbound, inboundRow };
 }
 
 test("a malformed poll inbound answers unknown for its own entry and the report answers the other entries", async (t) => {
@@ -272,6 +294,94 @@ test("a malformed poll inbound answers unknown for its own entry and the report 
       },
     },
   });
+});
+
+function releasedMaterials(t: TestContext, fixture: Fixture) {
+  const released: { materials: Material[]; drops: string[] } = {
+    materials: [],
+    drops: [],
+  };
+  const release = fixture.custody.release.bind(fixture.custody);
+  t.mock.method(
+    fixture.custody,
+    "release",
+    (...args: Parameters<typeof release>) => {
+      const material = release(...args);
+      const drop = material.drop.bind(material);
+      material.drop = () => {
+        released.drops.push(material.credential_id);
+        drop();
+      };
+      released.materials.push(material);
+      return material;
+    },
+  );
+  return released;
+}
+
+function intakeOnlyReport(t: TestContext, fixture: Fixture) {
+  const collect = () =>
+    fixture.store.transaction((tx) =>
+      collectInventories(tx, {
+        llm: () => [],
+        agent: () => [],
+        repository: () => [],
+        storage: () => [],
+        worker: () => [],
+        project: () => [],
+        intake: projectScopedIntakeInventory(fixture.intake, fixture.project),
+      }),
+    );
+  const context = new CancellationContext();
+  t.after(() => context.cancel());
+  const caller = {
+    identity: testHumanIdentity("health-reader", "Health Reader", ulid()),
+    context,
+    requestId: ulid(),
+    commit: <T>(write: (tx: Transaction) => T) =>
+      fixture.store.transaction(write),
+  };
+  return resourceHealthReport(
+    caller,
+    collect,
+    pino({ level: "silent" }),
+    DEADLINE_LIMITS,
+  );
+}
+
+test("the check deadline of a poll inbound answers unknown through the report, drops the material and changes no inbound", async (t) => {
+  const { gitHub, fixture, pollInbound, inboundRow } = await pollFixture(t);
+  const id = await pollInbound();
+  const before = inboundRow(id);
+  const eventsCalls = () =>
+    gitHub.calls.filter((call) => EVENTS_PATH.test(call.path)).length;
+  const calledBefore = eventsCalls();
+  const releaseEvents = gitHub.holdEvents({ pass: HELD_EVENTS_PASS });
+  t.after(() => releaseEvents());
+  const released = releasedMaterials(t, fixture);
+  const report = await intakeOnlyReport(t, fixture);
+  assert.deepEqual(report.services.intake, {
+    global: {},
+    projects: {
+      [INVENTORY_PROJECT_NAME]: {
+        [encodeURIComponent(id)]: {
+          status: ResourceStatus.Unknown,
+          capability: POLL_CAPABILITY,
+        },
+      },
+    },
+  });
+  assert.equal(released.materials.length, HELD_CHECK_RELEASES);
+  assert.equal(eventsCalls(), calledBefore + HELD_CHECK_RELEASES);
+  const drops = await until(
+    () => released.drops,
+    (items) => items.length === HELD_CHECK_RELEASES,
+  );
+  assert.deepEqual(
+    drops,
+    released.materials.map((material) => material.credential_id),
+  );
+  assert.deepEqual(inboundRow(id), before);
 });
 
 test("injected repository connector skips the tool gate and probe", async (t) => {
