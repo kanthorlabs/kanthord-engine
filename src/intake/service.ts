@@ -18,6 +18,7 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import type { GitHubPlatform } from "../repository/github.ts";
 import type { GitWriter } from "../repository/index.ts";
 import { checkAction, type IntakeCustody } from "./action-check.ts";
+import { performAction } from "./action-perform.ts";
 import { INTAKE_SERVICE_NAME, intakeOperations } from "./contract.ts";
 import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
@@ -73,6 +74,14 @@ export class IntakeService implements Service {
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),
+    );
+    registry.register(intakeOperations["action.perform"], ({ body }, caller) =>
+      performAction(
+        this.dependencies,
+        (request) => this.runOutbound(caller, request),
+        caller,
+        body,
+      ),
     );
   }
 

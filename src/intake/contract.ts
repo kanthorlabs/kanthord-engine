@@ -37,6 +37,7 @@ export const IntakeErrorCode = {
   OutboundRequestStateConflict: "intake.outbound.request.state_conflict",
   OutboundRequestForceRequired: "intake.outbound.request.force_required",
   OutboundRequestFilterInvalid: "intake.outbound.request.filter_invalid",
+  OutboundRequestActionUnmapped: "intake.outbound.request.action_unmapped",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -73,6 +74,28 @@ export const CheckEndState = {
   None: "none",
 } as const;
 
+export const ActionTableAction = {
+  PullRequest: "pull_request",
+  MergePush: "merge_push",
+} as const;
+export const ActionTablePlatform = { GitHub: "github" } as const;
+export const ACTION_TABLE = [
+  {
+    action: ActionTableAction.PullRequest,
+    platform: ActionTablePlatform.GitHub,
+    operation: OutboundOperation.GitHubPullRequest,
+  },
+  {
+    action: ActionTableAction.MergePush,
+    platform: ActionTablePlatform.GitHub,
+    operation: OutboundOperation.GitMergePush,
+  },
+] as const;
+export const AddressKind = {
+  PullRequest: "pull_request",
+  BranchPush: "branch_push",
+} as const;
+
 export const inboundKindSchema = z.enum(InboundKind);
 export const inboundPlatformSchema = z.enum(InboundPlatform);
 export const consumerSchema = z.enum(Consumer);
@@ -82,6 +105,28 @@ export const outboundOperationSchema = z.enum(OutboundOperation);
 export const resultClassSchema = z.enum(ResultClass);
 export const checkEndStateSchema = z.enum(CheckEndState);
 export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+
+export const actionKeySchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
+export const platformAddressSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(AddressKind.PullRequest),
+    resource_identity: z.string().min(1),
+    number: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  }),
+  z.strictObject({
+    kind: z.literal(AddressKind.BranchPush),
+    resource_identity: z.string().min(1),
+    branch: z.string().min(1),
+    commit: commitSchema,
+  }),
+]);
+export const resultClassAnswerSchema = z.strictObject({
+  class: resultClassSchema,
+  code: z.string(),
+  message: z.string(),
+});
 
 export const errorItemSchema = z.strictObject({
   code: z.string().min(1),
@@ -124,6 +169,8 @@ export type OutboundOperationValue = z.infer<typeof outboundOperationSchema>;
 export type ResultClassValue = z.infer<typeof resultClassSchema>;
 export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
 export type OutboundDelete = z.infer<typeof outboundDeleteSchema>;
+export type PlatformAddress = z.infer<typeof platformAddressSchema>;
+export type ResultClassAnswer = z.infer<typeof resultClassAnswerSchema>;
 
 const baseOperation = {
   service: INTAKE_SERVICE_NAME,
@@ -149,6 +196,16 @@ const serviceOperation = {
   method: HttpMethod.Post,
   mutation: false,
   body: true,
+} as const;
+const performOperation = {
+  ...baseOperation,
+  access: AccessPolicy.Client,
+  direct: true,
+  requiresExecution: true,
+  method: HttpMethod.Post,
+  mutation: true,
+  body: true,
+  timeoutMs: ACTION_PERFORM_TIMEOUT_MS,
 } as const;
 const readInput = <P extends z.ZodType, Q extends z.ZodType>(
   params: P,
@@ -241,5 +298,23 @@ export const intakeOperations = {
     }),
     description:
       "Check the platform end state of a request evidence for the Mission Service.",
+  },
+  "action.perform": {
+    ...performOperation,
+    id: "intake.action.perform",
+    path: "/api/intake/execution/:execution_id/action/perform",
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        key: actionKeySchema,
+        commit: commitSchema,
+        reused_evidence_id: identitySchema("evidence").nullable(),
+        request_key: z.string().min(1),
+      }),
+    }),
+    output: z.union([platformAddressSchema, resultClassAnswerSchema]),
+    description:
+      "Perform a configured repository action of an execution and answer its platform address or its result class.",
   },
 } as const;

@@ -688,8 +688,9 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.outbound.request.discard", AccessPolicy.Human],
   ["intake.outbound.request.delete", AccessPolicy.Human],
   ["intake.action.check", AccessPolicy.Service],
+  ["intake.action.perform", AccessPolicy.Client],
 ];
-const OPERATION_COUNT = 152;
+const OPERATION_COUNT = 153;
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
@@ -1405,6 +1406,28 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     const response = await fixture.request(path);
     assert.ok([400, 404].includes(response.status), path);
   }
+});
+
+test("the direct action perform has no OpenAPI path", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const operation = intakeOperations["action.perform"];
+  const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
+    Object.values(path ?? {}).filter(
+      (item) => isObject(item) && "operationId" in item,
+    ),
+  );
+  assert.ok(published.length);
+  assert.ok(
+    published.every(
+      (item) => (item as ResolvedOperation).operationId !== operation.id,
+    ),
+  );
+  assert.equal(
+    Object.keys(resolved.paths ?? {}).some((path) =>
+      path.startsWith("/api/intake/execution/"),
+    ),
+    false,
+  );
 });
 
 test("published outbound request reads are human unary routes", async () => {
