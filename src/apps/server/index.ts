@@ -31,6 +31,7 @@ import {
   missionOperations,
 } from "../../mission/contract.ts";
 import {
+  RepositoryPlatform,
   projectOperations,
   type ProjectBindings,
   type RepositoryConnector,
@@ -87,6 +88,7 @@ import {
   RepositoryComponent,
   RepositoryCredentials,
   REPOSITORY_PLATFORMS,
+  decodeGitHubEvent,
   platformImplementations,
   type GitWriter,
 } from "../../repository/index.ts";
@@ -434,6 +436,12 @@ export function composeServices(options: {
           ),
         );
       },
+    },
+    decoder: {
+      decode: ({ platform, resource, event, metadata }) =>
+        platform === RepositoryPlatform.GitHub
+          ? decodeGitHubEvent({ resource, event, metadata })
+          : null,
     },
     intakeCheck: {
       check: async (context, evidenceId) =>

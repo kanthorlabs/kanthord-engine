@@ -309,6 +309,7 @@ function makeService(
       delete: unexpectedCollaboration,
     },
     intakeCheck: { check: unexpectedCollaboration },
+    decoder: { decode: unexpectedCollaboration },
     config: {
       consecutive_loss_limit: CONSECUTIVE_LOSS_LIMIT,
       text_max_bytes,

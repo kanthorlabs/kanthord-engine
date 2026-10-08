@@ -23,6 +23,7 @@ export {
   type CredentialDependencies,
 } from "./credential.ts";
 export { REPOSITORY_PLATFORMS } from "./credential-platform.ts";
+export { decodeGitHubEvent } from "./github.ts";
 export {
   foldBranchPush,
   GitStage,

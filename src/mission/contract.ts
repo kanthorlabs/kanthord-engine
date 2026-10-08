@@ -163,6 +163,15 @@ export interface IntakeCheck {
   }>;
 }
 
+export interface EventDecoder {
+  decode(input: {
+    platform: string;
+    resource: string;
+    event: Uint8Array;
+    metadata: unknown;
+  }): PlatformAddress | null;
+}
+
 export interface SchedulerWakeup {
   wake(projectId: string): void;
 }
@@ -1149,6 +1158,48 @@ export const nodeCheckResultSchema = z.strictObject({
     }),
   ),
 });
+export const Disposition = {
+  AcceptedObservation: "accepted_observation",
+  Refused: "refused",
+  Duplicate: "duplicate",
+} as const;
+export const dispositionSchema = z.enum(Disposition);
+export type Disposition = z.infer<typeof dispositionSchema>;
+export const AdmissionRefusal = {
+  Ambiguous: "ambiguous",
+  Unmatched: "unmatched",
+  Undecodable: "undecodable",
+} as const;
+export const admissionRefusalSchema = z.enum(AdmissionRefusal);
+export type AdmissionRefusal = z.infer<typeof admissionRefusalSchema>;
+export const canonicalBase64Schema = z
+  .string()
+  .refine(
+    (value) =>
+      Buffer.from(value, CONTENT_ENCODING).toString(CONTENT_ENCODING) === value,
+  );
+export const deliveryAdmitSchema = z.strictObject({
+  inbound_event_id: identitySchema("inbound_event"),
+  project_id: identitySchema("project"),
+  platform: z.string().min(1),
+  resource: z.string().min(1),
+  event: canonicalBase64Schema,
+  metadata: z.record(z.string(), z.unknown()),
+});
+export const admissionAnswerSchema = z.union([
+  z.strictObject({
+    disposition: z.literal(Disposition.Refused),
+    reason: admissionRefusalSchema,
+  }),
+  z.strictObject({
+    disposition: z.enum([
+      Disposition.AcceptedObservation,
+      Disposition.Duplicate,
+    ]),
+    reason: z.null(),
+  }),
+]);
+export type AdmissionAnswer = z.infer<typeof admissionAnswerSchema>;
 export type ExecutionObjective = z.infer<typeof executionObjectiveSchema>;
 export const executionObjectiveSchema = z.union([
   nodeSchema.options[1],

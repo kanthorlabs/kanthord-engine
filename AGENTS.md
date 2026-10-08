@@ -153,6 +153,7 @@ engine/
 │   │   ├── assessment-admit.ts # Evidence, result and tested-input admission
 │   │   ├── assessment-submit.ts # Assessment insertion and eligible closure
 │   │   ├── node-check.ts      # On-demand checks and write-once end states
+│   │   ├── delivery-match.ts  # Delivery admission match of a platform address to a request
 │   │   └── service.ts          # Lifecycle, health, and collaboration implementations
 │   ├── scheduler/              # Scheduler Service: work queue, execution claims, history, and loss settlement
 │   │   ├── contract.ts         # Execution schemas, operations, and collaboration contracts

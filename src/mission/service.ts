@@ -41,6 +41,7 @@ import {
   type MissionActions,
   type IntakeStorage,
   type IntakeCheck,
+  type EventDecoder,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -133,6 +134,7 @@ export interface Dependencies {
   store: Store;
   intakeStorage: IntakeStorage;
   intakeCheck: IntakeCheck;
+  decoder: EventDecoder;
   config: MissionConfig;
   health?: HealthRegistry;
   bindings: MissionBindings;
