@@ -21,7 +21,10 @@ import { configuration } from "../../config/index.ts";
 import { custodyMigrations } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import { schedulerMigrations } from "../../scheduler/index.ts";
-import { SCHEDULER_SERVICE_NAME } from "../../scheduler/contract.ts";
+import {
+  SCHEDULER_SERVICE_NAME,
+  type ExecutionRecord,
+} from "../../scheduler/contract.ts";
 import type { SchedulerConfig } from "../../scheduler/index.ts";
 import { Store } from "../../kernel/store.ts";
 import { gatewayMigrations } from "../../gateway/index.ts";
@@ -29,12 +32,13 @@ import { projectMigrations } from "../../project/index.ts";
 import { missionMigrations } from "../../mission/index.ts";
 import { intakeMigrations } from "../../intake/index.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
-import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
+import { MISSION_SERVICE_NAME, type Revision } from "../../mission/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { agentMigrations } from "../../agent/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
+import { environment, kanthord } from "./cli-support.ts";
 import { composeServices } from "./index.ts";
 import { RepositoryComponent, type GitWriter } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
@@ -1115,5 +1119,237 @@ export async function fakeS3(t: TestContext) {
       assert.ok(count === ZERO_LOSSES || state.losses === ZERO_LOSSES);
       state.losses = count;
     },
+  };
+}
+
+const STORAGE_PREFIX = "kanthord";
+const STORAGE_REGION = "eu-central-1";
+const STORAGE_CREDENTIAL = "store";
+const STORAGE_ACCESS_KEY_ID = "AKIASTORAGEOPERATIONS";
+export const STORAGE_SECRET = "storage-operations-secret";
+const STORAGE_FIRST_REVISION = 1;
+const STORAGE_FIRST_INDEX = 0;
+const STORAGE_SUCCESSFUL_EXIT = 0;
+const STORAGE_NO_OUTPUT = "";
+const STORAGE_NODE_CONTENT = {
+  name: "Store objects",
+  requirement: "Store objects",
+  criterion: "Objects land",
+  verifications: ["true"],
+};
+
+type StorageCli = {
+  env: NodeJS.ProcessEnv;
+  read<T>(args: string[], env?: NodeJS.ProcessEnv): Promise<T>;
+  write<T>(args: string[], body: unknown, env?: NodeJS.ProcessEnv): Promise<T>;
+};
+
+function storageCli(t: TestContext, endpoint: string, token: string) {
+  const directory = temporary(t);
+  const env = {
+    ...environment(directory),
+    KANTHORD_ENDPOINT: endpoint,
+    KANTHORD_TOKEN: token,
+  };
+  let sequence = STORAGE_FIRST_INDEX;
+  const read = async <T>(args: string[], use = env): Promise<T> => {
+    const result = await kanthord(args, use);
+    assert.equal(result.code, STORAGE_SUCCESSFUL_EXIT, result.stderr);
+    assert.equal(result.stderr, STORAGE_NO_OUTPUT);
+    return JSON.parse(result.stdout) as T;
+  };
+  const write = <T>(args: string[], body: unknown, use = env) => {
+    const path = join(directory, `${++sequence}.json`);
+    writePrivate(path, JSON.stringify(body));
+    return read<T>([...args, "--file", path], use);
+  };
+  return { env, read, write } satisfies StorageCli;
+}
+
+async function storageCredentials(cli: StorageCli, endpoint: string) {
+  assert.ok(endpoint.startsWith("http://"));
+  await cli.write(["repository", "credential", "create"], {
+    name: "github",
+    platform: "github",
+    metadata: null,
+    secret: { key: "test-secret" },
+  });
+  await cli.write(
+    ["repository", "credential", "create"],
+    FAKE_SSH_CREDENTIAL_BODY,
+  );
+  await cli.write(["storage", "credential", "create"], {
+    name: STORAGE_CREDENTIAL,
+    platform: "s3",
+    metadata: { endpoint, bucket: S3_BUCKET, region: STORAGE_REGION },
+    secret: {
+      access_key_id: STORAGE_ACCESS_KEY_ID,
+      secret_access_key: STORAGE_SECRET,
+    },
+  });
+}
+
+function storageBindings(endpoint: string, available: boolean) {
+  assert.ok(endpoint.startsWith("http://"));
+  return {
+    repo: {
+      kind: "repository",
+      config: {
+        available: true,
+        platform: "github",
+        address: "git@github.com:owner/repo.git",
+        ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+        credential: "github",
+        strategy: { base_branch: "main" },
+      },
+    },
+    store: {
+      kind: "storage",
+      config: {
+        available,
+        endpoint,
+        bucket: S3_BUCKET,
+        region: STORAGE_REGION,
+        prefix: STORAGE_PREFIX,
+        credential: STORAGE_CREDENTIAL,
+      },
+    },
+    harness: {
+      kind: "worker",
+      config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
+    },
+  };
+}
+
+async function storageNode(
+  cli: StorageCli,
+  ids: { projectId: string; missionId: string },
+  bindingIds: string[],
+) {
+  const create = async (
+    filename: string,
+    kind: string,
+    bindings: string[],
+    parentId?: string,
+  ) => {
+    const { version } = await cli.read<{ version: number }>([
+      "mission",
+      "get",
+      ids.projectId,
+    ]);
+    const answer = await cli.write<{ revisions: Revision[] }>(
+      ["mission", "node", "create", ids.missionId],
+      {
+        filename,
+        kind,
+        content: { ...STORAGE_NODE_CONTENT, bindings },
+        reason: "plan",
+        expected_mission_version: version,
+        ...(parentId
+          ? {
+              parent_id: parentId,
+              expected_parent_revision: STORAGE_FIRST_REVISION,
+            }
+          : {}),
+      },
+    );
+    return answer.revisions[STORAGE_FIRST_INDEX]!.node_id;
+  };
+  const initiative = await create("initiative.md", "initiative", []);
+  return create("objective.md", "objective", bindingIds, initiative);
+}
+
+async function storageExecution(
+  cli: StorageCli,
+  token: string,
+  resourceIdentity: string,
+) {
+  assert.ok(token.length);
+  const env = { ...cli.env, KANTHORD_TOKEN: token };
+  const { runtime_identity } = await cli.read<{ runtime_identity: string }>(
+    ["worker", "register"],
+    env,
+  );
+  const { execution } = await cli.write<{ execution: ExecutionRecord }>(
+    ["scheduler", "work", "pull"],
+    { resource_identity: resourceIdentity, runtime_identity },
+    env,
+  );
+  assert.ok(execution.execution_id);
+  return execution;
+}
+
+export async function storageProject(t: TestContext) {
+  const s3 = await fakeS3(t);
+  const gitHub = await fakeGitHub(t);
+  const fixture = await gatewayFixture(t, {
+    github: { baseUrl: gitHub.endpoint },
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
+    },
+  });
+  const cli = storageCli(t, fixture.endpoint, fixture.token);
+  await storageCredentials(cli, s3.endpoint);
+  const project = await cli.read<{ id: string }>([
+    "project",
+    "create",
+    "--name",
+    "storage",
+  ]);
+  const mission = await cli.read<{ id: string }>([
+    "mission",
+    "get",
+    project.id,
+  ]);
+  const applyBindings = (version: number, available: boolean) =>
+    cli.write(["project", "binding", "apply", project.id], {
+      version,
+      bindings: storageBindings(s3.endpoint, available),
+    });
+  await applyBindings(STORAGE_FIRST_REVISION, true);
+  const { items } = await cli.read<{
+    items: { id: string; name: string; resource_identity: string }[];
+  }>(["project", "binding", "list", project.id]);
+  const binding = (name: string) => {
+    const row = items.find((item) => item.name === name);
+    assert.ok(row);
+    return row;
+  };
+  const nodeId = await storageNode(
+    cli,
+    { projectId: project.id, missionId: mission.id },
+    [binding("repo").id, binding("store").id],
+  );
+  const token = await fixture.machineToken(project.id, "harness");
+  const execution = await storageExecution(
+    cli,
+    token,
+    binding("harness").resource_identity,
+  );
+  assert.equal(execution.node_id, nodeId);
+  return {
+    s3,
+    fixture,
+    cli,
+    project,
+    nodeId,
+    token,
+    execution,
+    storageBindingId: binding("store").id,
+    applyBindings,
+    keyOf: (assetId: string) =>
+      [
+        STORAGE_PREFIX,
+        project.id,
+        mission.id,
+        nodeId,
+        execution.attempt,
+        assetId,
+      ].join("/"),
+    machine: () =>
+      fixture.invocation.authentication.authenticate(`Bearer ${token}`),
+    human: () =>
+      fixture.invocation.authentication.authenticate(`Bearer ${fixture.token}`),
   };
 }
