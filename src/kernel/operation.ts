@@ -26,6 +26,8 @@ export const StoreName = { Operational: "operational" } as const;
 export type StoreName = (typeof StoreName)[keyof typeof StoreName];
 
 const NO_TIMEOUT_MS = 0;
+const API_PATH_PREFIX = "/api/";
+const DELIVERY_PATH_PREFIX = "/hooks/";
 const EMPTY_REGISTRY_SIZE = 0;
 export const emptyInput = z.strictObject({
   params: z.strictObject({}),
@@ -148,8 +150,11 @@ export class OperationRegistry {
       throw new Error("Only a human or client operation is direct.");
     if (!Object.values(OperationLifetime).includes(operation.lifetime))
       throw new Error("Every route must declare a valid lifetime.");
-    if (
-      !operation.path.startsWith("/api/") ||
+    if (operation.access === AccessPolicy.Delivery) {
+      if (!operation.path.startsWith(DELIVERY_PATH_PREFIX))
+        throw new Error("A delivery route requires the /hooks prefix.");
+    } else if (
+      !operation.path.startsWith(API_PATH_PREFIX) ||
       /^\/api\/v\d+(\/|$)/.test(operation.path)
     )
       throw new Error("Routes require the unversioned /api prefix.");
@@ -162,9 +167,7 @@ export class OperationRegistry {
       operation.delivery &&
       (operation.access !== AccessPolicy.Delivery || operation.mutation)
     )
-      throw new Error(
-        "Delivery verification and deduplication belong to the Scheduler Service.",
-      );
+      throw new Error("A delivery operation is no mutation.");
     if (operation.access === AccessPolicy.Delivery && !operation.delivery)
       throw new Error("A delivery requires the exact-byte adapter.");
     if (operation.mutation && operation.access === AccessPolicy.Public)

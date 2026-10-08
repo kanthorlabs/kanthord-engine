@@ -162,9 +162,12 @@ function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
   if (operation.mutation)
     parameters.push({ $ref: `${sharedRef}/parameters/IdempotencyKey` });
   const responses: Record<string, unknown> = {
+    ...(operation.delivery
+      ? { [HttpStatus.NoContent]: { description: "Completed result" } }
+      : {}),
     [operation.status]: {
       description: "Completed result",
-      ...(operation.status === HttpStatus.NoContent
+      ...(operation.status === HttpStatus.NoContent || operation.delivery
         ? {}
         : {
             content: {

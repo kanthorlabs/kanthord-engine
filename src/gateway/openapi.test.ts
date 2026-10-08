@@ -153,3 +153,47 @@ test("the emitter excludes a service operation and a direct operation", () => {
   assert.equal(names.includes("openapi/test/service.yaml"), false);
   assert.equal(names.includes("openapi/test/direct.yaml"), false);
 });
+
+test("a delivery path publishes no security, an octet-stream body and two empty responses", () => {
+  const delivery = {
+    ...gatewayOperations.liveness,
+    id: "test.receive",
+    service: "test",
+    method: "POST",
+    path: "/hooks/:inbound_id",
+    access: AccessPolicy.Delivery,
+    delivery: true,
+    input: z.strictObject({
+      params: z.strictObject({ inbound_id: z.string() }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: z.null(),
+    status: HttpStatus.Accepted,
+  } as const;
+  const files = emitOpenAPIFiles([delivery]);
+  assert.deepEqual(Object.keys(files["openapi.yaml"].paths), [
+    "/hooks/{inbound_id}",
+  ]);
+  const document = files["openapi/test/receive.yaml"];
+  assert.ok(document && "pathItem" in document);
+  const path = document.pathItem as {
+    post: {
+      "x-access-policy": string;
+      security: unknown[];
+      requestBody: { content: Record<string, unknown> };
+      responses: Record<string, unknown>;
+    };
+  };
+  assert.equal(path.post["x-access-policy"], AccessPolicy.Delivery);
+  assert.deepEqual(path.post.security, []);
+  assert.deepEqual(Object.keys(path.post.requestBody.content), [
+    "application/octet-stream",
+  ]);
+  assert.deepEqual(path.post.responses[HttpStatus.Accepted], {
+    description: "Completed result",
+  });
+  assert.deepEqual(path.post.responses[HttpStatus.NoContent], {
+    description: "Completed result",
+  });
+});
