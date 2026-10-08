@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
 import {
@@ -41,6 +40,7 @@ import {
   passingEvaluation,
   pushNodeBranch,
   repositoryBinding,
+  until,
 } from "./cli-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
@@ -54,8 +54,6 @@ const FIRST_PULL_REQUEST = 1;
 const SECOND_PULL_REQUEST = 2;
 const SETTLED_COUNT = 3;
 const BAD_GATEWAY_STATUS = 502;
-const POLL_INTERVAL_MS = 50;
-const WAIT_LIMIT_MS = 10000;
 const TIMEOUT = 300000;
 const ROWS_TIMEOUT = 60000;
 const SECRET = "test-secret";
@@ -95,19 +93,6 @@ function refused(result: Result, code: string): void {
   assert.equal(result.code, ExitCode.Failure, result.stderr);
   assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
   assert.equal(result.stdout, EMPTY_OUTPUT);
-}
-
-async function until<T>(
-  read: () => Promise<T>,
-  done: (value: T) => boolean,
-): Promise<T> {
-  const deadline = Date.now() + WAIT_LIMIT_MS;
-  for (;;) {
-    const value = await read();
-    if (done(value)) return value;
-    assert.ok(Date.now() < deadline, "The awaited state did not arrive.");
-    await delay(POLL_INTERVAL_MS);
-  }
 }
 
 async function setup(t: TestContext) {

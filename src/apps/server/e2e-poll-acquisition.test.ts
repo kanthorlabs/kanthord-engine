@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { test } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import {
   Consumer,
   InboundEventState,
@@ -13,14 +12,13 @@ import {
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, until } from "./cli-support.ts";
 import { fakeGitHub, gatewayFixture } from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
 const TIMEOUT = 180000;
 const POLL_INTERVAL_MS = 50;
-const WAIT_LIMIT_MS = 5000;
 const ONE_CALL = 1;
 const VALIDATION_AND_HELD = 2;
 const ANSWERED_CALLS = 2;
@@ -63,19 +61,6 @@ function ev(n: number, type: string) {
 
 function etagOf(events: unknown[]): string {
   return `"${createHash("sha256").update(JSON.stringify(events)).digest("hex")}"`;
-}
-
-async function until<T>(
-  read: () => Promise<T> | T,
-  done: (value: T) => boolean,
-): Promise<T> {
-  const deadline = Date.now() + WAIT_LIMIT_MS;
-  for (;;) {
-    const value = await read();
-    if (done(value)) return value;
-    assert.ok(Date.now() < deadline, "The awaited state did not arrive.");
-    await delay(POLL_INTERVAL_MS);
-  }
 }
 
 test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {

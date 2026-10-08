@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { join } from "node:path";
 import { test } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import {
   Consumer,
   InboundEventState,
@@ -17,14 +16,12 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { ulidSchema } from "../../kernel/identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, until } from "./cli-support.ts";
 import { deliver, gatewayFixture } from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
 const TIMEOUT = 180000;
-const POLL_INTERVAL_MS = 50;
-const WAIT_LIMIT_MS = 10000;
 const ONE_ITEM = 1;
 const RESOURCE = "owner/repo";
 const PUSH_EVENT = "push";
@@ -64,19 +61,6 @@ function refused(result: Result, prefix: string): void {
 
 function codeOf(body: unknown): string {
   return errorSchema.parse(body).error.code;
-}
-
-async function until<T>(
-  read: () => Promise<T>,
-  done: (value: T) => boolean,
-): Promise<T> {
-  const deadline = Date.now() + WAIT_LIMIT_MS;
-  for (;;) {
-    const value = await read();
-    if (done(value)) return value;
-    assert.ok(Date.now() < deadline, "The awaited state did not arrive.");
-    await delay(POLL_INTERVAL_MS);
-  }
 }
 
 test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {

@@ -3,6 +3,7 @@ import { execFile, spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { isNumber, isString } from "../../kernel/values.ts";
 import { parse, stringify } from "yaml";
@@ -33,6 +34,21 @@ const INITIAL_SEQUENCE = 0;
 const FIRST_ATTEMPT = 1;
 const CREDENTIAL_NAME = "github";
 const HARNESS_BINDING = "harness";
+const WAIT_POLL_INTERVAL_MS = 50;
+const WAIT_LIMIT_MS = 10000;
+
+export async function until<T>(
+  read: () => Promise<T> | T,
+  done: (value: T) => boolean,
+): Promise<T> {
+  const deadline = Date.now() + WAIT_LIMIT_MS;
+  for (;;) {
+    const value = await read();
+    if (done(value)) return value;
+    assert.ok(Date.now() < deadline, "The awaited state did not arrive.");
+    await delay(WAIT_POLL_INTERVAL_MS);
+  }
+}
 
 export function generateMachineToken(input: {
   env: NodeJS.ProcessEnv;

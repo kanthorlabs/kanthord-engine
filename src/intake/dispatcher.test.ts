@@ -32,7 +32,11 @@ import {
 } from "./event-store.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
-import type { ConsumerCall } from "./test-support.ts";
+import {
+  scriptedConsumers,
+  type ConsumerAnswer,
+  type ConsumerCall,
+} from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESOURCE = "owner/gated";
@@ -61,14 +65,12 @@ const FILL_MESSAGE_LENGTH = 100;
 const WAKE_OFFSETS = 12;
 const EVENT_ENCODING = "base64";
 
-type Answer = () => Promise<OperationResult<unknown>>;
-
 interface Harness {
   store: Store;
   dispatcher: Dispatcher;
   calls: ConsumerCall[];
   lines: string[];
-  answers: Answer[];
+  answers: ConsumerAnswer[];
   inboundId: string;
 }
 
@@ -107,12 +109,16 @@ function addEvent(store: Store, inboundId: string, eventId: string): string {
   );
 }
 
-function completed(data: unknown): Answer {
+function completed(data: unknown): ConsumerAnswer {
   return () =>
     Promise.resolve({ type: OperationResultType.Completed, status: OK, data });
 }
 
-function failure(status: number, code: string, message: string): Answer {
+function failure(
+  status: number,
+  code: string,
+  message: string,
+): ConsumerAnswer {
   return () =>
     Promise.resolve({
       type: OperationResultType.Failure,
@@ -124,22 +130,8 @@ function failure(status: number, code: string, message: string): Answer {
     });
 }
 
-function indeterminate(): Answer {
+function indeterminate(): ConsumerAnswer {
   return () => Promise.resolve({ type: OperationResultType.Indeterminate });
-}
-
-function consumersOf(
-  calls: ConsumerCall[],
-  answers: Answer[],
-): IntakeConsumers {
-  return {
-    [Consumer.MissionDeliveryAdmit]: (input, options) => {
-      calls.push({ consumer: Consumer.MissionDeliveryAdmit, input, options });
-      const answer = answers.shift();
-      assert.ok(answer !== undefined, "Each call has a scripted answer.");
-      return answer();
-    },
-  };
 }
 
 function dispatcherOver(
@@ -171,8 +163,12 @@ function harness(t: TestContext): Harness {
     { write: (line) => lines.push(line) },
   );
   const calls: ConsumerCall[] = [];
-  const answers: Answer[] = [];
-  const dispatcher = dispatcherOver(store, logger, consumersOf(calls, answers));
+  const answers: ConsumerAnswer[] = [];
+  const dispatcher = dispatcherOver(
+    store,
+    logger,
+    scriptedConsumers(calls, answers),
+  );
   return {
     store,
     dispatcher,
@@ -401,7 +397,7 @@ test("A first handoff and one after a retry carry two keys and one event identit
 
 test("A timeout or an indeterminate answer sets failed, and the retry answers duplicate", async (t) => {
   const h = harness(t);
-  const cases: [string, Answer][] = [
+  const cases: [string, ConsumerAnswer][] = [
     [TIMEOUT, failure(GATEWAY_TIMEOUT, TIMEOUT, "Request timed out.")],
     [INDETERMINATE, indeterminate()],
   ];
@@ -516,7 +512,9 @@ test("A start hands an event over again after a kill of the process during its h
   const dispatcher = dispatcherOver(
     store,
     pino({ enabled: false }),
-    consumersOf(calls, [completed({ disposition: "duplicate", reason: null })]),
+    scriptedConsumers(calls, [
+      completed({ disposition: "duplicate", reason: null }),
+    ]),
   );
   dispatcher.wake();
   await dispatcher.join();

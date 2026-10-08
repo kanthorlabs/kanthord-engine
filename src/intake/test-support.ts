@@ -1,7 +1,9 @@
+import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import {
   OperationResultType,
   type ClientOptions,
+  type OperationResult,
 } from "../kernel/operation.ts";
 import { GitHubPlatform } from "../repository/github.ts";
 import { S3Platform } from "../storage/index.ts";
@@ -37,6 +39,22 @@ export function recordingConsumers(): {
         calls.push({ consumer: Consumer.MissionDeliveryAdmit, input, options });
         return Promise.resolve({ type: OperationResultType.Indeterminate });
       },
+    },
+  };
+}
+
+export type ConsumerAnswer = () => Promise<OperationResult<unknown>>;
+
+export function scriptedConsumers(
+  calls: ConsumerCall[],
+  answers: ConsumerAnswer[],
+): IntakeConsumers {
+  return {
+    [Consumer.MissionDeliveryAdmit]: (input, options) => {
+      calls.push({ consumer: Consumer.MissionDeliveryAdmit, input, options });
+      const answer = answers.shift();
+      assert.ok(answer !== undefined, "Each call has a scripted answer.");
+      return answer();
     },
   };
 }

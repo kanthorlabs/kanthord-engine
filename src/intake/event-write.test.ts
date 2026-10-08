@@ -24,7 +24,6 @@ import {
   InboundPlatform,
   intakeOperations,
   type InboundEventStateValue,
-  type IntakeConsumers,
 } from "./contract.ts";
 import {
   discardEventFrom,
@@ -35,7 +34,12 @@ import {
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
-import { unusedActionDependencies, type ConsumerCall } from "./test-support.ts";
+import {
+  scriptedConsumers,
+  unusedActionDependencies,
+  type ConsumerAnswer,
+  type ConsumerCall,
+} from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREATED_AT = 100;
@@ -56,22 +60,6 @@ const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const WAIT_TICKS = 1000;
 
-type Answer = () => Promise<OperationResult<unknown>>;
-
-function consumersOf(
-  calls: ConsumerCall[],
-  answers: Answer[],
-): IntakeConsumers {
-  return {
-    [Consumer.MissionDeliveryAdmit]: (input, options) => {
-      calls.push({ consumer: Consumer.MissionDeliveryAdmit, input, options });
-      const answer = answers.shift();
-      assert.ok(answer !== undefined, "Each call has a scripted answer.");
-      return answer();
-    },
-  };
-}
-
 function completed(): Promise<OperationResult<unknown>> {
   return Promise.resolve({
     type: OperationResultType.Completed,
@@ -87,14 +75,14 @@ function harness(t: TestContext) {
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);
   const calls: ConsumerCall[] = [];
-  const answers: Answer[] = [];
+  const answers: ConsumerAnswer[] = [];
   const intake = new IntakeService({
     store,
     logger: pino({ enabled: false }),
     health: new HealthRegistry(),
     identity: { kind: IdentityKind.Service, service: INTAKE_SERVICE_NAME },
     ...unusedActionDependencies(),
-    consumers: consumersOf(calls, answers),
+    consumers: scriptedConsumers(calls, answers),
   });
   const registry = new OperationRegistry();
   intake.declare(registry);
