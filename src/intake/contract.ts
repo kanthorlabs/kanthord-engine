@@ -200,6 +200,16 @@ export const outboundRequestSchema = z.strictObject({
   created_at: timestamp,
 });
 
+export const inboundEventSchema = z.strictObject({
+  id: identitySchema(INBOUND_EVENT_ID_PREFIX),
+  inbound_id: identitySchema(INBOUND_ID_PREFIX),
+  event_id: z.string().min(1),
+  metadata: z.record(z.string(), z.unknown()),
+  state: inboundEventStateSchema,
+  error: errorItemSchema.array().nullable(),
+  created_at: timestamp,
+});
+
 export const inboundSchema = z.strictObject({
   id: identitySchema(INBOUND_ID_PREFIX),
   project_id: identitySchema("project"),
@@ -248,6 +258,7 @@ export type OutboundRequestStateValue = z.infer<
 export type OutboundOperationValue = z.infer<typeof outboundOperationSchema>;
 export type ResultClassValue = z.infer<typeof resultClassSchema>;
 export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
+export type InboundEvent = z.infer<typeof inboundEventSchema>;
 export type Inbound = z.infer<typeof inboundSchema>;
 export type WebhookInbound = z.infer<typeof webhookInboundSchema>;
 export type InboundCreate = z.infer<typeof inboundCreateSchema>;

@@ -107,6 +107,7 @@ engine/
 │   │   ├── inbound-create.ts   # Inbound create: webhook admission, project check, credential check, and insert step
 │   │   ├── inbound-delete.ts   # Inbound delete that refuses a pending event and removes the events and the row
 │   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret
+│   │   ├── event-store.ts      # Inbound event rows, the repeat lookup, pending count, and the record projection
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
 │   │   ├── outbound-read.ts    # Outbound request list and get handlers
