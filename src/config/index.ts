@@ -170,11 +170,15 @@ export function loadConfig(path: string): ServerConfig {
   return configuration(parseMapping(readPrivate(path))).getProperties();
 }
 
-export function initialConfig(allowedHosts: readonly string[] = []): string {
+export function initialConfig(
+  allowedHosts: readonly string[] = [],
+  bind: string = gatewayConfigSchema.bind.default,
+): string {
   return stringify(
     configuration({
       master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
       gateway: {
+        bind,
         allowed_hosts: [
           ...new Set([
             ...gatewayConfigSchema.allowed_hosts.default,

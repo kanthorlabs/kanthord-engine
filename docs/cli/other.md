@@ -28,7 +28,7 @@ There are eight application/JWT forms below: three configuration commands,
 two `serve` application forms, two `jwt generate` modes, and `jwt inspect`.
 Help is a parser facility, not a fourth global command.
 
-1. `kanthord config init [--allowed-host <host>]... [--config <path>]` — implemented; local, no route.
+1. `kanthord config init [--allowed-host <host>]... [--bind <address>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
 4. `kanthord serve [server] [--config <path>]` — implemented; local application
@@ -340,8 +340,8 @@ The implemented fields are:
 - `log.level`: optional enum `trace|debug|info|warn|error|fatal`, default `info`.
 - `log.destination`: optional enum `stderr|file`, default `stderr`; `file` uses
   `kanthord.log` in the XDG state directory.
-- `gateway.bind`: optional loopback-IP string, default `127.0.0.1`; current
-  validation accepts IPv4 `127.*` loopback addresses and `::1`.
+- `gateway.bind`: optional IP-address string, default `127.0.0.1`; validation
+  accepts any IPv4 or IPv6 address, for example `0.0.0.0` in a container.
 - `gateway.port`: optional Convict `port`, default `31415`.
 - `gateway.allowed_hosts`: optional array of nonempty strings, default
   `["127.0.0.1:31415", "localhost:31415"]`.
@@ -378,7 +378,7 @@ no database. None reads or writes `cli.yaml`.
 ### `config init`
 
 ```text
-kanthord config init [--allowed-host <host>]... [--config <path>]
+kanthord config init [--allowed-host <host>]... [--bind <address>] [--config <path>]
 ```
 
 **Implemented; route/access: none, local filesystem.** The destination must be
@@ -387,7 +387,9 @@ master key, validate it in memory, and then publish it. Each repeatable
 `--allowed-host` value is lowercased and appended to the default
 `gateway.allowed_hosts` without duplicates. A value that is not exactly
 `<name>` or `<name>:<port>` fails with `cli.config.invalid_allowed_host` before
-any file is written. The invocation itself
+any file is written. `--bind` writes its value to `gateway.bind`. A value that
+is not an IP address fails with `system.config.invalid_field` before any file
+is written. The invocation itself
 authorizes creation; stdin and stdout may both be redirected.
 
 Create the destination directory at `0700` when absent. Write a same-directory
@@ -840,7 +842,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 400             | `gateway.request.validation_failed`              | The params, query or body fail the operation input schema.                                                              | remote commands                                           |
 | 404             | `gateway.routing.not_found`                      | No route matches the request path or preflight method.                                                                  | unmatched HTTP routes                                     |
 | local           | `system.config.cyclic_alias`                     | A YAML alias creates a cycle.                                                                                           | config validate, config show, jwt generate, serve server  |
-| local           | `system.config.invalid_field`                    | The server configuration contains an unknown or invalid field.                                                          | config validate, config show, jwt generate, serve server  |
+| local           | `system.config.invalid_field`                    | The server configuration contains an unknown or invalid field.                                                          | config init, config validate, config show, jwt generate, serve server |
 | local           | `system.config.invalid_mapping`                  | The YAML root is not one mapping, or a nested value is not a plain mapping or array.                                    | config validate, config show, jwt generate, serve server  |
 | local           | `system.config.invalid_yaml`                     | The YAML cannot be parsed as one mapping with unique string keys.                                                       | config validate, config show, jwt generate, serve server  |
 | local           | `system.config.not_found`                        | The server configuration file is absent.                                                                                | config validate, config show, jwt generate, serve server  |

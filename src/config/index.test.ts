@@ -240,7 +240,7 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   );
   assert.match(showConfig(path), /\[Sensitive\]/);
   assert.throws(
-    () => configuration({ gateway: { bind: "0.0.0.0", port: -1 } }),
+    () => configuration({ gateway: { bind: "localhost", port: -1 } }),
     (error: Error) => {
       assert.match(error.message, /master_key/);
       assert.match(error.message, /gateway.bind/);

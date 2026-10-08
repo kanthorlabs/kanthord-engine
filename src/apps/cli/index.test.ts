@@ -725,6 +725,25 @@ test("config init appends each lowercased allowed host to the default host allow
   ]);
 });
 
+test("config init sets the gateway bind address", (t) => {
+  for (const address of ["0.0.0.0", "::", "127.0.0.1"]) {
+    const env = environment(temporary(t));
+    const result = invocation(["config", "init", "--bind", address], env);
+    assert.equal(result.status, ExitCode.Success, result.stderr);
+    assert.equal(loadConfig(env.KANTHORD_CONFIG!).gateway.bind, address);
+  }
+});
+
+test("config init refuses a bind value that is not an IP address and writes nothing", (t) => {
+  const env = environment(temporary(t));
+  for (const value of ["localhost", "0.0.0.0:31415", ""]) {
+    const result = invocation(["config", "init", "--bind", value], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /^system\.config\.invalid_field:/);
+    assert.equal(existsSync(env.KANTHORD_CONFIG!), false);
+  }
+});
+
 test("config init refuses an allowed host that is not a name with an optional port and writes nothing", (t) => {
   const env = environment(temporary(t));
   for (const value of [

@@ -64,8 +64,9 @@ function collectHost(value: string, hosts: string[] | undefined): string[] {
 export async function initConfig(
   path: string,
   allowedHosts: readonly string[] = [],
+  bind?: string,
 ): Promise<void> {
-  const content = initialConfig(allowedHosts.map(allowedHost));
+  const content = initialConfig(allowedHosts.map(allowedHost), bind);
   writePrivate(path, content);
   process.stdout.write(`Created ${path}\n`);
 }
@@ -88,14 +89,13 @@ function addConfigCommand(program: Command): void {
       "--allowed-host <host>",
       "Append a host to gateway.allowed_hosts (repeatable)",
       collectHost,
-    );
+    )
+    .option("--bind <address>", "Set gateway.bind to this IP address");
   configHelp(init);
-  init.action(() =>
-    initConfig(
-      effectivePath(init),
-      init.opts<{ allowedHost?: string[] }>().allowedHost,
-    ),
-  );
+  init.action(() => {
+    const options = init.opts<{ allowedHost?: string[]; bind?: string }>();
+    return initConfig(effectivePath(init), options.allowedHost, options.bind);
+  });
   for (const [name, description, action] of [
     [
       "validate",
