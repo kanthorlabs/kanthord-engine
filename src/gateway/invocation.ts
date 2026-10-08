@@ -401,6 +401,8 @@ export class Invocation {
         },
       };
       const output = await handler(parsed.data, caller);
+      if (operation.delivery && output instanceof Response)
+        return { status: output.status, body: output };
       if (committed) {
         if (reservation)
           this.idempotency.complete(reservation, committed, operation.secret);

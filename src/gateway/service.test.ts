@@ -30,6 +30,9 @@ import { compareRouteSpecificity } from "./service.ts";
 
 const HUMAN_USERNAME = "ulrich";
 const SINGLE_EXECUTION_COUNT = 1;
+const HANDSHAKE_SEGMENT = "handshake";
+const HANDSHAKE_HEADER = "x-test-kind";
+const EMPTY_RESPONSE_BODY = "";
 const DELIVERY_SIGNATURE = "exact";
 const DELIVERY_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
 const ExpectedErrorCode = {
@@ -546,6 +549,47 @@ test("a delivery under /hooks forwards exact bytes and headers, refuses a body a
     registry: 503,
     invocation: 503,
   });
+});
+
+test("a delivery answers the Response of its handler, after a commit or without one", async (t) => {
+  const registry = new OperationRegistry();
+  let committed = 0;
+  registry.register(
+    {
+      ...protectedRead,
+      id: "test.delivery.response",
+      method: "POST",
+      path: "/hooks/:inbound_id",
+      access: AccessPolicy.Delivery,
+      delivery: true,
+      status: HttpStatus.Accepted,
+      output: z.null(),
+    },
+    (_input, caller) => {
+      assert.ok(caller.delivery);
+      if (caller.delivery.headers.get(HANDSHAKE_HEADER) === HANDSHAKE_SEGMENT)
+        return new Response(null, { status: HttpStatus.NoContent });
+      caller.commit(() => {
+        committed += 1;
+        return null;
+      });
+      return new Response(null, { status: HttpStatus.Accepted });
+    },
+  );
+  const fixture = await gatewayFixture(t, { registry });
+  for (const [name, status] of [
+    ["event", HttpStatus.Accepted],
+    [HANDSHAKE_SEGMENT, HttpStatus.NoContent],
+  ] as const) {
+    const answer = await fixture.request("/hooks/test", {
+      method: "POST",
+      headers: { [HANDSHAKE_HEADER]: name },
+      body: "{}",
+    });
+    assert.equal(answer.status, status);
+    assert.equal(await answer.text(), EMPTY_RESPONSE_BODY);
+  }
+  assert.equal(committed, SINGLE_EXECUTION_COUNT);
 });
 
 test("client disconnect reaches waiting handlers", async (t) => {
