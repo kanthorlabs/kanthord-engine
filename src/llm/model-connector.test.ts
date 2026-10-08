@@ -200,7 +200,7 @@ test("openrouter runs with the built-in pi provider and its credential", async (
     effective_configuration: {
       ...setup.effective_configuration,
       provider: "openrouter",
-      model_identifier: "anthropic/claude-3-haiku",
+      model_identifier: "anthropic/claude-haiku-4.5",
     },
   };
   const credentials = new InMemoryCredentialStore();
@@ -347,7 +347,7 @@ test("metadata env maps every metadata field of the five platforms", () => {
     GOOGLE_CLOUD_PROJECT: "p",
     GOOGLE_CLOUD_LOCATION: "l",
   });
-  assert.deepEqual(of("azure-openai-responses", { resource_name: "r" }), {
+  assert.deepEqual(of("azure", { resource_name: "r" }), {
     AZURE_OPENAI_RESOURCE_NAME: "r",
   });
   assert.deepEqual(of("cloudflare-workers-ai", { account_id: "a" }), {

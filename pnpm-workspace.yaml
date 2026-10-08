@@ -7,13 +7,5 @@ allowBuilds:
   "@google/genai": false
   esbuild: true
   protobufjs: false
-# Refuse package versions published less than three days ago (in minutes),
-# except for the explicitly listed versions below.
+# Refuse package versions published less than three days ago (in minutes).
 minimumReleaseAge: 4320
-minimumReleaseAgeExclude:
-  - "@earendil-works/chord@0.86.0"
-  - "@earendil-works/pi-agent-core@0.86.0"
-  - "@earendil-works/pi-ai@0.86.0"
-  - "@earendil-works/pi-telemetry@0.86.0"
-  - "@earendil-works/pi-coding-agent@0.86.0"
-  - "@earendil-works/pi-tui@0.86.0"

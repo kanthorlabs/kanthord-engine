@@ -965,7 +965,7 @@ test("openrouter uses the built-in catalog and refuses an unknown model", (t) =>
     () => f.invoke("enablement.put", body(MODEL)),
     AgentErrorCode.ModelUnknown,
   );
-  const builtin = "anthropic/claude-3-haiku";
+  const builtin = "anthropic/claude-haiku-4.5";
   assert.equal(
     f.invoke("enablement.put", body(builtin)).default_configuration
       .model_identifier,

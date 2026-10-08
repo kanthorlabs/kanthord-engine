@@ -707,7 +707,14 @@ function fakeProvider(
   return createProvider({
     id,
     models: [],
-    api: {},
+    api: {
+      stream: () => {
+        throw new Error("unexpected stream");
+      },
+      streamSimple: () => {
+        throw new Error("unexpected stream");
+      },
+    },
     auth: {
       oauth: {
         name: "Fake OAuth",
@@ -1458,7 +1465,7 @@ const llmMetadataCases = [
     edited: { project: "project", location: "europe-west4" },
   },
   {
-    platform: Platform.AzureOpenAIResponses,
+    platform: Platform.Azure,
     metadata: { resource_name: "resource" },
     edited: { resource_name: "other" },
   },

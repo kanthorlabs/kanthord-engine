@@ -53,8 +53,14 @@ export class ExecutionBudget {
     if (this.exhausted()) for (const context of this.agents) context.cancel();
   }
   exhausted(): boolean {
+    return this.exhaustedAt(this.endedTurns);
+  }
+  exhaustedAfterTurn(): boolean {
+    return this.exhaustedAt(this.endedTurns + 1);
+  }
+  private exhaustedAt(endedTurns: number): boolean {
     return (
-      (this.turns !== undefined && this.endedTurns >= this.turns) ||
+      (this.turns !== undefined && endedTurns >= this.turns) ||
       this.remainingMs() <= BUDGET_FLOOR
     );
   }

@@ -280,7 +280,14 @@ function offlineProvider(credential: OAuthCredential) {
   return createProvider({
     id: COPILOT,
     models: [],
-    api: {},
+    api: {
+      stream: () => {
+        throw new Error("Unexpected provider stream");
+      },
+      streamSimple: () => {
+        throw new Error("Unexpected provider stream");
+      },
+    },
     auth: {
       oauth: {
         name: "Offline boundary fixture",

@@ -68,9 +68,11 @@ function nativeAgent(
   disposeSignal: () => void,
 ): NativeAgent {
   let session: AgentSession | null = opened;
-  const shouldStopAfterTurn = opened.agent.shouldStopAfterTurn;
-  opened.agent.shouldStopAfterTurn = async (turn, signal) =>
-    budget.exhausted() || (await shouldStopAfterTurn?.(turn, signal)) === true;
+  const finishTurn = opened.agent.finishTurn;
+  opened.agent.finishTurn = async (turn, signal) =>
+    budget.exhaustedAfterTurn()
+      ? { action: "end" }
+      : ((await finishTurn?.(turn, signal)) ?? undefined);
   let unsubscribeTurns: (() => void) | null = countTurns(opened, () => {
     budget.turnEnded();
     if (budget.exhausted()) void session?.abort();

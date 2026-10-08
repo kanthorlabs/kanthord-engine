@@ -30,7 +30,7 @@ export const Platform = {
   OpenAI: "openai",
   AmazonBedrock: "amazon-bedrock",
   GoogleVertex: "google-vertex",
-  AzureOpenAIResponses: "azure-openai-responses",
+  Azure: "azure",
   CloudflareWorkersAI: "cloudflare-workers-ai",
   CloudflareAIGateway: "cloudflare-ai-gateway",
   OpencodeGo: "opencode-go",
@@ -90,7 +90,7 @@ export const googleVertexMetadataSchema = z.strictObject({
   project: nonblankStringSchema,
   location: nonblankStringSchema,
 });
-export const azureOpenAIResponsesMetadataSchema = z.strictObject({
+export const azureMetadataSchema = z.strictObject({
   resource_name: nonblankStringSchema,
 });
 export const cloudflareWorkersAIMetadataSchema = z.strictObject({
@@ -239,10 +239,7 @@ export const LLM_PLATFORMS: Readonly<Record<Platform, CredentialPlatform>> = {
     Platform.GoogleVertex,
     googleVertexMetadataSchema,
   ),
-  [Platform.AzureOpenAIResponses]: apiKey(
-    Platform.AzureOpenAIResponses,
-    azureOpenAIResponsesMetadataSchema,
-  ),
+  [Platform.Azure]: apiKey(Platform.Azure, azureMetadataSchema),
   [Platform.CloudflareWorkersAI]: apiKey(
     Platform.CloudflareWorkersAI,
     cloudflareWorkersAIMetadataSchema,
@@ -285,6 +282,8 @@ export const LLM_PLATFORMS: Readonly<Record<Platform, CredentialPlatform>> = {
   "xiaomi-token-plan-cn": apiKey("xiaomi-token-plan-cn"),
   "xiaomi-token-plan-ams": apiKey("xiaomi-token-plan-ams"),
   "xiaomi-token-plan-sgp": apiKey("xiaomi-token-plan-sgp"),
+  meta: apiKey("meta"),
+  typesafe: apiKey("typesafe"),
 };
 
 export function isLlmPlatform(value: string): value is Platform {

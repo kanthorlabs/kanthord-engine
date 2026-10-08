@@ -31,7 +31,7 @@ export const METADATA_ENV: Readonly<
     project: "GOOGLE_CLOUD_PROJECT",
     location: "GOOGLE_CLOUD_LOCATION",
   },
-  [Platform.AzureOpenAIResponses]: {
+  [Platform.Azure]: {
     resource_name: "AZURE_OPENAI_RESOURCE_NAME",
   },
   [Platform.CloudflareWorkersAI]: { account_id: "CLOUDFLARE_ACCOUNT_ID" },
