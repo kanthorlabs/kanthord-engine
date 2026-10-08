@@ -9,7 +9,12 @@ import {
   type InboundEvent,
   type InboundEventStateValue,
 } from "./contract.ts";
-import { eventRecord, readEvent, type InboundEventRow } from "./event-store.ts";
+import {
+  EVENT_PROJECTION_COLUMNS,
+  eventRecord,
+  readEventProjection,
+  type InboundEventProjectionRow,
+} from "./event-store.ts";
 
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
@@ -56,7 +61,7 @@ export function listEvents(tx: Transaction, query: EventListQuery): EventPage {
   const limit = query.limit ?? INBOUND_EVENT_LIST_LIMIT_DEFAULT;
   const rows = tx.database
     .prepare(
-      "SELECT * FROM intake_inbound_event WHERE (? IS NULL OR inbound_id = ?) AND (? IS NULL OR state = ?) AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?",
+      `SELECT ${EVENT_PROJECTION_COLUMNS} FROM intake_inbound_event WHERE (? IS NULL OR inbound_id = ?) AND (? IS NULL OR state = ?) AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?`,
     )
     .all(
       query.inbound_id ?? null,
@@ -66,7 +71,7 @@ export function listEvents(tx: Transaction, query: EventListQuery): EventPage {
       after,
       after,
       limit + LOOKAHEAD,
-    ) as unknown as InboundEventRow[];
+    ) as unknown as InboundEventProjectionRow[];
   const items = rows.slice(SLICE_START, limit).map(eventRecord);
   return {
     items,
@@ -76,7 +81,7 @@ export function listEvents(tx: Transaction, query: EventListQuery): EventPage {
 }
 
 export function getEvent(tx: Transaction, id: string): InboundEvent {
-  const row = readEvent(tx, id);
+  const row = readEventProjection(tx, id);
   if (row === null)
     throw new OperationError(
       HttpStatus.NotFound,

@@ -16,6 +16,7 @@ import {
   insertEvent,
   pendingCount,
   readEvent,
+  readEventProjection,
 } from "./event-store.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
@@ -85,9 +86,23 @@ test("findEvent finds a stored inbound and event identity pair", (t) => {
   const inboundId = addInbound(store);
   const id = addEvent(store, inboundId);
   const found = store.transaction((tx) => findEvent(tx, inboundId, EVENT_ID));
-  assert.equal(found?.id, id);
+  assert.equal(found, id);
   assert.equal(
     store.transaction((tx) => findEvent(tx, inboundId, "other")),
+    null,
+  );
+});
+
+test("the projection read answers every column except the event content", (t) => {
+  const store = migratedStore(t);
+  const id = addEvent(store, addInbound(store));
+  const row = store.transaction((tx) => readEventProjection(tx, id)!);
+  assert.equal(row.id, id);
+  assert.equal("event" in row, false);
+  assert.equal(
+    store.transaction((tx) =>
+      readEventProjection(tx, `${INBOUND_EVENT_ID_PREFIX}_absent`),
+    ),
     null,
   );
 });

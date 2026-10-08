@@ -21,31 +21,36 @@ export interface NewInboundEvent {
   created_at: number;
 }
 
-export interface InboundEventRow {
+export const EVENT_PROJECTION_COLUMNS =
+  "id, inbound_id, event_id, metadata, state, error, created_at";
+
+export interface InboundEventProjectionRow {
   id: string;
   inbound_id: string;
   event_id: string;
-  event: Uint8Array;
   metadata: string;
   state: InboundEventStateValue;
   error: string | null;
   created_at: number;
 }
 
+export interface InboundEventRow extends InboundEventProjectionRow {
+  event: Uint8Array;
+}
+
 export function findEvent(
   tx: Transaction,
   inboundId: string,
   eventId: string,
-): InboundEventRow | null {
+): string | null {
   assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
   assert.ok(eventId.length > NO_LENGTH, "An event identity is required.");
-  return (
-    (tx.database
-      .prepare(
-        "SELECT * FROM intake_inbound_event WHERE inbound_id = ? AND event_id = ?",
-      )
-      .get(inboundId, eventId) as InboundEventRow | undefined) ?? null
-  );
+  const row = tx.database
+    .prepare(
+      "SELECT id FROM intake_inbound_event WHERE inbound_id = ? AND event_id = ?",
+    )
+    .get(inboundId, eventId) as { id: string } | undefined;
+  return row?.id ?? null;
 }
 
 export function insertEvent(tx: Transaction, input: NewInboundEvent): string {
@@ -85,6 +90,20 @@ export function readEvent(tx: Transaction, id: string): InboundEventRow | null {
   );
 }
 
+export function readEventProjection(
+  tx: Transaction,
+  id: string,
+): InboundEventProjectionRow | null {
+  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  return (
+    (tx.database
+      .prepare(
+        `SELECT ${EVENT_PROJECTION_COLUMNS} FROM intake_inbound_event WHERE id = ?`,
+      )
+      .get(id) as InboundEventProjectionRow | undefined) ?? null
+  );
+}
+
 export function pendingCount(tx: Transaction): number {
   const row = tx.database
     .prepare(
@@ -94,7 +113,7 @@ export function pendingCount(tx: Transaction): number {
   return Number(row.total);
 }
 
-export function eventRecord(row: InboundEventRow): InboundEvent {
+export function eventRecord(row: InboundEventProjectionRow): InboundEvent {
   return inboundEventSchema.parse({
     id: row.id,
     inbound_id: row.inbound_id,

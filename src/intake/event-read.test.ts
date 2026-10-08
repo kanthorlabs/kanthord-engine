@@ -31,6 +31,7 @@ const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const PAGE_SIZE = 2;
 const FIRST_ROW = 0;
 const SECOND_ROW = 1;
+const NO_ROWS = 0;
 const PROJECTION_KEYS = [
   "created_at",
   "error",
@@ -118,7 +119,7 @@ function harness(t: TestContext) {
         .prepare("UPDATE intake_inbound_event SET state = ? WHERE id = ?")
         .run(state, id),
     );
-  return { list, get, addInbound, addEvent, setState };
+  return { store, list, get, addInbound, addEvent, setState };
 }
 
 async function refusal(promise: Promise<unknown>): Promise<OperationError> {
@@ -165,6 +166,42 @@ test("a list item is the projection with no event content", async (t) => {
   h.addEvent(h.addInbound());
   const [item] = (await h.list()).items;
   assert.deepEqual(Object.keys(item!).sort(), PROJECTION_KEYS);
+});
+
+function recordReadRows(t: TestContext, store: Store): object[] {
+  const rows: object[] = [];
+  const prepare = store.database.prepare.bind(store.database);
+  t.mock.method(store.database, "prepare", (sql: string) => {
+    const statement = prepare(sql);
+    const all = statement.all.bind(statement);
+    const get = statement.get.bind(statement);
+    return Object.assign(statement, {
+      all: (...values: Parameters<typeof all>) => {
+        const found = all(...values);
+        rows.push(...found);
+        return found;
+      },
+      get: (...values: Parameters<typeof get>) => {
+        const found = get(...values);
+        if (found !== undefined) rows.push(found);
+        return found;
+      },
+    });
+  });
+  return rows;
+}
+
+test("the list and the get read no event content", async (t) => {
+  const h = harness(t);
+  const id = h.addEvent(h.addInbound());
+  const rows = recordReadRows(t, h.store);
+  await h.list();
+  await h.get(id);
+  assert.ok(rows.length > NO_ROWS);
+  assert.equal(
+    rows.some((row) => "event" in row),
+    false,
+  );
 });
 
 test("a page of two answers the newest first with a cursor to the rest", async (t) => {
