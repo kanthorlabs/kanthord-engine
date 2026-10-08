@@ -55,6 +55,10 @@ async function fixture(t: TestContext, nextRepository = false) {
       decodeGitHubEvent({ resource, event, metadata }),
   };
   const checks: string[] = [];
+  const wakes: string[] = [];
+  h.dependencies.wakeup.wake = (projectId) => {
+    wakes.push(projectId);
+  };
   const answer = (
     end_state: (typeof CheckEndState)[keyof typeof CheckEndState],
     landed_commits: string[] = [],
@@ -81,7 +85,7 @@ async function fixture(t: TestContext, nextRepository = false) {
         metadata: { event: eventType },
       },
     });
-  return { ...h, checks, answer, admit };
+  return { ...h, checks, wakes, answer, admit };
 }
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
@@ -131,6 +135,7 @@ test("a merged pull request sets expected, writes the landed commit with the inb
     inbound_event_id: inboundEventId,
   });
   assert.equal(h.node().state, NodeState.Completed);
+  assert.deepEqual(h.wakes, [h.project_id]);
 });
 
 test("a repeat answers duplicate and writes nothing", async (t) => {
@@ -328,6 +333,7 @@ test("another request that becomes the one unresolved match answers match_change
   });
   await rejectsWith(h.admit(), MissionErrorCode.DeliveryMatchChanged);
   assert.ok(replacement);
+  assert.deepEqual(h.wakes, []);
   assert.equal(h.checks.length, SINGLE_CALL);
   assert.equal((await landedOf(h)).length, NO_CALLS);
   assert.equal(
