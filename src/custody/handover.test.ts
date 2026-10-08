@@ -25,6 +25,7 @@ import {
   type CredentialPlatformSet,
   type CustodyExecution,
 } from "./contract.ts";
+import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const SECRET = Buffer.alloc(32, 9).toString("base64");
 const FIRST = { type: SecretShape.ApiKey, key: "private-first" };
@@ -87,6 +88,7 @@ function fixture(t: TestContext) {
     clientSecret: () => SECRET,
     bindingsNaming: () => [],
     inboundsNaming: () => [],
+    intakeServiceName: INTAKE_SERVICE_NAME,
     agentProvidersDependentOn: () => [],
     platforms: TEST_SET.platforms,
     executions: {

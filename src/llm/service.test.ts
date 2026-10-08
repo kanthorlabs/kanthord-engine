@@ -57,6 +57,7 @@ import {
 import { ANTHROPIC_MODELS_URL, GITHUB_COPILOT_TOKEN_URL } from "./probes.ts";
 import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
 import { LlmComponent } from "./service.ts";
+import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const FIRST_REVISION = 1;
 const HUMAN_ACCOUNT_ID = "alice";
@@ -142,6 +143,7 @@ function fixture(
     agentProvidersDependentOn,
     bindingsNaming: () => [],
     inboundsNaming: () => [],
+    intakeServiceName: INTAKE_SERVICE_NAME,
   });
   const component = new LlmComponent({
     records: custody,

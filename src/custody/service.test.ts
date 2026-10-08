@@ -44,6 +44,7 @@ import {
 } from "./contract.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import { EXECUTION_CREDENTIAL_MAX_BYTES } from "./contract.ts";
+import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const TestPlatform = {
   Key: "key-platform",
@@ -242,6 +243,7 @@ function fixture(
       collaborations.agentProvidersDependentOn ?? (() => []),
     bindingsNaming: collaborations.bindingsNaming ?? (() => []),
     inboundsNaming: collaborations.inboundsNaming ?? (() => []),
+    intakeServiceName: INTAKE_SERVICE_NAME,
   });
   let lastTransaction: Transaction | undefined;
   const commit = <T>(write: (tx: Transaction) => T): T =>
@@ -1703,6 +1705,7 @@ test("lifecycle reports health and joins cancellation", async () => {
       agentProvidersDependentOn: () => [],
       bindingsNaming: () => [],
       inboundsNaming: () => [],
+      intakeServiceName: INTAKE_SERVICE_NAME,
       platforms: TEST_SET.platforms,
     });
     const context = new CancellationContext();

@@ -22,6 +22,7 @@ import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { storageOperations } from "./contract.ts";
 import { CAPABILITY_BUCKET_HEAD, STORAGE_PLATFORMS } from "./platforms.ts";
 import { StorageComponent } from "./service.ts";
+import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const SECRET = "test_private-s3-secret";
 const ACCESS_KEY_ID = "test_private-s3-access-id";
@@ -87,6 +88,7 @@ function fixture(t: TestContext, logger: Logger = pino({ enabled: false })) {
     agentProvidersDependentOn: () => [],
     bindingsNaming: () => [],
     inboundsNaming: () => [],
+    intakeServiceName: INTAKE_SERVICE_NAME,
   });
   const component = new StorageComponent({
     records: custody,

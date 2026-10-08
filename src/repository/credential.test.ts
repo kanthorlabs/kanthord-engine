@@ -39,6 +39,7 @@ import {
   RepositoryCredentials,
   type CredentialDependencies,
 } from "./credential.ts";
+import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const SECRET = "test_private-github-token";
 const FIRST_REVISION = 1;
@@ -100,6 +101,7 @@ function fixture(
     agentProvidersDependentOn: () => [],
     bindingsNaming: () => [],
     inboundsNaming: () => [],
+    intakeServiceName: INTAKE_SERVICE_NAME,
   });
   const component = new RepositoryCredentials({
     store,

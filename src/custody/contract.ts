@@ -6,6 +6,7 @@ import type {
   CallerIdentity,
   HumanIdentity,
   MachineIdentity,
+  ServiceIdentity,
 } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
@@ -248,8 +249,23 @@ export const GrantKind = {
   RequestEvidence: "request_evidence",
   EvidenceAsset: "evidence_asset",
   ObjectPut: "object_put",
+  Inbound: "inbound",
 } as const;
 export type GrantKind = (typeof GrantKind)[keyof typeof GrantKind];
+export const InboundOperation = { Poll: "poll" } as const;
+export type InboundOperation =
+  (typeof InboundOperation)[keyof typeof InboundOperation];
+export type InboundGrantInput = {
+  inboundId: string;
+  projectId: string;
+  credential: string;
+  platform: string;
+  resource: string;
+};
+export type InboundFacts = {
+  inbound_id: string;
+  resource: string;
+};
 export type GrantRequest =
   | {
       kind: typeof GrantKind.ModelInference;
@@ -281,7 +297,13 @@ export type GrantRequest =
       kind: typeof GrantKind.ObjectPut;
       identity: MachineIdentity;
       claim: ExecutionClaim;
-    } & ObjectPutInput);
+    } & ObjectPutInput)
+  | {
+      kind: typeof GrantKind.Inbound;
+      identity: ServiceIdentity;
+      inbound: InboundGrantInput;
+      operation: InboundOperation;
+    };
 export type ModelInferenceFacts = {
   provider_id: string;
   agent_provider: string;
@@ -292,6 +314,7 @@ type GrantFactsOfKind = {
   [GrantKind.RequestEvidence]: RequestFacts;
   [GrantKind.EvidenceAsset]: AssetFacts;
   [GrantKind.ObjectPut]: AssetFacts;
+  [GrantKind.Inbound]: InboundFacts;
 };
 export type GrantExecution = Readonly<
   Omit<CustodyExecution, "credentials"> & { credentials: readonly string[] }

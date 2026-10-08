@@ -261,6 +261,7 @@ export function composeServices(options: {
       agent.agentProvidersDependentOn(tx, name),
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
     inboundsNaming: options.standIns?.inboundsNaming ?? (() => []),
+    intakeServiceName: INTAKE_SERVICE_NAME,
   });
   const llm = new LlmComponent({
     records: custody,

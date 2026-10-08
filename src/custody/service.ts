@@ -6,7 +6,11 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import { isHumanIdentity, type MachineIdentity } from "../kernel/caller.ts";
+import {
+  isHumanIdentity,
+  isServiceIdentity,
+  type MachineIdentity,
+} from "../kernel/caller.ts";
 import {
   HealthScope,
   ResourceStatus,
@@ -56,6 +60,7 @@ import {
   GrantKind,
   type GrantOf,
   type GrantRequest,
+  InboundOperation,
   type MissionAuthorization,
   type Material,
   piCredentialSchema,
@@ -97,6 +102,7 @@ export interface Dependencies {
   agentProvidersDependentOn: AgentProvidersDependentOnFn;
   bindingsNaming: BindingsNamingFn;
   inboundsNaming: InboundsNamingFn;
+  intakeServiceName: string;
 }
 
 const CustodyErrorCode = {
@@ -314,6 +320,7 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly authorization: CustodyAuthorization;
   private readonly missionAuthorization: MissionAuthorization;
   private readonly clientSecret: (clientId: string) => string;
+  private readonly intakeServiceName: string;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -327,6 +334,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.bindingsNaming = dependencies.bindingsNaming;
     this.inboundsNaming = dependencies.inboundsNaming;
+    this.intakeServiceName = dependencies.intakeServiceName;
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -373,6 +381,8 @@ export class CustodyComponent implements Service, CredentialRecords {
         facts: { provider_id, agent_provider },
       });
     }
+    if (request.kind === GrantKind.Inbound)
+      return this.inboundGrant(tx, request);
     const execution =
       request.claim === null
         ? null
@@ -380,9 +390,37 @@ export class CustodyComponent implements Service, CredentialRecords {
     return this.missionGrant(tx, request, execution);
   }
 
+  private inboundGrant(
+    tx: Transaction,
+    request: Extract<GrantRequest, { kind: typeof GrantKind.Inbound }>,
+  ): GrantOf<typeof GrantKind.Inbound> {
+    assert(tx.database.isTransaction);
+    assert.equal(request.kind, GrantKind.Inbound);
+    const { identity, inbound, operation } = request;
+    if (
+      !isServiceIdentity(identity) ||
+      identity.service !== this.intakeServiceName ||
+      operation !== InboundOperation.Poll
+    )
+      throw new FacilityError();
+    const { credential, platform } = inbound;
+    this.custodySuitability(tx, { credential, platform });
+    return mintGrant({
+      kind: request.kind,
+      credential,
+      platform,
+      project_id: inbound.projectId,
+      execution: null,
+      facts: { inbound_id: inbound.inboundId, resource: inbound.resource },
+    });
+  }
+
   private missionGrant(
     tx: Transaction,
-    request: Exclude<GrantRequest, { kind: typeof GrantKind.ModelInference }>,
+    request: Exclude<
+      GrantRequest,
+      { kind: typeof GrantKind.ModelInference | typeof GrantKind.Inbound }
+    >,
     execution: CustodyExecution | null,
   ): Grant {
     assert(tx.database.isTransaction);
