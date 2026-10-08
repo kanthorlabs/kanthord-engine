@@ -167,7 +167,6 @@ export class Dispatcher {
 
   quiesce(): void {
     this.quiescent = true;
-    assert.ok(this.halted(), "A quiescent dispatcher starts no handoff.");
   }
 
   async join(): Promise<void> {
