@@ -723,9 +723,90 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.delete", AccessPolicy.Human],
 ];
 const OPERATION_COUNT = 170;
+const ROUTED_OPERATION_COUNT = 161;
+const INTAKE_OPERATION_COUNT = 22;
+const INTAKE_ROUTED_OPERATION_COUNT = 14;
+const SERVICE_OPERATION_IDS = ["intake.action.check", "mission.delivery.admit"];
+const DIRECT_OPERATION_IDS = [
+  "intake.action.perform",
+  "intake.action.read",
+  "intake.execution.storage.get",
+  "intake.storage.check",
+  "intake.storage.delete",
+  "intake.storage.get",
+  "intake.storage.put",
+];
 const routedOperationIds = new Set<string>(
   apiOperations.filter(hasHttpRoute).map(({ id }) => id),
 );
+
+test("the final inventory splits into routed, service and direct operations", async (t) => {
+  const inventoryIds = OPERATION_INVENTORY.map(([id]) => id);
+  const routedIds = apiOperations.filter(hasHttpRoute).map(({ id }) => id);
+  const serviceIds = apiOperations
+    .filter(({ access }) => access === AccessPolicy.Service)
+    .map(({ id }) => id);
+  const directIds = apiOperations
+    .filter(
+      (operation) =>
+        !hasHttpRoute(operation) && operation.access !== AccessPolicy.Service,
+    )
+    .map(({ id }) => id);
+  const intakeRows = OPERATION_INVENTORY.filter(([id]) =>
+    id.startsWith("intake."),
+  );
+  assert.equal(inventoryIds.length, OPERATION_COUNT);
+  assert.equal(routedIds.length, ROUTED_OPERATION_COUNT);
+  assert.equal(intakeRows.length, INTAKE_OPERATION_COUNT);
+  assert.equal(
+    intakeRows.filter(([id]) => routedOperationIds.has(id)).length,
+    INTAKE_ROUTED_OPERATION_COUNT,
+  );
+  assert.deepEqual(serviceIds.sort(), SERVICE_OPERATION_IDS);
+  assert.deepEqual(directIds.sort(), DIRECT_OPERATION_IDS);
+  assert.deepEqual(
+    [...routedIds, ...serviceIds, ...directIds].sort(),
+    [...inventoryIds].sort(),
+  );
+  const registry = new OperationRegistry();
+  await gatewayFixture(t, { registry });
+  assert.deepEqual(
+    registry
+      .all()
+      .map(({ operation }) => operation.id)
+      .sort(),
+    [...inventoryIds].sort(),
+  );
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const emitted = Object.entries(resolved.paths ?? {}).flatMap(([path, item]) =>
+    Object.entries(item ?? {})
+      .filter(
+        ([, entry]) =>
+          isObject(entry) &&
+          "operationId" in entry &&
+          isString(entry.operationId),
+      )
+      .map(([method, entry]) => ({
+        pair: `${method} ${path}`,
+        operationId: (entry as ResolvedOperation).operationId ?? "",
+      })),
+  );
+  const excludedIds = new Set<string>([...serviceIds, ...directIds]);
+  assert.equal(
+    emitted.some(({ operationId }) => excludedIds.has(operationId)),
+    false,
+  );
+  assert.deepEqual(
+    emitted.map(({ pair }) => pair).sort(),
+    apiOperations
+      .filter(hasHttpRoute)
+      .map(
+        ({ method, path }) =>
+          `${method.toLowerCase()} ${path.replace(/:([^/]+)/g, "{$1}")}`,
+      )
+      .sort(),
+  );
+});
 
 test("the operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();
