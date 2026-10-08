@@ -112,7 +112,7 @@ type Send<T> = (client: S3Client, abortSignal: AbortSignal) => Promise<T>;
 
 const headAnswerSchema = z.object({
   ContentLength: z.number().int().nonnegative(),
-  ChecksumSHA256: z.string().regex(SHA256_BASE64_PATTERN).optional(),
+  ChecksumSHA256: z.string().optional(),
   ChecksumType: z.string().optional(),
   VersionId: z.string().min(MIN_KEY_LENGTH).optional(),
 });
@@ -329,7 +329,9 @@ function headOf(output: unknown): S3Answer<ObjectHead> {
   const { ContentLength, ChecksumSHA256, ChecksumType, VersionId } =
     parsed.data;
   const whole =
-    ChecksumSHA256 !== undefined && ChecksumType !== CHECKSUM_TYPE_COMPOSITE;
+    ChecksumSHA256 !== undefined &&
+    ChecksumType !== CHECKSUM_TYPE_COMPOSITE &&
+    SHA256_BASE64_PATTERN.test(ChecksumSHA256);
   return {
     ok: true,
     value: {

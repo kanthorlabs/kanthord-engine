@@ -185,6 +185,28 @@ test("headObject answers the size, the hexadecimal SHA-256 and the version", asy
   assert.equal(request.headers[CHECKSUM_MODE_HEADER], CHECKSUM_MODE_ENABLED);
 });
 
+test("headObject answers the size and a null SHA-256 for a composite checksum", async (t) => {
+  const s3 = await store(
+    t,
+    status(HttpStatus.OK, {
+      [CONTENT_LENGTH_HEADER]: String(SIZE),
+      [CHECKSUM_SHA256_HEADER]: `${SHA256_BASE64}-3`,
+      "x-amz-checksum-type": "COMPOSITE",
+      "x-amz-version-id": VERSION,
+    }),
+  );
+  const answer = await new S3Platform().headObject(call(), {
+    ...location(s3.endpoint),
+    key: KEY,
+    version: VERSION,
+  });
+  assert.deepEqual(answer, {
+    ok: true,
+    value: { size: SIZE, sha256: null, version: VERSION },
+  });
+  assert.equal(s3.requests.length, ONE_REQUEST);
+});
+
 test("headObject maps 404 to null and 403 to final_refusal", async (t) => {
   const missing = await store(t, status(HttpStatus.NotFound));
   const target = { key: KEY, version: VERSION };
