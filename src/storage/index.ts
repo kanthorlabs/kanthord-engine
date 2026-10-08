@@ -5,9 +5,12 @@ export { StorageComponent, type Dependencies } from "./service.ts";
 export { STORAGE_PLATFORMS } from "./platforms.ts";
 export {
   S3Platform,
+  type ObjectHead,
   type PresignedGet,
   type PresignedPut,
+  type S3Answer,
   type S3Call,
+  type S3Failure,
   type S3ObjectTarget,
   type S3PutTarget,
 } from "./s3.ts";
