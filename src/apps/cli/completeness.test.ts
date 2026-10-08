@@ -12,6 +12,7 @@ import { agentOperations } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
+import { intakeOperations } from "../../intake/contract.ts";
 
 const PAGE_INVENTORIES = {
   llm: "## Command inventory",
@@ -20,6 +21,7 @@ const PAGE_INVENTORIES = {
   agent: "## Command inventory",
   project: "## Proposed command inventory and synopsis",
   mission: "## Target command inventory and synopsis",
+  intake: "## Command table",
   scheduler: "## Command inventory and operation mapping",
   worker: "## Command inventory",
   gateway: "## Complete command table",
@@ -36,7 +38,7 @@ const EXEMPT_LEAVES = new Map([
     "Documented future read with no ERD2 implementation plan",
   ],
 ]);
-const LATER_GROUPS = { intake: "ERD 3", tracking: "ERD 4" };
+const LATER_GROUPS = { tracking: "ERD 4" };
 const API_ONLY_OPERATIONS = [
   "gateway.liveness",
   "gateway.healthcheck",
@@ -48,6 +50,15 @@ const API_ONLY_OPERATIONS = [
   "mission.evidence.asset.complete",
   "mission.evidence.request",
   "mission.delivery.admit",
+  "intake.action.check",
+  "intake.action.perform",
+  "intake.action.read",
+  "intake.storage.put",
+  "intake.storage.check",
+  "intake.storage.get",
+  "intake.execution.storage.get",
+  "intake.storage.delete",
+  "intake.inbound.event.receive",
 ];
 const TOP_LEVEL_NAMES = new Set([
   "config",
@@ -67,12 +78,27 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 143;
+const DOCUMENTED_COUNT = 156;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 138;
-const OPERATION_COUNT = 140;
+const IMPLEMENTED_COUNT = 151;
+const OPERATION_COUNT = 162;
+const INTAKE_LEAVES = [
+  "intake event delete",
+  "intake event discard",
+  "intake event get",
+  "intake event list",
+  "intake event retry",
+  "intake inbound create",
+  "intake inbound delete",
+  "intake inbound get",
+  "intake inbound list",
+  "intake outbound delete",
+  "intake outbound discard",
+  "intake outbound get",
+  "intake outbound list",
+];
 const PAGE_COUNTS = {
   llm: 14,
   repository: 11,
@@ -80,6 +106,7 @@ const PAGE_COUNTS = {
   agent: 15,
   project: 13,
   mission: 54,
+  intake: 13,
   scheduler: 8,
   worker: 9,
   gateway: 2,
@@ -118,7 +145,7 @@ function inventory(group: string, heading: string): Documented[] {
       {
         path: group === OTHER_PAGE ? leaf : `${prefix} ${leaf}`,
         operations: spans.filter((span) =>
-          /^(gateway|llm|repository|storage|agent|worker|scheduler|project|mission)\.[A-Za-z_.]+$/.test(
+          /^(gateway|llm|repository|storage|agent|worker|scheduler|project|mission|intake)\.[A-Za-z_.]+$/.test(
             span,
           ),
         ),
@@ -155,7 +182,7 @@ function programLeaves(program: Command): string[] {
   return leaves.sort();
 }
 
-test("documented ERD2 CLI leaves and API-only operations exactly cover the dispatcher and contracts", () => {
+test("documented ERD 2 and ERD 3 CLI leaves and API-only operations exactly cover the dispatcher and contracts", () => {
   const rows = Object.entries(PAGE_INVENTORIES).flatMap(([group, heading]) => {
     const rows = inventory(group, heading);
     assert.equal(
@@ -168,13 +195,15 @@ test("documented ERD2 CLI leaves and API-only operations exactly cover the dispa
   const documented = new Set(rows.map((row) => row.path));
   assert.equal(documented.size, DOCUMENTED_COUNT);
   const program = createProgram();
-  const leaves = programLeaves(program).filter(
-    (path) => !path.startsWith(`${INTAKE_GROUP} `),
-  );
+  const leaves = programLeaves(program);
   assert.equal(leaves.length, IMPLEMENTED_COUNT);
   assert.deepEqual(
     leaves,
     [...documented].filter((path) => !EXEMPT_LEAVES.has(path)).sort(),
+  );
+  assert.deepEqual(
+    leaves.filter((path) => path.startsWith(`${INTAKE_GROUP} `)),
+    INTAKE_LEAVES,
   );
   for (const [path, reason] of EXEMPT_LEAVES) {
     assert.ok(reason);
@@ -214,6 +243,7 @@ test("documented ERD2 CLI leaves and API-only operations exactly cover the dispa
     schedulerOperations,
     projectOperations,
     missionOperations,
+    intakeOperations,
   ]
     .flatMap((operations) => Object.values(operations).map(({ id }) => id))
     .sort();
