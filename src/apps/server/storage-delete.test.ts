@@ -1,8 +1,4 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
-import { createServer, type IncomingMessage } from "node:http";
-import type { AddressInfo } from "node:net";
-import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
@@ -12,58 +8,34 @@ import {
   ResultClass,
   intakeOperations,
 } from "../../intake/contract.ts";
-import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import {
   OperationResultType,
   type OperationResult,
 } from "../../kernel/operation.ts";
-import { temporary } from "../../kernel/test-support.ts";
 import {
   AssetKind,
   MissionErrorCode,
   missionOperations,
-  type Revision,
 } from "../../mission/contract.ts";
-import type { ExecutionRecord } from "../../scheduler/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
-import {
-  FAKE_SSH_IDENTITY,
-  fakeGitHub,
-  gatewayFixture,
-} from "./test-support.ts";
+import { STORAGE_SECRET, storageProject } from "./test-support.ts";
 
-const SUCCESSFUL_EXIT = 0;
-const NO_OUTPUT = "";
-const FIRST_REVISION = 1;
 const FIRST_INDEX = 0;
-const SINGLE_INSTANCE = 1;
 const SINGLE_ROW = 1;
 const STORE_CREDENTIAL = "store";
-const ASSET_COUNT = 6;
+const ASSET_COUNT = 7;
 const BAD_GATEWAY_STATUS = 502;
 const TIMEOUT = 180000;
 const BUCKET = "evidence";
-const PREFIX = "kanthord";
-const REGION = "eu-central-1";
-const ACCESS_KEY_ID = "AKIASTORAGEDELETE";
-const SECRET = "storage-delete-secret";
 const MEDIA = "text/plain";
 const HELLO = Buffer.from("hello");
 const ROUTE_NOT_FOUND_CODE = "gateway.routing.not_found";
 const S3_PREFIX = "storage.platform.s3.";
 const DELETE = "DELETE";
 const HEAD = "HEAD";
-const CONTENT = {
-  name: "Delete objects",
-  requirement: "Delete objects",
-  criterion: "Objects go",
-  verifications: ["true"],
-};
-type Page<T> = { items: T[] };
-type StoreCall = { method: string; path: string };
-type Lose = "lose";
-const LOSE: Lose = "lose";
+const RECORDED_VERSION = "v1";
+const NEWER_VERSION = "v2";
+const RAW_AUTHORIZATION = "AWS4-HMAC-SHA256 storage-delete";
 type OutboundRow = {
   operation: string;
   request_key: string;
@@ -91,202 +63,13 @@ function deleted(result: OperationResult<null>) {
   assert.equal(result.data, null);
 }
 
-async function objectStore(t: TestContext) {
-  const objects = new Set<string>();
-  const calls: StoreCall[] = [];
-  const script: { next: number | Lose | null } = { next: null };
-  const answer = (request: IncomingMessage) => {
-    const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
-    const method = request.method ?? "";
-    calls.push({ method, path });
-    const scripted = script.next;
-    if (scripted === LOSE) return null;
-    if (scripted !== null) return scripted;
-    if (method === DELETE) {
-      objects.delete(path);
-      return HttpStatus.NoContent;
-    }
-    return objects.has(path) ? HttpStatus.OK : HttpStatus.NotFound;
-  };
-  const server = createServer((request, response) => {
-    request.resume();
-    request.once("end", () => {
-      const status = answer(request);
-      if (status === null) {
-        request.socket.destroy();
-        return;
-      }
-      response.writeHead(status, { "content-length": "0" });
-      response.end();
-    });
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => {
-    server.closeAllConnections();
-    server.close();
-  });
-  const { port } = server.address() as AddressInfo;
-  return { endpoint: `http://127.0.0.1:${port}`, objects, calls, script };
-}
-
 async function setup(t: TestContext) {
-  const store = await objectStore(t);
-  const gitHub = await fakeGitHub(t);
-  const fixture = await gatewayFixture(t, {
-    github: { baseUrl: gitHub.endpoint },
-    repositoryConnector: {
-      gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
-    },
-  });
-  const directory = temporary(t);
-  const H = {
-    ...environment(directory),
-    KANTHORD_ENDPOINT: fixture.endpoint,
-    KANTHORD_TOKEN: fixture.token,
-  };
-  let sequence = FIRST_INDEX;
-  const read = async <T>(args: string[], env = H): Promise<T> => {
-    const result = await kanthord(args, env);
-    assert.equal(result.code, SUCCESSFUL_EXIT, result.stderr);
-    assert.equal(result.stderr, NO_OUTPUT);
-    return JSON.parse(result.stdout) as T;
-  };
-  const write = <T>(args: string[], body: unknown, env = H) => {
-    const path = join(directory, `${++sequence}.json`);
-    writePrivate(path, JSON.stringify(body));
-    return read<T>([...args, "--file", path], env);
-  };
-  await write(["repository", "credential", "create"], {
-    name: "github",
-    platform: "github",
-    metadata: null,
-    secret: { key: "test-secret" },
-  });
-  await write(["repository", "credential", "create"], {
-    name: "github-ssh",
-    platform: "ssh",
-    metadata: {
-      host: "github.com",
-      hostname: "github.com",
-      port: 22,
-      identity_file: "~/.ssh/id_rsa",
-    },
-    secret: {},
-  });
-  await write(["storage", "credential", "create"], {
-    name: STORE_CREDENTIAL,
-    platform: "s3",
-    metadata: { endpoint: store.endpoint, bucket: BUCKET, region: REGION },
-    secret: { access_key_id: ACCESS_KEY_ID, secret_access_key: SECRET },
-  });
-  const project = await read<{ id: string }>([
-    "project",
-    "create",
-    "--name",
-    "delete",
-  ]);
-  const mission = await read<{ id: string }>(["mission", "get", project.id]);
-  const applyBindings = (version: number, available: boolean) =>
-    write(["project", "binding", "apply", project.id], {
-      version,
-      bindings: {
-        repo: {
-          kind: "repository",
-          config: {
-            available: true,
-            platform: "github",
-            address: "git@github.com:owner/repo.git",
-            ssh_credential: "github-ssh",
-            credential: "github",
-            strategy: { base_branch: "main" },
-          },
-        },
-        store: {
-          kind: "storage",
-          config: {
-            available,
-            endpoint: store.endpoint,
-            bucket: BUCKET,
-            region: REGION,
-            prefix: PREFIX,
-            credential: STORE_CREDENTIAL,
-          },
-        },
-        harness: {
-          kind: "worker",
-          config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
-        },
-      },
-    });
-  await applyBindings(FIRST_REVISION, true);
-  const bindings = await read<
-    Page<{ id: string; name: string; resource_identity: string }>
-  >(["project", "binding", "list", project.id]);
-  const binding = (name: string) => {
-    const row = bindings.items.find((item) => item.name === name);
-    assert.ok(row);
-    return row;
-  };
-  const version = async () =>
-    (await read<{ version: number }>(["mission", "get", project.id])).version;
-  const create = async (
-    filename: string,
-    kind: string,
-    names: string[],
-    parentId?: string,
-  ) => {
-    const answer = await write<{ revisions: Revision[] }>(
-      ["mission", "node", "create", mission.id],
-      {
-        filename,
-        kind,
-        content: {
-          ...CONTENT,
-          bindings: names.map((name) => binding(name).id),
-        },
-        reason: "plan",
-        expected_mission_version: await version(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
-      },
-    );
-    return answer.revisions[FIRST_INDEX]!.node_id;
-  };
-  const initiative = await create("initiative.md", "initiative", []);
-  const nodeId = await create(
-    "objective.md",
-    "objective",
-    ["repo", "store"],
-    initiative,
-  );
-  const token = await fixture.machineToken(project.id, "harness");
-  const W = { ...H, KANTHORD_TOKEN: token };
-  const { runtime_identity: runtimeIdentity } = await read<{
-    runtime_identity: string;
-  }>(["worker", "register"], W);
-  const execution = (
-    await write<{ execution: ExecutionRecord }>(
-      ["scheduler", "work", "pull"],
-      {
-        resource_identity: binding("harness").resource_identity,
-        runtime_identity: runtimeIdentity,
-      },
-      W,
-    )
-  ).execution;
-  assert.equal(execution.node_id, nodeId);
-  const human = await fixture.invocation.authentication.authenticate(
-    `Bearer ${fixture.token}`,
-  );
-  const submitted = await httpClient(
-    missionOperations,
-    fixture.endpoint,
-    token,
-  )["evidence.submit"]({
-    params: { node_id: nodeId },
+  const p = await storageProject(t);
+  const { fixture, execution } = p;
+  const human = await p.human();
+  const api = httpClient(missionOperations, fixture.endpoint, p.token);
+  const submitted = await api["evidence.submit"]({
+    params: { node_id: p.nodeId },
     query: {},
     body: {
       execution_id: execution.execution_id,
@@ -301,13 +84,8 @@ async function setup(t: TestContext) {
     },
   });
   assert.ok(submitted.type === OperationResultType.Completed);
-  const assets = submitted.data.uploads.map((upload) => upload.asset_id);
-  assert.equal(assets.length, ASSET_COUNT);
-  const pathOf = (assetId: string) =>
-    `/${BUCKET}/` +
-    [PREFIX, project.id, mission.id, nodeId, execution.attempt, assetId].join(
-      "/",
-    );
+  const { uploads } = submitted.data;
+  assert.equal(uploads.length, ASSET_COUNT);
   const rows = () =>
     fixture.store.transaction(
       (tx) =>
@@ -318,22 +96,43 @@ async function setup(t: TestContext) {
           .all() as OutboundRow[],
     );
   const intake = directClient(intakeOperations, fixture.invocation);
+  const upload = async (assetId: string) => {
+    const found = uploads.find((item) => item.asset_id === assetId);
+    assert.ok(found);
+    await storePut(found.put_url, found.headers);
+  };
   return {
     fixture,
-    store,
-    assets,
-    pathOf,
+    s3: p.s3,
+    assets: uploads.map((item) => item.asset_id),
+    keyOf: p.keyOf,
     rows,
+    upload,
     rowOf: (assetId: string) => {
       const found = rows().filter((row) => row.request_key === assetId);
       assert.equal(found.length, SINGLE_ROW);
       return found[FIRST_INDEX]!;
     },
+    complete: async (assetId: string) => {
+      const answer = await api["evidence.asset.complete"]({
+        params: { asset_id: assetId },
+        query: {},
+        body: {
+          execution_id: execution.execution_id,
+          attempt: execution.attempt,
+          node_revision: execution.pinned_revision,
+        },
+      });
+      assert.ok(
+        answer.type === OperationResultType.Completed,
+        JSON.stringify(answer),
+      );
+    },
     disableStorage: async () => {
-      const { binding_set_version: current } = await read<{
+      const { binding_set_version: current } = await p.cli.read<{
         binding_set_version: number;
-      }>(["project", "get", project.id]);
-      await applyBindings(current, false);
+      }>(["project", "get", p.project.id]);
+      await p.applyBindings(current, false);
     },
     remove: (assetId: string) =>
       intake["storage.delete"](
@@ -343,31 +142,38 @@ async function setup(t: TestContext) {
   };
 }
 
+async function storePut(url: string, headers: Record<string, string>) {
+  const answer = await fetch(url, {
+    method: HttpMethod.Put,
+    headers,
+    body: HELLO,
+  });
+  assert.equal(answer.status, HttpStatus.OK);
+  await answer.arrayBuffer();
+}
+
 test(
   "the object delete runs as an outbound request through the direct adapter",
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    const [refused, lost, removed, gone, absent, kept] = h.assets;
+    const [refused, lost, removed, gone, absent, kept, versioned] = h.assets;
     assert.ok(refused && lost && removed && gone && absent && kept);
+    assert.ok(versioned);
     const deletes = () =>
-      h.store.calls.filter((call) => call.method === DELETE).length;
+      h.s3.calls.filter((call) => call.method === DELETE).length;
 
     await t.test(
       "a failed delete commits failed and answers its result class",
       async () => {
-        h.store.objects.add(h.pathOf(refused));
-        h.store.script.next = HttpStatus.Forbidden;
-        try {
-          const error = failed(
-            await h.remove(refused),
-            BAD_GATEWAY_STATUS,
-            S3_PREFIX + ResultClass.FinalRefusal,
-          );
-          assert.deepEqual(error.details, { status: HttpStatus.Forbidden });
-        } finally {
-          h.store.script.next = null;
-        }
+        await h.upload(refused);
+        h.s3.failNext(HttpStatus.Forbidden);
+        const error = failed(
+          await h.remove(refused),
+          BAD_GATEWAY_STATUS,
+          S3_PREFIX + ResultClass.FinalRefusal,
+        );
+        assert.deepEqual(error.details, { status: HttpStatus.Forbidden });
         assert.equal(h.rowOf(refused).state, OutboundRequestState.Failed);
       },
     );
@@ -383,79 +189,100 @@ test(
         );
         assert.deepEqual(error.details, { status: HttpStatus.Forbidden });
         assert.equal(deletes(), before);
-        assert.deepEqual(h.store.calls.at(-1), {
+        assert.deepEqual(h.s3.calls.at(-1), {
           method: HEAD,
-          path: h.pathOf(refused),
+          key: h.keyOf(refused),
+          version: null,
         });
         assert.equal(h.rowOf(refused).state, OutboundRequestState.Failed);
       },
     );
 
     await t.test("a lost delete answer has no status", async () => {
-      h.store.objects.add(h.pathOf(lost));
-      h.store.script.next = LOSE;
-      try {
-        const error = failed(
-          await h.remove(lost),
-          BAD_GATEWAY_STATUS,
-          S3_PREFIX + ResultClass.UnknownOutcome,
-        );
-        assert.deepEqual(error.details, { status: null });
-      } finally {
-        h.store.script.next = null;
-      }
+      await h.upload(lost);
+      h.s3.loseNext();
+      const error = failed(
+        await h.remove(lost),
+        BAD_GATEWAY_STATUS,
+        S3_PREFIX + ResultClass.UnknownOutcome,
+      );
+      assert.deepEqual(error.details, { status: null });
       assert.equal(h.rowOf(lost).state, OutboundRequestState.Failed);
     });
 
     await t.test(
       "a delete records one succeeded request keyed by the asset",
       async () => {
-        h.store.objects.add(h.pathOf(removed));
+        await h.upload(removed);
         deleted(await h.remove(removed));
-        assert.equal(h.store.objects.has(h.pathOf(removed)), false);
-        assert.deepEqual(h.store.calls.at(-1), {
+        assert.deepEqual(h.s3.objects(h.keyOf(removed)), []);
+        assert.deepEqual(h.s3.calls.at(-1), {
           method: DELETE,
-          path: h.pathOf(removed),
+          key: h.keyOf(removed),
+          version: null,
         });
         const row = h.rowOf(removed);
         assert.equal(row.operation, OutboundOperation.S3DeleteObject);
         assert.equal(row.state, OutboundRequestState.Succeeded);
         assert.equal(row.credential, STORE_CREDENTIAL);
         assert.deepEqual(JSON.parse(row.result ?? "null"), {
-          location: `s3:/${h.pathOf(removed)}`,
+          location: `s3://${BUCKET}/${h.keyOf(removed)}`,
           version: null,
         });
       },
     );
 
     await t.test("a repeat answers with no second delete", async () => {
-      const calls = h.store.calls.length;
+      const calls = h.s3.calls.length;
       deleted(await h.remove(removed));
-      assert.equal(h.store.calls.length, calls);
+      assert.equal(h.s3.calls.length, calls);
       assert.equal(h.rowOf(removed).state, OutboundRequestState.Succeeded);
     });
 
     await t.test(
       "a lost delete of a gone object answers at the repeat through the read-back",
       async () => {
-        h.store.script.next = LOSE;
-        try {
-          failed(
-            await h.remove(gone),
-            BAD_GATEWAY_STATUS,
-            S3_PREFIX + ResultClass.UnknownOutcome,
-          );
-        } finally {
-          h.store.script.next = null;
-        }
+        h.s3.loseNext();
+        failed(
+          await h.remove(gone),
+          BAD_GATEWAY_STATUS,
+          S3_PREFIX + ResultClass.UnknownOutcome,
+        );
         const before = deletes();
         deleted(await h.remove(gone));
         assert.equal(deletes(), before);
-        assert.deepEqual(h.store.calls.at(-1), {
+        assert.deepEqual(h.s3.calls.at(-1), {
           method: HEAD,
-          path: h.pathOf(gone),
+          key: h.keyOf(gone),
+          version: null,
         });
         assert.equal(h.rowOf(gone).state, OutboundRequestState.Succeeded);
+      },
+    );
+
+    await t.test(
+      "a delete at a recorded version removes that version alone",
+      async () => {
+        const key = h.keyOf(versioned);
+        await h.upload(versioned);
+        await h.complete(versioned);
+        await storePut(`${h.s3.endpoint}/${BUCKET}/${key}`, {
+          authorization: RAW_AUTHORIZATION,
+        });
+        deleted(await h.remove(versioned));
+        assert.deepEqual(h.s3.calls.at(-1), {
+          method: DELETE,
+          key,
+          version: RECORDED_VERSION,
+        });
+        assert.deepEqual(
+          h.s3.objects(key).map((item) => item.version),
+          [NEWER_VERSION],
+        );
+        assert.deepEqual(JSON.parse(h.rowOf(versioned).result ?? "null"), {
+          location: `s3://${BUCKET}/${key}`,
+          version: RECORDED_VERSION,
+        });
       },
     );
 
@@ -475,7 +302,7 @@ test(
     await t.test("a refusal of the binding records no request", async () => {
       await h.disableStorage();
       const count = h.rows().length;
-      const calls = h.store.calls.length;
+      const calls = h.s3.calls.length;
       const error = failed(
         await h.remove(absent),
         HttpStatus.Forbidden,
@@ -483,11 +310,12 @@ test(
       );
       assert.deepEqual(error.details, { reason: "binding_disabled" });
       assert.equal(h.rows().length, count);
-      assert.equal(h.store.calls.length, calls);
+      assert.equal(h.s3.calls.length, calls);
     });
 
     await t.test("no log holds the secret", () => {
-      for (const line of h.fixture.logs) assert.ok(!line.includes(SECRET));
+      for (const line of h.fixture.logs)
+        assert.ok(!line.includes(STORAGE_SECRET));
     });
   },
 );
