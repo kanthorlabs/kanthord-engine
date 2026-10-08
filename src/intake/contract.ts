@@ -80,7 +80,11 @@ export const ActionTableAction = {
   PullRequest: "pull_request",
   MergePush: "merge_push",
 } as const;
-export const ActionTablePlatform = { GitHub: "github" } as const;
+export const ActionTablePlatform = {
+  GitHub: "github",
+  GitLab: "gitlab",
+  Bitbucket: "bitbucket",
+} as const;
 export const ACTION_TABLE = [
   {
     action: ActionTableAction.PullRequest,
@@ -90,6 +94,16 @@ export const ACTION_TABLE = [
   {
     action: ActionTableAction.MergePush,
     platform: ActionTablePlatform.GitHub,
+    operation: OutboundOperation.GitMergePush,
+  },
+  {
+    action: ActionTableAction.MergePush,
+    platform: ActionTablePlatform.GitLab,
+    operation: OutboundOperation.GitMergePush,
+  },
+  {
+    action: ActionTableAction.MergePush,
+    platform: ActionTablePlatform.Bitbucket,
     operation: OutboundOperation.GitMergePush,
   },
 ] as const;

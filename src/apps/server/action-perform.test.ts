@@ -75,7 +75,8 @@ const UNKNOWN_CODE = "gateway.invocation.unknown";
 const ROUTE_NOT_FOUND_CODE = "gateway.routing.not_found";
 const PULLS_PATH = "/repos/owner/gated/pulls";
 const MAIN_REF = "refs/heads/main";
-const UNMAPPED_PLATFORM = "gitlab";
+const UNMAPPED_PLATFORM = "unmapped";
+const GITLAB_PLATFORM = "gitlab";
 const CONTENT = {
   name: "Perform actions",
   requirement: "Perform actions",
@@ -693,6 +694,32 @@ test(
         );
         assert.equal(await remoteHead(h.pushed.bare, MAIN_REF), head);
         assert.equal(h.materials.length, before);
+      },
+    );
+
+    await t.test(
+      "a merge push on a gitlab binding answers a branch_push address",
+      async () => {
+        const authorize = h.fixture.mission.authorizeFrozenAction;
+        h.fixture.mission.authorizeFrozenAction = (...args) => ({
+          ...authorize.apply(h.fixture.mission, args),
+          platform: GITLAB_PLATFORM,
+        });
+        let answer: Answer;
+        try {
+          answer = completed(await h.perform(merged, mergeBody("gitlab")));
+        } finally {
+          h.fixture.mission.authorizeFrozenAction = authorize;
+        }
+        assert.deepEqual(answer, {
+          kind: PlatformAddressKind.BranchPush,
+          resource_identity: h.resource("pushed"),
+          branch: "main",
+          commit: await remoteHead(h.pushed.bare, MAIN_REF),
+        });
+        const stored = h.row("gitlab");
+        assert.equal(stored?.operation, OutboundOperation.GitMergePush);
+        assert.equal(stored?.state, OutboundRequestState.Succeeded);
       },
     );
 
