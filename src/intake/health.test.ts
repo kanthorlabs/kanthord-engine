@@ -8,8 +8,14 @@ import {
   type Material,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { background, CancellationContext } from "../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  DeadlineExceeded,
+} from "../kernel/context.ts";
+import { OperationError } from "../kernel/errors.ts";
 import { ResourceStatus } from "../kernel/health.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import type {
   GitHubAnswer,
@@ -45,8 +51,11 @@ const CHECKPOINT: GitHubCheckpoint = {
   etag: ETAG_STORED,
   newest_event_id: "100",
 };
+const REFUSAL_CODE = "credential.credential.archived";
 const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
+const UNKNOWN_OUTCOME_CODE = "repository.platform.github.unknown_outcome";
 const UNAUTHORIZED_STATUS = 401;
+const CHECK_DEADLINE_MS = 20;
 const CHECK_BUDGET_MS = 5000;
 const CREATED_AT = 1;
 const NO_CALLS = 0;
@@ -58,7 +67,28 @@ const SERVICE_IDENTITY = {
 type EventsAnswer = GitHubAnswer<GitHubEventsAnswer>;
 type EventsCall = (call: GitHubCall) => Promise<EventsAnswer>;
 
-function fakeCustody() {
+interface HarnessOptions {
+  refusal?: Error;
+}
+
+const ABORTED_ANSWER: EventsAnswer = {
+  ok: false,
+  class: ResultClass.UnknownOutcome,
+  code: UNKNOWN_OUTCOME_CODE,
+  status: null,
+  message: "The request was aborted.",
+};
+
+function abortedAnswer(call: GitHubCall): Promise<EventsAnswer> {
+  if (call.signal.aborted) return Promise.resolve(ABORTED_ANSWER);
+  return new Promise((resolve) =>
+    call.signal.addEventListener("abort", () => resolve(ABORTED_ANSWER), {
+      once: true,
+    }),
+  );
+}
+
+function fakeCustody(options: HarnessOptions) {
   const grants: GrantRequest[] = [];
   const drops: string[] = [];
   const custody: InboundHealthDependencies["custody"] = {
@@ -83,6 +113,7 @@ function fakeCustody() {
       return grant as GrantOf<R["kind"]>;
     },
     release(_tx, grant): Material {
+      if (options.refusal) throw options.refusal;
       const credential = grant.credential;
       assert.ok(credential !== null);
       return {
@@ -96,13 +127,13 @@ function fakeCustody() {
   return { custody, grants, drops };
 }
 
-function harness(t: TestContext) {
+function harness(t: TestContext, options: HarnessOptions = {}) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);
-  const { custody, grants, drops } = fakeCustody();
+  const { custody, grants, drops } = fakeCustody(options);
   const calls: { call: GitHubCall; query: GitHubEventsQuery }[] = [];
   const answers: { next: EventsCall } = {
     next: async () => ({
@@ -275,4 +306,75 @@ test("a poll check answers unhealthy for a platform result class and observes it
   assert.deepEqual(reasons, [FINAL_REFUSAL_CODE]);
   assert.deepEqual(h.drops, [CREDENTIAL]);
   assert.deepEqual(h.stored(), before);
+});
+
+test("a refused release answers unhealthy with no platform call and no material in the reason", async (t) => {
+  const h = harness(t, {
+    refusal: new OperationError(
+      HttpStatus.Conflict,
+      REFUSAL_CODE,
+      "Credential is archived.",
+    ),
+  });
+  const entry = h.entryOf(h.insert(InboundKind.Poll));
+  const reasons: string[] = [];
+  assert.equal(
+    await entry.check(checkContext(t), (reason) => reasons.push(reason)),
+    ResourceStatus.Unhealthy,
+  );
+  assert.deepEqual(reasons, [REFUSAL_CODE]);
+  assert.ok(reasons.every((reason) => !reason.includes(TOKEN)));
+  assert.equal(h.calls.length, NO_CALLS);
+  assert.deepEqual(h.drops, []);
+});
+
+test("a release failure that is no refusal propagates with no platform call", async (t) => {
+  const failure = new Error("The facility failed.");
+  const h = harness(t, { refusal: failure });
+  const entry = h.entryOf(h.insert(InboundKind.Poll));
+  await assert.rejects(
+    entry.check(checkContext(t)),
+    (error) => error === failure,
+  );
+  assert.equal(h.calls.length, NO_CALLS);
+});
+
+test("the check deadline propagates and drops the material", async (t) => {
+  const h = harness(t);
+  const entry = h.entryOf(h.insert(InboundKind.Poll));
+  h.answers.next = abortedAnswer;
+  const context = checkContext(t, CHECK_DEADLINE_MS);
+  await assert.rejects(
+    entry.check(context),
+    (error) => error instanceof DeadlineExceeded && error === context.err(),
+  );
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+test("a caller cancellation answers no success and drops the material", async (t) => {
+  const h = harness(t);
+  const entry = h.entryOf(h.insert(InboundKind.Poll));
+  const context = checkContext(t);
+  h.answers.next = (call) => {
+    context.cancel();
+    return abortedAnswer(call);
+  };
+  await assert.rejects(
+    entry.check(context),
+    (error) => error === context.err(),
+  );
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+test("a cancelled context sends no request and releases nothing", async (t) => {
+  const h = harness(t);
+  const entry = h.entryOf(h.insert(InboundKind.Poll));
+  const context = checkContext(t);
+  context.cancel();
+  await assert.rejects(
+    entry.check(context),
+    (error) => error === context.err(),
+  );
+  assert.deepEqual(h.grants, []);
+  assert.equal(h.calls.length, NO_CALLS);
 });

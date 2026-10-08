@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import type { InboundGrantInput, Material } from "../custody/contract.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
+import { throwIfCancelled } from "../kernel/context.ts";
+import { OperationError } from "../kernel/errors.ts";
 import { ResourceStatus, type ResourceCheck } from "../kernel/health.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
@@ -68,16 +70,22 @@ function probeOf(row: InboundRow): PollProbe {
   };
 }
 
-function releaseMaterial(
+function releaseRefusal(
   dependencies: InboundHealthDependencies,
   probe: PollProbe,
   hold: Hold,
-): void {
+): string | null {
   assert.equal(hold.material, null, "A check releases once.");
   assert.ok(probe.facts.inboundId.length > NO_LENGTH);
-  dependencies.store.transaction((tx) => {
-    hold.material = releasePollGrant(dependencies, tx, probe.facts);
-  });
+  try {
+    dependencies.store.transaction((tx) => {
+      hold.material = releasePollGrant(dependencies, tx, probe.facts);
+    });
+    return null;
+  } catch (error) {
+    if (!(error instanceof OperationError)) throw error;
+    return error.code;
+  }
 }
 
 function pollCheck(
@@ -87,9 +95,14 @@ function pollCheck(
   assert.ok(probe.owner.length > NO_LENGTH, "A probe names an owner.");
   assert.ok(probe.repo.length > NO_LENGTH, "A probe names a repository.");
   return async (context, observe) => {
+    throwIfCancelled(context);
     const hold: Hold = { material: null };
     try {
-      releaseMaterial(dependencies, probe, hold);
+      const refusal = releaseRefusal(dependencies, probe, hold);
+      if (refusal !== null) {
+        observe?.(refusal);
+        return ResourceStatus.Unhealthy;
+      }
       assert.ok(hold.material, "A committed release holds the material.");
       const answer = await requestPollEvents(dependencies.github, {
         requester: dependencies.identity,
@@ -99,6 +112,7 @@ function pollCheck(
         repo: probe.repo,
         etag: probe.etag,
       });
+      throwIfCancelled(context);
       if (answer.ok) return ResourceStatus.Healthy;
       observe?.(answer.code);
       return ResourceStatus.Unhealthy;
