@@ -5,12 +5,9 @@ import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
-  AssetKind,
   CheckEndState,
   MissionErrorCode,
   NodeState,
-  PlatformAddressKind,
-  RepositoryAction,
   Resolution,
   ClosingEvent,
 } from "./contract.ts";
@@ -22,23 +19,20 @@ import {
   readEvidence,
 } from "./record-store.ts";
 import { readMission, setNodeState } from "./store.ts";
-import { evidenceHarness } from "./test-support.ts";
+import { externalRequestHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NO_REMOTE_CALLS = 0;
 const NO_RESULTS = 0;
-const SUCCESS_EXIT_CODE = 0;
 const FIRST_RESULT_INDEX = 0;
 const NO_LANDED_COMMITS = 0;
 const SINGLE_FAILURE = 1;
 const SINGLE_CALL = 1;
 const SINGLE_LANDED_COMMIT = 1;
-const PULL_REQUEST_NUMBER = 1;
 const FIRST_MISSION_VERSION = 1;
 const FIRST_ATTEMPT = 1;
 const LANDED_COMMIT_COUNT = 2;
 const COMMIT = "a".repeat(40);
-const RESOURCE = "repository:github:owner/repo";
 
 test("node check reports Mission authorization refusal without calling Intake", async (t) => {
   const h = await fixture(t);
@@ -104,87 +98,14 @@ test("invalid Intake answers leave requests unresolved and stale mission version
 });
 
 async function fixture(t: TestContext) {
-  const h = evidenceHarness(t, IDENTITY);
-  h.dependencies.bindings.repositoryPolicyOf = () => ({
-    binding_id: h.repositoryId,
-    project_id: h.project_id,
-    name: "repo",
-    address: "git@github.com:owner/repo.git",
-    platform: "github",
-    ssh_credential: "github-ssh",
-    credential: "github",
-    base_branch: "main",
-    action: RepositoryAction.PullRequest,
-    project_prompt: null,
-  });
-  const address = {
-    kind: AssetKind.Repository,
-    binding_id: h.repositoryId,
-    commit: COMMIT,
-  } as const;
-  const evidence = await h.invoke("evidence.submit", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: {
-      ...h.context,
-      subject: "Verified",
-      assets: [{ kind: AssetKind.Repository, address }],
-      verification: {
-        tested_input: address,
-        results: [
-          {
-            command: "true",
-            exit_code: SUCCESS_EXIT_CODE,
-            signal: null,
-            timed_out: false,
-          },
-        ],
-      },
-    },
-  });
-  h.store.transaction((tx) =>
-    setNodeState(tx, h.node_id, NodeState.Evaluating),
-  );
-  await h.invoke("assessment.submit", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: {
-      ...h.context,
-      evidence_ids: [evidence.evidence.id],
-      child_outcome_ids: [],
-      result: AssessmentResult.Success,
-      rationale: "Passed",
-      tested_input: address,
-    },
-  });
-  const request = await h.invoke("evidence.request", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: {
-      ...h.context,
-      requirement_key: "repo.pull_request",
-      subject: "PR",
-      address: {
-        kind: PlatformAddressKind.PullRequest,
-        resource_identity: RESOURCE,
-        number: PULL_REQUEST_NUMBER,
-      },
-    },
-  });
-  const claim = h.dependencies.schedulerClaims.liveExecutionOf;
-  h.dependencies.schedulerClaims.liveExecutionOf = () => null;
-  h.store.transaction((tx) =>
-    setNodeState(tx, h.node_id, NodeState.ExternalRequested),
-  );
+  const h = await externalRequestHarness(t, IDENTITY);
   const check = () =>
     h.invoke("node.check", {
       params: { node_id: h.node_id },
       query: {},
       body: { expected_mission_version: FIRST_MISSION_VERSION },
     });
-  assert.equal(h.node().state, NodeState.ExternalRequested);
-  assert.ok(request.requirement_key);
-  return { ...h, request, check, claim };
+  return { ...h, check };
 }
 
 test("node check passes the context and the request evidence identity to Intake", async (t) => {

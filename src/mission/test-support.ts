@@ -424,3 +424,89 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
     resourceIdentity,
   };
 }
+
+const REQUEST_RESOURCE = "repository:github:owner/repo";
+export const REQUEST_NUMBER = 1;
+const SUCCESS_EXIT_CODE = 0;
+
+export async function externalRequestHarness(
+  t: TestContext,
+  identity: CallerIdentity,
+) {
+  const h = evidenceHarness(t, identity);
+  h.dependencies.bindings.repositoryPolicyOf = (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    ssh_credential: "github-ssh",
+    credential: "github",
+    base_branch: "main",
+    action: RepositoryAction.PullRequest,
+    project_prompt: null,
+  });
+  const testedInput = {
+    kind: AssetKind.Repository,
+    binding_id: h.repositoryId,
+    commit: ASSESSED_COMMIT,
+  } as const;
+  const evidence = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Verified",
+      assets: [{ kind: AssetKind.Repository, address: testedInput }],
+      verification: {
+        tested_input: testedInput,
+        results: [
+          {
+            command: "true",
+            exit_code: SUCCESS_EXIT_CODE,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  await h.invoke("assessment.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      evidence_ids: [evidence.evidence.id],
+      child_outcome_ids: [],
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      tested_input: testedInput,
+    },
+  });
+  const address: PlatformAddress = {
+    kind: PlatformAddressKind.PullRequest,
+    resource_identity: REQUEST_RESOURCE,
+    number: REQUEST_NUMBER,
+  };
+  const request = await h.invoke("evidence.request", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      requirement_key: "repo.pull_request",
+      subject: "PR",
+      address,
+    },
+  });
+  const claim = h.dependencies.schedulerClaims.liveExecutionOf;
+  h.dependencies.schedulerClaims.liveExecutionOf = () => null;
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.ExternalRequested),
+  );
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.ok(request.requirement_key);
+  return { ...h, request, address, claim };
+}
