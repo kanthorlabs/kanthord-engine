@@ -107,6 +107,7 @@ engine/
 │   │   ├── outbound-write.ts   # Outbound request discard and delete handlers
 │   │   ├── action-check.ts     # Check of a request evidence: authorization, release, and platform fold
 │   │   ├── action-perform.ts   # Configured action: action table, authorization, platform write, and read-backs
+│   │   ├── action-read.ts      # Read of a request evidence: authorization, release, and platform body
 │   │   ├── address-codec.ts    # Stored form of a platform address in an outbound result
 │   │   ├── test-support.ts     # Unused action collaborations for Intake unit tests
 │   │   └── service.ts          # Lifecycle, health probe, and resource inventory

@@ -28,6 +28,8 @@ export const PLATFORM_CALL_DEADLINE_MS = 30000;
 export const GIT_WRITE_DEADLINE_MS = 540000;
 export const ACTION_PERFORM_TIMEOUT_MS = 600000;
 export const ADMISSION_CONCURRENCY = 1;
+export const ACTION_READ_LIMIT_MIN = 1;
+export const ACTION_READ_LIMIT_MAX = 100;
 
 export const IntakeErrorCode = {
   CursorInvalid: "system.pagination.cursor_invalid",
@@ -91,6 +93,10 @@ export const ACTION_TABLE = [
     operation: OutboundOperation.GitMergePush,
   },
 ] as const;
+export const ActionReadMethod = {
+  PullRequestGet: "github-pull-request-get",
+  ReviewCommentList: "github-pull-request-review-comment-list",
+} as const;
 export const AddressKind = {
   PullRequest: "pull_request",
   BranchPush: "branch_push",
@@ -104,6 +110,7 @@ export const outboundRequestStateSchema = z.enum(OutboundRequestState);
 export const outboundOperationSchema = z.enum(OutboundOperation);
 export const resultClassSchema = z.enum(ResultClass);
 export const checkEndStateSchema = z.enum(CheckEndState);
+export const actionReadMethodSchema = z.enum(ActionReadMethod);
 export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
 export const actionKeySchema = z
@@ -126,6 +133,11 @@ export const resultClassAnswerSchema = z.strictObject({
   class: resultClassSchema,
   code: z.string(),
   message: z.string(),
+});
+
+export const actionReadPageSchema = z.strictObject({
+  body: z.unknown(),
+  next_cursor: z.string().nullable(),
 });
 
 export const errorItemSchema = z.strictObject({
@@ -171,6 +183,8 @@ export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
 export type OutboundDelete = z.infer<typeof outboundDeleteSchema>;
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
 export type ResultClassAnswer = z.infer<typeof resultClassAnswerSchema>;
+export type ActionReadMethodValue = z.infer<typeof actionReadMethodSchema>;
+export type ActionReadPage = z.infer<typeof actionReadPageSchema>;
 
 const baseOperation = {
   service: INTAKE_SERVICE_NAME,
@@ -206,6 +220,13 @@ const performOperation = {
   mutation: true,
   body: true,
   timeoutMs: ACTION_PERFORM_TIMEOUT_MS,
+} as const;
+const actionReadOperation = {
+  ...readOperation,
+  access: AccessPolicy.Client,
+  direct: true,
+  requiresExecution: true,
+  method: HttpMethod.Get,
 } as const;
 const readInput = <P extends z.ZodType, Q extends z.ZodType>(
   params: P,
@@ -316,5 +337,29 @@ export const intakeOperations = {
     output: z.union([platformAddressSchema, resultClassAnswerSchema]),
     description:
       "Perform a configured repository action of an execution and answer its platform address or its result class.",
+  },
+  "action.read": {
+    ...actionReadOperation,
+    id: "intake.action.read",
+    path: "/api/intake/execution/:execution_id/request/:evidence_id",
+    input: readInput(
+      z.strictObject({
+        execution_id: identitySchema("execution"),
+        evidence_id: identitySchema("evidence"),
+      }),
+      z.strictObject({
+        method: actionReadMethodSchema,
+        limit: z.coerce
+          .number()
+          .int()
+          .min(ACTION_READ_LIMIT_MIN)
+          .max(ACTION_READ_LIMIT_MAX)
+          .optional(),
+        cursor: z.string().optional(),
+      }),
+    ),
+    output: z.union([actionReadPageSchema, resultClassAnswerSchema]),
+    description:
+      "Read the platform body of a request evidence for an execution and answer it unchanged or its result class.",
   },
 } as const;
