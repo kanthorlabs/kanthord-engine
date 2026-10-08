@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   Consumer,
   InboundEventState,
@@ -22,7 +23,8 @@ import { deliver, gatewayFixture } from "./test-support.ts";
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
 const TIMEOUT = 180000;
-const PENDING_EVENT_LIMIT = 2;
+const POLL_INTERVAL_MS = 50;
+const WAIT_LIMIT_MS = 10000;
 const ONE_ITEM = 1;
 const RESOURCE = "owner/repo";
 const PUSH_EVENT = "push";
@@ -32,7 +34,6 @@ const PING = "{}";
 const FIRST_DELIVERY = "d-1";
 const ZERO_SIGNATURE = `sha256=${"0".repeat(64)}`;
 const UNKNOWN_INBOUND = "inbound_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-const EVENTS_PENDING = `${IntakeErrorCode.InboundEventsPending}:`;
 const NOT_FOUND = `${IntakeErrorCode.InboundNotFound}:`;
 type Result = { code: number; stdout: string; stderr: string };
 type Inbound = {
@@ -65,10 +66,21 @@ function codeOf(body: unknown): string {
   return errorSchema.parse(body).error.code;
 }
 
+async function until<T>(
+  read: () => Promise<T>,
+  done: (value: T) => boolean,
+): Promise<T> {
+  const deadline = Date.now() + WAIT_LIMIT_MS;
+  for (;;) {
+    const value = await read();
+    if (done(value)) return value;
+    assert.ok(Date.now() < deadline, "The awaited state did not arrive.");
+    await delay(POLL_INTERVAL_MS);
+  }
+}
+
 test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
-  const fixture = await gatewayFixture(t, {
-    intake: { pendingEventLimit: PENDING_EVENT_LIMIT },
-  });
+  const fixture = await gatewayFixture(t);
   const directory = temporary(t);
   const H = {
     ...environment(directory),
@@ -95,7 +107,6 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
     kanthord(["intake", "event", ...args], H);
   let W = "";
   let S = "";
-  let E1 = "";
   const send = (
     event: string,
     deliveryId: string,
@@ -126,19 +137,24 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
     S = one.secret;
   });
 
-  await t.test("E06.2 a signed push stores one pending event", async () => {
-    const delivered = await send(PUSH_EVENT, FIRST_DELIVERY, PUSH);
-    assert.equal(delivered.status, HttpStatus.Accepted);
-    const items = await events();
-    assert.equal(items.length, ONE_ITEM);
-    const [first] = items;
-    assert.ok(first);
-    assert.equal(first.event_id, FIRST_DELIVERY);
-    assert.deepEqual(first.metadata, { event: PUSH_EVENT });
-    assert.equal(first.state, InboundEventState.Pending);
-    assert.equal(first.error, null);
-    E1 = first.id;
-  });
+  await t.test(
+    "E06.2 a signed push stores one event that the handoff settles",
+    async () => {
+      const delivered = await send(PUSH_EVENT, FIRST_DELIVERY, PUSH);
+      assert.equal(delivered.status, HttpStatus.Accepted);
+      const items = await until(
+        events,
+        (list) =>
+          list.length === ONE_ITEM &&
+          list.every((item) => item.state === InboundEventState.Succeeded),
+      );
+      const [first] = items;
+      assert.ok(first);
+      assert.equal(first.event_id, FIRST_DELIVERY);
+      assert.deepEqual(first.metadata, { event: PUSH_EVENT });
+      assert.equal(first.error, null);
+    },
+  );
 
   await t.test("E06.3 a redelivery stores nothing", async () => {
     const delivered = await send(PUSH_EVENT, FIRST_DELIVERY, PUSH);
@@ -185,37 +201,6 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
     });
     assert.equal(delivered.status, HttpStatus.NotFound);
     assert.equal(codeOf(delivered.body), IntakeErrorCode.InboundNotFound);
-  });
-
-  await t.test("E06.7 the capacity bound refuses a new event", async () => {
-    assert.equal(
-      (await send(PUSH_EVENT, "d-4", PUSH)).status,
-      HttpStatus.Accepted,
-    );
-    const beyond = await send(PUSH_EVENT, "d-5", PUSH);
-    assert.equal(beyond.status, HttpStatus.ServiceUnavailable);
-    assert.equal(
-      codeOf(beyond.body),
-      IntakeErrorCode.InboundEventCapacityExceeded,
-    );
-    assert.equal(
-      (await send(PUSH_EVENT, FIRST_DELIVERY, PUSH)).status,
-      HttpStatus.Accepted,
-    );
-    assert.equal(
-      (await send(PING_EVENT, "d-6", PING)).status,
-      HttpStatus.NoContent,
-    );
-    assert.deepEqual((await events()).map((item) => item.event_id).sort(), [
-      FIRST_DELIVERY,
-      "d-4",
-    ]);
-  });
-
-  await t.test("E06.8 a pending event blocks the delete", async () => {
-    const one = succeeded<Event>(await inboundEvent(["get", E1]));
-    assert.equal(one.state, InboundEventState.Pending);
-    refused(await inbound(["delete", W]), EVENTS_PENDING);
   });
 
   let W2 = "";

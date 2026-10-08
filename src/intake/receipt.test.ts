@@ -127,6 +127,26 @@ function harness(t: TestContext) {
       return { status: error.status, code: error.code };
     }
   };
+  const remove = async (inboundId: string): Promise<Outcome> => {
+    const operation = intakeOperations["inbound.delete"];
+    const caller: CallerContext = {
+      context: background,
+      requestId: createIdentity("request"),
+      commit: (write) => store.transaction(write),
+    };
+    try {
+      await registry
+        .get(operation.id)
+        .handler(
+          { params: { inbound_id: inboundId }, query: {}, body: null },
+          caller,
+        );
+      return { status: HttpStatus.NoContent, code: null };
+    } catch (error) {
+      if (!(error instanceof OperationError)) throw error;
+      return { status: error.status, code: error.code };
+    }
+  };
   const github = (event: string, delivery: string, signature?: string) => {
     const headers = new Headers({
       "content-type": "application/json",
@@ -148,6 +168,7 @@ function harness(t: TestContext) {
   return {
     addInbound,
     receive,
+    remove,
     github,
     rows,
     logs,
@@ -245,6 +266,40 @@ test("a signed ping answers 204 below and at the bound with no row; an unsigned 
     SIGNATURE_INVALID,
   );
   assert.equal(h.wakes(), PENDING_EVENT_LIMIT);
+});
+
+test("at the bound a new delivery answers 503 while a redelivery and a ping pass, and a pending event refuses the delete of the inbound", async (t) => {
+  const h = harness(t);
+  const { id, secret } = h.addInbound();
+  const accepted = { status: HttpStatus.Accepted, code: null };
+  const send = (event: string, delivery: string, body: string) =>
+    h.receive(id, h.github(event, delivery, sign(secret, body)), body);
+  assert.deepEqual(await send("push", "d-1", PUSH), accepted);
+  assert.deepEqual(await send("push", "d-4", PUSH), accepted);
+  assert.deepEqual(await send("push", "d-5", PUSH), {
+    status: HttpStatus.ServiceUnavailable,
+    code: IntakeErrorCode.InboundEventCapacityExceeded,
+  });
+  assert.deepEqual(await send("push", "d-1", PUSH), accepted);
+  assert.deepEqual(await send("ping", "d-6", PING), {
+    status: HttpStatus.NoContent,
+    code: null,
+  });
+  assert.deepEqual(
+    h
+      .rows(id)
+      .map((row) => [row.event_id, row.state])
+      .sort(),
+    [
+      ["d-1", InboundEventState.Pending],
+      ["d-4", InboundEventState.Pending],
+    ],
+  );
+  assert.deepEqual(await h.remove(id), {
+    status: HttpStatus.Conflict,
+    code: IntakeErrorCode.InboundEventsPending,
+  });
+  assert.equal(h.rows(id).length, PENDING_EVENT_LIMIT);
 });
 
 test("a poll inbound, an unknown identity and an invalid identity answer 404", async (t) => {

@@ -20,9 +20,7 @@ const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
 const TIMEOUT = 180000;
 const POLL_INTERVAL_MS = 50;
-const PENDING_EVENT_LIMIT = 3;
 const WAIT_LIMIT_MS = 5000;
-const QUIET_INTERVALS = 4;
 const ONE_CALL = 1;
 const VALIDATION_AND_HELD = 2;
 const ANSWERED_CALLS = 2;
@@ -38,7 +36,6 @@ const PUSH_EVENT = "PushEvent";
 const PULL_REQUEST_EVENT = "PullRequestEvent";
 const EVENTS_PATH = /^\/repos\/owner\/repo\/events(\?|$)/;
 const PLATFORM_REFUSED = `${IntakeErrorCode.InboundPlatformRefused}:`;
-const EVENTS_PENDING = `${IntakeErrorCode.InboundEventsPending}:`;
 type Result = { code: number; stdout: string; stderr: string };
 type Checkpoint = { etag: string | null; newest_event_id: string | null };
 type Inbound = { id: string; kind: string; checkpoint: Checkpoint | null };
@@ -85,10 +82,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
   const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     github: { baseUrl: gitHub.endpoint },
-    intake: {
-      pollIntervalMs: POLL_INTERVAL_MS,
-      pendingEventLimit: PENDING_EVENT_LIMIT,
-    },
+    intake: { pollIntervalMs: POLL_INTERVAL_MS },
   });
   const directory = temporary(t);
   const H = {
@@ -189,14 +183,19 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
   });
 
   await t.test(
-    "E07.4 a cycle stores the batch and its checkpoint",
+    "E07.4 a cycle stores the batch and its checkpoint, and the handoff settles each event",
     async () => {
-      const items = await until(events, (list) => list.length === FIRST_BATCH);
+      const items = await until(
+        events,
+        (list) =>
+          list.length === FIRST_BATCH &&
+          list.every((item) => item.state === InboundEventState.Succeeded),
+      );
       assert.deepEqual(
         items.map((item) => [item.event_id, item.metadata, item.state]),
         [
-          ["100", { event: PULL_REQUEST_EVENT }, InboundEventState.Pending],
-          ["101", { event: PUSH_EVENT }, InboundEventState.Pending],
+          ["100", { event: PULL_REQUEST_EVENT }, InboundEventState.Succeeded],
+          ["101", { event: PUSH_EVENT }, InboundEventState.Succeeded],
         ],
       );
       assert.deepEqual((await inboundOf()).checkpoint, {
@@ -218,32 +217,5 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
       assert.equal(call.status, NOT_MODIFIED);
     }
     assert.equal((await events()).length, FIRST_BATCH);
-  });
-
-  await t.test("E07.6 the capacity bound pauses the poll", async () => {
-    gitHub.events(OWNER, REPO, [
-      ev(103, PUSH_EVENT),
-      ev(102, PUSH_EVENT),
-      ...first,
-    ]);
-    const items = await until(
-      events,
-      (list) => list.length === PENDING_EVENT_LIMIT,
-    );
-    assert.deepEqual(
-      items.map((item) => item.event_id),
-      ["100", "101", "102"],
-    );
-    assert.deepEqual((await inboundOf()).checkpoint, {
-      etag: null,
-      newest_event_id: "102",
-    });
-    const count = eventsCalls().length;
-    await delay(POLL_INTERVAL_MS * QUIET_INTERVALS);
-    assert.equal(eventsCalls().length, count);
-  });
-
-  await t.test("E07.7 a pending event blocks the delete", async () => {
-    refused(await inbound(["delete", P]), EVENTS_PENDING);
   });
 });

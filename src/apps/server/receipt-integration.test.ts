@@ -118,6 +118,7 @@ test("the receipt over HTTP verifies the exact bytes, stores once, keeps the bou
   const fixture = await gatewayFixture(t, {
     intake: { pendingEventLimit: PENDING_EVENT_LIMIT },
   });
+  fixture.intake.dispatcher.quiesce();
   const inbound = await webhookInbound(fixture);
   const delivery = {
     inboundId: inbound.id,

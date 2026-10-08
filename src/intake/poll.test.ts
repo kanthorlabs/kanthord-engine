@@ -10,6 +10,8 @@ import {
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import type {
   GitHubAnswer,
@@ -25,10 +27,12 @@ import {
   InboundEventState,
   InboundKind,
   InboundPlatform,
+  IntakeErrorCode,
   PLATFORM_CALL_DEADLINE_MS,
   ResultClass,
 } from "./contract.ts";
 import { insertEvent } from "./event-store.ts";
+import { removeInbound } from "./inbound-delete.ts";
 import {
   allocateInboundId,
   deleteInbound,
@@ -376,6 +380,29 @@ test("a cycle at the bound sends no request and releases nothing, and it resumes
   h.settleAll();
   await h.cycle();
   assert.equal(h.calls.length, ONE_CALL);
+});
+
+test("the capacity bound pauses the poll, and a pending event refuses the delete of the inbound", async (t) => {
+  const h = cycleHarness(t, { limit: SMALL_LIMIT });
+  h.answers.next = async () =>
+    modified(ETAG_FIRST, [
+      ev("102", "PushEvent"),
+      ev("101", "PushEvent"),
+      ev("100", "PushEvent"),
+    ]);
+  await h.cycle();
+  assert.deepEqual(h.eventIds(), ["100", "101"]);
+  assert.deepEqual(h.checkpoint(), { etag: null, newest_event_id: "101" });
+  await h.cycle();
+  assert.equal(h.calls.length, ONE_CALL);
+  assert.throws(
+    () => h.store.transaction((tx) => removeInbound(tx, h.inboundId)),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === IntakeErrorCode.InboundEventsPending,
+  );
+  assert.deepEqual(h.eventIds(), ["100", "101"]);
 });
 
 test("a bound reached between the request and the commit leaves the new events unstored and writes a null ETag", async (t) => {

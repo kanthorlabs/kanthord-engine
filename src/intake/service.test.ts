@@ -18,6 +18,7 @@ import {
   OperationRegistry,
   OperationResultType,
   type CallerContext,
+  type OperationResult,
 } from "../kernel/operation.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
@@ -33,6 +34,7 @@ import type { IntakeCustody } from "./action-check.ts";
 import {
   Consumer,
   INTAKE_SERVICE_NAME,
+  InboundEventState,
   InboundKind,
   InboundPlatform,
   intakeOperations,
@@ -40,6 +42,7 @@ import {
   type InboundKindValue,
   type IntakeConsumers,
 } from "./contract.ts";
+import { eventState, insertEvent } from "./event-store.ts";
 import {
   allocateInboundId,
   insertInbound,
@@ -518,4 +521,81 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
     { owner: "acme", repo: "app", etag: ETAG_FIRST },
   ]);
   await shutDown(second.intake, secondRun);
+});
+
+function handoffFixture(t: TestContext, consumers: IntakeConsumers) {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  store.migrate([
+    { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
+  ]);
+  const intake = new IntakeService({
+    store,
+    logger: pino({ enabled: false }),
+    health: new HealthRegistry(),
+    identity: identity(INTAKE_SERVICE_NAME),
+    ...unusedActionDependencies(),
+    consumers,
+  });
+  const inboundId = insertNaming(store, InboundKind.Webhook, null);
+  const addEvent = (eventId: string) =>
+    store.transaction((tx) =>
+      insertEvent(tx, {
+        inbound_id: inboundId,
+        event_id: eventId,
+        event: Buffer.from("{}"),
+        metadata: { event: "push" },
+        created_at: CREATED_AT,
+      }),
+    );
+  const stateOf = (id: string) => store.transaction((tx) => eventState(tx, id));
+  return { intake, addEvent, stateOf };
+}
+
+test("a wake before the start hands over nothing, and run hands every pending event over at its end", async (t) => {
+  const { consumers, calls } = recordingConsumers();
+  const h = handoffFixture(t, consumers);
+  const pending = [h.addEvent("d-1"), h.addEvent("d-2")].sort();
+  h.intake.wake();
+  await h.intake.dispatcher.join();
+  assert.equal(calls.length, NO_CALLS);
+  const running = h.intake.run();
+  await settle();
+  await h.intake.dispatcher.join();
+  assert.deepEqual(
+    calls.map((call) => call.input.inbound_event_id),
+    pending,
+  );
+  await shutDown(h.intake, running);
+});
+
+test("quiesce starts no new handoff and drain joins the running handoff", async (t) => {
+  const held = Promise.withResolvers<OperationResult<unknown>>();
+  const calls: string[] = [];
+  const h = handoffFixture(t, {
+    [Consumer.MissionDeliveryAdmit]: (input) => {
+      calls.push(input.inbound_event_id);
+      return held.promise;
+    },
+  });
+  const [first, second] = [h.addEvent("d-1"), h.addEvent("d-2")].sort();
+  assert.ok(first && second);
+  const running = h.intake.run();
+  await settle();
+  assert.deepEqual(calls, [first]);
+  assert.equal(await h.intake.quiesce(), null);
+  h.intake.wake();
+  let drained = false;
+  const drain = h.intake.drain().then(() => {
+    drained = true;
+  });
+  await settle();
+  assert.equal(drained, false);
+  held.resolve({ type: OperationResultType.Indeterminate });
+  await drain;
+  assert.deepEqual(calls, [first]);
+  assert.equal(h.stateOf(first), InboundEventState.Failed);
+  assert.equal(h.stateOf(second), InboundEventState.Pending);
+  assert.equal(await h.intake.stop(), null);
+  assert.equal(await running, null);
 });

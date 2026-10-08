@@ -310,6 +310,19 @@ test("A retried event is handed over once more when the dispatcher wakes", async
   assert.equal(h.stateOf(id), InboundEventState.Succeeded);
 });
 
+test("A retry on a started service hands the event over once more through the live wake", async (t) => {
+  const h = harness(t);
+  assert.equal(await h.intake.start(), null);
+  const id = h.addEvent(InboundEventState.Failed);
+  h.answers.push(completed);
+  assert.equal((await h.retry(id)).state, InboundEventState.Pending);
+  await h.intake.dispatcher.join();
+  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls[0]?.input.inbound_event_id, id);
+  assert.equal(h.stateOf(id), InboundEventState.Succeeded);
+  assert.equal(await h.intake.stop(), null);
+});
+
 test("A discarded event is handed over by no later wake", async (t) => {
   const h = harness(t);
   const id = h.addEvent(InboundEventState.Failed);

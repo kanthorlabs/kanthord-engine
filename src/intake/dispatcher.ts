@@ -139,12 +139,14 @@ export class Dispatcher {
   private readonly running = new Set<string>();
   private drainTask: Promise<void> | null = null;
   private again = false;
+  private quiescent = false;
 
   constructor(dependencies: DispatcherDependencies) {
     this.dependencies = dependencies;
   }
 
   wake(): void {
+    if (this.quiescent) return;
     if (this.drainTask !== null) {
       this.again = true;
       return;
@@ -159,16 +161,24 @@ export class Dispatcher {
     return this.running.has(id);
   }
 
+  quiesce(): void {
+    this.quiescent = true;
+    assert.ok(this.halted(), "A quiescent dispatcher starts no handoff.");
+  }
+
   async join(): Promise<void> {
     await this.drainTask;
   }
 
+  private halted(): boolean {
+    return this.quiescent || this.dependencies.context.err() !== null;
+  }
+
   private async drain(): Promise<void> {
-    const context = this.dependencies.context;
     do {
       this.again = false;
       await this.pass();
-    } while (this.again && context.err() === null);
+    } while (this.again && !this.halted());
   }
 
   private async pass(): Promise<void> {
@@ -176,7 +186,7 @@ export class Dispatcher {
     const limit = store.transaction((tx) => pendingCount(tx)) + FINAL_SELECTION;
     assert.ok(limit >= FINAL_SELECTION, "A pass selects at least once.");
     for (let step = FIRST_STEP; step < limit; step++) {
-      if (this.dependencies.context.err() !== null) return;
+      if (this.halted()) return;
       const selected = this.select();
       if (selected === null) return;
       if (selected !== SKIPPED) await this.handOver(selected);

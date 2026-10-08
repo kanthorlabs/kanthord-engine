@@ -290,17 +290,21 @@ export class IntakeService implements Service, IntakeCollaborations {
 
   quiesce(): Promise<Error | null> {
     this.pollLoops.quiesce();
+    this.dispatcher.quiesce();
     return this.quiesceTask;
   }
 
   async drain(): Promise<void> {
-    await this.pollLoops.drain();
+    await Promise.all([this.pollLoops.drain(), this.dispatcher.join()]);
   }
 
   stop(): Promise<Error | null> {
     this.shutdown.cancel();
     this.started = false;
-    this.stopTask ??= lifecycle(() => this.pollLoops.stopAll());
+    this.stopTask ??= lifecycle(async () => {
+      this.dispatcher.quiesce();
+      await Promise.all([this.pollLoops.stopAll(), this.dispatcher.join()]);
+    });
     return this.stopTask;
   }
 
@@ -313,6 +317,7 @@ export class IntakeService implements Service, IntakeCollaborations {
       const error = await this.start();
       if (error) return error;
       this.startPollLoops();
+      this.wake();
       await this.shutdown.done();
       return (await this.stop()) ?? context.err();
     } finally {
@@ -331,7 +336,10 @@ export class IntakeService implements Service, IntakeCollaborations {
     this.pollLoops.stop(inboundId);
   }
 
-  wake(): void {}
+  wake(): void {
+    if (!this.started) return;
+    this.dispatcher.wake();
+  }
 
   inboundsNaming(
     tx: Transaction,
