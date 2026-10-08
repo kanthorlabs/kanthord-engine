@@ -32,9 +32,7 @@ import { MissionService, missionMigrations } from "../../mission/index.ts";
 import {
   MISSION_SERVICE_NAME,
   missionOperations,
-  type IntakeStorage,
 } from "../../mission/contract.ts";
-import { unwired } from "./unwired.ts";
 import type {
   ProjectBindings,
   RepositoryConnector,
@@ -150,7 +148,6 @@ export function composeServices(options: {
   workbenchModelRuntimeFactory?: WorkbenchModelRuntimeFactory;
   inventoryOverrides?: Partial<ResourceInventories>;
   standIns?: {
-    intakeStorage?: IntakeStorage;
     inboundsNaming?: InboundsNamingFn;
   };
 }) {
@@ -380,12 +377,65 @@ export function composeServices(options: {
   });
   const mission: MissionService = new MissionService({
     store: options.store,
-    intakeStorage: options.standIns?.intakeStorage ?? {
-      put: unwired("IntakeStorage.put"),
-      check: unwired("IntakeStorage.check"),
-      get: unwired("IntakeStorage.get"),
-      executionGet: unwired("IntakeStorage.executionGet"),
-      delete: unwired("IntakeStorage.delete"),
+    intakeStorage: {
+      put: async (call, input) =>
+        resultOf(
+          await intakeClient["storage.put"](
+            {
+              params: { execution_id: call.executionId },
+              query: {},
+              body: {
+                node_id: input.nodeId,
+                asset_id: input.assetId,
+                storage_binding_id: input.storageBindingId,
+                size: input.size,
+                sha256: input.sha256,
+              },
+            },
+            { identity: call.identity, context: call.context },
+          ),
+        ),
+      check: async (call, assetId) =>
+        resultOf(
+          await intakeClient["storage.check"](
+            {
+              params: { execution_id: call.executionId, asset_id: assetId },
+              query: {},
+              body: null,
+            },
+            { identity: call.identity, context: call.context },
+          ),
+        ),
+      get: async (call, assetId) =>
+        resultOf(
+          await intakeClient["storage.get"](
+            { params: { asset_id: assetId }, query: {}, body: null },
+            { identity: call.identity, context: call.context },
+          ),
+        ),
+      executionGet: async (call, assetId) =>
+        resultOf(
+          await intakeClient["execution.storage.get"](
+            {
+              params: { execution_id: call.executionId, asset_id: assetId },
+              query: {},
+              body: null,
+            },
+            { identity: call.identity, context: call.context },
+          ),
+        ),
+      delete: async (call, assetId) => {
+        resultOf(
+          await intakeClient["storage.delete"](
+            { params: { asset_id: assetId }, query: {}, body: null },
+            {
+              identity: call.identity,
+              context: call.context,
+              idempotencyKey: ulid(),
+            },
+          ),
+        );
+      },
     },
     intakeCheck: {
       check: async (context, evidenceId) =>

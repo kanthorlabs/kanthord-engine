@@ -7,7 +7,7 @@ import { configuration } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { gatewayFixture, objectSink, sinkStorage } from "./test-support.ts";
+import { fakeS3, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
 const NO_STDERR = "";
@@ -19,7 +19,7 @@ export const WORKER_DEFAULTS = {
 };
 
 export async function workerAcceptance(t: TestContext, host = false) {
-  const sink = host ? await objectSink(t) : undefined;
+  const s3 = host ? await fakeS3(t) : undefined;
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
@@ -30,7 +30,6 @@ export async function workerAcceptance(t: TestContext, host = false) {
         identitiesOnly: true,
       }),
     },
-    ...(sink ? { standIns: { intakeStorage: sinkStorage(sink) } } : {}),
   });
   const directory = temporary(t);
   const human = {
@@ -78,12 +77,12 @@ export async function workerAcceptance(t: TestContext, host = false) {
     ],
     default_configuration: WORKER_DEFAULTS,
   });
-  const storage = {
-    endpoint: "https://s3.example.com",
-    bucket: "evidence",
+  const storage = s3 && {
+    endpoint: s3.endpoint,
+    bucket: s3.bucket,
     region: "eu-central-1",
   };
-  if (host)
+  if (storage)
     await write(["storage", "credential", "create"], {
       name: "store",
       platform: "s3",
@@ -104,7 +103,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
   }>(["project", "binding", "apply", project.id], {
     version: 1,
     bindings: {
-      ...(host
+      ...(storage
         ? {
             store: {
               kind: "storage",
@@ -189,7 +188,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
     read,
     write,
     machine,
-    sink,
+    s3,
     directory,
   };
 }

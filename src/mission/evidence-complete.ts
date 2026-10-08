@@ -11,7 +11,6 @@ import {
   type ExecutionContext,
 } from "./contract.ts";
 import { admitExecution } from "./execution.ts";
-import { keyOfLocation } from "./evidence-content.ts";
 import { readEvidence, type AssetRow } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import {
@@ -60,20 +59,8 @@ export function prepareComplete(
     uri: content.location,
   };
   if (!pending) return { result, pending: null };
-  const binding = authorizeStorage(
-    tx,
-    dependencies.bindings,
-    content.storage_binding_id,
-  );
-  assert.ok(binding);
-  return {
-    result,
-    pending: {
-      binding,
-      content,
-      key: keyOfLocation(binding, content.location),
-    },
-  };
+  authorizeStorage(tx, dependencies.bindings, content.storage_binding_id);
+  return { result, pending: { content } };
 }
 
 export async function completeEvidence(
@@ -94,13 +81,14 @@ export async function completeEvidence(
         prepareComplete(tx, dependencies, claim, assetId, context, Date.now())
           .result,
     );
-  const { binding, key, content } = prepared.pending;
+  const { content } = prepared.pending;
   const checked = await dependencies.intakeStorage.check(
-    { context: caller.context, identity: caller.identity },
-    binding,
-    key,
-    content.size,
-    content.sha256 ?? null,
+    {
+      context: caller.context,
+      identity: caller.identity,
+      executionId: claim.executionId,
+    },
+    assetId,
   );
   assert.equal(checked.location, content.location);
   return caller.commit((tx) => {

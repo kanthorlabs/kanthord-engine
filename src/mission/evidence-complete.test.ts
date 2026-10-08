@@ -21,7 +21,6 @@ const ALREADY_EXPIRED = 0;
 const FIRST_ASSET_INDEX = 0;
 const NO_CALLS = 0;
 const VERSION = "stored-version";
-const KEY = "prefix/key";
 const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
 
 function fixture(t: TestContext, expired = false) {
@@ -86,18 +85,10 @@ function fixture(t: TestContext, expired = false) {
     ),
   );
   let checks = NO_CALLS;
-  h.dependencies.intakeStorage.check = async (
-    _call,
-    received,
-    key,
-    size,
-    sha256,
-  ) => {
+  h.dependencies.intakeStorage.check = async (call, received) => {
     checks++;
-    assert.deepEqual(received, binding);
-    assert.equal(key, KEY);
-    assert.equal(size, SIZE);
-    assert.equal(sha256, null);
+    assert.equal(call.executionId, h.claim.executionId);
+    assert.equal(received, assetId);
     return { location, version: VERSION };
   };
   const complete = () =>

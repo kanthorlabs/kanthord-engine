@@ -18,10 +18,9 @@ import {
 import { generateMachineToken } from "./cli-support.ts";
 import {
   gatewayFixture,
-  objectSink,
   FAKE_SSH_IDENTITY,
-  sinkStorage,
   fakeGitHub,
+  fakeS3,
   inProcessWorker,
   bareRepository,
   mappedTransport,
@@ -113,7 +112,7 @@ async function waitForNode(cli: CLI, nodeId: string, state: string) {
 }
 
 async function setupInternal(t: TestContext) {
-  const sink = await objectSink(t);
+  const s3 = await fakeS3(t);
   const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
@@ -121,9 +120,6 @@ async function setupInternal(t: TestContext) {
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
     github: { baseUrl: gitHub.endpoint },
-    standIns: {
-      intakeStorage: sinkStorage(sink),
-    },
   });
   const cli = journeyClient(t, fixture.endpoint, fixture.token);
   for (const [group, name, platform, key] of [
@@ -148,8 +144,8 @@ async function setupInternal(t: TestContext) {
     secret: {},
   });
   const storage = {
-    endpoint: "https://s3.example.com",
-    bucket: "evidence",
+    endpoint: s3.endpoint,
+    bucket: s3.bucket,
     region: "eu-central-1",
   };
   await cli.write(["storage", "credential", "create"], {
@@ -291,7 +287,7 @@ async function setupInternal(t: TestContext) {
     initiative,
     generalAuth,
     reviewAuth,
-    sink,
+    s3,
     gitHub,
   };
 }
@@ -677,7 +673,7 @@ test(
         const text = JSON.stringify(messages);
         for (const privateValue of [
           "put_url",
-          f.sink.endpoint,
+          f.s3.endpoint,
           "X-Amz",
           ...f.cli.secrets,
         ])

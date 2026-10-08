@@ -22,6 +22,7 @@ const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
 const TWO_RESULTS = 2;
+const PROVIDER_AND_STORE_PINS = 2;
 const THIRD_REVISION = 3;
 const FIRST_INDEX = 0;
 const POLL_LIMIT = 30;
@@ -131,7 +132,7 @@ async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
     );
     if (record) {
       assert.equal(page.items.length, SINGLE_ITEM);
-      assert.equal(record.credentials.length, SINGLE_ITEM);
+      assert.equal(record.credentials.length, PROVIDER_AND_STORE_PINS);
       return record;
     }
     await delay(100);
@@ -237,7 +238,7 @@ test(
         const trace = JSON.stringify(provider.calls);
         assert.ok(!trace.includes("put_url"));
         assert.ok(!trace.includes("X-Amz"));
-        assert.ok(!trace.includes(setup.sink!.endpoint));
+        assert.ok(!trace.includes(setup.s3!.endpoint));
         assert.match(
           await setup.git.listRemote([
             setup.bare,

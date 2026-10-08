@@ -114,44 +114,36 @@ export interface StorageBinding {
   available: boolean;
 }
 
+export type IntakeExecutionCall = IntakeCall & { executionId: string };
+
 export interface IntakeStorage {
   put(
-    call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    size: number,
-    sha256: string | null,
+    call: IntakeExecutionCall,
+    input: {
+      nodeId: string;
+      assetId: string;
+      storageBindingId: string;
+      size: number;
+      sha256: string | null;
+    },
   ): Promise<{
     put_url: string;
     headers: Record<string, string>;
     expires_at: number;
   }>;
   check(
-    call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    size: number,
-    sha256: string | null,
+    call: IntakeExecutionCall,
+    assetId: string,
   ): Promise<{ location: string; version: string | null }>;
   get(
     call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    version: string | null,
+    assetId: string,
   ): Promise<{ get_url: string; expires_at: number }>;
   executionGet(
-    call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    version: string | null,
+    call: IntakeExecutionCall,
+    assetId: string,
   ): Promise<{ get_url: string; expires_at: number }>;
-  delete(
-    call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    version: string | null,
-    requestKey: string,
-  ): Promise<void>;
+  delete(call: IntakeCall, assetId: string): Promise<void>;
 }
 
 export const CheckEndState = {

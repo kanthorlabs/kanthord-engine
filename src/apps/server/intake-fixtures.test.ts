@@ -3,7 +3,7 @@ import { test, type TestContext } from "node:test";
 import { background } from "../../kernel/context.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { CheckEndState, type StorageBinding } from "../../mission/contract.ts";
+import { CheckEndState } from "../../mission/contract.ts";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -11,8 +11,6 @@ import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
 import { GitHubPlatform, GitHubTargetKind } from "../../repository/github.ts";
 import {
-  objectSink,
-  sinkStorage,
   fakeGitHub,
   fakeS3,
   FakePullState,
@@ -27,61 +25,15 @@ import { createHash } from "node:crypto";
 
 const KEY = "prefix#tag?query%2F space/é/project/mission/node/1/asset";
 const BYTES = "hello";
-const SHA256 = "a".repeat(64);
 const LIFETIME = 3600000;
 const NO_OBJECTS = 0;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const LAST_CALLS = 3;
-const binding: StorageBinding = {
-  binding_id: "binding",
-  project_id: "project",
-  endpoint: "https://s3.example.com",
-  bucket: "evidence",
-  region: "eu-central-1",
-  prefix: "prefix",
-  credential: "store",
-  available: true,
-};
 const call = {
   context: background,
   identity: testHumanIdentity("ulrich", "Ulrich", "token"),
 };
-
-test("Intake storage fixture transfers bytes, checks length and removes objects", async (t) => {
-  const sink = await objectSink(t);
-  const storage = sinkStorage(sink);
-  const before = Date.now();
-  const upload = await storage.put(call, binding, KEY, BYTES.length, null);
-  assert.deepEqual(upload.headers, {});
-  assert.ok(upload.expires_at >= before + LIFETIME);
-  assert.ok(upload.expires_at <= Date.now() + LIFETIME);
-  const checked = await storage.put(call, binding, KEY, BYTES.length, SHA256);
-  assert.deepEqual(checked.headers, { "x-amz-checksum-sha256": SHA256 });
-  await assert.rejects(
-    storage.check(call, binding, KEY, BYTES.length, null),
-    /object size mismatch/,
-  );
-  const response = await fetch(upload.put_url, { method: "PUT", body: BYTES });
-  assert.equal(response.status, HttpStatus.OK);
-  await response.arrayBuffer();
-  assert.ok(sink.objects.has(KEY));
-  assert.deepEqual(
-    await storage.check(call, binding, KEY, BYTES.length, null),
-    { location: `s3://${binding.bucket}/${KEY}`, version: null },
-  );
-  for (const get of [storage.get, storage.executionGet]) {
-    const result = await get(call, binding, KEY, null);
-    const content = await fetch(result.get_url);
-    assert.equal(content.status, HttpStatus.OK);
-    assert.equal(await content.text(), BYTES);
-  }
-  await storage.delete(call, binding, KEY, null, "asset-delete");
-  const missing = await fetch(upload.put_url);
-  assert.equal(missing.status, HttpStatus.NotFound);
-  await missing.arrayBuffer();
-  assert.equal(sink.objects.size, NO_OBJECTS);
-});
 
 const GITHUB_TOKEN = "test-secret";
 const VALIDATION_FAILED_STATUS = 422;
@@ -507,4 +459,61 @@ test("fake S3 scripts one failure status", async (t) => {
   const answered = await platform.deleteObject(s3Call(), target);
   assert.ok(answered.ok);
   assert.equal(s3.calls.length, TWO_CALLS);
+});
+
+test("fake S3 transfers, reads and removes a key with reserved characters", async (t) => {
+  const s3 = await fakeS3(t);
+  const platform = new S3Platform();
+  const location = {
+    endpoint: s3.endpoint,
+    bucket: s3.bucket,
+    region: S3_REGION,
+  };
+  const before = Date.now();
+  const upload = await platform.presignPut(s3Call(), {
+    ...location,
+    key: KEY,
+    size: BYTES.length,
+    sha256: null,
+  });
+  assert.ok(upload.expires_at >= before + LIFETIME);
+  assert.ok(upload.expires_at <= Date.now() + LIFETIME);
+  const stored = await fetch(upload.put_url, {
+    method: "PUT",
+    headers: upload.headers,
+    body: BYTES,
+  });
+  assert.equal(stored.status, HttpStatus.OK);
+  await stored.arrayBuffer();
+  assert.deepEqual(
+    s3.objects(KEY).map((item) => item.version),
+    [FIRST_VERSION],
+  );
+  const head = await platform.headObject(s3Call(), {
+    ...location,
+    key: KEY,
+    version: FIRST_VERSION,
+  });
+  assert.ok(head.ok);
+  assert.deepEqual(head.value, {
+    size: BYTES.length,
+    sha256: null,
+    version: FIRST_VERSION,
+  });
+  const read = await platform.presignGet(s3Call(), {
+    ...location,
+    key: KEY,
+    version: FIRST_VERSION,
+  });
+  const content = await fetch(read.get_url);
+  assert.equal(content.status, HttpStatus.OK);
+  assert.equal(await content.text(), BYTES);
+  const deleted = await platform.deleteObject(s3Call(), {
+    ...location,
+    key: KEY,
+    version: FIRST_VERSION,
+  });
+  assert.ok(deleted.ok);
+  assert.equal(s3.objects(KEY).length, NO_OBJECTS);
+  assert.ok(s3.calls.every((item) => item.key === KEY));
 });

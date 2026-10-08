@@ -11,7 +11,6 @@ import {
   type evidenceDeleteSchema,
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
-import { keyOfLocation } from "./evidence-content.ts";
 import { objectContentSchema } from "./evidence-content-read.ts";
 import { requireTextBound } from "./execution.ts";
 import { requireNode } from "./node-read.ts";
@@ -96,15 +95,11 @@ export async function deleteObject(
   assert.ok(caller.identity);
   if (asset.kind !== AssetKind.Object) return;
   const content = objectContentSchema.parse(JSON.parse(asset.content));
-  const binding = dependencies.store.transaction((tx) =>
+  dependencies.store.transaction((tx) =>
     authorizeStorage(tx, dependencies.bindings, content.storage_binding_id),
   );
-  assert.ok(binding);
   await dependencies.intakeStorage.delete(
     { context: caller.context, identity: caller.identity },
-    binding,
-    keyOfLocation(binding, content.location),
-    content.object_version ?? null,
     asset.id,
   );
 }

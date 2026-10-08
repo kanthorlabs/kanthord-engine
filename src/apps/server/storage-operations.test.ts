@@ -34,8 +34,6 @@ import {
   FAKE_SSH_IDENTITY,
   fakeGitHub,
   gatewayFixture,
-  objectSink,
-  sinkStorage,
 } from "./test-support.ts";
 
 const SUCCESSFUL_EXIT = 0;
@@ -157,7 +155,6 @@ async function objectStore(t: TestContext) {
 
 async function setup(t: TestContext) {
   const store = await objectStore(t);
-  const sink = await objectSink(t);
   const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     github: { baseUrl: gitHub.endpoint },
@@ -165,7 +162,6 @@ async function setup(t: TestContext) {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
-    standIns: { intakeStorage: sinkStorage(sink) },
   });
   const directory = temporary(t);
   const H = {

@@ -12,7 +12,6 @@ import {
   NodeKind,
   type EvidenceAsset,
 } from "./contract.ts";
-import { keyOfLocation } from "./evidence-content.ts";
 import { admitExecution } from "./execution.ts";
 import { evidenceRecord, outcomeRecord } from "./record-read.ts";
 import { recordNotFound } from "./record-list.ts";
@@ -145,6 +144,22 @@ export function contentOf(
   };
 }
 
+function signGet(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  assetId: string,
+  execution: boolean,
+) {
+  assert.ok(caller.identity);
+  const call = { context: caller.context, identity: caller.identity };
+  if (!execution) return dependencies.intakeStorage.get(call, assetId);
+  assert.ok(caller.execution);
+  return dependencies.intakeStorage.executionGet(
+    { ...call, executionId: caller.execution.executionId },
+    assetId,
+  );
+}
+
 export async function readContent(
   dependencies: Dependencies,
   caller: CallerContext,
@@ -156,29 +171,21 @@ export async function readContent(
   assert.equal(typeof bound, FUNCTION_TYPE);
   const prepared = dependencies.store.transaction((tx) => {
     const content = contentOf(tx, assetId, bound);
-    if (!content.object) return { ...content, binding: null };
-    const binding = authorizeStorage(
-      tx,
-      dependencies.bindings,
-      content.object.storage_binding_id,
-    );
-    assert.ok(binding);
-    return { ...content, binding };
+    if (content.object)
+      authorizeStorage(
+        tx,
+        dependencies.bindings,
+        content.object.storage_binding_id,
+      );
+    return content;
   });
-  if (!prepared.object || !prepared.binding)
+  if (!prepared.object)
     return caller.commit((tx) =>
       storedContentSchema.parse(contentOf(tx, assetId, bound).result),
     );
   let object = prepared.object;
-  const binding = prepared.binding;
-  const method = execution ? "executionGet" : "get";
   for (let attempt = 0; attempt < MAX_SIGNINGS; attempt++) {
-    const signed = await dependencies.intakeStorage[method](
-      { context: caller.context, identity: caller.identity },
-      binding,
-      keyOfLocation(binding, object.location),
-      object.object_version ?? null,
-    );
+    const signed = await signGet(dependencies, caller, assetId, execution);
     const current = dependencies.store.transaction((tx) =>
       contentOf(tx, assetId, bound),
     );

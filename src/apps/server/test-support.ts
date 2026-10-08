@@ -29,10 +29,7 @@ import { projectMigrations } from "../../project/index.ts";
 import { missionMigrations } from "../../mission/index.ts";
 import { intakeMigrations } from "../../intake/index.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
-import {
-  MISSION_SERVICE_NAME,
-  type IntakeStorage,
-} from "../../mission/contract.ts";
+import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { agentMigrations } from "../../agent/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
@@ -176,114 +173,9 @@ export const FAKE_SSH_CREDENTIAL_BODY = {
 };
 const SINGLE_INSTANCE = 1;
 const NO_INSTANCES = 0;
-const OBJECT_GRANT_LIFETIME_MS = 3600000;
-const SINK_BODY_MAX = 16 * 1024 ** 2;
 const CHECKSUM_HEADER = "x-amz-checksum-sha256";
 const ZERO_BYTES = 0;
 const EPHEMERAL_PORT = 0;
-
-type ObjectSink = { endpoint: string; objects: Map<string, Uint8Array> };
-
-async function sinkRequest(
-  objects: ObjectSink["objects"],
-  request: IncomingMessage,
-  response: ServerResponse,
-) {
-  assert.ok(request.url);
-  const key = decodeURIComponent(request.url.slice(1));
-  if (request.method === HttpMethod.Put) {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    for await (const chunk of request) {
-      size += chunk.length;
-      assert.ok(size <= SINK_BODY_MAX);
-      chunks.push(Buffer.from(chunk));
-    }
-    objects.set(key, Buffer.concat(chunks));
-    response.writeHead(HttpStatus.OK).end();
-    return;
-  }
-  assert.equal(request.method, HttpMethod.Get);
-  const bytes = objects.get(key);
-  response.writeHead(bytes ? HttpStatus.OK : HttpStatus.NotFound).end(bytes);
-}
-
-export async function objectSink(t: TestContext): Promise<ObjectSink> {
-  const objects: ObjectSink["objects"] = new Map();
-  const failures: unknown[] = [];
-  const server = createServer((request, response) => {
-    void sinkRequest(objects, request, response).catch((error: unknown) => {
-      failures.push(error);
-      response.destroy(
-        error instanceof Error ? error : new Error(String(error)),
-      );
-    });
-  });
-  t.after(async () => {
-    server.closeAllConnections();
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
-    if (failures.length)
-      throw new AggregateError(failures, "Object sink failed.");
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  assert.ok(address && !isString(address));
-  assert.ok(address.port > EPHEMERAL_PORT);
-  return { endpoint: `http://127.0.0.1:${address.port}`, objects };
-}
-
-export function sinkStorage(sink: ObjectSink): IntakeStorage {
-  assert.ok(sink.endpoint.startsWith("http://127.0.0.1:"));
-  assert.ok(sink.objects instanceof Map);
-  const deletedRequests = new Set<string>();
-  const get: IntakeStorage["get"] = async (call, _binding, key) => {
-    throwIfCancelled(call.context);
-    assert.ok(key);
-    return {
-      get_url: `${sink.endpoint}/${encodeURIComponent(key)}`,
-      expires_at: Date.now() + OBJECT_GRANT_LIFETIME_MS,
-    };
-  };
-  return {
-    async put(call, _binding, key, size, sha256) {
-      throwIfCancelled(call.context);
-      assert.ok(size >= ZERO_BYTES);
-      const headers: Record<string, string> = {};
-      if (sha256 !== null) headers[CHECKSUM_HEADER] = sha256;
-      return {
-        put_url: `${sink.endpoint}/${encodeURIComponent(key)}`,
-        headers,
-        expires_at: Date.now() + OBJECT_GRANT_LIFETIME_MS,
-      };
-    },
-    async check(call, binding, key, size, sha256) {
-      throwIfCancelled(call.context);
-      assert.ok(size >= ZERO_BYTES);
-      if (sink.objects.get(key)?.byteLength !== size)
-        throw new Error("object size mismatch");
-      if (
-        sha256 !== null &&
-        createHash("sha256").update(sink.objects.get(key)!).digest("hex") !==
-          sha256
-      )
-        throw new Error("object checksum mismatch");
-      return { location: `s3://${binding.bucket}/${key}`, version: null };
-    },
-    get,
-    executionGet: get,
-    async delete(call, _binding, key, _version, requestKey) {
-      throwIfCancelled(call.context);
-      assert.ok(key);
-      assert.ok(requestKey);
-      if (deletedRequests.has(requestKey)) return;
-      sink.objects.delete(key);
-      deletedRequests.add(requestKey);
-    },
-  };
-}
 
 export function fakeMachines(
   options: {

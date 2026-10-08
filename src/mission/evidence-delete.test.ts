@@ -31,7 +31,6 @@ const NO_CALLS = 0;
 const FIRST_ATTEMPT = 1;
 const SECOND_VERSION = 2;
 const VERSION = "version";
-const KEY = "key";
 const DISABLED_FIELD = "disabled";
 
 test("force never bypasses disabled or removed storage authorization", async (t) => {
@@ -124,17 +123,8 @@ function fixture(t: TestContext, request = false) {
 
 test("asset deletes require a terminal ancestor chain or force and preserve the empty evidence", async (t) => {
   const h = fixture(t);
-  h.dependencies.intakeStorage.delete = async (
-    _call,
-    binding,
-    key,
-    version,
-    requestKey,
-  ) => {
-    assert.equal(binding.binding_id, h.storageId);
-    assert.equal(key, KEY);
-    assert.equal(version, VERSION);
-    assert.equal(requestKey, h.asset_id);
+  h.dependencies.intakeStorage.delete = async (_call, assetId) => {
+    assert.equal(assetId, h.asset_id);
   };
   await assert.rejects(
     h.remove(),
@@ -166,17 +156,8 @@ test("failed remote deletion reads back on repeat and requires human request rem
   let failedRequest = false;
   let readBacks = NO_CALLS;
   let fail = true;
-  h.dependencies.intakeStorage.delete = async (
-    _call,
-    binding,
-    key,
-    version,
-    requestKey,
-  ) => {
-    assert.equal(requestKey, h.asset_id);
-    assert.equal(binding.binding_id, h.storageId);
-    assert.equal(key, KEY);
-    assert.equal(version, VERSION);
+  h.dependencies.intakeStorage.delete = async (_call, assetId) => {
+    assert.equal(assetId, h.asset_id);
     if (failedRequest) {
       readBacks++;
       throw failure;

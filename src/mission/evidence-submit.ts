@@ -10,7 +10,6 @@ import {
   MissionErrorCode,
   UPLOAD_LIFETIME_MS,
   type EvidenceSubmit,
-  type StorageBinding,
 } from "./contract.ts";
 import { admitExecution, requireTextBound } from "./execution.ts";
 import {
@@ -32,9 +31,9 @@ import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 
 type Identities = { evidence_id: string; asset_ids: string[] };
 type ObjectUpload = {
-  asset_id: string;
-  binding: StorageBinding;
-  key: string;
+  nodeId: string;
+  assetId: string;
+  storageBindingId: string;
   size: number;
   sha256: string | null;
 };
@@ -133,9 +132,9 @@ export function prepareEvidence(
       id,
     );
     objects.push({
-      asset_id: id,
-      binding,
-      key,
+      nodeId: node.id,
+      assetId: id,
+      storageBindingId,
       size: asset.size,
       sha256: asset.sha256 ?? null,
     });
@@ -192,13 +191,10 @@ export async function submitEvidence(
     );
     for (const object of prepared.objects) {
       const signed = await dependencies.intakeStorage.put(
-        { context: caller.context, identity },
-        object.binding,
-        object.key,
-        object.size,
-        object.sha256,
+        { context: caller.context, identity, executionId: claim.executionId },
+        object,
       );
-      uploads.push({ asset_id: object.asset_id, ...signed });
+      uploads.push({ asset_id: object.assetId, ...signed });
     }
   }
   return caller.commit((tx) => {
