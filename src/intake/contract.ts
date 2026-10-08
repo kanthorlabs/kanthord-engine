@@ -60,6 +60,7 @@ export const IntakeErrorCode = {
   InboundNotFound: "intake.inbound.not_found",
   InboundEventsPending: "intake.inbound.events_pending",
   InboundEventNotFound: "intake.inbound.event.not_found",
+  InboundEventStateConflict: "intake.inbound.event.state_conflict",
   InboundEventSignatureInvalid: "intake.inbound.event.signature_invalid",
   InboundEventCapacityExceeded: "intake.inbound.event.capacity_exceeded",
 } as const;
@@ -540,6 +541,22 @@ export const intakeOperations = {
     ),
     output: inboundEventSchema,
     description: "Get one inbound event projection.",
+  },
+  "inbound.event.retry": {
+    ...mutationOperation,
+    id: "intake.inbound.event.retry",
+    path: "/api/intake/event/:inbound_event_id/retry",
+    body: false,
+    input: z.strictObject({
+      params: z.strictObject({
+        inbound_event_id: identitySchema(INBOUND_EVENT_ID_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: inboundEventSchema,
+    description:
+      "Turn a failed inbound event back to pending; a pending event answers its current state.",
   },
   "inbound.event.receive": {
     ...baseOperation,

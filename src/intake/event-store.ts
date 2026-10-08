@@ -181,6 +181,17 @@ export function failEvent(
   return true;
 }
 
+export function retryFailedEvent(tx: Transaction, id: string): boolean {
+  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  const changes = tx.database
+    .prepare(
+      "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
+    )
+    .run(InboundEventState.Pending, id, InboundEventState.Failed).changes;
+  assert.ok(Number(changes) <= ONE_ROW, "A write changes at most one row.");
+  return Number(changes) === ONE_ROW;
+}
+
 export function eventRecord(row: InboundEventProjectionRow): InboundEvent {
   return inboundEventSchema.parse({
     id: row.id,
