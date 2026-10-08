@@ -42,11 +42,7 @@ import {
   type Assessment,
   type Outcome,
 } from "../../mission/contract.ts";
-import {
-  ClaimState,
-  WORK_PULL_WAIT_MS,
-  type ExecutionRecord,
-} from "../../scheduler/contract.ts";
+import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 
 const GIT_TIMEOUT_MS = 10000;
 const MAIN_REF = "refs/heads/main";
@@ -327,7 +323,7 @@ async function finishedExecutions(
 
 test(
   "EI10.1–7 internal harness completes local work, verification and external action",
-  { timeout: JOURNEY_TIMEOUT_MS + WORK_PULL_WAIT_MS },
+  { timeout: JOURNEY_TIMEOUT_MS },
   async (t) => {
     const f = await setupInternal(t);
     const repo = await bareRepository(t, "test_repo");

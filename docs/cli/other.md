@@ -526,16 +526,18 @@ logs one record `Worker application ready` with `runtime_identity`,
 versions in the diagnostic. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
 
-`SIGINT` and `SIGTERM` stop further startup and further work pulls. The
+`SIGINT` and `SIGTERM` stop further startup and further work pulls. A stop
+aborts the outstanding work pull. A claim that commits during that abort has no
+worker until its lease expires, and settlement then declares it lost. The
 application deregisters only a registration whose runtime identity it knows. It
 exits `0` after a successful deregistration or after the `404` that ends its
 registration, and exits `1` on any other deregistration or cleanup failure,
 without a retry. A 10-second watchdog applies only when no execution is live and
-no registration or work pull waits for its answer. `SIGHUP` reopens nothing.
+no registration waits for its answer. `SIGHUP` reopens nothing.
 
 The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-worker-application) rules the application, credential handover, workspace, prompt configuration, heartbeat expiry and containment.
-Shutdown during a live execution, a registration or a work pull with no answer,
-and a stop deadline in those cases remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
+Shutdown during a live execution or a registration with no answer, and a stop
+deadline in those cases remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
 
 ## Local JWT issuance
 
