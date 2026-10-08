@@ -14,6 +14,7 @@ import {
   objectSink,
   sinkStorage,
   fakeGitHub,
+  fakeS3,
   FakePullState,
   gatewayFixture,
   bareRepository,
@@ -21,6 +22,8 @@ import {
   remoteHead,
 } from "./test-support.ts";
 import { ResultClass } from "../../worker/contract.ts";
+import { S3Platform } from "../../storage/s3.ts";
+import { createHash } from "node:crypto";
 
 const KEY = "prefix#tag?query%2F space/é/project/mission/node/1/asset";
 const BYTES = "hello";
@@ -28,6 +31,8 @@ const SHA256 = "a".repeat(64);
 const LIFETIME = 3600000;
 const NO_OBJECTS = 0;
 const ONE_CALL = 1;
+const TWO_CALLS = 2;
+const LAST_CALLS = 3;
 const binding: StorageBinding = {
   binding_id: "binding",
   project_id: "project",
@@ -324,4 +329,182 @@ test("mapped transport maps the address of the fresh git writes and the landing 
       ),
     assert.AssertionError,
   );
+});
+
+const S3_DEADLINE_MS = 5000;
+const S3_REGION = "eu-central-1";
+const S3_KEY = "project/mission/node/1/asset";
+const FIRST_VERSION = "v1";
+const SECOND_VERSION = "v2";
+const SECOND_BYTES = "second";
+const SCRIPTED_STATUS = 503;
+const s3Call = () => ({
+  accessKeyId: "access",
+  secretAccessKey: "secret",
+  signal: new AbortController().signal,
+  deadlineAt: Date.now() + S3_DEADLINE_MS,
+});
+const sha256Of = (value: string) =>
+  createHash("sha256").update(value).digest("hex");
+
+test("fake S3 stores a PUT with and without a SHA-256", async (t) => {
+  const s3 = await fakeS3(t);
+  const platform = new S3Platform();
+  const location = {
+    endpoint: s3.endpoint,
+    bucket: s3.bucket,
+    region: S3_REGION,
+  };
+  const plain = await platform.presignPut(s3Call(), {
+    ...location,
+    key: S3_KEY,
+    size: BYTES.length,
+    sha256: null,
+  });
+  const stored = await fetch(plain.put_url, {
+    method: "PUT",
+    headers: plain.headers,
+    body: BYTES,
+  });
+  assert.equal(stored.status, HttpStatus.OK);
+  assert.equal(stored.headers.get("x-amz-version-id"), FIRST_VERSION);
+  const head = await platform.headObject(s3Call(), {
+    ...location,
+    key: S3_KEY,
+    version: null,
+  });
+  assert.ok(head.ok);
+  assert.deepEqual(head.value, {
+    size: BYTES.length,
+    sha256: null,
+    version: FIRST_VERSION,
+  });
+  const bound = await platform.presignPut(s3Call(), {
+    ...location,
+    key: S3_KEY,
+    size: BYTES.length,
+    sha256: sha256Of(BYTES),
+  });
+  const mismatch = await fetch(bound.put_url, {
+    method: "PUT",
+    headers: {
+      ...bound.headers,
+      "x-amz-checksum-sha256": Buffer.from(
+        sha256Of(SECOND_BYTES),
+        "hex",
+      ).toString("base64"),
+    },
+    body: BYTES,
+  });
+  assert.equal(mismatch.status, HttpStatus.BadRequest);
+  assert.equal(s3.objects(S3_KEY).length, ONE_CALL);
+  const accepted = await fetch(bound.put_url, {
+    method: "PUT",
+    headers: bound.headers,
+    body: BYTES,
+  });
+  assert.equal(accepted.status, HttpStatus.OK);
+  const checked = await platform.headObject(s3Call(), {
+    ...location,
+    key: S3_KEY,
+    version: SECOND_VERSION,
+  });
+  assert.ok(checked.ok);
+  assert.deepEqual(checked.value, {
+    size: BYTES.length,
+    sha256: sha256Of(BYTES),
+    version: SECOND_VERSION,
+  });
+  const unsigned = await fetch(`${s3.endpoint}/${s3.bucket}/${S3_KEY}`, {
+    method: "PUT",
+    body: BYTES,
+  });
+  assert.equal(unsigned.status, HttpStatus.Forbidden);
+});
+
+test("fake S3 keeps the first version addressable after a second PUT", async (t) => {
+  const s3 = await fakeS3(t);
+  const platform = new S3Platform();
+  const location = {
+    endpoint: s3.endpoint,
+    bucket: s3.bucket,
+    region: S3_REGION,
+  };
+  for (const body of [BYTES, SECOND_BYTES]) {
+    const put = await platform.presignPut(s3Call(), {
+      ...location,
+      key: S3_KEY,
+      size: body.length,
+      sha256: null,
+    });
+    const stored = await fetch(put.put_url, {
+      method: "PUT",
+      headers: put.headers,
+      body,
+    });
+    assert.equal(stored.status, HttpStatus.OK);
+  }
+  assert.deepEqual(
+    s3.objects(S3_KEY).map((item) => item.version),
+    [FIRST_VERSION, SECOND_VERSION],
+  );
+  const first = await platform.presignGet(s3Call(), {
+    ...location,
+    key: S3_KEY,
+    version: FIRST_VERSION,
+  });
+  assert.equal(await (await fetch(first.get_url)).text(), BYTES);
+  const newest = await platform.presignGet(s3Call(), {
+    ...location,
+    key: S3_KEY,
+    version: null,
+  });
+  assert.equal(await (await fetch(newest.get_url)).text(), SECOND_BYTES);
+  const deleted = await platform.deleteObject(s3Call(), {
+    ...location,
+    key: S3_KEY,
+    version: FIRST_VERSION,
+  });
+  assert.ok(deleted.ok);
+  assert.deepEqual(deleted.value, { version: FIRST_VERSION });
+  assert.deepEqual(
+    s3.objects(S3_KEY).map((item) => item.version),
+    [SECOND_VERSION],
+  );
+  const gone = await platform.headObject(s3Call(), {
+    ...location,
+    key: S3_KEY,
+    version: FIRST_VERSION,
+  });
+  assert.ok(gone.ok);
+  assert.equal(gone.value, null);
+  assert.deepEqual(
+    s3.calls.slice(-LAST_CALLS).map((item) => [item.method, item.version]),
+    [
+      ["GET", null],
+      ["DELETE", FIRST_VERSION],
+      ["HEAD", FIRST_VERSION],
+    ],
+  );
+  assert.ok(s3.calls.every((item) => item.key === S3_KEY));
+});
+
+test("fake S3 scripts one failure status", async (t) => {
+  const s3 = await fakeS3(t);
+  const platform = new S3Platform();
+  const target = {
+    endpoint: s3.endpoint,
+    bucket: s3.bucket,
+    region: S3_REGION,
+    key: S3_KEY,
+    version: null,
+  };
+  s3.failNext(SCRIPTED_STATUS);
+  const failed = await platform.deleteObject(s3Call(), target);
+  assert.ok(!failed.ok);
+  assert.equal(failed.class, ResultClass.UnknownOutcome);
+  assert.equal(failed.status, SCRIPTED_STATUS);
+  const answered = await platform.deleteObject(s3Call(), target);
+  assert.ok(answered.ok);
+  assert.equal(s3.calls.length, TWO_CALLS);
 });

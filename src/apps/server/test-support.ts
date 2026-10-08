@@ -973,3 +973,242 @@ export async function remoteHead(
   assert.match(head!, /^[a-f0-9]{40}$/);
   return head!;
 }
+
+const S3_BUCKET = "evidence";
+const S3_BODY_MAX = 16 * 1024 ** 2;
+const S3_FIRST_VERSION = 1;
+const S3_VERSION_PREFIX = "v";
+const S3_SIGNATURE_PARAMETER = "X-Amz-Signature";
+const S3_SIGNED_HEADERS_PARAMETER = "X-Amz-SignedHeaders";
+const S3_SIGNED_HEADER_SEPARATOR = ";";
+const S3_CONTENT_LENGTH_HEADER = "content-length";
+const S3_VERSION_HEADER = "x-amz-version-id";
+const S3_CHECKSUM_MODE_HEADER = "x-amz-checksum-mode";
+const S3_CHECKSUM_TYPE_HEADER = "x-amz-checksum-type";
+const S3_CHECKSUM_MODE_ENABLED = "ENABLED";
+const S3_CHECKSUM_TYPE_FULL = "FULL_OBJECT";
+const S3_HEAD = "HEAD";
+const S3_BASE64 = "base64";
+const S3_SHA256 = "sha256";
+const S3_ERROR_CODES = {
+  access: "AccessDenied",
+  bucket: "NoSuchBucket",
+  key: "NoSuchKey",
+  checksum: "BadDigest",
+  length: "IncompleteBody",
+  scripted: "InternalError",
+} as const;
+
+export interface FakeS3Object {
+  version: string;
+  bytes: Buffer;
+  sha256: string | null;
+}
+
+export interface FakeS3Call {
+  method: string;
+  key: string;
+  version: string | null;
+}
+
+interface FakeS3State {
+  versions: Map<string, FakeS3Object[]>;
+  calls: FakeS3Call[];
+  nextFailure: number | null;
+}
+
+interface FakeS3Target {
+  key: string;
+  version: string | null;
+}
+
+function s3Target(url: URL): FakeS3Target | null {
+  const prefix = `/${S3_BUCKET}/`;
+  if (!url.pathname.startsWith(prefix)) return null;
+  const key = decodeURIComponent(url.pathname.slice(prefix.length));
+  return { key, version: url.searchParams.get("versionId") };
+}
+
+function replyS3(response: ServerResponse, status: number, code: string) {
+  assert.ok(Number.isInteger(status));
+  assert.ok(!response.headersSent);
+  response
+    .writeHead(status, { "content-type": "application/xml" })
+    .end(`<?xml version="1.0"?><Error><Code>${code}</Code></Error>`);
+}
+
+async function readS3Body(request: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = ZERO_BYTES;
+  for await (const chunk of request) {
+    size += chunk.length;
+    assert.ok(size <= S3_BODY_MAX);
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+function s3Signed(request: IncomingMessage, url: URL): boolean {
+  return (
+    url.searchParams.has(S3_SIGNATURE_PARAMETER) ||
+    request.headers.authorization !== undefined
+  );
+}
+
+function s3SignedHeaders(url: URL): ReadonlySet<string> {
+  const value = url.searchParams.get(S3_SIGNED_HEADERS_PARAMETER) ?? "";
+  return new Set(value.split(S3_SIGNED_HEADER_SEPARATOR));
+}
+
+function s3Find(state: FakeS3State, target: FakeS3Target) {
+  const stored = state.versions.get(target.key) ?? [];
+  return target.version === null
+    ? stored.at(-1)
+    : stored.find((item) => item.version === target.version);
+}
+
+function putS3Object(
+  state: FakeS3State,
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  target: FakeS3Target,
+  bytes: Buffer,
+) {
+  const signed = s3SignedHeaders(url);
+  if (
+    signed.has(S3_CONTENT_LENGTH_HEADER) &&
+    request.headers[S3_CONTENT_LENGTH_HEADER] !== String(bytes.length)
+  )
+    return replyS3(response, HttpStatus.BadRequest, S3_ERROR_CODES.length);
+  const declared = request.headers[CHECKSUM_HEADER];
+  const actual = createHash(S3_SHA256).update(bytes).digest(S3_BASE64);
+  if (signed.has(CHECKSUM_HEADER) && declared !== actual)
+    return replyS3(response, HttpStatus.BadRequest, S3_ERROR_CODES.checksum);
+  const stored = state.versions.get(target.key) ?? [];
+  const version = `${S3_VERSION_PREFIX}${stored.length + S3_FIRST_VERSION}`;
+  stored.push({
+    version,
+    bytes,
+    sha256: signed.has(CHECKSUM_HEADER) ? actual : null,
+  });
+  state.versions.set(target.key, stored);
+  response.writeHead(HttpStatus.OK, { [S3_VERSION_HEADER]: version }).end();
+}
+
+function readS3Object(
+  state: FakeS3State,
+  request: IncomingMessage,
+  response: ServerResponse,
+  target: FakeS3Target,
+) {
+  const found = s3Find(state, target);
+  if (!found) {
+    return request.method === HttpMethod.Get
+      ? replyS3(response, HttpStatus.NotFound, S3_ERROR_CODES.key)
+      : response.writeHead(HttpStatus.NotFound).end();
+  }
+  const headers: Record<string, string | number> = {
+    [S3_CONTENT_LENGTH_HEADER]: found.bytes.length,
+    [S3_VERSION_HEADER]: found.version,
+  };
+  if (
+    found.sha256 !== null &&
+    request.headers[S3_CHECKSUM_MODE_HEADER] === S3_CHECKSUM_MODE_ENABLED
+  ) {
+    headers[CHECKSUM_HEADER] = found.sha256;
+    headers[S3_CHECKSUM_TYPE_HEADER] = S3_CHECKSUM_TYPE_FULL;
+  }
+  response
+    .writeHead(HttpStatus.OK, headers)
+    .end(request.method === HttpMethod.Get ? found.bytes : undefined);
+}
+
+function deleteS3Object(
+  state: FakeS3State,
+  response: ServerResponse,
+  target: FakeS3Target,
+) {
+  const stored = state.versions.get(target.key) ?? [];
+  const kept =
+    target.version === null
+      ? []
+      : stored.filter((item) => item.version !== target.version);
+  state.versions.set(target.key, kept);
+  const headers: Record<string, string> =
+    target.version === null ? {} : { [S3_VERSION_HEADER]: target.version };
+  response.writeHead(HttpStatus.NoContent, headers).end();
+}
+
+async function s3Request(
+  state: FakeS3State,
+  request: IncomingMessage,
+  response: ServerResponse,
+) {
+  assert.ok(request.url && request.method);
+  const url = new URL(request.url, "http://127.0.0.1");
+  const target = s3Target(url);
+  if (!target)
+    return replyS3(response, HttpStatus.NotFound, S3_ERROR_CODES.bucket);
+  state.calls.push({
+    method: request.method,
+    key: target.key,
+    version: target.version,
+  });
+  const body = await readS3Body(request);
+  const scripted = state.nextFailure;
+  if (scripted !== null) {
+    state.nextFailure = null;
+    return replyS3(response, scripted, S3_ERROR_CODES.scripted);
+  }
+  if (!s3Signed(request, url))
+    return replyS3(response, HttpStatus.Forbidden, S3_ERROR_CODES.access);
+  if (request.method === HttpMethod.Put)
+    return putS3Object(state, request, response, url, target, body);
+  if (request.method === HttpMethod.Delete)
+    return deleteS3Object(state, response, target);
+  assert.ok(request.method === HttpMethod.Get || request.method === S3_HEAD);
+  readS3Object(state, request, response, target);
+}
+
+export async function fakeS3(t: TestContext) {
+  const state: FakeS3State = {
+    versions: new Map(),
+    calls: [],
+    nextFailure: null,
+  };
+  const failures: unknown[] = [];
+  const server = createServer((request, response) => {
+    void s3Request(state, request, response).catch((error: unknown) => {
+      failures.push(error);
+      response.destroy(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    });
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    if (failures.length) throw new AggregateError(failures, "Fake S3 failed.");
+  });
+  server.listen(EPHEMERAL_PORT, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && !isString(address));
+  assert.ok(address.port > EPHEMERAL_PORT);
+  return {
+    endpoint: `http://127.0.0.1:${address.port}`,
+    bucket: S3_BUCKET,
+    calls: state.calls as readonly FakeS3Call[],
+    objects(key: string): readonly FakeS3Object[] {
+      return state.versions.get(key) ?? [];
+    },
+    failNext(status: number): void {
+      assert.ok(Number.isInteger(status));
+      assert.equal(state.nextFailure, null);
+      state.nextFailure = status;
+    },
+  };
+}
