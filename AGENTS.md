@@ -47,7 +47,7 @@ engine/
 │   │   ├── contract.ts         # Repository credential route group
 │   │   ├── credential-platform.ts # github platform validator and GitHub probe
 │   │   ├── credential.ts       # Repository credential routes over custody records and binding dependents
-│   │   └── github.ts           # GitHub platform implementation: per-call octokit client and result classes
+│   │   └── github.ts           # GitHub platform implementation: per-call octokit client, result classes and the delivery classification
 │   ├── llm/                    # LLM component: LLM platforms, credential routes, OAuth login sessions, and the model connector
 │   │   ├── contract.ts         # LLM credential route group, login and provider check operations, and error codes
 │   │   ├── index.ts            # Component and platform table exports
@@ -100,7 +100,7 @@ engine/
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
 │   ├── intake/                 # Intake Service: inbound events and outbound requests
-│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, inbound schemas, inbound operations, the inbound collaboration type, and operations
+│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, inbound schemas, inbound operations, the inbound collaboration type, the inbound event schema, the event operations and the receipt, and operations
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
 │   │   ├── configuration.ts    # Inbound configuration schema per kind and platform, and resource identity
 │   │   ├── inbound-store.ts    # Inbound rows, the record projection, pending event count, and delete with events
