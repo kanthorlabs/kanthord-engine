@@ -169,6 +169,7 @@ const INSTRUCTION_PATHS = [
   "CLAUDE.local.md",
 ];
 const NO_ENTRIES = 0;
+const MAX_BYTES = 16;
 const FIRST_INDEX = 0;
 const SECOND_INDEX = 1;
 const FIRST_TEXT = "first\n";
@@ -191,12 +192,14 @@ async function instructionOrigin(t: TestContext) {
   await git.init();
   await git.raw(["checkout", "-b", "main"]);
   await git.addRemote("origin", origin);
-  const commit = async (files: Record<string, string | { link: string }>) => {
+  const commit = async (
+    files: Record<string, string | Buffer | { link: string }>,
+  ) => {
     for (const [name, entry] of Object.entries(files)) {
       const path = join(seed, name);
       mkdirSync(dirname(path), { recursive: true });
       rmSync(path, { force: true });
-      if (isString(entry)) writeFileSync(path, entry);
+      if (isString(entry) || Buffer.isBuffer(entry)) writeFileSync(path, entry);
       else symlinkSync(entry.link, path);
     }
     await git.raw(["add", "--force", "."]);
@@ -251,6 +254,7 @@ test("readFilesAtCommit reads the present files of a commit and answers null for
     address,
     head,
     INSTRUCTION_PATHS,
+    MAX_BYTES,
     background,
     DEADLINE_MS,
     scratch,
@@ -270,7 +274,7 @@ test("readFilesAtCommit reads the present files of a commit and answers null for
 
 async function readStates(
   t: TestContext,
-  files: Record<string, string | { link: string }>,
+  files: Record<string, string | Buffer | { link: string }>,
 ) {
   const { address, scratch, commit } = await instructionOrigin(t);
   const head = await commit(files);
@@ -278,6 +282,7 @@ async function readStates(
     address,
     head,
     INSTRUCTION_PATHS,
+    MAX_BYTES,
     background,
     DEADLINE_MS,
     scratch,
@@ -355,6 +360,23 @@ test("readFilesAtCommit refuses a directory and a symlink to a directory", async
   );
 });
 
+test("readFilesAtCommit refuses a file above the byte bound and a file that is not UTF-8", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      "AGENTS.md": "x".repeat(MAX_BYTES + 1),
+      "AGENTS.local.md": "x".repeat(MAX_BYTES),
+      "CLAUDE.md": Buffer.from([0x66, 0xff, 0x0a]),
+      "CLAUDE.local.md": { link: "CLAUDE.md" },
+    }),
+    [
+      [RepositoryFileState.TooLarge, null],
+      [RepositoryFileState.Present, "x".repeat(MAX_BYTES)],
+      [RepositoryFileState.NotUtf8, null],
+      [RepositoryFileState.NotUtf8, null],
+    ],
+  );
+});
+
 test("readFilesAtCommit reads the named commit after the branch moved", async (t) => {
   const { address, scratch, commit } = await instructionOrigin(t);
   const first = await commit({ "AGENTS.md": "first\n" });
@@ -363,6 +385,7 @@ test("readFilesAtCommit reads the named commit after the branch moved", async (t
     address,
     first,
     INSTRUCTION_PATHS,
+    MAX_BYTES,
     background,
     DEADLINE_MS,
     scratch,
@@ -379,6 +402,7 @@ test("readFilesAtCommit deletes its directory when the read fails", async (t) =>
       address,
       UNKNOWN_COMMIT,
       INSTRUCTION_PATHS,
+      MAX_BYTES,
       background,
       DEADLINE_MS,
       scratch,
@@ -390,6 +414,7 @@ test("readFilesAtCommit deletes its directory when the read fails", async (t) =>
       MISSING_REPOSITORY,
       UNKNOWN_COMMIT,
       INSTRUCTION_PATHS,
+      MAX_BYTES,
       background,
       DEADLINE_MS,
       scratch,
@@ -407,6 +432,7 @@ test("readFilesAtCommit rejects when the deadline elapsed and deletes its direct
       address,
       head,
       INSTRUCTION_PATHS,
+      MAX_BYTES,
       background,
       EXPIRED_DEADLINE_MS - 1,
       scratch,

@@ -3580,6 +3580,7 @@ function instructionFixture(
     address: string;
     commit: string;
     paths: readonly string[];
+    maxBytes: number;
     timeout: number;
   }> = [];
   const started = Promise.withResolvers<void>();
@@ -3603,8 +3604,15 @@ function instructionFixture(
           ? commits.shift()!
           : commits[NO_ITEMS]!;
       },
-      async readFilesAtCommit(address, commit, paths, _context, timeout) {
-        readCalls.push({ address, commit, paths, timeout });
+      async readFilesAtCommit(
+        address,
+        commit,
+        paths,
+        maxBytes,
+        _context,
+        timeout,
+      ) {
+        readCalls.push({ address, commit, paths, maxBytes, timeout });
         if (behavior.readFails) throw new Error("fetch failed");
         return paths.map((path, index) => {
           const text = behavior.texts?.[index] ?? null;
@@ -3702,6 +3710,7 @@ test("binding.instruction_files.get answers the four files with their states", a
   assert.equal(readCalls.length, ONE_CALL);
   assert.equal(readCalls[NO_ITEMS]?.commit, INSTRUCTION_COMMIT);
   assert.deepEqual(readCalls[NO_ITEMS]?.paths, INSTRUCTION_PATHS);
+  assert.equal(readCalls[NO_ITEMS]?.maxBytes, PROMPT_SOURCE_MAX_BYTES);
 });
 
 test("binding.instruction_files.get maps the connector reasons of unreadable files to the invalid reasons of the working layer", async (t) => {
@@ -3720,6 +3729,27 @@ test("binding.instruction_files.get maps the connector reasons of unreadable fil
       [InstructionFileState.Invalid, InvalidReason.NotRegularFile, null],
       [InstructionFileState.Invalid, InvalidReason.OutsideWorkspace, null],
       [InstructionFileState.Invalid, InvalidReason.Unreadable, null],
+      [InstructionFileState.Absent, null, null],
+    ],
+  );
+});
+
+test("binding.instruction_files.get maps an oversized file and a file that is not UTF-8 to the invalid reasons of the working layer", async (t) => {
+  const { f, saved } = instructionFixture(t, {
+    states: [
+      RepositoryFileState.TooLarge,
+      RepositoryFileState.NotUtf8,
+      RepositoryFileState.Absent,
+      RepositoryFileState.Absent,
+    ],
+  });
+  const result = await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.deepEqual(
+    result.files.map(({ state, reason, text }) => [state, reason, text]),
+    [
+      [InstructionFileState.Invalid, InvalidReason.TooLarge, null],
+      [InstructionFileState.Invalid, InvalidReason.NotUtf8, null],
+      [InstructionFileState.Absent, null, null],
       [InstructionFileState.Absent, null, null],
     ],
   );

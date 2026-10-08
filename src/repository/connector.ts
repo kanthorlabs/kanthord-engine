@@ -1,4 +1,4 @@
-import { simpleGit } from "simple-git";
+import { simpleGit, type SimpleGit } from "simple-git";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -21,6 +21,7 @@ import {
 const GIT_FAILED = "repository.connector.git_failed";
 const EMPTY_STRING = "";
 const EXPIRED = 0;
+const EMPTY_BYTES = 0;
 const REPOSITORY_FILES_DIRECTORY_PREFIX = "kanthord-repository-files-";
 const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LS_REMOTE_FIELD_SEPARATOR = "\t";
@@ -30,6 +31,7 @@ const LS_TREE_MODE_FIELD = 0;
 const NOT_FOUND_INDEX = -1;
 const NEXT_INDEX = 1;
 const REGULAR_FILE_MODES = ["100644", "100755"];
+const UTF8_LABEL = "utf-8";
 const SYMLINK_MODE = "120000";
 const SYMLINK_HOPS_MAX = 40;
 const REPOSITORY_ROOT = ".";
@@ -46,6 +48,18 @@ async function runGit(
   operation: string,
 ): Promise<string> {
   assert.ok(args.length);
+  return runGitTask(directory, context, deadlineMs, operation, (git) =>
+    git.raw(args),
+  );
+}
+
+async function runGitTask<T>(
+  directory: string | undefined,
+  context: Context,
+  deadlineMs: number,
+  operation: string,
+  task: (git: SimpleGit) => Promise<T>,
+): Promise<T> {
   assert.ok(operation);
   const controller = new AbortController();
   const unsubscribe = context.onCancel(() => controller.abort());
@@ -56,11 +70,13 @@ async function runGit(
   try {
     throwIfCancelled(context);
     if (deadlineMs <= EXPIRED) throw new Error("Git deadline exceeded");
-    return await simpleGit({
-      ...(directory === undefined ? {} : { baseDir: directory }),
-      abort: controller.signal,
-      timeout: { block: deadlineMs },
-    }).raw(args);
+    return await task(
+      simpleGit({
+        ...(directory === undefined ? {} : { baseDir: directory }),
+        abort: controller.signal,
+        timeout: { block: deadlineMs },
+      }),
+    );
   } catch {
     throw new Diagnostic(GIT_FAILED, `${operation}: git failed.`);
   } finally {
@@ -246,6 +262,7 @@ export async function resolveBranchCommit(
 }
 
 type GitRun = (args: string[]) => Promise<string>;
+type GitBlobRun = (object: string) => Promise<Buffer>;
 
 async function treeMode(
   run: GitRun,
@@ -270,21 +287,49 @@ function repositoryFile(
   return { path, state, text };
 }
 
+async function regularRepositoryFile(
+  run: GitRun,
+  readBlob: GitBlobRun,
+  object: string,
+  path: string,
+  maxBytes: number,
+): Promise<RepositoryFile> {
+  const size = Number((await run(["cat-file", "-s", object])).trim());
+  assert.ok(Number.isSafeInteger(size));
+  if (size > maxBytes)
+    return repositoryFile(path, RepositoryFileState.TooLarge);
+  try {
+    return repositoryFile(
+      path,
+      RepositoryFileState.Present,
+      new TextDecoder(UTF8_LABEL, { fatal: true }).decode(
+        await readBlob(object),
+      ),
+    );
+  } catch (error) {
+    if (error instanceof TypeError)
+      return repositoryFile(path, RepositoryFileState.NotUtf8);
+    throw error;
+  }
+}
+
 async function resolveRepositoryFile(
   run: GitRun,
+  readBlob: GitBlobRun,
   commit: string,
   path: string,
+  maxBytes: number,
 ): Promise<RepositoryFile> {
   let current = path;
   for (let hops = 0; hops <= SYMLINK_HOPS_MAX; hops++) {
     const mode = await treeMode(run, commit, current);
     if (mode === null) return repositoryFile(path, RepositoryFileState.Absent);
-    const content = async () => run(["show", `${commit}:${current}`]);
+    const object = `${commit}:${current}`;
     if (REGULAR_FILE_MODES.includes(mode))
-      return repositoryFile(path, RepositoryFileState.Present, await content());
+      return regularRepositoryFile(run, readBlob, object, path, maxBytes);
     if (mode !== SYMLINK_MODE)
       return repositoryFile(path, RepositoryFileState.NotRegularFile);
-    const target = await content();
+    const target = await run(["show", object]);
     const resolved = posix.normalize(
       posix.join(posix.dirname(current), target),
     );
@@ -305,6 +350,7 @@ export async function readFilesAtCommit(
   address: string,
   commit: string,
   paths: readonly string[],
+  maxBytes: number,
   context: Context,
   deadlineMs: number,
   parent: string = tmpdir(),
@@ -312,6 +358,7 @@ export async function readFilesAtCommit(
   assert.ok(address !== EMPTY_STRING);
   assert.match(commit, OBJECT_ID_PATTERN);
   assert.ok(paths.length);
+  assert.ok(Number.isSafeInteger(maxBytes) && maxBytes > EMPTY_BYTES);
   const end = performance.now() + deadlineMs;
   const directory = await mkdtemp(
     join(parent, REPOSITORY_FILES_DIRECTORY_PREFIX),
@@ -323,6 +370,14 @@ export async function readFilesAtCommit(
       context,
       end - performance.now(),
       "read repository files",
+    );
+  const readBlob: GitBlobRun = (object) =>
+    runGitTask(
+      directory,
+      context,
+      end - performance.now(),
+      "read repository files",
+      async (git) => Buffer.from(await git.binaryCatFile(["blob", object])),
     );
   try {
     await run(["init", "--quiet"]);
@@ -337,7 +392,9 @@ export async function readFilesAtCommit(
     ]);
     const files: RepositoryFile[] = [];
     for (const path of paths)
-      files.push(await resolveRepositoryFile(run, commit, path));
+      files.push(
+        await resolveRepositoryFile(run, readBlob, commit, path, maxBytes),
+      );
     return files;
   } finally {
     await rm(directory, { recursive: true, force: true });

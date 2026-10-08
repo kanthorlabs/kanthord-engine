@@ -31,7 +31,11 @@ import {
   isPlatformSshHost,
 } from "../repository/platform.ts";
 import { WORKING_FILES } from "../agent/prompt-layers.ts";
-import { InvalidReason, validateText } from "../agent/prompt-source.ts";
+import {
+  InvalidReason,
+  PROMPT_SOURCE_MAX_BYTES,
+  validateText,
+} from "../agent/prompt-source.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
 import {
   assertPinned,
@@ -222,6 +226,8 @@ const INVALID_REASON_OF_FILE_STATE: Record<string, InvalidReason> = {
   [RepositoryFileState.NotRegularFile]: InvalidReason.NotRegularFile,
   [RepositoryFileState.OutsideRoot]: InvalidReason.OutsideWorkspace,
   [RepositoryFileState.Unreadable]: InvalidReason.Unreadable,
+  [RepositoryFileState.TooLarge]: InvalidReason.TooLarge,
+  [RepositoryFileState.NotUtf8]: InvalidReason.NotUtf8,
 };
 
 function instructionFileEntry(
@@ -507,6 +513,7 @@ export class ProjectService implements Service, ProjectBindings {
           config.address,
           commit,
           WORKING_FILES.map(([, path]) => path),
+          PROMPT_SOURCE_MAX_BYTES,
           deadline,
           end - Date.now(),
         ),

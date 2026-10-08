@@ -509,6 +509,7 @@ HTTP `200` answers `{ commit, read_at, files }`. `commit` is the commit of the b
 - `path` is the file name at the root of the repository.
 - `state` is `present`, `absent` or `invalid`. A path that the commit does not hold is `absent`.
 - A symlink in the commit resolves inside the repository root, up to 40 links. A dangling link is `absent`. A link that leaves the root is `invalid` with `outside_workspace`. A link loop is `invalid` with `unreadable`. A directory or a submodule is `invalid` with `not_regular_file`.
+- A file above 32768 bytes is `invalid` with `too_large`. A file that is not valid UTF-8 is `invalid` with `not_utf8`.
 - `reason` is the invalid reason of the working layer text validation, else null.
 - `text` is the text of a `present` file, else null.
 

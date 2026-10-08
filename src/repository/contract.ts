@@ -33,6 +33,8 @@ export const RepositoryFileState = {
   NotRegularFile: "not_regular_file",
   OutsideRoot: "outside_root",
   Unreadable: "unreadable",
+  TooLarge: "too_large",
+  NotUtf8: "not_utf8",
 } as const;
 export type RepositoryFileState =
   (typeof RepositoryFileState)[keyof typeof RepositoryFileState];

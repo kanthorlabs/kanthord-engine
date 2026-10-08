@@ -368,6 +368,7 @@ export type RepositoryFiles = {
     address: string,
     commit: string,
     paths: readonly string[],
+    maxBytes: number,
     context: Context,
     deadlineMs: number,
   ): Promise<Array<{ path: string; state: string; text: string | null }>>;
