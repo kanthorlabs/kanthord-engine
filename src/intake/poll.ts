@@ -35,7 +35,11 @@ import {
   PLATFORM_CALL_DEADLINE_MS,
 } from "./contract.ts";
 import { findEvent, insertEvent, pendingCount } from "./event-store.ts";
-import { readInbound, writeCheckpoint } from "./inbound-store.ts";
+import {
+  readInbound,
+  writeCheckpoint,
+  type InboundRow,
+} from "./inbound-store.ts";
 
 const NO_LENGTH = 0;
 const NO_ROOM = 0;
@@ -71,8 +75,8 @@ interface Loop {
   cycle: Promise<void> | null;
 }
 
-interface PollTarget {
-  inboundId: string;
+export interface PollTarget {
+  facts: InboundGrantInput;
   owner: string;
   repo: string;
   checkpoint: GitHubCheckpoint;
@@ -81,13 +85,42 @@ interface PollTarget {
 type Preparation =
   { ready: true; target: PollTarget } | { ready: false; outcome: CycleOutcome };
 
-interface Hold {
+export interface Hold {
   material: Material | null;
 }
 
 export function checkpointOf(text: string | null): GitHubCheckpoint {
   if (text === null) return EMPTY_CHECKPOINT;
   return githubCheckpointSchema.parse(JSON.parse(text));
+}
+
+export function pollTargetOf(row: InboundRow): PollTarget {
+  assert.equal(
+    row.kind,
+    InboundKind.Poll,
+    "A poll target reads a poll inbound.",
+  );
+  assert.equal(row.platform, InboundPlatform.GitHub);
+  assert.ok(row.credential !== null, "A poll names a credential.");
+  const { resource } = configurationSchemaOf(row.kind, row.platform).parse(
+    JSON.parse(row.configuration),
+  );
+  const { owner, repo } = repositoryOf({
+    kind: GitHubTargetKind.Inbound,
+    resource,
+  });
+  return {
+    facts: {
+      inboundId: row.id,
+      projectId: row.project_id,
+      credential: row.credential,
+      platform: row.platform,
+      resource,
+    },
+    owner,
+    repo,
+    checkpoint: checkpointOf(row.checkpoint),
+  };
 }
 
 export interface PollReleaseDependencies {
@@ -160,26 +193,12 @@ function prepareCycle(
   const row = readInbound(tx, inboundId);
   if (row === null) return { ready: false, outcome: CycleOutcome.Gone };
   assert.equal(row.kind, InboundKind.Poll, "A poll loop reads a poll inbound.");
-  assert.equal(row.platform, InboundPlatform.GitHub);
   if (pendingCount(tx) >= dependencies.pendingEventLimit)
     return { ready: false, outcome: CycleOutcome.Continue };
-  const checkpoint = checkpointOf(row.checkpoint);
-  const { resource } = configurationSchemaOf(row.kind, row.platform).parse(
-    JSON.parse(row.configuration),
-  );
-  const { owner, repo } = repositoryOf({
-    kind: GitHubTargetKind.Inbound,
-    resource,
-  });
-  assert.ok(row.credential !== null, "A poll names a credential.");
-  hold.material = releasePollGrant(dependencies, tx, {
-    inboundId: row.id,
-    projectId: row.project_id,
-    credential: row.credential,
-    platform: row.platform,
-    resource,
-  });
-  return { ready: true, target: { inboundId, owner, repo, checkpoint } };
+  const target = pollTargetOf(row);
+  assert.equal(target.facts.inboundId, inboundId);
+  hold.material = releasePollGrant(dependencies, tx, target.facts);
+  return { ready: true, target };
 }
 
 export function storeBatch(

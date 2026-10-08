@@ -1,20 +1,20 @@
 import assert from "node:assert/strict";
-import type { InboundGrantInput, Material } from "../custody/contract.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import { throwIfCancelled } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { ResourceStatus, type ResourceCheck } from "../kernel/health.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import {
-  GitHubTargetKind,
-  repositoryOf,
-  type GitHubPlatform,
-} from "../repository/github.ts";
+import type { GitHubPlatform } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
-import { configurationSchemaOf } from "./configuration.ts";
 import { InboundKind, type IntakeInventoryEntry } from "./contract.ts";
 import { allInbounds, type InboundRow } from "./inbound-store.ts";
-import { checkpointOf, releasePollGrant, requestPollEvents } from "./poll.ts";
+import {
+  pollTargetOf,
+  releasePollGrant,
+  requestPollEvents,
+  type Hold,
+  type PollTarget,
+} from "./poll.ts";
 
 const NO_LENGTH = 0;
 
@@ -33,53 +33,18 @@ export interface InboundHealthDependencies {
   github: Pick<GitHubPlatform, "listEvents">;
 }
 
-interface PollProbe {
-  facts: InboundGrantInput;
-  owner: string;
-  repo: string;
-  etag: string | null;
-}
-
-interface Hold {
-  material: Material | null;
-}
-
 const webhookCheck: ResourceCheck = async () => ResourceStatus.Unknown;
-
-function probeOf(row: InboundRow): PollProbe {
-  assert.equal(row.kind, InboundKind.Poll, "A probe reads a poll inbound.");
-  assert.ok(row.credential !== null, "A poll names a credential.");
-  const { resource } = configurationSchemaOf(row.kind, row.platform).parse(
-    JSON.parse(row.configuration),
-  );
-  const { owner, repo } = repositoryOf({
-    kind: GitHubTargetKind.Inbound,
-    resource,
-  });
-  return {
-    facts: {
-      inboundId: row.id,
-      projectId: row.project_id,
-      credential: row.credential,
-      platform: row.platform,
-      resource,
-    },
-    owner,
-    repo,
-    etag: checkpointOf(row.checkpoint).etag,
-  };
-}
 
 function releaseRefusal(
   dependencies: InboundHealthDependencies,
-  probe: PollProbe,
+  target: PollTarget,
   hold: Hold,
 ): string | null {
   assert.equal(hold.material, null, "A check releases once.");
-  assert.ok(probe.facts.inboundId.length > NO_LENGTH);
+  assert.ok(target.facts.inboundId.length > NO_LENGTH);
   try {
     dependencies.store.transaction((tx) => {
-      hold.material = releasePollGrant(dependencies, tx, probe.facts);
+      hold.material = releasePollGrant(dependencies, tx, target.facts);
     });
     return null;
   } catch (error) {
@@ -90,15 +55,15 @@ function releaseRefusal(
 
 function pollCheck(
   dependencies: InboundHealthDependencies,
-  probe: PollProbe,
+  target: PollTarget,
 ): ResourceCheck {
-  assert.ok(probe.owner.length > NO_LENGTH, "A probe names an owner.");
-  assert.ok(probe.repo.length > NO_LENGTH, "A probe names a repository.");
+  assert.ok(target.owner.length > NO_LENGTH, "A target names an owner.");
+  assert.ok(target.repo.length > NO_LENGTH, "A target names a repository.");
   return async (context, observe) => {
     throwIfCancelled(context);
     const hold: Hold = { material: null };
     try {
-      const refusal = releaseRefusal(dependencies, probe, hold);
+      const refusal = releaseRefusal(dependencies, target, hold);
       if (refusal !== null) {
         observe?.(refusal);
         return ResourceStatus.Unhealthy;
@@ -108,9 +73,9 @@ function pollCheck(
         requester: dependencies.identity,
         context,
         material: hold.material,
-        owner: probe.owner,
-        repo: probe.repo,
-        etag: probe.etag,
+        owner: target.owner,
+        repo: target.repo,
+        etag: target.checkpoint.etag,
       });
       throwIfCancelled(context);
       if (answer.ok) return ResourceStatus.Healthy;
@@ -131,7 +96,7 @@ function checkOf(
     return { capability: InboundCapability.Webhook, check: webhookCheck };
   return {
     capability: InboundCapability.PollAcquisition,
-    check: pollCheck(dependencies, probeOf(row)),
+    check: pollCheck(dependencies, pollTargetOf(row)),
   };
 }
 
