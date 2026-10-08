@@ -47,7 +47,7 @@ engine/
 │   │   ├── contract.ts         # Repository credential route group
 │   │   ├── credential-platform.ts # github platform validator and GitHub probe
 │   │   ├── credential.ts       # Repository credential routes over custody records and binding dependents
-│   │   └── github.ts           # GitHub platform implementation: per-call octokit client, result classes and the delivery classification
+│   │   └── github.ts           # GitHub platform implementation: per-call octokit client, result classes, the delivery classification and the event decoder
 │   ├── llm/                    # LLM component: LLM platforms, credential routes, OAuth login sessions, and the model connector
 │   │   ├── contract.ts         # LLM credential route group, login and provider check operations, and error codes
 │   │   ├── index.ts            # Component and platform table exports

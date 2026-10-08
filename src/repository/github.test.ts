@@ -25,6 +25,7 @@ import {
   classify,
   classifyDelivery,
   decodeCursor,
+  decodeGitHubEvent,
   encodeCursor,
   githubCheckpointSchema,
   newerEvents,
@@ -876,4 +877,172 @@ test("githubCheckpointSchema admits the checkpoint fields and refuses others", (
       extra: 1,
     }).success,
   );
+});
+
+const EVENT_RESOURCE = "owner/gated";
+const EVENT_RESOURCE_IDENTITY = "repository:github:owner/gated";
+const EVENT_COMMIT = "e".repeat(40);
+const webhookRepository = { full_name: EVENT_RESOURCE };
+const polledRepository = { id: 1, name: EVENT_RESOURCE };
+
+function eventBytes(text: string): Uint8Array {
+  return new Uint8Array(Buffer.from(text, "utf8"));
+}
+
+function decoded(event: string, body: unknown): unknown {
+  return decodeGitHubEvent({
+    resource: EVENT_RESOURCE,
+    event: eventBytes(JSON.stringify(body)),
+    metadata: { event },
+  });
+}
+
+function closedPullRequest(merged: boolean): unknown {
+  return {
+    action: "closed",
+    number: 7,
+    pull_request: { merged },
+    repository: webhookRepository,
+  };
+}
+
+function pushTo(ref: string, after: string): unknown {
+  return { ref, after, repository: webhookRepository };
+}
+
+test("decodeGitHubEvent answers the pull request of a merged and a closed pull request", () => {
+  const address = {
+    kind: "pull_request",
+    resource_identity: EVENT_RESOURCE_IDENTITY,
+    number: 7,
+  };
+  assert.deepEqual(decoded("pull_request", closedPullRequest(true)), address);
+  assert.deepEqual(decoded("pull_request", closedPullRequest(false)), address);
+});
+
+test("decodeGitHubEvent answers the branch push of a push to main", () => {
+  assert.deepEqual(decoded("push", pushTo("refs/heads/main", EVENT_COMMIT)), {
+    kind: "branch_push",
+    resource_identity: EVENT_RESOURCE_IDENTITY,
+    branch: "main",
+    commit: EVENT_COMMIT,
+  });
+});
+
+test("decodeGitHubEvent answers null for a branch delete, a tag push and an upper-case commit", () => {
+  assert.equal(
+    decoded("push", pushTo("refs/heads/main", "0".repeat(40))),
+    null,
+  );
+  assert.equal(decoded("push", pushTo("refs/tags/v1", EVENT_COMMIT)), null);
+  assert.equal(decoded("push", pushTo("refs/heads/", EVENT_COMMIT)), null);
+  assert.equal(
+    decoded("push", pushTo("refs/heads/main", "E".repeat(40))),
+    null,
+  );
+});
+
+test("decodeGitHubEvent answers null for a ping and another event type", () => {
+  assert.equal(decoded("ping", { zen: "z", hook_id: 1 }), null);
+  assert.equal(
+    decoded("issues", {
+      action: "opened",
+      issue: { number: 3 },
+      repository: webhookRepository,
+    }),
+    null,
+  );
+  assert.equal(decoded("constructor", closedPullRequest(true)), null);
+});
+
+test("decodeGitHubEvent answers null for another repository", () => {
+  const other = { full_name: "owner/other" };
+  assert.equal(decoded("pull_request", { number: 7, repository: other }), null);
+  assert.equal(
+    decoded("push", {
+      ref: "refs/heads/main",
+      after: EVENT_COMMIT,
+      repository: other,
+    }),
+    null,
+  );
+  assert.equal(
+    decoded("PullRequestEvent", {
+      repo: { name: "owner/other" },
+      payload: { number: 7 },
+    }),
+    null,
+  );
+});
+
+test("decodeGitHubEvent answers the address of the two polled types", () => {
+  assert.deepEqual(
+    decoded("PullRequestEvent", {
+      id: "1",
+      type: "PullRequestEvent",
+      repo: polledRepository,
+      payload: { action: "closed", number: 7 },
+    }),
+    {
+      kind: "pull_request",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      number: 7,
+    },
+  );
+  assert.deepEqual(
+    decoded("PushEvent", {
+      id: "2",
+      type: "PushEvent",
+      repo: polledRepository,
+      payload: { ref: "refs/heads/feature/x", head: EVENT_COMMIT },
+    }),
+    {
+      kind: "branch_push",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      branch: "feature/x",
+      commit: EVENT_COMMIT,
+    },
+  );
+});
+
+test("decodeGitHubEvent answers null for bytes that do not decode", () => {
+  const decode = (event: Uint8Array) =>
+    decodeGitHubEvent({
+      resource: EVENT_RESOURCE,
+      event,
+      metadata: { event: "pull_request" },
+    });
+  assert.equal(decode(eventBytes("{not json")), null);
+  assert.equal(decode(new Uint8Array([0xff, 0xfe, 0x7b])), null);
+  assert.equal(decode(new Uint8Array()), null);
+  assert.equal(decoded("pull_request", null), null);
+  assert.equal(decoded("pull_request", [closedPullRequest(true)]), null);
+  assert.equal(decoded("pull_request", { number: 7 }), null);
+  assert.equal(decoded("PushEvent", { repo: polledRepository }), null);
+});
+
+test("decodeGitHubEvent answers null for a zero, a negative or a fractional number", () => {
+  for (const number of [0, -1, 1.5, "7"]) {
+    assert.equal(
+      decoded("pull_request", { number, repository: webhookRepository }),
+      null,
+    );
+  }
+});
+
+test("decodeGitHubEvent answers null for metadata of another shape", () => {
+  const event = eventBytes(JSON.stringify(closedPullRequest(true)));
+  for (const metadata of [
+    null,
+    "pull_request",
+    {},
+    { event: "" },
+    { event: 1 },
+    { event: "pull_request", delivery: "d" },
+  ]) {
+    assert.equal(
+      decodeGitHubEvent({ resource: EVENT_RESOURCE, event, metadata }),
+      null,
+    );
+  }
 });

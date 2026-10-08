@@ -753,3 +753,193 @@ export class GitHubPlatform {
     }
   }
 }
+
+export const DecodedAddressKind = {
+  PullRequest: "pull_request",
+  BranchPush: "branch_push",
+} as const;
+
+export type DecodedAddress =
+  | {
+      kind: typeof DecodedAddressKind.PullRequest;
+      resource_identity: string;
+      number: number;
+    }
+  | {
+      kind: typeof DecodedAddressKind.BranchPush;
+      resource_identity: string;
+      branch: string;
+      commit: string;
+    };
+
+export interface GitHubEventInput {
+  resource: string;
+  event: Uint8Array;
+  metadata: unknown;
+}
+
+const GitHubEventType = {
+  PullRequest: "pull_request",
+  Push: "push",
+  PolledPullRequest: "PullRequestEvent",
+  PolledPush: "PushEvent",
+} as const;
+
+const RESOURCE_IDENTITY_PREFIX = "repository:github:";
+const ZERO_COMMIT = "0".repeat(40);
+const BRANCH_REF_PREFIX = "refs/heads/";
+const BRANCH_REF_PATTERN = /^refs\/heads\/[^\n]+$/;
+
+const eventMetadataSchema = z.strictObject({ event: z.string().min(1) });
+const eventNumberSchema = z.int().min(MIN_PULL_REQUEST_NUMBER);
+const eventCommitSchema = z
+  .string()
+  .regex(/^[0-9a-f]{40}$/)
+  .refine((commit) => commit !== ZERO_COMMIT);
+const eventBranchSchema = z
+  .string()
+  .regex(BRANCH_REF_PATTERN)
+  .transform((ref) => ref.slice(BRANCH_REF_PREFIX.length));
+const webhookRepositorySchema = z.looseObject({ full_name: z.string() });
+const polledRepositorySchema = z.looseObject({ name: z.string() });
+const pullRequestWebhookSchema = z.looseObject({
+  number: eventNumberSchema,
+  repository: webhookRepositorySchema,
+});
+const pushWebhookSchema = z.looseObject({
+  ref: eventBranchSchema,
+  after: eventCommitSchema,
+  repository: webhookRepositorySchema,
+});
+const pullRequestPolledSchema = z.looseObject({
+  repo: polledRepositorySchema,
+  payload: z.looseObject({ number: eventNumberSchema }),
+});
+const pushPolledSchema = z.looseObject({
+  repo: polledRepositorySchema,
+  payload: z.looseObject({ ref: eventBranchSchema, head: eventCommitSchema }),
+});
+
+type EventAddressDecoder = (
+  resource: string,
+  body: unknown,
+) => DecodedAddress | null;
+
+const EVENT_ADDRESS_DECODERS: ReadonlyMap<string, EventAddressDecoder> =
+  new Map<string, EventAddressDecoder>([
+    [GitHubEventType.PullRequest, pullRequestWebhookAddress],
+    [GitHubEventType.Push, pushWebhookAddress],
+    [GitHubEventType.PolledPullRequest, pullRequestPolledAddress],
+    [GitHubEventType.PolledPush, pushPolledAddress],
+  ]);
+
+export function decodeGitHubEvent(
+  input: GitHubEventInput,
+): DecodedAddress | null {
+  assert.ok(
+    isString(input.resource) && input.resource.length >= MIN_SEGMENT_LENGTH,
+  );
+  assert.ok(input.event instanceof Uint8Array);
+  const metadata = eventMetadataSchema.safeParse(input.metadata);
+  if (!metadata.success) {
+    return null;
+  }
+  const decoder = EVENT_ADDRESS_DECODERS.get(metadata.data.event);
+  const body = decoder === undefined ? null : eventBodyOf(input.event);
+  if (decoder === undefined || body === null) {
+    return null;
+  }
+  const address = decoder(input.resource, body.value);
+  assert.ok(
+    address === null ||
+      address.resource_identity === RESOURCE_IDENTITY_PREFIX + input.resource,
+  );
+  return address;
+}
+
+function eventBodyOf(event: Uint8Array): { value: unknown } | null {
+  assert.ok(event instanceof Uint8Array);
+  try {
+    const text = new TextDecoder(TEXT_ENCODING, { fatal: true }).decode(event);
+    return { value: JSON.parse(text) };
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof TypeError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function pullRequestWebhookAddress(
+  resource: string,
+  body: unknown,
+): DecodedAddress | null {
+  assert.ok(isString(resource));
+  const parsed = pullRequestWebhookSchema.safeParse(body);
+  if (!parsed.success || parsed.data.repository.full_name !== resource) {
+    return null;
+  }
+  return pullRequestAddress(resource, parsed.data.number);
+}
+
+function pushWebhookAddress(
+  resource: string,
+  body: unknown,
+): DecodedAddress | null {
+  assert.ok(isString(resource));
+  const parsed = pushWebhookSchema.safeParse(body);
+  if (!parsed.success || parsed.data.repository.full_name !== resource) {
+    return null;
+  }
+  return branchPushAddress(resource, parsed.data.ref, parsed.data.after);
+}
+
+function pullRequestPolledAddress(
+  resource: string,
+  body: unknown,
+): DecodedAddress | null {
+  assert.ok(isString(resource));
+  const parsed = pullRequestPolledSchema.safeParse(body);
+  if (!parsed.success || parsed.data.repo.name !== resource) {
+    return null;
+  }
+  return pullRequestAddress(resource, parsed.data.payload.number);
+}
+
+function pushPolledAddress(
+  resource: string,
+  body: unknown,
+): DecodedAddress | null {
+  assert.ok(isString(resource));
+  const parsed = pushPolledSchema.safeParse(body);
+  if (!parsed.success || parsed.data.repo.name !== resource) {
+    return null;
+  }
+  const { ref, head } = parsed.data.payload;
+  return branchPushAddress(resource, ref, head);
+}
+
+function pullRequestAddress(resource: string, number: number): DecodedAddress {
+  assert.ok(isString(resource) && resource.length >= MIN_SEGMENT_LENGTH);
+  assert.ok(Number.isSafeInteger(number) && number >= MIN_PULL_REQUEST_NUMBER);
+  return {
+    kind: DecodedAddressKind.PullRequest,
+    resource_identity: RESOURCE_IDENTITY_PREFIX + resource,
+    number,
+  };
+}
+
+function branchPushAddress(
+  resource: string,
+  branch: string,
+  commit: string,
+): DecodedAddress {
+  assert.ok(isString(resource) && resource.length >= MIN_SEGMENT_LENGTH);
+  assert.ok(branch.length >= MIN_SEGMENT_LENGTH && commit !== ZERO_COMMIT);
+  return {
+    kind: DecodedAddressKind.BranchPush,
+    resource_identity: RESOURCE_IDENTITY_PREFIX + resource,
+    branch,
+    commit,
+  };
+}
