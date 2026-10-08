@@ -7,7 +7,12 @@ import {
   type Material,
 } from "../custody/contract.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
-import { abortSignal, type Context } from "../kernel/context.ts";
+import {
+  abortSignal,
+  CancellationContext,
+  type Context,
+} from "../kernel/context.ts";
+import { CodedError } from "../kernel/errors.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
@@ -33,7 +38,9 @@ import { readInbound, type InboundRow } from "./inbound-store.ts";
 
 const NO_LENGTH = 0;
 const NO_ROOM = 0;
+const NO_INTERVAL_MS = 0;
 const ONE_ROW = 1;
+const UNKNOWN_CODE = "system.operation.unknown";
 const EMPTY_CHECKPOINT: GitHubCheckpoint = {
   etag: null,
   newest_event_id: null,
@@ -49,8 +56,19 @@ export interface PollCycleDependencies {
   wake(): void;
 }
 
+export interface PollDependencies extends PollCycleDependencies {
+  context: Context;
+  pollIntervalMs: number;
+}
+
 export const CycleOutcome = { Continue: "continue", Gone: "gone" } as const;
 export type CycleOutcome = (typeof CycleOutcome)[keyof typeof CycleOutcome];
+
+interface Loop {
+  timer: NodeJS.Timeout | null;
+  context: CancellationContext;
+  cycle: Promise<void> | null;
+}
 
 interface PollTarget {
   inboundId: string;
@@ -242,5 +260,89 @@ export async function pollCycle(
     return CycleOutcome.Continue;
   } finally {
     hold.material?.drop();
+  }
+}
+
+export class PollLoops {
+  readonly #dependencies: PollDependencies;
+  readonly #loops = new Map<string, Loop>();
+
+  constructor(dependencies: PollDependencies) {
+    assert.ok(Number.isSafeInteger(dependencies.pollIntervalMs));
+    assert.ok(dependencies.pollIntervalMs > NO_INTERVAL_MS);
+    assert.ok(Number.isSafeInteger(dependencies.pendingEventLimit));
+    assert.ok(dependencies.pendingEventLimit > NO_ROOM);
+    this.#dependencies = dependencies;
+  }
+
+  start(inboundId: string): void {
+    assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
+    if (this.#loops.has(inboundId)) return;
+    const loop: Loop = {
+      timer: null,
+      context: new CancellationContext(this.#dependencies.context),
+      cycle: null,
+    };
+    this.#loops.set(inboundId, loop);
+    this.#arm(inboundId, loop);
+  }
+
+  stop(inboundId: string): void {
+    assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
+    const loop = this.#loops.get(inboundId);
+    if (loop === undefined) return;
+    this.#loops.delete(inboundId);
+    if (loop.timer !== null) clearTimeout(loop.timer);
+    loop.timer = null;
+    loop.context.cancel();
+  }
+
+  async stopAll(): Promise<void> {
+    const cycles: Promise<void>[] = [];
+    for (const [inboundId, loop] of [...this.#loops]) {
+      if (loop.cycle !== null) cycles.push(loop.cycle);
+      this.stop(inboundId);
+    }
+    assert.equal(this.#loops.size, NO_LENGTH, "Every loop stops.");
+    await Promise.all(cycles);
+  }
+
+  #arm(inboundId: string, loop: Loop): void {
+    if (this.#loops.get(inboundId) !== loop) return;
+    assert.equal(loop.timer, null, "A loop holds one timer.");
+    assert.equal(loop.cycle, null, "A loop arms after its cycle ends.");
+    loop.timer = setTimeout(
+      () => this.#tick(inboundId, loop),
+      this.#dependencies.pollIntervalMs,
+    );
+  }
+
+  #tick(inboundId: string, loop: Loop): void {
+    assert.notEqual(loop.timer, null, "A tick follows an armed timer.");
+    loop.timer = null;
+    loop.cycle = this.#cycle(inboundId, loop.context).then((outcome) => {
+      loop.cycle = null;
+      if (outcome === CycleOutcome.Gone) this.#forget(inboundId, loop);
+      else this.#arm(inboundId, loop);
+    });
+  }
+
+  #forget(inboundId: string, loop: Loop): void {
+    if (this.#loops.get(inboundId) !== loop) return;
+    this.stop(inboundId);
+    assert.ok(!this.#loops.has(inboundId), "A gone inbound holds no loop.");
+  }
+
+  async #cycle(inboundId: string, context: Context): Promise<CycleOutcome> {
+    try {
+      return await pollCycle(this.#dependencies, inboundId, context);
+    } catch (error) {
+      logFailure(
+        this.#dependencies.logger,
+        inboundId,
+        error instanceof CodedError ? error.code : UNKNOWN_CODE,
+      );
+      return CycleOutcome.Continue;
+    }
   }
 }

@@ -109,7 +109,7 @@ engine/
 │   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret
 │   │   ├── event-store.ts      # Inbound event rows, the repeat lookup, pending count, and the record projection
 │   │   ├── event-read.ts       # Inbound event list with a cursor and get by identity
-│   │   ├── poll.ts             # Poll cycle: capacity pause, release, events request, and batch with its checkpoint in one transaction
+│   │   ├── poll.ts             # Poll loops: one loop per inbound, the cycle with its capacity pause and release, and the batch with its checkpoint
 │   │   ├── receipt.ts          # Webhook receipt: inbound lookup, signature check, handshake, capacity bound, and insert
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
 │   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit

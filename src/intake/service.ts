@@ -25,13 +25,10 @@ import {
   INTAKE_SERVICE_NAME,
   intakeOperations,
   PENDING_EVENT_LIMIT,
+  POLL_INTERVAL_MS,
   type IntakeCollaborations,
 } from "./contract.ts";
-import {
-  createInbound,
-  type InboundPollLoops,
-  type InboundProjects,
-} from "./inbound-create.ts";
+import { createInbound, type InboundProjects } from "./inbound-create.ts";
 import { removeInbound } from "./inbound-delete.ts";
 import { getEvent, listEvents } from "./event-read.ts";
 import { getInbound, listInbound } from "./inbound-read.ts";
@@ -39,6 +36,7 @@ import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { receiveEvent } from "./receipt.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { runOutbound, type OutboundRun } from "./outbound.ts";
+import { PollLoops } from "./poll.ts";
 import { deleteStoredObject } from "./storage-delete.ts";
 import {
   checkObject,
@@ -71,17 +69,21 @@ export class IntakeService implements Service, IntakeCollaborations {
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   private readonly outboundInFlight = new Set<string>();
-  readonly pollLoops: InboundPollLoops = {
-    start: (inboundId) => {
-      assert.ok(
-        inboundId.length > NO_LENGTH,
-        "An inbound identity is required.",
-      );
-    },
-  };
+  readonly pollLoops: PollLoops;
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.pollLoops = new PollLoops({
+      store: dependencies.store,
+      logger: dependencies.logger,
+      identity: dependencies.identity,
+      custody: dependencies.custody,
+      github: dependencies.github,
+      context: this.shutdown,
+      pendingEventLimit: dependencies.pendingEventLimit ?? PENDING_EVENT_LIMIT,
+      pollIntervalMs: POLL_INTERVAL_MS,
+      wake: () => this.wake(),
+    });
   }
 
   declare(registry: OperationRegistry): void {

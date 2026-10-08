@@ -39,6 +39,7 @@ import {
   CycleOutcome,
   pollCycle,
   storeBatch,
+  PollLoops,
   type PollCycleDependencies,
 } from "./poll.ts";
 
@@ -56,6 +57,11 @@ const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const SERVER_ERROR_STATUS = 500;
 const NO_CALLS = 0;
 const ONE_CALL = 1;
+const TWO_CALLS = 2;
+const INTERVAL_MS = 1000;
+const ONE_MS = 1;
+const SETTLE_TURNS = 20;
+const UNKNOWN_CODE = "system.operation.unknown";
 const SERVICE_IDENTITY = {
   kind: IdentityKind.Service,
   service: INTAKE_SERVICE_NAME,
@@ -303,7 +309,17 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
   };
   const cycle = (context = background) =>
     pollCycle(dependencies, h.inboundId, context);
-  return { ...h, grants, drops, calls, answers, warn, wakes, cycle };
+  return {
+    ...h,
+    grants,
+    drops,
+    calls,
+    answers,
+    warn,
+    wakes,
+    dependencies,
+    cycle,
+  };
 }
 
 test("a cycle releases one poll grant, requests the events under a deadline, stores the batch and wakes", async (t) => {
@@ -447,4 +463,110 @@ test("a cancelled context aborts the request and commits nothing after the answe
   assert.deepEqual(h.eventIds(), []);
   assert.equal(h.checkpoint(), null);
   assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < SETTLE_TURNS; turn += 1)
+    await new Promise((resolve) => setImmediate(resolve));
+}
+
+function loopHarness(t: TestContext, options: HarnessOptions = {}) {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = cycleHarness(t, options);
+  const shutdown = new CancellationContext();
+  const loops = new PollLoops({
+    ...h.dependencies,
+    context: shutdown,
+    pollIntervalMs: INTERVAL_MS,
+  });
+  t.after(() => loops.stopAll());
+  const interval = async () => {
+    t.mock.timers.tick(INTERVAL_MS);
+    await settle();
+  };
+  return { ...h, loops, interval };
+}
+
+test("a loop waits one interval before each cycle and re-arms after the cycle ends", async (t) => {
+  const h = loopHarness(t);
+  h.loops.start(h.inboundId);
+  t.mock.timers.tick(INTERVAL_MS - ONE_MS);
+  await settle();
+  assert.equal(h.calls.length, NO_CALLS);
+  t.mock.timers.tick(ONE_MS);
+  await settle();
+  assert.equal(h.calls.length, ONE_CALL);
+  await h.interval();
+  assert.equal(h.calls.length, TWO_CALLS);
+});
+
+test("a slow request starts no second request of that inbound before it ends", async (t) => {
+  const h = loopHarness(t);
+  const slow = Promise.withResolvers<EventsAnswer>();
+  h.answers.next = () => slow.promise;
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.interval();
+  await h.interval();
+  assert.equal(h.calls.length, ONE_CALL);
+  slow.resolve(modified(ETAG_FIRST, []));
+  await settle();
+  assert.equal(h.calls.length, ONE_CALL);
+  h.answers.next = async () => modified(ETAG_FIRST, []);
+  await h.interval();
+  assert.equal(h.calls.length, TWO_CALLS);
+});
+
+test("a thrown cycle logs the inbound and the code, and the loop continues", async (t) => {
+  const h = loopHarness(t);
+  h.answers.next = async () => {
+    throw new Error("transport closed");
+  };
+  h.loops.start(h.inboundId);
+  await h.interval();
+  assert.equal(h.warn.mock.callCount(), ONE_CALL);
+  const [fields] = h.warn.mock.calls[0]?.arguments ?? [];
+  assert.deepEqual(fields, { inbound_id: h.inboundId, code: UNKNOWN_CODE });
+  await h.interval();
+  assert.equal(h.calls.length, TWO_CALLS);
+  assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
+});
+
+test("a gone inbound ends its loop", async (t) => {
+  const h = loopHarness(t);
+  h.loops.start(h.inboundId);
+  h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
+  await h.interval();
+  await h.interval();
+  assert.equal(h.calls.length, NO_CALLS);
+  assert.deepEqual(h.grants, []);
+});
+
+test("a second start adds no loop and a stop clears the timer", async (t) => {
+  const h = loopHarness(t);
+  h.loops.start(h.inboundId);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  assert.equal(h.calls.length, ONE_CALL);
+  h.loops.stop(h.inboundId);
+  await h.interval();
+  assert.equal(h.calls.length, ONE_CALL);
+});
+
+test("stopAll cancels the running request, awaits its cycle and commits nothing", async (t) => {
+  const h = loopHarness(t);
+  const slow = Promise.withResolvers<EventsAnswer>();
+  h.answers.next = () => slow.promise;
+  h.loops.start(h.inboundId);
+  await h.interval();
+  assert.equal(h.calls.length, ONE_CALL);
+  const stopped = h.loops.stopAll();
+  assert.equal(h.calls[0]?.call.signal.aborted, true);
+  slow.resolve(modified(ETAG_FIRST, [ev("101", "PushEvent")]));
+  await stopped;
+  assert.deepEqual(h.eventIds(), []);
+  assert.equal(h.checkpoint(), null);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+  await h.interval();
+  assert.equal(h.calls.length, ONE_CALL);
 });

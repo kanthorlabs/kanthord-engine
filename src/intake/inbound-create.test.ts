@@ -424,7 +424,7 @@ function pollHarness(
   h.store.transaction((tx) =>
     tx.database.exec("CREATE TABLE test_drain (credential TEXT NOT NULL)"),
   );
-  const start = t.mock.method(h.intake.pollLoops, "start");
+  const start = t.mock.method(h.intake.pollLoops, "start", () => {});
   const drained = () =>
     h.store.transaction(
       (tx) =>
