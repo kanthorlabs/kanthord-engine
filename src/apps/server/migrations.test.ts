@@ -295,7 +295,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the nineteen tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
