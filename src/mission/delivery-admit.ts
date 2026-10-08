@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
+import {
+  ADMISSION_CONCURRENCY,
+  INTAKE_SERVICE_NAME,
+} from "../intake/contract.ts";
 import { isServiceIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -112,18 +115,52 @@ function commitAdmission(
   return ACCEPTED;
 }
 
-let admissionTail: Promise<unknown> = Promise.resolve();
+const NO_RUNNING_ADMISSIONS = 0;
+
+export class AdmissionQueue {
+  private running = NO_RUNNING_ADMISSIONS;
+  private readonly waiters: Array<() => void> = [];
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    assert.ok(this.running <= ADMISSION_CONCURRENCY);
+    await this.acquire();
+    try {
+      return await task();
+    } finally {
+      this.release();
+    }
+  }
+
+  private acquire(): Promise<void> {
+    if (this.running < ADMISSION_CONCURRENCY) {
+      this.running++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  private release(): void {
+    assert.ok(
+      this.running > NO_RUNNING_ADMISSIONS,
+      "A release follows an acquire.",
+    );
+    const next = this.waiters.shift();
+    if (next === undefined) {
+      this.running--;
+      return;
+    }
+    next();
+  }
+}
 
 export function admitDelivery(
+  queue: AdmissionQueue,
   dependencies: Dependencies,
   caller: CallerContext,
   input: AdmissionInput,
 ): Promise<AdmissionAnswer> {
-  const admission = admissionTail.then(() =>
-    admitOne(dependencies, caller, input),
-  );
-  admissionTail = Promise.allSettled([admission]);
-  return admission;
+  assert.ok(queue instanceof AdmissionQueue);
+  return queue.run(() => admitOne(dependencies, caller, input));
 }
 
 async function admitOne(

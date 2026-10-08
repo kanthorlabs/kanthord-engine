@@ -54,7 +54,7 @@ import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
 import { checkNode } from "./node-check.ts";
-import { admitDelivery } from "./delivery-admit.ts";
+import { AdmissionQueue, admitDelivery } from "./delivery-admit.ts";
 import { deleteEvidenceAsset, removeEvidence } from "./evidence-delete.ts";
 import {
   executionRevision,
@@ -168,6 +168,7 @@ export class MissionService
   private readonly quiesceTask = Promise.resolve(null);
   private started = false;
   private readonly dependencies: Dependencies;
+  private readonly admissions = new AdmissionQueue();
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -278,7 +279,7 @@ export class MissionService
         ),
     );
     registry.register(missionOperations["delivery.admit"], ({ body }, caller) =>
-      admitDelivery(this.dependencies, caller, body),
+      admitDelivery(this.admissions, this.dependencies, caller, body),
     );
     registry.register(
       missionOperations["assessment.submit"],
