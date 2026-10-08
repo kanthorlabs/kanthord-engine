@@ -247,15 +247,16 @@ The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
 and their capabilities are:
 
-| Worker       | Host                           | Method / agent      | Declared node states                         |
-| ------------ | ------------------------------ | ------------------- | -------------------------------------------- |
-| `general@1`  | kanthord                       | steps / `swe@1`     | `Available`                                  |
-| `reviewer@1` | kanthord                       | evaluation / `re@1` | `Waiting`, `External.Requested`              |
-| `claude@1`   | external harness `claude-code` | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
-| `opencode@1` | external harness `opencode`    | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
+| Worker        | Host                           | Method / agent                   | Declared node states                         |
+| ------------- | ------------------------------ | -------------------------------- | -------------------------------------------- |
+| `general@1`   | kanthord                       | steps / `swe@1`                  | `Available`                                  |
+| `reviewer@1`  | kanthord                       | evaluation / `re@1`              | `Waiting`, `External.Requested`              |
+| `developer@1` | kanthord                       | reviewed_steps / `swe@1`, `re@1` | `Available`                                  |
+| `claude@1`    | external harness `claude-code` | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
+| `opencode@1`  | external harness `opencode`    | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
 
-All four declarations are in the current catalog; native runtime execution and
-external-harness integration remain later work. All four require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
+All five declarations are in the current catalog; native runtime execution and
+external-harness integration remain later work. All five require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`
@@ -269,10 +270,10 @@ kanthord worker get <worker-name>
 HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
-- `method: "steps" | "evaluation"` and `agent_name: AgentName` for a native worker.
+- `method: "steps" | "evaluation" | "reviewed_steps"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. The first agent does the work, and `re@1` of `developer@1` reviews each task commit.
 - `resource_budget` for every worker, with a required positive safe integer
   `wall_time_ms` and an optional positive safe integer `turns`.
-  `general@1` and `reviewer@1` default to
+  `general@1`, `reviewer@1` and `developer@1` default to
   `{ turns: 200, wall_time_ms: 7200000 }`; `claude@1` and `opencode@1`
   default to `{ wall_time_ms: 7200000 }`. Every worker binding may override the
   default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)

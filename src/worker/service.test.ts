@@ -1271,18 +1271,18 @@ test("handover handlers pass the proven execution and one transactional clock re
 
 test("catalog pages supplied declarations once per commit and registrations add no entry", async (t) => {
   const f = enablementFixture(t);
-  const pageSize = 2;
+  const pageSize = 3;
   const expectedCommits = 4;
   const before = f.invoke("catalog.list", null, {});
   assert.deepEqual(
     before.items.map((item) => item.name),
-    ["claude@1", "general@1", "opencode@1", "reviewer@1"],
+    ["claude@1", "developer@1", "general@1", "opencode@1", "reviewer@1"],
   );
   assert.equal(before.next_cursor, null);
   const first = f.invoke("catalog.list", null, {}, { limit: pageSize });
   assert.deepEqual(
     first.items.map((item) => item.name),
-    ["claude@1", "general@1"],
+    ["claude@1", "developer@1", "general@1"],
   );
   assert.equal(first.next_cursor, Buffer.from(WORKER).toString("base64url"));
   const second = f.invoke(
@@ -1355,7 +1355,8 @@ test("catalog reads expose host-specific budgets and refuse unknown names and ma
   const native = f.invoke("catalog.get", null, { worker_name: WORKER });
   assert.equal(native.host, WorkerHost.Kanthord);
   assert.ok("method" in native && native.method === WorkerMethod.Steps);
-  assert.ok("agent_name" in native && native.agent_name === AGENT);
+  assert.ok("agent_names" in native);
+  assert.deepEqual(native.agent_names, [AGENT]);
   assert.ok(!("harness" in native));
   assert.deepEqual(native.resource_budget, {
     turns: 200,

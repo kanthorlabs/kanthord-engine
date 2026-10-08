@@ -22,14 +22,13 @@ export const evaluationJudgementSchema = z.strictObject({
 export function parseJudgement<T extends z.ZodType>(
   text: string | undefined,
   schema: T,
+  marker: string = JUDGEMENT_MARKER,
 ): z.output<T> | null {
-  const line = text
-    ?.split("\n")
-    .findLast((value) => value.startsWith(JUDGEMENT_MARKER));
+  const line = text?.split("\n").findLast((value) => value.startsWith(marker));
   if (!line) return null;
   let value: unknown;
   try {
-    value = JSON.parse(line.slice(JUDGEMENT_MARKER.length));
+    value = JSON.parse(line.slice(marker.length));
   } catch (error) {
     if (error instanceof SyntaxError) return null;
     throw error;

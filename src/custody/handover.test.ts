@@ -44,7 +44,7 @@ const TEST_SET: CredentialPlatformSet = {
   },
 };
 
-function fixture(t: TestContext) {
+function fixture(t: TestContext, names: readonly string[] = ["anthro-1"]) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   store.migrate([
@@ -116,29 +116,32 @@ function fixture(t: TestContext) {
             "worker.authorization.refused",
             "Refused.",
           );
-        return {
-          credential: "anthro-1",
+        return names.map((credential) => ({
+          credential,
           platform: TEST_PLATFORM,
           provider_id: TEST_PLATFORM,
           agent_provider: "default",
-        };
+        }));
       },
     },
   });
-  const created = store.transaction((tx) =>
-    component.create(
-      tx,
-      TEST_SET,
-      {
-        name: "anthro-1",
-        platform: TEST_PLATFORM,
-        metadata: null,
-        secret: { key: FIRST.key },
-      },
-      undefined,
-    ),
+  const credentialIds = names.map(
+    (name) =>
+      store.transaction((tx) =>
+        component.create(
+          tx,
+          TEST_SET,
+          {
+            name,
+            platform: TEST_PLATFORM,
+            metadata: null,
+            secret: { key: FIRST.key },
+          },
+          undefined,
+        ),
+      ).revisions[0]!.id,
   );
-  const credentialId = created.revisions[0]!.id;
+  const credentialId = credentialIds[0]!;
   const keys = deriveHandoverKeys(SECRET);
   const aad = handoverAad(row.execution_id, row.runtime_identity);
   const claim = {
@@ -161,6 +164,7 @@ function fixture(t: TestContext) {
     logs,
     row,
     credentialId,
+    credentialIds,
     keys,
     aad,
     handover,
@@ -286,4 +290,29 @@ test("authorization refusal reaches no material or pin", (t) => {
     .run(Buffer.from("corrupt"));
   assert.throws(f.handover, { code: "worker.authorization.refused" });
   assert.deepEqual(f.row.credentials, []);
+});
+
+test("handover seals and pins one item per credential and accepts a refresh of the second", (t) => {
+  const f = fixture(t, ["worker-key", "reviewer-key"]);
+  const payload = handoverPayloadSchema.parse(
+    openEnvelope(f.keys.handover, f.aad, f.handover()),
+  );
+  assert.deepEqual(
+    payload.items.map((item) => item.credential_id),
+    f.credentialIds,
+  );
+  assert.deepEqual(f.row.credentials, f.credentialIds);
+  f.report(
+    sealEnvelope(f.keys.report, f.aad, {
+      ...f.refresh,
+      credential_id: f.credentialIds[1]!,
+    }),
+  );
+  const refreshed = handoverPayloadSchema.parse(
+    openEnvelope(f.keys.handover, f.aad, f.handover()),
+  );
+  assert.deepEqual(
+    refreshed.items.map((item) => item.credential),
+    [FIRST, SECOND],
+  );
 });

@@ -93,9 +93,13 @@ components:
               enum:
                 - steps
                 - evaluation
-            agent_name:
-              type: string
-              minLength: 1
+                - reviewed_steps
+            agent_names:
+              minItems: 1
+              type: array
+              items:
+                type: string
+                minLength: 1
             resource_budget:
               type: object
               properties:
@@ -116,7 +120,7 @@ components:
             - declared_node_states
             - required_node_format
             - method
-            - agent_name
+            - agent_names
             - resource_budget
           additionalProperties: false
         - type: object

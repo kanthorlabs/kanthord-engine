@@ -5,13 +5,17 @@ import {
   connectModel,
   type ModelConnectorInput,
 } from "../llm/model-connector.ts";
-import type { ExecutionSetup } from "./contract.ts";
+import type { AgentSetup } from "./contract.ts";
 import { loadPi } from "../agent/pi.ts";
 
+export interface ExecutionCredential {
+  credential_id: string;
+  provider_id: string;
+  store: CredentialStore;
+}
 export interface ModelRuntimeInput {
-  credentials: CredentialStore;
-  handoverItem: { credential_id: string; provider_id: string };
-  setup: ExecutionSetup;
+  credential: ExecutionCredential;
+  agent: AgentSetup;
   signal: AbortSignal;
 }
 export type ModelRuntimeFactory = (
@@ -21,13 +25,16 @@ export type ModelRuntimeFactory = (
 export function modelConnectorInput(
   input: ModelRuntimeInput,
 ): ModelConnectorInput {
-  const { credentials, handoverItem, setup, signal } = input;
+  const { credential, agent, signal } = input;
   return {
-    credentials,
-    handoverItem,
-    credentialId: setup.credential_id,
-    configuration: setup.effective_configuration,
-    metadata: setup.metadata,
+    credentials: credential.store,
+    handoverItem: {
+      credential_id: credential.credential_id,
+      provider_id: credential.provider_id,
+    },
+    credentialId: agent.credential_id,
+    configuration: agent.effective_configuration,
+    metadata: agent.metadata,
     signal,
   };
 }
@@ -35,7 +42,7 @@ export function modelConnectorInput(
 export const defaultModelRuntimeFactory: ModelRuntimeFactory = async (
   input,
 ) => {
-  assert.ok(input.setup);
-  assert.ok(input.credentials);
+  assert.ok(input.agent);
+  assert.ok(input.credential);
   return connectModel(await loadPi(), modelConnectorInput(input));
 };

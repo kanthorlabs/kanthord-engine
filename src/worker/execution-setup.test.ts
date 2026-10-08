@@ -64,10 +64,11 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const store = new Store(":memory:");
   t.after(() => store.close());
   const setup = anthropicSetup();
+  const agent = setup.agents[0]!;
   const entry = {
-    agent: setup.agent_name,
+    agent: agent.agent_name,
     agent_provider: "default",
-    model_identifier: setup.effective_configuration.model_identifier,
+    model_identifier: agent.effective_configuration.model_identifier,
     reasoning_effort: "low",
   };
   const composed: string[] = [];
@@ -110,9 +111,9 @@ test("setup answers the system and agent prompt after its single snapshot and su
       resource_budget: null,
     }),
     pinnedCredentialMetadata: () => ({
-      id: setup.credential_id,
-      name: setup.effective_configuration.credential,
-      platform: setup.effective_configuration.provider,
+      id: agent.credential_id,
+      name: agent.effective_configuration.credential,
+      platform: agent.effective_configuration.provider,
       metadata: null,
     }),
     repositoryBindingIdsOf: () => [],
@@ -135,7 +136,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       return {
         defaults: null,
         effective: {
-          ...setup.effective_configuration,
+          ...agent.effective_configuration,
           reasoning_effort: entry.reasoning_effort,
         },
         valid: true,
@@ -145,16 +146,18 @@ test("setup answers the system and agent prompt after its single snapshot and su
   };
   const before = commits;
   const answer = await executionSetup(dependencies, worker, caller);
-  assert.deepEqual(composed, [setup.agent_name]);
-  assert.deepEqual(answer.prompt, {
+  assert.deepEqual(composed, [agent.agent_name]);
+  const [answered] = answer.agents;
+  assert.ok(answered);
+  assert.deepEqual(answered.prompt, {
     final: systemPrompt(promptLayers, PromptConsumer.Worker),
   });
-  assert.ok(answer.prompt.final.endsWith(framing(PromptConsumer.Worker)));
-  assert.ok(answer.prompt.final.includes(SYSTEM_TEXT));
-  assert.ok(answer.prompt.final.includes(AGENT_TEXT));
-  assert.ok(!answer.prompt.final.includes(WORKING_TEXT));
+  assert.ok(answered.prompt.final.endsWith(framing(PromptConsumer.Worker)));
+  assert.ok(answered.prompt.final.includes(SYSTEM_TEXT));
+  assert.ok(answered.prompt.final.includes(AGENT_TEXT));
+  assert.ok(!answered.prompt.final.includes(WORKING_TEXT));
   assert.equal(
-    answer.effective_configuration.reasoning_effort,
+    answered.effective_configuration.reasoning_effort,
     entry.reasoning_effort,
   );
   assert.equal(commits, before + 1);
@@ -199,4 +202,87 @@ test("setup answers the system and agent prompt after its single snapshot and su
   );
   assert.deepEqual(pinned.repositories[0]?.ssh_identity, sshIdentity);
   assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
+});
+
+test("setup answers one entry per agent of developer@1 with its own prompt and pinned credential", async (t) => {
+  const store = new Store(":memory:");
+  t.after(() => store.close());
+  const setup = anthropicSetup();
+  const credentials: Record<string, string> = {
+    "swe@1": "worker-key",
+    "re@1": "reviewer-key",
+  };
+  const credentialIds: Record<string, string> = {
+    "worker-key": createIdentity("credential"),
+    "reviewer-key": createIdentity("credential"),
+  };
+  const claim = {
+    executionId: setup.execution_id,
+    runtimeIdentity: createIdentity("worker_instance"),
+    workerBindingId: createIdentity("binding"),
+    nodeId: createIdentity("node"),
+    pinnedRevision: 1,
+    attempt: 1,
+    projectId: createIdentity("project"),
+  };
+  const caller: CallerContext = {
+    identity: testHumanIdentity("ulrich", "Ulrich", "jti"),
+    context: background,
+    requestId: "request",
+    execution: claim,
+    commit: (fn) => store.transaction(fn),
+  };
+  const answer = await executionSetup(
+    {
+      store,
+      agentPrompt: {
+        compose: async (agentName: string) => [
+          layerOf(PromptLayerKind.Agent, PromptLayer.AgentLayer, agentName),
+        ],
+      },
+      workerBindingRowOf: () => ({
+        binding_id: claim.workerBindingId,
+        project_id: claim.projectId,
+        resource_identity: "worker:developer@1",
+        tombstone: false,
+        disabled: false,
+        worker_name: "developer@1",
+        entries: [],
+        resource_budget: null,
+      }),
+      pinnedCredentialMetadata: (_tx, _claim, name) => ({
+        id: credentialIds[name]!,
+        name,
+        platform: "anthropic",
+        metadata: null,
+      }),
+      repositoryBindingIdsOf: () => [],
+      repositoryPolicyOf: () => null,
+      credentialMetadata: () => null,
+    },
+    {
+      declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+      workerAgentView: (_tx, _worker, agent) => ({
+        defaults: null,
+        effective: {
+          ...setup.agents[0]!.effective_configuration,
+          credential: credentials[agent]!,
+        },
+        valid: true,
+        issues: [],
+      }),
+    },
+    caller,
+  );
+  assert.deepEqual(
+    answer.agents.map((agent) => agent.agent_name),
+    ["swe@1", "re@1"],
+  );
+  assert.deepEqual(
+    answer.agents.map((agent) => agent.credential_id),
+    [credentialIds["worker-key"], credentialIds["reviewer-key"]],
+  );
+  assert.ok(answer.agents[0]!.prompt.final.includes("swe@1"));
+  assert.ok(answer.agents[1]!.prompt.final.includes("re@1"));
+  assert.ok(!answer.agents[1]!.prompt.final.includes("swe@1"));
 });

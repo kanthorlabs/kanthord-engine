@@ -74,12 +74,12 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     key: "scripted",
   }));
   const { runtime, model } = await scriptedModelRuntime(provider)({
-    credentials,
-    setup,
-    handoverItem: {
-      credential_id: setup.credential_id,
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
+      store: credentials,
     },
+    agent: setup.agents[0]!,
     signal: new AbortController().signal,
   });
   const session = await openSession({
@@ -156,12 +156,12 @@ test("two tool calls produce three counted turns with no absent project message"
     key: "scripted",
   }));
   const { runtime, model } = await scriptedModelRuntime(provider)({
-    credentials,
-    setup,
-    handoverItem: {
-      credential_id: setup.credential_id,
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
+      store: credentials,
     },
+    agent: setup.agents[0]!,
     signal: new AbortController().signal,
   });
   const session = await openSession({
@@ -294,12 +294,12 @@ for (const isSplitTurn of [false, true]) {
     }));
     const reads = t.mock.method(credentials, "read");
     const { runtime, model } = await scriptedModelRuntime(provider)({
-      credentials,
-      setup,
-      handoverItem: {
-        credential_id: setup.credential_id,
+      credential: {
+        credential_id: setup.agents[0]!.credential_id,
         provider_id: "anthropic",
+        store: credentials,
       },
+      agent: setup.agents[0]!,
       signal: new AbortController().signal,
     });
     const session = await openSession({

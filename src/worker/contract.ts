@@ -45,6 +45,7 @@ export type WorkerHost = (typeof WorkerHost)[keyof typeof WorkerHost];
 export const WorkerMethod = {
   Steps: "steps",
   Evaluation: "evaluation",
+  ReviewedSteps: "reviewed_steps",
 } as const;
 export type WorkerMethod = (typeof WorkerMethod)[keyof typeof WorkerMethod];
 export interface VerifiedClient {
@@ -622,13 +623,18 @@ export type CredentialMetadataOf = (
   tx: Transaction,
   credentialName: string,
 ) => { platform: string; metadata: Record<string, unknown> | null } | null;
-export const executionSetupSchema = z.strictObject({
-  execution_id: identitySchema("execution"),
-  worker_name: z.string().min(1),
+export const agentSetupSchema = z.strictObject({
   agent_name: z.string().min(1),
   effective_configuration: effectiveConfigurationSchema,
   credential_id: identitySchema("credential"),
   metadata: z.record(z.string(), z.unknown()).nullable(),
+  prompt: z.strictObject({ final: z.string() }),
+});
+export type AgentSetup = z.infer<typeof agentSetupSchema>;
+export const executionSetupSchema = z.strictObject({
+  execution_id: identitySchema("execution"),
+  worker_name: z.string().min(1),
+  agents: z.array(agentSetupSchema).min(1),
   resource_budget: resourceBudgetSchema,
   repositories: z.array(
     z.strictObject({
@@ -641,13 +647,12 @@ export const executionSetupSchema = z.strictObject({
       working_layer: workingLayerSchema,
     }),
   ),
-  prompt: z.strictObject({ final: z.string() }),
 });
 export const catalogEntrySchema = z.discriminatedUnion("host", [
   catalogItemSchema.extend({
     host: z.literal(WorkerHost.Kanthord),
     method: z.enum(WorkerMethod),
-    agent_name: z.string().min(1),
+    agent_names: z.array(z.string().min(1)).min(1),
     resource_budget: resourceBudgetSchema,
   }),
   catalogItemSchema.extend({

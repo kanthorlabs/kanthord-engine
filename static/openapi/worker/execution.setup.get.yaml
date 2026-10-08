@@ -87,102 +87,124 @@ components:
         worker_name:
           type: string
           minLength: 1
-        agent_name:
-          type: string
-          minLength: 1
-        effective_configuration:
-          type: object
-          properties:
-            agent_provider:
-              type: string
-              minLength: 1
-            provider:
-              type: string
-              enum:
-                - openai-compatible
-                - amazon-bedrock
-                - ant-ling
-                - anthropic
-                - azure
-                - baseten
-                - cerebras
-                - cloudflare-ai-gateway
-                - cloudflare-workers-ai
-                - deepseek
-                - fireworks
-                - github-copilot
-                - google
-                - google-vertex
-                - groq
-                - huggingface
-                - kimi-coding
-                - meta
-                - minimax
-                - minimax-cn
-                - mistral
-                - moonshotai
-                - moonshotai-cn
-                - nvidia
-                - openai
-                - openai-codex
-                - opencode
-                - opencode-go
-                - openrouter
-                - qwen-token-plan
-                - qwen-token-plan-cn
-                - qwen-token-plan-individual
-                - radius
-                - together
-                - typesafe
-                - vercel-ai-gateway
-                - xai
-                - xiaomi
-                - xiaomi-token-plan-ams
-                - xiaomi-token-plan-cn
-                - xiaomi-token-plan-sgp
-                - zai
-                - zai-coding-cn
-            credential:
-              type: string
-              minLength: 1
-            model_identifier:
-              type: string
-              minLength: 1
-            reasoning_effort:
-              type: string
-              enum:
-                - off
-                - minimal
-                - low
-                - medium
-                - high
-                - xhigh
-                - max
-          required:
-            - agent_provider
-            - provider
-            - credential
-            - model_identifier
-            - reasoning_effort
-          additionalProperties: false
-          description: The Agent component validates the whole configuration.
-            `model_identifier` belongs to `getBuiltinModels(provider)` of pi-ai
-            0.86.0 or to the `models` metadata of the `openai-compatible`
-            credential. `reasoning_effort` belongs to the supported reasoning
-            levels of that model. JSON Schema validates neither lookup.
-        credential_id:
-          type: string
-          minLength: 37
-          maxLength: 37
-          pattern: ^credential_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-          description: credential_ followed by a canonical 26-character uppercase ULID.
-        metadata:
-          anyOf:
-            - type: object
-              propertyNames:
+        agents:
+          minItems: 1
+          type: array
+          items:
+            type: object
+            properties:
+              agent_name:
                 type: string
-              additionalProperties: {}
-            - type: "null"
+                minLength: 1
+              effective_configuration:
+                type: object
+                properties:
+                  agent_provider:
+                    type: string
+                    minLength: 1
+                  provider:
+                    type: string
+                    enum:
+                      - openai-compatible
+                      - amazon-bedrock
+                      - ant-ling
+                      - anthropic
+                      - azure
+                      - baseten
+                      - cerebras
+                      - cloudflare-ai-gateway
+                      - cloudflare-workers-ai
+                      - deepseek
+                      - fireworks
+                      - github-copilot
+                      - google
+                      - google-vertex
+                      - groq
+                      - huggingface
+                      - kimi-coding
+                      - meta
+                      - minimax
+                      - minimax-cn
+                      - mistral
+                      - moonshotai
+                      - moonshotai-cn
+                      - nvidia
+                      - openai
+                      - openai-codex
+                      - opencode
+                      - opencode-go
+                      - openrouter
+                      - qwen-token-plan
+                      - qwen-token-plan-cn
+                      - qwen-token-plan-individual
+                      - radius
+                      - together
+                      - typesafe
+                      - vercel-ai-gateway
+                      - xai
+                      - xiaomi
+                      - xiaomi-token-plan-ams
+                      - xiaomi-token-plan-cn
+                      - xiaomi-token-plan-sgp
+                      - zai
+                      - zai-coding-cn
+                  credential:
+                    type: string
+                    minLength: 1
+                  model_identifier:
+                    type: string
+                    minLength: 1
+                  reasoning_effort:
+                    type: string
+                    enum:
+                      - off
+                      - minimal
+                      - low
+                      - medium
+                      - high
+                      - xhigh
+                      - max
+                required:
+                  - agent_provider
+                  - provider
+                  - credential
+                  - model_identifier
+                  - reasoning_effort
+                additionalProperties: false
+                description: The Agent component validates the whole configuration.
+                  `model_identifier` belongs to `getBuiltinModels(provider)` of
+                  pi-ai 0.86.0 or to the `models` metadata of the
+                  `openai-compatible` credential. `reasoning_effort` belongs to
+                  the supported reasoning levels of that model. JSON Schema
+                  validates neither lookup.
+              credential_id:
+                type: string
+                minLength: 37
+                maxLength: 37
+                pattern: ^credential_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: credential_ followed by a canonical 26-character uppercase ULID.
+              metadata:
+                anyOf:
+                  - type: object
+                    propertyNames:
+                      type: string
+                    additionalProperties: {}
+                  - type: "null"
+              prompt:
+                type: object
+                properties:
+                  final:
+                    type: string
+                required:
+                  - final
+                additionalProperties: false
+            required:
+              - agent_name
+              - effective_configuration
+              - credential_id
+              - metadata
+              - prompt
+            additionalProperties: false
         resource_budget:
           type: object
           properties:
@@ -275,22 +297,10 @@ components:
               - project_prompt
               - working_layer
             additionalProperties: false
-        prompt:
-          type: object
-          properties:
-            final:
-              type: string
-          required:
-            - final
-          additionalProperties: false
       required:
         - execution_id
         - worker_name
-        - agent_name
-        - effective_configuration
-        - credential_id
-        - metadata
+        - agents
         - resource_budget
         - repositories
-        - prompt
       additionalProperties: false

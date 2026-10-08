@@ -81,8 +81,15 @@ async function finishObjective(
   }
 }
 
+export type TaskRunner = (
+  state: StepsState,
+  task: TaskContent,
+  boundary: TaskBoundary,
+) => Promise<TaskResult>;
+
 export async function runStepsObjective(
   state: StepsState,
+  taskRunner: TaskRunner = runTask,
 ): Promise<ExecutionEnd> {
   try {
     const checked = await startCheck(state);
@@ -93,7 +100,7 @@ export async function runStepsObjective(
         checked.budgetEnd.boundary,
       );
     for (const { task, boundary } of checked.pending) {
-      const result = await runTask(state, task, boundary);
+      const result = await taskRunner(state, task, boundary);
       if (result.kind === TaskResultKind.BudgetEnd)
         return await finishObjective(state, task, result.boundary);
     }
@@ -129,17 +136,21 @@ export async function runTask(
   state: StepsState,
   task: TaskContent,
   initialBoundary: TaskBoundary = TaskBoundary.InProgress,
+  worked = false,
 ): Promise<TaskResult> {
   const budget = state.agent.budget;
   let instruction: string | null = null;
   let boundary = initialBoundary;
+  let workDone = worked;
   const ended = (boundary: TaskBoundary): TaskResult => ({
     kind: TaskResultKind.BudgetEnd,
     boundary,
   });
   while (!budget.exhausted()) {
     boundary = TaskBoundary.InProgress;
-    if (instruction === null) await state.agent.prompt(taskWork(state, task));
+    if (workDone) workDone = false;
+    else if (instruction === null)
+      await state.agent.prompt(taskWork(state, task));
     else await state.agent.instruct(taskWork(state, task), instruction);
     if (budget.exhausted()) return ended(TaskBoundary.InProgress);
     await commitWork(

@@ -1,3 +1,4 @@
+import { ExecutionBudget } from "./budget.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
 import { test, type TestContext } from "node:test";
@@ -10,7 +11,6 @@ import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import * as connector from "../repository/connector.ts";
 import type { Revision, TaskContent } from "../mission/contract.ts";
-import { WorkerMethod } from "./contract.ts";
 import { NodeKind, openNativeAgent } from "./native-agent.ts";
 import {
   anthropicSetup,
@@ -124,12 +124,18 @@ async function fixture(
     setup,
     claim,
     nodeKind: NodeKind.Objective,
-    method: WorkerMethod.Steps,
-    credentials,
-    handoverItem: {
-      credential_id: setup.credential_id,
+    agent: setup.agents[0]!,
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
+      store: credentials,
     },
+    budget: new ExecutionBudget({
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
+      resource_budget: setup.resource_budget,
+    }),
+    workspaceAgentFiles: true,
     workspace: workspace.directory,
     hostHome: temporary(t),
     modelRuntimeFactory: scriptedModelRuntime(provider),

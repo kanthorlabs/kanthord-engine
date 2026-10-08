@@ -34,19 +34,23 @@ test("host takes handover before setup and method, discards on every method end"
   const setup: ExecutionSetup = {
     execution_id: claim.execution_id,
     worker_name: "general@1",
-    agent_name: "swe@1",
-    credential_id: credential.credential_id,
-    effective_configuration: {
-      agent_provider: "default",
-      provider: "anthropic",
-      credential: "anthro-1",
-      model_identifier: "claude-sonnet-4-5",
-      reasoning_effort: "off",
-    },
-    metadata: null,
+    agents: [
+      {
+        agent_name: "swe@1",
+        credential_id: credential.credential_id,
+        effective_configuration: {
+          agent_provider: "default",
+          provider: "anthropic",
+          credential: "anthro-1",
+          model_identifier: "claude-sonnet-4-5",
+          reasoning_effort: "off",
+        },
+        metadata: null,
+        prompt: { final: "setup prompt" },
+      },
+    ],
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     repositories: [],
-    prompt: { final: "setup prompt" },
   };
   t.mock.method(api.worker, "handover", async () => {
     events.push("handover");
@@ -89,7 +93,10 @@ test("host takes handover before setup and method, discards on every method end"
     null,
   );
   assert.deepEqual(events, ["handover", "setup", "method"]);
-  assert.equal(await stored!.store.read(credential.provider_id), undefined);
+  assert.equal(
+    await stored!.items[0]!.store.read(credential.provider_id),
+    undefined,
+  );
   const expected = "system.operation.unknown";
   assert.equal(
     (
@@ -100,7 +107,10 @@ test("host takes handover before setup and method, discards on every method end"
     )?.code,
     expected,
   );
-  assert.equal(await stored!.store.read(credential.provider_id), undefined);
+  assert.equal(
+    await stored!.items[0]!.store.read(credential.provider_id),
+    undefined,
+  );
   const workspace = temporary(t);
   await writeFile(join(workspace, "a.txt"), "test evidence");
   t.mock.method(
