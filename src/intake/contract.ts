@@ -190,6 +190,23 @@ export const outboundRequestSchema = z.strictObject({
   created_at: timestamp,
 });
 
+export const inboundSchema = z.strictObject({
+  id: identitySchema(INBOUND_ID_PREFIX),
+  project_id: identitySchema("project"),
+  kind: inboundKindSchema,
+  platform: inboundPlatformSchema,
+  consumer: consumerSchema,
+  credential: z.string().min(1).nullable(),
+  configuration: z.record(z.string(), z.unknown()),
+  checkpoint: z.unknown().nullable(),
+  created_at: timestamp,
+});
+
+export const webhookInboundSchema = inboundSchema.extend({
+  address: z.string().min(1),
+  secret: z.string().min(1),
+});
+
 export const outboundDeleteSchema = z.strictObject({
   force: z.boolean().optional(),
   state: outboundRequestStateSchema.optional(),
@@ -212,6 +229,8 @@ export type OutboundRequestStateValue = z.infer<
 export type OutboundOperationValue = z.infer<typeof outboundOperationSchema>;
 export type ResultClassValue = z.infer<typeof resultClassSchema>;
 export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
+export type Inbound = z.infer<typeof inboundSchema>;
+export type WebhookInbound = z.infer<typeof webhookInboundSchema>;
 export type OutboundDelete = z.infer<typeof outboundDeleteSchema>;
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
 export type ResultClassAnswer = z.infer<typeof resultClassAnswerSchema>;
