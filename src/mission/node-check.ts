@@ -10,6 +10,7 @@ import {
   ActorKind,
   ActorService,
   AssetKind,
+  actorSchema,
   CheckEndState,
   MissionErrorCode,
   NodeState,
@@ -90,8 +91,16 @@ export function applyEndState(
   evidenceId: string,
   answer: CheckAnswer,
   now: number,
+  admission?: { inboundEventId: string },
 ): void {
   checkAnswerSchema.parse(answer);
+  const provenance = actorSchema.parse({
+    kind: ActorKind.Service,
+    service: ActorService.Mission,
+    ...(admission === undefined
+      ? {}
+      : { inbound_event_id: admission.inboundEventId }),
+  });
   const { request, frozen_action: frozenAction } = requestContext(
     tx,
     dependencies,
@@ -121,10 +130,7 @@ export function applyEndState(
           requirement_key: null,
           end_state: null,
           verification: null,
-          provenance: canonicalJSON({
-            kind: ActorKind.Service,
-            service: ActorService.Mission,
-          }),
+          provenance: canonicalJSON(provenance),
           created_at: now,
         },
         [

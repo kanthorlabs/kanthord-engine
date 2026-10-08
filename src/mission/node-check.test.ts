@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
@@ -31,6 +32,7 @@ const FIRST_RESULT_INDEX = 0;
 const NO_LANDED_COMMITS = 0;
 const SINGLE_FAILURE = 1;
 const SINGLE_CALL = 1;
+const SINGLE_LANDED_COMMIT = 1;
 const PULL_REQUEST_NUMBER = 1;
 const FIRST_MISSION_VERSION = 1;
 const FIRST_ATTEMPT = 1;
@@ -267,6 +269,39 @@ test("expected checks write every landed commit and close successful external at
   );
   assert.deepEqual(after, before);
   assert.equal(after.closing_event, ClosingEvent.ExternalSuccess);
+});
+
+test("an admission end state adds the inbound event identity to the landed-commit provenance and the evidence read answers it", async (t) => {
+  const h = await fixture(t);
+  const inboundEventId = createIdentity("inbound_event");
+  const landed = h.store.transaction((tx) => {
+    applyEndState(
+      tx,
+      h.dependencies,
+      h.request.id,
+      { end_state: CheckEndState.Expected, landed_commits: [COMMIT] },
+      Date.now(),
+      { inboundEventId },
+    );
+    return readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT);
+  });
+  assert.equal(landed.length, SINGLE_LANDED_COMMIT);
+  const provenance = {
+    kind: "service",
+    service: "mission",
+    inbound_event_id: inboundEventId,
+  };
+  assert.deepEqual(
+    JSON.parse(landed[FIRST_RESULT_INDEX]!.provenance),
+    provenance,
+  );
+  const read = await h.invoke("evidence.get", {
+    params: { evidence_id: landed[FIRST_RESULT_INDEX]!.id },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual(read.provenance, provenance);
+  assert.equal(h.node().state, NodeState.Completed);
 });
 
 test("other checks block while none stays unresolved and failed checks retain failure envelopes", async (t) => {
