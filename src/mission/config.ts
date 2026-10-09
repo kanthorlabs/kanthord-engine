@@ -10,7 +10,7 @@ const DEFAULT_TEXT_MAX_BYTES = 32768;
 
 export const missionConfigSchema: Schema<MissionConfig> = {
   consecutive_failure_limit: {
-    doc: "Consecutive lost or stopped executions permitted before a node is paused.",
+    doc: "Consecutive lost or stopped executions that the Mission Service permits before it pauses the node.",
     format: "nat",
     default: DEFAULT_CONSECUTIVE_FAILURE_LIMIT,
   },

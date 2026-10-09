@@ -5,8 +5,8 @@ import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   ClaimState,
-  executionStopSchema,
-  type ExecutionStop,
+  releaseStopSchema,
+  type ReleaseStop,
   type ExecutionRow,
   type ExecutionRecord,
   type InstanceRegistrations,
@@ -15,7 +15,7 @@ import {
 const NO_ROWS = 0;
 const ONE_ROW = 1;
 const credentialList = z.array(identitySchema("credential"));
-const storedStop = executionStopSchema.nullable();
+const storedStop = releaseStopSchema.nullable();
 const COLUMNS = `id AS execution_id, project_id, node_id,
   worker_binding_id, resource_identity,
   runtime_identity, attempt, pinned_revision,
@@ -135,7 +135,7 @@ export function endExecution(
   tx: Transaction,
   executionId: string,
   now: number,
-  stop: ExecutionStop | null = null,
+  stop: ReleaseStop | null = null,
 ): void {
   assert.ok(Number.isSafeInteger(now) && now >= NO_ROWS);
   const result = tx.database
@@ -144,7 +144,7 @@ export function endExecution(
     )
     .run(
       now,
-      stop === null ? null : canonicalJSON(executionStopSchema.parse(stop)),
+      stop === null ? null : canonicalJSON(releaseStopSchema.parse(stop)),
       executionId,
     );
   assert.equal(result.changes, ONE_ROW, "exactly one terminal write must win");

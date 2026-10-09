@@ -105,6 +105,15 @@ test("evaluation writes failed-verification assessments without inference and ga
     },
     {
       command: "true",
+      texts: ["invalid", "partial"],
+      result: null,
+      opens: 1,
+      repaired: true,
+      budgetEndsOnRepair: true,
+      stop: EndReason.AssessmentAbsent,
+    },
+    {
+      command: "true",
       texts: [
         'канthord-judgement: {"result":"success","rationale":"met"}',
         'kanthord-judgement: {"result":"success","rationale":"met"}',
@@ -253,7 +262,11 @@ test("evaluation writes failed-verification assessments without inference and ga
     const open = async () => {
       opens++;
       return {
-        budget: { exhausted: () => false },
+        budget: {
+          exhausted: () =>
+            scenario.budgetEndsOnRepair === true &&
+            instructions.at(-1) === repairInstruction(JUDGEMENT_MARKER),
+        },
         instruct: async (_work: WorkPrompt, instruction: string) => {
           instructions.push(instruction);
           if (instruction === repairInstruction(JUDGEMENT_MARKER)) return;
@@ -274,7 +287,9 @@ test("evaluation writes failed-verification assessments without inference and ga
       run,
       open,
     );
-    if (scenario.result === null) await assert.rejects(pending, ExecutionStop);
+    if (scenario.stop) await assert.rejects(pending, { reason: scenario.stop });
+    else if (scenario.result === null)
+      await assert.rejects(pending, ExecutionStop);
     else
       assert.deepEqual(await pending, {
         kind: "closed",

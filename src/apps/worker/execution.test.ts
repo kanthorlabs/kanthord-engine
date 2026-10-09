@@ -112,6 +112,14 @@ test("host takes handover before setup and method, discards on every method end"
     stop.code,
   );
   assert.equal(
+    await hostExecution(input, async () => ({
+      kind: "ended",
+      reason: EndReason.Revoked,
+      code: "scheduler.execution.not_running",
+    })),
+    null,
+  );
+  assert.equal(
     await stored!.items[0]!.store.read(credential.provider_id),
     undefined,
   );

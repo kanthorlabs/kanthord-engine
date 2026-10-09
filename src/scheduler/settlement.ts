@@ -97,7 +97,7 @@ export function consecutiveFailures(
       `SELECT count(*) AS count FROM scheduler_execution
     WHERE node_id = ? AND attempt = ? AND id != ?
     AND (ended_at >= expired_at OR stop IS NOT NULL)
-    AND ended_at > coalesce((SELECT max(ended_at) FROM scheduler_execution
+    AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
       WHERE node_id = ? AND attempt = ? AND ended_at < expired_at AND stop IS NULL), -1)`,
     )
     .get(

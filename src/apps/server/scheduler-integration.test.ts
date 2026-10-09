@@ -21,7 +21,7 @@ import {
   ClaimState,
   ExecutionStopReason,
   WorkPullKind,
-  type ExecutionStop,
+  type ReleaseStop,
   WORK_PULL_TIMEOUT_MS,
   SCHEDULER_TIMEOUT_MS,
 } from "../../scheduler/contract.ts";
@@ -47,7 +47,7 @@ const NO_INPUT = { params: {}, query: {}, body: null };
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const NOT_RUNNING = "scheduler.execution.not_running";
 const VALIDATION_FAILED = "gateway.request.validation_failed";
-const OPERATION_FAILED_STOP: ExecutionStop = {
+const OPERATION_FAILED_STOP: ReleaseStop = {
   reason: ExecutionStopReason.OperationFailed,
   code: "llm.provider.unavailable",
 };

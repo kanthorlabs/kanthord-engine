@@ -55,11 +55,11 @@ export const ExecutionStopReason = {
 } as const;
 export const executionStopReasonSchema = z.enum(ExecutionStopReason);
 export type ExecutionStopReason = z.infer<typeof executionStopReasonSchema>;
-export const executionStopSchema = z.strictObject({
+export const releaseStopSchema = z.strictObject({
   reason: executionStopReasonSchema,
   code: z.string().min(1).nullable(),
 });
-export type ExecutionStop = z.infer<typeof executionStopSchema>;
+export type ReleaseStop = z.infer<typeof releaseStopSchema>;
 export const traceIdSchema = z
   .string()
   .regex(/^[0-9a-f]{32}$/)
@@ -97,7 +97,7 @@ export const executionRecordSchema = z.strictObject({
   expired_at: timestamp,
   created_at: timestamp,
   ended_at: timestamp.nullable(),
-  stop: executionStopSchema.nullable(),
+  stop: releaseStopSchema.nullable(),
   trace_id: traceIdSchema,
   root_span_id: spanIdSchema,
 });
@@ -117,7 +117,7 @@ export const workPullResultSchema = z.discriminatedUnion("kind", [
 export const executionReleaseSchema = z
   .strictObject({
     further_work: z.boolean(),
-    stop: executionStopSchema.nullable().default(null),
+    stop: releaseStopSchema.nullable().default(null),
   })
   .refine((release) => release.stop === null || release.further_work, {
     path: ["stop"],
@@ -143,7 +143,7 @@ export interface ExecutionRow {
   root_span_id: string;
   created_at: number;
   ended_at: number | null;
-  stop: ExecutionStop | null;
+  stop: ReleaseStop | null;
 }
 export interface SchedulerClaims {
   revoke(tx: Transaction, nodeId: string, now: number): string | null;

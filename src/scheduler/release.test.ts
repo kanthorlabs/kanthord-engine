@@ -18,14 +18,14 @@ import {
   ClaimState,
   ExecutionStopReason,
   schedulerOperations,
-  type ExecutionStop,
+  type ReleaseStop,
 } from "./contract.ts";
 import { EXECUTION_NOT_RUNNING } from "./settlement.ts";
 
 const WAKE_CALL_COUNT = 1;
 const FIRST_FAILURE = 1;
 const RELEASE_ROUTING = "release";
-const STOP: ExecutionStop = {
+const STOP: ReleaseStop = {
   reason: ExecutionStopReason.JudgementInvalid,
   code: null,
 };
@@ -47,7 +47,7 @@ function harness(t: TestContext) {
     },
     commit: (write) => h.store.transaction(write),
   };
-  const release = (furtherWork = false, stop?: ExecutionStop) =>
+  const release = (furtherWork = false, stop?: ReleaseStop) =>
     h.invoke(
       "executionRelease",
       {

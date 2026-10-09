@@ -228,6 +228,29 @@ test("lost and stopped rows count together until a finished row with no stop", (
   });
 });
 
+test("a stopped row that ends in the same millisecond after a finished row counts", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  const row = (offset: number) =>
+    executionFixture({
+      node_id: node,
+      expired_at: FIXTURE_DEADLINE + 100,
+      created_at: FIXTURE_NOW + offset,
+    });
+  h.store.transaction((tx) => {
+    const released = row(1);
+    insertExecution(tx, released);
+    endExecution(tx, released.execution_id, FIXTURE_DEADLINE);
+    const first = row(2);
+    insertExecution(tx, first);
+    endExecution(tx, first.execution_id, FIXTURE_DEADLINE, STOP);
+    const second = row(3);
+    insertExecution(tx, second);
+    endExecution(tx, second.execution_id, FIXTURE_DEADLINE, STOP);
+    assert.equal(consecutiveFailures(tx, second), SECOND_LOSS);
+  });
+});
+
 test("revocation at expiry writes nothing and runtime lookup settles first", (t) => {
   const h = schedulerHarness(t);
   const row = executionFixture();

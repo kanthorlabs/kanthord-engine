@@ -10,7 +10,8 @@ import {
 import type { MethodClients } from "./method-clients.ts";
 import {
   ClaimState,
-  type ExecutionStop as ReleaseStop,
+  ExecutionStopReason,
+  type ReleaseStop,
 } from "../scheduler/contract.ts";
 
 type EvidenceBody = Omit<
@@ -23,12 +24,8 @@ type AssessmentBody = Omit<
 >;
 
 export const EndReason = {
+  ...ExecutionStopReason,
   Revoked: "revoked",
-  OperationFailed: "operation_failed",
-  JudgementInvalid: "judgement_invalid",
-  ReportAbsent: "report_absent",
-  ActionUnsettled: "action_unsettled",
-  AssessmentAbsent: "assessment_absent",
 } as const;
 export type EndReason = (typeof EndReason)[keyof typeof EndReason];
 export const ExecutionEndKind = {
@@ -299,6 +296,15 @@ export class ExecutionRun {
       }
       if (result.type === OperationResultType.Completed)
         return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
+      if (isExecutionEnd(result))
+        return {
+          kind: ExecutionEndKind.Ended,
+          reason: EndReason.Revoked,
+          code:
+            result.type === OperationResultType.Failure
+              ? result.error.error.code
+              : null,
+        };
     } catch (error) {
       if (!(error instanceof Error)) throw error;
     } finally {

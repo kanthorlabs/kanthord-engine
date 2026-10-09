@@ -610,3 +610,51 @@ test("the start check repairs one invalid judgement and stops on two", async (t)
     reason: EndReason.JudgementInvalid,
   });
 });
+
+test("a repair turn that ends the budget keeps the passing boundary and releases a checkpoint with no stop", async (t) => {
+  const current = task("repair", "true");
+  const ended = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage("no judgement"),
+      fauxAssistantMessage("partial"),
+    ],
+  );
+  const endOnRepair = (h: Awaited<ReturnType<typeof fixture>>) => {
+    const instruct = h.agent.instruct.bind(h.agent);
+    h.agent.instruct = async (work, instruction) => {
+      await instruct(work, instruction);
+      if (instruction !== repairInstruction(JUDGEMENT_MARKER)) return;
+      writeFileSync(join(h.directory, PARTIAL_WORK), PARTIAL_WORK);
+      h.agent.budget.exhausted = () => true;
+    };
+  };
+  endOnRepair(ended);
+  assert.deepEqual(await runTask(ended, current), {
+    kind: "budget_end",
+    boundary: "run_passed",
+  });
+  const h = await fixture(
+    t,
+    [current],
+    [fauxAssistantMessage("no judgement"), fauxAssistantMessage("partial")],
+  );
+  endOnRepair(h);
+  const bodies = recordReleases(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsObjective(h)), {
+    kind: "released",
+    furtherWork: true,
+  });
+  assert.deepEqual(bodies, [{ further_work: true }]);
+  const branch = `refs/heads/${h.nodeBranch}`;
+  assert.match(
+    await simpleGit(h.bare).raw(["log", "-1", "--format=%s", branch]),
+    /checkpoint of task/,
+  );
+  assert.equal(
+    await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
+    PARTIAL_WORK,
+  );
+});

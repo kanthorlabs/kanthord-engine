@@ -282,3 +282,31 @@ test("a stop release settles credentials under a fresh context and reconciles a 
     assert.equal(reports, SETTLE_CALL_COUNT);
   }
 });
+
+test("a stop release that the scheduler refuses as ended ends the run as revoked", async (t) => {
+  for (const [status, code] of [
+    [409, EXECUTION_NOT_RUNNING],
+    [403, EXECUTION_PROOF_FAILED],
+  ] as const) {
+    const run = fixture();
+    t.after(() => run.dispose());
+    const stopped = run.stopOf(
+      new ExecutionStop(EndReason.JudgementInvalid, null),
+    );
+    run.clients.scheduler = {
+      executionRelease: async () => ({
+        type: OperationResultType.Failure,
+        status,
+        error: {
+          error: { code, message: "Ended", details: null },
+          request_id: "test",
+        },
+      }),
+    } as unknown as MethodClients["scheduler"];
+    assert.deepEqual(await run.releaseStop(stopped), {
+      kind: "ended",
+      reason: EndReason.Revoked,
+      code,
+    });
+  }
+});
