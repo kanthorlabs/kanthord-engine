@@ -1278,6 +1278,21 @@ export const missionOperations = {
     output: outcomeSchema,
     description: "Read the previous attempt outcome cleared by an unblock.",
   },
+  "execution.clearedAssessment.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.clearedAssessment.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:execution_id/cleared-assessment",
+    input: readInput(
+      z.strictObject({ execution_id: identitySchema("execution") }),
+      z.strictObject({}),
+    ),
+    output: assessmentSchema,
+    description:
+      "Read the assessment of the outcome that an unblock cleared before the claimed attempt.",
+  },
   "execution.reworkAssessment.get": {
     ...readOperation,
     access: AccessPolicy.Client,

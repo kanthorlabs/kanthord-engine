@@ -1,0 +1,334 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.execution.clearedAssessment.get
+    tags:
+      - mission
+    description: Read the assessment of the outcome that an unblock cleared before
+      the claimed attempt.
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.execution.clearedAssessment.get.Input/prope\
+            rties/params/properties/execution_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.execution.clearedAssessment.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.execution.clearedAssessment.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - execution_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.execution.clearedAssessment.get.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 37
+          maxLength: 37
+          pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: assessment_ followed by a canonical 26-character uppercase ULID.
+        node_id:
+          type: string
+          minLength: 31
+          maxLength: 31
+          pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: node_ followed by a canonical 26-character uppercase ULID.
+        execution_id:
+          anyOf:
+            - type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+            - type: "null"
+        attempt:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        node_revision:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        evidence_ids:
+          type: array
+          items:
+            type: string
+            minLength: 35
+            maxLength: 35
+            pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+            description: evidence_ followed by a canonical 26-character uppercase ULID.
+        child_outcome_ids:
+          type: array
+          items:
+            type: string
+            minLength: 34
+            maxLength: 34
+            pattern: ^outcome_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+            description: outcome_ followed by a canonical 26-character uppercase ULID.
+        result:
+          type: string
+          enum:
+            - success
+            - criterion-not-met
+            - undetermined
+        rationale:
+          type: string
+          minLength: 1
+        tested_input:
+          anyOf:
+            - anyOf:
+                - oneOf:
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: repository
+                        binding_id:
+                          type: string
+                          minLength: 34
+                          maxLength: 34
+                          pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: binding_ followed by a canonical 26-character uppercase ULID.
+                        commit:
+                          type: string
+                          pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                      required:
+                        - kind
+                        - binding_id
+                        - commit
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: produced
+                        sha256:
+                          type: string
+                          pattern: ^[0-9a-f]{64}$
+                      required:
+                        - kind
+                        - sha256
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: object
+                        location:
+                          type: string
+                          pattern: ^s3:\/\/.*
+                        version:
+                          type: string
+                          minLength: 1
+                        sha256:
+                          type: string
+                          pattern: ^[0-9a-f]{64}$
+                      required:
+                        - kind
+                        - location
+                      additionalProperties: false
+                - minItems: 1
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: repository
+                      binding_id:
+                        type: string
+                        minLength: 34
+                        maxLength: 34
+                        pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: binding_ followed by a canonical 26-character uppercase ULID.
+                      commit:
+                        type: string
+                        pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                    required:
+                      - kind
+                      - binding_id
+                      - commit
+                    additionalProperties: false
+            - type: "null"
+        actor:
+          oneOf:
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  const: human
+                account:
+                  type: string
+                name:
+                  type: string
+              required:
+                - kind
+                - account
+                - name
+              additionalProperties: false
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  const: execution
+                execution_id:
+                  type: string
+                  minLength: 36
+                  maxLength: 36
+                  pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: execution_ followed by a canonical 26-character uppercase ULID.
+                client_id:
+                  anyOf:
+                    - type: string
+                      minLength: 42
+                      maxLength: 42
+                      pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: client_identity_ followed by a canonical 26-character uppercase
+                        ULID.
+                    - type: "null"
+                name:
+                  anyOf:
+                    - type: string
+                    - type: "null"
+              required:
+                - kind
+                - execution_id
+                - client_id
+                - name
+              additionalProperties: false
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  const: service
+                service:
+                  type: string
+                  enum:
+                    - scheduler
+                    - mission
+                inbound_event_id:
+                  type: string
+                  minLength: 40
+                  maxLength: 40
+                  pattern: ^inbound_event_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: inbound_event_ followed by a canonical 26-character uppercase ULID.
+              required:
+                - kind
+                - service
+              additionalProperties: false
+        created_at:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+        currency:
+          anyOf:
+            - type: object
+              properties:
+                current:
+                  type: boolean
+                context_matches:
+                  type: boolean
+                authority_admits:
+                  type: boolean
+                order_selected:
+                  type: boolean
+                reasons:
+                  type: array
+                  items:
+                    type: string
+                    minLength: 1
+              required:
+                - current
+                - context_matches
+                - authority_admits
+                - order_selected
+                - reasons
+              additionalProperties: false
+            - type: "null"
+        child_node_ids:
+          type: array
+          items:
+            type: string
+            minLength: 31
+            maxLength: 31
+            pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+            description: node_ followed by a canonical 26-character uppercase ULID.
+        worker_version:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
+      required:
+        - id
+        - node_id
+        - execution_id
+        - attempt
+        - node_revision
+        - evidence_ids
+        - child_outcome_ids
+        - result
+        - rationale
+        - tested_input
+        - actor
+        - created_at
+        - currency
+        - child_node_ids
+        - worker_version
+      additionalProperties: false

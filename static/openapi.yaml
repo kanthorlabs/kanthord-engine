@@ -88,6 +88,8 @@ paths:
     $ref: ./openapi/mission/evidence.list.yaml#/pathItem
   /api/mission/node/{node_id}/evidence/request:
     $ref: ./openapi/mission/evidence.request.yaml#/pathItem
+  /api/mission/execution/{execution_id}/cleared-assessment:
+    $ref: ./openapi/mission/execution.clearedAssessment.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/cleared-outcome:
     $ref: ./openapi/mission/execution.clearedOutcome.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/evidence/asset/{asset_id}/content:

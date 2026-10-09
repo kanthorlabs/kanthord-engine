@@ -60,6 +60,28 @@ export function addExecutionCommands(mission: Command): void {
         "execution.clearedOutcome.get",
       );
     });
+  const clearedAssessment = execution
+    .command("cleared-assessment")
+    .description("Assessment of the outcome that an unblock cleared");
+  clearedAssessment.action(() => clearedAssessment.help());
+  clearedAssessment
+    .command("get")
+    .description(
+      "Get the assessment of the outcome that an unblock cleared before the attempt as JSON",
+    )
+    .argument("<execution-id>", "Execution ID")
+    .action(async (executionId: string, _options, command: Command) => {
+      executionIdentity(
+        executionId,
+        "cli.mission.execution.cleared_assessment.get.invalid_execution_id",
+      );
+      printResult(
+        await client(command, "execution.clearedAssessment.get")[
+          "execution.clearedAssessment.get"
+        ]({ params: { execution_id: executionId }, query: {}, body: null }),
+        "execution.clearedAssessment.get",
+      );
+    });
   const rework = execution
     .command("rework-assessment")
     .description("Assessment that caused the latest rework");

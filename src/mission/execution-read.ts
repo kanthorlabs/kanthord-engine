@@ -21,6 +21,7 @@ import {
   evidenceRecord,
 } from "./record-read.ts";
 import {
+  readAssessment,
   readExecutionAssessmentsOfAttempt,
   readOutcomesOfAttempt,
   readCurrentOutcome,
@@ -177,7 +178,7 @@ export function executionEvidencePage(
   return evidencePage(tx, claim.nodeId, { ...query, attempt: claim.attempt });
 }
 
-export function clearedOutcome(
+function clearedOutcomeRow(
   tx: Transaction,
   dependencies: Dependencies,
   claim: ExecutionClaim,
@@ -194,7 +195,30 @@ export function clearedOutcome(
     claim.attempt - FIRST_ATTEMPT,
   ).at(-FIRST_ATTEMPT);
   assert.ok(outcome);
-  return outcomeRecord(tx, dependencies.bindings, outcome);
+  return outcome;
+}
+
+export function clearedOutcome(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+) {
+  return outcomeRecord(
+    tx,
+    dependencies.bindings,
+    clearedOutcomeRow(tx, dependencies, claim),
+  );
+}
+
+export function clearedAssessment(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+) {
+  const outcome = clearedOutcomeRow(tx, dependencies, claim);
+  const assessment = readAssessment(tx, outcome.assessment_id);
+  assert.ok(assessment);
+  return assessmentRecord(tx, dependencies, assessment);
 }
 
 export function reworkAssessment(
