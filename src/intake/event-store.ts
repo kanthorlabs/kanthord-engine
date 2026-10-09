@@ -12,7 +12,8 @@ import {
 } from "./contract.ts";
 import { appendError } from "./error-array.ts";
 
-const NO_LENGTH = 0;
+const EMPTY_LIST_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
 const EARLIEST_TIME = 0;
 const ROWS_PER_EVENT_WRITE = 1;
 
@@ -46,8 +47,14 @@ export function findEvent(
   inboundId: string,
   eventId: string,
 ): string | null {
-  assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
-  assert.ok(eventId.length > NO_LENGTH, "An event identity is required.");
+  assert.ok(
+    inboundId.length > EMPTY_TEXT_LENGTH,
+    "An inbound identity is required.",
+  );
+  assert.ok(
+    eventId.length > EMPTY_TEXT_LENGTH,
+    "An event identity is required.",
+  );
   const row = tx.database
     .prepare(
       "SELECT id FROM intake_inbound_event WHERE inbound_id = ? AND event_id = ?",
@@ -57,9 +64,12 @@ export function findEvent(
 }
 
 export function insertEvent(tx: Transaction, input: NewInboundEvent): string {
-  assert.ok(input.inbound_id.length > NO_LENGTH, "An inbound is required.");
   assert.ok(
-    input.event_id.length > NO_LENGTH,
+    input.inbound_id.length > EMPTY_TEXT_LENGTH,
+    "An inbound is required.",
+  );
+  assert.ok(
+    input.event_id.length > EMPTY_TEXT_LENGTH,
     "An event identity is required.",
   );
   assert.ok(
@@ -85,7 +95,10 @@ export function insertEvent(tx: Transaction, input: NewInboundEvent): string {
 }
 
 export function readEvent(tx: Transaction, id: string): InboundEventRow | null {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   return (
     (tx.database
       .prepare("SELECT * FROM intake_inbound_event WHERE id = ?")
@@ -97,7 +110,10 @@ export function readEventProjection(
   tx: Transaction,
   id: string,
 ): InboundEventProjectionRow | null {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   return (
     (tx.database
       .prepare(
@@ -121,7 +137,10 @@ export function oldestPendingEvent(
   excluded: ReadonlySet<string>,
 ): string | null {
   const exclusion = canonicalJSON([...excluded].sort());
-  assert.ok(exclusion.length > NO_LENGTH, "An exclusion encodes to JSON.");
+  assert.ok(
+    exclusion.length > EMPTY_TEXT_LENGTH,
+    "An exclusion encodes to JSON.",
+  );
   const row = tx.database
     .prepare(
       `SELECT id FROM intake_inbound_event
@@ -136,7 +155,10 @@ export function eventState(
   tx: Transaction,
   id: string,
 ): InboundEventStateValue | null {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   const row = tx.database
     .prepare("SELECT state FROM intake_inbound_event WHERE id = ?")
     .get(id) as { state: InboundEventStateValue } | undefined;
@@ -144,7 +166,10 @@ export function eventState(
 }
 
 export function succeedEvent(tx: Transaction, id: string): boolean {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   const changes = tx.database
     .prepare(
       "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
@@ -162,7 +187,10 @@ export function failEvent(
   id: string,
   item: ErrorItem,
 ): boolean {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   assert.ok(Number.isSafeInteger(item.created_at));
   const current = tx.database
     .prepare(
@@ -189,7 +217,10 @@ export function failEvent(
 }
 
 export function retryFailedEvent(tx: Transaction, id: string): boolean {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   const changes = tx.database
     .prepare(
       "UPDATE intake_inbound_event SET state = ? WHERE id = ? AND state = ?",
@@ -207,7 +238,10 @@ export function discardEventFrom(
   id: string,
   from: InboundEventStateValue,
 ): boolean {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   assert.ok(
     from === InboundEventState.Pending || from === InboundEventState.Failed,
     "A discard starts from pending or failed.",
@@ -228,7 +262,7 @@ export function pendingEventAmong(
   tx: Transaction,
   ids: readonly string[],
 ): string | null {
-  assert.ok(ids.length > NO_LENGTH, "An identity list is not empty.");
+  assert.ok(ids.length > EMPTY_LIST_LENGTH, "An identity list is not empty.");
   assert.ok(tx.database, "A read runs inside a transaction.");
   const marks = ids.map(() => "?").join(", ");
   const row = tx.database
@@ -243,7 +277,7 @@ export function deleteSettledEvents(
   tx: Transaction,
   ids: readonly string[],
 ): number {
-  assert.ok(ids.length > NO_LENGTH, "An identity list is not empty.");
+  assert.ok(ids.length > EMPTY_LIST_LENGTH, "An identity list is not empty.");
   assert.ok(tx.database, "A delete runs inside a transaction.");
   const marks = ids.map(() => "?").join(", ");
   const changes = tx.database
@@ -262,7 +296,7 @@ export function countEventsInRange(
   to: string,
 ): number {
   assert.ok(
-    from.length > NO_LENGTH && to.length > NO_LENGTH,
+    from.length > EMPTY_TEXT_LENGTH && to.length > EMPTY_TEXT_LENGTH,
     "A range has two bounds.",
   );
   const row = tx.database
@@ -285,7 +319,7 @@ export function deleteEventsInRange(
     "No delete removes a pending event.",
   );
   assert.ok(
-    from.length > NO_LENGTH && to.length > NO_LENGTH,
+    from.length > EMPTY_TEXT_LENGTH && to.length > EMPTY_TEXT_LENGTH,
     "A range has two bounds.",
   );
   const changes = tx.database

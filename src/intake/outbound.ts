@@ -34,8 +34,10 @@ import {
   type OutboundRow,
 } from "./outbound-store.ts";
 
-const NO_LENGTH = 0;
-const NO_DURATION = 0;
+const EMPTY_LIST_LENGTH = 0;
+const EMPTY_CODE_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
+const EXPIRED_DEADLINE_MS = 0;
 const TIMEOUT_CODE = "timeout";
 const CODE_SEPARATOR = ": ";
 const PENDING_UNMATCHED_MESSAGE =
@@ -142,12 +144,12 @@ export async function runOutbound<TBody>(
   request: OutboundRun<TBody>,
 ): Promise<TBody> {
   assert.ok(
-    request.requestKey.length > NO_LENGTH,
+    request.requestKey.length > EMPTY_TEXT_LENGTH,
     "A request key is required.",
   );
   assert.ok(
     Number.isSafeInteger(request.deadlineMs) &&
-      request.deadlineMs > NO_DURATION,
+      request.deadlineMs > EXPIRED_DEADLINE_MS,
     "A deadline must be a positive integer of milliseconds.",
   );
   const hold: Hold = { material: null, owned: null };
@@ -178,7 +180,7 @@ function admit<TBody>(
   const now = Date.now();
   const authorization = request.authorize(tx, now);
   hold.material = authorization.material;
-  assert.ok(authorization.project_id.length > NO_LENGTH);
+  assert.ok(authorization.project_id.length > EMPTY_TEXT_LENGTH);
   const existing = findByKey(tx, authorization.operation, request.requestKey);
   if (existing !== null)
     return repeat(inFlight, existing, request.resultCodec, hold);
@@ -203,7 +205,7 @@ function insertOrConflict(
   requestKey: string,
   now: number,
 ): string | null {
-  assert.ok(requestKey.length > NO_LENGTH);
+  assert.ok(requestKey.length > EMPTY_TEXT_LENGTH);
   assert.ok(Number.isSafeInteger(now));
   try {
     return insertPending(tx, {
@@ -316,7 +318,10 @@ function refused(
   answer: Extract<OutboundAnswer, { ok: false }>,
 ): Settlement {
   assert.ok(resultClassSchema.safeParse(answer.class).success);
-  assert.ok(answer.code.length > NO_LENGTH, "A refusal names its code.");
+  assert.ok(
+    answer.code.length > EMPTY_TEXT_LENGTH,
+    "A refusal names its code.",
+  );
   const item = {
     code: answer.class,
     message: answer.code + CODE_SEPARATOR + answer.message,
@@ -367,7 +372,7 @@ function unmatched(row: OutboundRow): OutboundAnswer {
       message: PENDING_UNMATCHED_MESSAGE,
     };
   const items = outboundRecord(row).error;
-  assert.ok(items !== null && items.length > NO_LENGTH);
+  assert.ok(items !== null && items.length > EMPTY_LIST_LENGTH);
   const newest = items[items.length - 1];
   assert.ok(newest !== undefined, "A failed request holds an error item.");
   const stored = resultClassSchema.safeParse(newest.code);
@@ -379,7 +384,7 @@ function unmatched(row: OutboundRow): OutboundAnswer {
       message: newest.message,
     };
   const separator = newest.message.indexOf(CODE_SEPARATOR);
-  assert.ok(separator > NO_LENGTH, "A stored refusal names its code.");
+  assert.ok(separator > EMPTY_CODE_LENGTH, "A stored refusal names its code.");
   return {
     ok: false,
     class: stored.data,
@@ -393,7 +398,7 @@ async function withDeadline<T>(
   deadlineMs: number,
   work: (scope: OutboundScope) => Promise<T>,
 ): Promise<Race<T>> {
-  assert.ok(deadlineMs > NO_DURATION);
+  assert.ok(deadlineMs > EXPIRED_DEADLINE_MS);
   const context = new CancellationContext(parent, Date.now() + deadlineMs);
   const { signal, dispose } = abortSignal(context);
   try {
@@ -450,7 +455,7 @@ function writeState(tx: Transaction, codec: ResultCodec, outcome: Outcome) {
 function encodeResult(codec: ResultCodec, result: unknown): unknown {
   const stored = codec.encode(result);
   const text = canonicalJSON(stored);
-  assert.ok(text.length > NO_LENGTH, "A result encodes to JSON text.");
+  assert.ok(text.length > EMPTY_TEXT_LENGTH, "A result encodes to JSON text.");
   assert.ok(
     Buffer.byteLength(text, "utf8") <= RESULT_MAX_BYTES,
     "A result must fit its byte bound.",
@@ -463,7 +468,7 @@ function confirmUnchanged(
   id: string,
   sources: readonly OutboundRequestStateValue[],
 ): void {
-  assert.ok(sources.length > NO_LENGTH);
+  assert.ok(sources.length > EMPTY_LIST_LENGTH);
   const row = findById(tx, id);
   assert.ok(
     row === null || !sources.includes(row.state),

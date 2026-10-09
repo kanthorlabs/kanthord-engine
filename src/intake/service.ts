@@ -54,7 +54,7 @@ import {
   putObject,
 } from "./storage.ts";
 
-const NO_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
 
 function assertConsumers(consumers: IntakeConsumers): void {
   const expected = Object.values(Consumer);
@@ -334,7 +334,10 @@ export class IntakeService implements Service, IntakeCollaborations {
   }
 
   inboundRemoved(inboundId: string): void {
-    assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
+    assert.ok(
+      inboundId.length > EMPTY_TEXT_LENGTH,
+      "An inbound identity is required.",
+    );
     this.pollLoops.stop(inboundId);
   }
 
@@ -349,7 +352,7 @@ export class IntakeService implements Service, IntakeCollaborations {
   ): { inbound_id: string }[] {
     assert.ok(tx);
     assert.ok(
-      credentialName.length > NO_LENGTH,
+      credentialName.length > EMPTY_TEXT_LENGTH,
       "A credential name is required.",
     );
     const rows = tx.database

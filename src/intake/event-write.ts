@@ -22,7 +22,8 @@ import {
   type InboundEventProjectionRow,
 } from "./event-store.ts";
 
-const NO_LENGTH = 0;
+const EMPTY_LIST_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
 const MIN_DELETE_COUNT = 0;
 
 type DeleteFilter =
@@ -55,7 +56,10 @@ function current(tx: Transaction, id: string): InboundEvent {
 }
 
 export function retryEvent(tx: Transaction, id: string): InboundEvent {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   const row = stored(tx, id);
   if (row.state === InboundEventState.Pending) return eventRecord(row);
   if (row.state !== InboundEventState.Failed)
@@ -69,7 +73,10 @@ export function discardEvent(
   inFlight: (id: string) => boolean,
   id: string,
 ): InboundEvent {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   const row = stored(tx, id);
   if (row.state === InboundEventState.Pending && inFlight(id))
     throw new OperationError(
@@ -101,7 +108,7 @@ function deleteFilter(body: InboundEventDelete): DeleteFilter {
   const { state, from, to, ids } = body;
   const rangeFields = [state, from, to].filter((value) => value !== undefined);
   if (ids !== undefined) {
-    if (rangeFields.length > NO_LENGTH) filterInvalid();
+    if (rangeFields.length > EMPTY_LIST_LENGTH) filterInvalid();
     return { ids };
   }
   if (state === undefined || from === undefined || to === undefined)
@@ -111,7 +118,7 @@ function deleteFilter(body: InboundEventDelete): DeleteFilter {
 }
 
 function deleteByIds(tx: Transaction, ids: readonly string[]): number {
-  assert.ok(ids.length > NO_LENGTH, "An identity list is not empty.");
+  assert.ok(ids.length > EMPTY_LIST_LENGTH, "An identity list is not empty.");
   assert.ok(ids.length <= DELETE_IDS_MAX, "An identity list fits its bound.");
   const pending = pendingEventAmong(tx, ids);
   if (pending !== null)

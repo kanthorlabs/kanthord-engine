@@ -12,8 +12,9 @@ import {
 } from "./contract.ts";
 import { discard, findById, outboundRecord } from "./outbound-store.ts";
 
-const NO_LENGTH = 0;
-const NO_COUNT = 0;
+const EMPTY_LIST_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
+const MIN_DELETE_COUNT = 0;
 
 type DeleteFilter =
   | { ids: string[] }
@@ -40,7 +41,7 @@ export function discardOutbound(
   inFlight: ReadonlySet<string>,
   id: string,
 ): OutboundRequest {
-  assert.ok(id.length > NO_LENGTH, "An identity is required.");
+  assert.ok(id.length > EMPTY_TEXT_LENGTH, "An identity is required.");
   const row = findById(tx, id) ?? notFound();
   if (inFlight.has(id))
     throw new OperationError(
@@ -70,7 +71,7 @@ function deleteFilter(body: OutboundDelete): DeleteFilter {
   const { state, from, to, ids } = body;
   const rangeFields = [state, from, to].filter((value) => value !== undefined);
   if (ids !== undefined) {
-    if (rangeFields.length > NO_COUNT) filterInvalid();
+    if (rangeFields.length > EMPTY_LIST_LENGTH) filterInvalid();
     return { ids };
   }
   if (state === undefined || from === undefined || to === undefined)
@@ -80,7 +81,7 @@ function deleteFilter(body: OutboundDelete): DeleteFilter {
 }
 
 function deleteByIds(tx: Transaction, ids: readonly string[]): number {
-  assert.ok(ids.length > NO_LENGTH, "An identity list is not empty.");
+  assert.ok(ids.length > EMPTY_LIST_LENGTH, "An identity list is not empty.");
   assert.ok(ids.length <= DELETE_IDS_MAX, "An identity list fits its bound.");
   const marks = ids.map(() => "?").join(", ");
   const pending = tx.database
@@ -107,7 +108,7 @@ function deleteByRange(
   to: string,
 ): number {
   assert.notEqual(state, OutboundRequestState.Pending);
-  assert.ok(from.length > NO_LENGTH && to.length > NO_LENGTH);
+  assert.ok(from.length > EMPTY_TEXT_LENGTH && to.length > EMPTY_TEXT_LENGTH);
   const matched = tx.database
     .prepare(
       "SELECT COUNT(*) AS total FROM intake_outbound_request WHERE state = ? AND id >= ? AND id <= ?",
@@ -137,6 +138,6 @@ export function deleteOutbound(
     "ids" in filter
       ? deleteByIds(tx, filter.ids)
       : deleteByRange(tx, filter.state, filter.from, filter.to);
-  assert.ok(Number.isSafeInteger(count) && count >= NO_COUNT);
+  assert.ok(Number.isSafeInteger(count) && count >= MIN_DELETE_COUNT);
   return { count };
 }

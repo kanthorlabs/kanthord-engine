@@ -9,7 +9,7 @@ import {
   readInbound,
 } from "./inbound-store.ts";
 
-const NO_EVENTS = 0;
+const DELETABLE_PENDING_COUNT = 0;
 
 export function removeInbound(tx: Transaction, id: string): null {
   if (readInbound(tx, id) === null)
@@ -18,7 +18,7 @@ export function removeInbound(tx: Transaction, id: string): null {
       IntakeErrorCode.InboundNotFound,
       "Inbound not found.",
     );
-  if (pendingEventCount(tx, id) > NO_EVENTS)
+  if (pendingEventCount(tx, id) > DELETABLE_PENDING_COUNT)
     throw new OperationError(
       HttpStatus.Conflict,
       IntakeErrorCode.InboundEventsPending,

@@ -41,11 +41,13 @@ import {
   type InboundRow,
 } from "./inbound-store.ts";
 
-const NO_LENGTH = 0;
-const NO_ROOM = 0;
-const NO_INTERVAL_MS = 0;
-const NO_OFFSET_MS = 0;
-const ONE_ROW = 1;
+const RUNNING_AFTER_STOP = 0;
+const EMPTY_TEXT_LENGTH = 0;
+const PENDING_LIMIT_FLOOR = 0;
+const EXHAUSTED_ROOM = 0;
+const POLL_INTERVAL_FLOOR_MS = 0;
+const IMMEDIATE_OFFSET_MS = 0;
+const ROOM_PER_EVENT = 1;
 const UNKNOWN_CODE = "system.operation.unknown";
 const EMPTY_CHECKPOINT: GitHubCheckpoint = {
   etag: null,
@@ -143,8 +145,14 @@ export function releasePollGrant(
   tx: Transaction,
   facts: InboundGrantInput,
 ): Material {
-  assert.ok(facts.inboundId.length > NO_LENGTH, "A poll names its inbound.");
-  assert.ok(facts.credential.length > NO_LENGTH, "A poll names a credential.");
+  assert.ok(
+    facts.inboundId.length > EMPTY_TEXT_LENGTH,
+    "A poll names its inbound.",
+  );
+  assert.ok(
+    facts.credential.length > EMPTY_TEXT_LENGTH,
+    "A poll names a credential.",
+  );
   const now = Date.now();
   const grant = dependencies.custody.authorizeOperation(
     tx,
@@ -164,10 +172,16 @@ export async function requestPollEvents(
   github: Pick<GitHubPlatform, "listEvents">,
   request: PollEventsRequest,
 ): Promise<GitHubAnswer<GitHubEventsAnswer>> {
-  assert.ok(request.owner.length > NO_LENGTH, "A poll names an owner.");
-  assert.ok(request.repo.length > NO_LENGTH, "A poll names a repository.");
+  assert.ok(request.owner.length > EMPTY_TEXT_LENGTH, "A poll names an owner.");
+  assert.ok(
+    request.repo.length > EMPTY_TEXT_LENGTH,
+    "A poll names a repository.",
+  );
   const token = apiKeySecretSchema.parse(request.material.value()).key;
-  assert.ok(token.length > NO_LENGTH, "A poll request carries a token.");
+  assert.ok(
+    token.length > EMPTY_TEXT_LENGTH,
+    "A poll request carries a token.",
+  );
   const { signal, dispose } = abortSignal(request.context);
   try {
     return await github.listEvents(
@@ -209,7 +223,10 @@ export function storeBatch(
   answer: { etag: string | null; events: GitHubEvent[] },
 ): boolean {
   assert.ok(Number.isSafeInteger(pendingEventLimit));
-  assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
+  assert.ok(
+    inboundId.length > EMPTY_TEXT_LENGTH,
+    "An inbound identity is required.",
+  );
   const row = readInbound(tx, inboundId);
   if (row === null) return false;
   const previous = checkpointOf(row.checkpoint);
@@ -218,7 +235,7 @@ export function storeBatch(
   let unstored = false;
   for (const event of newerEvents(answer.events, previous.newest_event_id)) {
     if (findEvent(tx, inboundId, event.id) !== null) continue;
-    if (room <= NO_ROOM) {
+    if (room <= EXHAUSTED_ROOM) {
       unstored = true;
       break;
     }
@@ -230,7 +247,7 @@ export function storeBatch(
       created_at: Date.now(),
     });
     newest = event.id;
-    room -= ONE_ROW;
+    room -= ROOM_PER_EVENT;
   }
   writeCheckpoint(
     tx,
@@ -246,8 +263,11 @@ export function storeBatch(
 }
 
 function logFailure(logger: Logger, inboundId: string, code: string): void {
-  assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
-  assert.ok(code.length > NO_LENGTH, "A failure names a code.");
+  assert.ok(
+    inboundId.length > EMPTY_TEXT_LENGTH,
+    "An inbound identity is required.",
+  );
+  assert.ok(code.length > EMPTY_TEXT_LENGTH, "A failure names a code.");
   logger.warn(
     { inbound_id: inboundId, code },
     "intake: a poll request of an inbound failed.",
@@ -301,14 +321,14 @@ export class PollLoops {
 
   constructor(dependencies: PollDependencies) {
     assert.ok(Number.isSafeInteger(dependencies.pollIntervalMs));
-    assert.ok(dependencies.pollIntervalMs > NO_INTERVAL_MS);
+    assert.ok(dependencies.pollIntervalMs > POLL_INTERVAL_FLOOR_MS);
     assert.ok(Number.isSafeInteger(dependencies.pendingEventLimit));
-    assert.ok(dependencies.pendingEventLimit > NO_ROOM);
+    assert.ok(dependencies.pendingEventLimit > PENDING_LIMIT_FLOOR);
     this.#dependencies = dependencies;
   }
 
   start(inboundId: string): void {
-    this.#open(inboundId, NO_OFFSET_MS);
+    this.#open(inboundId, IMMEDIATE_OFFSET_MS);
   }
 
   startAll(inboundIds: readonly string[]): void {
@@ -322,7 +342,10 @@ export class PollLoops {
   }
 
   stop(inboundId: string): void {
-    assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
+    assert.ok(
+      inboundId.length > EMPTY_TEXT_LENGTH,
+      "An inbound identity is required.",
+    );
     const loop = this.#loops.get(inboundId);
     if (loop === undefined) return;
     this.#loops.delete(inboundId);
@@ -334,13 +357,13 @@ export class PollLoops {
   quiesce(): void {
     this.#quiescent = true;
     for (const inboundId of [...this.#loops.keys()]) this.stop(inboundId);
-    assert.equal(this.#loops.size, NO_LENGTH, "Every loop stops.");
+    assert.equal(this.#loops.size, RUNNING_AFTER_STOP, "Every loop stops.");
   }
 
   async drain(): Promise<void> {
     assert.ok(this.#quiescent, "A drain follows the quiescence.");
     await Promise.all([...this.#cycles]);
-    assert.equal(this.#cycles.size, NO_LENGTH, "Every cycle ends.");
+    assert.equal(this.#cycles.size, RUNNING_AFTER_STOP, "Every cycle ends.");
   }
 
   async stopAll(): Promise<void> {
@@ -349,9 +372,12 @@ export class PollLoops {
   }
 
   #open(inboundId: string, startOffsetMs: number): void {
-    assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
+    assert.ok(
+      inboundId.length > EMPTY_TEXT_LENGTH,
+      "An inbound identity is required.",
+    );
     assert.ok(Number.isSafeInteger(startOffsetMs));
-    assert.ok(startOffsetMs >= NO_OFFSET_MS);
+    assert.ok(startOffsetMs >= IMMEDIATE_OFFSET_MS);
     assert.ok(startOffsetMs < this.#dependencies.pollIntervalMs);
     if (this.#quiescent || this.#loops.has(inboundId)) return;
     const loop: Loop = {
@@ -363,7 +389,11 @@ export class PollLoops {
     this.#arm(inboundId, loop, startOffsetMs);
   }
 
-  #arm(inboundId: string, loop: Loop, startOffsetMs = NO_OFFSET_MS): void {
+  #arm(
+    inboundId: string,
+    loop: Loop,
+    startOffsetMs = IMMEDIATE_OFFSET_MS,
+  ): void {
     if (this.#loops.get(inboundId) !== loop) return;
     assert.equal(loop.timer, null, "A loop holds one timer.");
     assert.equal(loop.cycle, null, "A loop arms after its cycle ends.");

@@ -41,7 +41,8 @@ const OPERATION_UNKNOWN_CODE = "system.operation.unknown";
 const CREDENTIAL_INVALID_STATUS = 422;
 const PLATFORM_REFUSED_STATUS = 422;
 const BODY_PATH = "body";
-const NO_LENGTH = 0;
+const EMPTY_LIST_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
 const CREDENTIAL_REFUSAL_CODES: ReadonlySet<string> = new Set([
   "credential.credential.not_found",
   "credential.platform.mismatch",
@@ -77,7 +78,10 @@ interface Hold {
 function validationFailed(
   issues: { path: string[]; code: string }[],
 ): OperationError {
-  assert.ok(issues.length > NO_LENGTH, "A validation failure names an issue.");
+  assert.ok(
+    issues.length > EMPTY_LIST_LENGTH,
+    "A validation failure names an issue.",
+  );
   return new OperationError(
     HttpStatus.BadRequest,
     VALIDATION_FAILED_CODE,
@@ -172,7 +176,7 @@ export function commitInbound(
   input: InboundCreate,
   checkpoint: unknown,
 ): Inbound {
-  assert.ok(id.length > NO_LENGTH, "An inbound identity is required.");
+  assert.ok(id.length > EMPTY_TEXT_LENGTH, "An inbound identity is required.");
   assert.equal(readInbound(tx, id), null, "An inbound identity is fresh.");
   checkCredential(custody, tx, input);
   insertInbound(tx, id, {
@@ -192,7 +196,10 @@ export function commitInbound(
 
 function platformRefused(failure: GitHubFailure): OperationError {
   assert.equal(failure.ok, false);
-  assert.ok(failure.message.length > NO_LENGTH, "A failure names a reason.");
+  assert.ok(
+    failure.message.length > EMPTY_TEXT_LENGTH,
+    "A failure names a reason.",
+  );
   return new OperationError(
     PLATFORM_REFUSED_STATUS,
     IntakeErrorCode.InboundPlatformRefused,

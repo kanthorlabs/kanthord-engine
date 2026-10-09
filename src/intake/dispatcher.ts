@@ -26,7 +26,7 @@ import {
 } from "./event-store.ts";
 import { readInbound } from "./inbound-store.ts";
 
-const NO_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
 const FIRST_STEP = 0;
 const FINAL_SELECTION = 1;
 const MAX_IN_FLIGHT = 1;
@@ -73,7 +73,10 @@ export function reserve(
   inFlight: Set<string>,
   id: string,
 ): boolean {
-  assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+  assert.ok(
+    id.length > EMPTY_TEXT_LENGTH,
+    "An event row identity is required.",
+  );
   assert.ok(inFlight.size < MAX_IN_FLIGHT, "One handoff runs at a time.");
   if (eventState(tx, id) !== InboundEventState.Pending) return false;
   inFlight.add(id);
@@ -111,7 +114,10 @@ function outcomeOf(result: OperationResult<unknown>): Outcome {
       code: INDETERMINATE_CODE,
       message: INDETERMINATE_MESSAGE,
     };
-  assert.ok(result.error.error.code.length > NO_LENGTH, "A failure has code.");
+  assert.ok(
+    result.error.error.code.length > EMPTY_TEXT_LENGTH,
+    "A failure has code.",
+  );
   return {
     succeeded: false,
     code: result.error.error.code,
@@ -161,7 +167,10 @@ export class Dispatcher {
   }
 
   inFlight(id: string): boolean {
-    assert.ok(id.length > NO_LENGTH, "An event row identity is required.");
+    assert.ok(
+      id.length > EMPTY_TEXT_LENGTH,
+      "An event row identity is required.",
+    );
     return this.running.has(id);
   }
 

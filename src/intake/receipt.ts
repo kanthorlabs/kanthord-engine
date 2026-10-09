@@ -30,8 +30,8 @@ const DIGEST_ENCODING = "hex";
 const DIGEST_BYTES = 32;
 const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 const HEADER_VALUE_SEPARATOR = ",";
-const NO_LENGTH = 0;
-const NO_EVENTS = 0;
+const EMPTY_TEXT_LENGTH = 0;
+const PENDING_LIMIT_FLOOR = 0;
 
 const receiptParamsSchema = z.strictObject({
   inbound_id: identitySchema(INBOUND_ID_PREFIX),
@@ -78,7 +78,10 @@ function verifySignature(
   bytes: Uint8Array,
   headers: Headers,
 ): void {
-  assert.ok(secret.length > NO_LENGTH, "A verification secret is required.");
+  assert.ok(
+    secret.length > EMPTY_TEXT_LENGTH,
+    "A verification secret is required.",
+  );
   const claimed = claimedDigest(headers);
   const computed = createHmac(SIGNATURE_ALGORITHM, secret)
     .update(bytes)
@@ -98,7 +101,8 @@ function storeEvent(
   event: NewInboundEvent,
 ): null {
   assert.ok(
-    Number.isSafeInteger(pendingEventLimit) && pendingEventLimit > NO_EVENTS,
+    Number.isSafeInteger(pendingEventLimit) &&
+      pendingEventLimit > PENDING_LIMIT_FLOOR,
   );
   if (findEvent(tx, event.inbound_id, event.event_id) !== null) return null;
   if (pendingCount(tx) >= pendingEventLimit)

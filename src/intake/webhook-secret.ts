@@ -5,11 +5,11 @@ import { INBOUND_ID_PREFIX } from "./contract.ts";
 
 const WEBHOOK_SECRET_LABEL_PREFIX = "webhook/";
 const WEBHOOK_SECRET_BYTES = 32;
-const NO_LENGTH = 0;
+const EMPTY_KEY_LENGTH = 0;
 
 export function webhookSecret(masterKey: string, inboundId: string): string {
   assert.ok(
-    masterKey.length > NO_LENGTH,
+    masterKey.length > EMPTY_KEY_LENGTH,
     "webhookSecret requires a master key.",
   );
   assert.ok(

@@ -46,9 +46,9 @@ const NODE_BRANCH_PREFIX = "kanthord/";
 const PULL_REQUEST_TITLE_PREFIX = "kanthord ";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const ACTION_UNMAPPED_STATUS = 422;
-const SINGLE_MATCH = 1;
-const NO_DURATION = 0;
-const NO_NUMBER = 0;
+const MATCHED_PULL_REQUEST_COUNT = 1;
+const EXPIRED_DEADLINE_MS = 0;
+const PULL_NUMBER_FLOOR = 0;
 
 export type PerformBody = {
   key: string;
@@ -310,7 +310,7 @@ async function openPullRequest(
       base: facts.frozen_action.configuration.base_branch,
     },
   );
-  if (!answer.ok || answer.value.length !== SINGLE_MATCH)
+  if (!answer.ok || answer.value.length !== MATCHED_PULL_REQUEST_COUNT)
     return { match: false };
   const [number] = answer.value;
   assert.ok(number !== undefined);
@@ -406,7 +406,7 @@ function gitHubCall(
 function deadlineOf(scope: OutboundScope, boundMs: number): number {
   const deadline = scope.context.deadline();
   assert.ok(deadline !== null, "An outbound scope holds a deadline.");
-  assert.ok(boundMs > NO_DURATION);
+  assert.ok(boundMs > EXPIRED_DEADLINE_MS);
   return Math.min(deadline, Date.now() + boundMs);
 }
 
@@ -419,7 +419,7 @@ function pullRequestAddress(
   facts: Readonly<ActionFacts>,
   number: number,
 ): PlatformAddress {
-  assert.ok(Number.isSafeInteger(number) && number > NO_NUMBER);
+  assert.ok(Number.isSafeInteger(number) && number > PULL_NUMBER_FLOOR);
   return {
     kind: AddressKind.PullRequest,
     resource_identity: facts.repository.resource_identity,

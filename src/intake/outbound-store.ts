@@ -13,9 +13,9 @@ import {
 } from "./contract.ts";
 import { appendError } from "./error-array.ts";
 
-const NO_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
 const EARLIEST_TIME = 0;
-const ONE_ROW = 1;
+const ROWS_PER_WRITE = 1;
 const KEY_UNIQUE_FAILURE =
   /UNIQUE constraint failed: intake_outbound_request\.operation, intake_outbound_request\.request_key/;
 const SUCCEED_SOURCES: readonly OutboundRequestStateValue[] = [
@@ -56,7 +56,10 @@ export interface OutboundFailure {
 }
 
 export function insertPending(tx: Transaction, row: PendingOutbound): string {
-  assert.ok(row.request_key.length > NO_LENGTH, "A request key is required.");
+  assert.ok(
+    row.request_key.length > EMPTY_TEXT_LENGTH,
+    "A request key is required.",
+  );
   assert.ok(
     Number.isSafeInteger(row.created_at) && row.created_at >= EARLIEST_TIME,
   );
@@ -90,7 +93,10 @@ export function findByKey(
   operation: OutboundOperationValue,
   requestKey: string,
 ): OutboundRow | null {
-  assert.ok(requestKey.length > NO_LENGTH, "A request key is required.");
+  assert.ok(
+    requestKey.length > EMPTY_TEXT_LENGTH,
+    "A request key is required.",
+  );
   return (
     (tx.database
       .prepare(
@@ -101,7 +107,7 @@ export function findByKey(
 }
 
 export function findById(tx: Transaction, id: string): OutboundRow | null {
-  assert.ok(id.length > NO_LENGTH, "An identity is required.");
+  assert.ok(id.length > EMPTY_TEXT_LENGTH, "An identity is required.");
   return (
     (tx.database
       .prepare("SELECT * FROM intake_outbound_request WHERE id = ?")
@@ -129,7 +135,7 @@ export function succeed(
   expected: readonly OutboundRequestStateValue[],
 ): boolean {
   assert.ok(
-    expected.length > NO_LENGTH,
+    expected.length > EMPTY_TEXT_LENGTH,
     "A succeed write requires a source state.",
   );
   assert.ok(
@@ -147,7 +153,7 @@ export function succeed(
       `UPDATE intake_outbound_request SET state = ?, result = ? WHERE id = ? AND state IN (${sources})`,
     )
     .run(OutboundRequestState.Succeeded, stored, id, ...expected).changes;
-  return Number(changes) === ONE_ROW;
+  return Number(changes) === ROWS_PER_WRITE;
 }
 
 export function fail(
@@ -179,7 +185,11 @@ export function fail(
       id,
       OutboundRequestState.Pending,
     ).changes;
-  assert.equal(Number(changes), ONE_ROW, "A failed write changes one row.");
+  assert.equal(
+    Number(changes),
+    ROWS_PER_WRITE,
+    "A failed write changes one row.",
+  );
   return true;
 }
 
@@ -193,5 +203,5 @@ export function discard(tx: Transaction, id: string): boolean {
       id,
       OutboundRequestState.Pending,
     ).changes;
-  return Number(changes) === ONE_ROW;
+  return Number(changes) === ROWS_PER_WRITE;
 }

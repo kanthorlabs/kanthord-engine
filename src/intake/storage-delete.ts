@@ -37,7 +37,7 @@ import {
 import { objectTarget, type StorageDependencies } from "./storage.ts";
 
 const BAD_GATEWAY_STATUS = 502;
-const NO_DURATION = 0;
+const EXPIRED_DEADLINE_MS = 0;
 const STATUS_CODE_PATTERN = /^[1-5][0-9]{2}$/;
 
 export type DeleteRunner = (request: OutboundRun<null>) => Promise<null>;
@@ -187,7 +187,7 @@ function s3Call(material: Material | null, scope: OutboundScope): S3Call {
   const secret = s3AccessKeySecretSchema.parse(material.value());
   const deadline = scope.context.deadline();
   assert.ok(deadline !== null, "An outbound scope holds a deadline.");
-  assert.ok(PLATFORM_CALL_DEADLINE_MS > NO_DURATION);
+  assert.ok(PLATFORM_CALL_DEADLINE_MS > EXPIRED_DEADLINE_MS);
   return {
     accessKeyId: secret.access_key_id,
     secretAccessKey: secret.secret_access_key,

@@ -14,10 +14,10 @@ import {
   type InboundPlatformValue,
 } from "./contract.ts";
 
-const NO_LENGTH = 0;
+const EMPTY_TEXT_LENGTH = 0;
 const EARLIEST_TIME = 0;
-const NO_EVENTS = 0;
-const ONE_ROW = 1;
+const DELETABLE_PENDING_COUNT = 0;
+const ROWS_PER_WRITE = 1;
 
 export interface NewInbound {
   project_id: string;
@@ -51,7 +51,7 @@ export function insertInbound(
   id: string,
   row: NewInbound,
 ): void {
-  assert.ok(id.length > NO_LENGTH, "An inbound identity is required.");
+  assert.ok(id.length > EMPTY_TEXT_LENGTH, "An inbound identity is required.");
   assert.ok(
     Number.isSafeInteger(row.created_at) && row.created_at >= EARLIEST_TIME,
   );
@@ -78,7 +78,7 @@ export function insertInbound(
 }
 
 export function readInbound(tx: Transaction, id: string): InboundRow | null {
-  assert.ok(id.length > NO_LENGTH, "An inbound identity is required.");
+  assert.ok(id.length > EMPTY_TEXT_LENGTH, "An inbound identity is required.");
   return (
     (tx.database
       .prepare("SELECT * FROM intake_inbound WHERE id = ?")
@@ -91,12 +91,12 @@ export function writeCheckpoint(
   id: string,
   text: string,
 ): void {
-  assert.ok(id.length > NO_LENGTH, "An inbound identity is required.");
-  assert.ok(text.length > NO_LENGTH, "A checkpoint is required.");
+  assert.ok(id.length > EMPTY_TEXT_LENGTH, "An inbound identity is required.");
+  assert.ok(text.length > EMPTY_TEXT_LENGTH, "A checkpoint is required.");
   const changes = tx.database
     .prepare("UPDATE intake_inbound SET checkpoint = ? WHERE id = ?")
     .run(text, id).changes;
-  assert.equal(Number(changes), ONE_ROW, "A checkpoint writes one row.");
+  assert.equal(Number(changes), ROWS_PER_WRITE, "A checkpoint writes one row.");
 }
 
 export function pollInboundIds(tx: Transaction): string[] {
@@ -105,7 +105,7 @@ export function pollInboundIds(tx: Transaction): string[] {
     .prepare("SELECT id FROM intake_inbound WHERE kind = ? ORDER BY id")
     .all(InboundKind.Poll) as { id: string }[];
   const ids = rows.map((row) => row.id);
-  assert.ok(ids.every((id) => id.length > NO_LENGTH));
+  assert.ok(ids.every((id) => id.length > EMPTY_TEXT_LENGTH));
   return ids;
 }
 
@@ -114,7 +114,7 @@ export function allInbounds(tx: Transaction): InboundRow[] {
   const rows = tx.database
     .prepare("SELECT * FROM intake_inbound ORDER BY id")
     .all() as unknown as InboundRow[];
-  assert.ok(rows.every((row) => row.id.length > NO_LENGTH));
+  assert.ok(rows.every((row) => row.id.length > EMPTY_TEXT_LENGTH));
   return rows;
 }
 
@@ -144,7 +144,7 @@ export function pendingEventCount(tx: Transaction, id: string): number {
 export function deleteInbound(tx: Transaction, id: string): boolean {
   assert.equal(
     pendingEventCount(tx, id),
-    NO_EVENTS,
+    DELETABLE_PENDING_COUNT,
     "A pending event blocks the delete of its inbound.",
   );
   tx.database
@@ -153,5 +153,5 @@ export function deleteInbound(tx: Transaction, id: string): boolean {
   const changes = tx.database
     .prepare("DELETE FROM intake_inbound WHERE id = ?")
     .run(id).changes;
-  return Number(changes) === ONE_ROW;
+  return Number(changes) === ROWS_PER_WRITE;
 }
