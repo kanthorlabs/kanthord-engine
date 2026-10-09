@@ -684,6 +684,40 @@ test("readFilesAtCommit answers unreadable for a symlink loop", async (t) => {
   assert.deepEqual(loop, [RepositoryFileState.Unreadable, null]);
 });
 
+const SYMLINK_HOPS_MAX = 40;
+const CHAIN_START = "AGENTS.md";
+const CHAIN_TARGET = "target.md";
+const CHAIN_TEXT = "target\n";
+const CHAIN_FIRST_LINK = 1;
+
+function symlinkChain(links: number) {
+  const files: Record<string, string | { link: string }> = {
+    [CHAIN_TARGET]: CHAIN_TEXT,
+  };
+  let next = CHAIN_TARGET;
+  for (let link = links - CHAIN_FIRST_LINK; link >= CHAIN_FIRST_LINK; link--) {
+    files[`link-${link}.md`] = { link: next };
+    next = `link-${link}.md`;
+  }
+  files[CHAIN_START] = { link: next };
+  return files;
+}
+
+test("readFilesAtCommit follows a chain of 40 symlinks within the deadline and refuses a chain of 41", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      ...symlinkChain(SYMLINK_HOPS_MAX),
+      "CLAUDE.md": { link: CHAIN_START },
+    }),
+    [
+      [RepositoryFileState.Present, CHAIN_TEXT],
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.Unreadable, null],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
+});
+
 test("readFilesAtCommit refuses a directory and a symlink to a directory", async (t) => {
   assert.deepEqual(
     await readStates(t, {

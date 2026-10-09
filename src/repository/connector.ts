@@ -4,6 +4,8 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
@@ -28,7 +30,16 @@ const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LS_REMOTE_FIELD_SEPARATOR = "\t";
 const LS_TREE_ENTRY_SEPARATOR = "\0";
 const LS_TREE_NAME_SEPARATOR = "\t";
+const LS_TREE_FIELD_SEPARATOR = " ";
 const LS_TREE_MODE_FIELD = 0;
+const LS_TREE_OBJECT_FIELD = 2;
+const BATCH_LINE_END = "\n";
+const BATCH_FIELD_SEPARATOR = " ";
+const BATCH_OBJECT_FIELD = 0;
+const BATCH_TYPE_FIELD = 1;
+const BATCH_SIZE_FIELD = 2;
+const BLOB_TYPE = "blob";
+const UNBOUNDED_OUTPUT_BYTES = Number.POSITIVE_INFINITY;
 const NOT_FOUND_INDEX = -1;
 const NEXT_INDEX = 1;
 const REGULAR_FILE_MODES = ["100644", "100755"];
@@ -117,7 +128,7 @@ async function runGitTask<T>(
   context: Context,
   deadlineMs: number,
   operation: string,
-  task: (git: SimpleGit) => Promise<T>,
+  task: (git: SimpleGit, signal: AbortSignal) => Promise<T>,
   options: GitOptions = {},
 ): Promise<T> {
   assert.ok(operation);
@@ -138,6 +149,7 @@ async function runGitTask<T>(
     });
     const output = await task(
       options.environment === undefined ? git : git.env(options.environment),
+      controller.signal,
     );
     if (controller.signal.aborted) throw new Error("Git aborted");
     return output;
@@ -539,20 +551,86 @@ export async function resolveBranchCommit(
 
 type GitRun = (args: string[]) => Promise<string>;
 type GitBlobRun = (object: string) => Promise<Buffer>;
+type GitInputRun = (args: string[], input: string) => Promise<Buffer>;
+type TreeEntry = { mode: string; object: string };
+type RepositoryTree = {
+  entries: Map<string, TreeEntry>;
+  targets: Map<string, string>;
+};
 
-async function treeMode(
+async function treeEntries(
   run: GitRun,
   commit: string,
-  path: string,
-): Promise<string | null> {
-  const listing = await run(["ls-tree", "-z", commit, "--", path]);
+): Promise<Map<string, TreeEntry>> {
+  const listing = await run(["ls-tree", "-r", "-t", "-z", commit]);
+  const entries = new Map<string, TreeEntry>();
   for (const entry of listing.split(LS_TREE_ENTRY_SEPARATOR)) {
     const nameIndex = entry.indexOf(LS_TREE_NAME_SEPARATOR);
     if (nameIndex === NOT_FOUND_INDEX) continue;
-    if (entry.slice(nameIndex + NEXT_INDEX) === path)
-      return entry.slice(LS_TREE_MODE_FIELD, entry.indexOf(" "));
+    const fields = entry
+      .slice(LS_TREE_MODE_FIELD, nameIndex)
+      .split(LS_TREE_FIELD_SEPARATOR);
+    entries.set(entry.slice(nameIndex + NEXT_INDEX), {
+      mode: fields[LS_TREE_MODE_FIELD]!,
+      object: fields[LS_TREE_OBJECT_FIELD]!,
+    });
   }
-  return null;
+  return entries;
+}
+
+function batchContents(output: Buffer): Map<string, string> {
+  const contents = new Map<string, string>();
+  let offset = EMPTY_BYTES;
+  while (offset < output.length) {
+    const headerEnd = output.indexOf(BATCH_LINE_END, offset);
+    assert.notEqual(headerEnd, NOT_FOUND_INDEX);
+    const fields = output
+      .toString(UTF8_LABEL, offset, headerEnd)
+      .split(BATCH_FIELD_SEPARATOR);
+    assert.equal(fields[BATCH_TYPE_FIELD], BLOB_TYPE);
+    const start = headerEnd + NEXT_INDEX;
+    const end = start + Number(fields[BATCH_SIZE_FIELD]);
+    assert.ok(Number.isSafeInteger(end) && end <= output.length);
+    contents.set(
+      fields[BATCH_OBJECT_FIELD]!,
+      output.toString(UTF8_LABEL, start, end),
+    );
+    offset = end + NEXT_INDEX;
+  }
+  return contents;
+}
+
+async function symlinkTargets(
+  runInput: GitInputRun,
+  entries: Map<string, TreeEntry>,
+): Promise<Map<string, string>> {
+  const objects = new Set<string>();
+  for (const { mode, object } of entries.values())
+    if (mode === SYMLINK_MODE) objects.add(object);
+  const input = [...objects]
+    .map((object) => object + BATCH_LINE_END)
+    .join(EMPTY_STRING);
+  await runInput(
+    ["fetch", "--no-tags", "--no-write-fetch-head", "--stdin", "origin"],
+    input,
+  );
+  return batchContents(await runInput(["cat-file", "--batch"], input));
+}
+
+async function repositoryTree(
+  run: GitRun,
+  runInput: GitInputRun,
+  commit: string,
+  paths: readonly string[],
+): Promise<RepositoryTree> {
+  const entries = await treeEntries(run, commit);
+  const linked = paths.some((path) => entries.get(path)?.mode === SYMLINK_MODE);
+  return {
+    entries,
+    targets: linked
+      ? await symlinkTargets(runInput, entries)
+      : new Map<string, string>(),
+  };
 }
 
 function repositoryFile(
@@ -592,6 +670,7 @@ async function regularRepositoryFile(
 async function resolveRepositoryFile(
   run: GitRun,
   readBlob: GitBlobRun,
+  tree: RepositoryTree,
   commit: string,
   path: string,
   maxBytes: number,
@@ -602,14 +681,16 @@ async function resolveRepositoryFile(
     if (visited.has(current))
       return repositoryFile(path, RepositoryFileState.Unreadable);
     visited.add(current);
-    const mode = await treeMode(run, commit, current);
-    if (mode === null) return repositoryFile(path, RepositoryFileState.Absent);
+    const entry = tree.entries.get(current);
+    if (entry === undefined)
+      return repositoryFile(path, RepositoryFileState.Absent);
     const object = `${commit}:${current}`;
-    if (REGULAR_FILE_MODES.includes(mode))
+    if (REGULAR_FILE_MODES.includes(entry.mode))
       return regularRepositoryFile(run, readBlob, object, path, maxBytes);
-    if (mode !== SYMLINK_MODE)
+    if (entry.mode !== SYMLINK_MODE)
       return repositoryFile(path, RepositoryFileState.NotRegularFile);
-    const target = await run(["show", object]);
+    const target = tree.targets.get(entry.object);
+    assert.ok(target !== undefined);
     const resolved = posix.normalize(
       posix.join(posix.dirname(current), target),
     );
@@ -659,6 +740,26 @@ export async function readFilesAtCommit(
       "read repository files",
       async (git) => Buffer.from(await git.binaryCatFile(["blob", object])),
     );
+  const runInput: GitInputRun = (args, input) =>
+    runGitTask(
+      directory,
+      context,
+      end - performance.now(),
+      "read repository files",
+      async (_git, signal) => {
+        const child = execFileAsync("git", args, {
+          cwd: directory,
+          signal,
+          encoding: "buffer",
+          maxBuffer: UNBOUNDED_OUTPUT_BYTES,
+        });
+        const [, { stdout }] = await Promise.all([
+          pipeline(Readable.from([input]), child.child.stdin!),
+          child,
+        ]);
+        return stdout;
+      },
+    );
   try {
     await run(["init", "--quiet"]);
     await run(["remote", "add", "origin", "--", address]);
@@ -670,10 +771,18 @@ export async function readFilesAtCommit(
       "origin",
       commit,
     ]);
+    const tree = await repositoryTree(run, runInput, commit, paths);
     const files: RepositoryFile[] = [];
     for (const path of paths)
       files.push(
-        await resolveRepositoryFile(run, readBlob, commit, path, maxBytes),
+        await resolveRepositoryFile(
+          run,
+          readBlob,
+          tree,
+          commit,
+          path,
+          maxBytes,
+        ),
       );
     return files;
   } finally {
