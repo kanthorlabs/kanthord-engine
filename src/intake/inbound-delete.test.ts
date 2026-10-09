@@ -28,11 +28,12 @@ const RESOURCE = "owner/repo";
 const CREATED_AT = 100;
 const NOT_FOUND = "intake.inbound.not_found";
 const EVENTS_PENDING = "intake.inbound.events_pending";
-const NO_ROWS = 0;
-const ONE_ROW = 1;
-const TWO_ROWS = 2;
-const NO_CALLS = 0;
-const ONE_CALL = 1;
+const ROWS_AFTER_DELETE = 0;
+const OTHER_INBOUND_EVENTS = 1;
+const ROWS_PER_INBOUND = 1;
+const KEPT_EVENT_ROWS = 2;
+const NOTIFICATIONS_AFTER_REFUSAL = 0;
+const NOTIFICATIONS_PER_DELETE = 1;
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -139,11 +140,11 @@ test("a delete removes the inbound and its settled events and notifies the poll 
   h.insertEvent(id, "e3", InboundEventState.Discarded);
   h.insertEvent(other, "e1", InboundEventState.Succeeded);
   assert.equal(await h.remove(id), null);
-  assert.equal(h.inboundRows(id), NO_ROWS);
-  assert.equal(h.eventRows(id), NO_ROWS);
-  assert.equal(h.inboundRows(other), ONE_ROW);
-  assert.equal(h.eventRows(other), ONE_ROW);
-  assert.equal(h.removed.mock.callCount(), ONE_CALL);
+  assert.equal(h.inboundRows(id), ROWS_AFTER_DELETE);
+  assert.equal(h.eventRows(id), ROWS_AFTER_DELETE);
+  assert.equal(h.inboundRows(other), ROWS_PER_INBOUND);
+  assert.equal(h.eventRows(other), OTHER_INBOUND_EVENTS);
+  assert.equal(h.removed.mock.callCount(), NOTIFICATIONS_PER_DELETE);
   assert.deepEqual(h.removed.mock.calls[0]?.arguments, [id]);
 });
 
@@ -155,9 +156,9 @@ test("a pending event refuses the delete with 409 and keeps the inbound", async 
   const error = await refusal(h.remove(id));
   assert.equal(error.status, HttpStatus.Conflict);
   assert.equal(error.code, EVENTS_PENDING);
-  assert.equal(h.inboundRows(id), ONE_ROW);
-  assert.equal(h.eventRows(id), TWO_ROWS);
-  assert.equal(h.removed.mock.callCount(), NO_CALLS);
+  assert.equal(h.inboundRows(id), ROWS_PER_INBOUND);
+  assert.equal(h.eventRows(id), KEPT_EVENT_ROWS);
+  assert.equal(h.removed.mock.callCount(), NOTIFICATIONS_AFTER_REFUSAL);
 });
 
 test("a repeat delete after a success answers 404", async (t) => {
@@ -167,7 +168,7 @@ test("a repeat delete after a success answers 404", async (t) => {
   const error = await refusal(h.remove(id));
   assert.equal(error.status, HttpStatus.NotFound);
   assert.equal(error.code, NOT_FOUND);
-  assert.equal(h.removed.mock.callCount(), ONE_CALL);
+  assert.equal(h.removed.mock.callCount(), NOTIFICATIONS_PER_DELETE);
 });
 
 test("a delete of an unknown inbound answers 404", async (t) => {

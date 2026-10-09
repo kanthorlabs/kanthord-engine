@@ -27,8 +27,10 @@ const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREATED_AT = 1000;
 const RESOURCE = "acme/app";
 const CHECKPOINT = { cursor: "abc" };
-const TWO_EVENTS = 2;
-const NO_EVENTS = 0;
+const KEPT_EVENTS = 2;
+const PENDING_EVENTS = 2;
+const EVENTS_AFTER_DELETE = 0;
+const PENDING_AFTER_SETTLE = 0;
 
 function migratedStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -136,7 +138,7 @@ test("deleteInbound removes the events and the row", (t) => {
   insertEvent(store, id, "e2", InboundEventState.Failed);
   assert.equal(
     store.transaction((tx) => pendingEventCount(tx, id)),
-    NO_EVENTS,
+    PENDING_AFTER_SETTLE,
   );
   assert.equal(
     store.transaction((tx) => deleteInbound(tx, id)),
@@ -154,7 +156,7 @@ test("deleteInbound removes the events and the row", (t) => {
         total: number;
       },
   );
-  assert.equal(left.total, NO_EVENTS);
+  assert.equal(left.total, EVENTS_AFTER_DELETE);
 });
 
 test("deleteInbound refuses an inbound with a pending event and keeps the row and the events", (t) => {
@@ -180,7 +182,7 @@ test("deleteInbound refuses an inbound with a pending event and keeps the row an
         total: number;
       },
   );
-  assert.equal(left.total, TWO_EVENTS);
+  assert.equal(left.total, KEPT_EVENTS);
 });
 
 test("pendingEventCount counts pending events alone", (t) => {
@@ -191,7 +193,7 @@ test("pendingEventCount counts pending events alone", (t) => {
   insertEvent(store, id, "e3", InboundEventState.Succeeded);
   assert.equal(
     store.transaction((tx) => pendingEventCount(tx, id)),
-    TWO_EVENTS,
+    PENDING_EVENTS,
   );
 });
 

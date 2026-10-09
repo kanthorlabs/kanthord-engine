@@ -35,7 +35,7 @@ const TIMEOUT_CODE = "timeout";
 const TIMEOUT_MESSAGE = "The call passed its deadline.";
 const STATUS_CODE = "502";
 const STATUS_MESSAGE = "Bad gateway.";
-const SINGLE_ITEM = 1;
+const ERROR_ITEMS_PER_FAILURE = 1;
 
 function migratedStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -194,7 +194,7 @@ test("fail changes one row from pending and none from failed", (t) => {
   assert.equal(stateOf(store, id), OutboundRequestState.Failed);
   assert.equal(failOnce(store, id), false);
   const record = store.transaction((tx) => outboundRecord(findById(tx, id)!));
-  assert.equal(record.error?.length, SINGLE_ITEM);
+  assert.equal(record.error?.length, ERROR_ITEMS_PER_FAILURE);
 });
 
 test("discard changes one row from pending only", (t) => {

@@ -41,9 +41,9 @@ const STATE_CONFLICT = "intake.outbound.request.state_conflict";
 const FORCE_REQUIRED = "intake.outbound.request.force_required";
 const FILTER_INVALID = "intake.outbound.request.filter_invalid";
 const LONG_DEADLINE_MS = 5000;
-const NO_ROWS = 0;
+const EMPTY_PAGE_LENGTH = 0;
 const FIRST_ROW = 0;
-const TWO_ROWS = 2;
+const DELETED_COUNT = 2;
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -201,7 +201,7 @@ test("a range of failed removes the failed rows of the range alone", async (t) =
     from: first < discarded ? first : discarded,
     to: last,
   });
-  assert.deepEqual(answer, { count: TWO_ROWS });
+  assert.deepEqual(answer, { count: DELETED_COUNT });
   assert.equal(h.stateOf(first), null);
   assert.equal(h.stateOf(last), null);
   assert.equal(h.stateOf(discarded), OutboundRequestState.Discarded);
@@ -217,7 +217,7 @@ test("an ids delete with a missing identity counts the others", async (t) => {
     force: true,
     ids: [failed, missing, discarded],
   });
-  assert.deepEqual(answer, { count: TWO_ROWS });
+  assert.deepEqual(answer, { count: DELETED_COUNT });
   assert.equal(h.stateOf(failed), null);
   assert.equal(h.stateOf(discarded), null);
 });
@@ -261,7 +261,7 @@ test("a discard of a running request answers 409 in_flight and the running write
   const page = h.caller.commit((tx) =>
     tx.database.prepare("SELECT id FROM intake_outbound_request").all(),
   ) as { id: string }[];
-  assert.notEqual(page.length, NO_ROWS);
+  assert.notEqual(page.length, EMPTY_PAGE_LENGTH);
   const id = page[FIRST_ROW]!.id;
   await refusesWith(h.discardRequest(id), HttpStatus.Conflict, IN_FLIGHT);
   answer.resolve({ ok: true, result: RESULT });

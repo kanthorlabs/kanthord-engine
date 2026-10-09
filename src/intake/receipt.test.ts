@@ -36,10 +36,11 @@ const VALIDATION_FAILED = "gateway.request.validation_failed";
 const ZERO_DIGEST = "0".repeat(64);
 const SHORT_DIGEST = "a".repeat(62);
 const NON_HEX_DIGEST = "z".repeat(64);
-const NO_ROWS = 0;
-const ONE_ROW = 1;
-const NO_WAKES = 0;
-const EMPTY_BODY = "";
+const UNSTORED_ROW_COUNT = 0;
+const WAKES_PER_DELIVERY = 1;
+const ROWS_PER_DELIVERY = 1;
+const WAKES_AFTER_REFUSAL = 0;
+const ACKNOWLEDGEMENT_BODY = "";
 const FIRST_DELIVERY = "d-1";
 
 interface Outcome {
@@ -120,7 +121,7 @@ function harness(t: TestContext) {
           caller,
         );
       assert.ok(answer instanceof Response);
-      assert.equal(await answer.text(), EMPTY_BODY);
+      assert.equal(await answer.text(), ACKNOWLEDGEMENT_BODY);
       return { status: answer.status, code: null };
     } catch (error) {
       if (!(error instanceof OperationError)) throw error;
@@ -206,8 +207,8 @@ test("a missing, duplicate, malformed, wrong-length or wrong signature answers 4
     await h.receive(id, h.github("push", "d-1", valid), `${PUSH} `),
     SIGNATURE_INVALID,
   );
-  assert.equal(h.rows(id).length, NO_ROWS);
-  assert.equal(h.wakes(), NO_WAKES);
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
+  assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
 });
 
 test("a valid signature over the exact bytes stores one pending row and wakes after the commit", async (t) => {
@@ -219,12 +220,12 @@ test("a valid signature over the exact bytes stores one pending row and wakes af
     { status: HttpStatus.Accepted, code: null },
   );
   const stored = h.rows(id);
-  assert.equal(stored.length, ONE_ROW);
+  assert.equal(stored.length, ROWS_PER_DELIVERY);
   assert.equal(stored[0]!.event_id, FIRST_DELIVERY);
   assert.equal(Buffer.from(stored[0]!.event).toString(), body);
   assert.deepEqual(JSON.parse(stored[0]!.metadata), { event: "push" });
   assert.equal(stored[0]!.state, InboundEventState.Pending);
-  assert.equal(h.wakes(), ONE_ROW);
+  assert.equal(h.wakes(), WAKES_PER_DELIVERY);
   assert.ok(h.logs.every((line) => !line.includes(secret)));
 });
 
@@ -236,7 +237,7 @@ test("a redelivery answers 202 and keeps one unchanged row, also at the bound", 
     h.receive(id, h.github("push", delivery, sign(secret, body)), body);
   assert.deepEqual(await deliver("d-1", PUSH), accepted);
   assert.deepEqual(await deliver("d-1", `${PUSH}\n`), accepted);
-  assert.equal(h.rows(id).length, ONE_ROW);
+  assert.equal(h.rows(id).length, ROWS_PER_DELIVERY);
   assert.deepEqual(await deliver("d-2", PUSH), accepted);
   assert.deepEqual(await deliver("d-1", `${PUSH}\n\n`), accepted);
   const stored = h.rows(id);
@@ -256,7 +257,7 @@ test("a signed ping answers 204 below and at the bound with no row; an unsigned 
   const ping = () =>
     h.receive(id, h.github("ping", "p-1", sign(secret, PING)), PING);
   assert.deepEqual(await ping(), handshake);
-  assert.equal(h.rows(id).length, NO_ROWS);
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
   for (const delivery of ["d-1", "d-2"])
     await h.receive(id, h.github("push", delivery, sign(secret, PUSH)), PUSH);
   assert.deepEqual(await ping(), handshake);
@@ -318,7 +319,7 @@ test("a poll inbound, an unknown identity and an invalid identity answer 404", a
       ),
       notFound,
     );
-  assert.equal(h.rows(poll.id).length, NO_ROWS);
+  assert.equal(h.rows(poll.id).length, UNSTORED_ROW_COUNT);
 });
 
 test("a signed delivery without a delivery identity answers 400 and stores nothing", async (t) => {
@@ -330,7 +331,7 @@ test("a signed delivery without a delivery identity answers 400 and stores nothi
     status: HttpStatus.BadRequest,
     code: VALIDATION_FAILED,
   });
-  assert.equal(h.rows(id).length, NO_ROWS);
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
 });
 
 test("a commit failure answers no acknowledgement and stores nothing", async (t) => {
@@ -341,6 +342,6 @@ test("a commit failure answers no acknowledgement and stores nothing", async (t)
     h.receive(id, h.github("push", "d-1", sign(secret, PUSH)), PUSH),
     /commit refused/,
   );
-  assert.equal(h.rows(id).length, NO_ROWS);
-  assert.equal(h.wakes(), NO_WAKES);
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
+  assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
 });

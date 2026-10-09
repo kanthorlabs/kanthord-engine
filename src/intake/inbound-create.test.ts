@@ -57,10 +57,17 @@ const CREDENTIAL_INVALID = "intake.inbound.credential_invalid";
 const CREDENTIAL_NOT_FOUND = "credential.credential.not_found";
 const PLATFORM_MISMATCH = "credential.platform.mismatch";
 const CREDENTIAL_INVALID_STATUS = 422;
-const NO_ROWS = 0;
-const ONE_ROW = 1;
-const TWO_ROWS = 2;
-const ONE_CALL = 1;
+const PROJECT_CALLS_AFTER_REFUSAL = 0;
+const REQUESTS_AFTER_REFUSAL = 0;
+const DRAINS_AFTER_REFUSAL = 0;
+const UNSTARTED_LOOP_COUNT = 0;
+const ROWS_AFTER_REFUSAL = 0;
+const DRAINS_PER_POLL_CREATE = 1;
+const ROWS_PER_CREATE = 1;
+const ROWS_AFTER_EQUAL_CREATES = 2;
+const PROJECT_CALLS_PER_CREATE = 1;
+const REQUESTS_PER_POLL_CREATE = 1;
+const LOOPS_PER_POLL_CREATE = 1;
 const CREDENTIAL_NAME = "token";
 const PLATFORM_REFUSED = "intake.inbound.platform_refused";
 const POLL_CREDENTIAL = "github-poll";
@@ -189,7 +196,7 @@ test("a webhook inbound inserts one row with no platform call and answers the al
     h.rows().map((row) => ({ ...row })),
     [{ id: inbound.id, credential: null, checkpoint: null }],
   );
-  assert.equal(h.projectCalls.length, ONE_CALL);
+  assert.equal(h.projectCalls.length, PROJECT_CALLS_PER_CREATE);
   assert.deepEqual(h.projectCalls[0], {
     projectId: PROJECT_ID,
     identity: h.identity,
@@ -206,7 +213,7 @@ test("a webhook with a credential answers 400 and inserts nothing", async (t) =>
   assert.deepEqual(error.details, [
     { path: ["body", "credential"], code: "custom" },
   ]);
-  assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });
 
 test("a poll without a credential answers 400 and inserts nothing", async (t) => {
@@ -219,8 +226,8 @@ test("a poll without a credential answers 400 and inserts nothing", async (t) =>
   assert.deepEqual(error.details, [
     { path: ["body", "credential"], code: "custom" },
   ]);
-  assert.equal(h.projectCalls.length, NO_ROWS);
-  assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });
 
 test("an unknown project answers 404 and inserts nothing", async (t) => {
@@ -230,7 +237,7 @@ test("an unknown project answers 404 and inserts nothing", async (t) => {
     HttpStatus.NotFound,
     PROJECT_NOT_FOUND,
   );
-  assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });
 
 test("an unknown consumer fails the body schema", () => {
@@ -259,8 +266,8 @@ test("an extra configuration field answers 400 with no project call and inserts 
   assert.deepEqual(error.details, [
     { path: ["body", "configuration"], code: "unrecognized_keys" },
   ]);
-  assert.equal(h.projectCalls.length, NO_ROWS);
-  assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });
 
 test("two equal creates insert two rows", async (t) => {
@@ -268,7 +275,7 @@ test("two equal creates insert two rows", async (t) => {
   const first = await h.create(WEBHOOK);
   const second = await h.create(WEBHOOK);
   assert.notEqual(first.id, second.id);
-  assert.equal(h.rows().length, TWO_ROWS);
+  assert.equal(h.rows().length, ROWS_AFTER_EQUAL_CREATES);
 });
 
 test("the insert step maps an unknown or unsuitable credential to 422", async (t) => {
@@ -296,7 +303,7 @@ test("the insert step maps an unknown or unsuitable credential to 422", async (t
         error.code === CREDENTIAL_INVALID,
     );
   }
-  assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });
 
 test("credentialRefusal maps the custody refusals and passes every other error", () => {
@@ -342,7 +349,7 @@ test("the insert step checks a named credential and inserts the row", async (t) 
   assert.deepEqual(requests, [
     { credential: "token", platform: InboundPlatform.GitHub },
   ]);
-  assert.equal(h.rows().length, ONE_ROW);
+  assert.equal(h.rows().length, ROWS_PER_CREATE);
 });
 
 const POLL: InboundCreate = {
@@ -448,21 +455,21 @@ test("a poll create performs one request with the credential and inserts one row
     h.rows().map((row) => ({ ...row })),
     [{ id: inbound.id, credential: POLL_CREDENTIAL, checkpoint: null }],
   );
-  assert.equal(h.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(h.listEvents.mock.callCount(), REQUESTS_PER_POLL_CREATE);
   const [call, query] = h.listEvents.mock.calls[0]?.arguments ?? [];
   assert.equal(call?.token, POLL_TOKEN);
   assert.equal(call?.requester, h.identity);
   assert.deepEqual(query, { owner: "owner", repo: "repo", etag: null });
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
-  assert.equal(h.drained(), ONE_ROW);
+  assert.equal(h.drained(), DRAINS_PER_POLL_CREATE);
 });
 
 test("a poll create starts one loop after the insert and a webhook starts none", async (t) => {
   const h = pollHarness(t, async () => modified);
   await h.create(WEBHOOK);
-  assert.equal(h.start.mock.callCount(), NO_ROWS);
+  assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
   const inbound = await h.create(POLL);
-  assert.equal(h.start.mock.callCount(), ONE_CALL);
+  assert.equal(h.start.mock.callCount(), LOOPS_PER_POLL_CREATE);
   assert.deepEqual(h.start.mock.calls[0]?.arguments, [inbound.id]);
 });
 
@@ -480,9 +487,9 @@ test("a failed first request answers 422 platform_refused, inserts no row and st
     PLATFORM_REFUSED,
   );
   assert.deepEqual(error.details, { status: UNAUTHORIZED_STATUS });
-  assert.equal(h.listEvents.mock.callCount(), ONE_CALL);
-  assert.equal(h.rows().length, NO_ROWS);
-  assert.equal(h.start.mock.callCount(), NO_ROWS);
+  assert.equal(h.listEvents.mock.callCount(), REQUESTS_PER_POLL_CREATE);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+  assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
 });
 
@@ -494,9 +501,9 @@ test("an unknown credential and a credential of another platform answer 422 with
       CREDENTIAL_INVALID_STATUS,
       CREDENTIAL_INVALID,
     );
-  assert.equal(h.listEvents.mock.callCount(), NO_ROWS);
-  assert.equal(h.rows().length, NO_ROWS);
-  assert.equal(h.drained(), NO_ROWS);
+  assert.equal(h.listEvents.mock.callCount(), REQUESTS_AFTER_REFUSAL);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+  assert.equal(h.drained(), DRAINS_AFTER_REFUSAL);
   assert.deepEqual(h.drops, []);
 });
 
@@ -512,9 +519,9 @@ test("a credential archive between the first request and the insert refuses the 
     CREDENTIAL_INVALID_STATUS,
     CREDENTIAL_INVALID,
   );
-  assert.equal(h.listEvents.mock.callCount(), ONE_CALL);
-  assert.equal(h.rows().length, NO_ROWS);
-  assert.equal(h.start.mock.callCount(), NO_ROWS);
+  assert.equal(h.listEvents.mock.callCount(), REQUESTS_PER_POLL_CREATE);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+  assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
 });
 
@@ -524,7 +531,7 @@ test("a failure after the release keeps the committed drain and drops the materi
     throw failure;
   });
   await assert.rejects(h.create(POLL), failure);
-  assert.equal(h.drained(), ONE_ROW);
-  assert.equal(h.rows().length, NO_ROWS);
+  assert.equal(h.drained(), DRAINS_PER_POLL_CREATE);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
 });

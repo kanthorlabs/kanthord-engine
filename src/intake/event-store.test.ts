@@ -30,10 +30,10 @@ const CREATED_AT = 1000;
 const EVENT_ID = "delivery-1";
 const CONTENT = '{"ref":"refs/heads/main"}';
 const METADATA = { event: "push" };
-const NO_EVENTS = 0;
-const ONE_EVENT = 1;
+const PENDING_IN_EMPTY_STORE = 0;
+const PENDING_AFTER_DUPLICATE = 1;
 const STORED_METADATA = '{"event":"push"}';
-const TWO_EVENTS = 2;
+const PENDING_ACROSS_INBOUNDS = 2;
 
 function migratedStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -118,7 +118,7 @@ test("a second insert of one pair throws on the unique index", (t) => {
   assert.throws(() => addEvent(store, inboundId), /UNIQUE/);
   assert.equal(
     store.transaction((tx) => pendingCount(tx)),
-    ONE_EVENT,
+    PENDING_AFTER_DUPLICATE,
   );
 });
 
@@ -129,7 +129,7 @@ test("one event identity in two inbounds inserts twice", (t) => {
   assert.notEqual(first, second);
   assert.equal(
     store.transaction((tx) => pendingCount(tx)),
-    TWO_EVENTS,
+    PENDING_ACROSS_INBOUNDS,
   );
 });
 
@@ -137,7 +137,7 @@ test("the pending count spans every inbound and skips other states", (t) => {
   const store = migratedStore(t);
   assert.equal(
     store.transaction((tx) => pendingCount(tx)),
-    NO_EVENTS,
+    PENDING_IN_EMPTY_STORE,
   );
   const first = addInbound(store);
   addEvent(store, first, "a");
@@ -150,7 +150,7 @@ test("the pending count spans every inbound and skips other states", (t) => {
   );
   assert.equal(
     store.transaction((tx) => pendingCount(tx)),
-    TWO_EVENTS,
+    PENDING_ACROSS_INBOUNDS,
   );
 });
 

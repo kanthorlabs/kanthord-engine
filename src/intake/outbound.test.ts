@@ -61,8 +61,14 @@ const DISCARDED = "intake.outbound.request.discarded";
 const AUTHORIZE_REFUSED = "intake.outbound.request.test_refused";
 const FINALIZE_FAILED = "intake.outbound.request.test_failed";
 const TIMEOUT = "timeout";
-const NO_ITEMS = 0;
-const SINGLE_RUN = 1;
+const IDLE_IN_FLIGHT_SIZE = 0;
+const UNLOGGED_LINE_COUNT = 0;
+const UNRUN_COUNT = 0;
+const COUNT_STEP = 1;
+const ERROR_ITEMS_PER_FAILURE = 1;
+const BYTES_ABOVE_LIMIT = 1;
+const DROPS_PER_MATERIAL = 1;
+const RUNS_PER_REQUEST = 1;
 const MATERIAL_RUNS = 4;
 
 class FakeMaterial implements Material {
@@ -75,7 +81,7 @@ class FakeMaterial implements Material {
   }
 
   drop(): void {
-    this.drops += SINGLE_RUN;
+    this.drops += COUNT_STEP;
   }
 }
 
@@ -161,12 +167,12 @@ function request(counts: Counts, script: Script): OutboundRun<OutboundAnswer> {
     },
     call: (material, scope) => {
       assert.equal(material?.value(), SECRET);
-      counts.calls += SINGLE_RUN;
+      counts.calls += COUNT_STEP;
       return (script.call ?? (() => never()))(scope);
     },
     readBack: (material, scope) => {
       assert.equal(material?.value(), SECRET);
-      counts.readBacks += SINGLE_RUN;
+      counts.readBacks += COUNT_STEP;
       return (script.readBack ?? (async () => ({ match: false })))(scope);
     },
     finalize:
@@ -238,8 +244,8 @@ test("A timed-out write stores timeout, and a matched repeat stores succeeded wi
   const succeeded = outboundRecord(stored(h.store));
   assert.equal(succeeded.state, OutboundRequestState.Succeeded);
   assert.deepEqual(succeeded.result, ADDRESS);
-  assert.equal(h.counts.calls, SINGLE_RUN);
-  assert.equal(h.counts.readBacks, SINGLE_RUN);
+  assert.equal(h.counts.calls, RUNS_PER_REQUEST);
+  assert.equal(h.counts.readBacks, RUNS_PER_REQUEST);
 });
 
 test("A caller cancellation during the call stores unknown_outcome, not timeout", async (t) => {
@@ -265,8 +271,8 @@ test("A caller cancellation during the call stores unknown_outcome, not timeout"
   assert.equal(record.error?.[0]?.code, ResultClass.UnknownOutcome);
   const repeat = await run(h, {});
   assert.deepEqual(repeat, cancelled);
-  assert.equal(h.counts.calls, SINGLE_RUN);
-  assert.equal(h.inFlight.size, NO_ITEMS);
+  assert.equal(h.counts.calls, RUNS_PER_REQUEST);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
 });
 
 test("A call that ignores its signal ends at the deadline, and its late answer writes nothing", async (t) => {
@@ -290,8 +296,8 @@ test("A call that ignores its signal ends at the deadline, and its late answer w
   const record = outboundRecord(stored(h.store));
   assert.equal(record.state, OutboundRequestState.Failed);
   assert.equal(record.result, null);
-  assert.equal(record.error?.length, SINGLE_RUN);
-  assert.equal(h.inFlight.size, NO_ITEMS);
+  assert.equal(record.error?.length, ERROR_ITEMS_PER_FAILURE);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
 });
 
 test("A restart after the insert calls nothing, and a repeat with no match answers unknown_outcome", async (t) => {
@@ -330,13 +336,13 @@ test("A restart after the insert calls nothing, and a repeat with no match answe
   assert.equal(await after.start(), null);
   t.after(() => after.stop());
   assert.equal(stored(second).state, OutboundRequestState.Pending);
-  assert.equal(counts.calls, SINGLE_RUN);
-  assert.equal(counts.readBacks, NO_ITEMS);
+  assert.equal(counts.calls, RUNS_PER_REQUEST);
+  assert.equal(counts.readBacks, UNRUN_COUNT);
   const answer = await after.runOutbound(callerOf(second), request(counts, {}));
   assert.ok(!answer.ok);
   assert.equal(answer.class, ResultClass.UnknownOutcome);
-  assert.equal(counts.calls, SINGLE_RUN);
-  assert.equal(counts.readBacks, SINGLE_RUN);
+  assert.equal(counts.calls, RUNS_PER_REQUEST);
+  assert.equal(counts.readBacks, RUNS_PER_REQUEST);
   assert.equal(stored(second).state, OutboundRequestState.Pending);
 });
 
@@ -361,8 +367,8 @@ test("Two concurrent runs of one key make one call, and the refused repeat keeps
   assert.equal(stored(h.store).state, OutboundRequestState.Pending);
   answer.resolve({ ok: true, result: ADDRESS });
   assert.deepEqual(await first, { ok: true, result: ADDRESS });
-  assert.equal(h.counts.calls, SINGLE_RUN);
-  assert.equal(h.inFlight.size, NO_ITEMS);
+  assert.equal(h.counts.calls, RUNS_PER_REQUEST);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
 });
 
 test("A repeat of succeeded answers its decoded result with no call and no read-back", async (t) => {
@@ -370,8 +376,8 @@ test("A repeat of succeeded answers its decoded result with no call and no read-
   await run(h, { call: async () => ({ ok: true, result: ADDRESS }) });
   const repeat = await run(h, {});
   assert.deepEqual(repeat, { ok: true, result: ADDRESS });
-  assert.equal(h.counts.calls, SINGLE_RUN);
-  assert.equal(h.counts.readBacks, NO_ITEMS);
+  assert.equal(h.counts.calls, RUNS_PER_REQUEST);
+  assert.equal(h.counts.readBacks, UNRUN_COUNT);
 });
 
 test("A repeat of failed with no match answers the newest stored error exactly", async (t) => {
@@ -380,8 +386,8 @@ test("A repeat of failed with no match answers the newest stored error exactly",
   const repeat = await run(h, {});
   assert.deepEqual(repeat, first);
   assert.deepEqual(repeat, REFUSAL);
-  assert.equal(h.counts.calls, SINGLE_RUN);
-  assert.equal(h.counts.readBacks, SINGLE_RUN);
+  assert.equal(h.counts.calls, RUNS_PER_REQUEST);
+  assert.equal(h.counts.readBacks, RUNS_PER_REQUEST);
 });
 
 test("A timed-out or refused read-back leaves the state and the error history unchanged", async (t) => {
@@ -399,7 +405,7 @@ test("A timed-out or refused read-back leaves the state and the error history un
     readBack: async () => Promise.reject(new Error("refused")),
   });
   assert.deepEqual(stored(other.store), failedBefore);
-  assert.equal(h.counts.calls, NO_ITEMS);
+  assert.equal(h.counts.calls, UNRUN_COUNT);
 });
 
 test("A human delete during a read-back recreates no row, and the repeat answers the match", async (t) => {
@@ -416,7 +422,7 @@ test("A human delete during a read-back recreates no row, and the repeat answers
   });
   assert.deepEqual(answer, { ok: true, result: OTHER_ADDRESS });
   assert.equal(row(h.store), null);
-  assert.equal(h.inFlight.size, NO_ITEMS);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
 });
 
 test("A repeat of discarded answers 409 discarded", async (t) => {
@@ -424,16 +430,16 @@ test("A repeat of discarded answers 409 discarded", async (t) => {
   const id = insertRow(h.store);
   assert.ok(h.store.transaction((tx) => discard(tx, id)));
   await rejectsWith(run(h, {}), DISCARDED);
-  assert.equal(h.counts.calls, NO_ITEMS);
-  assert.equal(h.counts.readBacks, NO_ITEMS);
+  assert.equal(h.counts.calls, UNRUN_COUNT);
+  assert.equal(h.counts.readBacks, UNRUN_COUNT);
 });
 
 test("A refusal of authorize inserts no row and calls nothing", async (t) => {
   const h = harness(t);
   await rejectsWith(run(h, { refuse: true }), AUTHORIZE_REFUSED);
   assert.equal(row(h.store), null);
-  assert.equal(h.counts.calls, NO_ITEMS);
-  assert.equal(h.inFlight.size, NO_ITEMS);
+  assert.equal(h.counts.calls, UNRUN_COUNT);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
 });
 
 test("A finalization to an error commits failed before the error reaches the caller", async (t) => {
@@ -461,11 +467,11 @@ test("A rejected call and a rejected read-back leave no owned identity", async (
     run(h, { call: async () => Promise.reject(broken) }),
     (error) => error === broken,
   );
-  assert.equal(h.inFlight.size, NO_ITEMS);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
   assert.equal(stored(h.store).state, OutboundRequestState.Pending);
   await run(h, { readBack: async () => Promise.reject(broken) });
-  assert.equal(h.inFlight.size, NO_ITEMS);
-  assert.equal(h.counts.readBacks, SINGLE_RUN);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
+  assert.equal(h.counts.readBacks, RUNS_PER_REQUEST);
 });
 
 test("A result that fails its codec or its bound fails the commit with no owned identity", async (t) => {
@@ -480,14 +486,14 @@ test("A result that fails its codec or its bound fails the commit with no owned 
     }),
     (error) => error === broken,
   );
-  assert.equal(h.inFlight.size, NO_ITEMS);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
   assert.equal(stored(h.store).state, OutboundRequestState.Pending);
-  const oversized = "x".repeat(RESULT_MAX_BYTES + SINGLE_RUN);
+  const oversized = "x".repeat(RESULT_MAX_BYTES + BYTES_ABOVE_LIMIT);
   await assert.rejects(
     run(h, { readBack: async () => ({ match: true, result: oversized }) }),
     assert.AssertionError,
   );
-  assert.equal(h.inFlight.size, NO_ITEMS);
+  assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
   assert.equal(stored(h.store).state, OutboundRequestState.Pending);
 });
 
@@ -503,12 +509,14 @@ test("drop runs after a success, a failure and a refusal, and no record holds th
   await rejectsWith(run(h, { requestKey: OTHER_REQUEST_KEY }), DISCARDED);
   assert.equal(h.counts.materials.length, MATERIAL_RUNS);
   assert.ok(
-    h.counts.materials.every((material) => material.drops === SINGLE_RUN),
+    h.counts.materials.every(
+      (material) => material.drops === DROPS_PER_MATERIAL,
+    ),
   );
   const rows = h.store.database
     .prepare("SELECT * FROM intake_outbound_request")
     .all();
   assert.ok(!JSON.stringify(rows).includes(SECRET));
-  assert.ok(h.lines.length > NO_ITEMS);
+  assert.ok(h.lines.length > UNLOGGED_LINE_COUNT);
   assert.ok(!h.lines.join("").includes(SECRET));
 });

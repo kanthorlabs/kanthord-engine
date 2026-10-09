@@ -31,7 +31,7 @@ const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const PAGE_SIZE = 2;
 const FIRST_ROW = 0;
 const SECOND_ROW = 1;
-const NO_ROWS = 0;
+const UNOBSERVED_READ_COUNT = 0;
 const PROJECTION_KEYS = [
   "created_at",
   "error",
@@ -197,7 +197,7 @@ test("the list and the get read no event content", async (t) => {
   const rows = recordReadRows(t, h.store);
   await h.list();
   await h.get(id);
-  assert.ok(rows.length > NO_ROWS);
+  assert.ok(rows.length > UNOBSERVED_READ_COUNT);
   assert.equal(
     rows.some((row) => "event" in row),
     false,

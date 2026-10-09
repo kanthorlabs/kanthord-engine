@@ -61,10 +61,12 @@ const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREDENTIAL = "github-poll";
 const OTHER_CREDENTIAL = "github-other";
 const CREATED_AT = 1000;
-const NO_CALLS = 0;
-const NO_EVENTS = 0;
-const ONE_CALL = 1;
-const TWO_CALLS = 2;
+const UNCALLED_CONSUMER_COUNT = 0;
+const UNOPENED_TRANSACTION_COUNT = 0;
+const UNSENT_REQUEST_COUNT = 0;
+const UNSTORED_EVENT_COUNT = 0;
+const REQUESTS_PER_LOOP = 1;
+const REQUESTS_AFTER_SECOND_LOOP = 2;
 const INTERVAL_MS = 1000;
 const SECOND_LOOP_OFFSET_MS = 500;
 const SETTLE_TURNS = 20;
@@ -126,7 +128,7 @@ test("Intake start accepts one consumer function per Consumer value and calls no
   const { consumers, calls } = recordingConsumers();
   const intake = consumerFixture(t, consumers);
   assert.equal(await intake.start(), null);
-  assert.equal(calls.length, NO_CALLS);
+  assert.equal(calls.length, UNCALLED_CONSUMER_COUNT);
 });
 
 test("Intake start refuses consumers without a function for a Consumer value", async (t) => {
@@ -244,7 +246,7 @@ test("inboundsNaming opens no transaction", (t) => {
     assert.deepEqual(intake.inboundsNaming(tx, CREDENTIAL), [
       { inbound_id: id },
     ]);
-    assert.equal(transactions.mock.callCount(), NO_CALLS);
+    assert.equal(transactions.mock.callCount(), UNOPENED_TRANSACTION_COUNT);
   });
 });
 
@@ -436,12 +438,12 @@ test("run starts one poll loop per poll inbound and none for a webhook", async (
   const s = pollService(t, store);
   const running = s.intake.run();
   await settle();
-  assert.equal(s.listEvents.mock.callCount(), NO_CALLS);
+  assert.equal(s.listEvents.mock.callCount(), UNSENT_REQUEST_COUNT);
   await s.interval();
-  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
   t.mock.timers.tick(SECOND_LOOP_OFFSET_MS);
   await settle();
-  assert.equal(s.listEvents.mock.callCount(), TWO_CALLS);
+  assert.equal(s.listEvents.mock.callCount(), REQUESTS_AFTER_SECOND_LOOP);
   await shutDown(s.intake, running);
 });
 
@@ -458,7 +460,7 @@ test("an inbound delete stops its poll loop", async (t) => {
     [[id]],
   );
   await s.interval();
-  assert.equal(s.listEvents.mock.callCount(), NO_CALLS);
+  assert.equal(s.listEvents.mock.callCount(), UNSENT_REQUEST_COUNT);
   await shutDown(s.intake, running);
 });
 
@@ -471,7 +473,7 @@ test("after drain no poll request runs and no poll timer fires", async (t) => {
   const running = s.intake.run();
   await settle();
   await s.interval();
-  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
   assert.equal(await s.intake.quiesce(), null);
   assert.equal(s.signals()[0]?.aborted, true);
   let drained = false;
@@ -485,7 +487,7 @@ test("after drain no poll request runs and no poll timer fires", async (t) => {
   s.answers.next = async () => modified(ETAG_FIRST, []);
   await s.interval();
   await s.interval();
-  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
   await shutDown(s.intake, running);
 });
 
@@ -501,7 +503,7 @@ test("a platform answer after quiesce commits nothing", async (t) => {
   assert.equal(await s.intake.quiesce(), null);
   slow.resolve(modified(ETAG_FIRST, [ev("101")]));
   await s.intake.drain();
-  assert.equal(eventCount(store), NO_EVENTS);
+  assert.equal(eventCount(store), UNSTORED_EVENT_COUNT);
   assert.equal(checkpointOf(store, id), null);
   await shutDown(s.intake, running);
 });
@@ -513,7 +515,7 @@ test("a create that ends after quiesce starts no poll loop", async (t) => {
   s.answers.next = () => held.promise;
   const creating = s.create(POLL);
   await settle();
-  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
   assert.equal(await s.intake.quiesce(), null);
   held.resolve(modified(ETAG_FIRST, []));
   const inbound = await creating;
@@ -521,7 +523,7 @@ test("a create that ends after quiesce starts no poll loop", async (t) => {
   await s.intake.drain();
   s.answers.next = async () => modified(ETAG_FIRST, []);
   await s.interval();
-  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  assert.equal(s.listEvents.mock.callCount(), REQUESTS_PER_LOOP);
   assert.equal(await s.intake.stop(), null);
 });
 
@@ -585,7 +587,7 @@ test("a wake before the start hands over nothing, and run hands every pending ev
   const pending = [h.addEvent("d-1"), h.addEvent("d-2")].sort();
   h.intake.wake();
   await h.intake.dispatcher.join();
-  assert.equal(calls.length, NO_CALLS);
+  assert.equal(calls.length, UNCALLED_CONSUMER_COUNT);
   const running = h.intake.run();
   await settle();
   await h.intake.dispatcher.join();

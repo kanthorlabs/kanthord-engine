@@ -16,7 +16,7 @@ const NEWEST_CODE = "newest";
 const BIG_CODE = "big";
 const LONE_SURROGATE_JSON = '"bad \\ud800"';
 const REPLACED_MESSAGE = "bad \uFFFD";
-const SINGLE_ITEM = 1;
+const ERROR_ITEMS_PER_APPEND = 1;
 
 function item(code: string, message: string, created_at = 1): ErrorItem {
   return { code, message, created_at };
@@ -97,7 +97,7 @@ test("a message with a lone surrogate is stored well-formed", () => {
   assert(!message.isWellFormed());
   const answer = appendError(null, item("e", message));
   const stored = JSON.parse(answer) as ErrorItem[];
-  assert.equal(stored.length, SINGLE_ITEM);
+  assert.equal(stored.length, ERROR_ITEMS_PER_APPEND);
   const [first] = stored as [ErrorItem];
   assert(first.message.isWellFormed());
   assert.equal(first.message, REPLACED_MESSAGE);

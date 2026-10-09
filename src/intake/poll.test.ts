@@ -54,18 +54,23 @@ const ETAG_STORED = '"etag-0"';
 const ETAG_FIRST = '"etag-1"';
 const ETAG_SECOND = '"etag-2"';
 const SMALL_LIMIT = 2;
-const ONE_LIMIT = 1;
+const TIGHT_LIMIT = 1;
 const LARGE_LIMIT = 100;
 const TOKEN = "ghp_poll-token";
 const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const SERVER_ERROR_STATUS = 500;
-const NO_CALLS = 0;
-const ONE_CALL = 1;
-const TWO_CALLS = 2;
+const WAKES_WITHOUT_EVENTS = 0;
+const UNSENT_REQUEST_COUNT = 0;
+const WAKES_PER_BATCH = 1;
+const WARNINGS_PER_FAILURE = 1;
+const TRANSACTIONS_OF_GONE_LOOP = 1;
+const REQUESTS_PER_CYCLE = 1;
+const REQUESTS_AFTER_REARM = 2;
 const INTERVAL_MS = 1000;
 const SPREAD_OFFSETS_MS = [0, 333, 666];
-const ONE_LOOP = 1;
-const ONE_MS = 1;
+const HARNESS_LOOP_COUNT = 1;
+const LOOPS_PER_OFFSET = 1;
+const TICK_MS = 1;
 const SETTLE_TURNS = 20;
 const UNKNOWN_CODE = "system.operation.unknown";
 const SERVICE_IDENTITY = {
@@ -337,8 +342,8 @@ test("a cycle releases one poll grant, requests the events under a deadline, sto
     etag: ETAG_FIRST,
     newest_event_id: "101",
   });
-  assert.equal(h.wakes.count, ONE_CALL);
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.wakes.count, WAKES_PER_BATCH);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   const [{ call, query }] = h.calls as [(typeof h.calls)[number]];
   assert.deepEqual(query, { owner: "owner", repo: "repo", etag: null });
   assert.equal(call.token, TOKEN);
@@ -369,19 +374,19 @@ test("a 304 answer commits nothing and the request carries the stored ETag", asy
   assert.equal(h.calls[0]?.query.etag, ETAG_STORED);
   assert.deepEqual(h.checkpoint(), stored);
   assert.deepEqual(h.eventIds(), []);
-  assert.equal(h.wakes.count, NO_CALLS);
+  assert.equal(h.wakes.count, WAKES_WITHOUT_EVENTS);
   assert.deepEqual(h.drops, [CREDENTIAL]);
 });
 
 test("a cycle at the bound sends no request and releases nothing, and it resumes below the bound", async (t) => {
-  const h = cycleHarness(t, { limit: ONE_LIMIT });
+  const h = cycleHarness(t, { limit: TIGHT_LIMIT });
   h.addEvent("50");
   assert.equal(await h.cycle(), CycleOutcome.Continue);
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   assert.deepEqual(h.grants, []);
   h.settleAll();
   await h.cycle();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });
 
 test("the capacity bound pauses the poll, and a pending event refuses the delete of the inbound", async (t) => {
@@ -396,7 +401,7 @@ test("the capacity bound pauses the poll, and a pending event refuses the delete
   assert.deepEqual(h.eventIds(), ["100", "101"]);
   assert.deepEqual(h.checkpoint(), { etag: null, newest_event_id: "101" });
   await h.cycle();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   assert.throws(
     () => h.store.transaction((tx) => removeInbound(tx, h.inboundId)),
     (error) =>
@@ -409,7 +414,7 @@ test("the capacity bound pauses the poll, and a pending event refuses the delete
 
 test("a bound reached between the request and the commit leaves the new events unstored and writes a null ETag", async (t) => {
   const h = cycleHarness(t, {
-    limit: ONE_LIMIT,
+    limit: TIGHT_LIMIT,
     checkpoint: { etag: ETAG_STORED, newest_event_id: "100" },
   });
   h.answers.next = async () => {
@@ -429,9 +434,9 @@ test("a delete of the inbound before the commit stores no event and answers gone
   };
   assert.equal(await h.cycle(), CycleOutcome.Gone);
   assert.deepEqual(h.eventIds(), []);
-  assert.equal(h.wakes.count, NO_CALLS);
+  assert.equal(h.wakes.count, WAKES_WITHOUT_EVENTS);
   assert.equal(await h.cycle(), CycleOutcome.Gone);
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });
 
 test("a store failure leaves the checkpoint unchanged and drops the material", async (t) => {
@@ -462,7 +467,7 @@ test("a result class leaves the checkpoint unchanged, logs the inbound and the c
   assert.equal(await h.cycle(), CycleOutcome.Continue);
   assert.deepEqual(h.checkpoint(), stored);
   assert.deepEqual(h.drops, [CREDENTIAL]);
-  assert.equal(h.warn.mock.callCount(), ONE_CALL);
+  assert.equal(h.warn.mock.callCount(), WARNINGS_PER_FAILURE);
   const [fields] = h.warn.mock.calls[0]?.arguments ?? [];
   assert.deepEqual(fields, { inbound_id: h.inboundId, code: RETRYABLE_CODE });
   assert.ok(!JSON.stringify(h.warn.mock.calls).includes(TOKEN));
@@ -519,19 +524,19 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
 test("a loop waits one interval before each cycle and re-arms after the cycle ends", async (t) => {
   const h = loopHarness(t);
   h.loops.start(h.inboundId);
-  t.mock.timers.tick(INTERVAL_MS - ONE_MS);
+  t.mock.timers.tick(INTERVAL_MS - TICK_MS);
   await settle();
-  assert.equal(h.calls.length, NO_CALLS);
-  t.mock.timers.tick(ONE_MS);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  t.mock.timers.tick(TICK_MS);
   await settle();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   await h.interval();
-  assert.equal(h.calls.length, TWO_CALLS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
 });
 
 test("startAll spreads the first cycles of the loops across one interval", async (t) => {
   const h = loopHarness(t);
-  const extra = SPREAD_OFFSETS_MS.slice(ONE_LOOP).map(() => {
+  const extra = SPREAD_OFFSETS_MS.slice(HARNESS_LOOP_COUNT).map(() => {
     const id = allocateInboundId();
     h.store.transaction((tx) =>
       insertInbound(tx, id, {
@@ -555,12 +560,12 @@ test("startAll spreads the first cycles of the loops across one interval", async
   h.loops.startAll(ids);
   let elapsedMs = 0;
   for (const [index, offsetMs] of SPREAD_OFFSETS_MS.entries()) {
-    t.mock.timers.tick(INTERVAL_MS + offsetMs - ONE_MS - elapsedMs);
+    t.mock.timers.tick(INTERVAL_MS + offsetMs - TICK_MS - elapsedMs);
     await settle();
     assert.deepEqual(polled(), ids.slice(0, index));
-    t.mock.timers.tick(ONE_MS);
+    t.mock.timers.tick(TICK_MS);
     await settle();
-    assert.deepEqual(polled(), ids.slice(0, index + ONE_LOOP));
+    assert.deepEqual(polled(), ids.slice(0, index + LOOPS_PER_OFFSET));
     elapsedMs = INTERVAL_MS + offsetMs;
   }
 });
@@ -573,13 +578,13 @@ test("a slow request starts no second request of that inbound before it ends", a
   await h.interval();
   await h.interval();
   await h.interval();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   slow.resolve(modified(ETAG_FIRST, []));
   await settle();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   h.answers.next = async () => modified(ETAG_FIRST, []);
   await h.interval();
-  assert.equal(h.calls.length, TWO_CALLS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
 });
 
 test("a thrown cycle logs the inbound and the code, and the loop continues", async (t) => {
@@ -589,11 +594,11 @@ test("a thrown cycle logs the inbound and the code, and the loop continues", asy
   };
   h.loops.start(h.inboundId);
   await h.interval();
-  assert.equal(h.warn.mock.callCount(), ONE_CALL);
+  assert.equal(h.warn.mock.callCount(), WARNINGS_PER_FAILURE);
   const [fields] = h.warn.mock.calls[0]?.arguments ?? [];
   assert.deepEqual(fields, { inbound_id: h.inboundId, code: UNKNOWN_CODE });
   await h.interval();
-  assert.equal(h.calls.length, TWO_CALLS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
   assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
 });
 
@@ -603,10 +608,10 @@ test("a gone inbound ends its loop", async (t) => {
   h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
   const transaction = t.mock.method(h.store, "transaction");
   await h.interval();
-  assert.equal(transaction.mock.callCount(), ONE_CALL);
+  assert.equal(transaction.mock.callCount(), TRANSACTIONS_OF_GONE_LOOP);
   await h.interval();
-  assert.equal(transaction.mock.callCount(), ONE_CALL);
-  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(transaction.mock.callCount(), TRANSACTIONS_OF_GONE_LOOP);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   assert.deepEqual(h.grants, []);
 });
 
@@ -615,10 +620,10 @@ test("a second start adds no loop and a stop clears the timer", async (t) => {
   h.loops.start(h.inboundId);
   h.loops.start(h.inboundId);
   await h.interval();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   h.loops.stop(h.inboundId);
   await h.interval();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });
 
 test("stopAll cancels the running request, awaits its cycle and commits nothing", async (t) => {
@@ -627,7 +632,7 @@ test("stopAll cancels the running request, awaits its cycle and commits nothing"
   h.answers.next = () => slow.promise;
   h.loops.start(h.inboundId);
   await h.interval();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   const stopped = h.loops.stopAll();
   assert.equal(h.calls[0]?.call.signal.aborted, true);
   slow.resolve(modified(ETAG_FIRST, [ev("101", "PushEvent")]));
@@ -636,5 +641,5 @@ test("stopAll cancels the running request, awaits its cycle and commits nothing"
   assert.equal(h.checkpoint(), null);
   assert.deepEqual(h.drops, [CREDENTIAL]);
   await h.interval();
-  assert.equal(h.calls.length, ONE_CALL);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });
