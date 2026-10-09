@@ -17,6 +17,7 @@ import {
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Consumer,
+  DELETE_IDS_MAX,
   INBOUND_EVENT_ID_PREFIX,
   INTAKE_SERVICE_NAME,
   InboundEventState,
@@ -410,4 +411,24 @@ test("Each state filter over a range of mixed states removes that state alone, b
       assert.equal(h.stateOf(id), removed ? null : value);
     }
   }
+});
+
+test("A range that matches more than the identity bound answers 400 filter_invalid and deletes nothing; a range at the bound passes", async (t) => {
+  const h = harness(t);
+  const ids = Array.from({ length: DELETE_IDS_MAX + 1 }, () =>
+    h.addEvent(InboundEventState.Succeeded),
+  ).sort();
+  const [first] = ids;
+  const atBound = ids[DELETE_IDS_MAX - 1];
+  const last = ids[DELETE_IDS_MAX];
+  assert.ok(first && atBound && last);
+  const state = InboundEventState.Succeeded;
+  await assert.rejects(
+    h.deleteEvents({ state, from: first, to: last }),
+    refusal(HttpStatus.BadRequest, FILTER_INVALID),
+  );
+  for (const id of ids) assert.equal(h.stateOf(id), state);
+  const answer = await h.deleteEvents({ state, from: first, to: atBound });
+  assert.deepEqual(answer, { count: DELETE_IDS_MAX });
+  for (const id of ids) assert.equal(h.stateOf(id), id === last ? state : null);
 });

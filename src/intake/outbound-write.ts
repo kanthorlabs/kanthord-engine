@@ -108,6 +108,17 @@ function deleteByRange(
 ): number {
   assert.notEqual(state, OutboundRequestState.Pending);
   assert.ok(from.length > NO_LENGTH && to.length > NO_LENGTH);
+  const matched = tx.database
+    .prepare(
+      "SELECT COUNT(*) AS total FROM intake_outbound_request WHERE state = ? AND id >= ? AND id <= ?",
+    )
+    .get(state, from, to) as { total: number | bigint };
+  if (Number(matched.total) > DELETE_IDS_MAX)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      IntakeErrorCode.OutboundRequestFilterInvalid,
+      `A range matches more than ${DELETE_IDS_MAX} outbound requests. Narrow the range.`,
+    );
   const changes = tx.database
     .prepare(
       "DELETE FROM intake_outbound_request WHERE state = ? AND id >= ? AND id <= ?",

@@ -11,6 +11,7 @@ import {
   type InboundEventStateValue,
 } from "./contract.ts";
 import {
+  countEventsInRange,
   deleteEventsInRange,
   deleteSettledEvents,
   discardEventFrom,
@@ -122,6 +123,23 @@ function deleteByIds(tx: Transaction, ids: readonly string[]): number {
   return deleteSettledEvents(tx, ids);
 }
 
+function deleteByRange(
+  tx: Transaction,
+  state: InboundEventStateValue,
+  from: string,
+  to: string,
+): number {
+  if (countEventsInRange(tx, state, from, to) > DELETE_IDS_MAX)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      IntakeErrorCode.InboundEventFilterInvalid,
+      `A range matches more than ${DELETE_IDS_MAX} events. Narrow the range.`,
+    );
+  const count = deleteEventsInRange(tx, state, from, to);
+  assert.ok(count <= DELETE_IDS_MAX, "A range delete fits its bound.");
+  return count;
+}
+
 export function deleteEvents(
   tx: Transaction,
   body: InboundEventDelete,
@@ -131,7 +149,7 @@ export function deleteEvents(
   const count =
     "ids" in filter
       ? deleteByIds(tx, filter.ids)
-      : deleteEventsInRange(tx, filter.state, filter.from, filter.to);
+      : deleteByRange(tx, filter.state, filter.from, filter.to);
   assert.ok(Number.isSafeInteger(count) && count >= MIN_DELETE_COUNT);
   return { count };
 }

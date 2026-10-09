@@ -10,6 +10,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
+  DELETE_IDS_MAX,
   INTAKE_SERVICE_NAME,
   OutboundOperation,
   OutboundRequestState,
@@ -273,4 +274,30 @@ test("a discard of a failed request answers 409 state_conflict", async (t) => {
   const id = h.insert("k1", OutboundRequestState.Failed);
   await refusesWith(h.discardRequest(id), HttpStatus.Conflict, STATE_CONFLICT);
   assert.equal(h.stateOf(id), OutboundRequestState.Failed);
+});
+
+test("a range that matches more than the identity bound answers 400 filter_invalid and deletes nothing; a range at the bound passes", async (t) => {
+  const h = harness(t);
+  const state = OutboundRequestState.Failed;
+  const ids = Array.from({ length: DELETE_IDS_MAX + 1 }, (_, index) =>
+    h.insert(`k${index}`, state),
+  ).sort();
+  const [first] = ids;
+  const atBound = ids[DELETE_IDS_MAX - 1];
+  const last = ids[DELETE_IDS_MAX];
+  assert.ok(first && atBound && last);
+  await refusesWith(
+    h.deleteRequests({ force: true, state, from: first, to: last }),
+    HttpStatus.BadRequest,
+    FILTER_INVALID,
+  );
+  for (const id of ids) assert.equal(h.stateOf(id), state);
+  const answer = await h.deleteRequests({
+    force: true,
+    state,
+    from: first,
+    to: atBound,
+  });
+  assert.deepEqual(answer, { count: DELETE_IDS_MAX });
+  for (const id of ids) assert.equal(h.stateOf(id), id === last ? state : null);
 });

@@ -255,6 +255,24 @@ export function deleteSettledEvents(
   return Number(changes);
 }
 
+export function countEventsInRange(
+  tx: Transaction,
+  state: InboundEventStateValue,
+  from: string,
+  to: string,
+): number {
+  assert.ok(
+    from.length > NO_LENGTH && to.length > NO_LENGTH,
+    "A range has two bounds.",
+  );
+  const row = tx.database
+    .prepare(
+      "SELECT COUNT(*) AS total FROM intake_inbound_event WHERE state = ? AND id >= ? AND id <= ?",
+    )
+    .get(state, from, to) as { total: number | bigint };
+  return Number(row.total);
+}
+
 export function deleteEventsInRange(
   tx: Transaction,
   state: InboundEventStateValue,
