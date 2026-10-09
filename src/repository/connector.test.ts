@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   mkdirSync,
   symlinkSync,
@@ -515,6 +517,8 @@ const SECOND_INDEX = 1;
 const FIRST_TEXT = "first\n";
 const UNKNOWN_COMMIT = "0".repeat(40);
 
+type SeedEntry = string | Buffer | { link: string } | { linkBlob: string };
+
 async function instructionOrigin(t: TestContext) {
   const root = temporary(t);
   const origin = join(root, "origin");
@@ -532,17 +536,28 @@ async function instructionOrigin(t: TestContext) {
   await git.init();
   await git.raw(["checkout", "-b", "main"]);
   await git.addRemote("origin", origin);
-  const commit = async (
-    files: Record<string, string | Buffer | { link: string }>,
-  ) => {
+  const commit = async (files: Record<string, SeedEntry>) => {
     for (const [name, entry] of Object.entries(files)) {
       const path = join(seed, name);
       mkdirSync(dirname(path), { recursive: true });
       rmSync(path, { force: true });
       if (isString(entry) || Buffer.isBuffer(entry)) writeFileSync(path, entry);
-      else symlinkSync(entry.link, path);
+      else if ("link" in entry) symlinkSync(entry.link, path);
     }
     await git.raw(["add", "--force", "."]);
+    for (const [name, entry] of Object.entries(files)) {
+      if (isString(entry) || Buffer.isBuffer(entry) || "link" in entry)
+        continue;
+      const blob = join(root, "link-blob");
+      writeFileSync(blob, entry.linkBlob);
+      const object = (await git.raw(["hash-object", "-w", blob])).trim();
+      await git.raw([
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        `${SYMLINK_MODE},${object},${name}`,
+      ]);
+    }
     await git.raw([
       "-c",
       "user.name=Test",
@@ -612,10 +627,7 @@ test("readFilesAtCommit reads the present files of a commit and answers null for
   assert.equal(readdirSync(scratch).length, NO_ENTRIES);
 });
 
-async function readStates(
-  t: TestContext,
-  files: Record<string, string | Buffer | { link: string }>,
-) {
+async function readStates(t: TestContext, files: Record<string, SeedEntry>) {
   const { address, scratch, commit } = await instructionOrigin(t);
   const head = await commit(files);
   const read = await readFilesAtCommit(
@@ -713,6 +725,142 @@ test("readFilesAtCommit follows a chain of 40 symlinks within the deadline and r
       [RepositoryFileState.Present, CHAIN_TEXT],
       [RepositoryFileState.Absent, null],
       [RepositoryFileState.Unreadable, null],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
+});
+
+const SYMLINK_MODE = "120000";
+const SYMLINK_TARGET_BYTES_MAX = 4096;
+const UNRELATED_SYMLINKS = 200;
+const BOUND_TARGET = "a.md";
+const CURRENT_DIRECTORY_PREFIX = "./";
+const WANT_PATTERN = / fetch> want ([0-9a-f]{40})/g;
+const WANTED_OBJECT_GROUP = 1;
+const START_EVENT = "start";
+const NO_TEXT = "";
+const GIT_ARGUMENTS_START = 1;
+
+function blobObject(text: string): string {
+  return createHash("sha1")
+    .update(`blob ${Buffer.byteLength(text)}\0${text}`)
+    .digest("hex");
+}
+
+async function tracedRead(t: TestContext, files: Record<string, SeedEntry>) {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const head = await commit(files);
+  const traces = temporary(t);
+  const events = join(traces, "trace2");
+  const packets = join(traces, "packet");
+  const previous = [process.env.GIT_TRACE2_EVENT, process.env.GIT_TRACE_PACKET];
+  process.env.GIT_TRACE2_EVENT = events;
+  process.env.GIT_TRACE_PACKET = packets;
+  try {
+    const read = await readFilesAtCommit(
+      address,
+      head,
+      INSTRUCTION_PATHS,
+      MAX_BYTES,
+      background,
+      DEADLINE_MS,
+      scratch,
+    );
+    const starts = readFileSync(events, "utf8")
+      .split("\n")
+      .filter((line) => line !== NO_TEXT)
+      .map((line) => JSON.parse(line) as { event: string; argv: string[] })
+      .filter(({ event }) => event === START_EVENT)
+      .map(({ argv }) => argv.slice(GIT_ARGUMENTS_START));
+    const wants = new Set(
+      [...readFileSync(packets, "utf8").matchAll(WANT_PATTERN)].map(
+        (match) => match[WANTED_OBJECT_GROUP]!,
+      ),
+    );
+    return { head, read, starts, wants };
+  } finally {
+    [process.env.GIT_TRACE2_EVENT, process.env.GIT_TRACE_PACKET] = previous;
+  }
+}
+
+test("readFilesAtCommit lists only the requested paths when no path is a symlink", async (t) => {
+  const { head, read, starts } = await tracedRead(t, {
+    "AGENTS.md": "agents\n",
+    "CLAUDE.md": "claude\n",
+    "docs/other.md": "other\n",
+  });
+  assert.deepEqual(
+    read.map(({ state }) => state),
+    [
+      RepositoryFileState.Present,
+      RepositoryFileState.Absent,
+      RepositoryFileState.Present,
+      RepositoryFileState.Absent,
+    ],
+  );
+  assert.deepEqual(
+    starts.filter((argv) => argv.includes("ls-tree")),
+    [
+      [
+        "--literal-pathspecs",
+        "ls-tree",
+        "-z",
+        head,
+        "--",
+        ...INSTRUCTION_PATHS,
+      ],
+    ],
+  );
+});
+
+test("readFilesAtCommit fetches only the symlink blobs of the chain among many unrelated symlinks", async (t) => {
+  const unrelated: Record<string, SeedEntry> = {};
+  const unrelatedTargets: string[] = [];
+  for (let index = 0; index < UNRELATED_SYMLINKS; index++) {
+    unrelatedTargets.push(`root-target-${index}.md`, `target-${index}.md`);
+    unrelated[`unrelated-${index}.md`] = { link: `root-target-${index}.md` };
+    unrelated[`unrelated/link-${index}.md`] = { link: `target-${index}.md` };
+  }
+  const { read, wants } = await tracedRead(t, {
+    ...unrelated,
+    "AGENTS.md": "agents\n",
+    "CLAUDE.md": { link: "AGENTS.md" },
+    "AGENTS.local.md": { link: "docs/middle.md" },
+    "docs/middle.md": { link: "target.md" },
+    "docs/target.md": "target\n",
+  });
+  assert.deepEqual(
+    read.map(({ state, text }) => [state, text]),
+    [
+      [RepositoryFileState.Present, "agents\n"],
+      [RepositoryFileState.Present, "target\n"],
+      [RepositoryFileState.Present, "agents\n"],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
+  for (const target of ["AGENTS.md", "docs/middle.md", "target.md"])
+    assert.ok(wants.has(blobObject(target)));
+  for (const target of unrelatedTargets)
+    assert.ok(!wants.has(blobObject(target)));
+});
+
+test("readFilesAtCommit answers unreadable for a symlink target above the byte bound", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      [BOUND_TARGET]: "a\n",
+      "AGENTS.md": { linkBlob: "x".repeat(SYMLINK_TARGET_BYTES_MAX + 1) },
+      "CLAUDE.md": {
+        linkBlob:
+          CURRENT_DIRECTORY_PREFIX.repeat(
+            (SYMLINK_TARGET_BYTES_MAX - BOUND_TARGET.length) /
+              CURRENT_DIRECTORY_PREFIX.length,
+          ) + BOUND_TARGET,
+      },
+    }),
+    [
+      [RepositoryFileState.Unreadable, null],
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.Present, "a\n"],
       [RepositoryFileState.Absent, null],
     ],
   );
