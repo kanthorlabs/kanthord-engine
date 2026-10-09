@@ -5,12 +5,16 @@ import {
   parseJudgement,
   taskJudgementSchema,
   evaluationJudgementSchema,
+  judgementRationale,
   evaluationInstruction,
   JUDGEMENT_MARKER,
   repairInstruction,
   taskJudgementInstruction,
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
+
+const TWO_GAP_RATIONALE =
+  "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
 
 test("the final marker is strict and invalid handoffs are refused", () => {
   const text =
@@ -29,10 +33,38 @@ test("the final marker is strict and invalid handoffs are refused", () => {
     assert.equal(parseJudgement(invalid, taskJudgementSchema), null);
   assert.deepEqual(
     parseJudgement(
+      'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed","unmet":[{"id":"task","reason":"no test"}]}',
+      evaluationJudgementSchema,
+    ),
+    {
+      result: "criterion-not-met",
+      rationale: "task failed",
+      unmet: [{ id: "task", reason: "no test" }],
+    },
+  );
+  assert.equal(
+    parseJudgement(
       'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed"}',
       evaluationJudgementSchema,
     ),
-    { result: "criterion-not-met", rationale: "task failed" },
+    null,
+  );
+  assert.deepEqual(
+    parseJudgement(
+      'kanthord-judgement: {"result":"success","rationale":"met"}',
+      evaluationJudgementSchema,
+    ),
+    { result: "success", rationale: "met", unmet: [] },
+  );
+  assert.equal(
+    judgementRationale({
+      rationale: "two gaps",
+      unmet: [
+        { id: "task_a", reason: "no route check" },
+        { id: "task_b", reason: "no restart test" },
+      ],
+    }),
+    TWO_GAP_RATIONALE,
   );
 });
 

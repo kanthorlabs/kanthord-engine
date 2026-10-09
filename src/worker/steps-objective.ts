@@ -320,6 +320,14 @@ export async function startCheck(state: StepsState): Promise<{
       pending.push({ task, boundary, instruction: null });
       continue;
     }
+    if (state.priorRationale?.includes(task.id)) {
+      pending.push({
+        task,
+        boundary,
+        instruction: criterionRevisionInstruction(state.priorRationale),
+      });
+      continue;
+    }
     await state.agent.instruct(
       taskWork(state, task),
       taskJudgementInstruction(task, state.priorRationale),

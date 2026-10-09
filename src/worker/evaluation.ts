@@ -27,6 +27,7 @@ import {
 import {
   evaluationInstruction,
   evaluationJudgementSchema,
+  judgementRationale,
   failedVerificationRationale,
   parseRepaired,
   ReplyRepair,
@@ -91,7 +92,7 @@ async function judge(
     return run.stop(EndReason.AssessmentAbsent);
   if (judgement === ReplyRepair.Invalid)
     return run.stop(EndReason.JudgementInvalid);
-  return judgement;
+  return { result: judgement.result, rationale: judgementRationale(judgement) };
 }
 
 export async function runEvaluation(

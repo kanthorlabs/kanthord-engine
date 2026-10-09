@@ -45,6 +45,7 @@ const PROVIDER_CALL_COUNT = 2;
 const NO_PROVIDER_CALLS = 0;
 const NO_PUSHES = 0;
 const REPAIRED_TASK_CALLS = 3;
+const ONE_JUDGEMENT = 1;
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -672,6 +673,32 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
     await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
     PARTIAL_WORK,
   );
+});
+
+test("the start check revises a task that the prior rationale names without a judgement", async (t) => {
+  const named = task("named", "true");
+  const other = task("other", "true");
+  const h = await fixture(
+    t,
+    [named, other],
+    [
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  const rationale = `Two gaps\nUnmet:\n- ${named.id}: no route check`;
+  h.priorRationale = rationale;
+  const checked = await startCheck(h);
+  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes(other.id));
+  assert.deepEqual(checked.pending, [
+    {
+      task: named,
+      boundary: "run_passed",
+      instruction: criterionRevisionInstruction(rationale),
+    },
+  ]);
 });
 
 test("the start check judges a task against the prior rationale and revises it with that rationale", async (t) => {

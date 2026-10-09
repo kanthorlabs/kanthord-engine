@@ -106,7 +106,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     {
       command: "true",
       texts: [
-        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet"}',
+        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"the defect"}]}',
       ],
       result: "criterion-not-met",
       opens: 1,
@@ -115,7 +115,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     {
       command: "true",
       texts: [
-        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet"}',
+        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"the defect"}]}',
       ],
       result: "criterion-not-met",
       opens: 1,
