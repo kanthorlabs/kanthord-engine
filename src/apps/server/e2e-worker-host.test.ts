@@ -22,9 +22,11 @@ const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
 const TWO_RESULTS = 2;
+const PROVIDER_AND_STORE_PINS = 2;
 const THIRD_REVISION = 3;
 const FIRST_INDEX = 0;
 const POLL_LIMIT = 30;
+const JOURNEY_TIMEOUT = 240000;
 const FILE_NAME = "hello.txt";
 const HELLO = "hello";
 const SIZE = 5;
@@ -131,7 +133,7 @@ async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
     );
     if (record) {
       assert.equal(page.items.length, SINGLE_ITEM);
-      assert.equal(record.credentials.length, SINGLE_ITEM);
+      assert.equal(record.credentials.length, PROVIDER_AND_STORE_PINS);
       return record;
     }
     await delay(100);
@@ -141,20 +143,20 @@ async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
 
 test(
   "E09.11–16 worker hosts offline execution, object upload and live failure boundaries",
-  { timeout: 240000 },
+  { timeout: JOURNEY_TIMEOUT },
   async (t) => {
+    const executionSetup = await fixture(t);
     await t.test(
       "E09.11–14 execution publishes evidence and node branch",
-      { timeout: 90000 },
+      { timeout: JOURNEY_TIMEOUT },
       async (t) => {
-        const setup = await fixture(t);
         const provider = scriptedProvider([
           tool("bash", { command: "printf hello > hello.txt" }),
           tool(UPLOAD, { path: "hello.txt" }),
           tool(UPLOAD, { path: "../outside.txt" }),
           fauxAssistantMessage("done"),
           async () => {
-            await setup.read([
+            await executionSetup.read([
               "agent",
               "enablement",
               "disable",
@@ -166,12 +168,12 @@ test(
           },
         ]);
         const host = await inProcessWorker(t, {
-          endpoint: setup.fixture.endpoint,
-          ...setup.auth,
+          endpoint: executionSetup.fixture.endpoint,
+          ...executionSetup.auth,
           modelRuntimeFactory: scriptedModelRuntime(provider),
-          repositoryTransport: setup.transport,
+          repositoryTransport: executionSetup.transport,
         });
-        await finished(setup);
+        await finished(executionSetup);
         assert.ok(provider.calls.length);
         assert.ok(
           provider.calls.every((call) => call.apiKey === WORKER_TEST_KEY),
@@ -182,11 +184,11 @@ test(
           ready >= FIRST_INDEX && claimed > ready,
           JSON.stringify(host.logs),
         );
-        const page = await setup.read<{ items: Evidence[] }>([
+        const page = await executionSetup.read<{ items: Evidence[] }>([
           "mission",
           "evidence",
           "list",
-          setup.node_id,
+          executionSetup.node_id,
           "--attempt",
           "1",
         ]);
@@ -203,7 +205,7 @@ test(
         assert.equal(asset.media_type, MEDIA_TYPE);
         assert.ok(Number.isFinite(asset.published_at));
         assert.ok(asset.address.sha256);
-        const grant = await setup.read<{ get_url: string }>([
+        const grant = await executionSetup.read<{ get_url: string }>([
           "mission",
           "evidence",
           "asset",
@@ -237,30 +239,30 @@ test(
         const trace = JSON.stringify(provider.calls);
         assert.ok(!trace.includes("put_url"));
         assert.ok(!trace.includes("X-Amz"));
-        assert.ok(!trace.includes(setup.sink!.endpoint));
+        assert.ok(!trace.includes(executionSetup.s3!.endpoint));
         assert.match(
-          await setup.git.listRemote([
-            setup.bare,
-            `refs/heads/kanthord/${setup.node_id}`,
+          await executionSetup.git.listRemote([
+            executionSetup.bare,
+            `refs/heads/kanthord/${executionSetup.node_id}`,
           ]),
           /^[a-f0-9]{40}\s/,
         );
-        const node = await setup.read<{ state: NodeState }>([
+        const node = await executionSetup.read<{ state: NodeState }>([
           "mission",
           "node",
           "get",
-          setup.node_id,
+          executionSetup.node_id,
         ]);
         assert.equal(node.state, NodeState.Waiting);
         assert.equal(await host.worker.stop(), null);
         assert.equal(await host.running, null);
       },
     );
+    const stopSetup = await fixture(t);
     await t.test(
       "E09.15 SIGTERM preserves a live claim and registration",
-      { timeout: 90000 },
+      { timeout: JOURNEY_TIMEOUT },
       async (t) => {
-        const setup = await fixture(t);
         const entered = Promise.withResolvers<void>();
         const resume = Promise.withResolvers<void>();
         const provider = scriptedProvider([
@@ -271,10 +273,10 @@ test(
           },
         ]);
         const host = await inProcessWorker(t, {
-          endpoint: setup.fixture.endpoint,
-          ...setup.auth,
+          endpoint: stopSetup.fixture.endpoint,
+          ...stopSetup.auth,
           modelRuntimeFactory: scriptedModelRuntime(provider),
-          repositoryTransport: setup.transport,
+          repositoryTransport: stopSetup.transport,
         });
         await entered.promise;
         process.emit("SIGTERM");
@@ -282,28 +284,28 @@ test(
         const error = await host.running;
         assert.ok(error instanceof Diagnostic);
         assert.equal(error.code, LIVE_STOP);
-        await assertLive(setup, host.logs);
+        await assertLive(stopSetup, host.logs);
       },
     );
+    const handoverSetup = await fixture(t);
+    const other = handoverSetup.machine("general-b");
     await t.test(
       "E09.16 wrong secret refuses handover without release or deregistration",
-      { timeout: 90000 },
+      { timeout: JOURNEY_TIMEOUT },
       async (t) => {
-        const setup = await fixture(t);
-        const other = setup.machine("general-b");
         const provider = scriptedProvider([]);
         const host = await inProcessWorker(t, {
-          endpoint: setup.fixture.endpoint,
-          token: setup.auth.token,
+          endpoint: handoverSetup.fixture.endpoint,
+          token: handoverSetup.auth.token,
           client_secret: other.client_secret,
           modelRuntimeFactory: scriptedModelRuntime(provider),
-          repositoryTransport: setup.transport,
+          repositoryTransport: handoverSetup.transport,
         });
         const error = await host.running;
         assert.ok(error instanceof Diagnostic);
         assert.equal(error.code, DECRYPTION_FAILED);
         assert.deepEqual(provider.calls, []);
-        await assertLive(setup, host.logs);
+        await assertLive(handoverSetup, host.logs);
       },
     );
   },

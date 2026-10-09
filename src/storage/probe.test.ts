@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HeadBucketCommand } from "@aws-sdk/client-s3";
+import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import {
   background,
   CancellationContext,
@@ -16,6 +16,7 @@ const ENDPOINT = "https://storage.example";
 const BUCKET = "test-bucket";
 const REGION = "us-east-1";
 const ONE_CALL = 1;
+const BUCKET_PATH = `/${BUCKET}/`;
 
 const s3Check = (
   context: Context,
@@ -58,6 +59,7 @@ for (const throws of [false, true]) {
         assert.deepEqual(config, {
           endpoint: ENDPOINT,
           region: REGION,
+          forcePathStyle: true,
           credentials: { accessKeyId: ACCESS_KEY_ID, secretAccessKey: SECRET },
         });
         return { send, destroy };
@@ -130,4 +132,31 @@ test("S3 skips cancelled contexts and aborts an in-flight request, destroying it
   const expired = new CancellationContext(background, Date.now());
   assert.equal(await s3Check(expired, createClient), ResourceStatus.Unknown);
   assert.equal(createClient.mock.callCount(), ONE_CALL);
+});
+
+test("S3 addresses the bucket in the path of the endpoint", async () => {
+  const requests: { hostname: string; path: string }[] = [];
+  const result = await s3Check(
+    background,
+    (config) =>
+      new S3Client({
+        ...config,
+        requestHandler: {
+          handle: async (request: { hostname: string; path: string }) => {
+            requests.push({ hostname: request.hostname, path: request.path });
+            return {
+              response: {
+                statusCode: HttpStatus.OK,
+                headers: {},
+                body: new Uint8Array(),
+              },
+            };
+          },
+        },
+      }),
+  );
+  assert.equal(result, ResourceStatus.Healthy);
+  assert.deepEqual(requests, [
+    { hostname: new URL(ENDPOINT).hostname, path: BUCKET_PATH },
+  ]);
 });

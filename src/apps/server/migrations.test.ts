@@ -19,6 +19,8 @@ import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import { missionMigrations } from "../../mission/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
+import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
+import { intakeMigrations } from "../../intake/index.ts";
 
 const PROJECT_SERVICE_NAME = "project";
 const GATEWAY_SERVICE_NAME = "gateway";
@@ -32,6 +34,7 @@ const services: Migrations = [
   { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
   { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
+  { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
 ];
 const HISTORY_TABLE = "migration";
 const CREDENTIAL_TABLE = "credential";
@@ -71,6 +74,14 @@ const MISSION_TABLES = [
   MISSION_DEPENDENCY_TABLE,
   ...ERD2_MISSION_TABLES,
 ];
+const INTAKE_INBOUND_TABLE = "intake_inbound";
+const INTAKE_INBOUND_EVENT_TABLE = "intake_inbound_event";
+const INTAKE_OUTBOUND_REQUEST_TABLE = "intake_outbound_request";
+const INTAKE_TABLES = [
+  INTAKE_INBOUND_TABLE,
+  INTAKE_INBOUND_EVENT_TABLE,
+  INTAKE_OUTBOUND_REQUEST_TABLE,
+];
 const INTEGRITY_OK = "ok";
 const NO_PREFIX_MATCHES = 0;
 const SINGLE_PREFIX_MATCH = 1;
@@ -80,6 +91,7 @@ const ALL_TABLES = [
   AGENT_ENABLEMENT_TABLE,
   AGENT_PROMPT_TABLE,
   CREDENTIAL_TABLE,
+  ...INTAKE_TABLES,
   MISSION_ASSESSMENT_TABLE,
   MISSION_ATTEMPT_TABLE,
   MISSION_DEPENDENCY_TABLE,
@@ -99,6 +111,8 @@ const ALL_INDEXES = [
   "agent_enablement_agent_name_revision",
   "agent_prompt_scope_agent_name",
   "credential_name_revision",
+  "intake_inbound_event_inbound_event",
+  "intake_outbound_request_operation_key",
   MISSION_ASSESSMENT_SEQUENCE_INDEX,
   MISSION_ATTEMPT_OPEN_INDEX,
   MISSION_EVIDENCE_REQUEST_INDEX,
@@ -153,6 +167,7 @@ test("service migrations own distinct prefixes and create only tables in their n
       PROJECT_BINDING_TABLE,
       ...SCHEDULER_TABLES,
       ...MISSION_TABLES,
+      ...INTAKE_TABLES,
     ]);
   } finally {
     store.close();
@@ -280,7 +295,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1 and ERD 2 migrations produce exactly the sixteen tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -290,6 +305,7 @@ test("all ERD 1 and ERD 2 migrations produce exactly the sixteen tables", () => 
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
     { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
+    { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ];
   const prefixes = allServices.map(({ service }) => `${service}_`);
   assert.equal(new Set(prefixes).size, allServices.length);
@@ -358,6 +374,7 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
   );
   for (const row of schema) assert.doesNotMatch(String(row.sql), /\bCHECK\b/i);
   const executionReferences: string[] = [];
+  const intakeReferences: string[] = [];
   for (const table of ALL_TABLES) {
     const indexes = store.database
       .prepare("SELECT * FROM pragma_index_list(?)")
@@ -379,9 +396,25 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
         ),
       );
     }
-    if (table === WORKER_INSTANCE_TABLE || table === SCHEDULER_EXECUTION_TABLE)
+    if (INTAKE_TABLES.includes(table)) {
+      intakeReferences.push(
+        ...references.map(
+          (row) =>
+            `${table}.${String(row.from)}->${String(row.table)}.${String(row.to)}`,
+        ),
+      );
+    }
+    if (
+      table === WORKER_INSTANCE_TABLE ||
+      table === SCHEDULER_EXECUTION_TABLE ||
+      table === INTAKE_INBOUND_TABLE ||
+      table === INTAKE_OUTBOUND_REQUEST_TABLE
+    )
       assert.deepEqual(references, []);
   }
+  assert.deepEqual(intakeReferences, [
+    `${INTAKE_INBOUND_EVENT_TABLE}.inbound_id->${INTAKE_INBOUND_TABLE}.id`,
+  ]);
   assert.deepEqual(executionReferences.sort(), [
     "mission_assessment.node_id->mission_node.id",
     "mission_attempt.node_id->mission_node.id",

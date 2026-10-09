@@ -1,0 +1,149 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: intake.outbound.request.get
+    tags:
+      - intake
+    description: Get one outbound request.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: outbound_request_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/intake.outbound.request.get.Input/properties/params\
+            /properties/outbound_request_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/intake.outbound.request.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    intake.outbound.request.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            outbound_request_id:
+              type: string
+              minLength: 43
+              maxLength: 43
+              pattern: ^outbound_request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: outbound_request_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - outbound_request_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    intake.outbound.request.get.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: ^outbound_request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: outbound_request_ followed by a canonical 26-character uppercase
+            ULID.
+        project_id:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: project_ followed by a canonical 26-character uppercase ULID.
+        operation:
+          type: string
+          enum:
+            - github.pull_request
+            - git.merge_push
+            - s3.delete_object
+        request_key:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          enum:
+            - pending
+            - succeeded
+            - failed
+            - discarded
+        result:
+          anyOf:
+            - {}
+            - type: "null"
+        error:
+          anyOf:
+            - type: array
+              items:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    minLength: 1
+                  message:
+                    type: string
+                  created_at:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                required:
+                  - code
+                  - message
+                  - created_at
+                additionalProperties: false
+            - type: "null"
+        created_at:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+      required:
+        - id
+        - project_id
+        - operation
+        - request_key
+        - state
+        - result
+        - error
+        - created_at
+      additionalProperties: false

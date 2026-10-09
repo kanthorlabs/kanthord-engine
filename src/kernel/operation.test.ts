@@ -127,3 +127,50 @@ test("registry rejects undeclared access policies, duplicates, versioned paths a
     /closed/,
   );
 });
+test("registry admits /hooks for a delivery operation alone", () => {
+  const registry = new OperationRegistry();
+  const delivery = {
+    ...operations.write,
+    id: "test.delivery",
+    path: "/hooks/:inbound_id",
+    access: AccessPolicy.Delivery,
+    mutation: false,
+    delivery: true,
+  } as const;
+  const unused = () => {
+    throw new Error("unused");
+  };
+  assert.throws(
+    () =>
+      registry.register(
+        {
+          ...operations.write,
+          path: "/hooks/human",
+          access: AccessPolicy.Human,
+        },
+        unused,
+      ),
+    /unversioned \/api prefix/,
+  );
+  assert.throws(
+    () => registry.register({ ...delivery, path: "/api/hooks/test" }, unused),
+    /\/hooks prefix/,
+  );
+  assert.throws(
+    () => registry.register({ ...delivery, mutation: true }, unused),
+    /A delivery operation is no mutation/,
+  );
+  assert.throws(
+    () =>
+      registry.register(
+        { ...delivery, path: "/api/human", access: AccessPolicy.Human },
+        unused,
+      ),
+    /The exact-byte adapter requires the delivery policy/,
+  );
+  registry.register(delivery, unused);
+  assert.deepEqual(
+    registry.all().map(({ operation }) => operation.path),
+    [delivery.path],
+  );
+});

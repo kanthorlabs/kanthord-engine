@@ -53,6 +53,7 @@ test("action operands come from the admitted assessment and pinned action", () =
     baseBranch: "main",
     commit: COMMIT,
     reusedAddress: null,
+    reusedEvidenceId: null,
   });
   assert.equal(operands.commit, snapshot.commit);
 });

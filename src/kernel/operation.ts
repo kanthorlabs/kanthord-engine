@@ -10,6 +10,7 @@ export const AccessPolicy = {
   Client: "client",
   Public: "public",
   Delivery: "delivery",
+  Service: "service",
 } as const;
 export type AccessPolicy = (typeof AccessPolicy)[keyof typeof AccessPolicy];
 
@@ -25,6 +26,8 @@ export const StoreName = { Operational: "operational" } as const;
 export type StoreName = (typeof StoreName)[keyof typeof StoreName];
 
 const NO_TIMEOUT_MS = 0;
+const API_PATH_PREFIX = "/api/";
+const DELIVERY_PATH_PREFIX = "/hooks/";
 const EMPTY_REGISTRY_SIZE = 0;
 export const emptyInput = z.strictObject({
   params: z.strictObject({}),
@@ -57,9 +60,14 @@ export interface Operation<
   replayGuard?: (recorded: unknown, identity: CallerIdentity) => boolean;
   lifetime: OperationLifetime;
   delivery?: true;
+  direct?: true;
   contentType?: string;
   errors?: readonly number[];
   description: string;
+}
+
+export function hasHttpRoute(operation: Operation): boolean {
+  return operation.access !== AccessPolicy.Service && operation.direct !== true;
 }
 
 export interface ExecutionClaim {
@@ -118,6 +126,16 @@ export class OperationRegistry {
     if (!Object.values(AccessPolicy).includes(operation.access))
       throw new Error("Every route must declare an access policy.");
     if (
+      operation.access === AccessPolicy.Service &&
+      (operation.requiresExecution !== undefined ||
+        operation.requiresRegistration !== undefined ||
+        operation.delivery !== undefined ||
+        operation.secret !== undefined)
+    )
+      throw new Error(
+        "A service operation declares no execution, registration, delivery or secret.",
+      );
+    if (
       operation.requiresExecution &&
       (operation.access !== AccessPolicy.Client ||
         operation.requiresRegistration === false)
@@ -125,10 +143,19 @@ export class OperationRegistry {
       throw new Error(
         "An execution proof requires client access and a live registration.",
       );
+    if (
+      operation.direct &&
+      operation.access !== AccessPolicy.Human &&
+      operation.access !== AccessPolicy.Client
+    )
+      throw new Error("Only a human or client operation is direct.");
     if (!Object.values(OperationLifetime).includes(operation.lifetime))
       throw new Error("Every route must declare a valid lifetime.");
-    if (
-      !operation.path.startsWith("/api/") ||
+    if (operation.access === AccessPolicy.Delivery) {
+      if (!operation.path.startsWith(DELIVERY_PATH_PREFIX))
+        throw new Error("A delivery route requires the /hooks prefix.");
+    } else if (
+      !operation.path.startsWith(API_PATH_PREFIX) ||
       /^\/api\/v\d+(\/|$)/.test(operation.path)
     )
       throw new Error("Routes require the unversioned /api prefix.");
@@ -137,13 +164,10 @@ export class OperationRegistry {
       operation.timeoutMs <= NO_TIMEOUT_MS
     )
       throw new Error("Every route requires a positive timeout.");
-    if (
-      operation.delivery &&
-      (operation.access !== AccessPolicy.Delivery || operation.mutation)
-    )
-      throw new Error(
-        "Delivery verification and deduplication belong to the Scheduler Service.",
-      );
+    if (operation.delivery && operation.access !== AccessPolicy.Delivery)
+      throw new Error("The exact-byte adapter requires the delivery policy.");
+    if (operation.delivery && operation.mutation)
+      throw new Error("A delivery operation is no mutation.");
     if (operation.access === AccessPolicy.Delivery && !operation.delivery)
       throw new Error("A delivery requires the exact-byte adapter.");
     if (operation.mutation && operation.access === AccessPolicy.Public)

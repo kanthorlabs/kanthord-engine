@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { RepositoryComponent } from "../../repository/index.ts";
-import type { RepositoryTransport } from "../../worker/index.ts";
 import {
   REPOSITORY_ADDRESS,
   GATED_ADDRESS,
@@ -20,12 +18,13 @@ import {
 import { generateMachineToken } from "./cli-support.ts";
 import {
   gatewayFixture,
-  objectSink,
   FAKE_SSH_IDENTITY,
-  sinkStorage,
-  scriptedCheck,
-  scriptedActions,
+  fakeGitHub,
+  fakeS3,
   inProcessWorker,
+  bareRepository,
+  mappedTransport,
+  remoteHead,
 } from "./test-support.ts";
 import {
   fauxAssistantMessage,
@@ -68,6 +67,7 @@ const REPORT = "A and C are complete.";
 const REQUIREMENT = "gated.pull_request";
 const UNRESOLVED = "unresolved";
 const EXPECTED_END = "expected-end";
+const LANDED_COMMIT = "c".repeat(40);
 const TOOL_RESULT = "toolResult";
 const UPLOAD = "evidence-upload";
 const DEFAULTS = {
@@ -108,22 +108,14 @@ async function waitForNode(cli: CLI, nodeId: string, state: string) {
 }
 
 async function setupInternal(t: TestContext) {
-  const sink = await objectSink(t);
-  const actions = scriptedActions();
-  const check = scriptedCheck({
-    end_state: "expected",
-    landed_commits: ["c".repeat(40)],
-  });
+  const s3 = await fakeS3(t);
+  const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
-    standIns: {
-      intakeStorage: sinkStorage(sink),
-      intakeCheck: check,
-      intakeActions: actions.seam,
-    },
+    github: { baseUrl: gitHub.endpoint },
   });
   const cli = journeyClient(t, fixture.endpoint, fixture.token);
   for (const [group, name, platform, key] of [
@@ -148,8 +140,8 @@ async function setupInternal(t: TestContext) {
     secret: {},
   });
   const storage = {
-    endpoint: "https://s3.example.com",
-    bucket: "evidence",
+    endpoint: s3.endpoint,
+    bucket: s3.bucket,
     region: "eu-central-1",
   };
   await cli.write(["storage", "credential", "create"], {
@@ -291,9 +283,8 @@ async function setupInternal(t: TestContext) {
     initiative,
     generalAuth,
     reviewAuth,
-    sink,
-    actions,
-    check,
+    s3,
+    gitHub,
   };
 }
 
@@ -332,12 +323,11 @@ test(
       [REPOSITORY_ADDRESS]: repo.bare,
       [GATED_ADDRESS]: gatedRepo.bare,
     });
-    const pr42 = {
-      kind: "pull_request" as const,
-      resource_identity: f.bindings.gated!.resource_identity,
-      number: 42,
+    let pr!: {
+      kind: "pull_request";
+      resource_identity: string;
+      number: number;
     };
-    f.actions.performAnswers.push(pr42);
     const generalProvider = scriptedProvider([
       tool("bash", { command: "printf hello > hello.txt" }),
       tool(UPLOAD, { path: FILE_NAME }),
@@ -397,6 +387,7 @@ test(
     let outcomeA!: string;
     await t.test(
       "EI10.2 objective publishes object and checkpoint, reviewer verifies",
+      { timeout: JOURNEY_TIMEOUT_MS },
       async () => {
         await waitForNode(f.cli, f.objective, NodeState.Completed);
         await finishedExecutions(f.cli, f.project_id, f.objective, runtimes);
@@ -510,9 +501,15 @@ test(
         const request = evidence.items.find(
           (item) => item.requirement_key === REQUIREMENT,
         )!;
+        assert.equal(f.gitHub.pulls.length, SINGLE_ITEM);
+        pr = {
+          kind: "pull_request",
+          resource_identity: f.bindings.gated!.resource_identity,
+          number: f.gitHub.pulls[0]!.number,
+        };
         const asset = request.assets[0]!;
         assert.ok(asset.kind === AssetKind.Platform);
-        assert.deepEqual(asset.address, pr42);
+        assert.deepEqual(asset.address, pr);
         const actions = await f.cli.read<Page<{ resolution: string }>>([
           "mission",
           "external-action",
@@ -522,19 +519,27 @@ test(
           "1",
         ]);
         assert.equal(actions.items[0]!.resolution, UNRESOLVED);
-        assert.equal(f.actions.performCalls.length, SINGLE_ITEM);
-        assert.deepEqual(f.actions.performCalls[0]!.operands, {
-          nodeBranch: `kanthord/${f.gated}`,
-          baseBranch: "main",
-          commit: head,
-          reusedAddress: null,
-        });
+        assert.deepEqual(f.gitHub.calls, [
+          {
+            method: "POST",
+            path: "/repos/owner/gated/pulls",
+            body: {
+              head: `kanthord/${f.gated}`,
+              base: "main",
+              title: `kanthord ${f.gated}`,
+            },
+            token: GITHUB_KEY,
+            if_none_match: null,
+            status: 201,
+          },
+        ]);
       },
     );
     let outcomeC!: string;
     await t.test(
       "EI10.4 on-demand Intake check closes the external request",
       async () => {
+        f.gitHub.merge(pr.number, LANDED_COMMIT);
         const mission = await f.cli.read<{ version: number }>([
           "mission",
           "get",
@@ -557,11 +562,25 @@ test(
           ClosingEvent.ExternalSuccess,
         );
         outcomeC = outcomes.items[0]!.id;
-        assert.equal(f.check.calls.length, SINGLE_ITEM);
+        assert.deepEqual(
+          f.gitHub.calls.slice(SINGLE_ITEM).map(({ method, path, token }) => ({
+            method,
+            path,
+            token,
+          })),
+          [
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}`,
+              token: GITHUB_KEY,
+            },
+          ],
+        );
       },
     );
     await t.test(
       "EI10.5 initiative report and assessment reference both current outcomes",
+      { timeout: JOURNEY_TIMEOUT_MS },
       async () => {
         await waitForNode(f.cli, f.initiative, NodeState.Completed);
         await finishedExecutions(f.cli, f.project_id, f.initiative, runtimes);
@@ -654,7 +673,7 @@ test(
         const text = JSON.stringify(messages);
         for (const privateValue of [
           "put_url",
-          f.sink.endpoint,
+          f.s3.endpoint,
           "X-Amz",
           ...f.cli.secrets,
         ])
@@ -700,56 +719,6 @@ test(
     );
   },
 );
-
-async function bareRepository(t: TestContext, name: string) {
-  const root = temporary(t);
-  const bare = join(root, `${name}.git`);
-  const seed = join(root, "seed");
-  mkdirSync(bare);
-  await simpleGit(bare).init(true, ["--initial-branch=main"]);
-  await simpleGit().clone(bare, seed);
-  const git = simpleGit(seed);
-  await git.addConfig("user.name", "Test Journey");
-  await git.addConfig("user.email", "test_journey@example.invalid");
-  writeFileSync(join(seed, "README.md"), "test_journey repository\n");
-  await git.add("README.md");
-  await git.commit("initial");
-  await git.push("origin", "main");
-  const head = (await git.revparse(["HEAD"])).trim();
-  assert.match(head, /^[a-f0-9]{40}$/);
-  assert.equal(await remoteHead(bare, MAIN_REF), head);
-  return { bare, head };
-}
-
-function mappedTransport(
-  addresses: Record<string, string>,
-): RepositoryTransport {
-  const connector = new RepositoryComponent();
-  function mapped(address: string) {
-    assert.ok(Object.hasOwn(addresses, address), "Unmapped repository address");
-    assert.ok(addresses[address]);
-    return addresses[address]!;
-  }
-  return {
-    proveSshIdentity: async () => {},
-    clone: (address, ...args) => connector.clone(mapped(address), ...args),
-    cloneSnapshot: (address, ...args) =>
-      connector.cloneSnapshot(mapped(address), ...args),
-    fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
-    pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
-  };
-}
-
-async function remoteHead(bare: string, ref: string): Promise<string | null> {
-  assert.ok(bare.startsWith("/"));
-  assert.ok(ref.startsWith("refs/heads/"));
-  const output = (await simpleGit().raw(["ls-remote", bare, ref])).trim();
-  if (!output) return null;
-  const [head, found] = output.split(/\s+/);
-  assert.equal(found, ref);
-  assert.match(head!, /^[a-f0-9]{40}$/);
-  return head!;
-}
 
 test("local mapped repository clones main and publishes only the node branch", async (t) => {
   const repo = await bareRepository(t, "test_repo");

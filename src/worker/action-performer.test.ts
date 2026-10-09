@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
-import { CodedError, OperationError } from "../kernel/errors.ts";
+import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationResultType } from "../kernel/operation.ts";
@@ -32,6 +32,7 @@ const COMMIT = "b".repeat(40);
 const NOT_RUNNING = "scheduler.execution.not_running";
 const SECOND_ATTEMPT = 2;
 const DUAL_CALL_COUNT = 2;
+const UNPROCESSABLE_STATUS = 422;
 const RESOURCE = "repository:github:owner/repo";
 const PR = {
   kind: PlatformAddressKind.PullRequest,
@@ -239,13 +240,7 @@ test("dispatch forwards identity, derived operands and the returned address to M
   ]);
   assert.deepEqual(perform.mock.calls[0]!.arguments, [
     { ...h.caller, executionId: h.claim.executionId },
-    h.entry.action,
-    {
-      nodeBranch: "kanthord/" + h.claim.nodeId,
-      baseBranch: "main",
-      commit: COMMIT,
-      reusedAddress: null,
-    },
+    { key: h.entry.action.key, commit: COMMIT, reusedEvidenceId: null },
     `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}`,
   ]);
   const [input, options] = request.mock.calls[0]!.arguments;
@@ -271,17 +266,16 @@ test("merge push records the address and commit returned by Intake", async (t) =
     branch: "main",
     commit: "d".repeat(40),
   };
-  h.dependencies.intakeActions.perform = async (
-    _call,
-    _action,
-    operands,
-    requestKey,
-  ) => {
+  h.dependencies.intakeActions.perform = async (_call, action, requestKey) => {
     assert.equal(
       requestKey,
       `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}/${COMMIT}`,
     );
-    assert.equal(operands.commit, COMMIT);
+    assert.deepEqual(action, {
+      key: h.entry.action.key,
+      commit: COMMIT,
+      reusedEvidenceId: null,
+    });
     return pushed;
   };
   const request = t.mock.method(h.dependencies.evidenceRequests, "request");
@@ -314,8 +308,8 @@ test("no-effect refusal releases the reservation for a later invocation", async 
   await h.perform();
   assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
   assert.equal(
-    perform.mock.calls[0]!.arguments[3],
-    perform.mock.calls[1]!.arguments[3],
+    perform.mock.calls[0]!.arguments[2],
+    perform.mock.calls[1]!.arguments[2],
   );
 });
 
@@ -384,17 +378,21 @@ test("reuse forwards the matching earlier pull request through Intake perform", 
   const read = t.mock.method(
     h.dependencies.intakeActions,
     "read",
-    async () => ({ body: h.body }),
+    async () => ({ body: h.body, next_cursor: null }),
   );
   assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
   assert.deepEqual(read.mock.calls[0]?.arguments, [
     { ...h.caller, executionId: h.claim.executionId },
     ActionReadMethod.PullRequestGet,
-    PR,
+    h.entry.reuse_candidates[0]!.evidence_id,
+    {},
   ]);
-  assert.deepEqual(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, PR);
   assert.equal(
-    h.performSpy.mock.calls[0]?.arguments[3],
+    h.performSpy.mock.calls[0]?.arguments[1]?.reusedEvidenceId,
+    h.entry.reuse_candidates[0]!.evidence_id,
+  );
+  assert.equal(
+    h.performSpy.mock.calls[0]?.arguments[2],
     `${h.claim.nodeId}/${SECOND_ATTEMPT}/${h.entry.action.key}/${PR.number}/${COMMIT}`,
   );
 });
@@ -403,22 +401,54 @@ test("closed pull request dispatches fresh and a later matching candidate is sel
   const h = reusable(t);
   h.dependencies.intakeActions.read = async () => ({
     body: { ...h.body, state: "closed" },
+    next_cursor: null,
   });
   await h.perform();
-  assert.equal(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, null);
-  const second = { ...PR, number: 43 };
+  assert.equal(
+    h.performSpy.mock.calls[0]?.arguments[1]?.reusedEvidenceId,
+    null,
+  );
+  const second = createIdentity("evidence");
   h.entry.reuse_candidates.push({
-    evidence_id: createIdentity("evidence"),
+    evidence_id: second,
+    attempt: FIRST_ATTEMPT,
+    address: { ...PR, number: 43 },
+  });
+  h.dependencies.intakeActions.read = async (_call, _method, evidenceId) => ({
+    body: evidenceId === second ? h.body : { ...h.body, state: "closed" },
+    next_cursor: null,
+  });
+  await h.perform();
+  assert.equal(
+    h.performSpy.mock.calls[1]?.arguments[1]?.reusedEvidenceId,
+    second,
+  );
+});
+
+test("a candidate change from 42 to 43 with one snapshot gives two request keys", async (t) => {
+  const h = reusable(t);
+  h.dependencies.intakeActions.read = async () => ({
+    body: h.body,
+    next_cursor: null,
+  });
+  await h.perform();
+  const second = { ...PR, number: 43 };
+  const secondEvidenceId = createIdentity("evidence");
+  h.entry.reuse_candidates.push({
+    evidence_id: secondEvidenceId,
     attempt: FIRST_ATTEMPT,
     address: second,
   });
-  h.dependencies.intakeActions.read = async (_call, _method, address) => ({
-    body: address === second ? h.body : { ...h.body, state: "closed" },
+  h.dependencies.intakeActions.read = async (_call, _method, evidenceId) => ({
+    body:
+      evidenceId === secondEvidenceId ? h.body : { ...h.body, state: "closed" },
+    next_cursor: null,
   });
   await h.perform();
+  const base = `${h.claim.nodeId}/${SECOND_ATTEMPT}/${h.entry.action.key}`;
   assert.deepEqual(
-    h.performSpy.mock.calls[1]?.arguments[2]?.reusedAddress,
-    second,
+    h.performSpy.mock.calls.map((call) => call.arguments[2]),
+    [`${base}/${PR.number}/${COMMIT}`, `${base}/${second.number}/${COMMIT}`],
   );
 });
 
@@ -447,14 +477,20 @@ test("merge push and foreign repository candidates never call read", async (t) =
   const h = reusable(t);
   h.entry.action.action = RepositoryAction.MergePush;
   await h.perform();
-  assert.equal(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, null);
+  assert.equal(
+    h.performSpy.mock.calls[0]?.arguments[1]?.reusedEvidenceId,
+    null,
+  );
   h.entry.action.action = RepositoryAction.PullRequest;
   h.entry.reuse_candidates[0]!.address = {
     ...PR,
     resource_identity: "repository:github:other/repo",
   };
   await h.perform();
-  assert.equal(h.performSpy.mock.calls[1]?.arguments[2]?.reusedAddress, null);
+  assert.equal(
+    h.performSpy.mock.calls[1]?.arguments[1]?.reusedEvidenceId,
+    null,
+  );
 });
 
 test("concurrent calls of one execution take a new snapshot after submission", async (t) => {
@@ -534,7 +570,7 @@ test("another execution cannot steal an in-flight reservation or invalidate its 
   assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
 });
 
-test("unclassified perform error persists but unwired proves no effect", async (t) => {
+test("unclassified perform error persists", async (t) => {
   const h = actionable(t);
   const perform = t.mock.method(
     h.dependencies.intakeActions,
@@ -546,18 +582,45 @@ test("unclassified perform error persists but unwired proves no effect", async (
   await assert.rejects(h.perform(), /socket/);
   assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Uncertain);
   assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
-  const other = actionable(t);
-  const unwired = t.mock.method(
-    other.dependencies.intakeActions,
-    "perform",
-    async () => {
-      throw new CodedError("system.composition.unwired", "unwired");
-    },
-  );
-  await assert.rejects(other.perform(), { code: "system.composition.unwired" });
-  await assert.rejects(other.perform(), { code: "system.composition.unwired" });
-  assert.equal(unwired.mock.callCount(), DUAL_CALL_COUNT);
 });
+
+for (const [status, code] of [
+  [HttpStatus.Forbidden, "mission.authorization.refused"],
+  [UNPROCESSABLE_STATUS, "intake.outbound.request.action_unmapped"],
+] as const)
+  test(`a ${status} perform refusal removes the reservation`, async (t) => {
+    const h = actionable(t);
+    const perform = t.mock.method(
+      h.dependencies.intakeActions,
+      "perform",
+      async () => {
+        throw new OperationError(status, code, "refused");
+      },
+    );
+    await assert.rejects(h.perform(), { code });
+    await assert.rejects(h.perform(), { code });
+    assert.equal(perform.mock.callCount(), DUAL_CALL_COUNT);
+  });
+
+for (const [status, code] of [
+  [HttpStatus.Conflict, "intake.outbound.request.in_flight"],
+  [HttpStatus.InternalServerError, "gateway.invocation.unknown"],
+] as const)
+  test(`a ${code} perform failure keeps the reservation uncertain`, async (t) => {
+    const h = actionable(t);
+    const perform = t.mock.method(
+      h.dependencies.intakeActions,
+      "perform",
+      async () => {
+        throw new OperationError(status, code, "failed");
+      },
+    );
+    await assert.rejects(h.perform(), { code });
+    const item = (await h.perform()).items[0];
+    assert.ok(item?.kind === ActionResultKind.Uncertain);
+    assert.equal(item.uncertainty, Uncertainty.Effect);
+    assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+  });
 
 test("same-attempt request evidence prunes uncertainty without dispatch", async (t) => {
   const h = actionable(t);
@@ -589,7 +652,10 @@ test("read exception clears its reservation and every undispatched owned action"
   };
   await assert.rejects(h.perform(), /read failed/);
   assert.equal(h.performSpy.mock.callCount(), NO_CALLS);
-  h.dependencies.intakeActions.read = async () => ({ body: h.body });
+  h.dependencies.intakeActions.read = async () => ({
+    body: h.body,
+    next_cursor: null,
+  });
   const answer = await h.perform();
   assert.deepEqual(
     answer.items.map((item) => item.kind),
@@ -628,10 +694,14 @@ test("mixed GitHub display capitalization reuses the earlier request without cha
       head: { ...h.body.head, repo: { full_name: "Owner/Repo" } },
       base: { ...h.body.base, repo: { full_name: "OWNER/REPO" } },
     },
+    next_cursor: null,
   });
   const request = t.mock.method(h.dependencies.evidenceRequests, "request");
   assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
-  assert.deepEqual(h.performSpy.mock.calls[0]?.arguments[2]?.reusedAddress, PR);
+  assert.equal(
+    h.performSpy.mock.calls[0]?.arguments[1]?.reusedEvidenceId,
+    h.entry.reuse_candidates[0]!.evidence_id,
+  );
   assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, PR);
   assert.equal(h.performSpy.mock.callCount(), SINGLE_CALL_COUNT);
 });

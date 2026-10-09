@@ -10,11 +10,14 @@ import {
   MissionErrorCode,
   type ExecutionContext,
 } from "./contract.ts";
-import { admitExecution, executionMismatch } from "./execution.ts";
-import { keyOfLocation } from "./evidence-content.ts";
+import { admitExecution } from "./execution.ts";
 import { readEvidence, type AssetRow } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
-import { authorizeClaim, authorizeStorage } from "./authorization.ts";
+import {
+  authorizeClaim,
+  authorizeStorage,
+  pendingObjectAdmitted,
+} from "./authorization.ts";
 
 const objectContentSchema = z.strictObject({
   location: z.string(),
@@ -48,35 +51,16 @@ export function prepareComplete(
   assert.ok(evidence);
   authorizeClaim(tx, dependencies, claim, evidence.node_id);
   admitExecution(tx, dependencies, claim, evidence.node_id, context, now);
-  if (evidence.attempt !== claim.attempt) executionMismatch("attempt");
+  const pending = pendingObjectAdmitted(evidence, asset, claim, now);
   const content = objectContentSchema.parse(JSON.parse(asset.content));
   const result = {
     asset_id: asset.id,
     evidence_id: evidence.id,
     uri: content.location,
   };
-  if (asset.published_at !== null) return { result, pending: null };
-  assert.notEqual(asset.expired_at, null);
-  if (asset.expired_at! <= now)
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.EvidenceUploadExpired,
-      "Evidence upload has expired.",
-    );
-  const binding = authorizeStorage(
-    tx,
-    dependencies.bindings,
-    content.storage_binding_id,
-  );
-  assert.ok(binding);
-  return {
-    result,
-    pending: {
-      binding,
-      content,
-      key: keyOfLocation(binding, content.location),
-    },
-  };
+  if (!pending) return { result, pending: null };
+  authorizeStorage(tx, dependencies.bindings, content.storage_binding_id);
+  return { result, pending: { content } };
 }
 
 export async function completeEvidence(
@@ -97,13 +81,14 @@ export async function completeEvidence(
         prepareComplete(tx, dependencies, claim, assetId, context, Date.now())
           .result,
     );
-  const { binding, key, content } = prepared.pending;
+  const { content } = prepared.pending;
   const checked = await dependencies.intakeStorage.check(
-    { context: caller.context, identity: caller.identity },
-    binding,
-    key,
-    content.size,
-    content.sha256 ?? null,
+    {
+      context: caller.context,
+      identity: caller.identity,
+      executionId: claim.executionId,
+    },
+    assetId,
   );
   assert.equal(checked.location, content.location);
   return caller.commit((tx) => {

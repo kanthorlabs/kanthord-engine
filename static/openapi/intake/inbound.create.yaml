@@ -1,0 +1,343 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: intake.inbound.create
+    tags:
+      - intake
+    description: Create an inbound of a project; a poll inbound performs one
+      platform request before the insert, and a webhook inbound calls no
+      platform.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/intake.inbound.create.Input/properties/body"
+    responses:
+      "201":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/intake.inbound.create.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+  get:
+    operationId: intake.inbound.list
+    tags:
+      - intake
+    description: List inbounds, newest first.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/intake.inbound.list.Input/properties/query/properti\
+            es/project_id"
+      - name: kind
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/intake.inbound.list.Input/properties/query/properti\
+            es/kind"
+      - name: platform
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/intake.inbound.list.Input/properties/query/properti\
+            es/platform"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/intake.inbound.list.Input/properties/query/properti\
+            es/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/intake.inbound.list.Input/properties/query/properti\
+            es/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/intake.inbound.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    intake.inbound.create.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            kind:
+              type: string
+              enum:
+                - webhook
+                - poll
+            platform:
+              type: string
+              enum:
+                - github
+            consumer:
+              type: string
+              enum:
+                - mission.delivery.admit
+            credential:
+              type: string
+              minLength: 1
+            configuration:
+              type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+          required:
+            - project_id
+            - kind
+            - platform
+            - consumer
+            - configuration
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    intake.inbound.create.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^inbound_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: inbound_ followed by a canonical 26-character uppercase ULID.
+        project_id:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: project_ followed by a canonical 26-character uppercase ULID.
+        kind:
+          type: string
+          enum:
+            - webhook
+            - poll
+        platform:
+          type: string
+          enum:
+            - github
+        consumer:
+          type: string
+          enum:
+            - mission.delivery.admit
+        credential:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
+        configuration:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        checkpoint:
+          anyOf:
+            - {}
+            - type: "null"
+        created_at:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+      required:
+        - id
+        - project_id
+        - kind
+        - platform
+        - consumer
+        - credential
+        - configuration
+        - checkpoint
+        - created_at
+      additionalProperties: false
+    intake.inbound.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            kind:
+              type: string
+              enum:
+                - webhook
+                - poll
+            platform:
+              type: string
+              enum:
+                - github
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    intake.inbound.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^inbound_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: inbound_ followed by a canonical 26-character uppercase ULID.
+              project_id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: project_ followed by a canonical 26-character uppercase ULID.
+              kind:
+                type: string
+                enum:
+                  - webhook
+                  - poll
+              platform:
+                type: string
+                enum:
+                  - github
+              consumer:
+                type: string
+                enum:
+                  - mission.delivery.admit
+              credential:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              configuration:
+                type: object
+                propertyNames:
+                  type: string
+                additionalProperties: {}
+              checkpoint:
+                anyOf:
+                  - {}
+                  - type: "null"
+              created_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            required:
+              - id
+              - project_id
+              - kind
+              - platform
+              - consumer
+              - credential
+              - configuration
+              - checkpoint
+              - created_at
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - next_cursor
+      additionalProperties: false

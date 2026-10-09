@@ -311,6 +311,7 @@ function makeService(
       delete: unexpectedCollaboration,
     },
     intakeCheck: { check: unexpectedCollaboration },
+    decoder: { decode: unexpectedCollaboration },
     config: {
       consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
       rework_limit: REWORK_LIMIT,

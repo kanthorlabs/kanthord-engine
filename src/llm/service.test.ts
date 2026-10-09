@@ -57,6 +57,7 @@ import {
 import { ANTHROPIC_MODELS_URL, GITHUB_COPILOT_TOKEN_URL } from "./probes.ts";
 import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
 import { LlmComponent } from "./service.ts";
+import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const FIRST_REVISION = 1;
 const HUMAN_ACCOUNT_ID = "alice";
@@ -124,6 +125,12 @@ function fixture(
       liveExecutionsPinning: () => [],
     },
     authorization: { authorizeModelInference: unexpectedCollaboration },
+    missionAuthorization: {
+      frozenAction: unexpectedCollaboration,
+      requestEvidence: unexpectedCollaboration,
+      evidenceAsset: unexpectedCollaboration,
+      objectPut: unexpectedCollaboration,
+    },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
     platforms: {
@@ -136,6 +143,7 @@ function fixture(
     agentProvidersDependentOn,
     bindingsNaming: () => [],
     inboundsNaming: () => [],
+    intakeServiceName: INTAKE_SERVICE_NAME,
   });
   const component = new LlmComponent({
     records: custody,

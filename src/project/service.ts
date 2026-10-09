@@ -160,6 +160,7 @@ const PAGE_EXTRA = 1;
 const FIRST_INDEX = 0;
 const LAST_INDEX = 1;
 const MINIMUM_LIMIT = 1;
+const EMPTY_IDENTITY_LENGTH = 0;
 type InstructionFilesAnswer = {
   commit: string;
   read_at: number;
@@ -1125,6 +1126,16 @@ export class ProjectService implements Service, ProjectBindings {
       project_prompt: config.project_prompt ?? null,
       working_layer: config.working_layer,
     };
+  }
+  projectNameOf(tx: Transaction, projectId: string): string {
+    assert.ok(tx.database.isTransaction);
+    assert.ok(
+      projectId.length > EMPTY_IDENTITY_LENGTH,
+      "A project identity is required.",
+    );
+    const project = requireProject(tx, projectId);
+    assert.equal(project.id, projectId);
+    return project.name;
   }
   workerBindingOf(
     tx: Transaction,

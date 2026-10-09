@@ -468,10 +468,10 @@ test(
         ErrorCode.Execution,
       ),
     );
+    const second = await setup(t);
     await t.test(
       "E02.22 resume running execution on a second fixture",
-      async (step) => {
-        const second = await setup(step);
+      async () => {
         const { runtime_identity: runtimeIdentity } = success<Registration>(
           await kanthord(["worker", "register"], second.A),
         );

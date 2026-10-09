@@ -24,6 +24,10 @@ import {
   assetSubmitSchema,
   mediaTypeSchema,
   OBJECT_SIZE_MAX,
+  AdmissionRefusal,
+  Disposition,
+  admissionAnswerSchema,
+  deliveryAdmitSchema,
 } from "./contract.ts";
 
 const ZERO_ATTEMPT = 0;
@@ -269,6 +273,62 @@ test("service actors admit Mission and Scheduler only", () => {
   assert.equal(
     actorSchema.safeParse({ kind: ActorKind.Service, service: UNKNOWN_KEY })
       .success,
+    false,
+  );
+});
+
+test("the delivery admission input holds canonical base64 event bytes", () => {
+  const body = {
+    inbound_event_id: createIdentity("inbound_event"),
+    project_id: createIdentity("project"),
+    platform: "github",
+    resource: "owner/gated",
+    event: Buffer.from('{"number":1}').toString("base64"),
+    metadata: { event: "pull_request" },
+  };
+  assert.deepEqual(deliveryAdmitSchema.parse(body), body);
+  for (const event of ["QR==", "QQ", "not base64!"])
+    assert.equal(
+      deliveryAdmitSchema.safeParse({ ...body, event }).success,
+      false,
+    );
+  assert.equal(
+    deliveryAdmitSchema.safeParse({
+      ...body,
+      inboundEventId: body.inbound_event_id,
+    }).success,
+    false,
+  );
+});
+
+test("the delivery admission answer carries a reason only for a refusal", () => {
+  for (const reason of Object.values(AdmissionRefusal))
+    assert.ok(
+      admissionAnswerSchema.safeParse({
+        disposition: Disposition.Refused,
+        reason,
+      }).success,
+    );
+  for (const disposition of [
+    Disposition.AcceptedObservation,
+    Disposition.Duplicate,
+  ]) {
+    assert.ok(
+      admissionAnswerSchema.safeParse({ disposition, reason: null }).success,
+    );
+    assert.equal(
+      admissionAnswerSchema.safeParse({
+        disposition,
+        reason: AdmissionRefusal.Unmatched,
+      }).success,
+      false,
+    );
+  }
+  assert.equal(
+    admissionAnswerSchema.safeParse({
+      disposition: Disposition.Refused,
+      reason: null,
+    }).success,
     false,
   );
 });

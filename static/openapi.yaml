@@ -36,6 +36,30 @@ paths:
     $ref: ./openapi/gateway/openapiFile.yaml#/pathItem
   /api/auth/verify:
     $ref: ./openapi/gateway/verify.yaml#/pathItem
+  /api/intake/inbound:
+    $ref: ./openapi/intake/inbound.create.yaml#/pathItem
+  /api/intake/inbound/{inbound_id}:
+    $ref: ./openapi/intake/inbound.delete.yaml#/pathItem
+  /api/intake/event/delete:
+    $ref: ./openapi/intake/inbound.event.delete.yaml#/pathItem
+  /api/intake/event/{inbound_event_id}/discard:
+    $ref: ./openapi/intake/inbound.event.discard.yaml#/pathItem
+  /api/intake/event/{inbound_event_id}:
+    $ref: ./openapi/intake/inbound.event.get.yaml#/pathItem
+  /api/intake/event:
+    $ref: ./openapi/intake/inbound.event.list.yaml#/pathItem
+  /hooks/{inbound_id}:
+    $ref: ./openapi/intake/inbound.event.receive.yaml#/pathItem
+  /api/intake/event/{inbound_event_id}/retry:
+    $ref: ./openapi/intake/inbound.event.retry.yaml#/pathItem
+  /api/intake/outbound/delete:
+    $ref: ./openapi/intake/outbound.request.delete.yaml#/pathItem
+  /api/intake/outbound/{outbound_request_id}/discard:
+    $ref: ./openapi/intake/outbound.request.discard.yaml#/pathItem
+  /api/intake/outbound/{outbound_request_id}:
+    $ref: ./openapi/intake/outbound.request.get.yaml#/pathItem
+  /api/intake/outbound:
+    $ref: ./openapi/intake/outbound.request.list.yaml#/pathItem
   /api/llm/credential/{credential_name}/archive:
     $ref: ./openapi/llm/credential.archive.yaml#/pathItem
   /api/llm/credential/check:

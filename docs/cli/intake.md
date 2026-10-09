@@ -36,7 +36,6 @@ supply no implicit defaults. The dated source snapshot above is the only
 implemented claim.
 
 [intake-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service
-[intake-bounds]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery
 
 ## Command table
 
@@ -47,21 +46,21 @@ authenticated human holds the same server-owner authority over every inbound;
 the Intake Service adds no project-membership or role model. A machine token
 authorizes no Intake command.
 
-| Command after `kanthord intake`          | Operation                         | Proposed HTTP route                                    | Access  | Output and effects                                                                                       |
-| ---------------------------------------- | --------------------------------- | ------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------- |
-| `inbound create`                         | `intake.inbound.create`           | `POST /api/intake/inbound`                             | `human` | Mutation; validates at the platform, then inserts one inbound.                                           |
-| `inbound list`                           | `intake.inbound.list`             | `GET /api/intake/inbound`                              | `human` | Bounded page, optionally filtered by project, kind and platform.                                         |
-| `inbound get <inbound-id>`               | `intake.inbound.get`              | `GET /api/intake/inbound/:inboundId`                   | `human` | One inbound; for a webhook, its address and its secret, whose display is **[blocked][intake-contract]**. |
-| `inbound delete <inbound-id>`            | `intake.inbound.delete`           | `DELETE /api/intake/inbound/:inboundId`                | `human` | Mutation; deletes the inbound and its events, and calls no platform.                                     |
-| `event list`                             | `intake.inbound.event.list`       | `GET /api/intake/event`                                | `human` | Bounded page, optionally filtered by inbound and state.                                                  |
-| `event get <inbound-event-id>`           | `intake.inbound.event.get`        | `GET /api/intake/event/:inboundEventId`                | `human` | One event with its state and errors; content inclusion is **[blocked][intake-contract]**.                |
-| `event retry <inbound-event-id>`         | `intake.inbound.event.retry`      | `POST /api/intake/event/:inboundEventId/retry`         | `human` | Mutation; turns a failed event back to `pending`.                                                        |
-| `event discard <inbound-event-id>`       | `intake.inbound.event.discard`    | `POST /api/intake/event/:inboundEventId/discard`       | `human` | Mutation; turns a pending or a failed event to `discarded`.                                              |
-| `event delete`                           | `intake.inbound.event.delete`     | `POST /api/intake/event/delete`                        | `human` | Mutation; deletes the succeeded, failed and discarded events that a filter names.                        |
-| `outbound list`                          | `intake.outbound.request.list`    | `GET /api/intake/outbound`                             | `human` | Bounded page, optionally filtered by project, state and operation.                                       |
-| `outbound get <outbound-request-id>`     | `intake.outbound.request.get`     | `GET /api/intake/outbound/:outboundRequestId`          | `human` | One outbound request with its state, result and errors.                                                  |
-| `outbound discard <outbound-request-id>` | `intake.outbound.request.discard` | `POST /api/intake/outbound/:outboundRequestId/discard` | `human` | Mutation; turns a pending request with no running call to `discarded`.                                   |
-| `outbound delete`                        | `intake.outbound.request.delete`  | `POST /api/intake/outbound/delete`                     | `human` | Mutation with `--force`; deletes the succeeded, failed and discarded requests that a filter names.       |
+| Command after `kanthord intake`          | Operation                         | Proposed HTTP route                                      | Access  | Output and effects                                                                                       |
+| ---------------------------------------- | --------------------------------- | -------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `inbound create`                         | `intake.inbound.create`           | `POST /api/intake/inbound`                               | `human` | Mutation; validates at the platform, then inserts one inbound.                                           |
+| `inbound list`                           | `intake.inbound.list`             | `GET /api/intake/inbound`                                | `human` | Bounded page, optionally filtered by project, kind and platform.                                         |
+| `inbound get <inbound-id>`               | `intake.inbound.get`              | `GET /api/intake/inbound/:inbound_id`                    | `human` | One inbound; for a webhook, its address and its secret, whose display is **[blocked][intake-contract]**. |
+| `inbound delete <inbound-id>`            | `intake.inbound.delete`           | `DELETE /api/intake/inbound/:inbound_id`                 | `human` | Mutation; deletes the inbound and its events, and calls no platform.                                     |
+| `event list`                             | `intake.inbound.event.list`       | `GET /api/intake/event`                                  | `human` | Bounded page, optionally filtered by inbound and state.                                                  |
+| `event get <inbound-event-id>`           | `intake.inbound.event.get`        | `GET /api/intake/event/:inbound_event_id`                | `human` | One event with its state and errors; content inclusion is **[blocked][intake-contract]**.                |
+| `event retry <inbound-event-id>`         | `intake.inbound.event.retry`      | `POST /api/intake/event/:inbound_event_id/retry`         | `human` | Mutation; turns a failed event back to `pending`.                                                        |
+| `event discard <inbound-event-id>`       | `intake.inbound.event.discard`    | `POST /api/intake/event/:inbound_event_id/discard`       | `human` | Mutation; turns a pending or a failed event to `discarded`.                                              |
+| `event delete`                           | `intake.inbound.event.delete`     | `POST /api/intake/event/delete`                          | `human` | Mutation; deletes the succeeded, failed and discarded events that a filter names.                        |
+| `outbound list`                          | `intake.outbound.request.list`    | `GET /api/intake/outbound`                               | `human` | Bounded page, optionally filtered by project, state and operation.                                       |
+| `outbound get <outbound-request-id>`     | `intake.outbound.request.get`     | `GET /api/intake/outbound/:outbound_request_id`          | `human` | One outbound request with its state, result and errors.                                                  |
+| `outbound discard <outbound-request-id>` | `intake.outbound.request.discard` | `POST /api/intake/outbound/:outbound_request_id/discard` | `human` | Mutation; turns a pending request with no running call to `discarded`.                                   |
+| `outbound delete`                        | `intake.outbound.request.delete`  | `POST /api/intake/outbound/delete`                       | `human` | Mutation with `--force`; deletes the succeeded, failed and discarded requests that a filter names.       |
 
 Every command declares a `unary` lifetime: one request and one answer. The
 create, delete, retry, discard, event delete, outbound discard and outbound
@@ -146,21 +145,21 @@ is no `inbound update`, `inbound enable`, `inbound disable`, `poll now` or
 
 | Argument or flag                                           | Requiredness and type                                                                | Default                      | Validation and request mapping                                                                   |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| `<inbound-id>`                                             | Required inbound identity on get and delete.                                         | None                         | Map to `params.inboundId`. Prefix `inbound_`.                                                    |
-| `<inbound-event-id>`                                       | Required inbound event identity on get, retry and discard.                           | None                         | Map to `params.inboundEventId`. Prefix `inbound_event_`.                                         |
-| `--project <id>`                                           | Optional project identity on `inbound list`.                                         | Absent: no project filter    | Send `query.projectId`; Project owns the prefix declaration.                                     |
+| `<inbound-id>`                                             | Required inbound identity on get and delete.                                         | None                         | Map to `params.inbound_id`. Prefix `inbound_`.                                                   |
+| `<inbound-event-id>`                                       | Required inbound event identity on get, retry and discard.                           | None                         | Map to `params.inbound_event_id`. Prefix `inbound_event_`.                                       |
+| `--project <id>`                                           | Optional project identity on `inbound list`.                                         | Absent: no project filter    | Send `query.project_id`; Project owns the prefix declaration.                                    |
 | `--kind <kind>`                                            | Optional inbound kind on `inbound list`.                                             | Absent: all kinds            | Send `query.kind`; closed set `webhook`, `poll`.                                                 |
 | `--platform <platform>`                                    | Optional platform on `inbound list`.                                                 | Absent: all platforms        | Send `query.platform`; closed set of supported platforms, today `github`.                        |
-| `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inboundId`.                                                                          |
+| `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inbound_id`.                                                                         |
 | `--state <state>`                                          | Optional on `event list`; required with `--from` and `--to` on `event delete`.       | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.    |
 | `--from`, `--to`                                           | Required together with `--state` on `event delete`.                                  | None                         | Send `body.from` and `body.to`, an inclusive range of inbound event identities.                  |
-| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list. Its bound is **[blocked][intake-bounds]**.                     |
-| `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outboundRequestId`. Prefix `outbound_request_`.                                   |
-| `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.projectId`.                                                                          |
+| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                     |
+| `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outbound_request_id`. Prefix `outbound_request_`.                                 |
+| `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.project_id`.                                                                         |
 | `--state <state>` on `outbound list` and `outbound delete` | Optional on `outbound list`; required with `--from` and `--to` on `outbound delete`. | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.    |
 | `--operation <operation>`                                  | Optional on `outbound list`.                                                         | Absent: all operations       | Send `query.operation`; closed set `github.pull_request`, `git.merge_push`, `s3.delete_object`.  |
 | `--from`, `--to` on `outbound delete`                      | Required together with `--state`.                                                    | None                         | Send `body.from` and `body.to`, an inclusive range of outbound request identities.               |
-| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list. Its bound is **[blocked][intake-bounds]**.                     |
+| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                     |
 | `--force` on `outbound delete`                             | Required boolean switch.                                                             | `false`                      | Send `body.force`. Without it the server answers `400` `intake.outbound.request.force_required`. |
 
 Supplied list filters combine by AND. A filter grants no authority. An omitted
@@ -190,7 +189,7 @@ shared file rules apply. The schema is closed.
 
 | File field      | Requiredness and type                             | Default | Validation and meaning                                                                                                                                                              |
 | --------------- | ------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `projectId`     | Required project identity.                        | None    | Must name a project of the Project Service.                                                                                                                                         |
+| `project_id`    | Required project identity.                        | None    | Must name a project of the Project Service.                                                                                                                                         |
 | `kind`          | Required enum string.                             | None    | Closed set `webhook`, `poll`.                                                                                                                                                       |
 | `platform`      | Required enum string.                             | None    | Closed set of supported platforms, today `github`.                                                                                                                                  |
 | `consumer`      | Required enum string.                             | None    | Closed set of admission operations, today `mission.delivery.admit`.                                                                                                                 |
@@ -202,9 +201,9 @@ state, error or arbitrary consumer operation.
 
 ## Inbound commands
 
-The inbound read projection contains `id`, `projectId`, `kind`, `platform`,
+The inbound read projection contains `id`, `project_id`, `kind`, `platform`,
 `consumer`, `credential`, `configuration`, `checkpoint` and
-`createdAt`. It exposes no credential material.
+`created_at`. It exposes no credential material.
 
 ### `inbound create`
 
@@ -238,7 +237,7 @@ shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/
 
 ### `inbound get <inbound-id>`
 
-**Request and validation:** map the identity to `params.inboundId`; accept no
+**Request and validation:** map the identity to `params.inbound_id`; accept no
 query or body.
 
 **Effects and idempotency:** read one inbound projection. For a webhook it
@@ -251,7 +250,7 @@ redaction and cache contract of the secret remains **[blocked][intake-contract]*
 
 ### `inbound delete <inbound-id>`
 
-**Request and validation:** use `params.inboundId`, with no query or body.
+**Request and validation:** use `params.inbound_id`, with no query or body.
 
 **Effects and idempotency:** refuse while the inbound holds a pending event.
 Otherwise one transaction deletes the events of the inbound and the inbound.
@@ -264,8 +263,8 @@ pending event exists.
 
 ## Event commands
 
-The event read projection contains `id`, `inboundId`, `eventId`, `metadata`,
-`state`, `error` and `createdAt`. Content inclusion and its size and redaction
+The event read projection contains `id`, `inbound_id`, `event_id`, `metadata`,
+`state`, `error` and `created_at`. Content inclusion and its size and redaction
 remain **[blocked][intake-contract]**. No output contains a credential.
 Each item of `error` holds `{ code, message, created_at }`. `code` is the error
 code of a declared failure of the consumer, or `indeterminate` when the handoff
@@ -277,13 +276,13 @@ ends with no answer.
 and state filters and shared pagination.
 
 **Effects and idempotency:** return one bounded `{ items, next_cursor }` page.
-Read only. Read bounds remain **[blocked][intake-bounds]**.
+Read only. The `limit` accepts 1 to 1000 and defaults to 100.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
 
 ### `event get <inbound-event-id>`
 
-**Request and validation:** map the identity to `params.inboundEventId`. A
+**Request and validation:** map the identity to `params.inbound_event_id`. A
 platform event identity is not a substitute for that identity.
 
 **Effects and idempotency:** return one event projection. Read only.
@@ -319,8 +318,9 @@ with neither form, with both forms or with the state `pending` answers `400`
 
 **Effects and idempotency:** one transaction deletes the matching `succeeded`,
 `failed` and `discarded` events and answers `{ count }`. A list that names a
-pending event deletes nothing. The bound of rows per call remains
-**[blocked][intake-bounds]**.
+pending event deletes nothing. A range that matches more than 1000 events
+answers `400` `intake.inbound.event.filter_invalid` and deletes nothing; the
+caller narrows the range.
 
 **Statuses:** `200` with `{ count }`; `400`
 `intake.inbound.event.filter_invalid`; `409`
@@ -328,8 +328,8 @@ pending event deletes nothing. The bound of rows per call remains
 
 ## Outbound commands
 
-The outbound read projection contains `id`, `projectId`, `operation`,
-`requestKey`, `state`, `result`, `error` and `createdAt`. No output contains a
+The outbound read projection contains `id`, `project_id`, `operation`,
+`request_key`, `state`, `result`, `error` and `created_at`. No output contains a
 credential or the operands of the write. Each item of `error` holds
 `{ code, message, created_at }`. `code` is a result class of the Repository
 component or the Storage component, the HTTP status, `timeout` or
@@ -341,7 +341,7 @@ component or the Storage component, the HTTP status, `timeout` or
 project, state and operation filters and shared pagination.
 
 **Effects and idempotency:** return one bounded `{ items, next_cursor }` page in
-the order of `id`. Read only. Read bounds remain **[blocked][intake-bounds]**.
+the order of `id`. Read only. The `limit` accepts 1 to 1000 and defaults to 100.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
 
@@ -374,7 +374,9 @@ both filters or with the state `pending` answers `400`
 `succeeded`, `failed` and `discarded` requests and answers `{ count }`. A list
 that names a pending request deletes nothing. A repeat of a deleted request
 key by its caller inserts a new request and calls the write again; `--force`
-accepts that risk. No process deletes an outbound request.
+accepts that risk. A range that matches more than 1000 requests answers `400`
+`intake.outbound.request.filter_invalid` and deletes nothing; the caller
+narrows the range. No process deletes an outbound request.
 
 **Statuses:** `200` with `{ count }`; `400`
 `intake.outbound.request.force_required`; `400`
@@ -449,8 +451,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | HTTP  | Code                                                   | Condition                                                                                                                                                           | Commands                                                                                                                                                                   |
 | ----- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 400   | `credential.platform.mismatch`                         | The requested platform differs from the stored platform.                                                                                                            | `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get`, `intake.storage.delete` |
-| 400   | `intake.inbound.event.filter_invalid`                  | The delete names no filter, both filters or the state `pending`.                                                                                                    | event delete                                                                                                                                                               |
-| 400   | `intake.outbound.request.filter_invalid`               | The delete names no filter, both filters or the state `pending`.                                                                                                    | outbound delete                                                                                                                                                            |
+| 400   | `intake.inbound.event.filter_invalid`                  | The delete names no filter, both filters or the state `pending`, or its range matches more than 1000 rows.                                                          | event delete                                                                                                                                                               |
+| 400   | `intake.outbound.request.filter_invalid`               | The delete names no filter, both filters or the state `pending`, or its range matches more than 1000 rows.                                                          | outbound delete                                                                                                                                                            |
 | 400   | `intake.outbound.request.force_required`               | The delete omits `force: true`.                                                                                                                                     | outbound delete                                                                                                                                                            |
 | 400   | `repository.platform.github.cursor_page_size_mismatch` | A review comment read names another `limit` than its cursor.                                                                                                        | `intake.action.read`                                                                                                                                                       |
 | 401   | `intake.inbound.event.signature_invalid`               | The webhook post fails verification.                                                                                                                                | receipt route                                                                                                                                                              |
@@ -473,12 +475,12 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 422   | `intake.inbound.credential_invalid`                    | The credential name does not exist, or its platform does not suit the inbound.                                                                                      | inbound create                                                                                                                                                             |
 | 422   | `intake.inbound.platform_refused`                      | The platform refuses the first request of a poll create.                                                                                                            | inbound create                                                                                                                                                             |
 | 422   | `intake.outbound.request.action_unmapped`              | The configured action has no row in the action table.                                                                                                               | `intake.action.perform`                                                                                                                                                    |
+| 502   | `repository.connector.git_failed`                      | A git operation fails, is aborted or reaches its deadline. `intake.action.perform` answers it with `200` and stores it in the request `error` message.              | `intake.action.check`, `intake.action.perform`                                                                                                                             |
 | 502   | `repository.platform.github.<class>`                   | A GitHub call of the check answers a result class; `details.status` holds the GitHub HTTP status when the failure carries one, otherwise null.                      | `intake.action.check`                                                                                                                                                      |
 | 502   | `storage.platform.s3.<class>`                          | An S3 call of the object check or the object delete answers a result class; `details.status` holds the S3 HTTP status when the failure carries one, otherwise null. | `intake.storage.check`, `intake.storage.delete`                                                                                                                            |
 | 503   | `intake.inbound.event.capacity_exceeded`               | The count of pending events is at its bound.                                                                                                                        | receipt route                                                                                                                                                              |
 | 503   | `intake.outbound.request.cli_unavailable`              | The binary of a CLI operation is missing or below its minimum version.                                                                                              | a CLI write                                                                                                                                                                |
 | local | `cli.intake.<command>.invalid_<argument>`              | A positional identity fails its prefix or ULID form, for example `cli.intake.inbound.get.invalid_inbound_id`.                                                       | every leaf with a positional identity                                                                                                                                      |
-| local | `repository.connector.git_failed`                      | A git operation of the repository connector fails, is aborted or reaches its deadline.                                                                              | `intake.action.perform`, `intake.action.check`                                                                                                                             |
 
 ## Optional design provenance
 

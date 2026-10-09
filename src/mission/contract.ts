@@ -114,44 +114,36 @@ export interface StorageBinding {
   available: boolean;
 }
 
+export type IntakeExecutionCall = IntakeCall & { executionId: string };
+
 export interface IntakeStorage {
   put(
-    call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    size: number,
-    sha256: string | null,
+    call: IntakeExecutionCall,
+    input: {
+      nodeId: string;
+      assetId: string;
+      storageBindingId: string;
+      size: number;
+      sha256: string | null;
+    },
   ): Promise<{
     put_url: string;
     headers: Record<string, string>;
     expires_at: number;
   }>;
   check(
-    call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    size: number,
-    sha256: string | null,
+    call: IntakeExecutionCall,
+    assetId: string,
   ): Promise<{ location: string; version: string | null }>;
   get(
     call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    version: string | null,
+    assetId: string,
   ): Promise<{ get_url: string; expires_at: number }>;
   executionGet(
-    call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    version: string | null,
+    call: IntakeExecutionCall,
+    assetId: string,
   ): Promise<{ get_url: string; expires_at: number }>;
-  delete(
-    call: IntakeCall,
-    binding: StorageBinding,
-    key: string,
-    version: string | null,
-    requestKey: string,
-  ): Promise<void>;
+  delete(call: IntakeCall, assetId: string): Promise<void>;
 }
 
 export const CheckEndState = {
@@ -164,11 +156,20 @@ export const checkEndStateSchema = z.enum(CheckEndState);
 export interface IntakeCheck {
   check(
     context: Context,
-    request: { frozen_action: FrozenAction; address: PlatformAddress },
+    evidenceId: string,
   ): Promise<{
     end_state: z.infer<typeof checkEndStateSchema>;
     landed_commits: string[];
   }>;
+}
+
+export interface EventDecoder {
+  decode(input: {
+    platform: string;
+    resource: string;
+    event: Uint8Array;
+    metadata: unknown;
+  }): PlatformAddress | null;
 }
 
 export interface SchedulerWakeup {
@@ -239,6 +240,7 @@ export const MissionErrorCode = {
   RequestAddressMismatch: "mission.request.address_mismatch",
   ExecutionRevisionAbovePin: "mission.execution.revision_above_pin",
   ClaimLive: "mission.node.claim_live",
+  DeliveryMatchChanged: "mission.delivery.match_changed",
   MissionNotFound: "mission.mission.not_found",
   NodeNotFound: "mission.node.not_found",
   VersionConflict: "mission.version.conflict",
@@ -782,6 +784,33 @@ export const frozenActionSchema = z.strictObject({
   configuration: z.strictObject({ base_branch: textSchema }),
 });
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
+export type PullRequestAddress = Extract<
+  PlatformAddress,
+  { kind: typeof PlatformAddressKind.PullRequest }
+>;
+export type RepositoryFacts = {
+  binding_id: string;
+  address: string;
+  resource_identity: string;
+  base_branch: string;
+};
+export type ActionFacts = {
+  frozen_action: FrozenAction;
+  repository: RepositoryFacts;
+  snapshot_commit: string;
+  reused_address: PullRequestAddress | null;
+};
+export type RequestFacts = {
+  frozen_action: FrozenAction;
+  address: PlatformAddress;
+  repository: RepositoryFacts;
+};
+export type Authorized<F> = {
+  credential: string | null;
+  platform: string;
+  project_id: string;
+  facts: F;
+};
 export type ActionContext = {
   state: NodeState;
   current_assessment: {
@@ -1132,6 +1161,48 @@ export const nodeCheckResultSchema = z.strictObject({
     }),
   ),
 });
+export const Disposition = {
+  AcceptedObservation: "accepted_observation",
+  Refused: "refused",
+  Duplicate: "duplicate",
+} as const;
+export const dispositionSchema = z.enum(Disposition);
+export type Disposition = z.infer<typeof dispositionSchema>;
+export const AdmissionRefusal = {
+  Ambiguous: "ambiguous",
+  Unmatched: "unmatched",
+  Undecodable: "undecodable",
+} as const;
+export const admissionRefusalSchema = z.enum(AdmissionRefusal);
+export type AdmissionRefusal = z.infer<typeof admissionRefusalSchema>;
+export const canonicalBase64Schema = z
+  .string()
+  .refine(
+    (value) =>
+      Buffer.from(value, CONTENT_ENCODING).toString(CONTENT_ENCODING) === value,
+  );
+export const deliveryAdmitSchema = z.strictObject({
+  inbound_event_id: identitySchema("inbound_event"),
+  project_id: identitySchema("project"),
+  platform: z.string().min(1),
+  resource: z.string().min(1),
+  event: canonicalBase64Schema,
+  metadata: z.record(z.string(), z.unknown()),
+});
+export const admissionAnswerSchema = z.union([
+  z.strictObject({
+    disposition: z.literal(Disposition.Refused),
+    reason: admissionRefusalSchema,
+  }),
+  z.strictObject({
+    disposition: z.enum([
+      Disposition.AcceptedObservation,
+      Disposition.Duplicate,
+    ]),
+    reason: z.null(),
+  }),
+]);
+export type AdmissionAnswer = z.infer<typeof admissionAnswerSchema>;
 export type ExecutionObjective = z.infer<typeof executionObjectiveSchema>;
 export const executionObjectiveSchema = z.union([
   nodeSchema.options[1],
@@ -1394,6 +1465,21 @@ export const missionOperations = {
     }),
     output: nodeCheckResultSchema,
     description: "Check unresolved external requests on demand.",
+  },
+  "delivery.admit": {
+    ...writeOperation,
+    access: AccessPolicy.Service,
+    id: "mission.delivery.admit",
+    method: HttpMethod.Post,
+    path: "/api/mission/delivery/admit",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: deliveryAdmitSchema,
+    }),
+    output: admissionAnswerSchema,
+    description:
+      "Admit an inbound platform event as the end state of one request evidence for the Intake Service.",
   },
   "assessment.submit": {
     ...writeOperation,

@@ -6,7 +6,11 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import { isHumanIdentity, type MachineIdentity } from "../kernel/caller.ts";
+import {
+  isHumanIdentity,
+  isServiceIdentity,
+  type MachineIdentity,
+} from "../kernel/caller.ts";
 import {
   HealthScope,
   ResourceStatus,
@@ -53,11 +57,17 @@ import {
   type CustodyAuthorization,
   type CustodyExecution,
   type Grant,
+  GrantKind,
+  type GrantOf,
+  type GrantRequest,
+  InboundOperation,
+  type MissionAuthorization,
   type Material,
   piCredentialSchema,
   type WorkbenchCredentialsInput,
   type WorkbenchGrant,
 } from "./contract.ts";
+import type { ExecutionClaim } from "../kernel/operation.ts";
 import {
   consumeGrant,
   consumeWorkbenchGrant,
@@ -82,6 +92,7 @@ import { isReservedName, validateNameForm } from "./names.ts";
 export interface Dependencies {
   executions: CustodyExecutions;
   authorization: CustodyAuthorization;
+  missionAuthorization: MissionAuthorization;
   clientSecret: (clientId: string) => string;
   store: Store;
   platforms: CredentialPlatforms;
@@ -91,6 +102,7 @@ export interface Dependencies {
   agentProvidersDependentOn: AgentProvidersDependentOnFn;
   bindingsNaming: BindingsNamingFn;
   inboundsNaming: InboundsNamingFn;
+  intakeServiceName: string;
 }
 
 const CustodyErrorCode = {
@@ -306,11 +318,14 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly inboundsNaming: InboundsNamingFn;
   private readonly executions: CustodyExecutions;
   private readonly authorization: CustodyAuthorization;
+  private readonly missionAuthorization: MissionAuthorization;
   private readonly clientSecret: (clientId: string) => string;
+  private readonly intakeServiceName: string;
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
     this.authorization = dependencies.authorization;
+    this.missionAuthorization = dependencies.missionAuthorization;
     this.clientSecret = dependencies.clientSecret;
     this.store = dependencies.store;
     this.platforms = dependencies.platforms;
@@ -319,6 +334,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.bindingsNaming = dependencies.bindingsNaming;
     this.inboundsNaming = dependencies.inboundsNaming;
+    this.intakeServiceName = dependencies.intakeServiceName;
     dependencies.health?.register(CUSTODY_HEALTH_NAME, () =>
       this.healthcheck(),
     );
@@ -333,36 +349,143 @@ export class CustodyComponent implements Service, CredentialRecords {
     assert.equal(tx.database, this.store.database);
     return this.authorization
       .authorizeModelInference(tx, identity, execution)
-      .map(({ credential, platform }) =>
-        mintGrant({ credential, platform, execution }),
+      .map(({ credential, platform, provider_id, agent_provider }) =>
+        mintGrant({
+          kind: GrantKind.ModelInference,
+          credential,
+          platform,
+          project_id: execution.project_id,
+          execution,
+          facts: { provider_id, agent_provider },
+        }),
       );
+  }
+
+  authorizeOperation<R extends GrantRequest>(
+    tx: Transaction,
+    request: R,
+    now: number,
+  ): GrantOf<R["kind"]>;
+  authorizeOperation(
+    tx: Transaction,
+    request: GrantRequest,
+    now: number,
+  ): Grant {
+    assert(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    if (request.kind === GrantKind.Inbound)
+      return this.inboundGrant(tx, request);
+    const execution =
+      request.claim === null
+        ? null
+        : this.claimedExecution(tx, request.claim, now);
+    return this.missionGrant(tx, request, execution);
+  }
+
+  private inboundGrant(
+    tx: Transaction,
+    request: Extract<GrantRequest, { kind: typeof GrantKind.Inbound }>,
+  ): GrantOf<typeof GrantKind.Inbound> {
+    assert(tx.database.isTransaction);
+    assert.equal(request.kind, GrantKind.Inbound);
+    const { identity, inbound, operation } = request;
+    if (
+      !isServiceIdentity(identity) ||
+      identity.service !== this.intakeServiceName ||
+      operation !== InboundOperation.Poll
+    )
+      throw new FacilityError();
+    const { credential, platform } = inbound;
+    this.custodySuitability(tx, { credential, platform });
+    return mintGrant({
+      kind: request.kind,
+      credential,
+      platform,
+      project_id: inbound.projectId,
+      execution: null,
+      facts: { inbound_id: inbound.inboundId, resource: inbound.resource },
+    });
+  }
+
+  private missionGrant(
+    tx: Transaction,
+    request: Exclude<GrantRequest, { kind: typeof GrantKind.Inbound }>,
+    execution: CustodyExecution | null,
+  ): Grant {
+    assert(tx.database.isTransaction);
+    assert(execution === null || request.claim !== null);
+    const mission = this.missionAuthorization;
+    switch (request.kind) {
+      case GrantKind.FrozenAction: {
+        const { key, commit, reusedEvidenceId } = request;
+        const authorized = mission.frozenAction(
+          tx,
+          request.identity,
+          request.claim,
+          { key, commit, reusedEvidenceId },
+        );
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
+      case GrantKind.RequestEvidence: {
+        const authorized = mission.requestEvidence(
+          tx,
+          request.identity,
+          request.evidenceId,
+          request.claim,
+        );
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
+      case GrantKind.EvidenceAsset: {
+        const authorized = mission.evidenceAsset(
+          tx,
+          request.identity,
+          request.assetId,
+          request.claim,
+          request.use,
+        );
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
+      case GrantKind.ObjectPut: {
+        const { nodeId, assetId, storageBindingId, size, sha256 } = request;
+        const authorized = mission.objectPut(
+          tx,
+          request.identity,
+          request.claim,
+          { nodeId, assetId, storageBindingId, size, sha256 },
+        );
+        return mintGrant({ kind: request.kind, execution, ...authorized });
+      }
+    }
+  }
+
+  private claimedExecution(
+    tx: Transaction,
+    claim: ExecutionClaim,
+    now: number,
+  ): CustodyExecution {
+    const row = this.executions.requireRunning(
+      tx,
+      claim.executionId,
+      claim.runtimeIdentity,
+      now,
+    );
+    assert.equal(row.execution_id, claim.executionId);
+    assert.equal(row.runtime_identity, claim.runtimeIdentity);
+    if (
+      row.project_id !== claim.projectId ||
+      row.worker_binding_id !== claim.workerBindingId
+    )
+      throw new FacilityError();
+    return row;
   }
 
   release(tx: Transaction, grant: Grant, now: number): Material {
     assert(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
+    if (grant.credential === null) throw new FacilityError();
     consumeGrant(grant);
-    const rows = rowsForName(tx, grant.credential);
-    let row = rows.find((candidate) =>
-      grant.execution.credentials.includes(candidate.id),
-    );
-    if (row && row.ended_at !== null)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        CustodyErrorCode.RevisionRevoked,
-        "The pinned credential revision is revoked.",
-      );
-    if (!row) {
-      row = rows.find((candidate) => candidate.ended_at === null);
-      if (!row)
-        throw new OperationError(
-          HttpStatus.NotFound,
-          CustodyErrorCode.NotFound,
-          "Credential not found.",
-        );
-      this.executions.pinCredential(tx, grant.execution.execution_id, row.id);
-      this.drainRevisions(tx, row.name, now);
-    }
+    const row = this.releasedRow(tx, grant.credential, grant.execution);
+    this.drainRevisions(tx, row.name, now);
     if (row.platform !== grant.platform)
       throw new OperationError(
         HttpStatus.BadRequest,
@@ -384,6 +507,41 @@ export class CustodyComponent implements Service, CredentialRecords {
         encrypted.ciphertext,
       ),
     );
+  }
+
+  consume(grant: Grant): void {
+    if (grant.credential !== null) throw new FacilityError();
+    consumeGrant(grant);
+  }
+
+  private releasedRow(
+    tx: Transaction,
+    credential: string,
+    execution: Grant["execution"],
+  ) {
+    assert(credential.length);
+    const rows = rowsForName(tx, credential);
+    const pinned = execution
+      ? rows.find((candidate) => execution.credentials.includes(candidate.id))
+      : undefined;
+    if (pinned && pinned.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionRevoked,
+        "The pinned credential revision is revoked.",
+      );
+    if (pinned) return pinned;
+    const live = rows.find((candidate) => candidate.ended_at === null);
+    if (!live)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        CustodyErrorCode.NotFound,
+        "Credential not found.",
+      );
+    if (execution)
+      this.executions.pinCredential(tx, execution.execution_id, live.id);
+    assert.equal(live.name, credential);
+    return live;
   }
 
   private workbenchRow(tx: Transaction, grant: WorkbenchGrant): LiveRow {

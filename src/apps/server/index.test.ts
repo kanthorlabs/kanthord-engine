@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -15,20 +15,48 @@ import { configuration } from "../../config/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { createServer } from "node:http";
 import { writePrivate } from "../../kernel/files.ts";
-import { Store } from "../../kernel/store.ts";
+import { Store, type Transaction } from "../../kernel/store.ts";
+import { CancellationContext } from "../../kernel/context.ts";
 import { isString } from "../../kernel/values.ts";
-import { GATEWAY_STARTED_MESSAGE } from "../../gateway/index.ts";
+import {
+  collectInventories,
+  GATEWAY_STARTED_MESSAGE,
+  resourceHealthReport,
+} from "../../gateway/index.ts";
+import { projectScopedIntakeInventory } from "./index.ts";
+import { until } from "./cli-support.ts";
+import { testHumanIdentity } from "../../kernel/test-identity.ts";
+import type { Material } from "../../custody/contract.ts";
+import pino from "pino";
 import { ulid } from "ulid";
 import {
   domainHealth,
   FAKE_SSH_IDENTITY,
+  fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { gatewayOperations } from "../../gateway/contract.ts";
-import { HealthRegistry } from "../../kernel/health.ts";
+import { gatewayOperations, OWNER_INTAKE } from "../../gateway/contract.ts";
+import { HealthRegistry, ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
+import { IntakeService } from "../../intake/index.ts";
+import {
+  Consumer,
+  INBOUND_CREATED_STATUS,
+  InboundKind,
+  InboundPlatform,
+  intakeOperations,
+  INTAKE_SERVICE_NAME,
+  type IntakeInventoryEntry,
+} from "../../intake/contract.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
+import {
+  PROJECT_ID_PREFIX,
+  projectOperations,
+} from "../../project/contract.ts";
+import { createIdentity } from "../../kernel/identity.ts";
+import { errorSchema } from "../../kernel/errors.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 import { HttpStatus } from "../../kernel/http.ts";
@@ -45,6 +73,25 @@ const MODEL_NAME = "composition-model";
 const FIRST_REVISION = 1;
 const REASONING_LEVEL = "off";
 const BASE_URL = "https://example.com/v1";
+const INVENTORY_PROJECT_NAME = "inventory";
+const INBOUND_NAME = "inbound";
+const INBOUND_TARGET = "inbound:composition";
+const WEBHOOK_CAPABILITY = "webhook";
+const INVENTORY_FAILED = "gateway.healthcheck.inventory_failed";
+const POLL_CAPABILITY = "poll acquisition";
+const POLL_CREDENTIAL = "health-github";
+const POLL_KEY = "health_poll_github_key";
+const POLL_OWNER = "owner";
+const POLL_REPO = "repo";
+const MALFORMED_CONFIGURATION = "{";
+const HELD_EVENTS_PASS = 0;
+const HELD_CHECK_RELEASES = 1;
+const DEADLINE_LIMITS = {
+  maxConcurrent: 1,
+  checkDeadlineMs: 50,
+  reportBudgetMs: 5000,
+};
+const EVENTS_PATH = /^\/repos\/owner\/repo\/events(\?|$)/;
 const entry = new URL("../../main.ts", import.meta.url).href;
 function layout(directory: string) {
   const env: NodeJS.ProcessEnv = {
@@ -82,6 +129,259 @@ test("composition starts all six services and registers the real repository tool
     assert.deepEqual(body.services[name], checks, name);
   assert.equal(body.services.gateway?.listener, HealthStatus.Healthy);
   assert.deepEqual(await fixture.mission.healthcheck(), domainHealth.mission);
+});
+
+test("composed services hold Intake and start its probe", async (t) => {
+  const health = new HealthRegistry();
+  const fixture = await gatewayFixture(t, { health });
+  assert.ok(fixture.intake instanceof IntakeService);
+  const checks = await health.check();
+  assert.deepEqual(checks[INTAKE_SERVICE_NAME], {
+    events: HealthStatus.Healthy,
+  });
+});
+
+function inboundEntry(projectId: string): IntakeInventoryEntry {
+  return {
+    project_id: projectId,
+    name: INBOUND_NAME,
+    target: INBOUND_TARGET,
+    capability: WEBHOOK_CAPABILITY,
+    check: async () => ResourceStatus.Unknown,
+  };
+}
+
+async function requestHealthReport(
+  fixture: Awaited<ReturnType<typeof gatewayFixture>>,
+) {
+  return fixture.request(gatewayOperations.healthcheck.path, {
+    headers: { Authorization: `Bearer ${fixture.token}` },
+  });
+}
+
+test("the composition root reports an Intake entry under the name of its project", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const created = await fixture.request(projectOperations.create.path, {
+    method: projectOperations.create.method,
+    headers: {
+      Authorization: `Bearer ${fixture.token}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": ulid(),
+    },
+    body: JSON.stringify({ name: INVENTORY_PROJECT_NAME }),
+  });
+  assert.equal(created.status, HttpStatus.OK);
+  const project = projectOperations.create.output.parse(await created.json());
+  t.mock.method(fixture.intake, "resourceInventory", () => [
+    inboundEntry(project.id),
+  ]);
+  const response = await requestHealthReport(fixture);
+  assert.equal(response.status, HttpStatus.OK);
+  const body = gatewayOperations.healthcheck.output.parse(
+    await response.json(),
+  );
+  assert.deepEqual(body.services.intake, {
+    global: {},
+    projects: {
+      [INVENTORY_PROJECT_NAME]: {
+        [INBOUND_NAME]: {
+          status: ResourceStatus.Unknown,
+          capability: WEBHOOK_CAPABILITY,
+        },
+      },
+    },
+  });
+});
+
+test("an Intake entry of an unknown project reports intake in missing_inventories", async (t) => {
+  const fixture = await gatewayFixture(t);
+  t.mock.method(fixture.intake, "resourceInventory", () => [
+    inboundEntry(createIdentity(PROJECT_ID_PREFIX)),
+  ]);
+  const response = await requestHealthReport(fixture);
+  assert.equal(response.status, HttpStatus.ServiceUnavailable);
+  const { error } = errorSchema.parse(await response.json());
+  assert.equal(error.code, INVENTORY_FAILED);
+  assert.deepEqual(error.details, { missing_inventories: [OWNER_INTAKE] });
+});
+
+type Fixture = Awaited<ReturnType<typeof gatewayFixture>>;
+
+async function created(
+  fixture: Fixture,
+  operation: { path: string; method: string },
+  status: number,
+  body: unknown,
+): Promise<unknown> {
+  const response = await fixture.request(operation.path, {
+    method: operation.method,
+    headers: {
+      Authorization: `Bearer ${fixture.token}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": ulid(),
+    },
+    body: JSON.stringify(body),
+  });
+  assert.equal(response.status, status, await response.clone().text());
+  return response.json();
+}
+
+async function pollFixture(t: TestContext) {
+  const gitHub = await fakeGitHub(t);
+  const fixture = await gatewayFixture(t, {
+    github: { baseUrl: gitHub.endpoint },
+  });
+  await created(fixture, repositoryOperations.create, HttpStatus.OK, {
+    name: POLL_CREDENTIAL,
+    platform: InboundPlatform.GitHub,
+    metadata: null,
+    secret: { key: POLL_KEY },
+  });
+  const project = projectOperations.create.output.parse(
+    await created(fixture, projectOperations.create, HttpStatus.OK, {
+      name: INVENTORY_PROJECT_NAME,
+    }),
+  );
+  const pollInbound = async () =>
+    intakeOperations["inbound.create"].output.parse(
+      await created(
+        fixture,
+        intakeOperations["inbound.create"],
+        INBOUND_CREATED_STATUS,
+        {
+          project_id: project.id,
+          kind: InboundKind.Poll,
+          platform: InboundPlatform.GitHub,
+          consumer: Consumer.MissionDeliveryAdmit,
+          credential: POLL_CREDENTIAL,
+          configuration: { resource: `${POLL_OWNER}/${POLL_REPO}` },
+        },
+      ),
+    ).id;
+  const inboundRow = (id: string) =>
+    fixture.store.transaction((tx) =>
+      tx.database.prepare("SELECT * FROM intake_inbound WHERE id = ?").get(id),
+    );
+  return { gitHub, fixture, pollInbound, inboundRow };
+}
+
+test("a malformed poll inbound answers unknown for its own entry and the report answers the other entries", async (t) => {
+  const { fixture, pollInbound } = await pollFixture(t);
+  const good = await pollInbound();
+  const malformed = await pollInbound();
+  fixture.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE intake_inbound SET configuration = ? WHERE id = ?")
+      .run(MALFORMED_CONFIGURATION, malformed),
+  );
+  const response = await requestHealthReport(fixture);
+  assert.equal(response.status, HttpStatus.OK);
+  const body = gatewayOperations.healthcheck.output.parse(
+    await response.json(),
+  );
+  assert.deepEqual(body.services.intake, {
+    global: {},
+    projects: {
+      [INVENTORY_PROJECT_NAME]: {
+        [encodeURIComponent(good)]: {
+          status: ResourceStatus.Healthy,
+          capability: POLL_CAPABILITY,
+        },
+        [encodeURIComponent(malformed)]: {
+          status: ResourceStatus.Unknown,
+          capability: POLL_CAPABILITY,
+        },
+      },
+    },
+  });
+});
+
+function releasedMaterials(t: TestContext, fixture: Fixture) {
+  const released: { materials: Material[]; drops: string[] } = {
+    materials: [],
+    drops: [],
+  };
+  const release = fixture.custody.release.bind(fixture.custody);
+  t.mock.method(
+    fixture.custody,
+    "release",
+    (...args: Parameters<typeof release>) => {
+      const material = release(...args);
+      const drop = material.drop.bind(material);
+      material.drop = () => {
+        released.drops.push(material.credential_id);
+        drop();
+      };
+      released.materials.push(material);
+      return material;
+    },
+  );
+  return released;
+}
+
+function intakeOnlyReport(t: TestContext, fixture: Fixture) {
+  const collect = () =>
+    fixture.store.transaction((tx) =>
+      collectInventories(tx, {
+        llm: () => [],
+        agent: () => [],
+        repository: () => [],
+        storage: () => [],
+        worker: () => [],
+        project: () => [],
+        intake: projectScopedIntakeInventory(fixture.intake, fixture.project),
+      }),
+    );
+  const context = new CancellationContext();
+  t.after(() => context.cancel());
+  const caller = {
+    identity: testHumanIdentity("health-reader", "Health Reader", ulid()),
+    context,
+    requestId: ulid(),
+    commit: <T>(write: (tx: Transaction) => T) =>
+      fixture.store.transaction(write),
+  };
+  return resourceHealthReport(
+    caller,
+    collect,
+    pino({ level: "silent" }),
+    DEADLINE_LIMITS,
+  );
+}
+
+test("the check deadline of a poll inbound answers unknown through the report, drops the material and changes no inbound", async (t) => {
+  const { gitHub, fixture, pollInbound, inboundRow } = await pollFixture(t);
+  const id = await pollInbound();
+  const before = inboundRow(id);
+  const eventsCalls = () =>
+    gitHub.calls.filter((call) => EVENTS_PATH.test(call.path)).length;
+  const calledBefore = eventsCalls();
+  const releaseEvents = gitHub.holdEvents({ pass: HELD_EVENTS_PASS });
+  t.after(() => releaseEvents());
+  const released = releasedMaterials(t, fixture);
+  const report = await intakeOnlyReport(t, fixture);
+  assert.deepEqual(report.services.intake, {
+    global: {},
+    projects: {
+      [INVENTORY_PROJECT_NAME]: {
+        [encodeURIComponent(id)]: {
+          status: ResourceStatus.Unknown,
+          capability: POLL_CAPABILITY,
+        },
+      },
+    },
+  });
+  assert.equal(released.materials.length, HELD_CHECK_RELEASES);
+  assert.equal(eventsCalls(), calledBefore + HELD_CHECK_RELEASES);
+  const drops = await until(
+    () => released.drops,
+    (items) => items.length === HELD_CHECK_RELEASES,
+  );
+  assert.deepEqual(
+    drops,
+    released.materials.map((material) => material.credential_id),
+  );
+  assert.deepEqual(inboundRow(id), before);
 });
 
 test("injected repository connector skips the tool gate and probe", async (t) => {
@@ -291,6 +591,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
       worker: { registrations: 200 },
       mission: { operations: 200 },
       project: { bindings: 200 },
+      intake: { events: 200 },
       gateway: {
         listener: 200,
         authentication: 200,
@@ -447,7 +748,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
   reopened.close();
 });
 
-test("server quiesces concurrently, drains with direct calls available, joins the chain and releases in reverse order", (t) => {
+test("server quiesces concurrently, drains Intake with direct calls available, joins the chain and releases Intake between Gateway and Project", (t) => {
   const paths = layout(temporary(t));
   const result = spawnSync(
     process.execPath,
@@ -462,6 +763,7 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     import { MissionService } from ${JSON.stringify(new URL("../../mission/index.ts", import.meta.url).href)};
     import { ProjectService } from ${JSON.stringify(new URL("../../project/index.ts", import.meta.url).href)};
     import { WorkerService } from ${JSON.stringify(new URL("../../worker/index.ts", import.meta.url).href)};
+    import { IntakeService } from ${JSON.stringify(new URL("../../intake/index.ts", import.meta.url).href)};
     import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
     import { Store } from ${JSON.stringify(new URL("../../kernel/store.ts", import.meta.url).href)};
     import { OperationalLog } from ${JSON.stringify(new URL("../../kernel/log.ts", import.meta.url).href)};
@@ -471,7 +773,7 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     let quiesced = 0;
     const signalled = new Set();
     const released = new Set();
-    const services = [['scheduler', SchedulerService], ['custody', CustodyComponent], ['worker', WorkerService], ['mission', MissionService], ['project', ProjectService], ['gateway', GatewayService]];
+    const services = [['scheduler', SchedulerService], ['custody', CustodyComponent], ['worker', WorkerService], ['mission', MissionService], ['project', ProjectService], ['intake', IntakeService], ['gateway', GatewayService]];
     const serviceCount = services.length;
     for (const [name, type] of services) {
       const start = type.prototype.start;
@@ -518,12 +820,12 @@ test("server quiesces concurrently, drains with direct calls available, joins th
     OperationalLog.prototype.close = function() { events.push('log'); return closeLog.call(this); };
     assert.equal(await server.start(), null);
     assert.equal(await server.stop(), null);
-    assert.deepEqual([...new Set(events.filter(event => event.startsWith('start-')))], ['start-scheduler', 'start-custody', 'start-worker', 'start-mission', 'start-project', 'start-gateway']);
+    assert.deepEqual([...new Set(events.filter(event => event.startsWith('start-')))], ['start-scheduler', 'start-custody', 'start-worker', 'start-mission', 'start-project', 'start-intake', 'start-gateway']);
     const shutdown = events.filter(event => !event.startsWith('start-'));
     const drainEnd = serviceCount + serviceCount;
-    assert.deepEqual(shutdown.slice(0, serviceCount), ['quiesce-scheduler', 'quiesce-custody', 'quiesce-worker', 'quiesce-mission', 'quiesce-project', 'quiesce-gateway']);
-    assert.deepEqual(shutdown.slice(serviceCount, drainEnd).sort(), ['drain-custody', 'drain-gateway', 'drain-mission', 'drain-project', 'drain-scheduler', 'drain-worker']);
-    assert.deepEqual(shutdown.slice(drainEnd), ['stop-gateway', 'stop-project', 'stop-mission', 'stop-worker', 'stop-custody', 'stop-scheduler', 'store', 'log']);
+    assert.deepEqual(shutdown.slice(0, serviceCount), ['quiesce-scheduler', 'quiesce-custody', 'quiesce-worker', 'quiesce-mission', 'quiesce-project', 'quiesce-intake', 'quiesce-gateway']);
+    assert.deepEqual(shutdown.slice(serviceCount, drainEnd).sort(), ['drain-custody', 'drain-gateway', 'drain-intake', 'drain-mission', 'drain-project', 'drain-scheduler', 'drain-worker']);
+    assert.deepEqual(shutdown.slice(drainEnd), ['stop-gateway', 'stop-intake', 'stop-project', 'stop-mission', 'stop-worker', 'stop-custody', 'stop-scheduler', 'store', 'log']);
   `,
     ],
     { env: paths.env, encoding: "utf8", timeout: 15000 },

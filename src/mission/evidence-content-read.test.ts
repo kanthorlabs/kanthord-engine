@@ -20,7 +20,6 @@ import { evidenceHarness } from "./test-support.ts";
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
 const DATA = "aGk=";
-const KEY = "key";
 const FIRST_ASSET_INDEX = 0;
 const VERSION = "v1";
 const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
@@ -132,12 +131,23 @@ test("content signing repeats after publication and never releases a URL after d
     });
     const assetId = submitted.evidence.assets[FIRST_ASSET_INDEX]!.id;
     const versions: (string | null)[] = [];
-    h.dependencies.intakeStorage.executionGet = async (
-      _call,
-      _binding,
-      _key,
-      version,
-    ) => {
+    h.dependencies.intakeStorage.executionGet = async (call, received) => {
+      assert.equal(call.executionId, h.claim.executionId);
+      assert.equal(received, assetId);
+      const version = h.store.transaction(
+        (tx) =>
+          (
+            JSON.parse(
+              (
+                tx.database
+                  .prepare(
+                    "SELECT content FROM mission_evidence_asset WHERE id = ?",
+                  )
+                  .get(assetId) as { content: string }
+              ).content,
+            ) as { object_version?: string }
+          ).object_version ?? null,
+      );
       versions.push(version);
       if (change === Change.Publish)
         h.store.transaction((tx) =>
@@ -186,7 +196,7 @@ test("content signing repeats after publication and never releases a URL after d
   }
 });
 
-test("content reads return inline bytes or sign only the recorded object version with the correct reader seam", async (t) => {
+test("content reads return inline bytes or sign the object asset with the correct reader seam", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
   const inline = await h.invoke("evidence.submit", {
     params: { node_id: h.node_id },
@@ -246,22 +256,19 @@ test("content reads return inline bytes or sign only the recorded object version
         ],
       ),
     );
-    const calls: string[] = [];
-    for (const method of ["get", "executionGet"] as const)
-      h.dependencies.intakeStorage[method] = async (
-        _call,
-        _binding,
-        key,
-        version,
-      ) => {
-        calls.push(method);
-        assert.equal(key, KEY);
-        assert.equal(version, objectVersion ?? null);
-        return {
-          get_url: "https://storage.example/get",
-          expires_at: FIRST_ATTEMPT,
-        };
-      };
+    const signed = {
+      get_url: "https://storage.example/get",
+      expires_at: FIRST_ATTEMPT,
+    };
+    const calls: unknown[] = [];
+    h.dependencies.intakeStorage.get = async (call, received) => {
+      calls.push(["get", received, "executionId" in call]);
+      return signed;
+    };
+    h.dependencies.intakeStorage.executionGet = async (call, received) => {
+      calls.push(["executionGet", received, call.executionId]);
+      return signed;
+    };
     await h.invoke("evidence.asset.content.get", {
       params: { asset_id: objectId },
       query: {},
@@ -272,7 +279,10 @@ test("content reads return inline bytes or sign only the recorded object version
       query: {},
       body: null,
     });
-    assert.deepEqual(calls, ["get", "executionGet"]);
+    assert.deepEqual(calls, [
+      ["get", objectId, false],
+      ["executionGet", objectId, h.claim.executionId],
+    ]);
   }
 });
 

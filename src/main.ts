@@ -1,4 +1,4 @@
-import { installFatalHandlers } from "./kernel/log.ts";
+import { installFatalHandlers } from "./kernel/fatal.ts";
 import type { Server } from "./apps/server/index.ts";
 
 let server: Server | undefined;

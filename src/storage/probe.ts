@@ -86,6 +86,7 @@ export async function probeS3(
       const client = createClient({
         endpoint,
         region,
+        forcePathStyle: true,
         credentials: { accessKeyId, secretAccessKey },
       });
       return await headBucket(

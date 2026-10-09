@@ -27,6 +27,7 @@ import {
   OWNER_AGENT,
   OWNER_WORKER,
   OWNER_PROJECT,
+  OWNER_INTAKE,
   type InventoryCollector,
   type InventorySnapshot,
   type ResourceInventories,
@@ -35,7 +36,7 @@ import { GatewayError } from "./errors.ts";
 
 const EMPTY_COUNT = 0;
 const MIN_LIMIT = 1;
-const INTAKE_EMPTY_OWNER = { global: {}, projects: {} } as const;
+const EMPTY_OWNER = { global: {}, projects: {} } as const;
 const INVENTORY_OWNERS = [
   OWNER_LLM,
   OWNER_REPOSITORY,
@@ -43,6 +44,7 @@ const INVENTORY_OWNERS = [
   OWNER_AGENT,
   OWNER_WORKER,
   OWNER_PROJECT,
+  OWNER_INTAKE,
 ] as const;
 const DEFAULT_LIMITS = {
   maxConcurrent: MAX_CONCURRENT_CHECKS,
@@ -220,7 +222,7 @@ async function runChecks(
 }
 
 function emptyOwner(): OwnerReport {
-  return structuredClone(INTAKE_EMPTY_OWNER);
+  return structuredClone(EMPTY_OWNER);
 }
 
 function assembleReport(
@@ -234,6 +236,7 @@ function assembleReport(
     [OWNER_AGENT]: emptyOwner(),
     [OWNER_WORKER]: emptyOwner(),
     [OWNER_PROJECT]: emptyOwner(),
+    [OWNER_INTAKE]: emptyOwner(),
   };
   for (const { owner, entry } of entries) {
     const status = statuses.get(entry.target);
@@ -261,7 +264,7 @@ function assembleReport(
   return {
     services: {
       project: owners.project,
-      intake: emptyOwner(),
+      intake: owners.intake,
       worker: owners.worker,
     },
     shared: {

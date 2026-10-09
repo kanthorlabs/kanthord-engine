@@ -34,5 +34,6 @@ export function operandsOf(
     baseBranch: entry.action.configuration.base_branch,
     commit: testedInput.commit,
     reusedAddress: null,
+    reusedEvidenceId: null,
   };
 }

@@ -29,17 +29,37 @@ import {
 } from "../../mission/contract.ts";
 import { workbenchOperations } from "../../workbench/contract.ts";
 import {
+  intakeOperations,
+  webhookInboundSchema,
+} from "../../intake/contract.ts";
+import {
   openapiPath,
   emitOpenAPI,
   emitOpenAPIFiles,
   serializeOpenAPIFile,
 } from "../../gateway/local.ts";
+import { errorSchema } from "../../kernel/errors.ts";
+import { createIdentity } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { AccessPolicy, OperationRegistry } from "../../kernel/operation.ts";
+import {
+  AccessPolicy,
+  hasHttpRoute,
+  OperationRegistry,
+  OperationResultType,
+} from "../../kernel/operation.ts";
+import { testMachineIdentity } from "../../kernel/test-identity.ts";
+import { directClient } from "../../gateway/index.ts";
 import { ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 const OPENAPI_FRAGMENT_SOFT_LIMIT_LINES = 500;
+const INBOUND_CREATED = 201;
+const INBOUND_ONE_ROW = 1;
+const INBOUND_NO_LOGS = 0;
+const INBOUND_VALIDATION_FAILED = "gateway.request.validation_failed";
+const INBOUND_UNAUTHORIZED = "gateway.authentication.unauthorized";
+const INBOUND_NOT_FOUND = "intake.inbound.not_found";
+const INBOUND_EMPTY_BODY = "";
 
 test("published native setup is an execution-scoped bodyless read", () => {
   const operation = workerOperations["execution.setup.get"];
@@ -390,6 +410,7 @@ const OPERATION_PREFIXES = [
   "project.",
   "mission.",
   "workbench.",
+  "intake.",
 ];
 const BEARER_SECURITY = [{ bearerAuth: [] }];
 const LIVENESS_PATH = "/api/liveness";
@@ -551,6 +572,7 @@ const apiOperations = [
   ...Object.values(projectOperations),
   ...Object.values(missionOperations),
   ...Object.values(workbenchOperations),
+  ...Object.values(intakeOperations),
 ];
 const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["gateway.liveness", AccessPolicy.Public],
@@ -667,6 +689,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.node.override", AccessPolicy.Human],
   ["mission.node.discard", AccessPolicy.Human],
   ["mission.node.check", AccessPolicy.Human],
+  ["mission.delivery.admit", AccessPolicy.Service],
   ["mission.attempt.list", AccessPolicy.Human],
   ["mission.attempt.get", AccessPolicy.Human],
   ["mission.evidence.list", AccessPolicy.Human],
@@ -703,10 +726,116 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["workbench.session.abort", AccessPolicy.Human],
   ["workbench.session.events", AccessPolicy.Human],
   ["workbench.session.approve", AccessPolicy.Human],
+  ["intake.outbound.request.list", AccessPolicy.Human],
+  ["intake.outbound.request.get", AccessPolicy.Human],
+  ["intake.outbound.request.discard", AccessPolicy.Human],
+  ["intake.outbound.request.delete", AccessPolicy.Human],
+  ["intake.inbound.create", AccessPolicy.Human],
+  ["intake.inbound.list", AccessPolicy.Human],
+  ["intake.inbound.get", AccessPolicy.Human],
+  ["intake.inbound.delete", AccessPolicy.Human],
+  ["intake.inbound.event.list", AccessPolicy.Human],
+  ["intake.inbound.event.get", AccessPolicy.Human],
+  ["intake.inbound.event.retry", AccessPolicy.Human],
+  ["intake.inbound.event.discard", AccessPolicy.Human],
+  ["intake.inbound.event.delete", AccessPolicy.Human],
+  ["intake.inbound.event.receive", AccessPolicy.Delivery],
+  ["intake.action.check", AccessPolicy.Service],
+  ["intake.action.perform", AccessPolicy.Client],
+  ["intake.action.read", AccessPolicy.Client],
+  ["intake.storage.put", AccessPolicy.Client],
+  ["intake.storage.check", AccessPolicy.Client],
+  ["intake.execution.storage.get", AccessPolicy.Client],
+  ["intake.storage.get", AccessPolicy.Human],
+  ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 150;
+const OPERATION_COUNT = 173;
+const ROUTED_OPERATION_COUNT = 164;
+const INTAKE_OPERATION_COUNT = 22;
+const INTAKE_ROUTED_OPERATION_COUNT = 14;
+const SERVICE_OPERATION_IDS = ["intake.action.check", "mission.delivery.admit"];
+const DIRECT_OPERATION_IDS = [
+  "intake.action.perform",
+  "intake.action.read",
+  "intake.execution.storage.get",
+  "intake.storage.check",
+  "intake.storage.delete",
+  "intake.storage.get",
+  "intake.storage.put",
+];
+const routedOperationIds = new Set<string>(
+  apiOperations.filter(hasHttpRoute).map(({ id }) => id),
+);
 
-test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
+test("the final inventory splits into routed, service and direct operations", async (t) => {
+  const inventoryIds = OPERATION_INVENTORY.map(([id]) => id);
+  const routedIds = apiOperations.filter(hasHttpRoute).map(({ id }) => id);
+  const serviceIds = apiOperations
+    .filter(({ access }) => access === AccessPolicy.Service)
+    .map(({ id }) => id);
+  const directIds = apiOperations
+    .filter(
+      (operation) =>
+        !hasHttpRoute(operation) && operation.access !== AccessPolicy.Service,
+    )
+    .map(({ id }) => id);
+  const intakeRows = OPERATION_INVENTORY.filter(([id]) =>
+    id.startsWith("intake."),
+  );
+  assert.equal(inventoryIds.length, OPERATION_COUNT);
+  assert.equal(routedIds.length, ROUTED_OPERATION_COUNT);
+  assert.equal(intakeRows.length, INTAKE_OPERATION_COUNT);
+  assert.equal(
+    intakeRows.filter(([id]) => routedOperationIds.has(id)).length,
+    INTAKE_ROUTED_OPERATION_COUNT,
+  );
+  assert.deepEqual(serviceIds.sort(), SERVICE_OPERATION_IDS);
+  assert.deepEqual(directIds.sort(), DIRECT_OPERATION_IDS);
+  assert.deepEqual(
+    [...routedIds, ...serviceIds, ...directIds].sort(),
+    [...inventoryIds].sort(),
+  );
+  const registry = new OperationRegistry();
+  await gatewayFixture(t, { registry });
+  assert.deepEqual(
+    registry
+      .all()
+      .map(({ operation }) => operation.id)
+      .sort(),
+    [...inventoryIds].sort(),
+  );
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const emitted = Object.entries(resolved.paths ?? {}).flatMap(([path, item]) =>
+    Object.entries(item ?? {})
+      .filter(
+        ([, entry]) =>
+          isObject(entry) &&
+          "operationId" in entry &&
+          isString(entry.operationId),
+      )
+      .map(([method, entry]) => ({
+        pair: `${method} ${path}`,
+        operationId: (entry as ResolvedOperation).operationId ?? "",
+      })),
+  );
+  const excludedIds = new Set<string>([...serviceIds, ...directIds]);
+  assert.equal(
+    emitted.some(({ operationId }) => excludedIds.has(operationId)),
+    false,
+  );
+  assert.deepEqual(
+    emitted.map(({ pair }) => pair).sort(),
+    apiOperations
+      .filter(hasHttpRoute)
+      .map(
+        ({ method, path }) =>
+          `${method.toLowerCase()} ${path.replace(/:([^/]+)/g, "{$1}")}`,
+      )
+      .sort(),
+  );
+});
+
+test("the operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();
   assert.equal(expected.length, OPERATION_COUNT);
   assert.deepEqual(
@@ -722,7 +851,10 @@ test("final ERD2 operation inventory agrees with contracts, OpenAPI and live reg
       )
       .map((item) => [item.operationId, item["x-access-policy"]]),
   );
-  assert.deepEqual(published.sort(), expected);
+  assert.deepEqual(
+    published.sort(),
+    expected.filter(([id]) => routedOperationIds.has(id)),
+  );
   const registry = new OperationRegistry();
   await gatewayFixture(t, { registry });
   assert.deepEqual(
@@ -1004,7 +1136,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   assert.equal(new Set(emittedIds).size, emittedIds.length);
   assert.deepEqual(
     [...new Set(emittedIds)].sort(),
-    [...new Set(apiOperations.map(({ id }) => id))].sort(),
+    [...routedOperationIds].sort(),
   );
   assert.equal(gatewayOperations.liveness.path, LIVENESS_PATH);
   assert.equal(gatewayOperations.healthcheck.path, HEALTHCHECK_PATH);
@@ -1414,4 +1546,403 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     const response = await fixture.request(path);
     assert.ok([400, 404].includes(response.status), path);
   }
+});
+
+test("the direct intake operations have no OpenAPI path", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const directIds = new Set<string>([
+    intakeOperations["action.perform"].id,
+    intakeOperations["action.read"].id,
+    intakeOperations["storage.put"].id,
+    intakeOperations["storage.check"].id,
+    intakeOperations["execution.storage.get"].id,
+    intakeOperations["storage.get"].id,
+    intakeOperations["storage.delete"].id,
+  ]);
+  const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
+    Object.values(path ?? {}).filter(
+      (item) => isObject(item) && "operationId" in item,
+    ),
+  );
+  assert.ok(published.length);
+  assert.ok(
+    published.every(
+      (item) => !directIds.has((item as ResolvedOperation).operationId ?? ""),
+    ),
+  );
+  assert.equal(
+    Object.keys(resolved.paths ?? {}).some((path) =>
+      path.startsWith("/api/intake/execution/"),
+    ),
+    false,
+  );
+  assert.equal(
+    Object.keys(resolved.paths ?? {}).some((path) =>
+      path.startsWith("/api/intake/storage/"),
+    ),
+    false,
+  );
+});
+
+test("published outbound request reads are human unary routes", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const list = resolved.paths?.["/api/intake/outbound"]?.get as
+    ResolvedOperation | undefined;
+  const get = resolved.paths?.["/api/intake/outbound/{outbound_request_id}"]
+    ?.get as ResolvedOperation | undefined;
+  assert.equal(list?.operationId, intakeOperations["outbound.request.list"].id);
+  assert.equal(list?.["x-access-policy"], AccessPolicy.Human);
+  assert.equal(get?.operationId, intakeOperations["outbound.request.get"].id);
+  assert.equal(get?.["x-access-policy"], AccessPolicy.Human);
+});
+
+test("published outbound request discard and delete are human mutation routes", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const discard = resolved.paths?.[
+    "/api/intake/outbound/{outbound_request_id}/discard"
+  ]?.post as ResolvedOperation | undefined;
+  const remove = resolved.paths?.["/api/intake/outbound/delete"]?.post as
+    ResolvedOperation | undefined;
+  assert.equal(
+    discard?.operationId,
+    intakeOperations["outbound.request.discard"].id,
+  );
+  assert.equal(discard?.["x-access-policy"], AccessPolicy.Human);
+  assert.equal(
+    remove?.operationId,
+    intakeOperations["outbound.request.delete"].id,
+  );
+  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
+});
+
+test("published inbound event retry and discard are human mutation routes", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const retry = resolved.paths?.["/api/intake/event/{inbound_event_id}/retry"]
+    ?.post as ResolvedOperation | undefined;
+  const discard = resolved.paths?.[
+    "/api/intake/event/{inbound_event_id}/discard"
+  ]?.post as ResolvedOperation | undefined;
+  assert.equal(retry?.operationId, intakeOperations["inbound.event.retry"].id);
+  assert.equal(retry?.["x-access-policy"], AccessPolicy.Human);
+  assert.equal(
+    discard?.operationId,
+    intakeOperations["inbound.event.discard"].id,
+  );
+  assert.equal(discard?.["x-access-policy"], AccessPolicy.Human);
+});
+
+test("published inbound event delete is a human mutation route that answers a count", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const remove = resolved.paths?.["/api/intake/event/delete"]?.post as
+    | (ResolvedOperation & {
+        responses?: Record<
+          number,
+          { content?: Record<string, { schema: ResolvedSchema }> }
+        >;
+      })
+    | undefined;
+  assert.equal(
+    remove?.operationId,
+    intakeOperations["inbound.event.delete"].id,
+  );
+  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
+  const schema =
+    remove?.responses?.[HttpStatus.OK]?.content?.["application/json"]?.schema;
+  assert.deepEqual(schema?.required, ["count"]);
+});
+
+test("published inbound create is a human mutation route with a 201 inbound", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const create = resolved.paths?.["/api/intake/inbound"]?.post as
+    | (ResolvedOperation & {
+        responses?: Record<
+          number,
+          { content?: Record<string, { schema: ResolvedSchema }> }
+        >;
+      })
+    | undefined;
+  assert.equal(create?.operationId, intakeOperations["inbound.create"].id);
+  assert.equal(create?.["x-access-policy"], AccessPolicy.Human);
+  const created = create?.responses?.[INBOUND_CREATED];
+  assert.deepEqual(
+    Object.keys(
+      created?.content?.["application/json"]?.schema.properties ?? {},
+    ).sort(),
+    [
+      "checkpoint",
+      "configuration",
+      "consumer",
+      "created_at",
+      "credential",
+      "id",
+      "kind",
+      "platform",
+      "project_id",
+    ],
+  );
+});
+
+test("inbound create answers 201, replays a repeated key, refuses an unknown consumer and a machine identity", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const authorization = `Bearer ${fixture.token}`;
+  const post = (path: string, key: string, body: unknown) =>
+    fixture.request(path, {
+      method: "POST",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json",
+        "Idempotency-Key": key,
+      },
+      body: JSON.stringify(body),
+    });
+  const project = projectOperations.create.output.parse(
+    await (
+      await post(projectOperations.create.path, ulid(), { name: "inbounds" })
+    ).json(),
+  );
+  const webhook = {
+    project_id: project.id,
+    kind: "webhook",
+    platform: "github",
+    consumer: "mission.delivery.admit",
+    configuration: { resource: "owner/repo" },
+  } as const;
+  const path = intakeOperations["inbound.create"].path;
+  const key = ulid();
+  const first = await post(path, key, webhook);
+  assert.equal(first.status, INBOUND_CREATED);
+  const inbound = intakeOperations["inbound.create"].output.parse(
+    await first.json(),
+  );
+  const repeat = await post(path, key, webhook);
+  assert.equal(repeat.status, INBOUND_CREATED);
+  assert.deepEqual(
+    intakeOperations["inbound.create"].output.parse(await repeat.json()),
+    inbound,
+  );
+  const inboundCount = () =>
+    fixture.store.transaction(
+      (tx) =>
+        (
+          tx.database
+            .prepare("SELECT COUNT(*) AS total FROM intake_inbound")
+            .get() as { total: number }
+        ).total,
+    );
+  assert.equal(inboundCount(), INBOUND_ONE_ROW);
+  const consumer = await post(path, ulid(), {
+    ...webhook,
+    consumer: "mission.node.check",
+  });
+  assert.equal(consumer.status, HttpStatus.BadRequest);
+  assert.equal(
+    errorSchema.parse(await consumer.json()).error.code,
+    INBOUND_VALIDATION_FAILED,
+  );
+  const machine = await directClient(intakeOperations, fixture.invocation)[
+    "inbound.create"
+  ](
+    { params: {}, query: {}, body: webhook },
+    {
+      identity: testMachineIdentity(
+        {
+          clientId: createIdentity("client_identity"),
+          name: "harness",
+          resourceIdentity: "worker:kanthord:binding",
+          issuedAt: Date.now(),
+          projectId: project.id,
+        },
+        ulid(),
+      ),
+      idempotencyKey: ulid(),
+    },
+  );
+  assert.equal(machine.type, OperationResultType.Failure);
+  if (machine.type !== OperationResultType.Failure) return;
+  assert.equal(machine.status, HttpStatus.Unauthorized);
+  assert.equal(machine.error.error.code, INBOUND_UNAUTHORIZED);
+  assert.equal(inboundCount(), INBOUND_ONE_ROW);
+});
+
+test("published inbound reads are human unary routes", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const list = resolved.paths?.["/api/intake/inbound"]?.get as
+    ResolvedOperation | undefined;
+  const get = resolved.paths?.["/api/intake/inbound/{inbound_id}"]?.get as
+    ResolvedOperation | undefined;
+  assert.equal(list?.operationId, intakeOperations["inbound.list"].id);
+  assert.equal(list?.["x-access-policy"], AccessPolicy.Human);
+  assert.equal(get?.operationId, intakeOperations["inbound.get"].id);
+  assert.equal(get?.["x-access-policy"], AccessPolicy.Human);
+});
+
+test("inbound get answers the webhook secret over HTTP, refuses another prefix and logs no secret", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const authorization = `Bearer ${fixture.token}`;
+  const project = projectOperations.create.output.parse(
+    await (
+      await fixture.request(projectOperations.create.path, {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+          "Idempotency-Key": ulid(),
+        },
+        body: JSON.stringify({ name: "inbound-reads" }),
+      })
+    ).json(),
+  );
+  const created = await fixture.request(
+    intakeOperations["inbound.create"].path,
+    {
+      method: "POST",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json",
+        "Idempotency-Key": ulid(),
+      },
+      body: JSON.stringify({
+        project_id: project.id,
+        kind: "webhook",
+        platform: "github",
+        consumer: "mission.delivery.admit",
+        configuration: { resource: "owner/repo" },
+      }),
+    },
+  );
+  assert.equal(created.status, INBOUND_CREATED);
+  const inbound = intakeOperations["inbound.create"].output.parse(
+    await created.json(),
+  );
+  const read = (path: string) =>
+    fixture.request(path, { headers: { Authorization: authorization } });
+  const got = await read(`/api/intake/inbound/${inbound.id}`);
+  assert.equal(got.status, HttpStatus.OK);
+  const answer = webhookInboundSchema.parse(await got.json());
+  assert.equal(answer.address, `/hooks/${inbound.id}`);
+  const listed = await read(
+    `/api/intake/inbound?project_id=${project.id}&kind=webhook`,
+  );
+  assert.equal(listed.status, HttpStatus.OK);
+  const page = intakeOperations["inbound.list"].output.parse(
+    await listed.json(),
+  );
+  assert.deepEqual(
+    page.items.map((item) => item.id),
+    [inbound.id],
+  );
+  const other = await read(
+    `/api/intake/inbound/${createIdentity("outbound_request")}`,
+  );
+  assert.equal(other.status, HttpStatus.BadRequest);
+  assert.equal(
+    errorSchema.parse(await other.json()).error.code,
+    INBOUND_VALIDATION_FAILED,
+  );
+  assert.ok(fixture.logs.length > INBOUND_NO_LOGS);
+  for (const line of fixture.logs)
+    assert.equal(line.includes(answer.secret), false);
+});
+
+test("published inbound delete is a human route with a bodyless 204 response", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const remove = resolved.paths?.["/api/intake/inbound/{inbound_id}"]
+    ?.delete as ResolvedOperation | undefined;
+  assert.equal(remove?.operationId, intakeOperations["inbound.delete"].id);
+  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), "openapi/intake/inbound.delete.yaml"),
+      "utf8",
+    ),
+  );
+  assert.equal(fragment.pathItem.delete["x-mutation"], true);
+  assert.equal(
+    fragment.pathItem.delete.responses[HttpStatus.NoContent].content,
+    undefined,
+  );
+});
+
+test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const authorization = `Bearer ${fixture.token}`;
+  const project = projectOperations.create.output.parse(
+    await (
+      await fixture.request(projectOperations.create.path, {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+          "Idempotency-Key": ulid(),
+        },
+        body: JSON.stringify({ name: "inbound-deletes" }),
+      })
+    ).json(),
+  );
+  const inbound = intakeOperations["inbound.create"].output.parse(
+    await (
+      await fixture.request(intakeOperations["inbound.create"].path, {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+          "Idempotency-Key": ulid(),
+        },
+        body: JSON.stringify({
+          project_id: project.id,
+          kind: "webhook",
+          platform: "github",
+          consumer: "mission.delivery.admit",
+          configuration: { resource: "owner/repo" },
+        }),
+      })
+    ).json(),
+  );
+  const path = `/api/intake/inbound/${inbound.id}`;
+  const remove = () =>
+    fixture.request(path, {
+      method: "DELETE",
+      headers: { Authorization: authorization, "Idempotency-Key": ulid() },
+    });
+  const deleted = await remove();
+  assert.equal(deleted.status, HttpStatus.NoContent);
+  assert.equal(await deleted.text(), INBOUND_EMPTY_BODY);
+  for (const response of [
+    await fixture.request(path, { headers: { Authorization: authorization } }),
+    await remove(),
+  ]) {
+    assert.equal(response.status, HttpStatus.NotFound);
+    assert.equal(
+      errorSchema.parse(await response.json()).error.code,
+      INBOUND_NOT_FOUND,
+    );
+  }
+});
+
+test("delivery admission has no HTTP route and no OpenAPI operation", async (t) => {
+  const operation = missionOperations["delivery.admit"];
+  assert.equal(routedOperationIds.has(operation.id), false);
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
+    Object.values(path ?? {})
+      .filter((item) => isObject(item) && "operationId" in item)
+      .map((item) => (item as ResolvedOperation).operationId),
+  );
+  assert.equal(published.includes(operation.id), false);
+  assert.equal(
+    Object.keys(resolved.paths ?? {}).includes(operation.path),
+    false,
+  );
+  const fixture = await gatewayFixture(t);
+  const response = await fixture.request(operation.path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${fixture.token}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": ulid(),
+    },
+    body: JSON.stringify({}),
+  });
+  assert.equal(response.status, HttpStatus.NotFound);
+  await response.body?.cancel();
 });

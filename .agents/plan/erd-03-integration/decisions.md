@@ -105,11 +105,14 @@ The pages leave the values below open, and HANDOFF names them for the implementa
 | `RESULT_MAX_BYTES`          | 65536  | `docs/reference/erd/03-integration.md:80`, `:148`                          |
 | `DELETE_IDS_MAX`            | 1000   | the `--id` list of `engine/docs/cli/intake.md:157`, `:163`                 |
 | `PLATFORM_CALL_DEADLINE_MS` | 30000  | `intake-service.impl.md:39`, `:65`                                         |
+| `READ_ANSWER_MARGIN_MS`     | 1000   | `intake-service.impl.md:39`                                                |
 | `GIT_WRITE_DEADLINE_MS`     | 540000 | `intake-service.md:127`                                                    |
 | `ACTION_PERFORM_TIMEOUT_MS` | 600000 | below the 900 s of `worker.action.request` (`gateway-service.impl.md:302`) |
 | `ADMISSION_CONCURRENCY`     | 1      | `mission-service.md:832` (a separate bound of admission processing)        |
 
-A range delete of events or of outbound requests has no row bound until HANDOFF lands (`engine/docs/cli/intake.md:319–320`); it deletes every matching row in one transaction, and the task states the gap. The bound of an event is the 50 MiB body limit of a delivery (`gateway-service.impl.md:210`). Every other Intake route takes the default 30 s timeout (`gateway-service.impl.md:298`).
+Ulrich accepted the values of this table as the ERD 3 values. The HANDOFF item stays open only for the acceptance tests of the 1,000-project workload.
+
+A range delete of events or of outbound requests that matches more than `DELETE_IDS_MAX` rows is refused with the `filter_invalid` code of that operation and deletes nothing; the caller narrows the range. The bound of an event is the 50 MiB body limit of a delivery (`gateway-service.impl.md:210`). Every other Intake route takes the default 30 s timeout (`gateway-service.impl.md:298`).
 
 ## D13 — The webhook receipt route
 
@@ -162,7 +165,7 @@ ERD 2 decision D24 stands. The Intake tables use the indexes `intake_inbound_eve
 
 ## D21 — Standing precedents and boundary changes
 
-ERD 2 decision D23 stands. Plan 01 adds `intake` to the `service` element pattern of `eslint.config.js` and the `service-mint.ts` rule of `architecture.impl.md:821`, `:940`. The test files of `apps-server` keep the allowances of ERD 2 decision D23.
+ERD 2 decision D23 stands. Plan 01 adds `intake` to the `service` element pattern of `eslint.config.js` and the `service-mint.ts` rule of `architecture.impl.md:821`, `:940`. The test files of `apps-server` keep the allowances of ERD 2 decision D23. Plan 03 admits `src/mission/test-support.ts` for the apps-server test files, because the D7 service-identity tests sit under `src/apps/server/`.
 
 ## D22 — Pre-existing deviations are findings, not blockers
 

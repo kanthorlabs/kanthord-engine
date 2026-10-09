@@ -1,0 +1,271 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  delete:
+    operationId: intake.inbound.delete
+    tags:
+      - intake
+    description: Delete an inbound and its events; a delete calls no platform and
+      refuses while a pending event exists.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: inbound_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/intake.inbound.delete.Input/properties/params/prope\
+            rties/inbound_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "204":
+        description: Completed result
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+  get:
+    operationId: intake.inbound.get
+    tags:
+      - intake
+    description: Get one inbound; a webhook inbound adds its address and its
+      verification secret.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: inbound_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/intake.inbound.get.Input/properties/params/properti\
+            es/inbound_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/intake.inbound.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    intake.inbound.delete.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            inbound_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^inbound_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: inbound_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - inbound_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    intake.inbound.delete.Output:
+      type: "null"
+    intake.inbound.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            inbound_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^inbound_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: inbound_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - inbound_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    intake.inbound.get.Output:
+      anyOf:
+        - type: object
+          properties:
+            id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^inbound_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: inbound_ followed by a canonical 26-character uppercase ULID.
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            kind:
+              type: string
+              enum:
+                - webhook
+                - poll
+            platform:
+              type: string
+              enum:
+                - github
+            consumer:
+              type: string
+              enum:
+                - mission.delivery.admit
+            credential:
+              anyOf:
+                - type: string
+                  minLength: 1
+                - type: "null"
+            configuration:
+              type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+            checkpoint:
+              anyOf:
+                - {}
+                - type: "null"
+            created_at:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            address:
+              type: string
+              minLength: 1
+            secret:
+              type: string
+              minLength: 1
+          required:
+            - id
+            - project_id
+            - kind
+            - platform
+            - consumer
+            - credential
+            - configuration
+            - checkpoint
+            - created_at
+            - address
+            - secret
+          additionalProperties: false
+        - type: object
+          properties:
+            id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^inbound_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: inbound_ followed by a canonical 26-character uppercase ULID.
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            kind:
+              type: string
+              enum:
+                - webhook
+                - poll
+            platform:
+              type: string
+              enum:
+                - github
+            consumer:
+              type: string
+              enum:
+                - mission.delivery.admit
+            credential:
+              anyOf:
+                - type: string
+                  minLength: 1
+                - type: "null"
+            configuration:
+              type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+            checkpoint:
+              anyOf:
+                - {}
+                - type: "null"
+            created_at:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+          required:
+            - id
+            - project_id
+            - kind
+            - platform
+            - consumer
+            - credential
+            - configuration
+            - checkpoint
+            - created_at
+          additionalProperties: false

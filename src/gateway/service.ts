@@ -37,7 +37,11 @@ import type { Invocation } from "./invocation.ts";
 import { parseJSON } from "./json.ts";
 import { gatewayOperations, type InventoryCollector } from "./contract.ts";
 import { registerGatewayOperations } from "./declarations.ts";
-import { AccessPolicy, OperationLifetime } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  hasHttpRoute,
+  OperationLifetime,
+} from "../kernel/operation.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { isString } from "../kernel/values.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
@@ -355,6 +359,7 @@ export class GatewayService implements Service {
         const method = context.req.header("access-control-request-method");
         const found = this.registry.all().some(
           ({ operation }) =>
+            hasHttpRoute(operation) &&
             operation.method === method &&
             new RegExp(
               `^${operation.path
@@ -429,9 +434,12 @@ export class GatewayService implements Service {
   }
 
   private registerRoutes(): void {
-    for (const { operation } of [...this.registry.all()].sort((left, right) =>
-      compareRouteSpecificity(left.operation.path, right.operation.path),
-    )) {
+    for (const { operation } of this.registry
+      .all()
+      .filter(({ operation }) => hasHttpRoute(operation))
+      .sort((left, right) =>
+        compareRouteSpecificity(left.operation.path, right.operation.path),
+      )) {
       const maxSize =
         operation.maxBodyBytes ??
         (operation.path.startsWith("/api/auth/")

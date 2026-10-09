@@ -134,21 +134,13 @@ test("repository and produced submissions publish atomically and repeated submis
 test("object submissions sign pinned keys and commit pending assets after PUT preparation", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
   const sha256 = "b".repeat(64);
-  h.dependencies.intakeStorage.put = async (
-    _call,
-    binding,
-    key,
-    size,
-    checksum,
-  ) => {
-    assert.deepEqual(binding, h.storage);
-    assert.ok(
-      key.startsWith(
-        `prefix/${h.project_id}/${h.mission_id}/${h.node_id}/1/evidence_asset_`,
-      ),
-    );
-    assert.equal(size, SINGLE_ITEM);
-    assert.equal(checksum, sha256);
+  h.dependencies.intakeStorage.put = async (call, input) => {
+    assert.equal(call.executionId, h.claim.executionId);
+    assert.equal(input.nodeId, h.node_id);
+    assert.ok(input.assetId.startsWith("evidence_asset_"));
+    assert.equal(input.storageBindingId, h.storage.binding_id);
+    assert.equal(input.size, SINGLE_ITEM);
+    assert.equal(input.sha256, sha256);
     return {
       put_url: "https://storage.example/put",
       headers: { checksum: sha256 },
@@ -179,6 +171,11 @@ test("object submissions sign pinned keys and commit pending assets after PUT pr
     UPLOAD_LIFETIME_MS,
   );
   assert.equal(result.uploads[FIRST_ASSET_INDEX]!.asset_id, asset.id);
+  if (asset.kind !== AssetKind.Object) assert.fail();
+  assert.equal(
+    asset.address.location,
+    `s3://bucket/prefix/${h.project_id}/${h.mission_id}/${h.node_id}/1/${asset.id}`,
+  );
 });
 
 test("storage absence, failed signing and revoked claims write no evidence", async (t) => {

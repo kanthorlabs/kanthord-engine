@@ -16,6 +16,7 @@ import {
 import { encrypt } from "./envelope.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CustodyComponent } from "./service.ts";
+import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const ENVELOPE_KEY = Buffer.alloc(32, 7);
@@ -83,6 +84,20 @@ function fixture(t: TestContext) {
         throw new Error("UNEXPECTED_COLLABORATION");
       },
     },
+    missionAuthorization: {
+      frozenAction: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      requestEvidence: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      evidenceAsset: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      objectPut: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+    },
     clientSecret: () => Buffer.alloc(32, 9).toString("base64"),
     store,
     platforms: {},
@@ -91,6 +106,7 @@ function fixture(t: TestContext) {
     agentProvidersDependentOn: () => [],
     bindingsNaming: () => [],
     inboundsNaming: () => [],
+    intakeServiceName: INTAKE_SERVICE_NAME,
   });
   const calls: ProbeCall[] = [];
   return { store, component, calls, set: platformSet(calls) };

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { ulid } from "ulid";
 import type { MachineIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
-import { CodedError, OperationError } from "../kernel/errors.ts";
+import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
   OperationResultType,
@@ -60,7 +60,18 @@ type UncertainItem = Extract<
   ActionResultItem,
   { kind: typeof ActionResultKind.Uncertain }
 >;
-const UNWIRED_CODE = "system.composition.unwired";
+const IN_FLIGHT_CODE = "intake.outbound.request.in_flight";
+
+function provesNoWrite(error: unknown): boolean {
+  if (!(error instanceof OperationError)) return false;
+  assert.ok(error.code.length, "A refusal names its code.");
+  assert.ok(Number.isInteger(error.status), "A refusal carries a status.");
+  if (error.code === IN_FLIGHT_CODE) return false;
+  return (
+    error.status >= HttpStatus.BadRequest &&
+    error.status < HttpStatus.InternalServerError
+  );
+}
 
 function requestKeyOf(pending: Pending): string {
   const base = `${pending.key.nodeId}/${pending.key.attempt}/${pending.entry.action.key}`;
@@ -248,13 +259,15 @@ export class ActionPerformer {
     try {
       return await this.dependencies.intakeActions.perform(
         call,
-        pending.entry.action,
-        pending.operands,
+        {
+          key: pending.entry.action.key,
+          commit: pending.operands.commit,
+          reusedEvidenceId: pending.operands.reusedEvidenceId,
+        },
         requestKeyOf(pending),
       );
     } catch (error) {
-      if (error instanceof CodedError && error.code === UNWIRED_CODE)
-        noEffect();
+      if (provesNoWrite(error)) noEffect();
       throw error;
     }
   }
@@ -280,12 +293,14 @@ export class ActionPerformer {
       const answer = await this.dependencies.intakeActions.read(
         call,
         ActionReadMethod.PullRequestGet,
-        candidate.address,
+        candidate.evidence_id,
+        {},
       );
       if (isResultClass(answer))
         return readRefusalItem(pending.key.action, answer);
       if (!fulfils(answer.body, operands, entry.resource_identity)) continue;
       operands.reusedAddress = candidate.address;
+      operands.reusedEvidenceId = candidate.evidence_id;
       break;
     }
     return null;

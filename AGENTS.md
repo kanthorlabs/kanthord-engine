@@ -30,6 +30,7 @@ engine/
 │   │   ├── operation.ts        # Operations, structural registry, callers, and client results
 │   │   ├── caller.ts           # Identity types, provenance, and predicates
 │   │   ├── caller-mint.ts      # Identity minting entry reserved for Gateway
+│   │   ├── service-mint.ts     # Service identity factory reserved for the server composition root
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
 │   │   ├── handover.ts         # Handover keys, additional authenticated data and envelope codec
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas
@@ -42,10 +43,11 @@ engine/
 │   │   ├── probe.ts            # Remote HTTP probe and failure-reason redaction
 │   │   ├── assets.ts           # Shipped assets from the single binary or static/
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
-│   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, and repository credentials
+│   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, server-side git write and landing read, and repository credentials
 │   │   ├── contract.ts         # Repository credential route group
 │   │   ├── credential-platform.ts # github platform validator and GitHub probe
-│   │   └── credential.ts       # Repository credential routes over custody records and binding dependents
+│   │   ├── credential.ts       # Repository credential routes over custody records and binding dependents
+│   │   └── github.ts           # GitHub platform implementation: per-call octokit client, result classes, the delivery classification and the event decoder
 │   ├── llm/                    # LLM component: LLM platforms, credential routes, OAuth login sessions, and the model connector
 │   │   ├── contract.ts         # LLM credential route group, login and provider check operations, and error codes
 │   │   ├── index.ts            # Component and platform table exports
@@ -77,11 +79,12 @@ engine/
 │   │   ├── enablements.ts      # Revision, tombstone, pagination, and dependency store reads
 │   │   ├── configuration.ts    # Shared provider, model, and reasoning-level validation
 │   │   └── service.ts          # Enablement routes, entry validation, agent views, and provider healthchecks
-│   ├── storage/                # Storage component: storage platforms and credential routes
+│   ├── storage/                # Storage component: storage platforms, credential routes, and the S3 presign, object read and object delete
 │   │   ├── contract.ts         # Storage credential route group
 │   │   ├── index.ts            # Component and platform table exports
 │   │   ├── platforms.ts        # s3 platform validator and metadata schema
 │   │   ├── probe.ts            # S3 HeadBucket probe
+│   │   ├── s3.ts               # S3 implementation: presigned PUT and GET, object metadata read, object delete and result classes
 │   │   └── service.ts          # Storage credential routes over custody records and binding dependents
 │   ├── custody/                # Custody component: credential store, envelope, revisions, record functions, release, and handover
 │   │   ├── contract.ts         # Secret shapes, record schemas, platform set types, and record functions
@@ -97,6 +100,34 @@ engine/
 │   │   ├── migrations.ts       # project_project and project_binding tables
 │   │   ├── store.ts            # Binding-set read, compare-and-swap write, pagination, and resource identity derivation
 │   │   └── service.ts          # Lifecycle, operation handlers, and collaboration implementations
+│   ├── intake/                 # Intake Service: inbound events and outbound requests
+│   │   ├── contract.ts         # Service name, closed sets, bounds, error codes, outbound schemas, action operations, action table, address and result-class schemas, storage operations, inbound schemas, inbound operations, the inbound collaboration type, the inbound event schema, the event operations and the receipt, and operations
+│   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
+│   │   ├── configuration.ts    # Inbound configuration schema per kind and platform, and resource identity
+│   │   ├── inbound-store.ts    # Inbound rows, the record projection, the checkpoint write, the poll inbound list, the list of every inbound, pending event count, and delete with events
+│   │   ├── inbound-create.ts   # Inbound create: admission of a webhook and a poll, project check, the poll release and first request, credential check, insert step, and loop start
+│   │   ├── inbound-delete.ts   # Inbound delete that refuses a pending event and removes the events and the row
+│   │   ├── inbound-read.ts     # Inbound list with a cursor and get with the webhook address and secret
+│   │   ├── event-store.ts      # Inbound event rows, the repeat lookup, pending count, the oldest pending read, conditional state writes, the event deletes, and the record projection
+│   │   ├── event-read.ts       # Inbound event list with a cursor and get by identity
+│   │   ├── event-write.ts      # Inbound event retry, discard and delete, with the in-flight refusal of a discard
+│   │   ├── dispatcher.ts       # Event handoff: oldest pending selection, reservation in the in-flight set, consumer call, and conditional state write
+│   │   ├── poll.ts             # Poll loops: one loop per inbound, the cycle with its capacity pause and release, and the batch with its checkpoint
+│   │   ├── health.ts           # Inbound resource inventory: one entry per inbound, the poll check with its release and request, and the webhook check
+│   │   ├── receipt.ts          # Webhook receipt: inbound lookup, signature check, handshake, capacity bound, and insert
+│   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection
+│   │   ├── outbound.ts         # Outbound runner: admission, in-flight set, deadline, read-back, and state commit
+│   │   ├── outbound-read.ts    # Outbound request list and get handlers
+│   │   ├── outbound-write.ts   # Outbound request discard and delete handlers
+│   │   ├── action-check.ts     # Check of a request evidence: authorization, release, and platform fold
+│   │   ├── action-perform.ts   # Configured action: action table lookup, authorization, platform write, and read-backs
+│   │   ├── action-read.ts      # Read of a request evidence: authorization, release, and platform body
+│   │   ├── address-codec.ts    # Stored form of a platform address in an outbound result
+│   │   ├── storage.ts          # Presigned PUT and GET and the object check: authorization, release and Storage call
+│   │   ├── storage-delete.ts   # Object delete: s3.delete_object, its read-back and its stored status
+│   │   ├── webhook-secret.ts   # Verification secret of a webhook inbound, derived from the master key
+│   │   ├── test-support.ts     # Unused action collaborations and a master key for Intake unit tests
+│   │   └── service.ts          # Lifecycle, health probe, resource inventory, the `inboundsNaming` collaboration, the inbound removal notice and the event wake notice
 │   ├── mission/                # Mission Service: mission graph, criteria, evidence, and outcomes
 │   │   ├── contract.ts         # Mission schemas, operations, and collaboration types
 │   │   ├── index.ts            # Service, dependencies, configuration fragment, and migrations
@@ -126,6 +157,8 @@ engine/
 │   │   ├── assessment-admit.ts # Evidence, result and tested-input admission
 │   │   ├── assessment-submit.ts # Assessment insertion and eligible closure
 │   │   ├── node-check.ts      # On-demand checks and write-once end states
+│   │   ├── delivery-match.ts  # Delivery admission match of a platform address to a request
+│   │   ├── delivery-admit.ts  # Delivery admission: decode, match, Intake check and end-state commit
 │   │   └── service.ts          # Lifecycle, health, and collaboration implementations
 │   ├── scheduler/              # Scheduler Service: work queue, execution claims, history, and loss settlement
 │   │   ├── contract.ts         # Execution schemas, operations, and collaboration contracts
@@ -205,6 +238,9 @@ engine/
 │       │   ├── repository.ts   # Repository command group
 │       │   ├── storage.ts      # Storage command group
 │       │   ├── agent.ts        # Agent command group
+│       │   ├── intake.ts       # Intake command group and outbound request commands
+│       │   ├── intake-inbound.ts # Intake inbound commands
+│       │   ├── intake-event.ts # Intake inbound event commands
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton
 │           ├── api.ts          # Server operation clients and bounded backoff

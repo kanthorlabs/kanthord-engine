@@ -1,6 +1,5 @@
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { sign } from "hono/jwt";
 import { ulid } from "ulid";
 import { Diagnostic } from "../kernel/errors.ts";
 import { deriveKey } from "../kernel/json.ts";
@@ -103,6 +102,7 @@ async function generateJWT(
   const exp = iat + lifetime;
   assert.ok(Number.isSafeInteger(exp));
   assert.ok(Number.isSafeInteger(exp * MILLISECONDS_PER_SECOND));
+  const { sign } = await import("hono/jwt");
   return {
     token: await sign(
       { ...claims, iat, exp, jti: ulid() },

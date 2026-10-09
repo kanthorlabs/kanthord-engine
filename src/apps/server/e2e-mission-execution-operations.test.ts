@@ -15,7 +15,7 @@ import {
   ActorService,
   AssessmentResult,
   AssetKind,
-  CheckEndState,
+  PlatformAddressKind,
   ClosingEvent,
   NodeState,
   Resolution,
@@ -36,9 +36,8 @@ import {
 import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
-  objectSink,
-  sinkStorage,
-  scriptedCheck,
+  fakeGitHub,
+  fakeS3,
 } from "./test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
@@ -101,19 +100,14 @@ function completed<T>(result: OperationResult<T>): T {
 }
 
 async function setup(t: TestContext) {
-  const sink = await objectSink(t);
+  const s3 = await fakeS3(t);
+  const gitHub = await fakeGitHub(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
-    standIns: {
-      intakeStorage: sinkStorage(sink),
-      intakeCheck: scriptedCheck({
-        end_state: CheckEndState.Expected,
-        landed_commits: [LANDED],
-      }),
-    },
+    github: { baseUrl: gitHub.endpoint },
   });
   const directory = temporary(t);
   const H = {
@@ -169,8 +163,8 @@ async function setup(t: TestContext) {
     name: "store",
     platform: "s3",
     metadata: {
-      endpoint: "https://s3.example.com",
-      bucket: "evidence",
+      endpoint: s3.endpoint,
+      bucket: s3.bucket,
       region: "eu-central-1",
     },
     secret: {
@@ -208,8 +202,8 @@ async function setup(t: TestContext) {
         kind: "storage",
         config: {
           available: true,
-          endpoint: "https://s3.example.com",
-          bucket: "evidence",
+          endpoint: s3.endpoint,
+          bucket: s3.bucket,
           region: "eu-central-1",
           prefix: "kanthord",
           credential: "store",
@@ -297,7 +291,8 @@ async function setup(t: TestContext) {
   assert.ok(initiative && objectiveA && objectiveB);
   assert.ok(binding("repo").id);
   return {
-    sink,
+    s3,
+    gitHub,
     read,
     write,
     refuses,
@@ -460,7 +455,9 @@ test(
         }),
       );
       assert.ok(
-        object.uploads[FIRST_ITEM_INDEX]!.put_url.startsWith(h.sink.endpoint),
+        object.uploads[FIRST_ITEM_INDEX]!.put_url.startsWith(
+          `${h.s3.endpoint}/${h.s3.bucket}/kanthord/`,
+        ),
       );
       assert.equal(
         object.evidence.assets[FIRST_ITEM_INDEX]!.published_at,
@@ -713,14 +710,20 @@ test(
       assert.equal(answer.outcome, null);
     });
     await t.test("E04.23 action request and duplicate refusal", async () => {
+      const number = h.gitHub.open({
+        owner: "owner",
+        repo: "gated",
+        head: `kanthord/${h.objectiveB}`,
+        base: "main",
+      });
       const body = {
         ...ctx(e4),
         requirement_key: "gated.pull_request",
-        subject: "pull request 42",
+        subject: `pull request ${number}`,
         address: {
           kind: "pull_request" as const,
           resource_identity: h.binding("gated").resource_identity,
-          number: 42,
+          number,
         },
       };
       request = completed(
@@ -801,6 +804,10 @@ test(
       );
     });
     await t.test("E04.26 observed expected end closes B", async () => {
+      const address = request.assets[FIRST_ITEM_INDEX]!;
+      assert.ok(address.kind === AssetKind.Platform);
+      assert.ok(address.address.kind === PlatformAddressKind.PullRequest);
+      h.gitHub.merge(address.address.number, LANDED);
       const answer = await h.write<{
         results: { resolution: string }[];
         failures: unknown[];

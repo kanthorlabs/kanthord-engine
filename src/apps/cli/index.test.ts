@@ -1317,3 +1317,233 @@ test("launcher rejects an unsupported runtime before importing application code"
     assert.match(result.stderr, />=24.15.0 <25/);
   }
 });
+
+test("intake outbound commands expose offline help, reject --config and validate identities before I/O", (t) => {
+  const env = environment(temporary(t));
+  const outboundId = "outbound_request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  for (const args of [
+    ["intake", "--help"],
+    ["intake", "outbound", "--help"],
+    ["intake", "outbound", "list", "--help"],
+    ["intake", "outbound", "get", "--help"],
+    ["intake", "outbound", "discard", "--help"],
+    ["intake", "outbound", "delete", "--help"],
+  ]) {
+    const help = invocation(args, env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+  }
+  for (const leaf of [
+    ["list"],
+    ["get", outboundId],
+    ["discard", outboundId],
+    ["delete"],
+  ]) {
+    const result = invocation(
+      ["intake", "outbound", ...leaf, "--config", "x.yaml"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
+  }
+  const invalid = invocation(["intake", "outbound", "get", "bad"], env);
+  assert.equal(invalid.status, ExitCode.Failure);
+  assert.match(
+    invalid.stderr,
+    /^cli\.intake\.outbound\.get\.invalid_outbound_request_id:/,
+  );
+  const discard = invocation(["intake", "outbound", "discard", "bad"], env);
+  assert.match(
+    discard.stderr,
+    /^cli\.intake\.outbound\.discard\.invalid_outbound_request_id:/,
+  );
+  const repeated = invocation(
+    ["intake", "outbound", "list", "--state", "failed", "--state", "failed"],
+    env,
+  );
+  assert.match(repeated.stderr, /^cli\.option\.duplicate:/);
+  const outOfRange = invocation(
+    [
+      "intake",
+      "outbound",
+      "list",
+      "--limit",
+      "1001",
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "t",
+    ],
+    env,
+  );
+  assert.equal(outOfRange.status, ExitCode.Failure);
+  assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
+});
+
+test("intake inbound commands expose offline help, reject --config and validate identities before I/O", (t) => {
+  const env = environment(temporary(t));
+  const inboundId = "inbound_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  for (const args of [
+    ["intake", "inbound", "--help"],
+    ["intake", "inbound", "create", "--help"],
+    ["intake", "inbound", "list", "--help"],
+    ["intake", "inbound", "get", "--help"],
+    ["intake", "inbound", "delete", "--help"],
+  ]) {
+    const help = invocation(args, env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+  }
+  for (const leaf of [
+    ["create", "--file", "x.json"],
+    ["list"],
+    ["get", inboundId],
+    ["delete", inboundId],
+  ]) {
+    const result = invocation(
+      ["intake", "inbound", ...leaf, "--config", "x.yaml"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
+  }
+  const get = invocation(["intake", "inbound", "get", "bad"], env);
+  assert.equal(get.status, ExitCode.Failure);
+  assert.match(get.stderr, /^cli\.intake\.inbound\.get\.invalid_inbound_id:/);
+  const remove = invocation(["intake", "inbound", "delete", "bad"], env);
+  assert.match(
+    remove.stderr,
+    /^cli\.intake\.inbound\.delete\.invalid_inbound_id:/,
+  );
+  const create = invocation(["intake", "inbound", "create"], env);
+  assert.equal(create.status, ExitCode.Failure);
+  assert.match(create.stderr, /--file/);
+  const outOfRange = invocation(
+    [
+      "intake",
+      "inbound",
+      "list",
+      "--limit",
+      "1001",
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "t",
+    ],
+    env,
+  );
+  assert.equal(outOfRange.status, ExitCode.Failure);
+  assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
+});
+
+test("intake event commands expose offline help, reject --config and validate before I/O", (t) => {
+  const env = environment(temporary(t));
+  const eventId = "inbound_event_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  for (const args of [
+    ["intake", "event", "--help"],
+    ["intake", "event", "list", "--help"],
+    ["intake", "event", "get", "--help"],
+    ["intake", "event", "retry", "--help"],
+    ["intake", "event", "discard", "--help"],
+    ["intake", "event", "delete", "--help"],
+  ]) {
+    const help = invocation(args, env);
+    assert.equal(help.status, ExitCode.Success, help.stderr);
+  }
+  for (const leaf of [
+    ["list"],
+    ["get", eventId],
+    ["retry", eventId],
+    ["discard", eventId],
+    ["delete", "--id", eventId],
+  ]) {
+    const result = invocation(
+      ["intake", "event", ...leaf, "--config", "x.yaml"],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /unknown option/);
+  }
+  const get = invocation(["intake", "event", "get", "bad"], env);
+  assert.equal(get.status, ExitCode.Failure);
+  assert.match(
+    get.stderr,
+    /^cli\.intake\.event\.get\.invalid_inbound_event_id:/,
+  );
+  for (const leaf of ["retry", "discard"]) {
+    const bad = invocation(["intake", "event", leaf, "bad"], env);
+    assert.equal(bad.status, ExitCode.Failure);
+    assert.match(
+      bad.stderr,
+      new RegExp(`^cli\\.intake\\.event\\.${leaf}\\.invalid_inbound_event_id:`),
+    );
+  }
+  for (const leaf of [["retry", eventId], ["discard", eventId], ["delete"]]) {
+    const result = invocation(["intake", "event", ...leaf], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(
+      result.stderr,
+      new RegExp(`^cli\\.intake\\.event\\.${leaf[0]}\\.token_required:`),
+    );
+  }
+  const outOfRange = invocation(
+    [
+      "intake",
+      "event",
+      "list",
+      "--limit",
+      "1001",
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "t",
+    ],
+    env,
+  );
+  assert.equal(outOfRange.status, ExitCode.Failure);
+  assert.match(outOfRange.stderr, /^cli\.pagination\.limit_out_of_range:/);
+});
+
+test("intake outbound discard prints the generated key when the result is indeterminate", (t) => {
+  const env = environment(temporary(t));
+  const args = [
+    "intake",
+    "outbound",
+    "discard",
+    "outbound_request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "--endpoint",
+    "http://127.0.0.1:1",
+    "--token",
+    "t",
+  ];
+  const result = invocation(args, env);
+  assert.equal(result.status, ExitCode.Failure);
+  assert.match(
+    result.stderr,
+    /^cli\.intake\.outbound\.discard\.indeterminate:/,
+  );
+  assert.match(
+    result.stderr,
+    /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
+  );
+});
+
+test("intake event mutations print the generated key when the result is indeterminate", (t) => {
+  const env = environment(temporary(t));
+  const eventId = "inbound_event_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const server = ["--endpoint", "http://127.0.0.1:1", "--token", "t"];
+  for (const leaf of [
+    ["retry", eventId],
+    ["discard", eventId],
+    ["delete", "--id", eventId],
+  ]) {
+    const result = invocation(["intake", "event", ...leaf, ...server], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(
+      result.stderr,
+      new RegExp(`^cli\\.intake\\.event\\.${leaf[0]}\\.indeterminate:`),
+    );
+    assert.match(
+      result.stderr,
+      /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
+    );
+  }
+});

@@ -13,6 +13,7 @@ import {
   type ResourceEntry,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import {
@@ -23,6 +24,7 @@ import {
   OWNER_AGENT,
   OWNER_WORKER,
   OWNER_PROJECT,
+  OWNER_INTAKE,
   type InventorySnapshot,
 } from "./contract.ts";
 import { collectInventories, resourceHealthReport } from "./health-report.ts";
@@ -50,6 +52,7 @@ const OWNERS = [
   OWNER_AGENT,
   OWNER_WORKER,
   OWNER_PROJECT,
+  OWNER_INTAKE,
 ] as const;
 
 function entry(
@@ -112,7 +115,7 @@ function fixture(t: TestContext, entries: InventorySnapshot["entries"] = []) {
   };
 }
 
-test("collectInventories isolates failing owners in llm, repository, storage, agent, worker, project order", (t) => {
+test("collectInventories isolates failing owners in llm, repository, storage, agent, worker, project, intake order", (t) => {
   const f = fixture(t);
   const calls: string[] = [];
   const llm = entry("credential");
@@ -148,6 +151,11 @@ test("collectInventories isolates failing owners in llm, repository, storage, ag
         assert.equal(received, tx);
         calls.push(OWNER_PROJECT);
         return [project];
+      },
+      intake: (received) => {
+        assert.equal(received, tx);
+        calls.push(OWNER_INTAKE);
+        return [];
       },
     }),
   );
@@ -187,6 +195,7 @@ test("report places every owner and scope with exact capabilities, encoded names
     agent: report.shared.agent,
     worker: report.services.worker,
     project: report.services.project,
+    intake: report.services.intake,
   };
   for (const [index, owner] of OWNERS.entries())
     assert.deepEqual(owners[owner], {
@@ -205,9 +214,14 @@ test("report places every owner and scope with exact capabilities, encoded names
         },
       },
     });
-  assert.deepEqual(report.services.intake, { global: {}, projects: {} });
   assert.equal(f.commits(), SINGLE_CHECK);
   assert.equal(f.collections(), SINGLE_CHECK);
+});
+
+test("an empty intake inventory answers fresh empty maps", async (t) => {
+  const f = fixture(t);
+  const report = await f.report();
+  assert.deepEqual(report.services.intake, { global: {}, projects: {} });
   report.services.intake.global.changed = {
     status: ResourceStatus.Unknown,
     capability: CAPABILITY,
@@ -216,6 +230,61 @@ test("report places every owner and scope with exact capabilities, encoded names
     global: {},
     projects: {},
   });
+  assert.equal(f.commits(), SINGLE_CHECK + SINGLE_CHECK);
+});
+
+test("an intake entry lands under services.intake.projects by project and inbound name", async (t) => {
+  const inbound = entry("inbound%2Fone", {
+    scope: HealthScope.Project,
+    project: "alpha",
+  });
+  const f = fixture(t, [{ owner: OWNER_INTAKE, entry: inbound }]);
+  const report = await f.report();
+  assert.deepEqual(report.services.intake, {
+    global: {},
+    projects: {
+      alpha: {
+        "inbound%2Fone": {
+          status: ResourceStatus.Healthy,
+          capability: CAPABILITY,
+        },
+      },
+    },
+  });
+  assert.deepEqual(report.services.project, { global: {}, projects: {} });
+});
+
+test("a throwing intake inventory answers 503 inventory_failed with intake missing", async (t) => {
+  const f = fixture(t);
+  const empty = () => [];
+  await assert.rejects(
+    resourceHealthReport(
+      f.caller,
+      () =>
+        f.store.transaction((tx) =>
+          collectInventories(tx, {
+            llm: empty,
+            repository: empty,
+            storage: empty,
+            agent: empty,
+            worker: empty,
+            project: empty,
+            intake: () => {
+              throw CHECK_ERROR;
+            },
+          }),
+        ),
+      f.logger,
+      LIMITS,
+    ),
+    {
+      status: HttpStatus.ServiceUnavailable,
+      code: "gateway.healthcheck.inventory_failed",
+      details: { missing_inventories: [OWNER_INTAKE] },
+    },
+  );
+  assert.equal(f.commits(), EMPTY_COUNT);
+  assert.equal(f.logs.length, EMPTY_COUNT);
 });
 
 test("shared targets use the first check once across owners and projects and log one safe record", async (t) => {

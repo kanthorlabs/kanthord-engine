@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { stringify } from "yaml";
 import { Command } from "commander";
-import { decode } from "hono/jwt";
-import { loadConfig } from "../../config/index.ts";
+import type { ServerConfig } from "../../config/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { isNumber, isObject, isString } from "../../kernel/values.ts";
@@ -32,7 +30,8 @@ const EXP_CLAIM = "exp";
 const MAX_DATE_SECONDS = 8640000000000;
 const BASE64URL_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
-function claims(token: string): Record<string, unknown> {
+async function claims(token: string): Promise<Record<string, unknown>> {
+  const { decode } = await import("hono/jwt");
   try {
     if (!token.split(".").every((part) => BASE64URL_SEGMENT.test(part)))
       throw new Error("Invalid JWT segments");
@@ -53,8 +52,8 @@ function claims(token: string): Record<string, unknown> {
   }
 }
 
-function renderClaims(token: string): string {
-  const lines = Object.entries(claims(token)).map(([key, value]) => {
+async function renderClaims(token: string): Promise<string> {
+  const lines = Object.entries(await claims(token)).map(([key, value]) => {
     const text =
       isString(value) || isNumber(value)
         ? String(value)
@@ -69,6 +68,11 @@ function renderClaims(token: string): string {
     return `${key}: ${text}${timestamp}`;
   });
   return `---\n${lines.join("\n")}\n---\n`;
+}
+
+async function loadServerConfig(path: string): Promise<ServerConfig> {
+  const { loadConfig } = await import("../../config/index.ts");
+  return loadConfig(path);
 }
 
 interface GenerateOptions {
@@ -159,7 +163,7 @@ export function addJWTCommand(program: Command): void {
       ) => {
         validateGenerateOptions(username, options);
         if (options.output === undefined) requireTokenTerminal(process.stdout);
-        const config = loadConfig(effectivePath(command));
+        const config = await loadServerConfig(effectivePath(command));
         const { token } =
           options.binding === undefined
             ? await generateHumanJWT(
@@ -184,11 +188,13 @@ export function addJWTCommand(program: Command): void {
               : { endpoint: options.endpoint }),
             token,
           });
+          const { stringify } = await import("yaml");
           writePrivate(path, stringify(document));
           process.stdout.write(`Created ${path}\n`);
         } else if (options.binding === undefined)
           process.stdout.write(`${token}\n`);
         else {
+          const { decode } = await import("hono/jwt");
           const { sub } = decode(token).payload;
           assert.ok(isString(sub));
           const clientSecret = deriveClientSecret(config.master_key, sub);
@@ -197,7 +203,7 @@ export function addJWTCommand(program: Command): void {
           );
         }
         if (command.optsWithGlobals().verbose)
-          process.stdout.write(renderClaims(token));
+          process.stdout.write(await renderClaims(token));
       },
     );
   configHelp(generate);
@@ -207,13 +213,13 @@ export function addJWTCommand(program: Command): void {
       "Decode claims locally without verification; token: argument, KANTHORD_TOKEN, then cli.yaml",
     )
     .argument("[token]", "JWT (otherwise KANTHORD_TOKEN or cli.yaml token)")
-    .action((token: string | undefined) => {
+    .action(async (token: string | undefined) => {
       const resolved = resolveClient({ token }).token;
       if (!resolved?.trim())
         throw new Diagnostic(
           "cli.jwt.inspect.token_required",
           "jwt inspect: supply a token argument, KANTHORD_TOKEN or cli.yaml token.",
         );
-      process.stdout.write(renderClaims(resolved));
+      process.stdout.write(await renderClaims(resolved));
     });
 }

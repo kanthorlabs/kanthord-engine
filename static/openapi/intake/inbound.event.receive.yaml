@@ -1,0 +1,82 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: intake.inbound.event.receive
+    tags:
+      - intake
+    description: Receive a signed platform delivery for a webhook inbound; store the
+      event once and acknowledge after the commit.
+    x-access-policy: delivery
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security: []
+    parameters:
+      - name: inbound_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/intake.inbound.event.receive.Input/properties/param\
+            s/properties/inbound_id"
+    requestBody:
+      required: true
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            contentEncoding: binary
+    responses:
+      "202":
+        description: Completed result
+      "204":
+        description: Completed result
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    intake.inbound.event.receive.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            inbound_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^inbound_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: inbound_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - inbound_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    intake.inbound.event.receive.Output:
+      type: "null"

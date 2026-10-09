@@ -30,7 +30,11 @@ import { compareRouteSpecificity } from "./service.ts";
 
 const HUMAN_USERNAME = "ulrich";
 const SINGLE_EXECUTION_COUNT = 1;
+const HANDSHAKE_SEGMENT = "handshake";
+const HANDSHAKE_HEADER = "x-test-kind";
+const EMPTY_RESPONSE_BODY = "";
 const DELIVERY_SIGNATURE = "exact";
+const DELIVERY_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
 const ExpectedErrorCode = {
   RouteNotFound: "gateway.routing.not_found",
   HostNotAllowed: "gateway.http.host_not_allowed",
@@ -455,20 +459,23 @@ test("timeout leaves a mutation in progress until its atomic commit, then replay
   assert.equal(count, SINGLE_EXECUTION_COUNT);
 });
 
-test("delivery forwards exact bytes/headers and the shutdown context closes an active stream", async (t) => {
+test("a delivery under /hooks forwards exact bytes and headers, refuses a body above 50 MiB, and the shutdown context closes an active stream", async (t) => {
   const registry = new OperationRegistry();
-  const bytes = Buffer.from([0xff, 0x00, 0x0d, 0x0a, 0x7b]);
+  const bytes = Buffer.from('{ "b" : 1,\r\n"a":2.0 }\n');
+  let delivered = 0;
   registry.register(
     {
       ...protectedRead,
       id: "test.delivery",
       method: "POST",
-      path: "/api/hooks/test",
+      path: "/hooks/:inbound_id",
       access: AccessPolicy.Delivery,
       delivery: true,
       output: z.strictObject({ accepted: z.boolean() }),
     },
     (_input, caller) => {
+      delivered += 1;
+      assert.equal(caller.identity, undefined);
       assert.deepEqual(Buffer.from(caller.delivery!.bytes), bytes);
       assert.equal(
         caller.delivery!.headers.get("x-signature"),
@@ -505,15 +512,27 @@ test("delivery forwards exact bytes/headers and the shutdown context closes an a
     },
   );
   const fixture = await gatewayFixture(t, { registry });
-  const delivery = await fixture.request("/api/hooks/test", {
+  const delivery = await fixture.request("/hooks/test", {
     method: "POST",
     headers: {
-      "Content-Type": "application/octet-stream",
+      "Content-Type": "application/json",
       "x-signature": "exact",
     },
     body: bytes,
   });
   assert.equal(delivery.status, HttpStatus.OK);
+  assert.equal(delivered, SINGLE_EXECUTION_COUNT);
+  const oversized = await fixture.request("/hooks/test", {
+    method: "POST",
+    headers: { "x-signature": DELIVERY_SIGNATURE },
+    body: Buffer.alloc(DELIVERY_BODY_LIMIT_BYTES + 1),
+  });
+  assert.equal(oversized.status, HttpStatus.PayloadTooLarge);
+  assert.equal(
+    errorSchema.parse(await oversized.json()).error.code,
+    ExpectedErrorCode.BodyTooLarge,
+  );
+  assert.equal(delivered, SINGLE_EXECUTION_COUNT);
   const token = fixture.token;
   const stream = await fixture.request("/api/mcp/test", {
     headers: { Authorization: `Bearer ${token}` },
@@ -530,6 +549,47 @@ test("delivery forwards exact bytes/headers and the shutdown context closes an a
     registry: 503,
     invocation: 503,
   });
+});
+
+test("a delivery answers the Response of its handler, after a commit or without one", async (t) => {
+  const registry = new OperationRegistry();
+  let committed = 0;
+  registry.register(
+    {
+      ...protectedRead,
+      id: "test.delivery.response",
+      method: "POST",
+      path: "/hooks/:inbound_id",
+      access: AccessPolicy.Delivery,
+      delivery: true,
+      status: HttpStatus.Accepted,
+      output: z.null(),
+    },
+    (_input, caller) => {
+      assert.ok(caller.delivery);
+      if (caller.delivery.headers.get(HANDSHAKE_HEADER) === HANDSHAKE_SEGMENT)
+        return new Response(null, { status: HttpStatus.NoContent });
+      caller.commit(() => {
+        committed += 1;
+        return null;
+      });
+      return new Response(null, { status: HttpStatus.Accepted });
+    },
+  );
+  const fixture = await gatewayFixture(t, { registry });
+  for (const [name, status] of [
+    ["event", HttpStatus.Accepted],
+    [HANDSHAKE_SEGMENT, HttpStatus.NoContent],
+  ] as const) {
+    const answer = await fixture.request("/hooks/test", {
+      method: "POST",
+      headers: { [HANDSHAKE_HEADER]: name },
+      body: "{}",
+    });
+    assert.equal(answer.status, status);
+    assert.equal(await answer.text(), EMPTY_RESPONSE_BODY);
+  }
+  assert.equal(committed, SINGLE_EXECUTION_COUNT);
 });
 
 test("client disconnect reaches waiting handlers", async (t) => {

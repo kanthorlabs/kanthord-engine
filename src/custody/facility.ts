@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { canonicalJSON } from "../kernel/json.ts";
-import type { Grant, Material, WorkbenchGrant } from "./contract.ts";
+import { isObject } from "../kernel/values.ts";
+import type {
+  Grant,
+  GrantFacts,
+  GrantOf,
+  GrantKind,
+  Material,
+  WorkbenchGrant,
+} from "./contract.ts";
 
 const grants = new WeakSet<object>();
+const minted = new WeakSet<object>();
+const DEEP_FREEZE_DEPTH_LIMIT = 32;
 
 export class FacilityError extends Error {
   constructor() {
@@ -11,19 +21,48 @@ export class FacilityError extends Error {
   }
 }
 
-export function mintGrant(fields: Grant): Grant {
-  assert(fields.credential.length);
-  assert(fields.execution.execution_id.length);
-  const grant = Object.freeze({
+function deepFrozen<T>(value: T, depth = 0): T {
+  assert(depth <= DEEP_FREEZE_DEPTH_LIMIT);
+  if (!isObject(value)) return value;
+  for (const item of Object.values(value)) deepFrozen(item, depth + 1);
+  return Object.freeze(value);
+}
+
+export function mintGrant<K extends GrantKind>(fields: GrantOf<K>): GrantOf<K> {
+  assert(fields.credential === null || fields.credential.length);
+  assert(fields.project_id.length);
+  assert(
+    fields.execution === null ||
+      fields.execution.project_id === fields.project_id,
+  );
+  const grant: GrantOf<K> = Object.freeze({
+    kind: fields.kind,
     credential: fields.credential,
     platform: fields.platform,
-    execution: Object.freeze({
-      ...fields.execution,
-      credentials: Object.freeze([...fields.execution.credentials]),
-    }),
+    project_id: fields.project_id,
+    execution:
+      fields.execution === null
+        ? null
+        : Object.freeze({
+            ...fields.execution,
+            credentials: Object.freeze([...fields.execution.credentials]),
+          }),
+    facts: deepFrozen(structuredClone(fields.facts)),
   });
   grants.add(grant);
+  minted.add(grant);
   return grant;
+}
+
+export function grantFacts<G extends Grant>(grant: G): GrantFacts<G> {
+  if (!minted.has(grant)) throw new FacilityError();
+  assert(Object.isFrozen(grant));
+  assert(Object.isFrozen(grant.facts));
+  return Object.freeze({
+    project_id: grant.project_id,
+    credential: grant.credential,
+    facts: grant.facts,
+  });
 }
 
 export function mintWorkbenchGrant(fields: WorkbenchGrant): WorkbenchGrant {
@@ -46,7 +85,7 @@ export function consumeWorkbenchGrant(grant: WorkbenchGrant): void {
 export function consumeGrant(grant: Grant): void {
   if (!grants.delete(grant)) throw new FacilityError();
   assert(Object.isFrozen(grant));
-  assert(Object.isFrozen(grant.execution));
+  assert(grant.execution === null || Object.isFrozen(grant.execution));
 }
 
 export class MaterialBuffer implements Material {
