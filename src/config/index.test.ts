@@ -34,6 +34,7 @@ const DEFAULT_CONSECUTIVE_LOSS_LIMIT = 3;
 const DEFAULT_TEXT_MAX_BYTES = 32768;
 const DEFAULT_HEARTBEAT_WINDOW = 300;
 const DEFAULT_RELEASE_RESERVE = 600;
+const ROOT_BASE_PATH = "/";
 const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
@@ -66,6 +67,7 @@ test("service fragments preserve the existing YAML field set", () => {
   assert.deepEqual(Object.keys(config.gateway).sort(), [
     "allowed_hosts",
     "allowed_origins",
+    "base_path",
     "bind",
     "idempotency_ttl",
     "port",
@@ -75,6 +77,41 @@ test("service fragments preserve the existing YAML field set", () => {
     "http://127.0.0.1:27182",
     "http://localhost:27182",
   ]);
+});
+
+test("gateway base path defaults to the root and accepts only a prefix without a trailing slash", () => {
+  const masterKey = randomBytes(32).toString("base64");
+  assert.equal(
+    configuration({ master_key: masterKey }).getProperties().gateway.base_path,
+    ROOT_BASE_PATH,
+  );
+  for (const base_path of ["/", "/s/kanthord", "/a.b_c~d-e"])
+    assert.equal(
+      configuration({
+        master_key: masterKey,
+        gateway: { base_path },
+      }).getProperties().gateway.base_path,
+      base_path,
+    );
+  for (const base_path of [
+    "",
+    "s/kanthord",
+    "/s/kanthord/",
+    "//",
+    "/s//kanthord",
+    "/s kanthord",
+    "/s?x",
+    1,
+    null,
+  ])
+    assert.throws(
+      () => configuration({ master_key: masterKey, gateway: { base_path } }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, INVALID_FIELD_CODE);
+        assert.match(error.message, /gateway\.base_path/);
+        return true;
+      },
+    );
 });
 
 test("worker configuration defaults and strict validation", () => {

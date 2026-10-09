@@ -35,6 +35,7 @@ const EMPTY_OUTPUT = "";
 const JWT_OUTPUT = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const PROJECT_GET = "get";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const PREFIX_BASE_PATH = "/s/kanthord";
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SINGLE_DIAGNOSTIC_LINE = 1;
 const CLIENT_SECRET_BYTES = 32;
@@ -744,6 +745,32 @@ test("config init refuses a bind value that is not an IP address and writes noth
   const env = environment(temporary(t));
   for (const value of ["localhost", "0.0.0.0:31415", ""]) {
     const result = invocation(["config", "init", "--gateway-bind", value], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /^system\.config\.invalid_field:/);
+    assert.equal(existsSync(env.KANTHORD_CONFIG!), false);
+  }
+});
+
+test("config init sets the gateway base path", (t) => {
+  const env = environment(temporary(t));
+  const result = invocation(
+    ["config", "init", "--gateway-base-path", PREFIX_BASE_PATH],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(
+    loadConfig(env.KANTHORD_CONFIG!).gateway.base_path,
+    PREFIX_BASE_PATH,
+  );
+});
+
+test("config init refuses an invalid base path and writes nothing", (t) => {
+  const env = environment(temporary(t));
+  for (const value of ["s/kanthord", "/s/kanthord/", "//", ""]) {
+    const result = invocation(
+      ["config", "init", "--gateway-base-path", value],
+      env,
+    );
     assert.equal(result.status, ExitCode.Failure);
     assert.match(result.stderr, /^system\.config\.invalid_field:/);
     assert.equal(existsSync(env.KANTHORD_CONFIG!), false);

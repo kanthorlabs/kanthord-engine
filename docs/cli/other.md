@@ -28,7 +28,7 @@ There are eight application/JWT forms below: three configuration commands,
 two `serve` application forms, two `jwt generate` modes, and `jwt inspect`.
 Help is a parser facility, not a fourth global command.
 
-1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--config <path>]` — implemented; local, no route.
+1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--gateway-base-path <path>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
 4. `kanthord serve [server] [--config <path>]` — implemented; local application
@@ -346,6 +346,10 @@ The implemented fields are:
 - `gateway.allowed_hosts`: optional array of nonempty strings, default
   `["127.0.0.1:31415", "localhost:31415"]`.
 - `gateway.allowed_origins`: optional array of nonempty strings, default `[]`.
+- `gateway.base_path`: optional string, default `/`. A value other than `/`
+  matches `^(/[A-Za-z0-9._~-]+)+$` and has no trailing slash, for example
+  `/s/kanthord`. The listener serves the API and the embedded dashboard only
+  under that prefix. See [Base path](#base-path).
 - `gateway.token_lifetime`: optional Convict `nat` in seconds, default
   `31536000` (one year). Local issuance additionally requires a nonnegative safe
   integer; zero produces an immediately expiring token.
@@ -378,7 +382,7 @@ no database. None reads or writes `cli.yaml`.
 ### `config init`
 
 ```text
-kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--config <path>]
+kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--gateway-base-path <path>] [--config <path>]
 ```
 
 **Implemented; route/access: none, local filesystem.** The destination must be
@@ -389,7 +393,9 @@ master key, validate it in memory, and then publish it. Each repeatable
 `<name>` or `<name>:<port>` fails with `cli.config.invalid_allowed_host` before
 any file is written. `--gateway-bind` writes its value to `gateway.bind`. A value that
 is not an IP address fails with `system.config.invalid_field` before any file
-is written. The invocation itself
+is written. `--gateway-base-path` writes its value to `gateway.base_path`. A
+value that is neither `/` nor a path without a trailing slash fails with
+`system.config.invalid_field` before any file is written. The invocation itself
 authorizes creation; stdin and stdout may both be redirected.
 
 Create the destination directory at `0700` when absent. Write a same-directory
@@ -403,6 +409,27 @@ It prints no generated configuration or secret. Invalid permissions, an existing
 destination, or a write/publication failure produces a diagnostic and exit `1`.
 Output/cleanup failure after publication does not undo an already created file;
 inspect the destination instead of assuming a failed invocation wrote nothing.
+
+### Base path
+
+A proxy that forwards the full request path can expose the server under a
+prefix, for example `gateway.base_path: /s/kanthord` behind
+`https://homelab.kanthorlabs.com/s/kanthord/`. The proxy sends no custom header
+and strips no prefix. The Host check and the readiness check run first. Then
+the listener answers by request path `P`:
+
+- With `gateway.base_path` set to `/`, the listener serves `P` unchanged.
+- With a prefix `B`, a `P` under `B/` is served as the remainder, so
+  `/s/kanthord/api/liveness` reaches `/api/liveness` and `/s/kanthord/` reaches
+  the dashboard. The CORS preflight check also sees the remainder.
+- A `P` equal to `B` answers `301` with `Location: B/` and the original query.
+- A `P` outside `B` answers `404 gateway.routing.not_found`. The dashboard
+  index never answers it.
+
+The response for the dashboard `index.html` always carries `<base href="/">`
+for the root and `<base href="B/">` for a prefix, directly after the opening
+`<head>` tag. The server fails the response when the embedded index has no
+`<head>` tag. The index keeps `Cache-Control: no-cache`.
 
 ### `config validate`
 
@@ -840,7 +867,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 400             | `gateway.request.unexpected_body`                | A body was sent to an operation that accepts none.                                                                      | HTTP routes without bodies                                            |
 | 415             | `gateway.request.unsupported_media_type`         | A JSON-body route lacks an `application/json` Content-Type.                                                             | HTTP routes with JSON bodies                                          |
 | 400             | `gateway.request.validation_failed`              | The params, query or body fail the operation input schema.                                                              | remote commands                                                       |
-| 404             | `gateway.routing.not_found`                      | No route matches the request path or preflight method.                                                                  | unmatched HTTP routes                                                 |
+| 404             | `gateway.routing.not_found`                      | No route matches the request path or preflight method, or the path is outside `gateway.base_path`.                      | unmatched HTTP routes                                                 |
 | local           | `system.config.cyclic_alias`                     | A YAML alias creates a cycle.                                                                                           | config validate, config show, jwt generate, serve server              |
 | local           | `system.config.invalid_field`                    | The server configuration contains an unknown or invalid field.                                                          | config init, config validate, config show, jwt generate, serve server |
 | local           | `system.config.invalid_mapping`                  | The YAML root is not one mapping, or a nested value is not a plain mapping or array.                                    | config validate, config show, jwt generate, serve server              |

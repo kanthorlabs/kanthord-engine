@@ -65,8 +65,9 @@ export async function initConfig(
   path: string,
   allowedHosts: readonly string[] = [],
   bind?: string,
+  basePath?: string,
 ): Promise<void> {
-  const content = initialConfig(allowedHosts.map(allowedHost), bind);
+  const content = initialConfig(allowedHosts.map(allowedHost), bind, basePath);
   writePrivate(path, content);
   process.stdout.write(`Created ${path}\n`);
 }
@@ -90,17 +91,23 @@ function addConfigCommand(program: Command): void {
       "Append a host to gateway.allowed_hosts (repeatable)",
       collectHost,
     )
-    .option("--gateway-bind <address>", "Set gateway.bind to this IP address");
+    .option("--gateway-bind <address>", "Set gateway.bind to this IP address")
+    .option(
+      "--gateway-base-path <path>",
+      "Set gateway.base_path to this path prefix",
+    );
   configHelp(init);
   init.action(() => {
     const options = init.opts<{
       gatewayAllowedHost?: string[];
       gatewayBind?: string;
+      gatewayBasePath?: string;
     }>();
     return initConfig(
       effectivePath(init),
       options.gatewayAllowedHost,
       options.gatewayBind,
+      options.gatewayBasePath,
     );
   });
   for (const [name, description, action] of [
