@@ -17,7 +17,7 @@
     "static"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && ! grep -rlE 'import[(]\"[^\"]+[.]ts\"[)]' dist",
     "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-reporter=./scripts/test-reporter.mjs --test-concurrency=6 --test-timeout=30000 'src/**/*.test.ts' scripts/test-reporter.test.mjs",
