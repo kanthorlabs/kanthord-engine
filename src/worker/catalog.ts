@@ -77,6 +77,8 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
   },
 };
 
+export const RELEASED_WORKER_NAMES: readonly string[] = ["developer@1"];
+
 export function getWorkerDeclaration(
   workerName: string,
 ): WorkerDeclaration | undefined {
@@ -95,7 +97,7 @@ export function listWorkerDeclarations(limit: number, cursor: string | null) {
   assert.ok(Number.isSafeInteger(limit));
   assert.ok(limit > FIRST_ITEM);
   const after = cursor === null ? null : decodeCatalogCursor(cursor);
-  const names = Object.keys(WORKER_CATALOG)
+  const names = [...RELEASED_WORKER_NAMES]
     .sort()
     .filter((name) => after === null || name > after);
   const items = names.slice(FIRST_ITEM, limit).map((name) => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import {
+  RELEASED_WORKER_NAMES,
   REQUIRED_NODE_FORMAT,
   WORKER_CATALOG,
   WorkerHost,
@@ -88,6 +89,12 @@ test("every native worker names an agent of the agent catalog", () => {
   for (const name of Object.keys(WORKER_CATALOG))
     for (const agentName of agentsOfWorker(name))
       assert.equal(getAgentDeclaration(agentName)?.agent_name, agentName);
+});
+
+test("every released worker is a declaration", () => {
+  assert.deepEqual(RELEASED_WORKER_NAMES, ["developer@1"]);
+  for (const name of RELEASED_WORKER_NAMES)
+    assert.equal(getWorkerDeclaration(name)?.name, name);
 });
 
 test("unknown and inherited names are not declarations", () => {

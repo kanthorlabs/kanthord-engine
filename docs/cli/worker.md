@@ -238,7 +238,7 @@ kanthord worker list [--limit <count>] [--cursor <opaque>]
 No positional arguments or filters. Required token: human JWT. Request:
 `params: {}`, `query: { limit, cursor? }`, no body. `limit` and `cursor` use the
 shared types, requiredness, defaults and validation. HTTP `200` returns
-one page of worker summaries in ascending alphabetical order by exact name,
+one page of released worker summaries in ascending alphabetical order by exact name,
 under the shared [pagination rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#pagination). Each item contains
 `name: WorkerName`, `host: "kanthord" | "external-harness"`,
 `declared_node_states: string[]` and `required_node_format: string[]`.
@@ -256,7 +256,8 @@ and their capabilities are:
 | `opencode@1`  | external harness `opencode`    | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
 
 All five declarations are in the current catalog; native runtime execution and
-external-harness integration remain later work. All five require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
+external-harness integration remain later work. `list` returns only the released
+worker `developer@1`. `get` and binding validation accept all five declarations. All five require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`

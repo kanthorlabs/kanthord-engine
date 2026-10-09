@@ -25,16 +25,14 @@ const SUCCESS = 0;
 const FAILURE = 1;
 const NO_OUTPUT = "";
 const FIRST_REVISION = 1;
-const NATIVE_WORKER_INDEX = 2;
+const FIRST_ITEM = 0;
 const SINGLE_ITEM = 1;
 const SINGLE_INSTANCE = 1;
 const SECOND_BINDING_VERSION = 2;
 const THIRD_BINDING_VERSION = 3;
-const REVIEWER_WORKER_INDEX = 4;
 const FOURTH_BINDING_VERSION = 4;
 const FIFTH_BINDING_VERSION = 5;
 const SIXTH_BINDING_VERSION = 6;
-const STRING_TYPE = "string";
 const NATIVE = "general@1";
 const EXTERNAL = "claude@1";
 const AGENT = "swe@1";
@@ -248,18 +246,14 @@ test(
       );
       assert.deepEqual(
         page.items.map((item) => item.name),
-        [EXTERNAL, "developer@1", NATIVE, "opencode@1", "reviewer@1"],
+        ["developer@1"],
       );
       assert.equal(page.next_cursor, null);
-      assert.equal(page.items[NATIVE_WORKER_INDEX]!.host, HOST);
-      assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.declared_node_states, [
+      assert.equal(page.items[FIRST_ITEM]!.host, HOST);
+      assert.deepEqual(page.items[FIRST_ITEM]!.declared_node_states, [
         "Available",
       ]);
-      assert.deepEqual(
-        page.items[REVIEWER_WORKER_INDEX]!.declared_node_states,
-        ["Waiting", "External.Requested"],
-      );
-      assert.deepEqual(page.items[NATIVE_WORKER_INDEX]!.required_node_format, [
+      assert.deepEqual(page.items[FIRST_ITEM]!.required_node_format, [
         "name",
         "requirement",
         "criterion",
@@ -269,23 +263,18 @@ test(
     });
     await t.test("E02.2 catalog pages", async () => {
       const page = success<CatalogPage>(
-        await kanthord(["worker", "list", "--limit", "3"], f.H),
+        await kanthord(["worker", "list", "--limit", "1"], f.H),
       );
       assert.deepEqual(
         page.items.map((item) => item.name),
-        [EXTERNAL, "developer@1", NATIVE],
+        ["developer@1"],
       );
-      assert.equal(typeof page.next_cursor, STRING_TYPE);
+      assert.equal(page.next_cursor, null);
+      const cursor = Buffer.from("developer@1").toString("base64url");
       const next = success<CatalogPage>(
-        await kanthord(
-          ["worker", "list", "--limit", "3", "--cursor", page.next_cursor!],
-          f.H,
-        ),
+        await kanthord(["worker", "list", "--cursor", cursor], f.H),
       );
-      assert.deepEqual(
-        next.items.map((item) => item.name),
-        ["opencode@1", "reviewer@1"],
-      );
+      assert.deepEqual(next.items, []);
       assert.equal(next.next_cursor, null);
     });
     await t.test("E02.3 host-specific catalog fields", async () => {

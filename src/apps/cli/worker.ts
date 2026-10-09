@@ -371,7 +371,7 @@ export function addWorkerCommand(program: Command): void {
     .action((_options, command: Command) => heartbeat(command));
   worker
     .command(LIST)
-    .description("List supplied workers as JSON")
+    .description("List released workers as JSON")
     .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
     .option(
       "--cursor <cursor>",

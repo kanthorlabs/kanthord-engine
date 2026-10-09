@@ -1269,32 +1269,34 @@ test("handover handlers pass the proven execution and one transactional clock re
   assert.equal(f.commits(), expectedCommits);
 });
 
-test("catalog pages supplied declarations once per commit and registrations add no entry", async (t) => {
+test("catalog pages released declarations once per commit and registrations add no entry", async (t) => {
   const f = enablementFixture(t);
-  const pageSize = 3;
+  const pageSize = 1;
   const expectedCommits = 4;
   const before = f.invoke("catalog.list", null, {});
   assert.deepEqual(
     before.items.map((item) => item.name),
-    ["claude@1", "developer@1", "general@1", "opencode@1", "reviewer@1"],
+    ["developer@1"],
   );
   assert.equal(before.next_cursor, null);
-  const first = f.invoke("catalog.list", null, {}, { limit: pageSize });
+  const first = f.invoke(
+    "catalog.list",
+    null,
+    {},
+    { limit: pageSize, cursor: Buffer.from("a").toString("base64url") },
+  );
   assert.deepEqual(
     first.items.map((item) => item.name),
-    ["claude@1", "developer@1", "general@1"],
+    ["developer@1"],
   );
-  assert.equal(first.next_cursor, Buffer.from(WORKER).toString("base64url"));
+  assert.equal(first.next_cursor, null);
   const second = f.invoke(
     "catalog.list",
     null,
     {},
-    { limit: pageSize, cursor: first.next_cursor },
+    { cursor: Buffer.from("developer@1").toString("base64url") },
   );
-  assert.deepEqual(
-    second.items.map((item) => item.name),
-    ["opencode@1", "reviewer@1"],
-  );
+  assert.deepEqual(second.items, []);
   assert.equal(second.next_cursor, null);
   await f.worker.start();
   t.after(() => f.worker.stop());

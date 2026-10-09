@@ -851,7 +851,7 @@ export const workerOperations = {
       items: z.array(catalogItemSchema),
       next_cursor: z.string().nullable(),
     }),
-    description: "List supplied workers in ascending worker-name order.",
+    description: "List released workers in ascending worker-name order.",
   },
   "catalog.get": {
     ...humanOperation,

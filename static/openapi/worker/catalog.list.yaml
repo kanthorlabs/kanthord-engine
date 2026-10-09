@@ -4,7 +4,7 @@ pathItem:
     operationId: worker.catalog.list
     tags:
       - worker
-    description: List supplied workers in ascending worker-name order.
+    description: List released workers in ascending worker-name order.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false

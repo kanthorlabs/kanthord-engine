@@ -27,7 +27,6 @@ const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;
 const REGISTRATION_ATTEMPTS = 2;
 const TOKEN_SOURCES = 3;
-const STRING_TYPE = "string";
 const NATIVE_AGENT = "swe@1";
 const EXTERNAL_HARNESS = "claude-code";
 
@@ -228,24 +227,19 @@ test("worker catalog CLI lists ascending pages", async (t) => {
   const help = await command(["worker", "list", "--help"], env);
   assert.equal(help.code, ExitCode.Success);
   assert.match(help.stdout, /--cursor/);
-  const first = await command(["worker", "list", "--limit", "3"], env);
+  const first = await command(["worker", "list", "--limit", "1"], env);
   assert.equal(first.code, ExitCode.Success, first.stderr);
   const page = JSON.parse(first.stdout);
   assert.deepEqual(
     page.items.map((item: { name: string }) => item.name),
-    ["claude@1", "developer@1", "general@1"],
+    ["developer@1"],
   );
-  assert.equal(typeof page.next_cursor, STRING_TYPE);
-  const second = await command(
-    ["worker", "list", "--limit", "3", "--cursor", page.next_cursor],
-    env,
-  );
+  assert.equal(page.next_cursor, null);
+  const cursor = Buffer.from("developer@1").toString("base64url");
+  const second = await command(["worker", "list", "--cursor", cursor], env);
   assert.equal(second.code, ExitCode.Success, second.stderr);
   const last = JSON.parse(second.stdout);
-  assert.deepEqual(
-    last.items.map((item: { name: string }) => item.name),
-    ["opencode@1", "reviewer@1"],
-  );
+  assert.deepEqual(last.items, []);
   assert.equal(last.next_cursor, null);
 });
 
