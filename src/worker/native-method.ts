@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { CodedError } from "../kernel/errors.ts";
 import {
   EndReason,
   ExecutionEndKind,
-  ExecutionStop,
+  type ExecutionStop,
   type ExecutionEnd,
   type ExecutionRun,
 } from "./execution-run.ts";
@@ -178,27 +177,16 @@ export async function executionBoundary(
   run: ExecutionRun,
   invoke: () => Promise<ExecutionEnd>,
 ): Promise<ExecutionEnd> {
+  let stopped: ExecutionStop;
   try {
     return await invoke();
   } catch (error) {
-    if (error instanceof ExecutionStop)
-      return {
-        kind: ExecutionEndKind.Ended,
-        reason: error.reason,
-        code: error.code,
-      };
-    try {
-      run.stop(
-        EndReason.OperationFailed,
-        error instanceof CodedError ? error.code : null,
-      );
-    } catch (stopped) {
-      if (!(stopped instanceof ExecutionStop)) throw stopped;
-      return {
-        kind: ExecutionEndKind.Ended,
-        reason: stopped.reason,
-        code: stopped.code,
-      };
-    }
+    stopped = run.stopOf(error);
   }
+  if (stopped.reason !== EndReason.Revoked) return run.releaseStop(stopped);
+  return {
+    kind: ExecutionEndKind.Ended,
+    reason: stopped.reason,
+    code: stopped.code,
+  };
 }

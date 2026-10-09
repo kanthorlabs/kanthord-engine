@@ -532,6 +532,10 @@ logs one record `Worker application ready` with `runtime_identity`,
 versions in the diagnostic. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
 
+An execution that ends with a release or a closure leaves the instance
+registered, and the application pulls again. A release with a `stop` is a
+release. An execution that ends with no release and no closure exits `1`.
+
 `SIGINT` and `SIGTERM` stop further startup and further work pulls. A stop
 aborts the outstanding work pull. A claim that commits during that abort has no
 worker until its lease expires, and settlement then declares it lost. The

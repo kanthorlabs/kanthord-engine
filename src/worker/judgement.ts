@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import type { TaskContent } from "../mission/contract.ts";
+import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import type { Verification, TestedInput } from "./verification.ts";
+import type { NativeAgent } from "./native-agent.ts";
 
 export const JUDGEMENT_MARKER = "kanthord-judgement:";
 const SUCCESS_EXIT = 0;
@@ -35,6 +37,32 @@ export function parseJudgement<T extends z.ZodType>(
   }
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+export const ReplyRepair = {
+  Invalid: "invalid",
+  BudgetEnd: "budget_end",
+} as const;
+export type ReplyRepair = (typeof ReplyRepair)[keyof typeof ReplyRepair];
+
+export function repairInstruction(marker: string): string {
+  assert.ok(marker);
+  return `The reply holds no valid ${marker} line. Reply again with exactly one such line.`;
+}
+
+export async function parseRepaired<T extends z.ZodType>(
+  agent: NativeAgent,
+  work: WorkPrompt,
+  schema: T,
+  marker: string = JUDGEMENT_MARKER,
+): Promise<z.output<T> | ReplyRepair> {
+  const reply = parseJudgement(agent.lastText(), schema, marker);
+  if (reply !== null) return reply;
+  await agent.instruct(work, repairInstruction(marker));
+  if (agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
+  return (
+    parseJudgement(agent.lastText(), schema, marker) ?? ReplyRepair.Invalid
+  );
 }
 
 export function taskJudgementInstruction(task: TaskContent): string {

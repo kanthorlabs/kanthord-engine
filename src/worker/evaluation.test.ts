@@ -4,7 +4,8 @@ import { existsSync } from "node:fs";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { background } from "../kernel/context.ts";
-import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { executionBoundary } from "./native-method.ts";
 import { anthropicSetup } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -13,6 +14,7 @@ import type { NativeAgent } from "./native-agent.ts";
 import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { ActionResultKind } from "./contract.ts";
+import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
@@ -34,7 +36,7 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
       expired_at: Date.now() + 60000,
       trace_id: "trace",
     };
-    let releases = 0;
+    const releases: unknown[] = [];
     const clients = {
       worker: {
         "action.request": async (input: unknown) => {
@@ -51,8 +53,8 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
         },
       },
       scheduler: {
-        executionRelease: async () => {
-          releases++;
+        executionRelease: async (input: { body: unknown }) => {
+          releases.push(input.body);
           return { type: "completed", status: 200, data: {} };
         },
       },
@@ -69,33 +71,58 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
         kind === ActionResultKind.Submitted ||
         kind === ActionResultKind.AwaitingPrerequisite,
     );
-    if (accepted)
+    const stop = { reason: EndReason.ActionUnsettled, code: null };
+    if (accepted) {
       assert.deepEqual(await requestAndRelease(run), {
         kind: "released",
         furtherWork: false,
       });
-    else await assert.rejects(requestAndRelease(run), ExecutionStop);
-    assert.equal(releases, accepted ? SINGLE_RELEASE : NO_RELEASES);
+      assert.deepEqual(releases, [{ further_work: false }]);
+    } else {
+      assert.deepEqual(
+        await executionBoundary(run, () => requestAndRelease(run)),
+        { kind: "released", furtherWork: true, stop },
+      );
+      assert.deepEqual(releases, [{ further_work: true, stop }]);
+    }
   }
 });
 test("evaluation writes failed-verification assessments without inference and gates malformed judgement", async (t) => {
   for (const scenario of [
-    { command: "false", text: "", result: "criterion-not-met", opens: 0 },
+    { command: "false", texts: [""], result: "criterion-not-met", opens: 0 },
     {
       command: "true",
-      text: 'kanthord-judgement: {"result":"success","rationale":"met"}',
+      texts: ['kanthord-judgement: {"result":"success","rationale":"met"}'],
       result: "success",
       opens: 1,
     },
-    { command: "true", text: "invalid", result: null, opens: 1 },
     {
       command: "true",
-      text: 'kanthord-judgement: {"result":"success","rationale":"children weighed"}',
+      texts: ["invalid", "still invalid"],
+      result: null,
+      opens: 1,
+      repaired: true,
+    },
+    {
+      command: "true",
+      texts: [
+        'канthord-judgement: {"result":"success","rationale":"met"}',
+        'kanthord-judgement: {"result":"success","rationale":"met"}',
+      ],
+      result: "success",
+      opens: 1,
+      repaired: true,
+    },
+    {
+      command: "true",
+      texts: [
+        'kanthord-judgement: {"result":"success","rationale":"children weighed"}',
+      ],
       result: "success",
       opens: 1,
       initiative: true,
     },
-    { command: "true", text: "", result: null, opens: 0, refused: true },
+    { command: "true", texts: [""], result: null, opens: 0, refused: true },
   ]) {
     const setup = anthropicSetup({ repositories: [] });
     const claim = {
@@ -120,6 +147,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     });
     let assessments = 0;
     let opens = 0;
+    const instructions: string[] = [];
     let reported = false;
     const clients = {
       mission: {
@@ -227,13 +255,18 @@ test("evaluation writes failed-verification assessments without inference and ga
       return {
         budget: { exhausted: () => false },
         instruct: async (_work: WorkPrompt, instruction: string) => {
+          instructions.push(instruction);
+          if (instruction === repairInstruction(JUDGEMENT_MARKER)) return;
           assert.ok(instruction.includes(assetId));
           if (scenario.initiative) {
             assert.match(instruction, /child-outcome/);
             assert.match(instruction, /Completed/);
           }
         },
-        lastText: () => scenario.text,
+        lastText: () =>
+          scenario.texts[
+            Math.min(instructions.length, scenario.texts.length) - 1
+          ],
       } as unknown as NativeAgent;
     };
     const pending = runEvaluation(
@@ -248,6 +281,10 @@ test("evaluation writes failed-verification assessments without inference and ga
         outcomeId: "outcome",
       });
     assert.equal(opens, scenario.opens);
+    assert.equal(
+      instructions.at(-1) === repairInstruction(JUDGEMENT_MARKER),
+      scenario.repaired === true,
+    );
     assert.equal(
       assessments,
       scenario.result === null ? NO_RELEASES : SINGLE_RELEASE,

@@ -247,3 +247,38 @@ test("release refusal preserves the owning error code", async (t) => {
       error.code === code,
   );
 });
+
+test("a stop release settles credentials under a fresh context and reconciles a lost answer only with a stopped claim", async (t) => {
+  const stop = { reason: EndReason.JudgementInvalid, code: null };
+  for (const recorded of [stop, null]) {
+    let reports = 0;
+    const run = fixture(async () => {
+      reports++;
+    });
+    t.after(() => run.dispose());
+    const stopped = run.stopOf(new ExecutionStop(stop.reason, stop.code));
+    assert.ok(run.operationContext.err());
+    run.clients.scheduler = {
+      executionRelease: async (
+        input: { body: unknown },
+        options: { context: { err(): unknown } },
+      ) => {
+        assert.deepEqual(input.body, { further_work: true, stop });
+        assert.equal(options.context.err(), null);
+        return { type: OperationResultType.Indeterminate };
+      },
+      claimGet: async () => ({
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { claim_state: "finished", stop: recorded },
+      }),
+    } as unknown as MethodClients["scheduler"];
+    assert.deepEqual(
+      await run.releaseStop(stopped),
+      recorded
+        ? { kind: "released", furtherWork: true, stop }
+        : { kind: "ended", ...stop },
+    );
+    assert.equal(reports, SETTLE_CALL_COUNT);
+  }
+});

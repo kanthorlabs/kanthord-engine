@@ -4,12 +4,13 @@ import { diffText } from "./local-git.ts";
 import {
   fixInstruction,
   hasBlocker,
-  parseReview,
+  parseRepairedReview,
   reviewInstruction,
   REVIEW_ROUNDS,
   type Finding,
   type Review,
 } from "./review.ts";
+import { ReplyRepair } from "./judgement.ts";
 import {
   runTask,
   taskWork,
@@ -62,7 +63,10 @@ async function reviewTask(
       reviewInstruction({ task, diff, findings, replies }),
     );
     if (budget.exhausted()) return ReviewStop.BudgetEnd;
-    return parseReview(agent.lastText()) ?? ReviewStop.Invalid;
+    const review = await parseRepairedReview(agent, taskWork(state, task));
+    if (review === ReplyRepair.BudgetEnd) return ReviewStop.BudgetEnd;
+    if (review === ReplyRepair.Invalid) return ReviewStop.Invalid;
+    return review;
   } finally {
     reviewer.close(agent);
   }

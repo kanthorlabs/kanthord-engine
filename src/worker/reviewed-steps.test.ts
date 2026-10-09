@@ -30,6 +30,7 @@ import {
 } from "./steps-objective.ts";
 import { reviewedTaskRunner } from "./reviewed-steps.ts";
 import { REVIEW_MARKER, REVIEW_ROUNDS } from "./review.ts";
+import { repairInstruction } from "./judgement.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
 const JUDGEMENT =
@@ -281,19 +282,46 @@ test("the review stops after the round cap while a blocker stands", async (t) =>
   assert.equal(reviewer.closed(), REVIEW_ROUNDS);
 });
 
-test("a review without the review line ends the review and keeps the task result", async (t) => {
+test("two review replies without the review line end the review and keep the task result", async (t) => {
   const h = await fixture(t, [
     write("a.txt"),
     fauxAssistantMessage("done"),
     fauxAssistantMessage(JUDGEMENT),
   ]);
-  const reviewer = fakeReviewer(h.budget, ["no verdict"]);
+  const reviewer = fakeReviewer(h.budget, ["no verdict", "still no verdict"]);
   const result = await reviewedTaskRunner(reviewer.sessions)(
     h.state,
     task,
     TaskBoundary.InProgress,
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
-  assert.equal(reviewer.instructions.length, FIRST_ROUND);
+  assert.deepEqual(reviewer.instructions.slice(1), [
+    repairInstruction(REVIEW_MARKER),
+  ]);
   assert.equal(reviewer.closed(), FIRST_ROUND);
+});
+
+test("one review reply without the review line gets a repair turn and the repaired review stands", async (t) => {
+  const h = await fixture(t, [
+    write("a.txt"),
+    fauxAssistantMessage("done"),
+    fauxAssistantMessage(JUDGEMENT),
+    write("b.txt"),
+    fauxAssistantMessage("B1 - status:FIXED - action:YES - Missing file"),
+    fauxAssistantMessage(JUDGEMENT),
+  ]);
+  const reviewer = fakeReviewer(h.budget, [
+    "no verdict",
+    BLOCKED_REVIEW,
+    CLEAN_REVIEW,
+  ]);
+  const result = await reviewedTaskRunner(reviewer.sessions)(
+    h.state,
+    task,
+    TaskBoundary.InProgress,
+  );
+  assert.deepEqual(result, { kind: TaskResultKind.Complete });
+  assert.equal(reviewer.instructions[1], repairInstruction(REVIEW_MARKER));
+  assert.ok(reviewer.instructions[2]!.includes(JSON.stringify([BLOCKER])));
+  assert.equal(reviewer.closed(), SECOND_ROUND);
 });

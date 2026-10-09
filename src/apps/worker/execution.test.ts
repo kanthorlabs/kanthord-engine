@@ -11,6 +11,7 @@ import {
 } from "../../kernel/handover.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
+  EndReason,
   WorkspaceRoot,
   noTranscript,
   type NativeExecutionInput,
@@ -93,6 +94,23 @@ test("host takes handover before setup and method, discards on every method end"
     null,
   );
   assert.deepEqual(events, ["handover", "setup", "method"]);
+  const stop = {
+    reason: EndReason.OperationFailed,
+    code: "llm.provider.unavailable",
+  };
+  assert.equal(
+    await hostExecution(input, async () => ({
+      kind: "released",
+      furtherWork: true,
+      stop,
+    })),
+    null,
+  );
+  assert.equal(
+    (await hostExecution(input, async () => ({ kind: "ended", ...stop })))
+      ?.code,
+    stop.code,
+  );
   assert.equal(
     await stored!.items[0]!.store.read(credential.provider_id),
     undefined,

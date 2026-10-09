@@ -6,6 +6,8 @@ import {
   taskJudgementSchema,
   evaluationJudgementSchema,
   evaluationInstruction,
+  JUDGEMENT_MARKER,
+  repairInstruction,
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
 
@@ -97,4 +99,11 @@ test("failed and unrun rationale names the command and cause", () => {
     instruction,
     /reasoningEffort|modelIdentifier|resourceBudget/,
   );
+});
+
+const JUDGEMENT_REPAIR =
+  "The reply holds no valid kanthord-judgement: line. Reply again with exactly one such line.";
+
+test("the repair instruction names the marker of the invalid reply", () => {
+  assert.equal(repairInstruction(JUDGEMENT_MARKER), JUDGEMENT_REPAIR);
 });

@@ -280,6 +280,17 @@ HTTP `200` returns the summary fields plus:
   defines a turn as one `turn_end` event of the pi agent loop and measures wall
   time from the execution's `created_at`. After budget end, execution code
   checkpoints, pushes and releases, with cleanup bounded by `expired_at`.
+  A stop for a reason other than a revocation aborts the agent and runs the
+  same cleanup under a fresh context bounded by `expired_at`. A steps execution
+  writes the checkpoint commit when the workspace holds uncommitted work,
+  pushes and releases with `further_work: true` and
+  `stop: { reason, code }`. A reviewer execution writes no commit and releases
+  with the `stop`. A failed push still releases with the `stop`. A failed
+  release ends the execution with no release.
+  A reply with no valid marker line gets one repair turn, for the task
+  judgement, the evaluation judgement and the review reply. A second invalid
+  judgement stops the execution with `judgement_invalid`, and a second invalid
+  review reply ends the review of that task.
   An external harness must release before its `expired_at`.
 
 Absent/inapplicable native fields other than `resource_budget` are omitted for

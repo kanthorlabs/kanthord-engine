@@ -20,10 +20,12 @@ import {
   scriptedModelRuntime,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
-import { ExecutionRun } from "./execution-run.ts";
+import { EndReason, ExecutionRun } from "./execution-run.ts";
+import { executionBoundary } from "./native-method.ts";
+import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
-import { TaskBoundary } from "./steps-objective.ts";
+import { TaskBoundary, type TaskRunner } from "./steps-objective.ts";
 import {
   prepareStepsWorkspace,
   startCheck,
@@ -37,6 +39,8 @@ const transport = { ...connector, proveSshIdentity: async () => {} };
 const SECRET = "test_steps_key";
 const PROVIDER_CALL_COUNT = 2;
 const NO_PROVIDER_CALLS = 0;
+const NO_PUSHES = 0;
+const REPAIRED_TASK_CALLS = 3;
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -431,5 +435,178 @@ test("criterion-negative judgement revises work and a budget-ended judgement kee
   assert.deepEqual(await runTask(other, current), {
     kind: "budget_end",
     boundary: "run_passed",
+  });
+});
+
+const STOP_REASONS = [
+  EndReason.OperationFailed,
+  EndReason.JudgementInvalid,
+  EndReason.ReportAbsent,
+  EndReason.ActionUnsettled,
+  EndReason.AssessmentAbsent,
+];
+const STOP_CODE = "test.operation.failed";
+const PARTIAL_WORK = "partial";
+
+function stoppingRunner(reason: EndReason): TaskRunner {
+  return async (state) => {
+    writeFileSync(join(state.directory, PARTIAL_WORK), PARTIAL_WORK);
+    return state.run.stop(reason, STOP_CODE);
+  };
+}
+
+function recordReleases(h: Awaited<ReturnType<typeof fixture>>) {
+  const bodies: unknown[] = [];
+  h.run.clients.scheduler = {
+    executionRelease: async (input: { body: unknown }) => {
+      bodies.push(input.body);
+      return { type: "completed", status: 200, data: {} };
+    },
+  } as unknown as MethodClients["scheduler"];
+  return bodies;
+}
+
+test("a stop with each reason checkpoints, pushes and releases with the stop", async (t) => {
+  for (const reason of STOP_REASONS) {
+    const h = await fixture(t, [task("stopped", "false")], []);
+    const bodies = recordReleases(h);
+    const stop = { reason, code: STOP_CODE };
+    assert.deepEqual(
+      await executionBoundary(h.run, () =>
+        runStepsObjective(h, stoppingRunner(reason)),
+      ),
+      { kind: "released", furtherWork: true, stop },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop }]);
+    const branch = `refs/heads/${h.nodeBranch}`;
+    assert.match(
+      await simpleGit(h.bare).raw(["log", "-1", "--format=%s", branch]),
+      /checkpoint of task/,
+    );
+    assert.equal(
+      await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
+      PARTIAL_WORK,
+    );
+  }
+});
+
+test("a failed push still releases with the stop and a failed release ends with no release", async (t) => {
+  const pushed = await fixture(t, [task("stopped", "false")], []);
+  pushed.input.transport = {
+    ...transport,
+    pushNodeBranch: async () => {
+      throw new Error("push failed");
+    },
+  };
+  const bodies = recordReleases(pushed);
+  const stop = { reason: EndReason.OperationFailed, code: STOP_CODE };
+  assert.deepEqual(
+    await executionBoundary(pushed.run, () =>
+      runStepsObjective(pushed, stoppingRunner(EndReason.OperationFailed)),
+    ),
+    { kind: "released", furtherWork: true, stop },
+  );
+  assert.deepEqual(bodies, [{ further_work: true, stop }]);
+  const refused = await fixture(t, [task("stopped", "false")], []);
+  refused.run.clients.scheduler = {
+    executionRelease: async () => {
+      throw new Error("release failed");
+    },
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(
+    await executionBoundary(refused.run, () =>
+      runStepsObjective(refused, stoppingRunner(EndReason.OperationFailed)),
+    ),
+    { kind: "ended", ...stop },
+  );
+});
+
+test("a revoked stop writes no checkpoint, pushes nothing and releases nothing", async (t) => {
+  const h = await fixture(t, [task("stopped", "false")], []);
+  const bodies = recordReleases(h);
+  let pushes = 0;
+  h.input.transport = {
+    ...transport,
+    pushNodeBranch: async () => {
+      pushes++;
+    },
+  };
+  assert.deepEqual(
+    await executionBoundary(h.run, () =>
+      runStepsObjective(h, stoppingRunner(EndReason.Revoked)),
+    ),
+    { kind: "ended", reason: EndReason.Revoked, code: STOP_CODE },
+  );
+  assert.deepEqual(bodies, []);
+  assert.equal(pushes, NO_PUSHES);
+  assert.equal(
+    (await simpleGit(h.directory).status()).not_added.includes(PARTIAL_WORK),
+    true,
+  );
+});
+
+test("one invalid task judgement gets a repair turn and a valid second reply completes the task", async (t) => {
+  const current = task("repaired", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage(
+        'канthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  assert.deepEqual(await runTask(h, current), { kind: "complete" });
+  assert.ok(
+    JSON.stringify(h.provider.calls.at(-1)).includes(
+      repairInstruction(JUDGEMENT_MARKER),
+    ),
+  );
+});
+
+test("two invalid task judgements stop the execution with judgement_invalid", async (t) => {
+  const current = task("invalid", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("work"),
+      fauxAssistantMessage("no judgement"),
+      fauxAssistantMessage("still no judgement"),
+    ],
+  );
+  await assert.rejects(runTask(h, current), {
+    reason: EndReason.JudgementInvalid,
+  });
+  assert.equal(h.provider.calls.length, REPAIRED_TASK_CALLS);
+});
+
+test("the start check repairs one invalid judgement and stops on two", async (t) => {
+  const repaired = await fixture(
+    t,
+    [task("met", "true")],
+    [
+      fauxAssistantMessage("no judgement"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  assert.deepEqual((await startCheck(repaired)).pending, []);
+  assert.equal(repaired.provider.calls.length, PROVIDER_CALL_COUNT);
+  const invalid = await fixture(
+    t,
+    [task("met", "true")],
+    [
+      fauxAssistantMessage("no judgement"),
+      fauxAssistantMessage("still no judgement"),
+    ],
+  );
+  await assert.rejects(startCheck(invalid), {
+    reason: EndReason.JudgementInvalid,
   });
 });

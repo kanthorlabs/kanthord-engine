@@ -24,7 +24,8 @@ import {
   evaluationInstruction,
   evaluationJudgementSchema,
   failedVerificationRationale,
-  parseJudgement,
+  parseRepaired,
+  ReplyRepair,
 } from "./judgement.ts";
 import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-objective.ts";
@@ -81,8 +82,11 @@ async function judge(
     }),
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
-  const judgement = parseJudgement(agent.lastText(), evaluationJudgementSchema);
-  if (!judgement) return run.stop(EndReason.JudgementInvalid);
+  const judgement = await parseRepaired(agent, work, evaluationJudgementSchema);
+  if (judgement === ReplyRepair.BudgetEnd)
+    return run.stop(EndReason.AssessmentAbsent);
+  if (judgement === ReplyRepair.Invalid)
+    return run.stop(EndReason.JudgementInvalid);
   return judgement;
 }
 

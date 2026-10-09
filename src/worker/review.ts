@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import type { TaskContent } from "../mission/contract.ts";
-import { parseJudgement } from "./judgement.ts";
+import { parseRepaired } from "./judgement.ts";
+import type { WorkPrompt } from "../agent/prompt-composer.ts";
+import type { NativeAgent } from "./native-agent.ts";
 
 export const REVIEW_MARKER = "kanthord-review:";
 export const REVIEW_ROUNDS = 3;
@@ -24,8 +26,8 @@ export const reviewSchema = z.strictObject({
 export type Finding = z.infer<typeof findingSchema>;
 export type Review = z.infer<typeof reviewSchema>;
 
-export function parseReview(text: string | undefined): Review | null {
-  return parseJudgement(text, reviewSchema, REVIEW_MARKER);
+export function parseRepairedReview(agent: NativeAgent, work: WorkPrompt) {
+  return parseRepaired(agent, work, reviewSchema, REVIEW_MARKER);
 }
 
 export function hasBlocker(findings: readonly Finding[]): boolean {
