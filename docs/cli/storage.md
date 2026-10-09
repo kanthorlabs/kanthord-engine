@@ -100,6 +100,8 @@ fix the secret shape and the metadata of each platform:
 For `s3`, `endpoint` is a required URL; `bucket` and `region` are required
 nonblank strings. These fields serve the credential healthcheck.
 A storage binding has its own endpoint, bucket, region and prefix for work.
+The `s3` credential holds `s3:ListBucket` on the bucket of each binding that uses it.
+With that permission, an absent object answers `404`. The object check reads only `404` as an absent object.
 [Suitability](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#suitability)
 compares only the platform of the record with the platform of its use, before
 any remote call. It compares no metadata.
