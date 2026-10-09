@@ -36,7 +36,6 @@ supply no implicit defaults. The dated source snapshot above is the only
 implemented claim.
 
 [intake-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#intake-service
-[intake-bounds]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#scheduler-service-and-delivery
 
 ## Command table
 
@@ -202,9 +201,9 @@ state, error or arbitrary consumer operation.
 
 ## Inbound commands
 
-The inbound read projection contains `id`, `projectId`, `kind`, `platform`,
+The inbound read projection contains `id`, `project_id`, `kind`, `platform`,
 `consumer`, `credential`, `configuration`, `checkpoint` and
-`createdAt`. It exposes no credential material.
+`created_at`. It exposes no credential material.
 
 ### `inbound create`
 
@@ -264,8 +263,8 @@ pending event exists.
 
 ## Event commands
 
-The event read projection contains `id`, `inboundId`, `eventId`, `metadata`,
-`state`, `error` and `createdAt`. Content inclusion and its size and redaction
+The event read projection contains `id`, `inbound_id`, `event_id`, `metadata`,
+`state`, `error` and `created_at`. Content inclusion and its size and redaction
 remain **[blocked][intake-contract]**. No output contains a credential.
 Each item of `error` holds `{ code, message, created_at }`. `code` is the error
 code of a declared failure of the consumer, or `indeterminate` when the handoff
@@ -277,7 +276,7 @@ ends with no answer.
 and state filters and shared pagination.
 
 **Effects and idempotency:** return one bounded `{ items, next_cursor }` page.
-Read only. Read bounds remain **[blocked][intake-bounds]**.
+Read only. The `limit` accepts 1 to 1000 and defaults to 100.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
 
@@ -329,8 +328,8 @@ caller narrows the range.
 
 ## Outbound commands
 
-The outbound read projection contains `id`, `projectId`, `operation`,
-`requestKey`, `state`, `result`, `error` and `createdAt`. No output contains a
+The outbound read projection contains `id`, `project_id`, `operation`,
+`request_key`, `state`, `result`, `error` and `created_at`. No output contains a
 credential or the operands of the write. Each item of `error` holds
 `{ code, message, created_at }`. `code` is a result class of the Repository
 component or the Storage component, the HTTP status, `timeout` or
@@ -342,7 +341,7 @@ component or the Storage component, the HTTP status, `timeout` or
 project, state and operation filters and shared pagination.
 
 **Effects and idempotency:** return one bounded `{ items, next_cursor }` page in
-the order of `id`. Read only. Read bounds remain **[blocked][intake-bounds]**.
+the order of `id`. Read only. The `limit` accepts 1 to 1000 and defaults to 100.
 
 **Statuses:** `200`, including an empty page; `400` for invalid input or cursor.
 
@@ -476,12 +475,12 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 422   | `intake.inbound.credential_invalid`                    | The credential name does not exist, or its platform does not suit the inbound.                                                                                      | inbound create                                                                                                                                                             |
 | 422   | `intake.inbound.platform_refused`                      | The platform refuses the first request of a poll create.                                                                                                            | inbound create                                                                                                                                                             |
 | 422   | `intake.outbound.request.action_unmapped`              | The configured action has no row in the action table.                                                                                                               | `intake.action.perform`                                                                                                                                                    |
+| 502   | `repository.connector.git_failed`                      | A git operation fails, is aborted or reaches its deadline. `intake.action.perform` answers it with `200` and stores it in the request `error` message.              | `intake.action.check`, `intake.action.perform`                                                                                                                             |
 | 502   | `repository.platform.github.<class>`                   | A GitHub call of the check answers a result class; `details.status` holds the GitHub HTTP status when the failure carries one, otherwise null.                      | `intake.action.check`                                                                                                                                                      |
 | 502   | `storage.platform.s3.<class>`                          | An S3 call of the object check or the object delete answers a result class; `details.status` holds the S3 HTTP status when the failure carries one, otherwise null. | `intake.storage.check`, `intake.storage.delete`                                                                                                                            |
 | 503   | `intake.inbound.event.capacity_exceeded`               | The count of pending events is at its bound.                                                                                                                        | receipt route                                                                                                                                                              |
 | 503   | `intake.outbound.request.cli_unavailable`              | The binary of a CLI operation is missing or below its minimum version.                                                                                              | a CLI write                                                                                                                                                                |
 | local | `cli.intake.<command>.invalid_<argument>`              | A positional identity fails its prefix or ULID form, for example `cli.intake.inbound.get.invalid_inbound_id`.                                                       | every leaf with a positional identity                                                                                                                                      |
-| local | `repository.connector.git_failed`                      | A git operation of the repository connector fails, is aborted or reaches its deadline.                                                                              | `intake.action.perform`, `intake.action.check`                                                                                                                             |
 
 ## Optional design provenance
 
