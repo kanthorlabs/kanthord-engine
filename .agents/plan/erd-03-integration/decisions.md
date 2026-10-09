@@ -165,7 +165,7 @@ ERD 2 decision D24 stands. The Intake tables use the indexes `intake_inbound_eve
 
 ## D21 — Standing precedents and boundary changes
 
-ERD 2 decision D23 stands. Plan 01 adds `intake` to the `service` element pattern of `eslint.config.js` and the `service-mint.ts` rule of `architecture.impl.md:821`, `:940`. The test files of `apps-server` keep the allowances of ERD 2 decision D23.
+ERD 2 decision D23 stands. Plan 01 adds `intake` to the `service` element pattern of `eslint.config.js` and the `service-mint.ts` rule of `architecture.impl.md:821`, `:940`. The test files of `apps-server` keep the allowances of ERD 2 decision D23. Plan 03 admits `src/mission/test-support.ts` for the apps-server test files, because the D7 service-identity tests sit under `src/apps/server/`.
 
 ## D22 — Pre-existing deviations are findings, not blockers
 

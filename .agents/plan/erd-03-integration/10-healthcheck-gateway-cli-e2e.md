@@ -7,7 +7,7 @@ This plan closes the ERD 3 plan set. It delivers:
 - The inbound resource healthcheck: one project-scoped entry per inbound in the inventory of the Intake Service, with its check for a poll and for a webhook inbound.
 - The project name of an inbound entry, which the composition root resolves through the Project read `projectNameOf` (`gateway-service.impl.md:377`; `project-service.impl.md:240`).
 - The final `unwired` set: no ERD 3 seam remains (decision D6).
-- The combined assertion of the nineteen tables of ERD 1, ERD 2 and ERD 3, their fifteen unique indexes and their foreign keys.
+- The combined assertion of the twenty tables of ERD 1, ERD 2 and ERD 3, their sixteen unique indexes and their foreign keys.
 - The final OpenAPI inventory with the Intake operations, and the absence of every `service` operation and every `direct: true` operation from it.
 - The CLI completeness over `engine/docs/cli/intake.md`.
 - The integration journey: a configured pull request through a webhook inbound and a configured merge through a poll, from the claim to `Completed`, with the outbound requests, the inbound events and the health report.
@@ -104,7 +104,7 @@ Out of scope:
 
 - Files: `src/apps/server/migrations.test.ts` (edit)
 - Do:
-  1. Rename the combined test to "all ERD 1, ERD 2 and ERD 3 migrations produce exactly the nineteen tables", add `intakeMigrations` to `allServices`, and add `intake_inbound`, `intake_inbound_event` and `intake_outbound_request` to `ALL_TABLES`.
+  1. Rename the combined test to "all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty tables", add `intakeMigrations` to `allServices`, and add `intake_inbound`, `intake_inbound_event` and `intake_outbound_request` to `ALL_TABLES`.
   2. Add `intake_inbound_event_inbound_event` and `intake_outbound_request_operation_key` to `ALL_INDEXES`.
   3. Assert that the ERD 3 references are exactly `intake_inbound_event.inbound_id` to `intake_inbound.id`, and that `intake_inbound` and `intake_outbound_request` hold none.
 - Rules:
@@ -121,8 +121,8 @@ Out of scope:
   1. Add the rows of the Intake Service to `OPERATION_INVENTORY`:
      - `human`, prefix `intake.`: `inbound.create`, `inbound.list`, `inbound.get`, `inbound.delete`, `inbound.event.list`, `inbound.event.get`, `inbound.event.retry`, `inbound.event.discard`, `inbound.event.delete`, `outbound.request.list`, `outbound.request.get`, `outbound.request.discard`, `outbound.request.delete`.
      - `delivery`, prefix `intake.`: `inbound.event.receive`.
-  2. Assert 120 rows: 106 of ERD 1 and ERD 2 and 14 of ERD 3.
-  3. Assert that the sorted ids of `registry.all()` equal the inventory plus the two `service` operations `intake.action.check` and `mission.delivery.admit` plus the seven `direct: true` operations `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get` and `intake.storage.delete` (129); that the emitted OpenAPI holds no `operationId` of the nine; and that the emitted method and path pairs equal those of the 120 rows.
+  2. Assert 162 routed rows: 148 of ERD 1 and ERD 2 and 14 of ERD 3.
+  3. Assert that the sorted ids of `registry.all()` equal the inventory plus the two `service` operations `intake.action.check` and `mission.delivery.admit` plus the seven `direct: true` operations `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get` and `intake.storage.delete` (171); that the emitted OpenAPI holds no `operationId` of the nine; and that the emitted method and path pairs equal those of the 162 routed rows.
 - Rules:
   - The route set of the registry equals the path set of the committed OpenAPI. `architecture.impl.md:837`.
   - A `service` operation and a `direct: true` operation have no route and no OpenAPI entry. `architecture.impl.md:668`; `intake-service.impl.md:130`.
@@ -135,7 +135,7 @@ Out of scope:
 - Do:
   1. Add `intake.md` "## Command table" to `PAGE_INVENTORIES`; remove `intake` from `LATER_GROUPS`.
   2. Add to `API_ONLY_OPERATIONS`: `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get`, `intake.storage.delete`, `intake.inbound.event.receive`.
-  3. Assert: the documented paths number 123 (ERD 2 count 110 and 13 Intake rows); the program leaves number 118; the program holds the `intake` group with the leaves `inbound create`, `inbound list`, `inbound get`, `inbound delete`, `event list`, `event get`, `event retry`, `event discard`, `event delete`, `outbound list`, `outbound get`, `outbound discard`, `outbound delete`; the ids of the rows that are not exempt, joined with `API_ONLY_OPERATIONS`, equal the 127 ids of the non-service operations of the contracts.
+  3. Assert: the documented paths number 157 (ERD 2 count 144 and 13 Intake rows); the program leaves number 152; the program holds the `intake` group with the leaves `inbound create`, `inbound list`, `inbound get`, `inbound delete`, `event list`, `event get`, `event retry`, `event discard`, `event delete`, `outbound list`, `outbound get`, `outbound discard`, `outbound delete`; the ids of the rows that are not exempt, joined with `API_ONLY_OPERATIONS`, equal the 163 ids of the non-service operations of the contracts.
   4. Extend the operation-id pattern of the test with `intake`.
 - Rules:
   - A command table holds one row for each command of the group. `architecture.impl.md:545–546`.
@@ -147,7 +147,7 @@ Out of scope:
 
 - Files: `src/apps/server/e2e-integration-journey.test.ts` (create)
 - Do:
-  1. Start `fakeGitHub(t)`, `fakeS3(t)`, the bare repositories `gated` and `merge`, and `gatewayFixture` with `repositoryConnector: { gitLsRemote: async () => {} }`, `github`, `repositoryTransport`, `intake: { pollIntervalMs: 50 }` and `inventoryOverrides: { custody: () => [] }`.
+  1. Start `fakeGitHub(t)`, `fakeS3(t)`, the bare repositories `gated` and `merge`, and `gatewayFixture` with `repositoryConnector: { gitLsRemote: async () => {} }`, `github`, `repositoryTransport`, `intake: { pollIntervalMs: 50 }` and `inventoryOverrides: { repository: () => [] }`.
   2. Build fixture J of `## E2E` through the CLI and run EJ10.1 to EJ10.9 in one test in table order, with the test option `{ timeout: 120000 }`. Assert the `nodeId` and the node state of every claim. Poll a CLI read every 50 ms for at most 10 s where a row waits for the dispatcher or the poll.
   3. Read the health report with `fixture.request(gatewayOperations.healthcheck.path, …)` and the human token. Call `worker.action.request` and the object operations through `httpClient` from the test process.
 - Rules:

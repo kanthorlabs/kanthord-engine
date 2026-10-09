@@ -247,7 +247,7 @@ Out of scope:
 
 - Files: `src/apps/server/e2e-intake-foundation.test.ts` (create)
 - Do:
-  1. Start `gatewayFixture` with `inventoryOverrides: { custody: () => [] }`.
+  1. Start `gatewayFixture` with `inventoryOverrides: { repository: () => [] }`.
   2. Write one `test` block for each scenario E01.1 to E01.3 of `## E2E`.
 - Rules:
   - The liveness answer and the health report have no CLI command, so the test reads them over HTTP. ERD 1 decision D13.
