@@ -354,6 +354,8 @@ The implemented fields are:
 
 - `mission.consecutive_failure_limit`: optional Convict `nat`, default `3`. It
   holds the consecutive failure limit of the Mission Service.
+- `mission.rework_limit`: optional Convict `nat`, default `2`. It holds the
+  rework limit of the Mission Service. The value `0` turns rework off.
 - `mission.text_max_bytes`: optional Convict `nat` in UTF-8 bytes, default
   `32768`. It bounds every `Text` value of a Mission write; a stored value keeps
   its length after a change of the bound.

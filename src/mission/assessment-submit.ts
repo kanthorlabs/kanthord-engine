@@ -23,13 +23,30 @@ import {
   closeAttempt,
   insertAssessment,
   insertOutcome,
+  readExecutionAssessmentsOfAttempt,
   readLandedCommitEvidence,
+  type AssessmentRow,
   type OutcomeRow,
 } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 
 const NO_REQUIRED_ACTIONS = 0;
+
+function causesRework(
+  tx: Transaction,
+  dependencies: Dependencies,
+  assessment: AssessmentRow,
+): boolean {
+  if (assessment.result !== AssessmentResult.CriterionNotMet) return false;
+  const reworks = readExecutionAssessmentsOfAttempt(
+    tx,
+    assessment.node_id,
+    assessment.attempt,
+    AssessmentResult.CriterionNotMet,
+  ).filter((row) => row.sequence < assessment.sequence);
+  return reworks.length < dependencies.config.rework_limit;
+}
 
 export function submitAssessment(
   tx: Transaction,
@@ -71,7 +88,17 @@ export function submitAssessment(
     revision.revision,
   );
   let outcome: OutcomeRow | null = null;
-  if (
+  if (current && causesRework(tx, dependencies, assessment)) {
+    endLiveClaim(tx, dependencies, node, now);
+    transition(
+      tx,
+      dependencies,
+      requireMission(tx, node.mission_id),
+      node,
+      NodeState.Available,
+      now,
+    );
+  } else if (
     current &&
     (body.result !== AssessmentResult.Success ||
       actions.length === NO_REQUIRED_ACTIONS)

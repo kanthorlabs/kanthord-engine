@@ -1278,6 +1278,21 @@ export const missionOperations = {
     output: outcomeSchema,
     description: "Read the previous attempt outcome cleared by an unblock.",
   },
+  "execution.reworkAssessment.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.reworkAssessment.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:execution_id/rework-assessment",
+    input: readInput(
+      z.strictObject({ execution_id: identitySchema("execution") }),
+      z.strictObject({}),
+    ),
+    output: assessmentSchema,
+    description:
+      "Read the assessment that caused the latest rework of the claimed attempt.",
+  },
   "execution.pinnedRevision.get": {
     ...readOperation,
     access: AccessPolicy.Client,

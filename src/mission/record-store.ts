@@ -403,6 +403,19 @@ export function readAssessmentsOfAttempt(
     .all(nodeId, attempt) as unknown as AssessmentRow[];
 }
 
+export function readExecutionAssessmentsOfAttempt(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+  result: AssessmentResult,
+): AssessmentRow[] {
+  return tx.database
+    .prepare(
+      "SELECT * FROM mission_assessment WHERE node_id = ? AND attempt = ? AND result = ? AND execution_id IS NOT NULL ORDER BY sequence",
+    )
+    .all(nodeId, attempt, result) as unknown as AssessmentRow[];
+}
+
 export function insertOutcome(
   tx: Transaction,
   row: Omit<OutcomeRow, "sequence">,

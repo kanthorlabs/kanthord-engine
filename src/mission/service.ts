@@ -52,6 +52,7 @@ import {
   executionRevisionPage,
   executionEvidencePage,
   clearedOutcome,
+  reworkAssessment,
   executionObjectives,
   executionObjectiveOutcomes,
   executionObjectiveEvidence,
@@ -206,6 +207,16 @@ export class MissionService
         const claim = caller.execution;
         return caller.commit((tx) =>
           clearedOutcome(tx, this.dependencies, claim),
+        );
+      },
+    );
+    registry.register(
+      missionOperations["execution.reworkAssessment.get"],
+      (_input, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) =>
+          reworkAssessment(tx, this.dependencies, claim),
         );
       },
     );

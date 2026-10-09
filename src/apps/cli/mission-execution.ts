@@ -60,6 +60,28 @@ export function addExecutionCommands(mission: Command): void {
         "execution.clearedOutcome.get",
       );
     });
+  const rework = execution
+    .command("rework-assessment")
+    .description("Assessment that caused the latest rework");
+  rework.action(() => rework.help());
+  rework
+    .command("get")
+    .description(
+      "Get the assessment that caused the latest rework of the attempt as JSON",
+    )
+    .argument("<execution-id>", "Execution ID")
+    .action(async (executionId: string, _options, command: Command) => {
+      executionIdentity(
+        executionId,
+        "cli.mission.execution.rework_assessment.get.invalid_execution_id",
+      );
+      printResult(
+        await client(command, "execution.reworkAssessment.get")[
+          "execution.reworkAssessment.get"
+        ]({ params: { execution_id: executionId }, query: {}, body: null }),
+        "execution.reworkAssessment.get",
+      );
+    });
   const asset = evidence.command("asset").description("Bound assets");
   asset.action(() => asset.help());
   const content = asset.command("content").description("Bound asset content");

@@ -1,5 +1,9 @@
 import { canonicalJSON } from "../kernel/json.ts";
-import { AssessmentResult, type Revision } from "../mission/contract.ts";
+import {
+  AssessmentResult,
+  NodeState,
+  type Revision,
+} from "../mission/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import {
   EndReason,
@@ -151,6 +155,12 @@ export async function runEvaluation(
       return { kind: ExecutionEndKind.Closed, outcomeId: answer.outcome.id };
     if (answer.assessment.result === AssessmentResult.Success)
       return await requestAndRelease(run);
+    if ("state" in answer.node && answer.node.state === NodeState.Available)
+      return {
+        kind: ExecutionEndKind.Ended,
+        reason: EndReason.Revoked,
+        code: null,
+      };
     return run.stop(EndReason.OperationFailed);
   } finally {
     input.workspaces.release(prepared.directory, WorkspaceKind.Execution);

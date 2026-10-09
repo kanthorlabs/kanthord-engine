@@ -106,6 +106,8 @@ paths:
     $ref: ./openapi/mission/execution.revision.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/revision:
     $ref: ./openapi/mission/execution.revision.list.yaml#/pathItem
+  /api/mission/execution/{execution_id}/rework-assessment:
+    $ref: ./openapi/mission/execution.reworkAssessment.get.yaml#/pathItem
   /api/mission/{mission_id}/export:
     $ref: ./openapi/mission/export.yaml#/pathItem
   /api/mission/node/{node_id}/attempt/{attempt}/external-action/{action_key}:

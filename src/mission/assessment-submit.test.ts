@@ -12,13 +12,16 @@ import {
   RepositoryAction,
   PlatformAddressKind,
   NodeKind,
+  MissionErrorCode,
   type AssessmentSubmit,
 } from "./contract.ts";
 import {
   readOpenAttempt,
   readEvidence,
+  readOutcomesOfAttempt,
   insertAssessment,
   insertOutcome,
+  openAttempt,
 } from "./record-store.ts";
 import {
   setNodeState,
@@ -37,6 +40,9 @@ const FIRST_REVISION = 1;
 const NOT_RUNNING = "scheduler.execution.not_running";
 const VALIDATION = "gateway.request.validation_failed";
 const QUEUE_INSERT = "workQueue.insert";
+const REWORK_OFF = 0;
+const SECOND_ATTEMPT = 2;
+const FIRST_REWORK = 1;
 
 test("initiative currency follows real child outcomes and only current closure releases dependent work", async (t) => {
   const h = executionHarness(t, IDENTITY);
@@ -232,7 +238,7 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
     });
   assert.equal(h.node().state, NodeState.Evaluating);
   assert.equal(body.evidence_ids.length, FIRST_REVISION);
-  return { ...h, body, submit, revokes: () => revokes };
+  return { ...h, body, submit, address, revokes: () => revokes };
 }
 
 test("current passing assessments close attempts and revoke claims without an external action", async (t) => {
@@ -259,6 +265,8 @@ test("current nonpassing assessments block and a required-action pass keeps eval
     AssessmentResult.Undetermined,
   ]) {
     const h = await fixture(t);
+    if (result === AssessmentResult.CriterionNotMet)
+      h.dependencies.config.rework_limit = REWORK_OFF;
     const answer = await h.submit({ ...h.body, result });
     assert.ok("state" in answer.node);
     assert.equal(answer.node.state, NodeState.Blocked);
@@ -279,6 +287,7 @@ test("current nonpassing assessments block and a required-action pass keeps eval
 
 test("nonpassing assessment closes into Blocked while preserving its unresolved request", async (t) => {
   const h = await fixture(t, RepositoryAction.PullRequest);
+  h.dependencies.config.rework_limit = REWORK_OFF;
   await h.submit();
   const request = await h.invoke("evidence.request", {
     params: { node_id: h.node_id },
@@ -305,4 +314,110 @@ test("nonpassing assessment closes into Blocked while preserving its unresolved 
     assert.equal(readOpenAttempt(tx, h.node_id), null);
     assert.equal(readEvidence(tx, request.id)?.end_state, null);
   });
+});
+
+test("a criterion-not-met assessment below the rework limit returns the node to Available and blocks at the limit", async (t) => {
+  const h = await fixture(t);
+  const limit = h.dependencies.config.rework_limit;
+  const live = () => {
+    h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+      execution_id: h.claim.executionId,
+      runtime_identity: h.claim.runtimeIdentity,
+      attempt: h.claim.attempt,
+      pinned_revision: h.claim.pinnedRevision,
+    });
+  };
+  const evaluateAgain = () => {
+    live();
+    h.store.transaction((tx) =>
+      setNodeState(tx, h.node_id, NodeState.Evaluating),
+    );
+  };
+  const readRework = () =>
+    h.invoke("execution.reworkAssessment.get", {
+      params: { execution_id: h.claim.executionId },
+      query: {},
+      body: null,
+    });
+  const notFound = (error: unknown) =>
+    error instanceof OperationError &&
+    error.code === MissionErrorCode.RecordNotFound;
+  await assert.rejects(readRework(), notFound);
+  const notMet = { ...h.body, result: AssessmentResult.CriterionNotMet };
+  for (let rework = FIRST_REWORK; rework <= limit; rework++) {
+    if (rework > FIRST_REWORK) evaluateAgain();
+    const inserts = h.calls.filter((call) => call.method === QUEUE_INSERT);
+    const answer = await h.submit(notMet);
+    assert.ok("state" in answer.node);
+    assert.equal(answer.node.state, NodeState.Available);
+    assert.equal(answer.outcome, null);
+    assert.equal(h.revokes(), rework);
+    assert.ok(
+      h.calls
+        .filter((call) => call.method === QUEUE_INSERT)
+        .slice(inserts.length)
+        .some((call) => call.arguments.includes(h.node_id)),
+    );
+    h.store.transaction((tx) => {
+      assert.equal(readOpenAttempt(tx, h.node_id)?.attempt, h.claim.attempt);
+      assert.deepEqual(
+        readOutcomesOfAttempt(tx, h.node_id, h.claim.attempt),
+        [],
+      );
+    });
+    live();
+    assert.equal((await readRework()).id, answer.assessment.id);
+  }
+  evaluateAgain();
+  const blocked = await h.submit(notMet);
+  assert.ok("state" in blocked.node);
+  assert.equal(blocked.node.state, NodeState.Blocked);
+  assert.equal(
+    blocked.outcome?.closing_event,
+    ClosingEvent.AssessmentNotPassed,
+  );
+  assert.equal(
+    h.store.transaction((tx) => readOpenAttempt(tx, h.node_id)),
+    null,
+  );
+  h.store.transaction((tx) =>
+    openAttempt(tx, h.node_id, FIRST_REVISION, h.actor, FIRST_REVISION),
+  );
+  h.claim.attempt = SECOND_ATTEMPT;
+  evaluateAgain();
+  await assert.rejects(readRework(), notFound);
+  const context = { ...h.context, attempt: SECOND_ATTEMPT };
+  const evidence = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...context,
+      subject: "Verified",
+      assets: [
+        {
+          kind: AssetKind.Repository,
+          address: h.address,
+        },
+      ],
+      verification: {
+        tested_input: h.address,
+        results: [
+          {
+            command: "true",
+            exit_code: SUCCESSFUL_EXIT_CODE,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  const next = await h.submit({
+    ...notMet,
+    ...context,
+    evidence_ids: [evidence.evidence.id],
+  });
+  assert.ok("state" in next.node);
+  assert.equal(next.node.state, NodeState.Available);
+  assert.equal(next.outcome, null);
 });

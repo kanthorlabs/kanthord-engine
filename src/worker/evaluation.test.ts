@@ -105,6 +105,15 @@ test("evaluation writes failed-verification assessments without inference and ga
     },
     {
       command: "true",
+      texts: [
+        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet"}',
+      ],
+      result: "criterion-not-met",
+      opens: 1,
+      reworked: true,
+    },
+    {
+      command: "true",
       texts: ["invalid", "partial"],
       result: null,
       opens: 1,
@@ -243,6 +252,12 @@ test("evaluation writes failed-verification assessments without inference and ga
           );
           if (!scenario.opens)
             assert.match(input.body.rationale, /Verification 1 `false` failed/);
+          if (scenario.reworked)
+            return complete({
+              assessment: { result: scenario.result },
+              node: { state: "Available" },
+              outcome: null,
+            });
           return complete({ outcome: { id: "outcome" } });
         },
       },
@@ -290,6 +305,12 @@ test("evaluation writes failed-verification assessments without inference and ga
     if (scenario.stop) await assert.rejects(pending, { reason: scenario.stop });
     else if (scenario.result === null)
       await assert.rejects(pending, ExecutionStop);
+    else if (scenario.reworked)
+      assert.deepEqual(await pending, {
+        kind: "ended",
+        reason: EndReason.Revoked,
+        code: null,
+      });
     else
       assert.deepEqual(await pending, {
         kind: "closed",

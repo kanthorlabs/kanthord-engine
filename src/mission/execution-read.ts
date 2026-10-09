@@ -6,6 +6,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   ActorKind,
   actorSchema,
+  AssessmentResult,
   MissionErrorCode,
   NodeKind,
   NODE_LIST_LIMIT_DEFAULT,
@@ -14,8 +15,13 @@ import {
 import { identitySchema } from "../kernel/identity.ts";
 import { evidencePage } from "./evidence-read.ts";
 import { recordNotFound } from "./record-list.ts";
-import { outcomeRecord, evidenceRecord } from "./record-read.ts";
 import {
+  assessmentRecord,
+  outcomeRecord,
+  evidenceRecord,
+} from "./record-read.ts";
+import {
+  readExecutionAssessmentsOfAttempt,
   readOutcomesOfAttempt,
   readCurrentOutcome,
   readEvidence,
@@ -189,6 +195,22 @@ export function clearedOutcome(
   ).at(-FIRST_ATTEMPT);
   assert.ok(outcome);
   return outcomeRecord(tx, dependencies.bindings, outcome);
+}
+
+export function reworkAssessment(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+) {
+  executionRead(tx, dependencies, claim);
+  const assessment = readExecutionAssessmentsOfAttempt(
+    tx,
+    claim.nodeId,
+    claim.attempt,
+    AssessmentResult.CriterionNotMet,
+  ).at(-1);
+  if (!assessment) recordNotFound();
+  return assessmentRecord(tx, dependencies, assessment);
 }
 
 export function executionRead(
