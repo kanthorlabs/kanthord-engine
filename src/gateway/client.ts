@@ -79,6 +79,11 @@ export function resolveClient(
   return resolved;
 }
 
+function operationUrl(endpoint: string, path: string): URL {
+  const base = endpoint.endsWith("/") ? endpoint : `${endpoint}/`;
+  return new URL(path.slice(1), base);
+}
+
 export function httpClient<T extends Record<string, Operation>>(
   operations: T,
   endpoint: string,
@@ -96,7 +101,7 @@ export function httpClient<T extends Record<string, Operation>>(
     const path = operation.path.replace(/:([^/]+)/g, (_, key: string) =>
       encodeURIComponent(String(input.params[key])),
     );
-    const url = new URL(path, endpoint);
+    const url = operationUrl(endpoint, path);
     for (const [key, value] of Object.entries(input.query))
       for (const entry of Array.isArray(value) ? value : [value])
         if (entry !== undefined) url.searchParams.append(key, String(entry));

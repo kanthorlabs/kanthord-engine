@@ -72,3 +72,41 @@ test("missing, malformed and unavailable server versions are diagnostics", async
   assert.ok(result instanceof Diagnostic);
   assert.equal(result.code, VERSION_UNAVAILABLE);
 });
+
+test("client joins an endpoint path prefix with the operation path", async () => {
+  const input = { params: {}, query: {}, body: null };
+  for (const [endpoint, expected] of [
+    [
+      "https://h.example/s/kanthord",
+      "https://h.example/s/kanthord/api/liveness",
+    ],
+    [
+      "https://h.example/s/kanthord/",
+      "https://h.example/s/kanthord/api/liveness",
+    ],
+    ["https://h.example", "https://h.example/api/liveness"],
+    ["https://h.example/", "https://h.example/api/liveness"],
+  ]) {
+    let requested = "";
+    const client = httpClient(
+      gatewayOperations,
+      endpoint!,
+      undefined,
+      async (url) => {
+        requested = String(url);
+        return Response.json({ status: "ok", services: {} });
+      },
+    );
+    await client.liveness(input);
+    assert.equal(requested, expected);
+  }
+});
+
+test("client reaches a gateway served under a base path", async (t) => {
+  const fixture = await gatewayFixture(t, { basePath: "/s/kanthord" });
+  const client = httpClient(
+    gatewayOperations,
+    `${fixture.endpoint}/s/kanthord`,
+  );
+  assert.equal(await readServerVersion(client), packageVersion());
+});

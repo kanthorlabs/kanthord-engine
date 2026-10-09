@@ -80,9 +80,11 @@ supplied value:
 4. `http://127.0.0.1:31415`.
 
 The effective value must be an absolute HTTP(S) URL without embedded username
-or password, query, or fragment. A URL path is accepted by the current schema,
-but absolute operation paths replace it and resolve from the URL's origin.
-The server's Host allowlist still applies. An invalid chosen value fails rather
+or password, query, or fragment. A URL path is a prefix: the client appends the
+absolute operation path to it, with or without a trailing slash, so
+`https://h.example/s/kanthord` and `/api/liveness` give
+`https://h.example/s/kanthord/api/liveness`. Match the prefix to the server
+`gateway.base_path`. The server's Host allowlist still applies. An invalid chosen value fails rather
 than falling back: precedence uses presence, not successful validation.
 
 This flag selects the server, not a project or the server's listener settings.
