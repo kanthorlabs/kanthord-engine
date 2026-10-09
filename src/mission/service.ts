@@ -212,7 +212,7 @@ export class MissionService
       },
     );
     registry.register(
-      missionOperations["execution.clearedAssessment.get"],
+      missionOperations["execution.cleared_assessment.get"],
       (_input, caller) => {
         assert.ok(caller.execution);
         const claim = caller.execution;
@@ -222,7 +222,7 @@ export class MissionService
       },
     );
     registry.register(
-      missionOperations["execution.reworkAssessment.get"],
+      missionOperations["execution.rework_assessment.get"],
       (_input, caller) => {
         assert.ok(caller.execution);
         const claim = caller.execution;

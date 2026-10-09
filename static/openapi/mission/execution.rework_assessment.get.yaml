@@ -1,11 +1,10 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   get:
-    operationId: mission.execution.clearedAssessment.get
+    operationId: mission.execution.rework_assessment.get
     tags:
       - mission
-    description: Read the assessment of the outcome that an unblock cleared before
-      the claimed attempt.
+    description: Read the assessment that caused the latest rework of the claimed attempt.
     x-access-policy: client
     x-timeout-ms: 30000
     x-mutation: false
@@ -17,7 +16,7 @@ pathItem:
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/mission.execution.clearedAssessment.get.Input/prope\
+          $ref: "#/components/schemas/mission.execution.rework_assessment.get.Input/prope\
             rties/params/properties/execution_id"
     responses:
       "200":
@@ -25,7 +24,7 @@ pathItem:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/mission.execution.clearedAssessment.get.Output"
+              $ref: "#/components/schemas/mission.execution.rework_assessment.get.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -48,7 +47,7 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    mission.execution.clearedAssessment.get.Input:
+    mission.execution.rework_assessment.get.Input:
       type: object
       properties:
         params:
@@ -74,7 +73,7 @@ components:
         - query
         - body
       additionalProperties: false
-    mission.execution.clearedAssessment.get.Output:
+    mission.execution.rework_assessment.get.Output:
       type: object
       properties:
         id:

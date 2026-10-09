@@ -91,8 +91,8 @@ test("the assessment reads answer null only on a record not found", async (t) =>
     },
   });
   for (const [operation, read] of [
-    ["execution.reworkAssessment.get", readReworkAssessment],
-    ["execution.clearedAssessment.get", readClearedAssessment],
+    ["execution.rework_assessment.get", readReworkAssessment],
+    ["execution.cleared_assessment.get", readClearedAssessment],
   ] as const) {
     for (const [answer, expected] of [
       [
@@ -141,8 +141,8 @@ test("the prior rationale is the rework rationale, else the cleared rationale, e
     const run = fixture(SECOND_ATTEMPT);
     t.after(() => run.dispose());
     run.clients.mission = {
-      "execution.reworkAssessment.get": async () => rework,
-      "execution.clearedAssessment.get": async () => cleared,
+      "execution.rework_assessment.get": async () => rework,
+      "execution.cleared_assessment.get": async () => cleared,
     } as unknown as MethodClients["mission"];
     assert.equal(await readPriorRationale(run), expected);
   }

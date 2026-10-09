@@ -573,8 +573,8 @@ The execution identity is the first positional in every synopsis. The server der
 | 52  | `execution objective outcome list <execution-id> [L]`            | `GET /api/mission/execution/:execution_id/objective/outcome`                | `mission.execution.objective.outcome.list`     | E      |
 | 53  | `execution objective evidence list <execution-id> [L]`           | `GET /api/mission/execution/:execution_id/objective/evidence`               | `mission.execution.objective.evidence.list`    | E      |
 | 54  | `execution cleared-outcome get <execution-id>`                   | `GET /api/mission/execution/:execution_id/cleared-outcome`                  | `mission.execution.clearedOutcome.get`         | E      |
-| 55  | `execution rework-assessment get <execution-id>`                 | `GET /api/mission/execution/:execution_id/rework-assessment`                | `mission.execution.reworkAssessment.get`       | E      |
-| 56  | `execution cleared-assessment get <execution-id>`                | `GET /api/mission/execution/:execution_id/cleared-assessment`               | `mission.execution.clearedAssessment.get`      | E      |
+| 55  | `execution rework-assessment get <execution-id>`                 | `GET /api/mission/execution/:execution_id/rework-assessment`                | `mission.execution.rework_assessment.get`      | E      |
+| 56  | `execution cleared-assessment get <execution-id>`                | `GET /api/mission/execution/:execution_id/cleared-assessment`               | `mission.execution.cleared_assessment.get`     | E      |
 
 The reads return the same record schemas as the human reads and never a revision newer than the pinned one.
 The pinned-revision read returns `Revision` with tasks and the complete node content.

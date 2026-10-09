@@ -76,10 +76,10 @@ export function addExecutionCommands(mission: Command): void {
         "cli.mission.execution.cleared_assessment.get.invalid_execution_id",
       );
       printResult(
-        await client(command, "execution.clearedAssessment.get")[
-          "execution.clearedAssessment.get"
+        await client(command, "execution.cleared_assessment.get")[
+          "execution.cleared_assessment.get"
         ]({ params: { execution_id: executionId }, query: {}, body: null }),
-        "execution.clearedAssessment.get",
+        "execution.cleared_assessment.get",
       );
     });
   const rework = execution
@@ -98,10 +98,10 @@ export function addExecutionCommands(mission: Command): void {
         "cli.mission.execution.rework_assessment.get.invalid_execution_id",
       );
       printResult(
-        await client(command, "execution.reworkAssessment.get")[
-          "execution.reworkAssessment.get"
+        await client(command, "execution.rework_assessment.get")[
+          "execution.rework_assessment.get"
         ]({ params: { execution_id: executionId }, query: {}, body: null }),
-        "execution.reworkAssessment.get",
+        "execution.rework_assessment.get",
       );
     });
   const asset = evidence.command("asset").description("Bound assets");

@@ -123,8 +123,8 @@ test("published execution evidence, cleared outcome, cleared assessment and rewo
   for (const name of [
     "execution.evidence.list",
     "execution.clearedOutcome.get",
-    "execution.clearedAssessment.get",
-    "execution.reworkAssessment.get",
+    "execution.cleared_assessment.get",
+    "execution.rework_assessment.get",
   ] as const) {
     const fragment = parse(
       readFileSync(
@@ -693,8 +693,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.execution.objective.outcome.list", AccessPolicy.Client],
   ["mission.execution.objective.evidence.list", AccessPolicy.Client],
   ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
-  ["mission.execution.clearedAssessment.get", AccessPolicy.Client],
-  ["mission.execution.reworkAssessment.get", AccessPolicy.Client],
+  ["mission.execution.cleared_assessment.get", AccessPolicy.Client],
+  ["mission.execution.rework_assessment.get", AccessPolicy.Client],
   ["workbench.session.list", AccessPolicy.Human],
   ["workbench.session.create", AccessPolicy.Human],
   ["workbench.session.get", AccessPolicy.Human],

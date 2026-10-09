@@ -104,7 +104,7 @@ test("developer@1 opens the reviewer from the second agent with its own credenti
             },
           ],
         }),
-      "execution.reworkAssessment.get": async () => ({
+      "execution.rework_assessment.get": async () => ({
         type: "failure",
         status: 404,
         error: {
@@ -116,7 +116,7 @@ test("developer@1 opens the reviewer from the second agent with its own credenti
           },
         },
       }),
-      "execution.clearedAssessment.get": async () =>
+      "execution.cleared_assessment.get": async () =>
         complete({ id: createIdentity("assessment"), rationale: "unmet" }),
       "evidence.submit": async () => complete({ evidence: {} }),
     },

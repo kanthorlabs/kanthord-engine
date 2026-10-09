@@ -1278,11 +1278,11 @@ export const missionOperations = {
     output: outcomeSchema,
     description: "Read the previous attempt outcome cleared by an unblock.",
   },
-  "execution.clearedAssessment.get": {
+  "execution.cleared_assessment.get": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.clearedAssessment.get",
+    id: "mission.execution.cleared_assessment.get",
     method: HttpMethod.Get,
     path: "/api/mission/execution/:execution_id/cleared-assessment",
     input: readInput(
@@ -1293,11 +1293,11 @@ export const missionOperations = {
     description:
       "Read the assessment of the outcome that an unblock cleared before the claimed attempt.",
   },
-  "execution.reworkAssessment.get": {
+  "execution.rework_assessment.get": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.reworkAssessment.get",
+    id: "mission.execution.rework_assessment.get",
     method: HttpMethod.Get,
     path: "/api/mission/execution/:execution_id/rework-assessment",
     input: readInput(

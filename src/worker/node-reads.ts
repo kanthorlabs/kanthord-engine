@@ -114,7 +114,7 @@ function nullOnRecordNotFound(
 export async function readReworkAssessment(run: ExecutionRun) {
   return run.call(async (options) =>
     nullOnRecordNotFound(
-      await run.clients.mission["execution.reworkAssessment.get"](
+      await run.clients.mission["execution.rework_assessment.get"](
         {
           params: { execution_id: run.claim.execution_id },
           query: {},
@@ -130,7 +130,7 @@ export async function readClearedAssessment(run: ExecutionRun) {
   if (run.claim.attempt === FIRST_ATTEMPT) return null;
   return run.call(async (options) =>
     nullOnRecordNotFound(
-      await run.clients.mission["execution.clearedAssessment.get"](
+      await run.clients.mission["execution.cleared_assessment.get"](
         {
           params: { execution_id: run.claim.execution_id },
           query: {},

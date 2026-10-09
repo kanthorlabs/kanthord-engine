@@ -335,7 +335,7 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
     );
   };
   const readRework = () =>
-    h.invoke("execution.reworkAssessment.get", {
+    h.invoke("execution.rework_assessment.get", {
       params: { execution_id: h.claim.executionId },
       query: {},
       body: null,
@@ -427,7 +427,7 @@ test("the cleared assessment read answers the assessment that the cleared outcom
   for (const humanBlock of [false, true]) {
     const h = await fixture(t);
     const readCleared = () =>
-      h.invoke("execution.clearedAssessment.get", {
+      h.invoke("execution.cleared_assessment.get", {
         params: { execution_id: h.claim.executionId },
         query: {},
         body: null,
