@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isNumber, isObject, isString } from "./values.ts";
+import { isBoolean, isNumber, isObject, isString } from "./values.ts";
 
 const primitiveValues = [undefined, null, true, false, 0, 1, NaN, "", "text"];
 const objectValues = [{}, [], new Date(), new String("text"), new Number(1)];
@@ -15,13 +15,21 @@ test("named type guards preserve primitive and object distinctions", () => {
     assert.equal(isNumber(value), true);
     assert.equal(isString(value), false);
   }
+  for (const value of [true, false]) {
+    assert.equal(isBoolean(value), true);
+    assert.equal(isString(value), false);
+  }
   for (const value of objectValues) {
     assert.equal(isObject(value), true);
     assert.equal(isString(value), false);
     assert.equal(isNumber(value), false);
+    assert.equal(isBoolean(value), false);
   }
   for (const value of [...primitiveValues, functionValue]) {
     assert.equal(isObject(value), false);
+  }
+  for (const value of [undefined, null, 0, "false", "off", functionValue]) {
+    assert.equal(isBoolean(value), false);
   }
   for (const value of [undefined, null, true, false, functionValue]) {
     assert.equal(isString(value), false);

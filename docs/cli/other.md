@@ -28,7 +28,7 @@ There are eight application/JWT forms below: three configuration commands,
 two `serve` application forms, two `jwt generate` modes, and `jwt inspect`.
 Help is a parser facility, not a fourth global command.
 
-1. `kanthord config init [--config <path>]` — implemented; local, no route.
+1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
 4. `kanthord serve [server] [--config <path>]` — implemented; local application
@@ -49,11 +49,12 @@ owning pages in the [index](./README.md).
 ### Closed root names and option scope
 
 **Implemented and target requirement:** the three global root names are
-`config`, `serve`, and `jwt`. The six service root names are `project`, `mission`,
+`config`, `serve`, and `jwt`. The four component root names are `llm`, `repository`,
+`storage`, and `agent`. The six service root names are `project`, `mission`,
 `scheduler`, `worker`, `tracking`, and `gateway`. These are disjoint, closed sets.
 `server` and the application form of `worker` are operands of `serve`, never new
-root commands. `cli` is not a `serve` operand. Current `project`, `mission`,
-`scheduler`, and `tracking` groups expose help only.
+root commands. `cli` is not a `serve` operand. The current `tracking` group
+exposes help only.
 
 - [`--config`](./common-flags.md#--config) selects server configuration only
   where the local command declares it; service commands reject it.
@@ -178,7 +179,12 @@ The worker application uses the same
 
 **Implemented:** `runCLI` uses exit `0` for success and `1` for handled failures.
 Commander help exits `0`; parsing failures exit nonzero. A caught CLI or domain
-failure writes a diagnostic to stderr. Coded diagnostics use the owning
+failure writes a diagnostic to stderr. A declared remote failure of a mutation
+prints `<code>: request failed (HTTP <status>); idempotency key <key>.`, and a
+declared remote failure of a read prints `<code>: request failed (HTTP <status>).`
+`gateway verify`, `worker register` and `worker handover` put the command name
+before `request failed`. The CLI does not print the remote message, details or
+request ID. Coded diagnostics use the owning
 `cli`, `system`, or service namespace; Commander syntax diagnostics are not a
 uniform JSON envelope. The launcher rejects unsupported Node.js versions with
 one stderr line and a nonzero exit before loading the application. The supported
@@ -310,6 +316,7 @@ not change `gateway.bind` or `gateway.port`. Configuration is read at startup,
 and an edit takes effect on the next start. **Target requirement:** a relative
 path-valued field inside the configuration resolves against the data directory.
 `agent.prompt.system_file` and `agent.prompt.agent_directory` declare such fields.
+`agent.prompt.host_file` holds a boolean and defaults to `true`. `false` locks the `host_file` prompt switch of the `system` scope off.
 
 Reads require a user-owned regular `0600` file and a user-owned `0700` containing
 directory. Exact modes are checked, including rejection of special bits and
@@ -333,8 +340,8 @@ The implemented fields are:
 - `log.level`: optional enum `trace|debug|info|warn|error|fatal`, default `info`.
 - `log.destination`: optional enum `stderr|file`, default `stderr`; `file` uses
   `kanthord.log` in the XDG state directory.
-- `gateway.bind`: optional loopback-IP string, default `127.0.0.1`; current
-  validation accepts IPv4 `127.*` loopback addresses and `::1`.
+- `gateway.bind`: optional IP-address string, default `127.0.0.1`; validation
+  accepts any IPv4 or IPv6 address, for example `::` in a container.
 - `gateway.port`: optional Convict `port`, default `31415`.
 - `gateway.allowed_hosts`: optional array of nonempty strings, default
   `["127.0.0.1:31415", "localhost:31415"]`.
@@ -371,12 +378,18 @@ no database. None reads or writes `cli.yaml`.
 ### `config init`
 
 ```text
-kanthord config init [--config <path>]
+kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--config <path>]
 ```
 
 **Implemented; route/access: none, local filesystem.** The destination must be
 absent. Build a whole document with every current default and a newly generated
-master key, validate it in memory, and then publish it. The invocation itself
+master key, validate it in memory, and then publish it. Each repeatable
+`--gateway-allowed-host` value is lowercased and appended to the default
+`gateway.allowed_hosts` without duplicates. A value that is not exactly
+`<name>` or `<name>:<port>` fails with `cli.config.invalid_allowed_host` before
+any file is written. `--gateway-bind` writes its value to `gateway.bind`. A value that
+is not an IP address fails with `system.config.invalid_field` before any file
+is written. The invocation itself
 authorizes creation; stdin and stdout may both be redirected.
 
 Create the destination directory at `0700` when absent. Write a same-directory
@@ -519,16 +532,18 @@ logs one record `Worker application ready` with `runtime_identity`,
 versions in the diagnostic. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
 
-`SIGINT` and `SIGTERM` stop further startup and further work pulls. The
+`SIGINT` and `SIGTERM` stop further startup and further work pulls. A stop
+aborts the outstanding work pull. A claim that commits during that abort has no
+worker until its lease expires, and settlement then declares it lost. The
 application deregisters only a registration whose runtime identity it knows. It
 exits `0` after a successful deregistration or after the `404` that ends its
 registration, and exits `1` on any other deregistration or cleanup failure,
 without a retry. A 10-second watchdog applies only when no execution is live and
-no registration or work pull waits for its answer. `SIGHUP` reopens nothing.
+no registration waits for its answer. `SIGHUP` reopens nothing.
 
 The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-worker-application) rules the application, credential handover, workspace, prompt configuration, heartbeat expiry and containment.
-Shutdown during a live execution, a registration or a work pull with no answer,
-and a stop deadline in those cases remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
+Shutdown during a live execution or a registration with no answer, and a stop
+deadline in those cases remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
 
 ## Local JWT issuance
 
@@ -732,8 +747,11 @@ The [`--help`](./common-flags.md#--help) reference defines the implemented
 parser option and its no-work behavior. Command-specific forms are:
 
 - `kanthord -h` or `kanthord --help`: print root help to stdout and exit `0`.
-  List exactly the three global names and six service groups. There is no
+  List exactly the three global names, four component groups and six service
+  groups. There is no
   top-level `help` command; `kanthord help` currently fails as excess input.
+- `kanthord -V` or `kanthord --version`: print the package version to stdout
+  and exit `0`. See [`--version`](./common-flags.md#--version).
 - `kanthord` with no command: print root help to stdout and exit `1`; start no
   application. This differs deliberately from an explicit help request.
 - `kanthord <group> --help`: print that group's commands and applicable options
@@ -758,97 +776,98 @@ implement them. Help is not an extra root name or a reason to load secrets.
 
 ## Error codes
 
-| HTTP            | Code                                             | Condition                                                                                                               | Commands                                                  |
-| --------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| local           | `worker.lifecycle.stopped`                       | The Worker Service or application cannot restart after shutdown.                                                        | server or serve worker                                    |
-| local           | `project.lifecycle.stopped`                      | The Project Service cannot restart after shutdown.                                                                      | server or serve worker                                    |
-| local           | `mission.lifecycle.stopped`                      | The Mission Service cannot restart after shutdown.                                                                      | server or serve worker                                    |
-| local           | `intake.lifecycle.stopped`                       | A stopped Intake Service cannot start again.                                                                            | serve server                                              |
-| local           | `custody.lifecycle.stopped`                      | A stopped Custody component cannot start again.                                                                         | serve server                                              |
-| local           | `gateway.client.version_unavailable`             | The OpenAPI index cannot supply a valid server package version.                                                         | serve worker                                              |
-| local           | `cli.command.required`                           | No command was supplied.                                                                                                | kanthord                                                  |
-| local           | `cli.config.invalid`                             | The stored `cli.yaml` fails the client configuration schema.                                                            | client commands, serve worker                             |
-| local           | `cli.config.invalid_endpoint`                    | The resolved endpoint is not an absolute HTTP(S) URL without credentials, query or fragment.                            | remote commands, serve worker, jwt generate               |
-| local           | `cli.file.duplicate_key`                         | The JSON input repeats an object key.                                                                                   | commands with `--file`                                    |
-| local           | `cli.file.encoding_invalid`                      | The input file is not valid UTF-8.                                                                                      | commands with `--file`                                    |
-| local           | `cli.file.invalid_path`                          | The `--file` value is `-`; standard input is not accepted.                                                              | commands with `--file`                                    |
-| local           | `cli.file.not_found`                             | The `--file` path does not exist.                                                                                       | commands with `--file`                                    |
-| local           | `cli.file.not_json`                              | The input file is not valid JSON.                                                                                       | commands with `--file`                                    |
-| local           | `cli.file.not_object`                            | The JSON input is null, an array or a scalar, not an object.                                                            | commands with `--file`                                    |
-| local           | `cli.file.not_regular`                           | The `--file` path names a directory, a device or another non-regular file.                                              | commands with `--file`                                    |
-| local           | `cli.file.schema_invalid`                        | The JSON object does not match the command input schema.                                                                | commands with `--file`                                    |
-| local           | `cli.idempotency_key.invalid`                    | The `--idempotency-key` value is not a canonical ULID.                                                                  | mutations with `--idempotency-key`                        |
-| local           | `cli.jwt.endpoint_without_output`                | `--endpoint` is given without `--output`.                                                                               | jwt generate                                              |
-| local           | `cli.jwt.inspect.malformed_token`                | The token is not three base64url segments with a JSON object header and a JSON object payload.                          | jwt inspect                                               |
-| local           | `cli.jwt.inspect.token_required`                 | No argument, KANTHORD_TOKEN or cli.yaml token supplies a token.                                                         | jwt inspect                                               |
-| local           | `cli.jwt.output_with_binding`                    | `--output` is combined with `--binding`.                                                                                | jwt generate                                              |
-| local           | `cli.jwt.binding_without_project`                | `--binding` is given without `--project`.                                                                               | jwt generate                                              |
-| local           | `cli.jwt.project_without_binding`                | `--project` is given without `--binding`.                                                                               | jwt generate                                              |
-| local           | `cli.jwt.invalid_project`                        | The `--project` value is not a canonical `project_<ulid>` identity.                                                     | jwt generate                                              |
-| local           | `cli.jwt.username_with_binding`                  | A JWT request names a worker binding and a human username together.                                                     | jwt generate                                              |
-| local           | `cli.option.duplicate`                           | A single-use option appears more than once.                                                                             | commands with single-use flags                            |
-| local           | `cli.output.terminal_required`                   | JWT output would go to a non-terminal standard output.                                                                  | jwt generate                                              |
-| local           | `cli.pagination.limit_invalid`                   | The `--limit` value is not a positive safe integer.                                                                     | list commands with `--limit`                              |
-| local           | `cli.pagination.limit_out_of_range`              | The `--limit` value exceeds 1000.                                                                                       | list commands with `--limit`                              |
-| local           | `cli.serve.unsupported_application`              | The named `serve` application is neither `worker` nor the default server.                                               | serve                                                     |
-| local           | `cli.serve.worker_config`                        | `serve worker` was given the unsupported `--config` option.                                                             | serve worker                                              |
-| local           | `gateway.authentication.invalid_binding`         | The binding name is not 1 to 63 characters of a lower-case letter, then lower-case letters, digits and hyphens.         | jwt generate                                              |
-| local           | `gateway.authentication.invalid_lifetime`        | The JWT lifetime is not a nonnegative safe integer.                                                                     | jwt generate                                              |
-| local           | `gateway.authentication.invalid_name`            | The display name is blank or longer than 64 characters.                                                                 | jwt generate                                              |
-| local           | `gateway.authentication.invalid_username`        | The username is blank or longer than 64 characters.                                                                     | jwt generate                                              |
-| 401             | `gateway.authentication.unauthorized`            | A required JWT is absent, invalid, expired or has the wrong caller kind.                                                | authenticated remote commands                             |
-| 503             | `gateway.healthcheck.inventory_failed`           | A resource owner did not supply its health inventory.                                                                   | GET /api/healthcheck                                      |
-| upstream status | `gateway.http.failed`                            | HTTP middleware raises an HTTP exception other than a timeout.                                                          | HTTP routes                                               |
-| 403             | `gateway.http.host_not_allowed`                  | The request Host header is absent or not on `allowed_hosts`.                                                            | HTTP routes                                               |
-| 409             | `gateway.idempotency.conflict`                   | The same caller reuses a key for a different operation or input.                                                        | remote mutations                                          |
-| 400             | `gateway.idempotency.invalid_key`                | The Idempotency-Key header is not a canonical ULID.                                                                     | remote mutations                                          |
-| 403             | `gateway.invocation.execution_proof_failed`      | The execution identity of the input is no live claim of the registration of the machine identity.                       | machine operations that require a live execution          |
-| 503             | `gateway.invocation.cancelled`                   | The request context is cancelled before the operation runs.                                                             | remote commands                                           |
-| 500             | `gateway.invocation.invalid_response`            | An operation returns data that fails its output schema.                                                                 | remote commands                                           |
-| 503             | `gateway.invocation.stopping`                    | The invocation starts after the server begins stopping.                                                                 | remote commands                                           |
-| 504             | `gateway.invocation.timeout`                     | The operation exceeds its route timeout.                                                                                | remote commands                                           |
-| 500             | `gateway.invocation.unknown`                     | An operation fails without an explicit safe HTTP error.                                                                 | remote commands                                           |
-| 503             | `gateway.lifecycle.not_ready`                    | An HTTP request arrives before the server is ready.                                                                     | HTTP routes                                               |
-| local           | `gateway.lifecycle.stopped`                      | A stopped Gateway Service cannot start again.                                                                           | serve server                                              |
-| local           | `gateway.listener.bind_failed`                   | The server cannot bind its configured listener address.                                                                 | serve server                                              |
-| 503             | `gateway.liveness.unhealthy`                     | A service is unavailable or no healthchecks are registered.                                                             | GET /api/liveness                                         |
-| 404             | `gateway.openapi.not_found`                      | The requested scoped OpenAPI file does not exist.                                                                       | GET /api/openapi/:service/:file                           |
-| 503             | `gateway.openapi.unavailable`                    | The published OpenAPI file cannot be read.                                                                              | GET /api/openapi.yaml, GET /api/openapi/:service/:file    |
-| 403             | `gateway.registration.required`                  | A machine call lacks a live worker registration.                                                                        | registered machine operations except worker register      |
-| 409             | `gateway.registration.stale`                     | A registration replay names a registration that has ended.                                                              | worker register                                           |
-| 413             | `gateway.request.body_too_large`                 | The request body exceeds the route byte limit.                                                                          | HTTP routes with bodies                                   |
-| 400             | `gateway.request.invalid_json`                   | The request body is not valid JSON.                                                                                     | HTTP routes with JSON bodies                              |
-| 400             | `gateway.request.unexpected_body`                | A body was sent to an operation that accepts none.                                                                      | HTTP routes without bodies                                |
-| 415             | `gateway.request.unsupported_media_type`         | A JSON-body route lacks an `application/json` Content-Type.                                                             | HTTP routes with JSON bodies                              |
-| 400             | `gateway.request.validation_failed`              | The params, query or body fail the operation input schema.                                                              | remote commands                                           |
-| 404             | `gateway.routing.not_found`                      | No route matches the request path or preflight method.                                                                  | unmatched HTTP routes                                     |
-| local           | `system.config.cyclic_alias`                     | A YAML alias creates a cycle.                                                                                           | config validate, config show, jwt generate, serve server  |
-| local           | `system.config.invalid_field`                    | The server configuration contains an unknown or invalid field.                                                          | config validate, config show, jwt generate, serve server  |
-| local           | `system.config.invalid_mapping`                  | The YAML root is not one mapping, or a nested value is not a plain mapping or array.                                    | config validate, config show, jwt generate, serve server  |
-| local           | `system.config.invalid_yaml`                     | The YAML cannot be parsed as one mapping with unique string keys.                                                       | config validate, config show, jwt generate, serve server  |
-| local           | `system.config.not_found`                        | The server configuration file is absent.                                                                                | config validate, config show, jwt generate, serve server  |
-| local           | `system.config.too_deep`                         | The configuration exceeds 32 levels of nesting.                                                                         | config validate, config show, jwt generate, serve server  |
-| local           | `system.config.too_large`                        | The configuration YAML exceeds 1 MiB.                                                                                   | config validate, config show, jwt generate, serve server  |
-| local           | `system.config.too_many_values`                  | The configuration exceeds 4096 values.                                                                                  | config validate, config show, jwt generate, serve server  |
-| local           | `system.context.cancelled`                       | The operation context is cancelled.                                                                                     | remote commands                                           |
-| local           | `system.context.deadline_exceeded`               | The operation deadline expires.                                                                                         | remote commands                                           |
-| local           | `system.database.initialization_failed`          | The operational database cannot be initialized. The message names the SQLite reason, for example `database is locked`.  | serve server                                              |
-| local           | `system.database.migration.duplicate_service`    | Two migration lists claim the same service name.                                                                        | serve server                                              |
-| local           | `system.database.migration.incompatible_history` | Stored migrations differ from the daemon migration list.                                                                | serve server                                              |
-| local           | `system.database.open_failed`                    | The operational SQLite store cannot open.                                                                               | serve server                                              |
-| local           | `system.files.create_failed`                     | A private state or configuration directory cannot be created.                                                           | config init, serve server, jwt generate --output          |
-| local           | `system.files.inspect_failed`                    | The process cannot inspect a required private file or directory.                                                        | config commands, jwt generate, serve server, serve worker |
-| local           | `system.files.invalid_permissions`               | A required private path has the wrong type, owner or POSIX mode.                                                        | config commands, jwt generate, serve server, serve worker |
-| local           | `system.files.open_failed`                       | A private file cannot be opened without following symlinks.                                                             | config commands, jwt generate, serve server, serve worker |
-| local           | `system.files.publish_failed`                    | The private file cannot be published or the destination already exists.                                                 | config init, jwt generate --output                        |
-| local           | `system.lifecycle.stopped`                       | A stopped server cannot start again.                                                                                    | serve server                                              |
-| 409             | `system.operation.unknown`                       | An unknown error escapes a remote operation without a safe domain code.                                                 | remote commands                                           |
-| 400             | `system.pagination.cursor_invalid`               | The `--cursor` value is malformed or belongs to another listing.                                                        | paginated list commands                                   |
-| local           | `cli.<group>.<command>.token_required`           | No nonblank JWT is available for the command.                                                                           | remote commands                                           |
-| local           | `cli.<group>.<command>.indeterminate`            | The client cannot determine whether the request completed.                                                              | remote commands                                           |
-| local           | `repository.connector.tool_missing`              | Bash, git or ssh cannot run, exits with an error or has unrecognized version output.                                    | serve server, serve worker                                |
-| local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                    | serve server, serve worker                                |
-| local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation. | serve worker, binding apply                               |
+| HTTP            | Code                                             | Condition                                                                                                               | Commands                                                              |
+| --------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| local           | `worker.lifecycle.stopped`                       | The Worker Service or application cannot restart after shutdown.                                                        | server or serve worker                                                |
+| local           | `project.lifecycle.stopped`                      | The Project Service cannot restart after shutdown.                                                                      | server or serve worker                                                |
+| local           | `mission.lifecycle.stopped`                      | The Mission Service cannot restart after shutdown.                                                                      | server or serve worker                                                |
+| local           | `intake.lifecycle.stopped`                       | A stopped Intake Service cannot start again.                                                                            | serve server                                                          |
+| local           | `custody.lifecycle.stopped`                      | A stopped Custody component cannot start again.                                                                         | serve server                                                          |
+| local           | `gateway.client.version_unavailable`             | The OpenAPI index cannot supply a valid server package version.                                                         | serve worker                                                          |
+| local           | `cli.command.required`                           | No command was supplied.                                                                                                | kanthord                                                              |
+| local           | `cli.config.invalid`                             | The stored `cli.yaml` fails the client configuration schema.                                                            | client commands, serve worker                                         |
+| local           | `cli.config.invalid_endpoint`                    | The resolved endpoint is not an absolute HTTP(S) URL without credentials, query or fragment.                            | remote commands, serve worker, jwt generate                           |
+| local           | `cli.config.invalid_allowed_host`                | An `--gateway-allowed-host` value is not exactly `<name>` or `<name>:<port>`.                                           | config init                                                           |
+| local           | `cli.file.duplicate_key`                         | The JSON input repeats an object key.                                                                                   | commands with `--file`                                                |
+| local           | `cli.file.encoding_invalid`                      | The input file is not valid UTF-8.                                                                                      | commands with `--file`                                                |
+| local           | `cli.file.invalid_path`                          | The `--file` value is `-`; standard input is not accepted.                                                              | commands with `--file`                                                |
+| local           | `cli.file.not_found`                             | The `--file` path does not exist.                                                                                       | commands with `--file`                                                |
+| local           | `cli.file.not_json`                              | The input file is not valid JSON.                                                                                       | commands with `--file`                                                |
+| local           | `cli.file.not_object`                            | The JSON input is null, an array or a scalar, not an object.                                                            | commands with `--file`                                                |
+| local           | `cli.file.not_regular`                           | The `--file` path names a directory, a device or another non-regular file.                                              | commands with `--file`                                                |
+| local           | `cli.file.schema_invalid`                        | The JSON object does not match the command input schema.                                                                | commands with `--file`                                                |
+| local           | `cli.idempotency_key.invalid`                    | The `--idempotency-key` value is not a canonical ULID.                                                                  | mutations with `--idempotency-key`                                    |
+| local           | `cli.jwt.endpoint_without_output`                | `--endpoint` is given without `--output`.                                                                               | jwt generate                                                          |
+| local           | `cli.jwt.inspect.malformed_token`                | The token is not three base64url segments with a JSON object header and a JSON object payload.                          | jwt inspect                                                           |
+| local           | `cli.jwt.inspect.token_required`                 | No argument, KANTHORD_TOKEN or cli.yaml token supplies a token.                                                         | jwt inspect                                                           |
+| local           | `cli.jwt.output_with_binding`                    | `--output` is combined with `--binding`.                                                                                | jwt generate                                                          |
+| local           | `cli.jwt.binding_without_project`                | `--binding` is given without `--project`.                                                                               | jwt generate                                                          |
+| local           | `cli.jwt.project_without_binding`                | `--project` is given without `--binding`.                                                                               | jwt generate                                                          |
+| local           | `cli.jwt.invalid_project`                        | The `--project` value is not a canonical `project_<ulid>` identity.                                                     | jwt generate                                                          |
+| local           | `cli.jwt.username_with_binding`                  | A JWT request names a worker binding and a human username together.                                                     | jwt generate                                                          |
+| local           | `cli.option.duplicate`                           | A single-use option appears more than once.                                                                             | commands with single-use flags                                        |
+| local           | `cli.output.terminal_required`                   | JWT output would go to a non-terminal standard output.                                                                  | jwt generate                                                          |
+| local           | `cli.pagination.limit_invalid`                   | The `--limit` value is not a positive safe integer.                                                                     | list commands with `--limit`                                          |
+| local           | `cli.pagination.limit_out_of_range`              | The `--limit` value exceeds 1000.                                                                                       | list commands with `--limit`                                          |
+| local           | `cli.serve.unsupported_application`              | The named `serve` application is neither `worker` nor the default server.                                               | serve                                                                 |
+| local           | `cli.serve.worker_config`                        | `serve worker` was given the unsupported `--config` option.                                                             | serve worker                                                          |
+| local           | `gateway.authentication.invalid_binding`         | The binding name is not 1 to 63 characters of a lower-case letter, then lower-case letters, digits and hyphens.         | jwt generate                                                          |
+| local           | `gateway.authentication.invalid_lifetime`        | The JWT lifetime is not a nonnegative safe integer.                                                                     | jwt generate                                                          |
+| local           | `gateway.authentication.invalid_name`            | The display name is blank or longer than 64 characters.                                                                 | jwt generate                                                          |
+| local           | `gateway.authentication.invalid_username`        | The username is blank or longer than 64 characters.                                                                     | jwt generate                                                          |
+| 401             | `gateway.authentication.unauthorized`            | A required JWT is absent, invalid, expired or has the wrong caller kind.                                                | authenticated remote commands                                         |
+| 503             | `gateway.healthcheck.inventory_failed`           | A resource owner did not supply its health inventory.                                                                   | GET /api/healthcheck                                                  |
+| upstream status | `gateway.http.failed`                            | HTTP middleware raises an HTTP exception other than a timeout.                                                          | HTTP routes                                                           |
+| 403             | `gateway.http.host_not_allowed`                  | The request Host header is absent or not on `allowed_hosts`.                                                            | HTTP routes                                                           |
+| 409             | `gateway.idempotency.conflict`                   | The same caller reuses a key for a different operation or input.                                                        | remote mutations                                                      |
+| 400             | `gateway.idempotency.invalid_key`                | The Idempotency-Key header is not a canonical ULID.                                                                     | remote mutations                                                      |
+| 403             | `gateway.invocation.execution_proof_failed`      | The execution identity of the input is no live claim of the registration of the machine identity.                       | machine operations that require a live execution                      |
+| 503             | `gateway.invocation.cancelled`                   | The request context is cancelled before the operation runs.                                                             | remote commands                                                       |
+| 500             | `gateway.invocation.invalid_response`            | An operation returns data that fails its output schema.                                                                 | remote commands                                                       |
+| 503             | `gateway.invocation.stopping`                    | The invocation starts after the server begins stopping.                                                                 | remote commands                                                       |
+| 504             | `gateway.invocation.timeout`                     | The operation exceeds its route timeout.                                                                                | remote commands                                                       |
+| 500             | `gateway.invocation.unknown`                     | An operation fails without an explicit safe HTTP error.                                                                 | remote commands                                                       |
+| 503             | `gateway.lifecycle.not_ready`                    | An HTTP request arrives before the server is ready.                                                                     | HTTP routes                                                           |
+| local           | `gateway.lifecycle.stopped`                      | A stopped Gateway Service cannot start again.                                                                           | serve server                                                          |
+| local           | `gateway.listener.bind_failed`                   | The server cannot bind its configured listener address.                                                                 | serve server                                                          |
+| 503             | `gateway.liveness.unhealthy`                     | A service is unavailable or no healthchecks are registered.                                                             | GET /api/liveness                                                     |
+| 404             | `gateway.openapi.not_found`                      | The requested scoped OpenAPI file does not exist.                                                                       | GET /api/openapi/:service/:file                                       |
+| 503             | `gateway.openapi.unavailable`                    | The published OpenAPI file cannot be read.                                                                              | GET /api/openapi.yaml, GET /api/openapi/:service/:file                |
+| 403             | `gateway.registration.required`                  | A machine call lacks a live worker registration.                                                                        | registered machine operations except worker register                  |
+| 409             | `gateway.registration.stale`                     | A registration replay names a registration that has ended.                                                              | worker register                                                       |
+| 413             | `gateway.request.body_too_large`                 | The request body exceeds the route byte limit.                                                                          | HTTP routes with bodies                                               |
+| 400             | `gateway.request.invalid_json`                   | The request body is not valid JSON.                                                                                     | HTTP routes with JSON bodies                                          |
+| 400             | `gateway.request.unexpected_body`                | A body was sent to an operation that accepts none.                                                                      | HTTP routes without bodies                                            |
+| 415             | `gateway.request.unsupported_media_type`         | A JSON-body route lacks an `application/json` Content-Type.                                                             | HTTP routes with JSON bodies                                          |
+| 400             | `gateway.request.validation_failed`              | The params, query or body fail the operation input schema.                                                              | remote commands                                                       |
+| 404             | `gateway.routing.not_found`                      | No route matches the request path or preflight method.                                                                  | unmatched HTTP routes                                                 |
+| local           | `system.config.cyclic_alias`                     | A YAML alias creates a cycle.                                                                                           | config validate, config show, jwt generate, serve server              |
+| local           | `system.config.invalid_field`                    | The server configuration contains an unknown or invalid field.                                                          | config init, config validate, config show, jwt generate, serve server |
+| local           | `system.config.invalid_mapping`                  | The YAML root is not one mapping, or a nested value is not a plain mapping or array.                                    | config validate, config show, jwt generate, serve server              |
+| local           | `system.config.invalid_yaml`                     | The YAML cannot be parsed as one mapping with unique string keys.                                                       | config validate, config show, jwt generate, serve server              |
+| local           | `system.config.not_found`                        | The server configuration file is absent.                                                                                | config validate, config show, jwt generate, serve server              |
+| local           | `system.config.too_deep`                         | The configuration exceeds 32 levels of nesting.                                                                         | config validate, config show, jwt generate, serve server              |
+| local           | `system.config.too_large`                        | The configuration YAML exceeds 1 MiB.                                                                                   | config validate, config show, jwt generate, serve server              |
+| local           | `system.config.too_many_values`                  | The configuration exceeds 4096 values.                                                                                  | config validate, config show, jwt generate, serve server              |
+| local           | `system.context.cancelled`                       | The operation context is cancelled.                                                                                     | remote commands                                                       |
+| local           | `system.context.deadline_exceeded`               | The operation deadline expires.                                                                                         | remote commands                                                       |
+| local           | `system.database.initialization_failed`          | The operational database cannot be initialized. The message names the SQLite reason, for example `database is locked`.  | serve server                                                          |
+| local           | `system.database.migration.duplicate_service`    | Two migration lists claim the same service name.                                                                        | serve server                                                          |
+| local           | `system.database.migration.incompatible_history` | Stored migrations differ from the daemon migration list.                                                                | serve server                                                          |
+| local           | `system.database.open_failed`                    | The operational SQLite store cannot open.                                                                               | serve server                                                          |
+| local           | `system.files.create_failed`                     | A private state or configuration directory cannot be created.                                                           | config init, serve server, jwt generate --output                      |
+| local           | `system.files.inspect_failed`                    | The process cannot inspect a required private file or directory.                                                        | config commands, jwt generate, serve server, serve worker             |
+| local           | `system.files.invalid_permissions`               | A required private path has the wrong type, owner or POSIX mode.                                                        | config commands, jwt generate, serve server, serve worker             |
+| local           | `system.files.open_failed`                       | A private file cannot be opened without following symlinks.                                                             | config commands, jwt generate, serve server, serve worker             |
+| local           | `system.files.publish_failed`                    | The private file cannot be published or the destination already exists.                                                 | config init, jwt generate --output                                    |
+| local           | `system.lifecycle.stopped`                       | A stopped server cannot start again.                                                                                    | serve server                                                          |
+| 409             | `system.operation.unknown`                       | An unknown error escapes a remote operation without a safe domain code.                                                 | remote commands                                                       |
+| 400             | `system.pagination.cursor_invalid`               | The `--cursor` value is malformed or belongs to another listing.                                                        | paginated list commands                                               |
+| local           | `cli.<group>.<command>.token_required`           | No nonblank JWT is available for the command.                                                                           | remote commands                                                       |
+| local           | `cli.<group>.<command>.indeterminate`            | The client cannot determine whether the request completed.                                                              | remote commands                                                       |
+| local           | `repository.connector.tool_missing`              | Bash, git or ssh cannot run, exits with an error or has unrecognized version output.                                    | serve server, serve worker                                            |
+| local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                    | serve server, serve worker                                            |
+| local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation. | serve worker, binding apply                                           |
 
 The internal error `system.composition.unwired` means that the composition root's
 stand-in was called before its collaboration was implemented. It throws before

@@ -1,24 +1,36 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   get:
-    operationId: repository.credential.ssh_discover
+    operationId: project.binding.instruction_files.get
     tags:
-      - repository
-    description: List the SSH aliases of ~/.ssh/config that resolve to a git platform host.
+      - project
+    description: Read the instruction files of one repository binding at its base branch.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
     x-kanthord-lifetime: unary
     security:
       - bearerAuth: []
-    parameters: []
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.instruction_files.get.Input/propert\
+            ies/params/properties/project_id"
+      - name: binding_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.binding.instruction_files.get.Input/propert\
+            ies/params/properties/binding_id"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/repository.credential.ssh_discover.Output"
+              $ref: "#/components/schemas/project.binding.instruction_files.get.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -33,8 +45,6 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
       "415":
         $ref: ../shared/components.yaml#/components/responses/Error
-      "422":
-        $ref: ../shared/components.yaml#/components/responses/Error
       "500":
         $ref: ../shared/components.yaml#/components/responses/Error
       "503":
@@ -43,12 +53,21 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    repository.credential.ssh_discover.Input:
+    project.binding.instruction_files.get.Input:
       type: object
       properties:
         params:
           type: object
-          properties: {}
+          properties:
+            project_id:
+              type: string
+              minLength: 1
+            binding_id:
+              type: string
+              minLength: 1
+          required:
+            - project_id
+            - binding_id
           additionalProperties: false
         query:
           type: object
@@ -61,44 +80,55 @@ components:
         - query
         - body
       additionalProperties: false
-    repository.credential.ssh_discover.Output:
+    project.binding.instruction_files.get.Output:
       type: object
       properties:
-        items:
+        commit:
+          type: string
+          minLength: 1
+        read_at:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        files:
           type: array
           items:
             type: object
             properties:
-              host:
+              source:
                 type: string
-              hostname:
+                enum:
+                  - agents_md
+                  - agents_local_md
+                  - claude_md
+                  - claude_local_md
+              path:
                 type: string
-              port:
-                type: integer
-                minimum: -9007199254740991
-                maximum: 9007199254740991
-              identity_file:
-                anyOf:
-                  - type: string
-                  - type: "null"
+                minLength: 1
               state:
                 type: string
                 enum:
-                  - ready
-                  - refused
                   - present
+                  - absent
+                  - invalid
               reason:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              text:
                 anyOf:
                   - type: string
                   - type: "null"
             required:
-              - host
-              - hostname
-              - port
-              - identity_file
+              - source
+              - path
               - state
               - reason
+              - text
             additionalProperties: false
       required:
-        - items
+        - commit
+        - read_at
+        - files
       additionalProperties: false

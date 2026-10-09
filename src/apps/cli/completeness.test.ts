@@ -19,7 +19,7 @@ const PAGE_INVENTORIES = {
   repository: "## Command inventory",
   storage: "## Command inventory",
   agent: "## Command inventory",
-  project: "## Proposed command inventory and synopsis",
+  project: "## Command inventory and synopsis",
   mission: "## Target command inventory and synopsis",
   intake: "## Command table",
   scheduler: "## Command inventory and operation mapping",
@@ -78,12 +78,12 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 156;
+const DOCUMENTED_COUNT = 157;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 151;
-const OPERATION_COUNT = 162;
+const IMPLEMENTED_COUNT = 152;
+const OPERATION_COUNT = 163;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -104,7 +104,7 @@ const PAGE_COUNTS = {
   repository: 11,
   storage: 10,
   agent: 15,
-  project: 13,
+  project: 14,
   mission: 54,
   intake: 13,
   scheduler: 8,

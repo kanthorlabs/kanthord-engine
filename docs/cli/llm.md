@@ -79,7 +79,7 @@ All paths below are implemented routes under the ruled `/api/llm/credential` pre
 | 12  | `check --file <path> [R]`                                         | `POST /api/llm/credential/check`                                      | `llm.credential.check`           | `human`; implemented |
 | 13  | `verify <credential-name> [R]`                                    | `POST /api/llm/credential/:credential_name/verify`                    | `llm.credential.verify`          | `human`; implemented |
 
-The static `/api/llm/credential/login`, `/api/llm/credential/platform` and `/api/llm/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`.
+The static `/api/llm/credential/login`, `/api/llm/credential/platform` and `/api/llm/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`. Custody also reserves `ssh`.
 These routes have no project identity.
 
 The [`provider check`](#provider-check) is a server-wide read under `human` access with the `[R]` flags.
@@ -156,12 +156,12 @@ Custody validates the local schema and makes no remote call. HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
 creation. A taken name answers `409 credential.name.conflict`, with the identity
 of its newest revision in `error.details`, including a retry after restart. The CLI prints
-that identity, never the submitted secret.
+the code and the HTTP status, not that identity, and never the submitted secret.
 
 ## `list`
 
 No positional arguments and no body. The optional filter maps to query `platform`.
-The optional `--include-archived` flag maps to query `include_archived`, a boolean that defaults to `false`. Without it, the list leaves out an archived name.
+The optional `--include-archived` flag maps to query `include_archived`, the string `true` or `false` with default `false`. Without it, the list leaves out an archived name.
 It is single-use with no default filter. The platform enum is defined above.
 `limit` and optional `cursor` use the shared pagination contract.
 HTTP `200` returns one credential answer for each name of this component in `items`, in ascending name
@@ -287,12 +287,20 @@ default; absence leaves selection to the platform's supported flow. Custody
 maps `device` to pi-ai interaction value `device_code`. A platform with one
 mode ignores the requested mode. No terminal prompt is permitted.
 
+Browser mode needs a browser on the server host, because the provider returns
+the browser to a fixed `localhost` callback. The server reads the `Host` header
+of the request. A host that is not `localhost`, `127.*` or `[::1]` refuses
+`--mode browser` with `400 credential.login.browser_unavailable`. With no
+`--mode`, that host selects `device`.
+
 The unary mutation starts a session and answers its identity, address, code
 and expiry. The command prints those values, one per line, plus the mutation
 key, and exits `0`. This line output is an exception to ordinary JSON output.
 Expiry falls 15 minutes after start. At most one pending session exists per
 platform and human; another start answers 409. A name conflict at start or
 commit answers `409 credential.name.conflict` and the holder identity.
+A flow that fails before an address answers `503 credential.login.failed`.
+A stopped LLM component answers `503 llm.lifecycle.stopped`.
 
 The human opens the address and completes the platform interaction. A browser
 callback listener belongs to pi-ai and lasts only for the session. Device mode
@@ -316,6 +324,8 @@ the CLI adds the mutation key. It reads no prompt and outputs no token.
 The required `LoginSessionId` maps to `params.session_id`; query is empty and
 body absent. HTTP `200` prints `{ session_id, state, last_message,
 failure_reason }` as JSON. `state` is `pending | completed | failed | expired`.
+A pending session past its expiry answers `state` `expired`. An unknown session
+answers `404 credential.login.not_found`.
 Absent message and failure reason values are `null`. This read does
 not poll until completion or change the session. No mutation key is accepted.
 
@@ -358,6 +368,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.login.pending`                   | Another login is pending for this platform and human.                                           | login                                                                  |
 | 404   | `credential.login.not_found`                 | The login session does not exist.                                                               | login-code, login-status                                               |
 | 400   | `credential.login.mode_unsupported`          | The platform does not support the selected login mode.                                          | login                                                                  |
+| 400   | `credential.login.browser_unavailable`       | Browser mode is requested through a `Host` that is not a loopback name.                         | login                                                                  |
+| 503   | `credential.login.failed`                    | The login flow fails before it answers an address.                                              | login                                                                  |
 | 404   | `credential.credential.not_found`            | The credential does not exist, or its platform is not an LLM platform.                          | get, rotate, update-metadata, revoke, archive, verify, worker handover |
 | local | `cli.llm.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.                                           | login                                                                  |
 | local | `cli.llm.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                       | revoke                                                                 |
@@ -374,8 +386,9 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.revision.newest_live`            | The revoke names the newest live revision.                                                      | revoke                                                                 |
 | 409   | `credential.credential.in_use`               | A dependent names the credential; `details` holds `agent_providers`, `bindings` and `inbounds`. | archive                                                                |
 | 409   | `credential.credential.archived`             | The credential is archived; an archive is final.                                                | rotate, update-metadata, archive, verify                               |
-| 404   | `credential.revision.not_found`              | The revision does not exist.                                                                    | revoke                                                                 |
-| local | `llm.lifecycle.stopped`                      | The LLM component cannot accept a login or restart after shutdown.                              | login, serve server                                                    |
+| 404   | `credential.revision.not_found`              | The revision does not exist, or the credential name is unknown.                                 | revoke                                                                 |
+| 503   | `llm.lifecycle.stopped`                      | The LLM component is stopped and accepts no login.                                              | login                                                                  |
+| local | `llm.lifecycle.stopped`                      | The LLM component cannot restart after shutdown.                                                | serve server                                                           |
 | 400   | `llm.provider.invalid_input`                 | The provider check input fails validation.                                                      | provider check                                                         |
 | 400   | `llm.provider.check_unsupported`             | The platform of the credential has no LLM provider.                                             | provider check                                                         |
 | 404   | `llm.provider.credential_not_found`          | The credential does not exist, or its platform belongs to another component.                    | provider check                                                         |

@@ -36,7 +36,10 @@ export function addRecordCommands(mission: Command): void {
     .description("Mission attempt records");
   attempts.action(() => attempts.help());
   addPagination(
-    attempts.command("list").argument("<node-id>", "Node ID"),
+    attempts
+      .command("list")
+      .description("List the attempts of a node as JSON")
+      .argument("<node-id>", "Node ID"),
   ).action(async (nodeId: string, _options, command: Command) => {
     validateNode(nodeId, "cli.mission.attempt.list.invalid_node_id");
     printResult(
@@ -50,6 +53,7 @@ export function addRecordCommands(mission: Command): void {
   });
   attempts
     .command("get")
+    .description("Get an attempt of a node as JSON")
     .argument("<node-id>", "Node ID")
     .argument("<attempt>", "Positive attempt")
     .action(
@@ -89,17 +93,24 @@ function recordGroup(mission: Command, name: string) {
   const list = addPagination(
     group
       .command("list")
+      .description(`List the ${name} records of a node as JSON`)
       .argument("<node-id>", "Node ID")
       .option("--attempt <attempt>", "Attempt filter", singleUse("--attempt")),
   );
-  const get = group.command("get").argument(`<${name}-id>`, "Record ID");
+  const get = group
+    .command("get")
+    .description(`Get a ${name} record as JSON`)
+    .argument(`<${name}-id>`, "Record ID");
   return { group, list, get };
 }
 
 function addAssessmentCommands(mission: Command): void {
   const { group, list, get } = recordGroup(mission, "assessment");
   addMutationOptions(
-    group.command("submit").argument("<node-id>", "Node ID"),
+    group
+      .command("submit")
+      .description("Submit an assessment of a node")
+      .argument("<node-id>", "Node ID"),
   ).action(async (nodeId: string, _options, command: Command) => {
     validateNode(nodeId, "cli.mission.assessment.submit.invalid_node_id");
     await mutate(
@@ -185,6 +196,7 @@ function addExternalCommands(mission: Command): void {
   addPagination(
     actions
       .command("list")
+      .description("List the required external actions of a node as JSON")
       .argument("<node-id>", "Node ID")
       .option("--attempt <attempt>", "Attempt filter", singleUse("--attempt")),
   ).action(async (nodeId: string, _options, command: Command) => {
@@ -209,6 +221,7 @@ function addExternalCommands(mission: Command): void {
   });
   actions
     .command("get")
+    .description("Get a required external action as JSON")
     .argument("<node-id>", "Node ID")
     .argument("<attempt>", "Positive attempt")
     .argument("<action-key>", "Required action key")

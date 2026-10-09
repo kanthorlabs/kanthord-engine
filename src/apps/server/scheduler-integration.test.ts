@@ -59,7 +59,7 @@ const CONFIGURATION = {
 };
 type Adapter = "direct" | "http";
 const HTTP_ADAPTER = "http";
-const MAX_WAIT_TURNS = 100;
+const PULL_START_DEADLINE_MS = 5000;
 
 function completed<T>(result: OperationResult<T>): T {
   assert.equal(
@@ -342,11 +342,8 @@ for (const adapter of ["direct", "http"] as const) {
       );
     const context = new CancellationContext();
     const other = h.pull(h.other, h.otherToken, { context });
-    for (
-      let tries = 0;
-      tries < MAX_WAIT_TURNS && !h.f.scheduler.pulling(h.other);
-      tries++
-    )
+    const deadline = Date.now() + PULL_START_DEADLINE_MS;
+    while (!h.f.scheduler.pulling(h.other) && Date.now() < deadline)
       await turn();
     assert.equal(h.f.scheduler.pulling(h.other), true);
     context.cancel();

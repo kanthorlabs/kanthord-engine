@@ -155,10 +155,10 @@ async function agentGet(agentName: string, command: Command): Promise<void> {
     !Object.values(PromptView).includes(options.view)
   )
     throw new Diagnostic(GET_INVALID_VIEW, "the only view is final");
-  if ((options.project === undefined) !== (options.binding === undefined))
+  if ((options.project === undefined) !== (options.bindingId === undefined))
     throw new Diagnostic(
       GET_BINDING_PAIR,
-      "--project and --binding go together",
+      "--project and --binding-id go together",
     );
   const { endpoint, token } = resolveClient(options);
   requireToken(token, "cli.agent.get.token_required");
@@ -167,7 +167,7 @@ async function agentGet(agentName: string, command: Command): Promise<void> {
     query: {
       ...(options.view !== undefined ? { view: options.view } : {}),
       ...(options.project !== undefined
-        ? { project_id: options.project, binding_id: options.binding }
+        ? { project_id: options.project, binding_id: options.bindingId }
         : {}),
     },
     body: null,
@@ -437,7 +437,7 @@ async function remove(agentName: string, command: Command): Promise<void> {
   );
   const data = handleMutationResult(result, REMOVE_INDETERMINATE, key);
   process.stdout.write(
-    `${JSON.stringify({ agent_name: data.agent_name, idempotency_key: key })}\n`,
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
   );
 }
 
@@ -544,7 +544,8 @@ export function addAgentCommand(program: Command): void {
       singleUse("--token"),
     );
   agent
-    .command("get <agent-name>")
+    .command("get")
+    .argument("<agent-name>", "Agent name")
     .description("Get an agent declaration (human JWT)")
     .option(
       "--view <view>",
@@ -553,9 +554,9 @@ export function addAgentCommand(program: Command): void {
     )
     .option("--project <project-id>", "Project", singleUse("--project"))
     .option(
-      "--binding <binding-id>",
-      "Repository binding",
-      singleUse("--binding"),
+      "--binding-id <binding-id>",
+      "Repository binding revision",
+      singleUse("--binding-id"),
     )
     .action((agentName: string, _options, command: Command) =>
       agentGet(agentName, command),

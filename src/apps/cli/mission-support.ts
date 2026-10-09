@@ -108,7 +108,7 @@ export function addMutationOptions(command: Command): Command {
   return command
     .requiredOption(
       FILE_OPTION + " <path>",
-      "Node JSON file",
+      "Request body JSON file",
       singleUse(FILE_OPTION),
     )
     .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION));

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import type { KnownProvider } from "@earendil-works/pi-ai";
-import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import type { ResourceCheck } from "../kernel/health.ts";
 import {
@@ -115,6 +114,7 @@ export const AgentErrorCode = {
   PromptRevisionConflict: "agent.prompt.revision_conflict",
   PromptTooLarge: "agent.prompt.too_large",
   PromptAgentLayerEmpty: "agent.prompt.agent_layer_empty",
+  PromptSwitchLocked: "agent.prompt.switch_locked",
 } as const;
 
 export type AgentProviderItem = {
@@ -218,9 +218,53 @@ export type ToolDeclarationsFn = (
 export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible";
 export type AgentProviderKind =
   KnownProvider | typeof OPENAI_COMPATIBLE_PROVIDER;
+const BUILTIN_PROVIDERS = [
+  "amazon-bedrock",
+  "ant-ling",
+  "anthropic",
+  "azure",
+  "baseten",
+  "cerebras",
+  "cloudflare-ai-gateway",
+  "cloudflare-workers-ai",
+  "deepseek",
+  "fireworks",
+  "github-copilot",
+  "google",
+  "google-vertex",
+  "groq",
+  "huggingface",
+  "kimi-coding",
+  "meta",
+  "minimax",
+  "minimax-cn",
+  "mistral",
+  "moonshotai",
+  "moonshotai-cn",
+  "nvidia",
+  "openai",
+  "openai-codex",
+  "opencode",
+  "opencode-go",
+  "openrouter",
+  "qwen-token-plan",
+  "qwen-token-plan-cn",
+  "qwen-token-plan-individual",
+  "radius",
+  "together",
+  "typesafe",
+  "vercel-ai-gateway",
+  "xai",
+  "xiaomi",
+  "xiaomi-token-plan-ams",
+  "xiaomi-token-plan-cn",
+  "xiaomi-token-plan-sgp",
+  "zai",
+  "zai-coding-cn",
+] as const satisfies readonly KnownProvider[];
 export const agentProviderKindSchema = z.enum([
   OPENAI_COMPATIBLE_PROVIDER,
-  ...getBuiltinProviders(),
+  ...BUILTIN_PROVIDERS,
 ] as [AgentProviderKind, ...AgentProviderKind[]]);
 
 export const reasoningEffortSchema = z.enum([
@@ -309,8 +353,10 @@ export const promptSettingsSchema = z.strictObject({
   custom_text: z.string(),
   system_layer: z.enum(SystemLayerOverride).nullable(),
   revision: z.number().int().nonnegative(),
+  locked_switches: z.array(z.string()),
 });
 export type PromptSettings = z.infer<typeof promptSettingsSchema>;
+export type StoredPromptSettings = Omit<PromptSettings, "locked_switches">;
 
 const promptSwitchNames = [
   ...new Set(Object.values(PROMPT_SWITCHES).flat()),

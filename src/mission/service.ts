@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Logger } from "pino";
 import {
   isHumanIdentity,
   type CallerIdentity,
@@ -143,6 +144,7 @@ export interface Dependencies {
   schedulerClaims: SchedulerClaims;
   wakeup: SchedulerWakeup;
   executionAttribution: ExecutionAttribution;
+  logger: Logger;
 }
 
 export class MissionService

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { ulid } from "ulid";
-import { background, type Context } from "../../kernel/context.ts";
+import type { Context } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
@@ -40,7 +40,7 @@ export async function pullLoop(
             runtime_identity: registration.runtime_identity,
           },
         },
-        { idempotencyKey: ulid(), context: background },
+        { idempotencyKey: ulid(), context: input.shutdown },
       )
       .then((result) => {
         if (

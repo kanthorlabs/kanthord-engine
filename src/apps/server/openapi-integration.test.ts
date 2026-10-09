@@ -8,7 +8,10 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 import { gatewayFixture } from "./test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "../../gateway/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
-import { repositoryOperations } from "../../repository/contract.ts";
+import {
+  repositoryOperations,
+  SSH_RESOLVE_FAILED_STATUS,
+} from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
 import { ActionResultKind, workerOperations } from "../../worker/contract.ts";
 import {
@@ -204,6 +207,25 @@ test("published asset delete names its operation with a bodyless 204 response", 
     fragment.pathItem.delete.responses[HttpStatus.NoContent].content,
     undefined,
   );
+});
+
+test("published SSH credential writes declare the ssh -G resolution failure status", () => {
+  for (const [file, method] of [
+    ["credential.create", "post"],
+    ["credential.rotate", "post"],
+    ["credential.update_metadata", "put"],
+  ] as const) {
+    const fragment = parse(
+      readFileSync(
+        join(dirname(openapiPath()), `openapi/repository/${file}.yaml`),
+        "utf8",
+      ),
+    );
+    assert.ok(
+      String(SSH_RESOLVE_FAILED_STATUS) in fragment.pathItem[method].responses,
+      file,
+    );
+  }
 });
 
 test("published node check names its operation", () => {
@@ -631,6 +653,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["project.binding.list", AccessPolicy.Human],
   ["project.binding.get", AccessPolicy.Human],
   ["project.binding.verify", AccessPolicy.Human],
+  ["project.binding.instruction_files.get", AccessPolicy.Human],
   ["project.binding.check", AccessPolicy.Human],
   ["project.bindingSet.get", AccessPolicy.Human],
   ["project.bindingSet.write", AccessPolicy.Human],
@@ -722,8 +745,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 170;
-const ROUTED_OPERATION_COUNT = 161;
+const OPERATION_COUNT = 171;
+const ROUTED_OPERATION_COUNT = 162;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = ["intake.action.check", "mission.delivery.admit"];

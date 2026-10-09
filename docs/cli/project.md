@@ -2,49 +2,42 @@
 
 [CLI specification index](./README.md) · [Shared conventions](./other.md)
 
-This contributor specification covers the future `kanthord project` group:
+This contributor specification covers the implemented `kanthord project` group:
 project identity, resource bindings, repository policy and worker binding
 entries. [Worker](./worker.md) owns agent enablement and
 effective configuration resolution. [LLM](./llm.md), [Repository](./repository.md) and [Storage](./storage.md) cover credentials.
 It is self-contained in an engine checkout.
 
-**Status: no Project operation command is implemented.**
-Root rulings govern the declared operations; other spellings, routes, schemas and defaults remain proposals pending contracts and OpenAPI. A design rule
-described here is a target invariant, not evidence of a working feature. Entries
-marked **blocked** also require a substantive design decision before their
-request or response schema can be completed.
+**Status: all 13 Project commands are implemented.**
+Root rulings govern the declared operations. Entries
+marked **blocked** link open design items in HANDOFF that extend the binding
+model; they do not block the implemented commands.
 
 ## Implementation baseline
 
-The working tree inspected on 2026-09-23 contains:
+The working tree contains:
 
-- [`projectOperations = {}`](../../src/project/contract.ts), with no declared
-  public Project operation. `ProjectBindings.resolveWorkerBinding` is a peer
-  interface, not a command or a published route.
-- A [Project Service](../../src/project/service.ts) whose `declare` method
-  registers nothing. Its binding lookup delegates to an injected collaborator
-  or returns `null`. Its lifecycle health probe is not a provider healthcheck.
-- [No Project migrations or configuration fields](../../src/project/index.ts).
-  The target binding store described below is not present here.
-- A [CLI help group](../../src/apps/cli/index.ts) with the existing spelling
-  `kanthord project [--endpoint <url>]` and Commander `--help`. Invoking the group
-  prints help and calls no route. The group currently has no leaf commands and
-  accepts no `--token` option of its own.
-- A [test of that empty service](../../src/project/service.test.ts), which
-  explicitly asserts zero operations and no configured binding resolution.
+- The [Project contract](../../src/project/contract.ts), which declares the 13
+  `human` operations of the [command inventory](#command-inventory-and-synopsis).
+- A [Project Service](../../src/project/service.ts) that registers those
+  operations and resolves worker bindings for machine JWTs.
+- [Project migrations](../../src/project/migrations.ts) for the project and
+  binding stores.
+- A [CLI group](../../src/apps/cli/project.ts) `kanthord project [--endpoint <url>] [--token <token>]`
+  with one leaf command for each operation.
 
-The [command inventory](#proposed-command-inventory-and-synopsis) proposes
-**12 leaf commands**. The existing help group is not counted. The
-[calling convention](#common-proposed-calling-convention) defines the shared
+The [command inventory](#command-inventory-and-synopsis) lists
+**13 leaf commands**. The
+[calling convention](#common-calling-convention) defines the shared
 options used by those synopses; the resource sections define their inputs,
 results, and effects without repeating the command syntax.
 
-The proposal preserves the existing group spelling and `--endpoint` option.
 All commands on this page belong under `project`. The [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface)
 declares three global commands, seven service groups and the shared component
-groups `llm`, `repository` and `storage`.
+groups `llm`, `repository` and `storage`. The CLI also registers the `agent`
+group, which the command surface does not list, and does not register `intake`.
 
-## Common proposed calling convention
+## Common calling convention
 
 The rules in [other.md](./other.md) apply to every command. Every synopsis
 starts with `kanthord project` and uses the
@@ -52,7 +45,7 @@ starts with `kanthord project` and uses the
 
 | Named flag set                                                   | Applies to            |
 | ---------------------------------------------------------------- | --------------------- |
-| [`[R]` — Remote flags](./common-flags.md#remote-flags-r)         | All 12 remote leaves. |
+| [`[R]` — Remote flags](./common-flags.md#remote-flags-r)         | All 14 remote leaves. |
 | [`[M]` — Mutation flags](./common-flags.md#mutation-flags-m)     | Mutations only.       |
 | [`[L]` — Pagination flags](./common-flags.md#pagination-flags-l) | Paginated lists only. |
 
@@ -139,17 +132,15 @@ results. The current [Gateway replay implementation](../../src/gateway/idempoten
 is in memory and bounded by its configured TTL; restart loses it. The shared
 [same-key retry rules](./other.md#idempotency-and-retries) apply, but that page's
 SQLite implementation note predates the in-memory implementation.
-This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name.conflict`, and the CLI prints the holder identity from `error.details`. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. A binding-set edit has a version precondition,
+This specification promises no exactly-once behavior across restart. A project name is the natural key of project creation: a retry after a restart that names an existing project returns 409 with `project.name.conflict`, and the CLI prints the code and the HTTP status, not the holder identity. A rename targets a project ID and commits in one transaction; the last write wins under the unique name. A retry after a restart checks the name holder again. A binding-set edit has a version precondition,
 but a retry after a committed edit and restart can encounter a stale version
 instead of replaying the old answer.
 
 [project-contract]: https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service
 
-## Proposed command inventory and synopsis
+## Command inventory and synopsis
 
-Every entry below is **unimplemented**.
-Operation IDs and paths remain proposed.
-The current empty Project contract publishes none of these routes. Each row is one leaf command; its synopsis follows `kanthord project`
+Each row is one leaf command; its synopsis follows `kanthord project`
 and includes every positional argument, command-specific option, and applicable
 shared-option marker. Route parameters are placeholders, and path resource
 names are singular.
@@ -157,25 +148,26 @@ names are singular.
 All 13 commands have `[R]` and `human` access. The three mutations have `[M]`; the four paginated lists have `[L]`.
 Blocked commands link their items in [HANDOFF Project Service](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#project-service).
 
-| #   | Synopsis after `kanthord project`                                         | Proposed HTTP route                                                  | Proposed operation ID                                  | Access/status     |
-| --- | ------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------ | ----------------- |
-| 1   | `create --name <name> [M] [R]`                                            | `POST /api/project`                                                  | `project.create`                                       | `human`; proposed |
-| 2   | `list [L] [R]`                                                            | `GET /api/project`                                                   | `project.list`                                         | `human`; proposed |
-| 3   | `get <project-id> [R]`                                                    | `GET /api/project/:project_id`                                       | `project.get`                                          | `human`; proposed |
-| 4   | `rename <project-id> --name <name> [M] [R]`                               | `PATCH /api/project/:project_id`                                     | `project.rename`                                       | `human`; proposed |
-| 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]` | `GET /api/project/:project_id/binding`                               | `project.binding.list` **[blocked][project-contract]** | `human`; proposed |
-| 6   | `binding get <project-id> <binding-id> [R]`                               | `GET /api/project/:project_id/binding/:binding_id`                   | `project.binding.get` **[blocked][project-contract]**  | `human`; proposed |
-| 7   | `binding export <project-id> [R]`                                         | `GET /api/project/:project_id/binding-set`                           | `project.bindingSet.get`                               | `human`; proposed |
-| 8   | `binding apply <project-id> --file <path> [M] [R]`                        | `PUT /api/project/:project_id/binding-set`                           | `project.bindingSet.write`                             | `human`; proposed |
-| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                 | `GET /api/project/:project_id/binding/:binding_id/revision`          | `project.bindingRevision.list`                         | `human`; proposed |
-| 10  | `agent list <project-id> <worker-binding-id> [L] [R]`                     | `GET /api/project/:project_id/binding/:binding_id/agent`             | `project.agentConfiguration.list`                      | `human`; proposed |
-| 11  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:project_id/binding/:binding_id/agent/:agent_name` | `project.agentConfiguration.get`                       | `human`; proposed |
-| 12  | `binding verify <project-id> <binding-id> [R]`                            | `POST /api/project/:project_id/binding/:binding_id/verify`           | `project.binding.verify`                               | `human`; proposed |
-| 13  | `binding check <project-id> --file <path> [R]`                            | `POST /api/project/:project_id/binding/check`                        | `project.binding.check`                                | `human`; proposed |
+| #   | Synopsis after `kanthord project`                                         | HTTP route                                                           | Operation ID                                           | Access/status        |
+| --- | ------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------ | -------------------- |
+| 1   | `create --name <name> [M] [R]`                                            | `POST /api/project`                                                  | `project.create`                                       | `human`; implemented |
+| 2   | `list [L] [R]`                                                            | `GET /api/project`                                                   | `project.list`                                         | `human`; implemented |
+| 3   | `get <project-id> [R]`                                                    | `GET /api/project/:project_id`                                       | `project.get`                                          | `human`; implemented |
+| 4   | `rename <project-id> --name <name> [M] [R]`                               | `PATCH /api/project/:project_id`                                     | `project.rename`                                       | `human`; implemented |
+| 5   | `binding list <project-id> [--kind <kind> ...] [--state <state>] [L] [R]` | `GET /api/project/:project_id/binding`                               | `project.binding.list` **[blocked][project-contract]** | `human`; implemented |
+| 6   | `binding get <project-id> <binding-id> [R]`                               | `GET /api/project/:project_id/binding/:binding_id`                   | `project.binding.get` **[blocked][project-contract]**  | `human`; implemented |
+| 7   | `binding export <project-id> [R]`                                         | `GET /api/project/:project_id/binding-set`                           | `project.bindingSet.get`                               | `human`; implemented |
+| 8   | `binding apply <project-id> --file <path> [M] [R]`                        | `PUT /api/project/:project_id/binding-set`                           | `project.bindingSet.write`                             | `human`; implemented |
+| 9   | `binding revision list <project-id> <binding-id> [L] [R]`                 | `GET /api/project/:project_id/binding/:binding_id/revision`          | `project.bindingRevision.list`                         | `human`; implemented |
+| 10  | `agent list <project-id> <worker-binding-id> [L] [R]`                     | `GET /api/project/:project_id/binding/:binding_id/agent`             | `project.agentConfiguration.list`                      | `human`; implemented |
+| 11  | `agent get <project-id> <worker-binding-id> <agent-name> [R]`             | `GET /api/project/:project_id/binding/:binding_id/agent/:agent_name` | `project.agentConfiguration.get`                       | `human`; implemented |
+| 12  | `binding verify <project-id> <binding-id> [R]`                            | `POST /api/project/:project_id/binding/:binding_id/verify`           | `project.binding.verify`                               | `human`; implemented |
+| 13  | `binding check <project-id> --file <path> [R]`                            | `POST /api/project/:project_id/binding/check`                        | `project.binding.check`                                | `human`; implemented |
+| 14  | `binding instruction-files <project-id> <binding-id> [R]`                 | `GET /api/project/:project_id/binding/:binding_id/instruction_files` | `project.binding.instruction_files.get`                | `human`; implemented |
 
 - Rows 5 and 6 keep their marks under HANDOFF Project Service, not for the storage credential record type.
 - Server-wide credential routes belong to `/api/llm/credential`, `/api/repository/credential` and `/api/storage/credential`; provider check belongs to `/api/llm/provider/check`. Neither route is under `/api/project`.
-- There are 13 distinct route operations for the 13 CLI leaves.
+- There are 14 distinct route operations for the 14 CLI leaves.
 
 ## Project resource
 
@@ -199,7 +191,7 @@ other request fields. Read commands have no body. Proposed project metadata is
 Creation allocates a project identity and an empty binding set at version `1`.
 The server returns that version. A mission belongs intrinsically to its project; it is
 not a binding. Creation calls the Mission collaboration `createMission` in the same transaction. The mission starts empty at mission version 1. No operation creates or deletes a mission.
-A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name.conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the holder identity. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
+A project name is unique on the server and is the natural key of creation. Creation or rename to a name that another project holds returns 409 with code `project.name.conflict` and the holder identity in `error.details`. A retry of creation after a restart returns 409 when the name exists, and the CLI prints the code and the HTTP status. Rename commits in one transaction; the last write wins under the unique name. Rename keeps the same project identity and bindings.
 
 No deletion, archival, project membership, or ownership-transfer command is
 declared: those lifecycle policies have no basis in the Project design.
@@ -499,6 +491,33 @@ HTTP `200` answers `{ address, ssh_credential, credential }`. `credential` is nu
 A refusal of the record verify refuses the request with its own code.
 A binding that is absent, belongs to another project, is removed or is no repository binding answers `404 project.binding.not_found`.
 
+### Binding instruction files
+
+`binding instruction-files` calls `project.binding.instruction_files.get`, a read under `human` access, under the
+[instruction files ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md#the-instruction-files-read).
+The required `ProjectId` and `BindingId` map to `params.project_id` and `params.binding_id`. Query is empty and body absent. The command takes no mutation key and rejects `--idempotency-key`.
+It reads the instruction files of one repository binding and stores nothing in the database.
+
+- It reads the configuration of the revision that `<binding-id>` names.
+- The repository connector resolves the commit of the base branch with `ls-remote`. It fetches that commit at depth 1 with no blobs into a temporary directory, reads the four paths with `git show` and deletes the directory.
+- The deadline of the resource healthcheck bounds the read.
+- The service caches the answer in memory per binding revision and commit. Each request runs `ls-remote`, so a new commit of the base branch replaces the answer.
+
+HTTP `200` answers `{ commit, read_at, files }`. `commit` is the commit of the base branch. `read_at` is a Unix timestamp in milliseconds. `files` holds four entries in the order `AGENTS.md`, `AGENTS.local.md`, `CLAUDE.md`, `CLAUDE.local.md`. Each entry is `{ source, path, state, reason, text }`:
+
+- `source` is the `working_layer` switch name: `agents_md`, `agents_local_md`, `claude_md` or `claude_local_md`.
+- `path` is the file name at the root of the repository.
+- `state` is `present`, `absent` or `invalid`. A path that the commit does not hold is `absent`.
+- A symlink in the commit resolves inside the repository root, up to 40 links. A dangling link is `absent`. A link that leaves the root is `invalid` with `outside_workspace`. A link loop is `invalid` with `unreadable`. A directory or a submodule is `invalid` with `not_regular_file`.
+- A file above 32768 bytes is `invalid` with `too_large`. A file that is not valid UTF-8 is `invalid` with `not_utf8`.
+- `reason` is the invalid reason of the working layer text validation, else null.
+- `text` is the text of a `present` file, else null.
+
+A failed or timed-out read answers `422 project.bindings.repository.ssh_unreachable`.
+A base branch that the remote does not hold answers `422 project.bindings.repository.base_branch_absent`.
+A binding that is absent, belongs to another project, is removed or is no repository binding answers `404 project.binding.not_found`.
+An absent project answers `404 project.project.not_found`.
+
 ### Binding check
 
 `binding check` calls `project.binding.check`, a read under `human` access, under the
@@ -586,47 +605,50 @@ no healthcheck command.
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
 
-| HTTP  | Code                                                   | Condition                                                                                                                                                                                    | Commands                                                                                                    |
-| ----- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| local | `cli.project.agent.get.invalid_binding_id`             | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                    | agent get                                                                                                   |
-| local | `cli.project.agent.get.invalid_project_id`             | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | agent get                                                                                                   |
-| local | `cli.project.agent.list.invalid_binding_id`            | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                    | agent list                                                                                                  |
-| local | `cli.project.agent.list.invalid_project_id`            | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | agent list                                                                                                  |
-| local | `cli.project.binding.apply.invalid_project_id`         | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | binding apply                                                                                               |
-| local | `cli.project.binding.check.invalid_project_id`         | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | binding check                                                                                               |
-| local | `cli.project.binding.verify.invalid_binding_id`        | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                    | binding verify                                                                                              |
-| local | `cli.project.binding.verify.invalid_project_id`        | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | binding verify                                                                                              |
-| local | `cli.project.binding.export.invalid_project_id`        | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | binding export                                                                                              |
-| local | `cli.project.binding.get.invalid_binding_id`           | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                    | binding get                                                                                                 |
-| local | `cli.project.binding.get.invalid_project_id`           | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | binding get                                                                                                 |
-| local | `cli.project.binding.list.invalid_kind`                | The `--kind` value is not a declared binding kind.                                                                                                                                           | binding list                                                                                                |
-| local | `cli.project.binding.list.invalid_project_id`          | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | binding list                                                                                                |
-| local | `cli.project.binding.list.invalid_state`               | The `--state` value is not a declared binding state.                                                                                                                                         | binding list                                                                                                |
-| local | `cli.project.binding.revision.list.invalid_binding_id` | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                    | binding revision list                                                                                       |
-| local | `cli.project.binding.revision.list.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | binding revision list                                                                                       |
-| local | `cli.project.create.invalid_name`                      | The name is not 1–63 characters starting with a lowercase letter and then lowercase letters, digits or hyphens.                                                                              | create                                                                                                      |
-| local | `cli.project.get.invalid_project_id`                   | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | get                                                                                                         |
-| local | `cli.project.rename.invalid_name`                      | The name is not 1–63 characters starting with a lowercase letter and then lowercase letters, digits or hyphens.                                                                              | rename                                                                                                      |
-| local | `cli.project.rename.invalid_project_id`                | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                    | rename                                                                                                      |
-| 404   | `project.binding.not_found`                            | The binding is absent or belongs to another project. For agent list and agent get, it is not a worker binding. For binding verify, it is removed or is not a repository binding.             | binding get, binding revision list, binding verify, agent list, agent get                                   |
-| 409   | `project.binding_set.version_conflict`                 | The submitted binding-set version differs from the current version.                                                                                                                          | binding apply                                                                                               |
-| 400   | `project.bindings.duplicate_resource`                  | Two bindings use the same resource.                                                                                                                                                          | binding apply                                                                                               |
-| 400   | `project.bindings.repository.address_invalid`          | The repository address is invalid, or `ssh -G` resolves its host outside the SSH host set of the platform.                                                                                   | binding apply, binding check                                                                                |
-| 400   | `project.bindings.repository.action_unsupported`       | A binding of the git-only platform `gitlab` or `bitbucket` names a `credential` or the action `pull_request`.                                                                                | binding apply, binding check                                                                                |
-| 400   | `project.bindings.repository.credential_required`      | The action `pull_request` names no `credential`.                                                                                                                                             | binding apply, binding check                                                                                |
-| 400   | `project.bindings.repository.ssh_host_mismatch`        | The host of the address differs from the `host` of the `ssh_credential`.                                                                                                                     | binding apply, binding check                                                                                |
-| 400   | `repository.credential.ssh_drift`                      | `ssh -G` resolves the host of the `ssh_credential` to values that differ from its metadata; details name each differing key.                                                                 | binding apply                                                                                               |
-| 400   | `project.bindings.repository.project_prompt_too_large` | The repository project prompt exceeds the limit.                                                                                                                                             | binding apply                                                                                               |
-| 422   | `project.bindings.repository.ssh_unreachable`          | The repository SSH read fails.                                                                                                                                                               | binding apply                                                                                               |
-| 400   | `project.bindings.worker.agent_unknown`                | An entry names an agent the worker does not declare.                                                                                                                                         | binding apply                                                                                               |
-| 400   | `project.bindings.worker.field_forbidden`              | A known worker without an agent carries `entries` or `resource_budget`; details `{ binding, field }`. Worker validates the name first (`agent.configuration.invalid` for an unknown worker). | binding apply                                                                                               |
-| 400   | `project.bindings.worker.instance_count_range`         | The instance count is outside the worker limits.                                                                                                                                             | binding apply                                                                                               |
-| 409   | `project.bindings.worker.resource_changed`             | An edit changes the worker resource of a binding.                                                                                                                                            | binding apply                                                                                               |
-| 409   | `credential.credential.archived`                       | The credential of the binding is archived.                                                                                                                                                   | binding verify, binding check                                                                               |
-| 404   | `credential.credential.not_found`                      | The credential of the binding has no live revision, or it is not a credential of the Repository component.                                                                                   | binding verify, binding check                                                                               |
-| 400   | `credential.check.unsupported`                         | The platform of the credential has `verifiable: false`.                                                                                                                                      | binding verify, binding check                                                                               |
-| 409   | `project.name.conflict`                                | Another project already uses the requested name.                                                                                                                                             | create, rename                                                                                              |
-| 404   | `project.project.not_found`                            | The project identity does not exist.                                                                                                                                                         | get, rename, binding list, binding get, binding apply, agent list, agent get, binding verify, binding check |
+| HTTP  | Code                                                       | Condition                                                                                                                                                                                                      | Commands                                                                                                                               |
+| ----- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| local | `cli.project.agent.get.invalid_binding_id`                 | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                                      | agent get                                                                                                                              |
+| local | `cli.project.agent.get.invalid_project_id`                 | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | agent get                                                                                                                              |
+| local | `cli.project.agent.list.invalid_binding_id`                | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                                      | agent list                                                                                                                             |
+| local | `cli.project.agent.list.invalid_project_id`                | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | agent list                                                                                                                             |
+| local | `cli.project.binding.apply.invalid_project_id`             | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | binding apply                                                                                                                          |
+| local | `cli.project.binding.check.invalid_project_id`             | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | binding check                                                                                                                          |
+| local | `cli.project.binding.instruction_files.invalid_binding_id` | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                                      | binding instruction-files                                                                                                              |
+| local | `cli.project.binding.instruction_files.invalid_project_id` | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | binding instruction-files                                                                                                              |
+| local | `cli.project.binding.verify.invalid_binding_id`            | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                                      | binding verify                                                                                                                         |
+| local | `cli.project.binding.verify.invalid_project_id`            | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | binding verify                                                                                                                         |
+| local | `cli.project.binding.export.invalid_project_id`            | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | binding export                                                                                                                         |
+| local | `cli.project.binding.get.invalid_binding_id`               | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                                      | binding get                                                                                                                            |
+| local | `cli.project.binding.get.invalid_project_id`               | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | binding get                                                                                                                            |
+| local | `cli.project.binding.list.invalid_kind`                    | The `--kind` value is not a declared binding kind.                                                                                                                                                             | binding list                                                                                                                           |
+| local | `cli.project.binding.list.invalid_project_id`              | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | binding list                                                                                                                           |
+| local | `cli.project.binding.list.invalid_state`                   | The `--state` value is not a declared binding state.                                                                                                                                                           | binding list                                                                                                                           |
+| local | `cli.project.binding.revision.list.invalid_binding_id`     | The `<binding-id>` argument is not a canonical `binding_<ulid>` identity.                                                                                                                                      | binding revision list                                                                                                                  |
+| local | `cli.project.binding.revision.list.invalid_project_id`     | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | binding revision list                                                                                                                  |
+| local | `cli.project.create.invalid_name`                          | The name is not 1–63 characters starting with a lowercase letter and then lowercase letters, digits or hyphens.                                                                                                | create                                                                                                                                 |
+| local | `cli.project.get.invalid_project_id`                       | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | get                                                                                                                                    |
+| local | `cli.project.rename.invalid_name`                          | The name is not 1–63 characters starting with a lowercase letter and then lowercase letters, digits or hyphens.                                                                                                | rename                                                                                                                                 |
+| local | `cli.project.rename.invalid_project_id`                    | The `<project-id>` argument is not a canonical `project_<ulid>` identity.                                                                                                                                      | rename                                                                                                                                 |
+| 404   | `project.binding.not_found`                                | The binding is absent or belongs to another project. For agent list and agent get, it is not a worker binding. For binding verify and binding instruction-files, it is removed or is not a repository binding. | binding get, binding revision list, binding verify, binding instruction-files, agent list, agent get                                   |
+| 409   | `project.binding_set.version_conflict`                     | The submitted binding-set version differs from the current version.                                                                                                                                            | binding apply                                                                                                                          |
+| 400   | `project.bindings.duplicate_resource`                      | Two bindings use the same resource.                                                                                                                                                                            | binding apply                                                                                                                          |
+| 400   | `project.bindings.repository.address_invalid`              | The repository address is invalid, or `ssh -G` resolves its host outside the SSH host set of the platform.                                                                                                     | binding apply, binding check                                                                                                           |
+| 400   | `project.bindings.repository.action_unsupported`           | A binding of the git-only platform `gitlab` or `bitbucket` names a `credential` or the action `pull_request`.                                                                                                  | binding apply, binding check                                                                                                           |
+| 400   | `project.bindings.repository.credential_required`          | The action `pull_request` names no `credential`.                                                                                                                                                               | binding apply, binding check                                                                                                           |
+| 400   | `project.bindings.repository.ssh_host_mismatch`            | The host of the address differs from the `host` of the `ssh_credential`.                                                                                                                                       | binding apply, binding check                                                                                                           |
+| 400   | `repository.credential.ssh_drift`                          | `ssh -G` resolves the host of the `ssh_credential` to values that differ from its metadata; details name each differing key.                                                                                   | binding apply                                                                                                                          |
+| 400   | `project.bindings.repository.project_prompt_too_large`     | The repository project prompt exceeds the limit.                                                                                                                                                               | binding apply                                                                                                                          |
+| 422   | `project.bindings.repository.base_branch_absent`           | The remote does not hold the base branch of the binding.                                                                                                                                                       | binding instruction-files                                                                                                              |
+| 422   | `project.bindings.repository.ssh_unreachable`              | The repository SSH read fails. For binding instruction-files, the read of the commit or of the files fails or exceeds its deadline.                                                                            | binding apply, binding instruction-files                                                                                               |
+| 400   | `project.bindings.worker.agent_unknown`                    | An entry names an agent the worker does not declare.                                                                                                                                                           | binding apply                                                                                                                          |
+| 400   | `project.bindings.worker.field_forbidden`                  | A known worker without an agent carries `entries` or `resource_budget`; details `{ binding, field }`. Worker validates the name first (`agent.configuration.invalid` for an unknown worker).                   | binding apply                                                                                                                          |
+| 400   | `project.bindings.worker.instance_count_range`             | The instance count is outside the worker limits.                                                                                                                                                               | binding apply                                                                                                                          |
+| 409   | `project.bindings.worker.resource_changed`                 | An edit changes the worker resource of a binding.                                                                                                                                                              | binding apply                                                                                                                          |
+| 409   | `credential.credential.archived`                           | The credential of the binding is archived.                                                                                                                                                                     | binding verify, binding check                                                                                                          |
+| 404   | `credential.credential.not_found`                          | The credential of the binding has no live revision, or it is not a credential of the Repository component.                                                                                                     | binding verify, binding check                                                                                                          |
+| 400   | `credential.check.unsupported`                             | The platform of the credential has `verifiable: false`.                                                                                                                                                        | binding verify, binding check                                                                                                          |
+| 409   | `project.name.conflict`                                    | Another project already uses the requested name.                                                                                                                                                               | create, rename                                                                                                                         |
+| 404   | `project.project.not_found`                                | The project identity does not exist.                                                                                                                                                                           | get, rename, binding list, binding get, binding apply, agent list, agent get, binding verify, binding instruction-files, binding check |
 
 ## Design provenance
 

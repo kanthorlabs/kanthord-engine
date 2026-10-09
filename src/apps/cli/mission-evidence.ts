@@ -54,7 +54,10 @@ export function addEvidenceCommands(mission: Command): void {
   evidence.action(() => evidence.help());
   addEvidenceReads(evidence);
   addDeleteOptions(
-    evidence.command("delete").argument("<evidence-id>", "Evidence ID"),
+    evidence
+      .command("delete")
+      .description("Delete an evidence record and its stored assets")
+      .argument("<evidence-id>", "Evidence ID"),
   ).action(async (evidenceId: string, _options, command: Command) => {
     if (!identitySchema("evidence").safeParse(evidenceId).success)
       throw new Diagnostic(
@@ -86,7 +89,10 @@ export function addEvidenceCommands(mission: Command): void {
   const asset = evidence.command("asset").description("Evidence assets");
   asset.action(() => asset.help());
   addDeleteOptions(
-    asset.command("delete").argument("<asset-id>", "Asset ID"),
+    asset
+      .command("delete")
+      .description("Delete an evidence asset and its stored content")
+      .argument("<asset-id>", "Asset ID"),
   ).action(async (assetId: string, _options, command: Command) => {
     if (!identitySchema("evidence_asset").safeParse(assetId).success)
       throw new Diagnostic(
@@ -121,6 +127,7 @@ export function addEvidenceCommands(mission: Command): void {
   content.action(() => content.help());
   content
     .command("get")
+    .description("Get the stored content of an evidence asset")
     .argument("<asset-id>", "Evidence asset ID")
     .action(async (assetId: string, _options, command: Command) => {
       if (!identitySchema("evidence_asset").safeParse(assetId).success)
@@ -136,7 +143,10 @@ export function addEvidenceCommands(mission: Command): void {
       );
     });
   addMutationOptions(
-    evidence.command("submit").argument("<node-id>", "Node ID"),
+    evidence
+      .command("submit")
+      .description("Submit evidence for a node")
+      .argument("<node-id>", "Node ID"),
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(
@@ -166,6 +176,7 @@ function addEvidenceReads(evidence: Command): void {
   addPagination(
     evidence
       .command("list")
+      .description("List the evidence of a node as JSON")
       .argument("<node-id>", "Node ID")
       .option("--attempt <attempt>", "Attempt filter", singleUse("--attempt")),
   ).action(async (nodeId: string, _options, command: Command) => {
@@ -201,6 +212,7 @@ function addEvidenceReads(evidence: Command): void {
   });
   evidence
     .command("get")
+    .description("Get an evidence record as JSON")
     .argument("<evidence-id>", "Evidence ID")
     .action(async (evidenceId: string, _options, command: Command) => {
       if (!identitySchema("evidence").safeParse(evidenceId).success)

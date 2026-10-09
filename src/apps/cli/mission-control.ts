@@ -16,7 +16,10 @@ const PAUSE_INVALID_NODE = "cli.mission.node.pause.invalid_node_id";
 
 export function addControlCommands(node: Command): void {
   addMutationOptions(
-    node.command("check").argument("<node-id>", "Node ID"),
+    node
+      .command("check")
+      .description("Check unresolved external requests of a node")
+      .argument("<node-id>", "Node ID"),
   ).action(async (nodeId: string, _options, command: Command) => {
     if (!identitySchema("node").safeParse(nodeId).success)
       throw new Diagnostic(
@@ -39,7 +42,7 @@ export function addControlCommands(node: Command): void {
     addMutationOptions(
       node
         .command(name)
-        .description(`${name} a mission node`)
+        .description(`${name[0]!.toUpperCase()}${name.slice(1)} a mission node`)
         .argument("<node-id>", "Node ID"),
     ).action(async (nodeId: string, _options, command: Command) => {
       if (!identitySchema("node").safeParse(nodeId).success)

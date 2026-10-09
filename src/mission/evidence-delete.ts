@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { z } from "zod";
+import { isHumanIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
@@ -30,6 +31,15 @@ import { requireMission } from "./write.ts";
 import { authorizeStorage } from "./authorization.ts";
 
 export type EvidenceDelete = z.infer<typeof evidenceDeleteSchema>;
+
+function deletion(caller: CallerContext, body: EvidenceDelete) {
+  assert.ok(isHumanIdentity(caller.identity));
+  return {
+    account: caller.identity.accountId,
+    force: body.force,
+    reason: body.reason ?? null,
+  };
+}
 
 export function admitDelete(
   tx: Transaction,
@@ -114,11 +124,16 @@ export async function deleteEvidenceAsset(
     prepareAssetDelete(tx, dependencies, assetId, body),
   );
   await deleteObject(dependencies, caller, prepared.asset);
-  return caller.commit((tx) => {
+  const result = caller.commit((tx) => {
     prepareAssetDelete(tx, dependencies, assetId, body);
     deleteAsset(tx, assetId);
     return null;
   });
+  dependencies.logger.info(
+    { asset_id: assetId, ...deletion(caller, body) },
+    "evidence asset deleted",
+  );
+  return result;
 }
 
 export function prepareEvidenceDelete(
@@ -176,6 +191,10 @@ export async function removeEvidence(
     }
     return null;
   });
+  dependencies.logger.info(
+    { evidence_id: evidenceId, ...deletion(caller, body) },
+    "evidence deleted",
+  );
   dependencies.wakeup.wake(prepared.mission.project_id);
   return result;
 }

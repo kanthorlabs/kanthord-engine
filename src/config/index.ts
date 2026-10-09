@@ -23,7 +23,7 @@ import {
 } from "./global.ts";
 import { gatewayConfigSchema, type GatewayConfig } from "../gateway/config.ts";
 import { missionConfigSchema, type MissionConfig } from "../mission/config.ts";
-import { agentConfigSchema, type AgentConfig } from "../agent/index.ts";
+import { agentConfigSchema, type AgentConfig } from "../agent/config.ts";
 import { projectConfigSchema } from "../project/index.ts";
 import { intakeConfigSchema } from "../intake/index.ts";
 import { workerConfigSchema, type WorkerConfig } from "../worker/config.ts";
@@ -172,10 +172,22 @@ export function loadConfig(path: string): ServerConfig {
   return configuration(parseMapping(readPrivate(path))).getProperties();
 }
 
-export function initialConfig(): string {
+export function initialConfig(
+  allowedHosts: readonly string[] = [],
+  bind: string = gatewayConfigSchema.bind.default,
+): string {
   return stringify(
     configuration({
       master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+      gateway: {
+        bind,
+        allowed_hosts: [
+          ...new Set([
+            ...gatewayConfigSchema.allowed_hosts.default,
+            ...allowedHosts,
+          ]),
+        ],
+      },
     }).getProperties(),
   );
 }

@@ -19,6 +19,7 @@ import { resolveSshIdentity } from "./connector.ts";
 import {
   repositoryOperations,
   SshDiscoverState,
+  SSH_CONFIG_UNREADABLE_STATUS,
   type RepositoryCredentialAnswer,
   type SshDiscoverAnswer,
 } from "./contract.ts";
@@ -54,7 +55,6 @@ export const DiscoverKeyword = {
 
 const SSH_CONFIG_PATH = join(homedir(), ".ssh", "config");
 const UTF8_ENCODING = "utf8";
-const SSH_CONFIG_UNREADABLE_STATUS = 422;
 
 const PLATFORM_SET: CredentialPlatformSet = { platforms: REPOSITORY_PLATFORMS };
 

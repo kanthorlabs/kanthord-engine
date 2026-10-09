@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import type { Provider } from "@earendil-works/pi-ai";
+import { registerBunOAuthFlows as registerOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import {
@@ -38,6 +39,7 @@ import {
   type ProviderCheckAnswer,
 } from "./contract.ts";
 import {
+  isLoopbackHost,
   loginMode,
   loginNotFound,
   LOGIN_VALUE_NOT_AWAITED,
@@ -110,6 +112,7 @@ export class LlmComponent implements Service {
   private readonly platformSet: CredentialPlatformSet;
 
   constructor(dependencies: Dependencies) {
+    registerOAuthFlows();
     this.records = dependencies.records;
     this.store = dependencies.store;
     this.logger = dependencies.logger;
@@ -368,7 +371,11 @@ export class LlmComponent implements Service {
     caller: CallerContext,
   ): Promise<typeof llmOperations.login.output._output> {
     if (!this.acceptingLogins)
-      throw new Diagnostic(LlmErrorCode.Stopped, "llm: login is stopped.");
+      throw new OperationError(
+        HttpStatus.ServiceUnavailable,
+        LlmErrorCode.Stopped,
+        "The LLM component is stopped.",
+      );
     const { platform, name, mode: requested } = input.body;
     if (!isLlmPlatform(platform))
       throw new OperationError(
@@ -383,7 +390,11 @@ export class LlmComponent implements Service {
         "Unsupported credential entry.",
       );
     this.store.transaction((tx) => this.records.requireAvailableName(tx, name));
-    const mode = loginMode(platform, requested);
+    const mode = loginMode(
+      platform,
+      requested,
+      caller.host === undefined || isLoopbackHost(caller.host),
+    );
     if (caller.identity?.kind !== IdentityKind.Human) throw invalidInput();
     const session = this.sessions.start(
       platform,
@@ -423,12 +434,8 @@ export class LlmComponent implements Service {
 
   private loginSession(id: string): LoginSession {
     const session = this.sessions.get(id);
-    if (!session || session.state === LoginSessionState.Expired)
-      throw loginNotFound();
-    if (session.expires_at <= this.now()) {
-      this.logins.get(id)?.expire();
-      throw loginNotFound();
-    }
+    if (!session) throw loginNotFound();
+    if (session.expires_at <= this.now()) this.logins.get(id)?.expire();
     return session;
   }
 

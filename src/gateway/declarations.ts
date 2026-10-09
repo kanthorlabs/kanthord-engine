@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
 import type { Logger } from "pino";
-import { dirname, join } from "node:path";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import { isHumanIdentity } from "../kernel/caller.ts";
 import { healthy } from "../kernel/service.ts";
@@ -14,7 +12,7 @@ import {
   type InventoryCollector,
 } from "./contract.ts";
 import { resourceHealthReport } from "./health-report.ts";
-import { openapiPath } from "./local.ts";
+import { shippedAsset } from "../kernel/assets.ts";
 
 const EMPTY_SERVICE_COUNT = 0;
 
@@ -66,9 +64,9 @@ export function registerGatewayOperations(
   });
 }
 
-async function readOpenAPIFile(file: string): Promise<string> {
+function readOpenAPIFile(file: string): string {
   try {
-    return await readFile(join(dirname(openapiPath()), file), "utf8");
+    return shippedAsset(file);
   } catch {
     throw new GatewayError(
       503,

@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, join } from "node:path";
 import { Command } from "commander";
 import { z } from "zod";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { ensureDirectory, writePrivate } from "../../kernel/files.ts";
+import {
+  PRIVATE_DIRECTORY_MODE,
+  PRIVATE_FILE_MODE,
+} from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
   client,
@@ -422,20 +432,13 @@ function importFileSchema<S extends z.ZodTypeAny>(
           "JSON imports do not accept plan-file positionals",
         );
       if (manifest.format !== ImportFormat.Markdown) return body;
-      if (paths.length > NO_FILES && Object.hasOwn(manifest, "files"))
+      if (paths.length === NO_FILES) return body;
+      if (Object.hasOwn(manifest, "files"))
         throw new Diagnostic(
           `cli.mission.${name}.files_conflict`,
           "supply plan-file positionals or files, not both",
         );
-      return {
-        ...body,
-        files:
-          paths.length > NO_FILES
-            ? paths.map(readPlanFile)
-            : manifest.files === undefined
-              ? []
-              : manifest.files,
-      };
+      return { ...body, files: paths.map(readPlanFile) };
     })
     .pipe(schema);
 }
@@ -492,6 +495,28 @@ function validateExportDirectory(path: string): void {
     );
 }
 
+function createExportDirectory(path: string): void {
+  try {
+    mkdirSync(path, { mode: PRIVATE_DIRECTORY_MODE, recursive: true });
+  } catch {
+    throw new Diagnostic(
+      "system.files.create_failed",
+      `${path}: cannot create directory.`,
+    );
+  }
+}
+
+function writeExport(path: string, content: string): void {
+  try {
+    writeFileSync(path, content, { flag: "wx", mode: PRIVATE_FILE_MODE });
+  } catch {
+    throw new Diagnostic(
+      "system.files.publish_failed",
+      `${path}: cannot publish file; the destination must be absent.`,
+    );
+  }
+}
+
 async function exportMission(
   missionId: string,
   command: Command,
@@ -513,12 +538,12 @@ async function exportMission(
   if (format.data === ImportFormat.Markdown) {
     assert.ok("files" in data);
     validateExportDirectory(options.out);
-    ensureDirectory(options.out);
+    createExportDirectory(options.out);
     for (const entry of data.files)
-      writePrivate(join(options.out, entry.filename), entry.content);
+      writeExport(join(options.out, entry.filename), entry.content);
   } else {
     assert.ok("entries" in data);
-    writePrivate(options.out, JSON.stringify(data));
+    writeExport(options.out, JSON.stringify(data));
   }
   process.stdout.write(
     `${JSON.stringify({ mission_id: data.mission_id, mission_version: data.mission_version })}\n`,
@@ -582,7 +607,9 @@ function addImportCommands(mission: Command): void {
   for (const action of [PREVIEW, APPLY] as const) {
     const command = imports
       .command(action)
-      .description(`${action} a mission import as JSON`)
+      .description(
+        `${action[0]!.toUpperCase()}${action.slice(1)} a mission import as JSON`,
+      )
       .argument("<mission-id>", "Mission ID")
       .argument("[plan-file...]", "Markdown plan files in import order")
       .requiredOption(
@@ -749,7 +776,9 @@ function addDependencyCommands(mission: Command): void {
     addMutationOptions(
       dependency
         .command(action)
-        .description(`${action} a dependency`)
+        .description(
+          `${action[0]!.toUpperCase()}${action.slice(1)} a dependency`,
+        )
         .argument("<node-id>", "Dependent node ID")
         .argument("<depends-on-id>", "Prerequisite node ID"),
     ).action(

@@ -414,7 +414,10 @@ for (const isSplitTurn of [false, true]) {
         .messages.filter((message) => message.role === USER)
         .map((message) => contentText(message.content))
         .join("\n");
-      assert.match(prefixRequest, /This is the PREFIX of a turn/);
+      assert.match(
+        prefixRequest,
+        /Create a concise checkpoint of the user's request/,
+      );
       assert.ok(prefixRequest.includes(`prefix request quoting ${work.text}`));
     }
     for (const [index, call] of provider.calls.entries()) {

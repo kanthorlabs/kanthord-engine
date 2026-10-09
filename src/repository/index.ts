@@ -13,6 +13,8 @@ import {
   mergePushFresh,
   pushSnapshotFresh,
   landedOn,
+  resolveBranchCommit,
+  readFilesAtCommit,
 } from "./connector.ts";
 import type { SshIdentity, SshPin } from "./ssh-identity.ts";
 import { proveSshPin } from "./credential-platform.ts";
@@ -42,6 +44,8 @@ export interface GitWriter {
 export const platformImplementations = {
   [RepositoryPlatform.GitHub]: GitHubPlatform,
 } as const;
+
+export const repositoryFiles = { resolveBranchCommit, readFilesAtCommit };
 
 export interface Dependencies {
   health?: HealthRegistry;

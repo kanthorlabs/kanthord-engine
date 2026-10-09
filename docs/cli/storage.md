@@ -74,7 +74,7 @@ All paths below are implemented routes under the ruled `/api/storage/credential`
 | 9   | `check --file <path> [R]`                                 | `POST /api/storage/credential/check`                                      | `storage.credential.check`           | `human`; implemented |
 | 10  | `verify <credential-name> [R]`                            | `POST /api/storage/credential/:credential_name/verify`                    | `storage.credential.verify`          | `human`; implemented |
 
-The static `/api/storage/credential/platform` and `/api/storage/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`.
+The static `/api/storage/credential/platform` and `/api/storage/credential/check` paths take precedence over `/:credential_name`, so custody refuses the names `login`, `platform` and `check`. Custody also reserves `ssh`.
 These routes have no project identity.
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
@@ -119,12 +119,12 @@ Custody validates the local schema and makes no remote call. HTTP
 `200` returns the credential answer with revision 1. The name is the natural key of
 creation. A taken name answers `409 credential.name.conflict`, with the identity
 of its newest revision in `error.details`, including a retry after restart. The CLI prints
-that identity, never the submitted secret.
+the code and the HTTP status, not that identity, and never the submitted secret.
 
 ## `list`
 
 No positional arguments and no body. The optional filter maps to query `platform`.
-The optional `--include-archived` flag maps to query `include_archived`, a boolean that defaults to `false`. Without it, the list leaves out an archived name.
+The optional `--include-archived` flag maps to query `include_archived`, the string `true` or `false` with default `false`. Without it, the list leaves out an archived name.
 It is single-use with no default filter. The platform enum is defined above.
 `limit` and optional `cursor` use the shared pagination contract.
 HTTP `200` returns one credential answer for each name of this component in `items`, in ascending name
@@ -251,7 +251,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.revision.newest_live`                | The revoke names the newest live revision.                                                      | revoke                                                                 |
 | 409   | `credential.credential.in_use`                   | A dependent names the credential; `details` holds `agent_providers`, `bindings` and `inbounds`. | archive                                                                |
 | 409   | `credential.credential.archived`                 | The credential is archived; an archive is final.                                                | rotate, update-metadata, archive, verify                               |
-| 404   | `credential.revision.not_found`                  | The revision does not exist.                                                                    | revoke                                                                 |
+| 404   | `credential.revision.not_found`                  | The revision does not exist, or the credential name is unknown.                                 | revoke                                                                 |
 | 409   | `credential.revision.revoked`                    | A pinned use names a revoked revision.                                                          | worker handover, worker credential (API only)                          |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.

@@ -41,15 +41,30 @@ const SINGLE_MODE = 1;
 const FIRST_MODE = 0;
 const PUBLIC_GITHUB_DOMAIN = "";
 const LOGIN_FAILED = "login failed";
+const LOGIN_FAILED_CODE = "credential.login.failed";
 const MODE_UNSUPPORTED = "credential.login.mode_unsupported";
+export const BROWSER_UNAVAILABLE = "credential.login.browser_unavailable";
+const HOST_PROBE_SCHEME = "http://";
+const IPV4_LOOPBACK_PREFIX = "127.";
+const LOOPBACK_NAMES: readonly string[] = ["localhost", "[::1]"];
 const INVALID_INPUT = "credential.input.invalid";
 export const LOGIN_NOT_FOUND = "credential.login.not_found";
 export const LOGIN_VALUE_NOT_AWAITED = "credential.login.value_not_awaited";
 export type OAuthSecret = { refresh: string; access: string; expires: number };
 
+export function isLoopbackHost(host: string): boolean {
+  const hostname = URL.parse(`${HOST_PROBE_SCHEME}${host}`)?.hostname;
+  if (hostname === undefined) return false;
+  return (
+    LOOPBACK_NAMES.includes(hostname) ||
+    hostname.startsWith(IPV4_LOOPBACK_PREFIX)
+  );
+}
+
 export function loginMode(
   platform: Platform,
-  requested?: string,
+  requested: string | undefined,
+  browserReachable: boolean,
 ): LoginSessionMode {
   if (
     requested !== undefined &&
@@ -61,15 +76,24 @@ export function loginMode(
       "Invalid input.",
     );
   const modes = LLM_PLATFORMS[platform].login_modes;
+  const usable = browserReachable
+    ? modes
+    : modes.filter((mode) => mode !== LoginSessionMode.Browser);
   const selected =
     modes.length === SINGLE_MODE
       ? modes[FIRST_MODE]
-      : (requested ?? modes[FIRST_MODE]);
+      : (requested ?? usable[FIRST_MODE]);
   if (!selected || !modes.includes(selected as LoginSessionMode))
     throw new OperationError(
       HttpStatus.BadRequest,
       MODE_UNSUPPORTED,
       "Unsupported login mode.",
+    );
+  if (!usable.includes(selected as LoginSessionMode))
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      BROWSER_UNAVAILABLE,
+      "Browser login needs a browser on the server host. Use device mode.",
     );
   return selected as LoginSessionMode;
 }
@@ -82,10 +106,18 @@ export function loginNotFound(): OperationError {
   );
 }
 
+function loginFailed(): OperationError {
+  return new OperationError(
+    HttpStatus.ServiceUnavailable,
+    LOGIN_FAILED_CODE,
+    "The login failed before an address.",
+  );
+}
+
 export class OAuthLogin {
   readonly controller = new AbortController();
   readonly ready = Promise.withResolvers<void>();
-  failure: Error = new Error(LOGIN_FAILED);
+  failure: Error = loginFailed();
   private timer?: NodeJS.Timeout;
   private answer?: (value: string) => void;
 
@@ -246,8 +278,7 @@ export class OAuthLogin {
       const cause = error instanceof ModelsError ? error.cause : error;
       if (this.session.expires_at <= this.now()) this.expire();
       if (this.session.state === LoginSessionState.Pending) {
-        this.failure =
-          cause instanceof OperationError ? cause : new Error(LOGIN_FAILED);
+        this.failure = cause instanceof OperationError ? cause : loginFailed();
         this.sessions.fail(
           this.session.id,
           cause instanceof OperationError ? cause.code : LOGIN_FAILED,

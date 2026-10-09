@@ -13,7 +13,7 @@ import {
 import {
   amazonBedrockMetadataSchema,
   approvedModelSchema,
-  azureOpenAIResponsesMetadataSchema,
+  azureMetadataSchema,
   cloudflareAIGatewayMetadataSchema,
   cloudflareWorkersAIMetadataSchema,
   googleVertexMetadataSchema,
@@ -38,7 +38,7 @@ const PI_KNOWN_PROVIDERS = [
   "google",
   "google-vertex",
   "openai",
-  "azure-openai-responses",
+  "azure",
   "openai-codex",
   "radius",
   "nvidia",
@@ -63,6 +63,8 @@ const PI_KNOWN_PROVIDERS = [
   "opencode",
   "opencode-go",
   "kimi-coding",
+  "meta",
+  "typesafe",
   "cloudflare-workers-ai",
   "cloudflare-ai-gateway",
   "qwen-token-plan",
@@ -73,7 +75,7 @@ const PI_KNOWN_PROVIDERS = [
   "xiaomi-token-plan-ams",
   "xiaomi-token-plan-sgp",
 ] as const satisfies readonly KnownProvider[];
-const PLATFORM_COUNT = 41;
+const PLATFORM_COUNT = 43;
 const VERIFIABLE_PLATFORMS: Platform[] = [
   Platform.GitHubCopilot,
   Platform.OpenAICodex,
@@ -87,7 +89,7 @@ const METADATA_FIELDS: Partial<Record<Platform, string[]>> = {
   [Platform.OpenAICompatible]: ["base_url"],
   [Platform.AmazonBedrock]: ["region"],
   [Platform.GoogleVertex]: ["project", "location"],
-  [Platform.AzureOpenAIResponses]: ["resource_name"],
+  [Platform.Azure]: ["resource_name"],
   [Platform.CloudflareWorkersAI]: ["account_id"],
   [Platform.CloudflareAIGateway]: ["account_id", "gateway_id"],
 };
@@ -288,7 +290,7 @@ const llmMetadataSchemas: {
     valid: { project: "project", location: "us-central1" },
   },
   {
-    schema: azureOpenAIResponsesMetadataSchema,
+    schema: azureMetadataSchema,
     valid: { resource_name: "resource" },
   },
   { schema: cloudflareWorkersAIMetadataSchema, valid: { account_id: "acct" } },

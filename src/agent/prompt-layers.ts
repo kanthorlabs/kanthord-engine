@@ -12,7 +12,7 @@ import {
   SystemLayerOverride,
   SystemPromptSource,
   WorkbenchPromptSource,
-  type PromptSettings,
+  type StoredPromptSettings,
 } from "./contract.ts";
 import type { RepositoryPolicy } from "../project/contract.ts";
 import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
@@ -31,7 +31,7 @@ const SHIPPED_BASE_NAME = "base.md";
 const SHIPPED_WORKBENCH_NAME = "workbench.md";
 const MARKDOWN_EXTENSION = ".md";
 const PROJECT_PROMPT_SOURCE = "project_prompt";
-const WORKING_FILES = [
+export const WORKING_FILES = [
   [WorkbenchPromptSource.AgentsMd, "AGENTS.md"],
   [WorkbenchPromptSource.AgentsLocalMd, "AGENTS.local.md"],
   [WorkbenchPromptSource.ClaudeMd, "CLAUDE.md"],
@@ -68,9 +68,9 @@ export interface ResolvedLayer {
 }
 
 export interface PromptSettingsSet {
-  system: PromptSettings;
-  agent: PromptSettings;
-  working: PromptSettings;
+  system: StoredPromptSettings;
+  agent: StoredPromptSettings;
+  working: StoredPromptSettings;
 }
 
 export type RepositoryLayerSource = Pick<

@@ -15,8 +15,10 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   assert.equal(budget.wallDeadline(), wallDeadline);
   const agent = budget.agentContext(background);
   const cleanup = budget.cleanupContext(background);
+  assert.equal(budget.exhaustedAfterTurn(), false);
   budget.turnEnded();
   assert.equal(budget.exhausted(), false);
+  assert.equal(budget.exhaustedAfterTurn(), true);
   budget.turnEnded();
   assert.equal(budget.exhausted(), true);
   assert.ok(agent.err());
@@ -26,6 +28,7 @@ test("budget bounds wall time, counts turns and keeps cleanup until execution ex
   });
   uncapped.turnEnded();
   assert.equal(uncapped.exhausted(), false);
+  assert.equal(uncapped.exhaustedAfterTurn(), false);
   const wallAgent = uncapped.agentContext(background);
   t.mock.timers.tick(5000);
   assert.ok(wallAgent.err());

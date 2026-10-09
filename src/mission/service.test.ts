@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import pino from "pino";
 import { background } from "../kernel/context.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -326,6 +327,7 @@ function makeService(
         throw new Error(UNEXPECTED_COLLABORATION);
       },
     },
+    logger: pino({ enabled: false }),
     ...collaborators,
   });
 }

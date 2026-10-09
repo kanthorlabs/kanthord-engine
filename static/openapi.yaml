@@ -188,6 +188,8 @@ paths:
     $ref: ./openapi/project/binding.check.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}:
     $ref: ./openapi/project/binding.get.yaml#/pathItem
+  /api/project/{project_id}/binding/{binding_id}/instruction_files:
+    $ref: ./openapi/project/binding.instruction_files.get.yaml#/pathItem
   /api/project/{project_id}/binding:
     $ref: ./openapi/project/binding.list.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}/verify:

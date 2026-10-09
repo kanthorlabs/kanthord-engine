@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
+  readdirSync,
   rmSync,
   mkdirSync,
-  readdirSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import test from "node:test";
+import { dirname, join } from "node:path";
+import test, { type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { background, CancellationContext } from "../kernel/context.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { RepositoryFileState } from "./contract.ts";
 import {
   gitLsRemote,
   resolveSshHostname,
@@ -24,13 +27,18 @@ import {
   foldBranchPush,
   GitStage,
   GitWriteError,
+  resolveBranchCommit,
+  readFilesAtCommit,
 } from "./connector.ts";
 import { CheckEndState, ExpectedEndState } from "./github.ts";
+import { isString } from "../kernel/values.ts";
 import { temporary } from "../kernel/test-support.ts";
 
 const DEADLINE_MS = 5000;
 const EXPIRED_DEADLINE_MS = 1;
 const LOCAL_HOST = "localhost";
+const SSH_RESOLVE_FAILED_STATUS = 422;
+const SSH_RESOLVE_FAILED_CODE = "repository.credential.ssh_resolve_failed";
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_plan04_test";
 
 test("resolveSshHostname reads the hostname line of ssh -G", async () => {
@@ -43,10 +51,17 @@ test("resolveSshHostname reads the hostname line of ssh -G", async () => {
 test("resolveSshHostname rejects when the deadline elapses or the context was cancelled", async () => {
   await assert.rejects(
     resolveSshHostname(LOCAL_HOST, background, EXPIRED_DEADLINE_MS - 1),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === SSH_RESOLVE_FAILED_STATUS &&
+      error.code === SSH_RESOLVE_FAILED_CODE,
   );
   const context = new CancellationContext();
   context.cancel();
-  await assert.rejects(resolveSshHostname(LOCAL_HOST, context, DEADLINE_MS));
+  await assert.rejects(
+    resolveSshHostname(LOCAL_HOST, context, DEADLINE_MS),
+    (error) => error === context.err(),
+  );
 });
 
 test("gitLsRemote resolves for a local git repository", async (t) => {
@@ -485,4 +500,284 @@ test("foldBranchPush folds a landing against base_branch_pushed", () => {
   assert.throws(() =>
     foldBranchPush(true, commit, ExpectedEndState.PullRequestMerged),
   );
+});
+
+const INSTRUCTION_PATHS = [
+  "AGENTS.md",
+  "AGENTS.local.md",
+  "CLAUDE.md",
+  "CLAUDE.local.md",
+];
+const NO_ENTRIES = 0;
+const MAX_BYTES = 16;
+const FIRST_INDEX = 0;
+const SECOND_INDEX = 1;
+const FIRST_TEXT = "first\n";
+const UNKNOWN_COMMIT = "0".repeat(40);
+
+async function instructionOrigin(t: TestContext) {
+  const root = temporary(t);
+  const origin = join(root, "origin");
+  const seed = join(root, "seed");
+  const scratch = join(root, "scratch");
+  for (const directory of [origin, seed, scratch]) mkdirSync(directory);
+  await simpleGit(origin).init(true);
+  await simpleGit(origin).raw(["config", "uploadpack.allowFilter", "true"]);
+  await simpleGit(origin).raw([
+    "config",
+    "uploadpack.allowAnySHA1InWant",
+    "true",
+  ]);
+  const git = simpleGit(seed);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  await git.addRemote("origin", origin);
+  const commit = async (
+    files: Record<string, string | Buffer | { link: string }>,
+  ) => {
+    for (const [name, entry] of Object.entries(files)) {
+      const path = join(seed, name);
+      mkdirSync(dirname(path), { recursive: true });
+      rmSync(path, { force: true });
+      if (isString(entry) || Buffer.isBuffer(entry)) writeFileSync(path, entry);
+      else symlinkSync(entry.link, path);
+    }
+    await git.raw(["add", "--force", "."]);
+    await git.raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      "files",
+    ]);
+    await git.push("origin", "main");
+    return (await git.revparse(["HEAD"])).trim();
+  };
+  return { address: "file://" + origin, scratch, commit };
+}
+
+test("resolveBranchCommit answers the commit of a branch and null for an absent branch", async (t) => {
+  const { address, commit } = await instructionOrigin(t);
+  const head = await commit({ "AGENTS.md": "first\n" });
+  assert.equal(
+    await resolveBranchCommit(address, "main", background, DEADLINE_MS),
+    head,
+  );
+  assert.equal(
+    await resolveBranchCommit(address, "absent", background, DEADLINE_MS),
+    null,
+  );
+  assert.equal(
+    await resolveBranchCommit(address, "ain", background, DEADLINE_MS),
+    null,
+  );
+});
+
+test("resolveBranchCommit rejects for a nonexistent repository", async () => {
+  await assert.rejects(
+    resolveBranchCommit(MISSING_REPOSITORY, "main", background, DEADLINE_MS),
+    { code: "repository.connector.git_failed" },
+  );
+});
+
+test("readFilesAtCommit reads the present files of a commit and answers null for an absent file", async (t) => {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  await commit({ "AGENTS.md": "first\n" });
+  const head = await commit({
+    "AGENTS.md": "second\n",
+    "CLAUDE.md": "claude\n\n",
+    "other.md": "other\n",
+  });
+  const files = await readFilesAtCommit(
+    address,
+    head,
+    INSTRUCTION_PATHS,
+    MAX_BYTES,
+    background,
+    DEADLINE_MS,
+    scratch,
+  );
+  assert.deepEqual(files, [
+    { path: "AGENTS.md", state: RepositoryFileState.Present, text: "second\n" },
+    { path: "AGENTS.local.md", state: RepositoryFileState.Absent, text: null },
+    {
+      path: "CLAUDE.md",
+      state: RepositoryFileState.Present,
+      text: "claude\n\n",
+    },
+    { path: "CLAUDE.local.md", state: RepositoryFileState.Absent, text: null },
+  ]);
+  assert.equal(readdirSync(scratch).length, NO_ENTRIES);
+});
+
+async function readStates(
+  t: TestContext,
+  files: Record<string, string | Buffer | { link: string }>,
+) {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const head = await commit(files);
+  const read = await readFilesAtCommit(
+    address,
+    head,
+    INSTRUCTION_PATHS,
+    MAX_BYTES,
+    background,
+    DEADLINE_MS,
+    scratch,
+  );
+  return read.map(({ state, text }) => [state, text]);
+}
+
+test("readFilesAtCommit follows a symlink and a chain of two symlinks", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      "AGENTS.md": "agents\n",
+      "CLAUDE.md": { link: "AGENTS.md" },
+      "docs/target.md": "target\n",
+      "AGENTS.local.md": { link: "docs/middle.md" },
+      "docs/middle.md": { link: "target.md" },
+    }),
+    [
+      [RepositoryFileState.Present, "agents\n"],
+      [RepositoryFileState.Present, "target\n"],
+      [RepositoryFileState.Present, "agents\n"],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
+});
+
+test("readFilesAtCommit refuses a symlink that leaves the repository root", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      "AGENTS.md": { link: "../outside" },
+      "CLAUDE.md": { link: "/etc/passwd" },
+      "CLAUDE.local.md": { link: "docs/../../outside" },
+    }),
+    [
+      [RepositoryFileState.OutsideRoot, null],
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.OutsideRoot, null],
+      [RepositoryFileState.OutsideRoot, null],
+    ],
+  );
+});
+
+test("readFilesAtCommit answers absent for a dangling symlink", async (t) => {
+  assert.deepEqual(
+    await readStates(t, { "AGENTS.md": { link: "missing.md" } }),
+    [
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.Absent, null],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
+});
+
+test("readFilesAtCommit answers unreadable for a symlink loop", async (t) => {
+  const [loop] = await readStates(t, {
+    "AGENTS.md": { link: "CLAUDE.md" },
+    "CLAUDE.md": { link: "AGENTS.md" },
+  });
+  assert.deepEqual(loop, [RepositoryFileState.Unreadable, null]);
+});
+
+test("readFilesAtCommit refuses a directory and a symlink to a directory", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      "AGENTS.md/inner.md": "inner\n",
+      "CLAUDE.md": { link: "AGENTS.md" },
+      "AGENTS.local.md": { link: "." },
+    }),
+    [
+      [RepositoryFileState.NotRegularFile, null],
+      [RepositoryFileState.NotRegularFile, null],
+      [RepositoryFileState.NotRegularFile, null],
+      [RepositoryFileState.Absent, null],
+    ],
+  );
+});
+
+test("readFilesAtCommit refuses a file above the byte bound and a file that is not UTF-8", async (t) => {
+  assert.deepEqual(
+    await readStates(t, {
+      "AGENTS.md": "x".repeat(MAX_BYTES + 1),
+      "AGENTS.local.md": "x".repeat(MAX_BYTES),
+      "CLAUDE.md": Buffer.from([0x66, 0xff, 0x0a]),
+      "CLAUDE.local.md": { link: "CLAUDE.md" },
+    }),
+    [
+      [RepositoryFileState.TooLarge, null],
+      [RepositoryFileState.Present, "x".repeat(MAX_BYTES)],
+      [RepositoryFileState.NotUtf8, null],
+      [RepositoryFileState.NotUtf8, null],
+    ],
+  );
+});
+
+test("readFilesAtCommit reads the named commit after the branch moved", async (t) => {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const first = await commit({ "AGENTS.md": "first\n" });
+  await commit({ "AGENTS.md": "second\n" });
+  const files = await readFilesAtCommit(
+    address,
+    first,
+    INSTRUCTION_PATHS,
+    MAX_BYTES,
+    background,
+    DEADLINE_MS,
+    scratch,
+  );
+  assert.equal(files[FIRST_INDEX]?.text, FIRST_TEXT);
+  assert.equal(files[SECOND_INDEX]?.text, null);
+});
+
+test("readFilesAtCommit deletes its directory when the read fails", async (t) => {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  await commit({ "AGENTS.md": "first\n" });
+  await assert.rejects(
+    readFilesAtCommit(
+      address,
+      UNKNOWN_COMMIT,
+      INSTRUCTION_PATHS,
+      MAX_BYTES,
+      background,
+      DEADLINE_MS,
+      scratch,
+    ),
+    { code: "repository.connector.git_failed" },
+  );
+  await assert.rejects(
+    readFilesAtCommit(
+      MISSING_REPOSITORY,
+      UNKNOWN_COMMIT,
+      INSTRUCTION_PATHS,
+      MAX_BYTES,
+      background,
+      DEADLINE_MS,
+      scratch,
+    ),
+    { code: "repository.connector.git_failed" },
+  );
+  assert.equal(readdirSync(scratch).length, NO_ENTRIES);
+});
+
+test("readFilesAtCommit rejects when the deadline elapsed and deletes its directory", async (t) => {
+  const { address, scratch, commit } = await instructionOrigin(t);
+  const head = await commit({ "AGENTS.md": "first\n" });
+  await assert.rejects(
+    readFilesAtCommit(
+      address,
+      head,
+      INSTRUCTION_PATHS,
+      MAX_BYTES,
+      background,
+      EXPIRED_DEADLINE_MS - 1,
+      scratch,
+    ),
+    { code: "repository.connector.git_failed" },
+  );
+  assert.equal(readdirSync(scratch).length, NO_ENTRIES);
 });

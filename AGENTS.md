@@ -72,6 +72,7 @@ engine/
 │   │   ├── prompt-layers.ts    # System, agent and working layer sources, switches and states
 │   │   ├── prompt-render.ts    # Framing, system prompt, pinned working texts and final prompt
 │   │   ├── prompts.ts          # agent_prompt settings reads and writes
+│   │   ├── prompt-locks.ts     # Configuration locks of prompt switches
 │   │   ├── pinned-layers.ts    # Context and inference pins across compaction
 │   │   ├── environment.ts      # Provider-free child process environment
 │   │   ├── test-support.ts     # Scripted offline provider
@@ -221,6 +222,7 @@ engine/
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
 │   │   ├── client.ts           # HTTP client, client configuration, and server version discovery
 │   │   ├── local.ts            # Local JWT issuance and OpenAPI generation without a server
+│   │   ├── dashboard.ts        # Embedded dashboard assets outside /api
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
 │   └── apps/                   # Application entries and composition roots
 │       ├── server/             # Service construction, startup, shutdown, and integration tests

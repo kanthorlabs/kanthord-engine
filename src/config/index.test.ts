@@ -104,21 +104,34 @@ test("worker configuration defaults and strict validation", () => {
   }
 });
 
-test("agent prompt configuration defaults to empty paths and accepts strings", () => {
+test("agent prompt configuration defaults the agent directory to agents and accepts strings", () => {
   const masterKey = randomBytes(32).toString("base64");
   assert.deepEqual(
     configuration({ master_key: masterKey }).getProperties().agent,
     {
-      prompt: { system_file: "", agent_directory: "" },
+      prompt: { system_file: "", agent_directory: "agents", host_file: true },
     },
   );
-  const prompt = { system_file: "a/AGENTS.md", agent_directory: "/agents" };
+  const prompt = {
+    system_file: "a/AGENTS.md",
+    agent_directory: "/agents",
+    host_file: false,
+  };
   assert.deepEqual(
     configuration({ master_key: masterKey, agent: { prompt } }).getProperties()
       .agent.prompt,
     prompt,
   );
-  for (const bad of [{ system_file: 1 }, { agent_directory: null }, { x: "" }])
+  for (const bad of [
+    { system_file: 1 },
+    { agent_directory: null },
+    { host_file: 1 },
+    { host_file: null },
+    { host_file: "off" },
+    { host_file: "no" },
+    { host_file: "false" },
+    { x: "" },
+  ])
     assert.throws(
       () => configuration({ master_key: masterKey, agent: { prompt: bad } }),
       (error: Error & { code?: string }) => {
@@ -227,7 +240,7 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   );
   assert.match(showConfig(path), /\[Sensitive\]/);
   assert.throws(
-    () => configuration({ gateway: { bind: "0.0.0.0", port: -1 } }),
+    () => configuration({ gateway: { bind: "localhost", port: -1 } }),
     (error: Error) => {
       assert.match(error.message, /master_key/);
       assert.match(error.message, /gateway.bind/);

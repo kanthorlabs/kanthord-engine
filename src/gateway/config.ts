@@ -1,8 +1,6 @@
 import { isIP } from "node:net";
 import { isString, isNumber } from "../kernel/values.ts";
-const IPV4_VERSION = 4;
 const NO_LIFETIME = 0;
-export const IPV6_LOOPBACK = "::1";
 export interface GatewayConfig {
   bind: string;
   port: number;
@@ -20,17 +18,11 @@ const strings = (value: unknown) => {
 };
 export const gatewayConfigSchema = {
   bind: {
-    doc: "Loopback listener address.",
+    doc: "Listener IP address.",
     default: "127.0.0.1",
     format(value: unknown) {
-      if (
-        !isString(value) ||
-        !(
-          (isIP(value) === IPV4_VERSION && value.startsWith("127.")) ||
-          value === IPV6_LOOPBACK
-        )
-      )
-        throw new Error("expected a loopback IP address");
+      if (!isString(value) || !isIP(value))
+        throw new Error("expected an IP address");
     },
   },
   port: { doc: "HTTP listener port.", format: "port", default: 31415 },

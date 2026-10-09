@@ -12,6 +12,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
+import { packageVersion } from "../../kernel/version.ts";
 import { IdentityKind, CLIENT_IDENTITY_PREFIX } from "../../kernel/caller.ts";
 import {
   deriveClientSecret,
@@ -366,6 +367,44 @@ test("worker handover validates locally and prints receipt metadata without the 
   assert.doesNotMatch(result.stdout, /nonce|ciphertext/);
 });
 
+test("scheduler execution release tells the operator to read the execution before a retry when the answer is lost", (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  const file = join(directory, "release.json");
+  writeFileSync(file, JSON.stringify({ further_work: false }), {
+    mode: 0o600,
+  });
+  const executionId = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const result = invocation(
+    [
+      "scheduler",
+      "execution",
+      "release",
+      executionId,
+      "--file",
+      file,
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "machine",
+      "--idempotency-key",
+      "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    ],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Failure);
+  assert.equal(result.stdout, EMPTY_OUTPUT);
+  assert.match(
+    result.stderr,
+    /^cli\.scheduler\.execution\.release\.indeterminate:/,
+  );
+  assert.ok(
+    result.stderr.includes(`kanthord scheduler execution get ${executionId}`),
+    result.stderr,
+  );
+  assert.doesNotMatch(result.stderr, /retry with --idempotency-key/);
+});
+
 test("agent enablement commands expose offline help and validate inputs before I/O", (t) => {
   const env = environment(temporary(t));
   for (const [path, fileRequired] of [
@@ -430,7 +469,10 @@ test("agent get and prompt commands expose help and refuse invalid options befor
   const env = environment(temporary(t));
   const remote = ["--endpoint", "http://127.0.0.1:1", "--token", "t"];
   for (const [path, flags] of [
-    [["get"], /--view <view>[\s\S]*--project <project-id>[\s\S]*--binding/],
+    [
+      ["get"],
+      /--view <view>[\s\S]*--project <project-id>[\s\S]*--binding-id <binding-id>/,
+    ],
     [["prompt", "put"], /--scope <scope>[\s\S]*--file <path>/],
     [["prompt", "switch"], /--switch <source>[\s\S]*--on[\s\S]*--off/],
   ] as const) {
@@ -445,7 +487,7 @@ test("agent get and prompt commands expose help and refuse invalid options befor
       "cli.agent.get.project_binding_pair_required",
     ],
     [
-      ["get", "swe@1", "--binding", BINDING_ID],
+      ["get", "swe@1", "--binding-id", BINDING_ID],
       "cli.agent.get.project_binding_pair_required",
     ],
     [["get", "swe@1", "--view", "final"], "cli.agent.get.token_required"],
@@ -635,6 +677,16 @@ test("serve worker with a client_secret reports an unavailable server without ch
   assert.equal(readFileSync(path, "utf8"), content);
 });
 
+test("--version prints the package version and exits without work", (t) => {
+  const env = environment(temporary(t));
+  for (const flag of ["--version", "-V"]) {
+    const result = invocation([flag], env);
+    assert.equal(result.status, ExitCode.Success, result.stderr);
+    assert.equal(result.stdout, `${packageVersion()}\n`);
+  }
+  assert.equal(existsSync(env.KANTHORD_CONFIG!), false);
+});
+
 test("config init is non-interactive, writes validated private configuration without displaying secrets and preserves existing files", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
@@ -650,6 +702,71 @@ test("config init is non-interactive, writes validated private configuration wit
   assert.notEqual(existing.status, ExitCode.Success);
   assert.equal(readFileSync(env.KANTHORD_CONFIG!, "utf8"), content);
   assert.deepEqual(readdirSync(directory), ["kanthord.yaml"]);
+});
+
+test("config init appends each lowercased allowed host to the default host allowlist", (t) => {
+  const env = environment(temporary(t));
+  const result = invocation(
+    [
+      "config",
+      "init",
+      "--gateway-allowed-host",
+      "Mac.Tailnet.ts.net",
+      "--gateway-allowed-host",
+      "localhost:31415",
+      "--gateway-allowed-host",
+      "203.0.113.7:8443",
+    ],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.deepEqual(loadConfig(env.KANTHORD_CONFIG!).gateway.allowed_hosts, [
+    "127.0.0.1:31415",
+    "localhost:31415",
+    "mac.tailnet.ts.net",
+    "203.0.113.7:8443",
+  ]);
+});
+
+test("config init sets the gateway bind address", (t) => {
+  for (const address of ["0.0.0.0", "::", "127.0.0.1"]) {
+    const env = environment(temporary(t));
+    const result = invocation(
+      ["config", "init", "--gateway-bind", address],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Success, result.stderr);
+    assert.equal(loadConfig(env.KANTHORD_CONFIG!).gateway.bind, address);
+  }
+});
+
+test("config init refuses a bind value that is not an IP address and writes nothing", (t) => {
+  const env = environment(temporary(t));
+  for (const value of ["localhost", "0.0.0.0:31415", ""]) {
+    const result = invocation(["config", "init", "--gateway-bind", value], env);
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /^system\.config\.invalid_field:/);
+    assert.equal(existsSync(env.KANTHORD_CONFIG!), false);
+  }
+});
+
+test("config init refuses an allowed host that is not a name with an optional port and writes nothing", (t) => {
+  const env = environment(temporary(t));
+  for (const value of [
+    "https://mac.tailnet.ts.net",
+    "mac.tailnet.ts.net/path",
+    "user@mac.tailnet.ts.net",
+    "mac tailnet",
+    "",
+  ]) {
+    const result = invocation(
+      ["config", "init", "--gateway-allowed-host", value],
+      env,
+    );
+    assert.equal(result.status, ExitCode.Failure);
+    assert.match(result.stderr, /^cli\.config\.invalid_allowed_host:/);
+    assert.equal(existsSync(env.KANTHORD_CONFIG!), false);
+  }
 });
 
 test("removed authentication commands and excess arguments fail without prompting or creating files", (t) => {

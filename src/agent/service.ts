@@ -25,6 +25,7 @@ import {
   PromptScope,
   SystemLayerOverride,
   type PromptSettings,
+  type StoredPromptSettings,
   agentModelSchema,
   effectiveConfigurationSchema,
   PromptView,
@@ -56,6 +57,7 @@ import {
   type EnablementRow,
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
+import { applyLocks, lockedSwitches, withLocks } from "./prompt-locks.ts";
 import {
   ProjectErrorCode,
   type RepositoryPolicy,
@@ -166,7 +168,11 @@ type PromptTarget = {
   expected_revision?: number | undefined;
 };
 
-function currentPrompt(tx: Transaction, target: PromptTarget): PromptSettings {
+function currentPrompt(
+  tx: Transaction,
+  target: PromptTarget,
+  config: AgentConfig["prompt"],
+): StoredPromptSettings {
   const agentName = target.agent_name ?? "";
   if (target.scope !== PromptScope.System) requireAgent(agentName);
   const current = promptSettings(tx, target.scope, agentName);
@@ -175,7 +181,11 @@ function currentPrompt(tx: Transaction, target: PromptTarget): PromptSettings {
       HttpStatus.Conflict,
       AgentErrorCode.PromptRevisionConflict,
       "Prompt settings revision conflict.",
-      { scope: target.scope, agent_name: agentName, current },
+      {
+        scope: target.scope,
+        agent_name: agentName,
+        current: withLocks(current, config),
+      },
     );
   return current;
 }
@@ -183,8 +193,9 @@ function currentPrompt(tx: Transaction, target: PromptTarget): PromptSettings {
 function putPrompt(
   tx: Transaction,
   body: PromptTarget & { custom_text: string },
+  config: AgentConfig["prompt"],
 ): PromptSettings {
-  const current = currentPrompt(tx, body);
+  const current = currentPrompt(tx, body, config);
   if (Buffer.byteLength(body.custom_text) > PROMPT_TEXT_MAX_BYTES)
     throw new OperationError(
       HttpStatus.BadRequest,
@@ -193,10 +204,13 @@ function putPrompt(
       { scope: body.scope, maxBytes: PROMPT_TEXT_MAX_BYTES },
     );
   return promptSettingsSchema.parse(
-    savePromptSettings(
-      tx,
-      { ...current, custom_text: body.custom_text },
-      current.revision,
+    withLocks(
+      savePromptSettings(
+        tx,
+        { ...current, custom_text: body.custom_text },
+        current.revision,
+      ),
+      config,
     ),
   );
 }
@@ -208,17 +222,28 @@ function switchPrompt(
     enabled?: boolean | undefined;
     system_layer?: SystemLayerOverride | undefined;
   },
+  config: AgentConfig["prompt"],
 ): PromptSettings {
-  const current = currentPrompt(tx, body);
+  const current = currentPrompt(tx, body, config);
   if (body.system_layer !== undefined)
     return promptSettingsSchema.parse(
-      savePromptSettings(
-        tx,
-        { ...current, system_layer: body.system_layer },
-        current.revision,
+      withLocks(
+        savePromptSettings(
+          tx,
+          { ...current, system_layer: body.system_layer },
+          current.revision,
+        ),
+        config,
       ),
     );
   assert.ok(body.switch !== undefined && body.enabled !== undefined);
+  if (lockedSwitches(body.scope, config).includes(body.switch))
+    throw new OperationError(
+      HttpStatus.Conflict,
+      AgentErrorCode.PromptSwitchLocked,
+      "The configuration locks this prompt switch.",
+      { scope: body.scope, switch: body.switch },
+    );
   const switches = { ...current.switches, [body.switch]: body.enabled };
   if (
     body.scope === PromptScope.Agent &&
@@ -235,7 +260,10 @@ function switchPrompt(
       },
     );
   return promptSettingsSchema.parse(
-    savePromptSettings(tx, { ...current, switches }, current.revision),
+    withLocks(
+      savePromptSettings(tx, { ...current, switches }, current.revision),
+      config,
+    ),
   );
 }
 
@@ -342,6 +370,8 @@ export class AgentComponent {
     );
     if (credentials.size !== agentProviders.length)
       throw conflict(agentName, AgentErrorCode.ProviderCredentialConflict);
+    for (const item of agentProviders)
+      validateProvider(this.dependencies, tx, agentName, item);
     this.validateEffectiveConfig(
       tx,
       agentName,
@@ -733,14 +763,17 @@ export class AgentComponent {
   ): Promise<ResolvedLayer[]> {
     const agent = getAgentDeclaration(agentName);
     assert.ok(agent);
+    const { config, dataDirectory, workbenchDirectory } = this.dependencies;
     const settings: PromptSettingsSet = this.dependencies.store.transaction(
       (tx) => ({
-        system: promptSettings(tx, PromptScope.System),
+        system: applyLocks(
+          promptSettings(tx, PromptScope.System),
+          config.prompt,
+        ),
         agent: promptSettings(tx, PromptScope.Agent, agentName),
         working: promptSettings(tx, PromptScope.Workbench, agentName),
       }),
     );
-    const { config, dataDirectory, workbenchDirectory } = this.dependencies;
     return resolveLayers({
       agent,
       settings,
@@ -865,17 +898,24 @@ export class AgentComponent {
         ),
     );
     registry.register(agentOperations["prompt.put"], ({ body }, caller) =>
-      caller.commit((tx) => putPrompt(tx, body)),
+      caller.commit((tx) =>
+        putPrompt(tx, body, this.dependencies.config.prompt),
+      ),
     );
     registry.register(agentOperations["prompt.switch"], ({ body }, caller) =>
-      caller.commit((tx) => switchPrompt(tx, body)),
+      caller.commit((tx) =>
+        switchPrompt(tx, body, this.dependencies.config.prompt),
+      ),
     );
     registry.register(agentOperations["prompt.get"], ({ query }, caller) =>
       caller.commit((tx) => {
         const agentName = query.agent_name ?? "";
         if (query.scope !== PromptScope.System) requireAgent(agentName);
         return promptSettingsSchema.parse(
-          promptSettings(tx, query.scope, agentName),
+          withLocks(
+            promptSettings(tx, query.scope, agentName),
+            this.dependencies.config.prompt,
+          ),
         );
       }),
     );

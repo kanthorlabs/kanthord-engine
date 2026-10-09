@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
+import { OperationResultType } from "../../kernel/operation.ts";
 import {
   schedulerOperations,
   workPullSchema,
@@ -28,6 +29,7 @@ const TOKEN_REQUIRED = "cli.scheduler.work.pull.token_required";
 const INDETERMINATE = "cli.scheduler.work.pull.indeterminate";
 const EXECUTION = "execution";
 const RELEASE = "release";
+const RELEASE_INDETERMINATE = "cli.scheduler.execution.release.indeterminate";
 const CLAIM = "claim";
 const GET = "get";
 const LIST = "list";
@@ -144,8 +146,13 @@ async function release(executionId: string, command: Command): Promise<void> {
     { params: { execution_id: executionId }, query: {}, body },
     { idempotencyKey: key },
   );
+  if (result.type === OperationResultType.Indeterminate)
+    throw new Diagnostic(
+      RELEASE_INDETERMINATE,
+      `read the execution with kanthord scheduler execution get ${executionId} before any retry`,
+    );
   process.stdout.write(
-    `${JSON.stringify({ ...handleMutationResult(result, "cli.scheduler.execution.release.indeterminate", key), idempotency_key: key })}\n`,
+    `${JSON.stringify({ ...handleMutationResult(result, RELEASE_INDETERMINATE, key), idempotency_key: key })}\n`,
   );
 }
 

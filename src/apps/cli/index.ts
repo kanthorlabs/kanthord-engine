@@ -20,6 +20,7 @@ import { gatewayOperations } from "../../gateway/contract.ts";
 import { openapiPath } from "../../gateway/local.ts";
 import { writeOpenAPI } from "../../gateway/local.ts";
 import { httpClient } from "../../gateway/client.ts";
+import { packageVersion } from "../../kernel/version.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
@@ -40,8 +41,34 @@ import {
   SERVER_APPLICATION,
 } from "./constants.ts";
 
-export async function initConfig(path: string): Promise<void> {
-  const content = initialConfig();
+const HOST_PROBE_SCHEME = "http://";
+const HOST_PROBE_DEFAULT_PORT = ":80";
+
+function allowedHost(value: string): string {
+  const host = value.toLowerCase();
+  const parsed = URL.parse(`${HOST_PROBE_SCHEME}${host}`);
+  if (
+    parsed &&
+    (parsed.host === host ||
+      `${parsed.host}${HOST_PROBE_DEFAULT_PORT}` === host)
+  )
+    return host;
+  throw new Diagnostic(
+    "cli.config.invalid_allowed_host",
+    "config init: --gateway-allowed-host expects <name> or <name>:<port>.",
+  );
+}
+
+function collectHost(value: string, hosts: string[] | undefined): string[] {
+  return [...(hosts ?? []), value];
+}
+
+export async function initConfig(
+  path: string,
+  allowedHosts: readonly string[] = [],
+  bind?: string,
+): Promise<void> {
+  const content = initialConfig(allowedHosts.map(allowedHost), bind);
   writePrivate(path, content);
   process.stdout.write(`Created ${path}\n`);
 }
@@ -57,12 +84,28 @@ function addConfigCommand(program: Command): void {
     .option("--config <path>", "YAML configuration file");
   configHelp(config);
   config.action(() => config.help());
+  const init = config
+    .command("init")
+    .description("Create a private configuration file without prompting")
+    .option(
+      "--gateway-allowed-host <host>",
+      "Append a host to gateway.allowed_hosts (repeatable)",
+      collectHost,
+    )
+    .option("--gateway-bind <address>", "Set gateway.bind to this IP address");
+  configHelp(init);
+  init.action(() => {
+    const options = init.opts<{
+      gatewayAllowedHost?: string[];
+      gatewayBind?: string;
+    }>();
+    return initConfig(
+      effectivePath(init),
+      options.gatewayAllowedHost,
+      options.gatewayBind,
+    );
+  });
   for (const [name, description, action] of [
-    [
-      "init",
-      "Create a private configuration file without prompting",
-      (path: string) => initConfig(path),
-    ],
     [
       "validate",
       "Validate the stored configuration",
@@ -113,7 +156,8 @@ function addServeCommand(
     !program.commands.some((command) => command.name() === CommandName.Serve),
   );
   const serve = program
-    .command(`${CommandName.Serve} [application]`)
+    .command(CommandName.Serve)
+    .argument("[application]", "Application to start: server or worker")
     .description("Start an application (default: server)")
     .option("--config <path>", "YAML configuration file")
     .action((application: string | undefined, _options, command: Command) =>
@@ -122,7 +166,7 @@ function addServeCommand(
   serve
     .command(CommandName.Worker)
     .description(
-      "Start the worker application after checking the server version",
+      "Start the worker application: register, pull and execute work",
     )
     .option("--endpoint <url>", "Server endpoint")
     .option(
@@ -148,6 +192,11 @@ export function createProgram(
     .name(PROGRAM_NAME)
     .description("kanthord work orchestration server and CLI");
   program.option("--verbose", "Show verbose output", false);
+  program.version(
+    packageVersion(),
+    "-V, --version",
+    "Print the package version",
+  );
   program.exitOverride();
   program.allowExcessArguments(false);
   program.configureHelp({ showGlobalOptions: true });
@@ -173,7 +222,9 @@ export function createProgram(
   for (const name of [CommandName.Tracking]) {
     const group = program
       .command(name)
-      .description(`${name[0]!.toUpperCase()}${name.slice(1)} Service commands`)
+      .description(
+        `${name[0]!.toUpperCase()}${name.slice(1)} Service commands (not implemented)`,
+      )
       .option("--endpoint <url>", "Server endpoint");
     group.action(() => group.help());
   }
@@ -198,10 +249,7 @@ function addGatewayCommand(program: Command): void {
   gateway
     .command("verify")
     .description("Verify a human JWT through the server and print its identity")
-    .option(
-      "--token <jwt>",
-      "Human JWT (otherwise KANTHORD_TOKEN or an operator-supplied client file)",
-    )
+    .option("--token <jwt>", "Human JWT (otherwise KANTHORD_TOKEN or cli.yaml)")
     .action(async (_options, command: Command) => {
       const config = resolveClient(command.optsWithGlobals());
       const result = await httpClient(

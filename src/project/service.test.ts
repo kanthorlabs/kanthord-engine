@@ -28,6 +28,10 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { AgentErrorCode } from "../agent/contract.ts";
 import {
+  InvalidReason,
+  PROMPT_SOURCE_MAX_BYTES,
+} from "../agent/prompt-source.ts";
+import {
   BINDING_ID_PREFIX,
   BINDING_SET_INITIAL_VERSION,
   BindingKind,
@@ -36,6 +40,7 @@ import {
   BINDING_CHECK_TIMEOUT_MS,
   FollowsType,
   GitHubAction,
+  InstructionFileState,
   INSTANCE_COUNT_MIN,
   INSTANCE_COUNT_MAX,
   LS_REMOTE_TIMEOUT_MS,
@@ -56,6 +61,7 @@ import {
   ProjectErrorCode,
   projectOperations,
 } from "./contract.ts";
+import { RepositoryFileState } from "../repository/contract.ts";
 import { projectMigrations } from "./migrations.ts";
 import { SshErrorCode, type SshIdentity } from "../repository/ssh-identity.ts";
 import {
@@ -97,6 +103,7 @@ const CORE_OPERATIONS = [
   "project.agentConfiguration.list",
   "project.agentConfiguration.get",
   "project.binding.verify",
+  "project.binding.instruction_files.get",
   "project.binding.check",
 ];
 const CURSOR_ENCODING = "base64url";
@@ -104,7 +111,7 @@ type OperationKey = Exclude<
   keyof typeof projectOperations,
   "bindingSet.write" | "binding.check"
 >;
-type AsyncOperationKey = "binding.verify";
+type AsyncOperationKey = "binding.verify" | "binding.instruction_files.get";
 
 function unexpected(): never {
   throw new Error("Unexpected peer collaboration call.");
@@ -142,6 +149,10 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     repositoryConnector: {
       gitLsRemote: unexpected,
       resolveSshIdentity: unexpected,
+    },
+    repositoryFiles: {
+      resolveBranchCommit: unexpected,
+      readFilesAtCommit: unexpected,
     },
     verifyRepositoryCredential: unexpected,
     credentialMetadata: (_tx, name) => sshPinMetadata(name),
@@ -3553,6 +3564,382 @@ test("binding.verify returns 404 for a non-repository binding", async (t) => {
       assert.equal(error.code, ProjectErrorCode.BindingNotFound);
       return true;
     },
+  );
+});
+
+const BASE_BRANCH = "main";
+const INSTRUCTION_COMMIT = "a".repeat(40);
+const NEXT_INSTRUCTION_COMMIT = "b".repeat(40);
+const INSTRUCTION_PATHS = [
+  "AGENTS.md",
+  "AGENTS.local.md",
+  "CLAUDE.md",
+  "CLAUDE.local.md",
+];
+const INSTRUCTION_SOURCES = [
+  "agents_md",
+  "agents_local_md",
+  "claude_md",
+  "claude_local_md",
+];
+const AGENTS_TEXT = "# Agents\n";
+const CONTROL_TEXT = "bad\u0000text";
+const BASE_BRANCH_ABSENT_MESSAGE = "The base branch is absent on the remote.";
+const OTHER_PROJECT_NAME = "gamma";
+
+type InstructionTexts = Array<string | null>;
+
+function instructionFixture(
+  t: TestContext,
+  behavior: {
+    commits?: Array<string | null>;
+    texts?: InstructionTexts;
+    states?: string[];
+    resolveFails?: boolean;
+    readFails?: boolean;
+    hang?: boolean;
+  } = {},
+) {
+  const commits = [...(behavior.commits ?? [INSTRUCTION_COMMIT])];
+  const resolveCalls: Array<{
+    address: string;
+    branch: string;
+    timeout: number;
+  }> = [];
+  const readCalls: Array<{
+    address: string;
+    commit: string;
+    paths: readonly string[];
+    maxBytes: number;
+    timeout: number;
+  }> = [];
+  const started = Promise.withResolvers<void>();
+  const f = fixture(t, {
+    repositoryConnector: {
+      async resolveSshIdentity(host: string) {
+        return sshIdentity(host);
+      },
+      gitLsRemote: unexpected,
+    },
+    repositoryFiles: {
+      async resolveBranchCommit(address, branch, context, timeout) {
+        resolveCalls.push({ address, branch, timeout });
+        started.resolve();
+        if (behavior.hang) {
+          await context.done();
+          throw context.err();
+        }
+        if (behavior.resolveFails) throw new Error("ls-remote failed");
+        return commits.length > ONE_CALL
+          ? commits.shift()!
+          : commits[NO_ITEMS]!;
+      },
+      async readFilesAtCommit(
+        address,
+        commit,
+        paths,
+        maxBytes,
+        _context,
+        timeout,
+      ) {
+        readCalls.push({ address, commit, paths, maxBytes, timeout });
+        if (behavior.readFails) throw new Error("fetch failed");
+        return paths.map((path, index) => {
+          const text = behavior.texts?.[index] ?? null;
+          return {
+            path,
+            state:
+              behavior.states?.[index] ??
+              (text === null
+                ? RepositoryFileState.Absent
+                : RepositoryFileState.Present),
+            text,
+          };
+        });
+      },
+    },
+  });
+  const saved = f.store.transaction((tx) => {
+    const p = insertProject(tx, PROJECT_NAME);
+    const result = writeBindingSet(
+      tx,
+      p.id,
+      p.binding_set_version,
+      new Map([[REPOSITORY_NAME, repositoryBinding()]]),
+    );
+    const bindingId = result.changes[NO_ITEMS]?.binding_id;
+    assert.ok(bindingId);
+    return { project_id: p.id, binding_id: bindingId };
+  });
+  return { f, saved, resolveCalls, readCalls, started };
+}
+
+function refusesInstructionFiles(
+  promise: Promise<unknown>,
+  status: number,
+  code: string,
+) {
+  return assert.rejects(promise, (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, status);
+    assert.equal(error.code, code);
+    return true;
+  });
+}
+
+test("binding.instruction_files.get answers the four files with their states", async (t) => {
+  const { f, saved, resolveCalls, readCalls } = instructionFixture(t, {
+    texts: [
+      AGENTS_TEXT,
+      null,
+      CONTROL_TEXT,
+      "x".repeat(PROMPT_SOURCE_MAX_BYTES + ONE_BYTE_OVER),
+    ],
+  });
+  const before = Date.now();
+  const result = await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.equal(result.commit, INSTRUCTION_COMMIT);
+  assert.ok(result.read_at >= before && result.read_at <= Date.now());
+  assert.deepEqual(result.files, [
+    {
+      source: INSTRUCTION_SOURCES[0],
+      path: INSTRUCTION_PATHS[0],
+      state: InstructionFileState.Present,
+      reason: null,
+      text: AGENTS_TEXT,
+    },
+    {
+      source: INSTRUCTION_SOURCES[1],
+      path: INSTRUCTION_PATHS[1],
+      state: InstructionFileState.Absent,
+      reason: null,
+      text: null,
+    },
+    {
+      source: INSTRUCTION_SOURCES[2],
+      path: INSTRUCTION_PATHS[2],
+      state: InstructionFileState.Invalid,
+      reason: InvalidReason.ControlCharacter,
+      text: null,
+    },
+    {
+      source: INSTRUCTION_SOURCES[3],
+      path: INSTRUCTION_PATHS[3],
+      state: InstructionFileState.Invalid,
+      reason: InvalidReason.TooLarge,
+      text: null,
+    },
+  ]);
+  assert.equal(resolveCalls.length, ONE_CALL);
+  assert.equal(resolveCalls[NO_ITEMS]?.address, REPOSITORY_ADDRESS);
+  assert.equal(resolveCalls[NO_ITEMS]?.branch, BASE_BRANCH);
+  assert.ok(
+    (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) > NO_CALLS &&
+      (resolveCalls[NO_ITEMS]?.timeout ?? NO_CALLS) <= BINDING_CHECK_TIMEOUT_MS,
+  );
+  assert.equal(readCalls.length, ONE_CALL);
+  assert.equal(readCalls[NO_ITEMS]?.commit, INSTRUCTION_COMMIT);
+  assert.deepEqual(readCalls[NO_ITEMS]?.paths, INSTRUCTION_PATHS);
+  assert.equal(readCalls[NO_ITEMS]?.maxBytes, PROMPT_SOURCE_MAX_BYTES);
+});
+
+test("binding.instruction_files.get maps the connector reasons of unreadable files to the invalid reasons of the working layer", async (t) => {
+  const { f, saved } = instructionFixture(t, {
+    states: [
+      RepositoryFileState.NotRegularFile,
+      RepositoryFileState.OutsideRoot,
+      RepositoryFileState.Unreadable,
+      RepositoryFileState.Absent,
+    ],
+  });
+  const result = await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.deepEqual(
+    result.files.map(({ state, reason, text }) => [state, reason, text]),
+    [
+      [InstructionFileState.Invalid, InvalidReason.NotRegularFile, null],
+      [InstructionFileState.Invalid, InvalidReason.OutsideWorkspace, null],
+      [InstructionFileState.Invalid, InvalidReason.Unreadable, null],
+      [InstructionFileState.Absent, null, null],
+    ],
+  );
+});
+
+test("binding.instruction_files.get maps an oversized file and a file that is not UTF-8 to the invalid reasons of the working layer", async (t) => {
+  const { f, saved } = instructionFixture(t, {
+    states: [
+      RepositoryFileState.TooLarge,
+      RepositoryFileState.NotUtf8,
+      RepositoryFileState.Absent,
+      RepositoryFileState.Absent,
+    ],
+  });
+  const result = await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.deepEqual(
+    result.files.map(({ state, reason, text }) => [state, reason, text]),
+    [
+      [InstructionFileState.Invalid, InvalidReason.TooLarge, null],
+      [InstructionFileState.Invalid, InvalidReason.NotUtf8, null],
+      [InstructionFileState.Absent, null, null],
+      [InstructionFileState.Absent, null, null],
+    ],
+  );
+});
+
+test("binding.instruction_files.get answers four absent files for a repository without instructions", async (t) => {
+  const { f, saved } = instructionFixture(t);
+  const result = await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.deepEqual(
+    result.files.map(({ state, reason, text }) => [state, reason, text]),
+    INSTRUCTION_PATHS.map(() => [InstructionFileState.Absent, null, null]),
+  );
+});
+
+test("binding.instruction_files.get serves the cache for the same commit and reads again for a new commit", async (t) => {
+  const { f, saved, resolveCalls, readCalls } = instructionFixture(t, {
+    commits: [INSTRUCTION_COMMIT, INSTRUCTION_COMMIT, NEXT_INSTRUCTION_COMMIT],
+    texts: [AGENTS_TEXT, null, null, null],
+  });
+  const first = await f.invokeAsync("binding.instruction_files.get", saved);
+  const second = await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.deepEqual(second, first);
+  assert.equal(resolveCalls.length, TWO_CALLS);
+  assert.equal(readCalls.length, ONE_CALL);
+  const third = await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.equal(third.commit, NEXT_INSTRUCTION_COMMIT);
+  assert.equal(resolveCalls.length, TWO_CALLS + ONE_CALL);
+  assert.equal(readCalls.length, TWO_CALLS);
+  assert.equal(readCalls[ONE_CALL]?.commit, NEXT_INSTRUCTION_COMMIT);
+});
+
+test("binding.instruction_files.get stores nothing in the database", async (t) => {
+  const { f, saved } = instructionFixture(t, { texts: [AGENTS_TEXT] });
+  const rows = () =>
+    f.store.database
+      .prepare("SELECT COUNT(*) AS count FROM project_binding")
+      .get();
+  const before = rows();
+  await f.invokeAsync("binding.instruction_files.get", saved);
+  assert.deepEqual(rows(), before);
+});
+
+test("binding.instruction_files.get refuses an absent base branch", async (t) => {
+  const { f, saved, readCalls } = instructionFixture(t, { commits: [null] });
+  await assert.rejects(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, SSH_FAILURE_STATUS);
+      assert.equal(error.code, ProjectErrorCode.RepositoryBaseBranchAbsent);
+      assert.equal(error.message, BASE_BRANCH_ABSENT_MESSAGE);
+      return true;
+    },
+  );
+  assert.equal(readCalls.length, NO_CALLS);
+});
+
+test("binding.instruction_files.get refuses a failed commit resolution", async (t) => {
+  const { f, saved } = instructionFixture(t, { resolveFails: true });
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+  );
+});
+
+test("binding.instruction_files.get refuses a failed file read and caches nothing", async (t) => {
+  const { f, saved, readCalls } = instructionFixture(t, { readFails: true });
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+  );
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+  );
+  assert.equal(readCalls.length, TWO_CALLS);
+});
+
+test("binding.instruction_files.get refuses a read that exceeds the deadline", async (t) => {
+  const { f, saved, started } = instructionFixture(t, { hang: true });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const refusal = refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+  );
+  await started.promise;
+  t.mock.timers.tick(BINDING_CHECK_TIMEOUT_MS);
+  await refusal;
+});
+
+test("binding.instruction_files.get answers 404 for an absent project", async (t) => {
+  const { f, saved } = instructionFixture(t);
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", {
+      ...saved,
+      project_id: `${PROJECT_ID_PREFIX}_01ARZ3NDEKTSV4RRFFQ69G5FAV`,
+    }),
+    HttpStatus.NotFound,
+    ProjectErrorCode.ProjectNotFound,
+  );
+});
+
+test("binding.instruction_files.get answers 404 for an absent binding and a binding of another project", async (t) => {
+  const { f, saved } = instructionFixture(t);
+  const other = f.store.transaction((tx) =>
+    insertProject(tx, OTHER_PROJECT_NAME),
+  );
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", {
+      ...saved,
+      binding_id: `${BINDING_ID_PREFIX}_01ARZ3NDEKTSV4RRFFQ69G5FAV`,
+    }),
+    HttpStatus.NotFound,
+    ProjectErrorCode.BindingNotFound,
+  );
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", {
+      ...saved,
+      project_id: other.id,
+    }),
+    HttpStatus.NotFound,
+    ProjectErrorCode.BindingNotFound,
+  );
+});
+
+test("binding.instruction_files.get answers 404 for a removed binding", async (t) => {
+  const { f, saved } = instructionFixture(t);
+  f.store.transaction((tx) => {
+    const project = requireProject(tx, saved.project_id);
+    writeBindingSet(tx, project.id, project.binding_set_version, new Map());
+  });
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", saved),
+    HttpStatus.NotFound,
+    ProjectErrorCode.BindingNotFound,
+  );
+});
+
+test("binding.instruction_files.get answers 404 for a non-repository binding", async (t) => {
+  const { f } = instructionFixture(t);
+  const worker = f.store.transaction((tx) => {
+    const p = insertProject(tx, OTHER_PROJECT_NAME);
+    const result = writeBindingSet(
+      tx,
+      p.id,
+      p.binding_set_version,
+      new Map([[WORKER_NAME, workerBinding()]]),
+    );
+    const bindingId = result.changes[NO_ITEMS]?.binding_id;
+    assert.ok(bindingId);
+    return { project_id: p.id, binding_id: bindingId };
+  });
+  await refusesInstructionFiles(
+    f.invokeAsync("binding.instruction_files.get", worker),
+    HttpStatus.NotFound,
+    ProjectErrorCode.BindingNotFound,
   );
 });
 

@@ -232,6 +232,7 @@ export const MissionErrorCode = {
   RecordNotFound: "mission.record.not_found",
   ExecutionContextMismatch: "mission.execution.context_mismatch",
   EvidenceStorageBindingAbsent: "mission.evidence.storage_binding_absent",
+  EvidenceStorageUnavailable: "mission.evidence.storage_unavailable",
   EvidenceContentPlatform: "mission.evidence.content_platform",
   ExecutionClaimNotEvaluation: "mission.execution.claim_not_evaluation",
   RequestRequirementUnknown: "mission.request.requirement_unknown",

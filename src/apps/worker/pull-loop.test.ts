@@ -42,6 +42,39 @@ test("claim admission precedes hosting even when shutdown races the pull", async
   assert.equal(result, null);
   assert.deepEqual(events, ["pull", "claimed", "host"]);
 });
+test("shutdown aborts the outstanding pull and ends the loop", async (t) => {
+  const api = workerApi("http://127.0.0.1:1");
+  const shutdown = new CancellationContext();
+  let pulls = 0;
+  t.mock.method(
+    api.scheduler,
+    "workPull",
+    (_input: unknown, options: Parameters<typeof api.scheduler.workPull>[1]) =>
+      new Promise((resolve) => {
+        pulls++;
+        options!.context!.onCancel(() =>
+          resolve({ type: OperationResultType.Indeterminate }),
+        );
+      }),
+  );
+  const running = pullLoop({
+    api,
+    registration: REGISTRATION,
+    backoff: new Backoff(),
+    shutdown,
+    host: async () => {
+      assert.fail("Unexpected claim");
+    },
+    register: async () => {
+      assert.fail("Unexpected registration");
+    },
+    pulling: () => {},
+    claimed: () => assert.fail("Unexpected claim"),
+  });
+  shutdown.cancel();
+  assert.equal(await running, null);
+  assert.equal(pulls, ONCE);
+});
 test("pull loop backs off no work and uncertainty with fresh keys and stops sleep on cancellation", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const api = workerApi("http://127.0.0.1:1");

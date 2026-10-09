@@ -688,6 +688,8 @@ const LOGIN_PENDING = "credential.login.pending";
 const LOGIN_NOT_FOUND = "credential.login.not_found";
 const LOGIN_VALUE_NOT_AWAITED = "credential.login.value_not_awaited";
 const LOGIN_FAILED_MESSAGE = "login failed";
+const LOGIN_FAILED_CODE = "credential.login.failed";
+const LLM_STOPPED_CODE = "llm.lifecycle.stopped";
 const INVALID_INPUT_CODE = "credential.input.invalid";
 const UNSUPPORTED_ENTRY_CODE = "credential.entry.unsupported";
 const UNSUPPORTED_PLATFORM_CODE = "credential.platform.unsupported";
@@ -713,7 +715,14 @@ function fakeProvider(
   return createProvider({
     id,
     models: [],
-    api: {},
+    api: {
+      stream: () => {
+        throw new Error("unexpected stream");
+      },
+      streamSimple: () => {
+        throw new Error("unexpected stream");
+      },
+    },
     auth: {
       oauth: {
         name: "Fake OAuth",
@@ -1104,15 +1113,14 @@ test("OAuth expiry aborts an unanswered prompt and never writes credentials", as
   });
   const answer = await f.login(LOGIN_BODY);
   now = answer.expires_at;
-  fails(
-    () => f.loginStatus(answer.session_id),
-    HttpStatus.NotFound,
-    LOGIN_NOT_FOUND,
+  assert.equal(
+    f.loginStatus(answer.session_id).state,
+    LoginSessionState.Expired,
   );
   fails(
     () => f.loginCode(answer.session_id, MANUAL_VALUE),
-    HttpStatus.NotFound,
-    LOGIN_NOT_FOUND,
+    HttpStatus.Conflict,
+    LOGIN_VALUE_NOT_AWAITED,
   );
   assert.ok((await entered.promise).signal.aborted);
   await setImmediate();
@@ -1160,10 +1168,9 @@ test("OAuth rechecks expiry on completion before a delayed expiry timer fires", 
   assert.ok((await gate.entered.promise).signal.aborted);
   assert.equal(credentialCount(f), NO_CREDENTIALS);
   assert.deepEqual(f.logs, []);
-  fails(
-    () => f.loginStatus(answer.session_id),
-    HttpStatus.NotFound,
-    LOGIN_NOT_FOUND,
+  assert.equal(
+    f.loginStatus(answer.session_id).state,
+    LoginSessionState.Expired,
   );
 });
 
@@ -1251,7 +1258,10 @@ for (const shutdown of ["stop", "quiesce"] as const) {
     await setImmediate();
     assert.equal(status.state, LoginSessionState.Failed);
     assert.equal(credentialCount(f), NO_CREDENTIALS);
-    await assert.rejects(f.login({ ...LOGIN_BODY, name: "after-stop" }));
+    await assert.rejects(
+      f.login({ ...LOGIN_BODY, name: "after-stop" }),
+      rejectsWith(HttpStatus.ServiceUnavailable, LLM_STOPPED_CODE),
+    );
   });
 }
 
@@ -1297,10 +1307,10 @@ test("OAuth pre-address failures preserve OperationError and sanitize arbitrary 
     });
     await assert.rejects(f.login(LOGIN_BODY), (error) => {
       if (original instanceof OperationError) assert.equal(error, original);
-      else {
-        assert.ok(error instanceof Error);
-        assert.equal(error.message, LOGIN_FAILED_MESSAGE);
-      }
+      else
+        assert.ok(
+          rejectsWith(HttpStatus.ServiceUnavailable, LOGIN_FAILED_CODE)(error),
+        );
       noOAuthSecret(error);
       return true;
     });
@@ -1322,7 +1332,10 @@ test("OAuth unsupported select options fail without an address or a credential",
     await f.component.stop();
     f.store.close();
   });
-  await assert.rejects(f.login(LOGIN_BODY), { message: LOGIN_FAILED_MESSAGE });
+  await assert.rejects(
+    f.login(LOGIN_BODY),
+    rejectsWith(HttpStatus.ServiceUnavailable, LOGIN_FAILED_CODE),
+  );
   assert.equal(credentialCount(f), NO_CREDENTIALS);
 });
 
@@ -1356,9 +1369,10 @@ test("lifecycle aborts logins and joins cancellation", async () => {
     assert.equal(await f.component.start(), null);
     assert.equal((await f.component.healthcheck()).login, HealthStatus.Healthy);
     assert.equal(await f.component.quiesce(), null);
-    await assert.rejects(f.login(LOGIN_BODY), {
-      code: "llm.lifecycle.stopped",
-    });
+    await assert.rejects(
+      f.login(LOGIN_BODY),
+      rejectsWith(HttpStatus.ServiceUnavailable, LLM_STOPPED_CODE),
+    );
     assert.equal(await f.component.stop(), null);
     assert.ok((await f.component.start()) instanceof Error);
     const other = fixture();
@@ -1459,7 +1473,7 @@ const llmMetadataCases = [
     edited: { project: "project", location: "europe-west4" },
   },
   {
-    platform: Platform.AzureOpenAIResponses,
+    platform: Platform.Azure,
     metadata: { resource_name: "resource" },
     edited: { resource_name: "other" },
   },

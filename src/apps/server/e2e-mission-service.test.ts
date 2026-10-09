@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { ulid } from "ulid";
@@ -44,6 +50,7 @@ const NO_OUTPUT = "";
 const UNSET_NODE_ID = "";
 const UTF8 = "utf8";
 const MODE_MASK = 0o777;
+const SHARED_DIRECTORY_MODE = 0o755;
 const DATA = "data";
 const STATE_DIRECTORY = "state";
 const MISSION = "mission";
@@ -156,6 +163,8 @@ const EXCESS_LIMIT = "1001";
 const OUTPUT_DIRECTORY = "markdown";
 const ABSENT_OUTPUT_DIRECTORY = "absent-markdown";
 const OUTPUT_FILE = "mission.json";
+const SHARED_DIRECTORY = "shared";
+const PUBLISH_FAILED = "system.files.publish_failed";
 const EXISTING_FILE = "keep.md";
 const EXISTING_CONTENT = "preserve this file";
 const KIND_STATE_CONFLICT = "cli.mission.node.list.kind_state_conflict";
@@ -870,6 +879,7 @@ for (const action of [PREVIEW, APPLY] as const) {
         FILE_NOT_FOUND,
       );
       for (const manifest of [
+        controls,
         { ...controls, format: ImportFormat.Json },
         { ...controls, files: null },
         { ...controls, mission_id: null },
@@ -1189,11 +1199,10 @@ test("mission node retire force previews and removes dependent edges", async (t)
   assert.ok(retired.idempotency_key);
 });
 
-test("mission imports accept empty Markdown controls, embedded files and JSON entries", async (t) => {
+test("mission imports accept embedded empty files and JSON entries", async (t) => {
   const fixture = await setup(t);
   const mission = await createMission(fixture);
   for (const manifest of [
-    IMPORT_CONTROLS,
     { ...IMPORT_CONTROLS, mission_id: mission.id, files: [] },
     { ...IMPORT_CONTROLS, format: ImportFormat.Json, entries: [] },
   ]) {
@@ -1240,6 +1249,47 @@ test("mission export writes empty Markdown and complete private JSON answers", a
   const answer: ExportAnswer = { ...summary, entries: [] };
   assert.equal(readFileSync(path, UTF8), JSON.stringify(answer));
   assert.equal(statSync(path).mode & MODE_MASK, PRIVATE_FILE_MODE);
+});
+
+test("mission export writes into a shared directory and never overwrites a file", async (t) => {
+  const fixture = await setup(t);
+  const mission = await createMission(fixture);
+  const initiative = await createNode(
+    fixture,
+    mission.id,
+    NodeKind.Initiative,
+    mission.version,
+  );
+  const summary = {
+    mission_id: mission.id,
+    mission_version: initiative.mission_version,
+  };
+  const shared = join(fixture.directory, SHARED_DIRECTORY);
+  mkdirSync(shared);
+  chmodSync(shared, SHARED_DIRECTORY_MODE);
+  const path = join(shared, OUTPUT_FILE);
+  const args = exportArgs(mission.id, ImportFormat.Json, path);
+  assert.deepEqual(success(await kanthord(args, fixture.env)), summary);
+  const written = readFileSync(path, UTF8);
+  assert.equal(
+    (JSON.parse(written) as ExportAnswer).mission_id,
+    summary.mission_id,
+  );
+  refusal(await kanthord(args, fixture.env), PUBLISH_FAILED);
+  assert.equal(readFileSync(path, UTF8), written);
+  const markdown = join(shared, OUTPUT_DIRECTORY);
+  mkdirSync(markdown);
+  chmodSync(markdown, SHARED_DIRECTORY_MODE);
+  assert.deepEqual(
+    success(
+      await kanthord(
+        exportArgs(mission.id, ImportFormat.Markdown, markdown),
+        fixture.env,
+      ),
+    ),
+    summary,
+  );
+  assert.equal(readdirSync(markdown).length, SINGLE_ITEM);
 });
 
 test("mission Markdown export refuses occupied destinations before network I/O", async (t) => {

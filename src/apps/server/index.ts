@@ -95,6 +95,7 @@ import {
   REPOSITORY_PLATFORMS,
   decodeGitHubEvent,
   platformImplementations,
+  repositoryFiles,
   type GitWriter,
 } from "../../repository/index.ts";
 import { LlmComponent, LLM_PLATFORMS } from "../../llm/index.ts";
@@ -486,6 +487,7 @@ export function composeServices(options: {
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
     },
+    logger: options.logger,
     bindings: {
       resolveBinding: (tx, pid, name) => project.resolveBinding(tx, pid, name),
       resolveBindingIdentity: (tx, pid, bid) =>
@@ -507,6 +509,7 @@ export function composeServices(options: {
     validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     repositoryConnector: repoConnector,
+    repositoryFiles,
     verifyRepositoryCredential: (name, context) =>
       repositoryCredentials.verifyCredential(name, context),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),

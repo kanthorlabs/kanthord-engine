@@ -30,9 +30,9 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
-The Project inventory has 11 proposed leaves. The LLM inventory has 14 implemented leaves.
-The Repository and Storage inventories have 10 leaves each. The Worker inventory
-has 19 leaves: 1 implemented and 18 proposed. These five groups contain 64 leaves in total.
+The Project inventory has 14 implemented leaves. The LLM inventory has 14 implemented leaves.
+The Repository inventory has 11 implemented leaves and the Storage inventory has 10.
+The Worker inventory has 9 implemented leaves. These five groups contain 57 leaves in total.
 
 Start with [common flags](common-flags.md) and
 [shared conventions](other.md), then read the owning group page.
@@ -45,17 +45,16 @@ optional argument has no implicit value unless its definition gives a default.
 The pages distinguish three kinds of information:
 
 - **Implemented:** behavior checked against the current engine source. This is
-  a snapshot of the working tree on 2026-09-24, not a statement about a released
-  package.
+  not a statement about a released package.
 - **Planned or proposed:** target behavior grounded in the service design.
   Command spellings, request fields, routes, and defaults introduced by this
   specification are proposals until the owning operation contract adopts them.
 - **Open or blocked:** an open decision lives in the root [HANDOFF](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md). A blocked row links its item.
 
-Inspected 2026-09-24: the source currently supplies `config init|validate|show`, `serve` with the
-`server` application, human and machine `jwt generate` issuance, `worker register`,
-`gateway verify`, and `gateway openapi`. The `project`, `mission`, `scheduler`,
-and `tracking` groups currently provide help only. The `intake` group is not registered in the dispatcher, even for help. `serve worker` is implemented; it checks the server version and waits for cancellation, but does not register, pull, or execute work. Registration also depends on server-side collaborators; a CLI
+Each group page states the status of its commands. The source registers every
+group in the table above except `intake` and `workbench`. The `tracking` group
+provides help only. `serve worker` registers the worker instance, sends
+heartbeats, pulls work, executes claims and deregisters on shutdown. A CLI
 parser and an operation declaration alone do not establish a working journey.
 
 New remote commands must be backed by an operation in their owning component's
@@ -70,6 +69,8 @@ and [Worker contract](../../src/worker/contract.ts); dispatch is in the
 
 - Keep the three global command names, seven service groups and three shared
   component groups listed above, as the [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface) declares.
+  The CLI also registers the `agent` component group, which the command surface
+  does not list yet, and does not register `intake`.
   Application names are operands of `serve`, not additional top-level commands.
 - A remote command calls the operation of the service or shared component that
   owns its effect. Gateway authenticates and routes the request; it does not

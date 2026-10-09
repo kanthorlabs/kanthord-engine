@@ -121,7 +121,7 @@ components:
                   - amazon-bedrock
                   - ant-ling
                   - anthropic
-                  - azure-openai-responses
+                  - azure
                   - baseten
                   - cerebras
                   - cloudflare-ai-gateway
@@ -134,6 +134,7 @@ components:
                   - groq
                   - huggingface
                   - kimi-coding
+                  - meta
                   - minimax
                   - minimax-cn
                   - mistral
@@ -150,6 +151,7 @@ components:
                   - qwen-token-plan-individual
                   - radius
                   - together
+                  - typesafe
                   - vercel-ai-gateway
                   - xai
                   - xiaomi
