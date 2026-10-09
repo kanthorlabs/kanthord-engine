@@ -88,10 +88,24 @@ test("failed and unrun rationale names the command and cause", () => {
         },
       },
     ],
-    tested_input: testedInput,
+    verification: {
+      tested_input: testedInput,
+      results: [
+        {
+          command: "npm run verify",
+          exit_code: 0,
+          signal: null,
+          timed_out: false,
+        },
+      ],
+    },
     evidence: [],
   });
   assert.match(instruction, /distinct criterion/);
+  assert.match(
+    instruction,
+    /Verification results of this evaluation: \[\{"command":"npm run verify","exit_code":0/,
+  );
   assert.match(
     instruction,
     /default-standard violation requires criterion-not-met/,

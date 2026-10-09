@@ -80,7 +80,7 @@ async function judge(
     work,
     evaluationInstruction({
       tasks: revision.tasks ?? [],
-      tested_input: verification.tested_input,
+      verification,
       evidence,
       objectives,
     }),

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import type { TaskContent } from "../mission/contract.ts";
 import type { WorkPrompt } from "../agent/prompt-composer.ts";
-import type { Verification, TestedInput } from "./verification.ts";
+import type { Verification } from "./verification.ts";
 import type { NativeAgent } from "./native-agent.ts";
 
 export const JUDGEMENT_MARKER = "kanthord-judgement:";
@@ -114,11 +114,11 @@ export function criterionRevisionInstruction(rationale: string): string {
 
 export function evaluationInstruction(input: {
   tasks: readonly TaskContent[];
-  tested_input: TestedInput;
+  verification: Verification;
   evidence: unknown;
   objectives?: unknown;
 }): string {
-  return `Judge the evidence against the node criterion in the pinned work prompt, every current task criterion below, and the default standard. Inspect the supporting assets at the workspace-relative paths in the review bundle. Weigh each current objective outcome in the supplied objective context. Give one result: success, criterion-not-met, or undetermined. A default-standard violation requires criterion-not-met. Name each current task whose criterion is unmet in the rationale.\nTasks: ${JSON.stringify(input.tasks.map((task) => ({ id: task.id, criterion: task.content.criterion })))}\nTested input: ${JSON.stringify(input.tested_input)}\nEvidence: ${JSON.stringify(input.evidence)}\nCurrent objective context: ${JSON.stringify(input.objectives ?? null)}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"result": "success", "rationale": "Explain your judgement"}`;
+  return `Judge the evidence against the node criterion in the pinned work prompt, every current task criterion below, and the default standard. Inspect the supporting assets at the workspace-relative paths in the review bundle. Weigh each current objective outcome in the supplied objective context. Give one result: success, criterion-not-met, or undetermined. A default-standard violation requires criterion-not-met. Name each current task whose criterion is unmet in the rationale.\nTasks: ${JSON.stringify(input.tasks.map((task) => ({ id: task.id, criterion: task.content.criterion })))}\nTested input: ${JSON.stringify(input.verification.tested_input)}\nVerification results of this evaluation: ${JSON.stringify(input.verification.results)}\nEvidence: ${JSON.stringify(input.evidence)}\nCurrent objective context: ${JSON.stringify(input.objectives ?? null)}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"result": "success", "rationale": "Explain your judgement"}`;
 }
 
 export function reportInstruction(
