@@ -74,7 +74,7 @@ export function taskJudgementInstruction(
   const prior =
     priorRationale === null
       ? ""
-      : `\nThe reviewer judged: ${priorRationale}. Judge whether the task criterion is met now.`;
+      : `\nPrevious judgement: ${priorRationale}. Judge whether the task criterion is met now.`;
   return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}${prior}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterion_met": true, "rationale": "Explain your judgement"}`;
 }
 

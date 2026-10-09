@@ -294,7 +294,7 @@ HTTP `200` returns the summary fields plus:
   A steps execution reads the assessment that caused the latest rework of its
   attempt. When the attempt holds no such assessment, the execution reads the
   assessment that the cleared outcome names. The task judgement at the start
-  carries the rationale of the first assessment that exists, and a task that the
+  carries the rationale of the first assessment that exists. A task that the
   agent judges unmet starts its work with a revision instruction that holds the
   rationale. A reviewer execution whose
   `criterion-not-met` assessment causes a rework ends with no release, because

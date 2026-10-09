@@ -16,12 +16,14 @@ import {
 import { NodeKind } from "./native-agent.ts";
 import type { MethodClients } from "./method-clients.ts";
 
-function fixture() {
+const SECOND_ATTEMPT = 2;
+
+function fixture(attempt = 1) {
   return new ExecutionRun({
     claim: {
       execution_id: "execution",
       node_id: "node",
-      attempt: 1,
+      attempt,
       pinned_revision: 1,
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
@@ -100,7 +102,7 @@ test("the assessment reads answer null only on a record not found", async (t) =>
       [failure(404, "mission.record.not_found"), null],
       [failure(404, "mission.execution.revision_above_pin"), ExecutionStop],
     ] as const) {
-      const run = fixture();
+      const run = fixture(SECOND_ATTEMPT);
       t.after(() => run.dispose());
       run.clients.mission = {
         [operation]: async () => answer,
@@ -136,7 +138,7 @@ test("the prior rationale is the rework rationale, else the cleared rationale, e
     [answered("rework"), notFound, "rework"],
     [notFound, notFound, null],
   ] as const) {
-    const run = fixture();
+    const run = fixture(SECOND_ATTEMPT);
     t.after(() => run.dispose());
     run.clients.mission = {
       "execution.reworkAssessment.get": async () => rework,
@@ -144,4 +146,11 @@ test("the prior rationale is the rework rationale, else the cleared rationale, e
     } as unknown as MethodClients["mission"];
     assert.equal(await readPriorRationale(run), expected);
   }
+});
+
+test("the cleared assessment read of a first attempt answers null with no call", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  run.clients.mission = {} as MethodClients["mission"];
+  assert.equal(await readClearedAssessment(run), null);
 });

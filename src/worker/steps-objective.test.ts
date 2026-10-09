@@ -261,7 +261,7 @@ test("start check judges passing tasks in order and discards verification change
   );
   assert.doesNotMatch(
     JSON.stringify(h.provider.calls[0]),
-    /The reviewer judged/,
+    /Previous judgement/,
   );
   assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
   assert.equal(existsSync(join(h.directory, "dirty")), false);
@@ -694,7 +694,7 @@ test("the start check judges a task against the prior rationale and revises it w
   const checked = await startCheck(h);
   assert.ok(
     JSON.stringify(h.provider.calls[0]).includes(
-      `The reviewer judged: ${rationale}. Judge whether the task criterion is met now.`,
+      `Previous judgement: ${rationale}. Judge whether the task criterion is met now.`,
     ),
   );
   const revision = criterionRevisionInstruction(rationale);

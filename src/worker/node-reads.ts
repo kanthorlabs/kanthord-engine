@@ -15,6 +15,7 @@ import { EndReason, ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
 
 export const READ_PAGE_LIMIT = 1000;
+const FIRST_ATTEMPT = 1;
 export const TERMINAL_STATES: readonly NodeState[] = [
   NodeState.Completed,
   NodeState.Discarded,
@@ -126,6 +127,7 @@ export async function readReworkAssessment(run: ExecutionRun) {
 }
 
 export async function readClearedAssessment(run: ExecutionRun) {
+  if (run.claim.attempt === FIRST_ATTEMPT) return null;
   return run.call(async (options) =>
     nullOnRecordNotFound(
       await run.clients.mission["execution.clearedAssessment.get"](

@@ -155,7 +155,10 @@ export async function runEvaluation(
       return { kind: ExecutionEndKind.Closed, outcomeId: answer.outcome.id };
     if (answer.assessment.result === AssessmentResult.Success)
       return await requestAndRelease(run);
-    if ("state" in answer.node && answer.node.state === NodeState.Available)
+    if (
+      answer.assessment.result === AssessmentResult.CriterionNotMet &&
+      !("state" in answer.node && answer.node.state === NodeState.Evaluating)
+    )
       return {
         kind: ExecutionEndKind.Ended,
         reason: EndReason.Revoked,

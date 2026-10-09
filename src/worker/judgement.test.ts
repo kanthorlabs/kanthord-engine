@@ -109,7 +109,7 @@ test("the repair instruction names the marker of the invalid reply", () => {
   assert.equal(repairInstruction(JUDGEMENT_MARKER), JUDGEMENT_REPAIR);
 });
 
-test("a prior rationale adds the reviewer judgement to the task judgement instruction", () => {
+test("a prior rationale adds the previous judgement to the task judgement instruction", () => {
   const task = {
     id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     filename: "task.md",
@@ -123,12 +123,12 @@ test("a prior rationale adds the reviewer judgement to the task judgement instru
   };
   const plain = taskJudgementInstruction(task);
   assert.equal(taskJudgementInstruction(task, null), plain);
-  assert.doesNotMatch(plain, /The reviewer judged/);
+  assert.doesNotMatch(plain, /Previous judgement/);
   assert.equal(
     taskJudgementInstruction(task, "edge case unmet"),
     plain.replace(
       "\nEnd with exactly:",
-      "\nThe reviewer judged: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",
+      "\nPrevious judgement: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",
     ),
   );
 });

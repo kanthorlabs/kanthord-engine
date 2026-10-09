@@ -114,6 +114,16 @@ test("evaluation writes failed-verification assessments without inference and ga
     },
     {
       command: "true",
+      texts: [
+        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet"}',
+      ],
+      result: "criterion-not-met",
+      opens: 1,
+      reworked: true,
+      reworkedState: "Pending",
+    },
+    {
+      command: "true",
       texts: ["invalid", "partial"],
       result: null,
       opens: 1,
@@ -255,7 +265,7 @@ test("evaluation writes failed-verification assessments without inference and ga
           if (scenario.reworked)
             return complete({
               assessment: { result: scenario.result },
-              node: { state: "Available" },
+              node: { state: scenario.reworkedState ?? "Available" },
               outcome: null,
             });
           return complete({ outcome: { id: "outcome" } });
