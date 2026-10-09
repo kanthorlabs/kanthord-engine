@@ -597,7 +597,11 @@ async function resolveRepositoryFile(
   maxBytes: number,
 ): Promise<RepositoryFile> {
   let current = path;
+  const visited = new Set<string>();
   for (let hops = 0; hops <= SYMLINK_HOPS_MAX; hops++) {
+    if (visited.has(current))
+      return repositoryFile(path, RepositoryFileState.Unreadable);
+    visited.add(current);
     const mode = await treeMode(run, commit, current);
     if (mode === null) return repositoryFile(path, RepositoryFileState.Absent);
     const object = `${commit}:${current}`;
