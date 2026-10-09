@@ -14,10 +14,21 @@ import {
   readExecution,
   claimStateOf,
 } from "./execution-store.ts";
-import { ClaimState } from "./contract.ts";
+import {
+  ClaimState,
+  ExecutionStopReason,
+  schedulerOperations,
+  type ExecutionStop,
+} from "./contract.ts";
 import { EXECUTION_NOT_RUNNING } from "./settlement.ts";
 
 const WAKE_CALL_COUNT = 1;
+const FIRST_FAILURE = 1;
+const RELEASE_ROUTING = "release";
+const STOP: ExecutionStop = {
+  reason: ExecutionStopReason.JudgementInvalid,
+  code: null,
+};
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
   const row = executionFixture();
@@ -36,13 +47,13 @@ function harness(t: TestContext) {
     },
     commit: (write) => h.store.transaction(write),
   };
-  const release = (furtherWork = false) =>
+  const release = (furtherWork = false, stop?: ExecutionStop) =>
     h.invoke(
       "executionRelease",
       {
         params: { execution_id: row.execution_id },
         query: {},
-        body: { further_work: furtherWork },
+        body: { further_work: furtherWork, ...(stop && { stop }) },
       },
       caller,
     );
@@ -126,4 +137,54 @@ test("a release begun before expiry remains finished when commit ends after expi
     ended_at: started,
   });
   assert.equal(claimStateOf(h.read(), now), ClaimState.Finished);
+});
+
+test("a release with a stop stores the stop and routes the failure count", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const wake = t.mock.method(h.service, "wake");
+  assert.deepEqual(await h.release(true, STOP), {
+    execution_id: h.row.execution_id,
+    ended_at: FIXTURE_NOW,
+  });
+  assert.deepEqual(h.read().stop, STOP);
+  assert.equal(claimStateOf(h.read(), FIXTURE_NOW), ClaimState.Finished);
+  assert.deepEqual(
+    h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
+    [["failure", h.row.node_id, FIRST_FAILURE, FIXTURE_NOW]],
+  );
+  assert.equal(wake.mock.callCount(), WAKE_CALL_COUNT);
+});
+
+test("a release without a stop field stores no stop", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  await h.release(true);
+  assert.equal(h.read().stop, null);
+  assert.equal(h.calls[0]!.method, RELEASE_ROUTING);
+});
+
+test("the release input refuses a stop with no further work", () => {
+  const input = schedulerOperations.executionRelease.input;
+  const params = { execution_id: createIdentity("execution") };
+  assert.equal(
+    input.safeParse({
+      params,
+      query: {},
+      body: { further_work: false, stop: STOP },
+    }).success,
+    false,
+  );
+  assert.equal(
+    input.safeParse({
+      params,
+      query: {},
+      body: { further_work: true, stop: { reason: "unknown", code: null } },
+    }).success,
+    false,
+  );
+  assert.deepEqual(
+    input.parse({ params, query: {}, body: { further_work: false } }).body,
+    { further_work: false, stop: null },
+  );
 });

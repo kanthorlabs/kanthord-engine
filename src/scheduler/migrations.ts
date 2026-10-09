@@ -35,7 +35,12 @@ const createExecutionTable: Migration = (database) => {
   `);
 };
 
+const addExecutionStop: Migration = (database) => {
+  database.exec(`ALTER TABLE scheduler_execution ADD COLUMN stop TEXT;`);
+};
+
 export const schedulerMigrations: readonly Migration[] = [
   createJobTable,
   createExecutionTable,
+  addExecutionStop,
 ];

@@ -418,6 +418,7 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
       ["root_span_id", "TEXT", 1, 0],
       ["created_at", "INTEGER", 1, 0],
       ["ended_at", "INTEGER", 0, 0],
+      ["stop", "TEXT", 0, 0],
     ],
   );
   const indexes = store.database

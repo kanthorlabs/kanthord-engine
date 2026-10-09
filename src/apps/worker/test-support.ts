@@ -17,6 +17,7 @@ export function testClaim(): ExecutionRecord {
     expired_at: Date.now() + 60000,
     created_at: Date.now(),
     ended_at: null,
+    stop: null,
     trace_id: "1".repeat(32),
     root_span_id: "2".repeat(16),
   };

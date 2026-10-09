@@ -78,6 +78,29 @@ components:
           properties:
             further_work:
               type: boolean
+            stop:
+              default: null
+              anyOf:
+                - type: object
+                  properties:
+                    reason:
+                      type: string
+                      enum:
+                        - operation_failed
+                        - judgement_invalid
+                        - report_absent
+                        - action_unsettled
+                        - assessment_absent
+                    code:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                        - type: "null"
+                  required:
+                    - reason
+                    - code
+                  additionalProperties: false
+                - type: "null"
           required:
             - further_work
           additionalProperties: false
