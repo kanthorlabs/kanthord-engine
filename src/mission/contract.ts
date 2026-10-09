@@ -260,6 +260,7 @@ export const MissionErrorCode = {
   ReferenceKindInvalid: "mission.import.reference_kind_invalid",
   KindChanged: "mission.import.kind_changed",
   UnresolvedReference: "mission.import.unresolved_reference",
+  VerificationUncovered: "mission.import.verification_uncovered",
   DuplicateFile: "mission.import.duplicate_file",
   UnknownId: "mission.import.unknown_id",
   DuplicateId: "mission.import.duplicate_id",

@@ -231,6 +231,8 @@ function hierarchy(): NormalizedEntry[] {
       bindings: [REPOSITORY],
     }),
     entry("t.md", { kind: NodeKind.Task, parent: "o.md" }),
+    entry("s.md", { kind: NodeKind.Task, parent: "o.md" }),
+    entry("u.md", { kind: NodeKind.Task, parent: "p.md" }),
   ];
 }
 
@@ -622,6 +624,7 @@ test("unresolved parent and dependencies identify the submitted references", (t)
       depends_on: ["missing-dep.md"],
       bindings: [REPOSITORY],
     }),
+    entry("t.md", { kind: NodeKind.Task, parent: "o.md" }),
   ]);
   assert.deepEqual(
     result.violations.map(({ code, details, filename }) => ({
@@ -1077,6 +1080,7 @@ const CONDITION_CASES: Array<{
         parent: "a.md",
         bindings: [REPOSITORY],
       }),
+      entry("new-task.md", { kind: NodeKind.Task, parent: "new.md" }),
     ],
     checked: ["a.md"],
   },
@@ -1101,6 +1105,7 @@ const CONDITION_CASES: Array<{
         parent: "new.md",
         bindings: [REPOSITORY],
       }),
+      entry("new-task.md", { kind: NodeKind.Task, parent: "new-objective.md" }),
     ],
     checked: [],
   },
@@ -1113,7 +1118,9 @@ const CONDITION_CASES: Array<{
   {
     label: "retired objective checks itself and its surviving initiative",
     transform: (entries) =>
-      entries.filter((value) => !["o.md", "t.md"].includes(value.filename)),
+      entries.filter(
+        (value) => !["o.md", "s.md", "t.md"].includes(value.filename),
+      ),
     checked: ["a.md", "o.md"],
   },
   {
@@ -1252,4 +1259,83 @@ test("prepared import exposes the resolved state without resolving bindings twic
   assert.deepEqual(prepared.preview.violations, []);
   assert.equal(prepared.preview.no_ops, prepared.resolved.no_ops);
   assert.equal(prepared.resolved.resolved_entries.length, entries.length);
+});
+
+function uncovered(
+  violations: ReturnType<typeof resolveImportSet>["violations"],
+) {
+  return violations
+    .filter((value) => value.code === MissionErrorCode.VerificationUncovered)
+    .map(({ filename, details }) => ({ filename, details }));
+}
+
+test("objective verifications held by tasks of the objective pass", (t) => {
+  const { resolve } = fixture(t, []);
+  const entries = change(
+    change(hierarchy(), "o.md", { verifications: ["first", "second"] }),
+    "t.md",
+    { verifications: ["first", "other"] },
+  );
+  const result = resolve(
+    change(entries, "s.md", { verifications: ["second"] }),
+  );
+  assert.deepEqual(result.violations, []);
+});
+
+test("each uncovered objective verification is one located violation", (t) => {
+  const { resolve } = fixture(t, []);
+  const entries = change(hierarchy(), "o.md", {
+    verifications: ["first", "second", "third"],
+  });
+  const result = resolve(
+    change(entries, "t.md", { verifications: ["second"] }),
+  );
+  assert.deepEqual(uncovered(result.violations), [
+    { filename: "o.md", details: { name: "o.md", command: "first" } },
+    { filename: "o.md", details: { name: "o.md", command: "third" } },
+  ]);
+});
+
+test("an objective without a task leaves every verification uncovered", (t) => {
+  const { resolve } = fixture(t, []);
+  const entries = change(
+    hierarchy().filter(
+      (value) =>
+        value.kind !== NodeKind.Task || value.parent !== OBJECTIVE_FILENAME,
+    ),
+    "o.md",
+    { verifications: ["first", "second"] },
+  );
+  assert.deepEqual(uncovered(resolve(entries).violations), [
+    { filename: "o.md", details: { name: "o.md", command: "first" } },
+    { filename: "o.md", details: { name: "o.md", command: "second" } },
+  ]);
+});
+
+test("a verification that differs by whitespace is uncovered", (t) => {
+  const { resolve } = fixture(t, []);
+  const entries = change(hierarchy(), "o.md", { verifications: ["pnpm test"] });
+  const result = resolve(
+    change(change(entries, "t.md", { verifications: ["pnpm  test"] }), "s.md", {
+      verifications: ["pnpm test "],
+    }),
+  );
+  assert.deepEqual(uncovered(result.violations), [
+    { filename: "o.md", details: { name: "o.md", command: "pnpm test" } },
+  ]);
+});
+
+test("a task of another objective does not cover an objective verification", (t) => {
+  const { resolve } = fixture(t, []);
+  const entries = change(
+    change(hierarchy(), "o.md", { verifications: ["only-p"] }),
+    "p.md",
+    { verifications: ["only-p"] },
+  );
+  const result = resolve(
+    change(entries, "u.md", { verifications: ["only-p"] }),
+  );
+  assert.deepEqual(uncovered(result.violations), [
+    { filename: "o.md", details: { name: "o.md", command: "only-p" } },
+  ]);
 });

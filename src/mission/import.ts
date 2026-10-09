@@ -349,6 +349,29 @@ function resolveBindings(
   return resolved.map((binding) => binding.binding_id);
 }
 
+function checkVerificationCoverage(result: ResolvedImport): void {
+  const covered = new Map<string, Set<string>>();
+  for (const item of result.resolved_entries) {
+    if (item.entry.kind !== NodeKind.Task || item.parent_id === null) continue;
+    const commands = covered.get(item.parent_id) ?? new Set<string>();
+    for (const command of item.entry.verifications) commands.add(command);
+    covered.set(item.parent_id, commands);
+  }
+  for (const item of result.resolved_entries) {
+    if (item.entry.kind !== NodeKind.Objective) continue;
+    for (const command of item.entry.verifications)
+      if (!covered.get(item.key)?.has(command))
+        result.violations.push(
+          violation(
+            MissionErrorCode.VerificationUncovered,
+            "Objective verification is not held by a task of the objective.",
+            { name: item.entry.filename, command },
+            item.entry,
+          ),
+        );
+  }
+}
+
 function resolveGraph(result: ResolvedImport): void {
   const byFilename = new Map(
     result.resolved_entries.map((item) => [item.entry.filename, item]),
@@ -377,6 +400,7 @@ function resolveGraph(result: ResolvedImport): void {
     }
     result.dependencies.set(item.key, item.depends_on);
   }
+  checkVerificationCoverage(result);
   const keys = new Set(result.resolved_entries.map((item) => item.key));
   if (keys.size !== result.resolved_entries.length) return;
   const edges = result.resolved_entries.flatMap((item) =>

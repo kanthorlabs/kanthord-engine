@@ -96,6 +96,7 @@ const RETIRE = "retire";
 const PREVIEW = "preview";
 const IMPORT = "import";
 const FORCE = "--force";
+const TWO_ITEMS = 2;
 const THREE_ITEMS = 3;
 const DIGEST = "0".repeat(64);
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -104,6 +105,7 @@ const RETIRE_FILE = "retire.json";
 const PLAN_FIRST_REVISION = "plan1.md";
 const PLAN_SECOND_REVISION = "plan2.md";
 const NEW_OBJECTIVE_FILE = "new-objective.md";
+const NEW_TASK_FILE = "new-task.md";
 const NEW_OBJECTIVE_CONTENT = [
   "---",
   "kind: objective",
@@ -118,6 +120,22 @@ const NEW_OBJECTIVE_CONTENT = [
   "",
   "## Criterion",
   "New work is done",
+  "",
+].join("\r\n");
+const NEW_TASK_CONTENT = [
+  "---",
+  "kind: task",
+  "parent: new-objective.md",
+  "bindings: []",
+  "verifications: [Check result]",
+  "---",
+  "# New task",
+  "",
+  "## Requirement",
+  "Do new task work",
+  "",
+  "## Criterion",
+  "New task work is done",
   "",
 ].join("\r\n");
 const IMPORT_CONTROLS = {
@@ -1078,14 +1096,16 @@ test(
     assert.equal(unchanged.assigned_ids.length, THREE_ITEMS);
     const newPath = join(fixture.directory, NEW_OBJECTIVE_FILE);
     writePrivate(newPath, NEW_OBJECTIVE_CONTENT);
-    const expandedPaths = [...paths, newPath];
+    const newTaskPath = join(fixture.directory, NEW_TASK_FILE);
+    writePrivate(newTaskPath, NEW_TASK_CONTENT);
+    const expandedPaths = [...paths, newPath, newTaskPath];
     const expanded = await previewImport(
       fixture,
       mission.id,
       manifest,
       expandedPaths,
     );
-    assert.deepEqual(expanded.creates, [NEW_OBJECTIVE_FILE]);
+    assert.deepEqual(expanded.creates, [NEW_OBJECTIVE_FILE, NEW_TASK_FILE]);
     const applied = await applyImport(
       fixture,
       mission.id,
@@ -1100,7 +1120,7 @@ test(
     assert.ok(applied.idempotency_key);
     assert.equal(
       applied.assigned_ids.length,
-      unchanged.assigned_ids.length + VERSION_INCREMENT,
+      unchanged.assigned_ids.length + TWO_ITEMS,
     );
     assert.ok(
       applied.assigned_ids.some(
@@ -1637,11 +1657,17 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
         bindings: [REPOSITORY_NAME],
         depends_on: [],
       },
+      {
+        ...CONTENT,
+        filename: NEW_TASK_FILE,
+        kind: NodeKind.Task,
+        parent: NEW_OBJECTIVE_FILE,
+      },
     ],
   };
   const preview = await previewImport(fixture, mission.id, manifest, []);
   assert.deepEqual(preview.retirements, []);
-  assert.deepEqual(preview.creates, [NEW_OBJECTIVE_FILE]);
+  assert.deepEqual(preview.creates, [NEW_OBJECTIVE_FILE, NEW_TASK_FILE]);
   const path = jsonFile(fixture, MANIFEST_FILE, {
     ...manifest,
     preview_digest: preview.preview_digest,
@@ -1662,10 +1688,7 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
   scenario.importedId = assigned.node_id;
   await queued(scenario, assigned.node_id);
   const after = await scenarioExport(scenario, EXISTING_EXPORT_FILE);
-  assert.equal(
-    after.entries.length,
-    exported.entries.length + VERSION_INCREMENT,
-  );
+  assert.equal(after.entries.length, exported.entries.length + TWO_ITEMS);
   assert.ok(after.entries.some(({ id }) => id === assigned.node_id));
 }
 
