@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { subscribe, unsubscribe } from "node:diagnostics_channel";
-import type { ClientRequest } from "node:http";
 import { test, type TestContext } from "node:test";
 import { ulid } from "ulid";
 import { httpClient } from "../../gateway/client.ts";
@@ -39,6 +37,7 @@ import {
   fakeS3,
   gatewayFixture,
   mappedTransport,
+  outboundHosts,
   remoteHead,
 } from "./test-support.ts";
 import {
@@ -88,8 +87,6 @@ const PULL_REQUEST_OPERATION = "github.pull_request";
 const MERGE_PUSH_OPERATION = "git.merge_push";
 const DELETE_OBJECT_OPERATION = "s3.delete_object";
 const EVENTS_PATH = /^\/repos\/owner\/merge\/events(\?|$)/;
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-const HTTP_REQUEST_CHANNEL = "http.client.request.start";
 const UNOBSERVED_REQUEST_COUNT = 0;
 const CONTENT = {
   name: "Ship accounts",
@@ -111,32 +108,6 @@ function closed(number: number): string {
     pull_request: { merged: true },
     repository: { full_name: GATED_RESOURCE },
   });
-}
-
-function outboundHosts(t: TestContext) {
-  const hosts = {
-    remote: [] as string[],
-    fetch: [] as string[],
-    http: [] as string[],
-  };
-  const record = (seen: string[], host: string) => {
-    seen.push(host);
-    if (!LOOPBACK_HOSTS.has(host)) hosts.remote.push(host);
-  };
-  const fetch = globalThis.fetch;
-  t.mock.method(globalThis, "fetch", (...args: Parameters<typeof fetch>) => {
-    const [input] = args;
-    const url = input instanceof Request ? input.url : input;
-    record(hosts.fetch, new URL(url).hostname);
-    return fetch(...args);
-  });
-  const onRequest = (message: unknown) => {
-    const { request } = message as { request: ClientRequest };
-    record(hosts.http, request.host);
-  };
-  subscribe(HTTP_REQUEST_CHANNEL, onRequest);
-  t.after(() => unsubscribe(HTTP_REQUEST_CHANNEL, onRequest));
-  return hosts;
 }
 
 async function setup(t: TestContext) {

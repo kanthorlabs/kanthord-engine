@@ -10,10 +10,12 @@ import { clientConfigPath } from "../../gateway/client.ts";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
   createServer,
+  type ClientRequest,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
 import { once } from "node:events";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import type { TestContext } from "node:test";
 import pino from "pino";
 import { z } from "zod";
@@ -828,6 +830,35 @@ function changePull(state: FakeGitHubState, number: number): FakePullRequest {
   assert.ok(pull, "Unknown fake pull request");
   assert.equal(pull.state, FakePullState.Open);
   return pull;
+}
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+const HTTP_REQUEST_CHANNEL = "http.client.request.start";
+
+export function outboundHosts(t: TestContext) {
+  const hosts = {
+    remote: [] as string[],
+    fetch: [] as string[],
+    http: [] as string[],
+  };
+  const record = (seen: string[], host: string) => {
+    seen.push(host);
+    if (!LOOPBACK_HOSTS.has(host)) hosts.remote.push(host);
+  };
+  const fetch = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", (...args: Parameters<typeof fetch>) => {
+    const [input] = args;
+    const url = input instanceof Request ? input.url : input;
+    record(hosts.fetch, new URL(url).hostname);
+    return fetch(...args);
+  });
+  const onRequest = (message: unknown) => {
+    const { request } = message as { request: ClientRequest };
+    record(hosts.http, request.host);
+  };
+  subscribe(HTTP_REQUEST_CHANNEL, onRequest);
+  t.after(() => unsubscribe(HTTP_REQUEST_CHANNEL, onRequest));
+  return hosts;
 }
 
 export async function fakeGitHub(t: TestContext) {

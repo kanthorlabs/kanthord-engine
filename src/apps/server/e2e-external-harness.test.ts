@@ -10,7 +10,11 @@ import {
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import { InstanceActivity } from "../../worker/contract.ts";
 import { generateMachineToken } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  outboundHosts,
+} from "./test-support.ts";
 import {
   journeyClient,
   createJourneyNode,
@@ -29,6 +33,7 @@ const HEALTHY = "healthy";
 const SUCCESS = "success";
 const EXECUTION_ACTOR = "execution";
 const ASSESSMENT_PASSED = "assessment-passed";
+const UNOBSERVED_REQUEST_COUNT = 0;
 type Submitted = { evidence: Evidence };
 type Assessed = {
   assessment: Assessment;
@@ -41,12 +46,13 @@ test(
   "EX10.1–11 external harness completes objective and initiative through CLI",
   { timeout: JOURNEY_TIMEOUT_MS },
   async (t) => {
+    const hosts = outboundHosts(t);
     const fixture = await gatewayFixture(t, {
       repositoryConnector: {
         gitLsRemote: async () => {},
         resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
       },
-      inventoryOverrides: { llm: () => [] },
+      inventoryOverrides: { llm: () => [], repository: () => [] },
     });
     const cli = journeyClient(t, fixture.endpoint, fixture.token);
     await cli.write(["repository", "credential", "create"], {
@@ -482,6 +488,8 @@ test(
           auth.token,
           "gateway.registration.required",
         );
+        assert.ok(hosts.fetch.length > UNOBSERVED_REQUEST_COUNT);
+        assert.deepEqual(hosts.remote, []);
       },
     );
   },
