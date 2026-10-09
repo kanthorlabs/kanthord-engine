@@ -144,7 +144,7 @@ engine/
 │   │   ├── control-hold.ts     # Pause, ready, and resume
 │   │   ├── control-close.ts    # Block, discard, and success override
 │   │   ├── control-unblock.ts  # Atomic direction change and next attempt
-│   │   ├── transitions.ts     # Scheduler claim, release admission, and loss
+│   │   ├── transitions.ts     # Scheduler claim, release admission, and failure
 │   │   ├── execution.ts       # Live claim and execution context admission
 │   │   ├── execution-read.ts  # Pinned revisions, attempts and current objective outcomes
 │   │   ├── evidence-content.ts # Binding, byte and verification validation
@@ -222,6 +222,7 @@ engine/
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
 │   │   ├── client.ts           # HTTP client, client configuration, and server version discovery
 │   │   ├── local.ts            # Local JWT issuance and OpenAPI generation without a server
+│   │   ├── base-path.ts        # Base path format, prefix stripping, and base href
 │   │   ├── dashboard.ts        # Embedded dashboard assets outside /api
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
 │   └── apps/                   # Application entries and composition roots

@@ -37,6 +37,7 @@ export function executionFixture(
     root_span_id: FIXTURE_SPAN_ID,
     created_at: FIXTURE_NOW,
     ended_at: null,
+    stop: null,
     ...overrides,
   };
   assert.ok(row.attempt > NO_REVISION);
@@ -66,7 +67,7 @@ export function schedulerHarness(
         return null;
       },
       release: (...args) => record("release", args),
-      loss: (...args) => record("loss", args),
+      failure: (...args) => record("failure", args),
     },
     registrations: {
       clientAttributionOf: (...args) => {

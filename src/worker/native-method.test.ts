@@ -1,3 +1,4 @@
+import { ExecutionBudget } from "./budget.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
 import { existsSync } from "node:fs";
@@ -21,6 +22,7 @@ import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
+  anthropicAgent,
   anthropicSetup,
   fauxAssistantMessage,
   fauxToolCall,
@@ -32,7 +34,6 @@ import { noTranscript } from "./transcript.ts";
 import type { RepositoryTransport } from "./contract.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
-import { WorkerMethod } from "./contract.ts";
 import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 
 const EXPECTED_CALL_COUNT = 1;
@@ -73,12 +74,18 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     setup,
     claim,
     nodeKind: NodeKind.Objective,
-    method: WorkerMethod.Steps,
-    credentials: store,
-    handoverItem: {
-      credential_id: setup.credential_id,
+    agent: setup.agents[0]!,
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
+      store: store,
     },
+    budget: new ExecutionBudget({
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
+      resource_budget: setup.resource_budget,
+    }),
+    workspaceAgentFiles: true,
     workspace,
     hostHome: temporary(t),
     modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -134,7 +141,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
 test("S1 native reviewer evaluates even when the attempt already contains an expected request", async (t) => {
   const setup = anthropicSetup({
     worker_name: "reviewer@1",
-    agent_name: "re@1",
+    agents: [anthropicAgent({ agent_name: "re@1" })],
     repositories: [],
   });
   const claim = {
@@ -213,10 +220,15 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     claim,
     setup,
     clients,
-    credentials: { store, release: async () => {} },
-    handoverItem: {
-      credential_id: setup.credential_id,
-      provider_id: "anthropic",
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
     },
     transport: {} as RepositoryTransport,
     workspaces: WorkspaceRoot.open(temporary(t)),
@@ -278,10 +290,15 @@ test("native entry runs an initiative report with the scripted provider", async 
     claim,
     setup,
     clients,
-    credentials: { store, release: async () => {} },
-    handoverItem: {
-      credential_id: setup.credential_id,
-      provider_id: "anthropic",
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
     },
     transport: {} as RepositoryTransport,
     workspaces: WorkspaceRoot.open(temporary(t)),

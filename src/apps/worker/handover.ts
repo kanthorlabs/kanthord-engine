@@ -12,7 +12,10 @@ import {
   OperationResultType,
   type OperationResult,
 } from "../../kernel/operation.ts";
-import { handoverPayloadSchema } from "../../custody/contract.ts";
+import {
+  handoverPayloadSchema,
+  type RefreshReport,
+} from "../../custody/contract.ts";
 import { executionCredentialStore } from "../../custody/client.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { retryIndeterminate, type WorkerApi } from "./api.ts";
@@ -79,9 +82,8 @@ export async function takeHandover(input: {
     const payload = handoverPayloadSchema.parse(
       openEnvelope(keys.handover, aad, envelope),
     );
-    const item = payload.items[0]!;
-    const credentials = executionCredentialStore(payload, async (report) => {
-      const sealed = sealEnvelope(keys.report, aad, report);
+    const report = async (refresh: RefreshReport) => {
+      const sealed = sealEnvelope(keys.report, aad, refresh);
       completed(
         await retryIndeterminate(
           (key) =>
@@ -97,21 +99,27 @@ export async function takeHandover(input: {
           context,
         ),
       );
-    });
+    };
+    const views = payload.items.map((item) => ({
+      item,
+      view: executionCredentialStore({ items: [item] }, report),
+    }));
     keys.handover.fill(0);
     return {
       credentials: {
-        store: credentials.store,
-        release: () => credentials.release(),
+        items: views.map(({ item, view }) => ({
+          credential_id: item.credential_id,
+          provider_id: item.provider_id,
+          store: view.store,
+        })),
+        release: async () => {
+          for (const { view } of views) await view.release();
+        },
         discard() {
-          credentials.discard();
+          for (const { view } of views) view.discard();
           keys.report.fill(0);
           context.cancel();
         },
-      },
-      handoverItem: {
-        credential_id: item.credential_id,
-        provider_id: item.provider_id,
       },
     };
   } catch (error) {

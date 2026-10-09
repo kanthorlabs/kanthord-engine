@@ -6,6 +6,9 @@ import {
   taskJudgementSchema,
   evaluationJudgementSchema,
   evaluationInstruction,
+  JUDGEMENT_MARKER,
+  repairInstruction,
+  taskJudgementInstruction,
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
 
@@ -96,5 +99,36 @@ test("failed and unrun rationale names the command and cause", () => {
   assert.doesNotMatch(
     instruction,
     /reasoningEffort|modelIdentifier|resourceBudget/,
+  );
+});
+
+const JUDGEMENT_REPAIR =
+  "The reply holds no valid kanthord-judgement: line. Reply again with exactly one such line.";
+
+test("the repair instruction names the marker of the invalid reply", () => {
+  assert.equal(repairInstruction(JUDGEMENT_MARKER), JUDGEMENT_REPAIR);
+});
+
+test("a prior rationale adds the previous judgement to the task judgement instruction", () => {
+  const task = {
+    id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    filename: "task.md",
+    content: {
+      name: "task",
+      requirement: "work",
+      criterion: "criterion",
+      verifications: ["true"],
+      bindings: [],
+    },
+  };
+  const plain = taskJudgementInstruction(task);
+  assert.equal(taskJudgementInstruction(task, null), plain);
+  assert.doesNotMatch(plain, /Previous judgement/);
+  assert.equal(
+    taskJudgementInstruction(task, "edge case unmet"),
+    plain.replace(
+      "\nEnd with exactly:",
+      "\nPrevious judgement: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",
+    ),
   );
 });

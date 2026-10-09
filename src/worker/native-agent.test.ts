@@ -1,3 +1,4 @@
+import { ExecutionBudget } from "./budget.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
 import {
@@ -24,6 +25,7 @@ import {
 } from "./contract.ts";
 import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import {
+  anthropicAgent,
   anthropicSetup,
   fauxAssistantMessage,
   fauxToolCall,
@@ -91,12 +93,19 @@ async function fixture(
       expired_at: Date.now() + 60000,
     },
     nodeKind: NodeKind.Objective,
-    method: options.method ?? WorkerMethod.Steps,
-    credentials,
-    handoverItem: {
-      credential_id: setup.credential_id,
+    agent: setup.agents[0]!,
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
+      store: credentials,
     },
+    budget: new ExecutionBudget({
+      created_at: Date.now(),
+      expired_at: Date.now() + 60000,
+      resource_budget: setup.resource_budget,
+    }),
+    workspaceAgentFiles:
+      (options.method ?? WorkerMethod.Steps) !== WorkerMethod.Evaluation,
     workspace,
     hostHome,
     modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -263,7 +272,10 @@ test("native reviewer refuses a scripted write tool", async (t) => {
       tool("write", { path: "forbidden.txt", content: CONTENT }),
       fauxAssistantMessage("done"),
     ],
-    { worker_name: "reviewer@1", agent_name: "re@1" },
+    {
+      worker_name: "reviewer@1",
+      agents: [anthropicAgent({ agent_name: "re@1" })],
+    },
   );
   await h.agent.prompt(WORK);
   assert.equal(existsSync(join(h.workspace, "forbidden.txt")), false);
@@ -320,7 +332,10 @@ test("host upload is declared only for the software agent and validates argument
   const reviewer = await fixture(
     t,
     [tool("evidence-upload", { path: "c.txt" }), fauxAssistantMessage("done")],
-    { worker_name: "reviewer@1", agent_name: "re@1" },
+    {
+      worker_name: "reviewer@1",
+      agents: [anthropicAgent({ agent_name: "re@1" })],
+    },
     hostTools,
   );
   await reviewer.agent.prompt(WORK);

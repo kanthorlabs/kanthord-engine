@@ -139,10 +139,12 @@ test("published execution objective reads name their operations", () => {
   }
 });
 
-test("published execution evidence and cleared outcome name their operations", () => {
+test("published execution evidence, cleared outcome, cleared assessment and rework assessment name their operations", () => {
   for (const name of [
     "execution.evidence.list",
     "execution.clearedOutcome.get",
+    "execution.cleared_assessment.get",
+    "execution.rework_assessment.get",
   ] as const) {
     const fragment = parse(
       readFileSync(
@@ -714,6 +716,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.execution.objective.outcome.list", AccessPolicy.Client],
   ["mission.execution.objective.evidence.list", AccessPolicy.Client],
   ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
+  ["mission.execution.cleared_assessment.get", AccessPolicy.Client],
+  ["mission.execution.rework_assessment.get", AccessPolicy.Client],
   ["workbench.session.list", AccessPolicy.Human],
   ["workbench.session.create", AccessPolicy.Human],
   ["workbench.session.get", AccessPolicy.Human],
@@ -745,8 +749,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 171;
-const ROUTED_OPERATION_COUNT = 162;
+const OPERATION_COUNT = 173;
+const ROUTED_OPERATION_COUNT = 164;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = ["intake.action.check", "mission.delivery.admit"];

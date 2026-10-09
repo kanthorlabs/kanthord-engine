@@ -50,7 +50,9 @@ export async function hostExecution(
     input.log({
       msg: "credential handover received",
       execution_id: input.claim.execution_id,
-      credential_id: handover.handoverItem.credential_id,
+      credential_ids: handover.credentials.items.map(
+        (item) => item.credential_id,
+      ),
     });
     const setup = completed(
       await retryIndeterminate(

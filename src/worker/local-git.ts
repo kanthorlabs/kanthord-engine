@@ -117,3 +117,15 @@ export async function headCommit(
   assert.ok(directory);
   return commit;
 }
+
+export async function diffText(
+  directory: string,
+  from: string,
+  to: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string> {
+  assert.match(from, /^[a-f0-9]{40,64}$/);
+  assert.match(to, /^[a-f0-9]{40,64}$/);
+  return run(directory, ["diff", from, to], context, deadlineMs);
+}

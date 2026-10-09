@@ -432,7 +432,7 @@ test("sweep hands consecutive loss counts to Mission once per steps and evaluati
   t.mock.method(Date, "now", () => now);
   const rows = [executionFixture(), executionFixture()];
   const counts: number[] = [];
-  h.dependencies.transitions.loss = (tx, nodeId, count) => {
+  h.dependencies.transitions.failure = (tx, nodeId, count) => {
     assert.ok(tx.database.isTransaction);
     assert.ok(rows.some((row) => row.node_id === nodeId));
     counts.push(count);
@@ -467,7 +467,7 @@ test("a timer sweep failure rolls back, stops the timer and returns the original
   const row = executionFixture();
   h.store.transaction((tx) => insertExecution(tx, row));
   const failure = new Error("loss routing failed");
-  h.dependencies.transitions.loss = () => {
+  h.dependencies.transitions.failure = () => {
     throw failure;
   };
   const running = h.service.run();

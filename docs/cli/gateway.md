@@ -51,7 +51,7 @@ The token reference includes the implemented verification preflight exception.
 | Input                                        | Gateway-specific meaning                                                                            |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | Positional arguments                         | None; any positional is an error. The username comes from the verified token.                       |
-| [`--endpoint`](./common-flags.md#--endpoint) | Inherited server selection; the absolute `/api/auth/verify` path replaces any endpoint path.        |
+| [`--endpoint`](./common-flags.md#--endpoint) | Inherited server selection; the `/api/auth/verify` path follows any endpoint path prefix.           |
 | [`--token`](./common-flags.md#--token)       | A human bearer JWT is required for success; verification does not enforce a nonblank token locally. |
 | [`--help`](./common-flags.md#--help)         | Show command help without verification.                                                             |
 

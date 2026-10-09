@@ -209,10 +209,10 @@ export interface MissionTransitions {
     furtherWork: boolean,
     now: number,
   ): void;
-  loss(
+  failure(
     tx: Transaction,
     nodeId: string,
-    consecutiveLosses: number,
+    consecutiveFailures: number,
     now: number,
   ): void;
 }
@@ -262,6 +262,7 @@ export const MissionErrorCode = {
   ReferenceKindInvalid: "mission.import.reference_kind_invalid",
   KindChanged: "mission.import.kind_changed",
   UnresolvedReference: "mission.import.unresolved_reference",
+  VerificationUncovered: "mission.import.verification_uncovered",
   DuplicateFile: "mission.import.duplicate_file",
   UnknownId: "mission.import.unknown_id",
   DuplicateId: "mission.import.duplicate_id",
@@ -1347,6 +1348,36 @@ export const missionOperations = {
     ),
     output: outcomeSchema,
     description: "Read the previous attempt outcome cleared by an unblock.",
+  },
+  "execution.cleared_assessment.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.cleared_assessment.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:execution_id/cleared-assessment",
+    input: readInput(
+      z.strictObject({ execution_id: identitySchema("execution") }),
+      z.strictObject({}),
+    ),
+    output: assessmentSchema,
+    description:
+      "Read the assessment of the outcome that an unblock cleared before the claimed attempt.",
+  },
+  "execution.rework_assessment.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.rework_assessment.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:execution_id/rework-assessment",
+    input: readInput(
+      z.strictObject({ execution_id: identitySchema("execution") }),
+      z.strictObject({}),
+    ),
+    output: assessmentSchema,
+    description:
+      "Read the assessment that caused the latest rework of the claimed attempt.",
   },
   "execution.pinnedRevision.get": {
     ...readOperation,

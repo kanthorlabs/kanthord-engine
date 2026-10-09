@@ -42,7 +42,8 @@ import {
 } from "./record-store.ts";
 import { getRevision } from "./node-read.ts";
 
-const CONSECUTIVE_LOSS_LIMIT = 3;
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+const REWORK_LIMIT = 2;
 const TEXT_MAX_BYTES = 32768;
 const FIXTURE_TIME = 100;
 const FIRST_REVISION = 1;
@@ -240,7 +241,8 @@ export function missionHarness(
     intakeCheck: { check: unexpectedCollaboration },
     decoder: { decode: unexpectedCollaboration },
     config: {
-      consecutive_loss_limit: CONSECUTIVE_LOSS_LIMIT,
+      consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
+      rework_limit: REWORK_LIMIT,
       text_max_bytes: TEXT_MAX_BYTES,
     },
     bindings: {

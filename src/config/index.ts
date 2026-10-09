@@ -164,12 +164,14 @@ export function loadConfig(path: string): ServerConfig {
 export function initialConfig(
   allowedHosts: readonly string[] = [],
   bind: string = gatewayConfigSchema.bind.default,
+  basePath: string = gatewayConfigSchema.base_path.default,
 ): string {
   return stringify(
     configuration({
       master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
       gateway: {
         bind,
+        base_path: basePath,
         allowed_hosts: [
           ...new Set([
             ...gatewayConfigSchema.allowed_hosts.default,

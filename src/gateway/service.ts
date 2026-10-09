@@ -6,6 +6,7 @@ import { matchedRoutes } from "hono/route";
 import { timeout } from "hono/timeout";
 import { HTTPException } from "hono/http-exception";
 import { serveStatic } from "hono/serve-static";
+import { getPath } from "hono/utils/url";
 import {
   createAdaptorServer,
   type ServerType,
@@ -50,6 +51,7 @@ const SERVER_NOT_RUNNING = "ERR_SERVER_NOT_RUNNING";
 const SINGLE_QUERY_VALUE_COUNT = 1;
 import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 import { dashboardResponse, type DashboardLoader } from "./dashboard.ts";
+import { ROOT_BASE_PATH, baseHref, stripBasePath } from "./base-path.ts";
 import { dashboardAsset } from "../kernel/assets.ts";
 
 export interface GatewayDependencies {
@@ -272,7 +274,13 @@ export class GatewayService implements Service {
   }
 
   private createApp(): Hono<{ Bindings: HttpBindings }> {
-    const app = new Hono<{ Bindings: HttpBindings }>();
+    const basePath = this.options.config.base_path;
+    const app = new Hono<{ Bindings: HttpBindings }>({
+      getPath: (request) => {
+        const path = getPath(request);
+        return stripBasePath(basePath, path) ?? path;
+      },
+    });
     app.use(
       "*",
       requestId({
@@ -321,6 +329,25 @@ export class GatewayService implements Service {
             503,
             "gateway.lifecycle.not_ready",
             "Server is not ready.",
+          ),
+          context.get("requestId"),
+        );
+      await next();
+    });
+    app.use("*", async (context, next) => {
+      if (basePath === ROOT_BASE_PATH) return next();
+      const path = getPath(context.req.raw);
+      if (path === basePath)
+        return context.redirect(
+          `${baseHref(basePath)}${new URL(context.req.url).search}`,
+          HttpStatus.MovedPermanently,
+        );
+      if (stripBasePath(basePath, path) === undefined)
+        return respondError(
+          new GatewayError(
+            404,
+            "gateway.routing.not_found",
+            "Route not found.",
           ),
           context.get("requestId"),
         );
@@ -391,6 +418,7 @@ export class GatewayService implements Service {
         dashboardResponse(
           context.req.method,
           context.req.path,
+          basePath,
           this.options.dashboard ?? dashboardAsset,
         ) ??
         respondError(

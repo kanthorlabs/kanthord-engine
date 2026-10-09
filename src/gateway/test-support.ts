@@ -156,12 +156,17 @@ export async function gatewayFixture(
     collect?: InventoryCollector;
     dashboard?: DashboardLoader;
     path?: string;
+    basePath?: string;
   } = {},
 ) {
   process.umask(0o077);
   const config = configuration({
     master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
-    gateway: { port: 0, allowed_hosts: ["localhost"] },
+    gateway: {
+      port: 0,
+      allowed_hosts: ["localhost"],
+      ...(options.basePath ? { base_path: options.basePath } : {}),
+    },
   }).getProperties();
   const store = storeAt(options.path);
   const logs: string[] = [];

@@ -25,12 +25,12 @@ const SUCCESS = 0;
 const FAILURE = 1;
 const NO_OUTPUT = "";
 const FIRST_REVISION = 1;
-const NATIVE_WORKER_INDEX = 1;
+const NATIVE_WORKER_INDEX = 2;
 const SINGLE_ITEM = 1;
 const SINGLE_INSTANCE = 1;
 const SECOND_BINDING_VERSION = 2;
 const THIRD_BINDING_VERSION = 3;
-const REVIEWER_WORKER_INDEX = 3;
+const REVIEWER_WORKER_INDEX = 4;
 const FOURTH_BINDING_VERSION = 4;
 const FIFTH_BINDING_VERSION = 5;
 const SIXTH_BINDING_VERSION = 6;
@@ -248,7 +248,7 @@ test(
       );
       assert.deepEqual(
         page.items.map((item) => item.name),
-        [EXTERNAL, NATIVE, "opencode@1", "reviewer@1"],
+        [EXTERNAL, "developer@1", NATIVE, "opencode@1", "reviewer@1"],
       );
       assert.equal(page.next_cursor, null);
       assert.equal(page.items[NATIVE_WORKER_INDEX]!.host, HOST);
@@ -269,16 +269,16 @@ test(
     });
     await t.test("E02.2 catalog pages", async () => {
       const page = success<CatalogPage>(
-        await kanthord(["worker", "list", "--limit", "2"], f.H),
+        await kanthord(["worker", "list", "--limit", "3"], f.H),
       );
       assert.deepEqual(
         page.items.map((item) => item.name),
-        [EXTERNAL, NATIVE],
+        [EXTERNAL, "developer@1", NATIVE],
       );
       assert.equal(typeof page.next_cursor, STRING_TYPE);
       const next = success<CatalogPage>(
         await kanthord(
-          ["worker", "list", "--limit", "2", "--cursor", page.next_cursor!],
+          ["worker", "list", "--limit", "3", "--cursor", page.next_cursor!],
           f.H,
         ),
       );
@@ -297,7 +297,7 @@ test(
       );
       assert.equal(native.host, HOST);
       assert.equal(native.method, METHOD);
-      assert.equal(native.agent_name, AGENT);
+      assert.deepEqual(native.agent_names, [AGENT]);
       assert.deepEqual(native.resource_budget, BUDGET);
       assert.equal("harness" in native, false);
       assert.equal(external.host, EXTERNAL_HOST);

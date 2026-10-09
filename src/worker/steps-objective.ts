@@ -9,7 +9,6 @@ import {
   type MethodClaim,
   type ExecutionEnd,
 } from "./execution-run.ts";
-import { CodedError } from "../kernel/errors.ts";
 import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import {
   commitWork,
@@ -20,7 +19,8 @@ import {
 } from "./local-git.ts";
 import { runVerifications, verificationPassed } from "./verification.ts";
 import {
-  parseJudgement,
+  parseRepaired,
+  ReplyRepair,
   taskJudgementInstruction,
   taskJudgementSchema,
   taskRevisionInstruction,
@@ -81,8 +81,46 @@ async function finishObjective(
   }
 }
 
+async function checkpointOnStop(state: StepsState): Promise<void> {
+  const cleanup = state.run.cleanupContext();
+  const remaining = () => state.input.claim.expired_at - Date.now();
+  try {
+    await state.agent.abort();
+    if (state.task)
+      await commitWork(
+        state.directory,
+        checkpointCommitMessage(state.task.id, state.input.claim.attempt),
+        cleanup,
+        remaining(),
+      );
+    await state.input.transport.proveSshIdentity(
+      state.input.setup.repositories[0]!.ssh_identity,
+      cleanup,
+      remaining(),
+    );
+    await state.input.transport.pushNodeBranch(
+      state.directory,
+      state.nodeBranch,
+      cleanup,
+      remaining(),
+    );
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+  } finally {
+    cleanup.cancel();
+  }
+}
+
+export type TaskRunner = (
+  state: StepsState,
+  task: TaskContent,
+  boundary: TaskBoundary,
+  instruction: string | null,
+) => Promise<TaskResult>;
+
 export async function runStepsObjective(
   state: StepsState,
+  taskRunner: TaskRunner = runTask,
 ): Promise<ExecutionEnd> {
   try {
     const checked = await startCheck(state);
@@ -92,17 +130,17 @@ export async function runStepsObjective(
         checked.budgetEnd.task,
         checked.budgetEnd.boundary,
       );
-    for (const { task, boundary } of checked.pending) {
-      const result = await runTask(state, task, boundary);
+    for (const { task, boundary, instruction } of checked.pending) {
+      state.task = task;
+      const result = await taskRunner(state, task, boundary, instruction);
       if (result.kind === TaskResultKind.BudgetEnd)
         return await finishObjective(state, task, result.boundary);
     }
     return await finishObjective(state, null, null);
   } catch (error) {
-    return state.run.stop(
-      EndReason.OperationFailed,
-      error instanceof CodedError ? error.code : null,
-    );
+    const stopped = state.run.stopOf(error);
+    if (stopped.reason !== EndReason.Revoked) await checkpointOnStop(state);
+    throw stopped;
   } finally {
     state.input.workspaces.release(
       state.input.workspaces.objectiveKey(state.input.claim.node_id),
@@ -129,17 +167,22 @@ export async function runTask(
   state: StepsState,
   task: TaskContent,
   initialBoundary: TaskBoundary = TaskBoundary.InProgress,
+  initialInstruction: string | null = null,
+  worked = false,
 ): Promise<TaskResult> {
   const budget = state.agent.budget;
-  let instruction: string | null = null;
+  let instruction = initialInstruction;
   let boundary = initialBoundary;
+  let workDone = worked;
   const ended = (boundary: TaskBoundary): TaskResult => ({
     kind: TaskResultKind.BudgetEnd,
     boundary,
   });
   while (!budget.exhausted()) {
     boundary = TaskBoundary.InProgress;
-    if (instruction === null) await state.agent.prompt(taskWork(state, task));
+    if (workDone) workDone = false;
+    else if (instruction === null)
+      await state.agent.prompt(taskWork(state, task));
     else await state.agent.instruct(taskWork(state, task), instruction);
     if (budget.exhausted()) return ended(TaskBoundary.InProgress);
     await commitWork(
@@ -170,11 +213,15 @@ export async function runTask(
       taskJudgementInstruction(task),
     );
     if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
-    const judgement = parseJudgement(
-      state.agent.lastText(),
+    const judgement = await parseRepaired(
+      state.agent,
+      taskWork(state, task),
       taskJudgementSchema,
     );
-    if (!judgement) state.run.stop(EndReason.JudgementInvalid);
+    if (judgement === ReplyRepair.BudgetEnd)
+      return ended(TaskBoundary.RunPassed);
+    if (judgement === ReplyRepair.Invalid)
+      state.run.stop(EndReason.JudgementInvalid);
     if (judgement.criterion_met) return { kind: TaskResultKind.Complete };
     instruction = criterionRevisionInstruction(judgement.rationale);
   }
@@ -195,6 +242,8 @@ export interface StepsState {
   directory: string;
   head: string;
   nodeBranch: string;
+  priorRationale: string | null;
+  task?: TaskContent;
 }
 
 export function prepareStepsWorkspace(input: StepsInput, run: ExecutionRun) {
@@ -247,36 +296,55 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
   return verification;
 }
 
+export interface PendingTask {
+  task: TaskContent;
+  boundary: TaskBoundary;
+  instruction: string | null;
+}
+
 export async function startCheck(state: StepsState): Promise<{
-  pending: { task: TaskContent; boundary: TaskBoundary }[];
+  pending: PendingTask[];
   budgetEnd: { task: TaskContent; boundary: TaskBoundary } | null;
 }> {
   assert.ok(state.revision.tasks);
   assert.ok(state.head);
-  const pending: { task: TaskContent; boundary: TaskBoundary }[] = [];
+  const pending: PendingTask[] = [];
   for (const task of state.revision.tasks) {
+    state.task = task;
     const verification = await verifyTask(state, task);
     const passed = verificationPassed(verification, task.content.verifications);
     const boundary = passed ? TaskBoundary.RunPassed : TaskBoundary.RunFailed;
     if (state.agent.budget.exhausted())
       return { pending, budgetEnd: { task, boundary } };
     if (!passed) {
-      pending.push({ task, boundary });
+      pending.push({ task, boundary, instruction: null });
       continue;
     }
     await state.agent.instruct(
       taskWork(state, task),
-      taskJudgementInstruction(task),
+      taskJudgementInstruction(task, state.priorRationale),
     );
     if (state.agent.budget.exhausted()) {
       return { pending, budgetEnd: { task, boundary } };
     }
-    const judgement = parseJudgement(
-      state.agent.lastText(),
+    const judgement = await parseRepaired(
+      state.agent,
+      taskWork(state, task),
       taskJudgementSchema,
     );
-    if (!judgement) state.run.stop(EndReason.JudgementInvalid);
-    if (!judgement.criterion_met) pending.push({ task, boundary });
+    if (judgement === ReplyRepair.BudgetEnd)
+      return { pending, budgetEnd: { task, boundary } };
+    if (judgement === ReplyRepair.Invalid)
+      state.run.stop(EndReason.JudgementInvalid);
+    if (!judgement.criterion_met)
+      pending.push({
+        task,
+        boundary,
+        instruction:
+          state.priorRationale === null
+            ? null
+            : criterionRevisionInstruction(state.priorRationale),
+      });
   }
   return { pending, budgetEnd: null };
 }

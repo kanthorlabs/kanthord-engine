@@ -117,7 +117,7 @@ export interface CustodyAuthorization {
       worker_binding_id: string;
       resource_identity: string;
     },
-  ): ModelInferenceAuthorization;
+  ): ModelInferenceAuthorization[];
 }
 
 export type WorkbenchAuthorization = {
@@ -267,11 +267,6 @@ export type InboundFacts = {
   resource: string;
 };
 export type GrantRequest =
-  | {
-      kind: typeof GrantKind.ModelInference;
-      identity: MachineIdentity;
-      execution: CustodyExecution;
-    }
   | {
       kind: typeof GrantKind.FrozenAction;
       identity: MachineIdentity;

@@ -125,6 +125,7 @@ function acquire(
     ...trace,
     created_at: now,
     ended_at: null,
+    stop: null,
   };
   insertExecution(tx, row);
   return { outcome: ClaimOutcome.Claimed, row, settled: selected.settled };

@@ -344,13 +344,21 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx: Transaction,
     identity: MachineIdentity,
     execution: CustodyExecution,
-    now: number,
-  ): Grant {
-    return this.authorizeOperation(
-      tx,
-      { kind: GrantKind.ModelInference, identity, execution },
-      now,
-    );
+  ): Grant[] {
+    assert(tx.database.isTransaction);
+    assert.equal(tx.database, this.store.database);
+    return this.authorization
+      .authorizeModelInference(tx, identity, execution)
+      .map(({ credential, platform, provider_id, agent_provider }) =>
+        mintGrant({
+          kind: GrantKind.ModelInference,
+          credential,
+          platform,
+          project_id: execution.project_id,
+          execution,
+          facts: { provider_id, agent_provider },
+        }),
+      );
   }
 
   authorizeOperation<R extends GrantRequest>(
@@ -365,22 +373,6 @@ export class CustodyComponent implements Service, CredentialRecords {
   ): Grant {
     assert(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
-    if (request.kind === GrantKind.ModelInference) {
-      const { credential, platform, provider_id, agent_provider } =
-        this.authorization.authorizeModelInference(
-          tx,
-          request.identity,
-          request.execution,
-        );
-      return mintGrant({
-        kind: request.kind,
-        credential,
-        platform,
-        project_id: request.execution.project_id,
-        execution: request.execution,
-        facts: { provider_id, agent_provider },
-      });
-    }
     if (request.kind === GrantKind.Inbound)
       return this.inboundGrant(tx, request);
     const execution =
@@ -417,10 +409,7 @@ export class CustodyComponent implements Service, CredentialRecords {
 
   private missionGrant(
     tx: Transaction,
-    request: Exclude<
-      GrantRequest,
-      { kind: typeof GrantKind.ModelInference | typeof GrantKind.Inbound }
-    >,
+    request: Exclude<GrantRequest, { kind: typeof GrantKind.Inbound }>,
     execution: CustodyExecution | null,
   ): Grant {
     assert(tx.database.isTransaction);
@@ -654,29 +643,28 @@ export class CustodyComponent implements Service, CredentialRecords {
       execution.runtimeIdentity,
       now,
     );
-    const material = this.release(
-      tx,
-      this.authorize(tx, identity, row, now),
-      now,
-    );
+    const materials: Material[] = [];
     try {
+      for (const grant of this.authorize(tx, identity, row))
+        materials.push(this.release(tx, grant, now));
       const envelope = sealMaterial(
         this.clientSecret(identity.clientId),
         row,
-        material,
+        materials,
         this.platforms,
       );
-      this.logger.info(
-        {
-          execution_id: row.execution_id,
-          worker_binding_id: row.worker_binding_id,
-          credential_id: material.credential_id,
-        },
-        "credential handover",
-      );
+      for (const material of materials)
+        this.logger.info(
+          {
+            execution_id: row.execution_id,
+            worker_binding_id: row.worker_binding_id,
+            credential_id: material.credential_id,
+          },
+          "credential handover",
+        );
       return envelope;
     } finally {
-      material.drop();
+      for (const material of materials) material.drop();
     }
   }
 

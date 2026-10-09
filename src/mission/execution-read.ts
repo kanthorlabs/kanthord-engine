@@ -6,6 +6,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   ActorKind,
   actorSchema,
+  AssessmentResult,
   MissionErrorCode,
   NodeKind,
   NODE_LIST_LIMIT_DEFAULT,
@@ -14,8 +15,14 @@ import {
 import { identitySchema } from "../kernel/identity.ts";
 import { evidencePage } from "./evidence-read.ts";
 import { recordNotFound } from "./record-list.ts";
-import { outcomeRecord, evidenceRecord } from "./record-read.ts";
 import {
+  assessmentRecord,
+  outcomeRecord,
+  evidenceRecord,
+} from "./record-read.ts";
+import {
+  readAssessment,
+  readExecutionAssessmentsOfAttempt,
   readOutcomesOfAttempt,
   readCurrentOutcome,
   readEvidence,
@@ -171,7 +178,7 @@ export function executionEvidencePage(
   return evidencePage(tx, claim.nodeId, { ...query, attempt: claim.attempt });
 }
 
-export function clearedOutcome(
+function clearedOutcomeRow(
   tx: Transaction,
   dependencies: Dependencies,
   claim: ExecutionClaim,
@@ -188,7 +195,46 @@ export function clearedOutcome(
     claim.attempt - FIRST_ATTEMPT,
   ).at(-FIRST_ATTEMPT);
   assert.ok(outcome);
-  return outcomeRecord(tx, dependencies.bindings, outcome);
+  return outcome;
+}
+
+export function clearedOutcome(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+) {
+  return outcomeRecord(
+    tx,
+    dependencies.bindings,
+    clearedOutcomeRow(tx, dependencies, claim),
+  );
+}
+
+export function clearedAssessment(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+) {
+  const outcome = clearedOutcomeRow(tx, dependencies, claim);
+  const assessment = readAssessment(tx, outcome.assessment_id);
+  assert.ok(assessment);
+  return assessmentRecord(tx, dependencies, assessment);
+}
+
+export function reworkAssessment(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+) {
+  executionRead(tx, dependencies, claim);
+  const assessment = readExecutionAssessmentsOfAttempt(
+    tx,
+    claim.nodeId,
+    claim.attempt,
+    AssessmentResult.CriterionNotMet,
+  ).at(-1);
+  if (!assessment) recordNotFound();
+  return assessmentRecord(tx, dependencies, assessment);
 }
 
 export function executionRead(

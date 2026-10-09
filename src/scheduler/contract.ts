@@ -46,6 +46,20 @@ export const NodeFormatField = {
 } as const;
 export const nodeFormatFieldSchema = z.enum(NodeFormatField);
 export type NodeFormatField = z.infer<typeof nodeFormatFieldSchema>;
+export const ExecutionStopReason = {
+  OperationFailed: "operation_failed",
+  JudgementInvalid: "judgement_invalid",
+  ReportAbsent: "report_absent",
+  ActionUnsettled: "action_unsettled",
+  AssessmentAbsent: "assessment_absent",
+} as const;
+export const executionStopReasonSchema = z.enum(ExecutionStopReason);
+export type ExecutionStopReason = z.infer<typeof executionStopReasonSchema>;
+export const releaseStopSchema = z.strictObject({
+  reason: executionStopReasonSchema,
+  code: z.string().min(1).nullable(),
+});
+export type ReleaseStop = z.infer<typeof releaseStopSchema>;
 export const traceIdSchema = z
   .string()
   .regex(/^[0-9a-f]{32}$/)
@@ -83,6 +97,7 @@ export const executionRecordSchema = z.strictObject({
   expired_at: timestamp,
   created_at: timestamp,
   ended_at: timestamp.nullable(),
+  stop: releaseStopSchema.nullable(),
   trace_id: traceIdSchema,
   root_span_id: spanIdSchema,
 });
@@ -99,9 +114,15 @@ export const workPullResultSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal(WorkPullKind.NoWork) }),
 ]);
-export const executionReleaseSchema = z.strictObject({
-  further_work: z.boolean(),
-});
+export const executionReleaseSchema = z
+  .strictObject({
+    further_work: z.boolean(),
+    stop: releaseStopSchema.nullable().default(null),
+  })
+  .refine((release) => release.stop === null || release.further_work, {
+    path: ["stop"],
+  });
+export type ExecutionRelease = z.infer<typeof executionReleaseSchema>;
 export const releaseResultSchema = z.strictObject({
   execution_id: identitySchema(EXECUTION_IDENTITY_PREFIX),
   ended_at: timestamp,
@@ -122,6 +143,7 @@ export interface ExecutionRow {
   root_span_id: string;
   created_at: number;
   ended_at: number | null;
+  stop: ReleaseStop | null;
 }
 export interface SchedulerClaims {
   revoke(tx: Transaction, nodeId: string, now: number): string | null;
@@ -186,10 +208,10 @@ export interface MissionTransitions {
     furtherWork: boolean,
     now: number,
   ): void;
-  loss(
+  failure(
     tx: Transaction,
     nodeId: string,
-    consecutiveLosses: number,
+    consecutiveFailures: number,
     now: number,
   ): void;
 }

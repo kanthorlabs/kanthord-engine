@@ -8,13 +8,16 @@ import {
   allTerminal,
   nodeKindOf,
   readAllPages,
-  readClearedOutcome,
+  readClearedAssessment,
+  readPriorRationale,
+  readReworkAssessment,
   READ_PAGE_LIMIT,
 } from "./node-reads.ts";
 import { NodeKind } from "./native-agent.ts";
 import type { MethodClients } from "./method-clients.ts";
 
-const INITIAL_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+
 function fixture(attempt = 1) {
   return new ExecutionRun({
     claim: {
@@ -64,7 +67,7 @@ test("reads concatenate ordered pages and enforce their finite limit", async (t)
   assert.equal(calls, READ_PAGE_LIMIT);
 });
 
-test("node kind, terminal states and cleared outcome follow the pinned attempt", async (t) => {
+test("node kind and terminal states follow the pinned revision", () => {
   assert.equal(nodeKindOf({ tasks: [] }), NodeKind.Objective);
   assert.equal(nodeKindOf({}), NodeKind.Initiative);
   assert.equal(allTerminal([{ id: "node", state: NodeState.Blocked }]), false);
@@ -75,25 +78,79 @@ test("node kind, terminal states and cleared outcome follow the pinned attempt",
     ]),
     true,
   );
-  let calls = 0;
-  const outcome = { id: "outcome" };
-  for (const attempt of [1, 2]) {
-    const run = fixture(attempt);
+});
+
+test("the assessment reads answer null only on a record not found", async (t) => {
+  const assessment = { id: "assessment", rationale: "unmet" };
+  const failure = (status: number, code: string) => ({
+    type: OperationResultType.Failure,
+    status,
+    error: {
+      request_id: "request",
+      error: { code, message: "failed", details: null },
+    },
+  });
+  for (const [operation, read] of [
+    ["execution.rework_assessment.get", readReworkAssessment],
+    ["execution.cleared_assessment.get", readClearedAssessment],
+  ] as const) {
+    for (const [answer, expected] of [
+      [
+        { type: OperationResultType.Completed, status: 200, data: assessment },
+        assessment,
+      ],
+      [failure(404, "mission.record.not_found"), null],
+      [failure(404, "mission.execution.revision_above_pin"), ExecutionStop],
+    ] as const) {
+      const run = fixture(SECOND_ATTEMPT);
+      t.after(() => run.dispose());
+      run.clients.mission = {
+        [operation]: async () => answer,
+      } as unknown as MethodClients["mission"];
+      if (expected === ExecutionStop)
+        await assert.rejects(read(run), ExecutionStop);
+      else assert.deepEqual(await read(run), expected);
+    }
+  }
+});
+
+test("the prior rationale is the rework rationale, else the cleared rationale, else null", async (t) => {
+  const notFound = {
+    type: OperationResultType.Failure,
+    status: 404,
+    error: {
+      request_id: "request",
+      error: {
+        code: "mission.record.not_found",
+        message: "failed",
+        details: null,
+      },
+    },
+  };
+  const answered = (rationale: string) => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: { id: "assessment", rationale },
+  });
+  for (const [rework, cleared, expected] of [
+    [answered("rework"), answered("cleared"), "rework"],
+    [notFound, answered("cleared"), "cleared"],
+    [answered("rework"), notFound, "rework"],
+    [notFound, notFound, null],
+  ] as const) {
+    const run = fixture(SECOND_ATTEMPT);
     t.after(() => run.dispose());
     run.clients.mission = {
-      "execution.clearedOutcome.get": async () => {
-        calls++;
-        return {
-          type: OperationResultType.Completed,
-          status: 200,
-          data: outcome,
-        };
-      },
+      "execution.rework_assessment.get": async () => rework,
+      "execution.cleared_assessment.get": async () => cleared,
     } as unknown as MethodClients["mission"];
-    assert.equal(
-      await readClearedOutcome(run),
-      attempt === INITIAL_ATTEMPT ? null : outcome,
-    );
+    assert.equal(await readPriorRationale(run), expected);
   }
-  assert.equal(calls, INITIAL_ATTEMPT);
+});
+
+test("the cleared assessment read of a first attempt answers null with no call", async (t) => {
+  const run = fixture();
+  t.after(() => run.dispose());
+  run.clients.mission = {} as MethodClients["mission"];
+  assert.equal(await readClearedAssessment(run), null);
 });

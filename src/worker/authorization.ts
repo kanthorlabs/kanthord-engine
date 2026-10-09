@@ -6,6 +6,8 @@ import type { Transaction } from "../kernel/store.ts";
 import { AuthorizationRefusal, WorkerErrorCode } from "./contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 
+const NO_AGENTS = 0;
+
 function refused(reason: AuthorizationRefusal): never {
   throw new OperationError(
     HttpStatus.Forbidden,
@@ -40,33 +42,41 @@ export function authorizeModelInference(
     refused(AuthorizationRefusal.BindingMismatch);
   if (row.tombstone) refused(AuthorizationRefusal.BindingRemoved);
   if (row.disabled) refused(AuthorizationRefusal.BindingDisabled);
-  const agent = worker.declarationOf(row.worker_name)?.agent_name;
-  if (!agent) refused(AuthorizationRefusal.NoNativeAgent);
-  const selected = row.entries.find((item) => item.agent === agent);
-  const entry = selected
-    ? {
-        agent_provider: selected.agent_provider,
-        model_identifier: selected.model_identifier,
-        reasoning_effort: selected.reasoning_effort,
-      }
-    : null;
-  const view = worker.workerAgentView(tx, row.worker_name, agent, entry);
-  assert.ok(view);
-  if (!view.valid) {
-    const issue = view.issues[0];
-    assert.ok(issue);
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      issue.code,
-      "The agent configuration is not valid.",
-      { issues: view.issues },
-    );
-  }
-  assert.ok(view.effective);
-  return {
-    credential: view.effective.credential,
-    platform: view.effective.provider,
-    provider_id: view.effective.provider,
-    agent_provider: view.effective.agent_provider,
-  };
+  const agents = worker.declarationOf(row.worker_name)?.agent_names ?? [];
+  if (agents.length === NO_AGENTS) refused(AuthorizationRefusal.NoNativeAgent);
+  const authorizations = agents.map((agent) => {
+    const selected = row.entries.find((item) => item.agent === agent);
+    const entry = selected
+      ? {
+          agent_provider: selected.agent_provider,
+          model_identifier: selected.model_identifier,
+          reasoning_effort: selected.reasoning_effort,
+        }
+      : null;
+    const view = worker.workerAgentView(tx, row.worker_name, agent, entry);
+    assert.ok(view);
+    if (!view.valid) {
+      const issue = view.issues[0];
+      assert.ok(issue);
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        issue.code,
+        "The agent configuration is not valid.",
+        { issues: view.issues },
+      );
+    }
+    assert.ok(view.effective);
+    return {
+      credential: view.effective.credential,
+      platform: view.effective.provider,
+      provider_id: view.effective.provider,
+      agent_provider: view.effective.agent_provider,
+    };
+  });
+  return authorizations.filter(
+    (item, index) =>
+      authorizations.findIndex(
+        (other) => other.credential === item.credential,
+      ) === index,
+  );
 }

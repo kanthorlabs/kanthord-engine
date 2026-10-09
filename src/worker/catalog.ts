@@ -17,7 +17,7 @@ export interface WorkerDeclaration {
   name: string;
   host: WorkerHost;
   method?: WorkerMethod;
-  agent_name?: string;
+  agent_names?: readonly string[];
   harness?: string;
   resource_budget: { turns?: number; wall_time_ms: number };
   declared_node_states: readonly string[];
@@ -36,7 +36,7 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     name: "general@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Steps,
-    agent_name: "swe@1",
+    agent_names: ["swe@1"],
     resource_budget: NATIVE_RESOURCE_BUDGET,
     declared_node_states: ["Available"],
     required_node_format: REQUIRED_NODE_FORMAT,
@@ -45,9 +45,18 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     name: "reviewer@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Evaluation,
-    agent_name: "re@1",
+    agent_names: ["re@1"],
     resource_budget: NATIVE_RESOURCE_BUDGET,
     declared_node_states: ["Waiting", "External.Requested"],
+    required_node_format: REQUIRED_NODE_FORMAT,
+  },
+  "developer@1": {
+    name: "developer@1",
+    host: WorkerHost.Kanthord,
+    method: WorkerMethod.ReviewedSteps,
+    agent_names: ["swe@1", "re@1"],
+    resource_budget: NATIVE_RESOURCE_BUDGET,
+    declared_node_states: ["Available"],
     required_node_format: REQUIRED_NODE_FORMAT,
   },
   "claude@1": {
@@ -77,9 +86,9 @@ export function getWorkerDeclaration(
 
 export function agentsOfWorker(workerName: string): string[] {
   const declaration = getWorkerDeclaration(workerName);
-  if (declaration?.host !== WorkerHost.Kanthord || !declaration.agent_name)
+  if (declaration?.host !== WorkerHost.Kanthord || !declaration.agent_names)
     return [];
-  return [declaration.agent_name];
+  return [...declaration.agent_names];
 }
 
 export function listWorkerDeclarations(limit: number, cursor: string | null) {

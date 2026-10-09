@@ -54,9 +54,10 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
           declarationOf: () => getWorkerDeclaration(row.worker_name) ?? null,
           workerAgentView: (_tx, worker, agent, entry) => {
             assert.equal(worker, row.worker_name);
-            assert.equal(
-              agent,
-              getWorkerDeclaration(row.worker_name)?.agent_name,
+            assert.ok(
+              getWorkerDeclaration(row.worker_name)?.agent_names?.includes(
+                agent,
+              ),
             );
             return {
               valid,
@@ -79,14 +80,16 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
         { ...execution, ...change },
       ),
     );
-  assert.deepEqual(authorize(), {
-    credential: "anthro-1",
-    platform: "anthropic",
-    provider_id: "anthropic",
-    agent_provider: "default",
-  });
+  assert.deepEqual(authorize(), [
+    {
+      credential: "anthro-1",
+      platform: "anthropic",
+      provider_id: "anthropic",
+      agent_provider: "default",
+    },
+  ]);
   row.entries = [{ agent: "swe@1", agent_provider: "override" }];
-  assert.equal(authorize().agent_provider, row.entries[0]!.agent_provider);
+  assert.equal(authorize()[0]!.agent_provider, row.entries[0]!.agent_provider);
   for (const change of [
     { worker_binding_id: "absent" },
     { project_id: "other" },
@@ -121,4 +124,73 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     code: AgentErrorCode.Unavailable,
     details: { issues },
   });
+});
+
+test("Worker authorizes one credential per distinct credential of the agents of developer@1", (t) => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  const row: NonNullable<ReturnType<WorkerBindingRowOf>> = {
+    binding_id: createIdentity("binding"),
+    project_id: createIdentity("project"),
+    resource_identity: "worker:kanthord:developer",
+    worker_name: "developer@1",
+    entries: [],
+    resource_budget: null,
+    tombstone: false,
+    disabled: false,
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      projectId: row.project_id,
+      resourceIdentity: row.resource_identity,
+      name: "test",
+      issuedAt: 0,
+    },
+    "jti",
+  );
+  const execution = {
+    execution_id: createIdentity("execution"),
+    project_id: row.project_id,
+    worker_binding_id: row.binding_id,
+    resource_identity: row.resource_identity,
+  };
+  const authorize = (credentials: Record<string, string>) =>
+    store.transaction((tx) =>
+      authorizeModelInference(
+        {
+          workerBindingRowOf: (_tx, id) => (id === row.binding_id ? row : null),
+        },
+        {
+          declarationOf: () => getWorkerDeclaration(row.worker_name) ?? null,
+          workerAgentView: (_tx, _worker, agent) => ({
+            valid: true,
+            issues: [],
+            defaults: null,
+            effective: {
+              agent_provider: "default",
+              provider: "anthropic",
+              credential: credentials[agent]!,
+              model_identifier: "claude-sonnet-4-5",
+              reasoning_effort: "off",
+            },
+          }),
+        },
+        tx,
+        identity,
+        execution,
+      ),
+    );
+  assert.deepEqual(
+    authorize({ "swe@1": "shared", "re@1": "shared" }).map(
+      (item) => item.credential,
+    ),
+    ["shared"],
+  );
+  assert.deepEqual(
+    authorize({ "swe@1": "worker", "re@1": "reviewer" }).map(
+      (item) => item.credential,
+    ),
+    ["worker", "reviewer"],
+  );
 });

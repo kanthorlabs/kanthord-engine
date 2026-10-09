@@ -1,11 +1,13 @@
 import { isIP } from "node:net";
 import { isString, isNumber } from "../kernel/values.ts";
+import { ROOT_BASE_PATH, BASE_PATH_FORMAT } from "./base-path.ts";
 const NO_LIFETIME = 0;
 export interface GatewayConfig {
   bind: string;
   port: number;
   allowed_hosts: string[];
   allowed_origins: string[];
+  base_path: string;
   token_lifetime: number;
   idempotency_ttl: number;
 }
@@ -35,6 +37,17 @@ export const gatewayConfigSchema = {
     doc: "Allowed CORS origins.",
     format: strings,
     default: ["http://127.0.0.1:27182", "http://localhost:27182"],
+  },
+  base_path: {
+    doc: "Path prefix that serves the whole HTTP surface.",
+    default: ROOT_BASE_PATH,
+    format(value: unknown) {
+      if (
+        !isString(value) ||
+        (value !== ROOT_BASE_PATH && !BASE_PATH_FORMAT.test(value))
+      )
+        throw new Error("expected / or a path without a trailing slash");
+    },
   },
   token_lifetime: {
     doc: "Token lifetime in seconds.",

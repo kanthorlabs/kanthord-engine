@@ -436,8 +436,16 @@ test(
             ),
             worker: workerClient,
           },
-          credentials,
-          handoverItem: payload.items[0]!,
+          credentials: {
+            items: [
+              {
+                credential_id: payload.items[0]!.credential_id,
+                provider_id: payload.items[0]!.provider_id,
+                store: credentials.store,
+              },
+            ],
+            release: () => credentials.release(),
+          },
           transport,
           workspaces,
           hostHome: temporary(t),

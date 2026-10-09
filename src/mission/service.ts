@@ -62,11 +62,13 @@ import {
   executionRevisionPage,
   executionEvidencePage,
   clearedOutcome,
+  clearedAssessment,
+  reworkAssessment,
   executionObjectives,
   executionObjectiveOutcomes,
   executionObjectiveEvidence,
 } from "./execution-read.ts";
-import { claim, release, loss } from "./transitions.ts";
+import { claim, release, failure } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
 import {
   authorizeAction,
@@ -160,9 +162,9 @@ export class MissionService
     return release(tx, this.dependencies, ...rest);
   }
 
-  loss(...args: Parameters<MissionTransitions["loss"]>) {
+  failure(...args: Parameters<MissionTransitions["failure"]>) {
     const [tx, ...rest] = args;
-    return loss(tx, this.dependencies, ...rest);
+    return failure(tx, this.dependencies, ...rest);
   }
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
@@ -227,6 +229,26 @@ export class MissionService
         const claim = caller.execution;
         return caller.commit((tx) =>
           clearedOutcome(tx, this.dependencies, claim),
+        );
+      },
+    );
+    registry.register(
+      missionOperations["execution.cleared_assessment.get"],
+      (_input, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) =>
+          clearedAssessment(tx, this.dependencies, claim),
+        );
+      },
+    );
+    registry.register(
+      missionOperations["execution.rework_assessment.get"],
+      (_input, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) =>
+          reworkAssessment(tx, this.dependencies, claim),
         );
       },
     );

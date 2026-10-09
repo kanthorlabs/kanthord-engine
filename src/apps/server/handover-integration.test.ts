@@ -123,8 +123,8 @@ for (const adapter of ["direct", "http"] as const) {
       .prepare("SELECT credentials FROM scheduler_execution WHERE id = ?")
       .get(h.execution.execution_id);
     const answer = completed(await read());
-    assert.equal(answer.credential_id, h.credentialId);
-    assert.deepEqual(answer.effective_configuration, {
+    assert.equal(answer.agents[0]!.credential_id, h.credentialId);
+    assert.deepEqual(answer.agents[0]!.effective_configuration, {
       ...CONFIGURATION,
       provider: "anthropic",
       credential: "anthro-1",
@@ -133,9 +133,11 @@ for (const adapter of ["direct", "http"] as const) {
       turns: 200,
       wall_time_ms: 7200000,
     });
-    assert.equal(answer.metadata, null);
-    assert.ok(answer.prompt.final.endsWith(framing(PromptConsumer.Worker)));
-    assert.ok(answer.prompt.final.includes(SWE_AGENT_PROMPT));
+    assert.equal(answer.agents[0]!.metadata, null);
+    assert.ok(
+      answer.agents[0]!.prompt.final.endsWith(framing(PromptConsumer.Worker)),
+    );
+    assert.ok(answer.agents[0]!.prompt.final.includes(SWE_AGENT_PROMPT));
     assert.deepEqual(answer.repositories[0], {
       binding_id: answer.repositories[0]!.binding_id,
       name: "repo",

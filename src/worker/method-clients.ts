@@ -14,7 +14,8 @@ export interface MethodClients {
     | "execution.objective.list"
     | "execution.objective.outcome.list"
     | "execution.objective.evidence.list"
-    | "execution.clearedOutcome.get"
+    | "execution.cleared_assessment.get"
+    | "execution.rework_assessment.get"
   >;
   scheduler: Pick<
     ServiceClient<typeof schedulerOperations>,

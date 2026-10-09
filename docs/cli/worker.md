@@ -247,15 +247,16 @@ The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
 and their capabilities are:
 
-| Worker       | Host                           | Method / agent      | Declared node states                         |
-| ------------ | ------------------------------ | ------------------- | -------------------------------------------- |
-| `general@1`  | kanthord                       | steps / `swe@1`     | `Available`                                  |
-| `reviewer@1` | kanthord                       | evaluation / `re@1` | `Waiting`, `External.Requested`              |
-| `claude@1`   | external harness `claude-code` | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
-| `opencode@1` | external harness `opencode`    | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
+| Worker        | Host                           | Method / agent                   | Declared node states                         |
+| ------------- | ------------------------------ | -------------------------------- | -------------------------------------------- |
+| `general@1`   | kanthord                       | steps / `swe@1`                  | `Available`                                  |
+| `reviewer@1`  | kanthord                       | evaluation / `re@1`              | `Waiting`, `External.Requested`              |
+| `developer@1` | kanthord                       | reviewed_steps / `swe@1`, `re@1` | `Available`                                  |
+| `claude@1`    | external harness `claude-code` | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
+| `opencode@1`  | external harness `opencode`    | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
 
-All four declarations are in the current catalog; native runtime execution and
-external-harness integration remain later work. All four require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
+All five declarations are in the current catalog; native runtime execution and
+external-harness integration remain later work. All five require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`
@@ -269,16 +270,35 @@ kanthord worker get <worker-name>
 HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
-- `method: "steps" | "evaluation"` and `agent_name: AgentName` for a native worker.
+- `method: "steps" | "evaluation" | "reviewed_steps"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. The first agent does the work, and `re@1` of `developer@1` reviews each task commit.
 - `resource_budget` for every worker, with a required positive safe integer
   `wall_time_ms` and an optional positive safe integer `turns`.
-  `general@1` and `reviewer@1` default to
+  `general@1`, `reviewer@1` and `developer@1` default to
   `{ turns: 200, wall_time_ms: 7200000 }`; `claude@1` and `opencode@1`
   default to `{ wall_time_ms: 7200000 }`. Every worker binding may override the
   default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
   defines a turn as one `turn_end` event of the pi agent loop and measures wall
   time from the execution's `created_at`. After budget end, execution code
   checkpoints, pushes and releases, with cleanup bounded by `expired_at`.
+  A stop for a reason other than a revocation aborts the agent and runs the
+  same cleanup under a fresh context bounded by `expired_at`. A steps execution
+  writes the checkpoint commit when the workspace holds uncommitted work,
+  pushes and releases with `further_work: true` and
+  `stop: { reason, code }`. A reviewer execution writes no commit and releases
+  with the `stop`. A failed push still releases with the `stop`. A failed
+  release ends the execution with no release.
+  A reply with no valid marker line gets one repair turn, for the task
+  judgement, the evaluation judgement and the review reply. A second invalid
+  judgement stops the execution with `judgement_invalid`, and a second invalid
+  review reply ends the review of that task.
+  A steps execution reads the assessment that caused the latest rework of its
+  attempt. When the attempt holds no such assessment, the execution reads the
+  assessment that the cleared outcome names. The task judgement at the start
+  carries the rationale of the first assessment that exists. A task that the
+  agent judges unmet starts its work with a revision instruction that holds the
+  rationale. A reviewer execution whose
+  `criterion-not-met` assessment causes a rework ends with no release, because
+  the assessment ends its claim.
   An external harness must release before its `expired_at`.
 
 Absent/inapplicable native fields other than `resource_budget` are omitted for

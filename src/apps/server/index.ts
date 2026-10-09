@@ -221,7 +221,7 @@ export function composeServices(options: {
       claim: (...args: Parameters<MissionService["claim"]>) =>
         mission.claim(...args),
       release: (...args) => mission.release(...args),
-      loss: (...args) => mission.loss(...args),
+      failure: (...args) => mission.failure(...args),
     },
     registrations: {
       clientAttributionOf: (tx, runtimeIdentity) =>
