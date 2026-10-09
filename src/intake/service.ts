@@ -330,7 +330,7 @@ export class IntakeService implements Service, IntakeCollaborations {
   private startPollLoops(): void {
     if (this.shutdown.err()) return;
     const ids = this.dependencies.store.transaction((tx) => pollInboundIds(tx));
-    for (const id of ids) this.pollLoops.start(id);
+    this.pollLoops.startAll(ids);
   }
 
   inboundRemoved(inboundId: string): void {

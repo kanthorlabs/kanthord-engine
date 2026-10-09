@@ -66,6 +66,7 @@ const NO_EVENTS = 0;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const INTERVAL_MS = 1000;
+const SECOND_LOOP_OFFSET_MS = 500;
 const SETTLE_TURNS = 20;
 const POLL_TOKEN = "ghp_poll-token";
 const RESOURCE = "acme/app";
@@ -437,6 +438,9 @@ test("run starts one poll loop per poll inbound and none for a webhook", async (
   await settle();
   assert.equal(s.listEvents.mock.callCount(), NO_CALLS);
   await s.interval();
+  assert.equal(s.listEvents.mock.callCount(), ONE_CALL);
+  t.mock.timers.tick(SECOND_LOOP_OFFSET_MS);
+  await settle();
   assert.equal(s.listEvents.mock.callCount(), TWO_CALLS);
   await shutDown(s.intake, running);
 });

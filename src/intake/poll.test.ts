@@ -63,6 +63,8 @@ const NO_CALLS = 0;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const INTERVAL_MS = 1000;
+const SPREAD_OFFSETS_MS = [0, 333, 666];
+const ONE_LOOP = 1;
 const ONE_MS = 1;
 const SETTLE_TURNS = 20;
 const UNKNOWN_CODE = "system.operation.unknown";
@@ -525,6 +527,42 @@ test("a loop waits one interval before each cycle and re-arms after the cycle en
   assert.equal(h.calls.length, ONE_CALL);
   await h.interval();
   assert.equal(h.calls.length, TWO_CALLS);
+});
+
+test("startAll spreads the first cycles of the loops across one interval", async (t) => {
+  const h = loopHarness(t);
+  const extra = SPREAD_OFFSETS_MS.slice(ONE_LOOP).map(() => {
+    const id = allocateInboundId();
+    h.store.transaction((tx) =>
+      insertInbound(tx, id, {
+        project_id: PROJECT_ID,
+        kind: InboundKind.Poll,
+        platform: InboundPlatform.GitHub,
+        consumer: Consumer.MissionDeliveryAdmit,
+        credential: CREDENTIAL,
+        configuration: { resource: RESOURCE },
+        checkpoint: null,
+        created_at: 1,
+      }),
+    );
+    return id;
+  });
+  const ids = [h.inboundId, ...extra];
+  const polled = () =>
+    h.grants.map((grant) =>
+      grant.kind === GrantKind.Inbound ? grant.inbound.inboundId : null,
+    );
+  h.loops.startAll(ids);
+  let elapsedMs = 0;
+  for (const [index, offsetMs] of SPREAD_OFFSETS_MS.entries()) {
+    t.mock.timers.tick(INTERVAL_MS + offsetMs - ONE_MS - elapsedMs);
+    await settle();
+    assert.deepEqual(polled(), ids.slice(0, index));
+    t.mock.timers.tick(ONE_MS);
+    await settle();
+    assert.deepEqual(polled(), ids.slice(0, index + ONE_LOOP));
+    elapsedMs = INTERVAL_MS + offsetMs;
+  }
 });
 
 test("a slow request starts no second request of that inbound before it ends", async (t) => {

@@ -44,6 +44,7 @@ import {
 const NO_LENGTH = 0;
 const NO_ROOM = 0;
 const NO_INTERVAL_MS = 0;
+const NO_OFFSET_MS = 0;
 const ONE_ROW = 1;
 const UNKNOWN_CODE = "system.operation.unknown";
 const EMPTY_CHECKPOINT: GitHubCheckpoint = {
@@ -307,15 +308,17 @@ export class PollLoops {
   }
 
   start(inboundId: string): void {
-    assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
-    if (this.#quiescent || this.#loops.has(inboundId)) return;
-    const loop: Loop = {
-      timer: null,
-      context: new CancellationContext(this.#dependencies.context),
-      cycle: null,
-    };
-    this.#loops.set(inboundId, loop);
-    this.#arm(inboundId, loop);
+    this.#open(inboundId, NO_OFFSET_MS);
+  }
+
+  startAll(inboundIds: readonly string[]): void {
+    const intervalMs = this.#dependencies.pollIntervalMs;
+    inboundIds.forEach((inboundId, index) => {
+      this.#open(
+        inboundId,
+        Math.floor((index * intervalMs) / inboundIds.length),
+      );
+    });
   }
 
   stop(inboundId: string): void {
@@ -345,13 +348,28 @@ export class PollLoops {
     await this.drain();
   }
 
-  #arm(inboundId: string, loop: Loop): void {
+  #open(inboundId: string, startOffsetMs: number): void {
+    assert.ok(inboundId.length > NO_LENGTH, "An inbound identity is required.");
+    assert.ok(Number.isSafeInteger(startOffsetMs));
+    assert.ok(startOffsetMs >= NO_OFFSET_MS);
+    assert.ok(startOffsetMs < this.#dependencies.pollIntervalMs);
+    if (this.#quiescent || this.#loops.has(inboundId)) return;
+    const loop: Loop = {
+      timer: null,
+      context: new CancellationContext(this.#dependencies.context),
+      cycle: null,
+    };
+    this.#loops.set(inboundId, loop);
+    this.#arm(inboundId, loop, startOffsetMs);
+  }
+
+  #arm(inboundId: string, loop: Loop, startOffsetMs = NO_OFFSET_MS): void {
     if (this.#loops.get(inboundId) !== loop) return;
     assert.equal(loop.timer, null, "A loop holds one timer.");
     assert.equal(loop.cycle, null, "A loop arms after its cycle ends.");
     loop.timer = setTimeout(
       () => this.#tick(inboundId, loop),
-      this.#dependencies.pollIntervalMs,
+      this.#dependencies.pollIntervalMs + startOffsetMs,
     );
   }
 
