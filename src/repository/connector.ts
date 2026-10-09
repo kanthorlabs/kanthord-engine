@@ -39,13 +39,18 @@ const BATCH_OBJECT_FIELD = 0;
 const BATCH_TYPE_FIELD = 1;
 const BATCH_SIZE_FIELD = 2;
 const BLOB_TYPE = "blob";
-const UNBOUNDED_OUTPUT_BYTES = Number.POSITIVE_INFINITY;
+const BATCH_HEADER_BYTES_MAX = 128;
+const GIT_MESSAGE_BYTES_MAX = 65536;
 const NOT_FOUND_INDEX = -1;
 const NEXT_INDEX = 1;
 const REGULAR_FILE_MODES = ["100644", "100755"];
 const UTF8_LABEL = "utf-8";
 const SYMLINK_MODE = "120000";
 const SYMLINK_HOPS_MAX = 40;
+const TREE_ROUND_LAST = SYMLINK_HOPS_MAX + 1;
+const SYMLINK_TARGET_BYTES_MAX = 4096;
+const BATCH_ENTRY_BYTES_MAX =
+  BATCH_HEADER_BYTES_MAX + SYMLINK_TARGET_BYTES_MAX + BATCH_LINE_END.length;
 const REPOSITORY_ROOT = ".";
 const PARENT_DIRECTORY = "..";
 const COMMIT_FIELD = 0;
@@ -551,31 +556,106 @@ export async function resolveBranchCommit(
 
 type GitRun = (args: string[]) => Promise<string>;
 type GitBlobRun = (object: string) => Promise<Buffer>;
-type GitInputRun = (args: string[], input: string) => Promise<Buffer>;
+type GitInputRun = (
+  args: string[],
+  input: string,
+  maxBytes: number,
+) => Promise<Buffer>;
 type TreeEntry = { mode: string; object: string };
 type RepositoryTree = {
   entries: Map<string, TreeEntry>;
-  targets: Map<string, string>;
+  listedPaths: Set<string>;
+  listedDirectories: Set<string>;
+  targets: Map<string, string | null>;
 };
 
-async function treeEntries(
-  run: GitRun,
-  commit: string,
-): Promise<Map<string, TreeEntry>> {
-  const listing = await run(["ls-tree", "-r", "-t", "-z", commit]);
-  const entries = new Map<string, TreeEntry>();
+const LinkStepKind = {
+  Answered: "answered",
+  Regular: "regular",
+  Unlisted: "unlisted",
+  Unread: "unread",
+} as const;
+type LinkStepKind = (typeof LinkStepKind)[keyof typeof LinkStepKind];
+type LinkStep =
+  | { kind: typeof LinkStepKind.Answered; file: RepositoryFile }
+  | {
+      kind: Exclude<LinkStepKind, typeof LinkStepKind.Answered>;
+      current: string;
+    };
+
+function addTreeEntries(tree: RepositoryTree, listing: string): void {
   for (const entry of listing.split(LS_TREE_ENTRY_SEPARATOR)) {
     const nameIndex = entry.indexOf(LS_TREE_NAME_SEPARATOR);
     if (nameIndex === NOT_FOUND_INDEX) continue;
     const fields = entry
       .slice(LS_TREE_MODE_FIELD, nameIndex)
       .split(LS_TREE_FIELD_SEPARATOR);
-    entries.set(entry.slice(nameIndex + NEXT_INDEX), {
-      mode: fields[LS_TREE_MODE_FIELD]!,
-      object: fields[LS_TREE_OBJECT_FIELD]!,
+    assert.ok(fields[LS_TREE_MODE_FIELD] && fields[LS_TREE_OBJECT_FIELD]);
+    tree.entries.set(entry.slice(nameIndex + NEXT_INDEX), {
+      mode: fields[LS_TREE_MODE_FIELD],
+      object: fields[LS_TREE_OBJECT_FIELD],
     });
   }
-  return entries;
+}
+
+async function listPaths(
+  run: GitRun,
+  commit: string,
+  tree: RepositoryTree,
+  paths: readonly string[],
+): Promise<void> {
+  assert.ok(paths.length);
+  addTreeEntries(
+    tree,
+    await run(["--literal-pathspecs", "ls-tree", "-z", commit, "--", ...paths]),
+  );
+  for (const path of paths)
+    if (!paths.some((other) => other.startsWith(`${path}/`)))
+      tree.listedPaths.add(path);
+}
+
+async function listDirectory(
+  run: GitRun,
+  commit: string,
+  tree: RepositoryTree,
+  directory: string,
+): Promise<void> {
+  assert.ok(directory !== EMPTY_STRING);
+  assert.ok(!tree.listedDirectories.has(directory));
+  const pathspec = directory === REPOSITORY_ROOT ? [] : ["--", `${directory}/`];
+  addTreeEntries(
+    tree,
+    await run(["--literal-pathspecs", "ls-tree", "-z", commit, ...pathspec]),
+  );
+  tree.listedDirectories.add(directory);
+}
+
+function treeEntry(
+  tree: RepositoryTree,
+  path: string,
+): TreeEntry | null | undefined {
+  assert.ok(path !== EMPTY_STRING);
+  const entry = tree.entries.get(path);
+  if (entry !== undefined) return entry;
+  if (
+    tree.listedPaths.has(path) ||
+    tree.listedDirectories.has(posix.dirname(path))
+  )
+    return null;
+  return undefined;
+}
+
+function batchSizes(output: Buffer): Map<string, number> {
+  const sizes = new Map<string, number>();
+  for (const line of output.toString(UTF8_LABEL).split(BATCH_LINE_END)) {
+    if (line === EMPTY_STRING) continue;
+    const fields = line.split(BATCH_FIELD_SEPARATOR);
+    assert.equal(fields[BATCH_TYPE_FIELD], BLOB_TYPE);
+    const size = Number(fields[BATCH_SIZE_FIELD]);
+    assert.ok(Number.isSafeInteger(size));
+    sizes.set(fields[BATCH_OBJECT_FIELD]!, size);
+  }
+  return sizes;
 }
 
 function batchContents(output: Buffer): Map<string, string> {
@@ -600,37 +680,51 @@ function batchContents(output: Buffer): Map<string, string> {
   return contents;
 }
 
-async function symlinkTargets(
-  runInput: GitInputRun,
-  entries: Map<string, TreeEntry>,
-): Promise<Map<string, string>> {
-  const objects = new Set<string>();
-  for (const { mode, object } of entries.values())
-    if (mode === SYMLINK_MODE) objects.add(object);
-  const input = [...objects]
-    .map((object) => object + BATCH_LINE_END)
-    .join(EMPTY_STRING);
-  await runInput(
-    ["fetch", "--no-tags", "--no-write-fetch-head", "--stdin", "origin"],
-    input,
-  );
-  return batchContents(await runInput(["cat-file", "--batch"], input));
+function batchInput(objects: readonly string[]): string {
+  return objects.map((object) => object + BATCH_LINE_END).join(EMPTY_STRING);
 }
 
-async function repositoryTree(
-  run: GitRun,
+async function readSymlinkTargets(
   runInput: GitInputRun,
-  commit: string,
-  paths: readonly string[],
-): Promise<RepositoryTree> {
-  const entries = await treeEntries(run, commit);
-  const linked = paths.some((path) => entries.get(path)?.mode === SYMLINK_MODE);
-  return {
-    entries,
-    targets: linked
-      ? await symlinkTargets(runInput, entries)
-      : new Map<string, string>(),
-  };
+  tree: RepositoryTree,
+  objects: readonly string[],
+): Promise<void> {
+  assert.ok(objects.length);
+  assert.ok(objects.every((object) => !tree.targets.has(object)));
+  await runInput(
+    [
+      "fetch",
+      "--quiet",
+      "--no-tags",
+      "--no-write-fetch-head",
+      "--stdin",
+      "origin",
+    ],
+    batchInput(objects),
+    GIT_MESSAGE_BYTES_MAX,
+  );
+  const sizes = batchSizes(
+    await runInput(
+      ["cat-file", "--batch-check"],
+      batchInput(objects),
+      objects.length * BATCH_HEADER_BYTES_MAX,
+    ),
+  );
+  const bounded = objects.filter(
+    (object) => sizes.get(object)! <= SYMLINK_TARGET_BYTES_MAX,
+  );
+  for (const object of objects)
+    if (sizes.get(object)! > SYMLINK_TARGET_BYTES_MAX)
+      tree.targets.set(object, null);
+  if (!bounded.length) return;
+  const contents = batchContents(
+    await runInput(
+      ["cat-file", "--batch"],
+      batchInput(bounded),
+      bounded.length * BATCH_ENTRY_BYTES_MAX,
+    ),
+  );
+  for (const object of bounded) tree.targets.set(object, contents.get(object)!);
 }
 
 function repositoryFile(
@@ -667,30 +761,28 @@ async function regularRepositoryFile(
   }
 }
 
-async function resolveRepositoryFile(
-  run: GitRun,
-  readBlob: GitBlobRun,
-  tree: RepositoryTree,
-  commit: string,
-  path: string,
-  maxBytes: number,
-): Promise<RepositoryFile> {
+function answered(path: string, state: RepositoryFileState): LinkStep {
+  return { kind: LinkStepKind.Answered, file: repositoryFile(path, state) };
+}
+
+function followLinks(tree: RepositoryTree, path: string): LinkStep {
+  assert.ok(path !== EMPTY_STRING);
   let current = path;
   const visited = new Set<string>();
   for (let hops = 0; hops <= SYMLINK_HOPS_MAX; hops++) {
     if (visited.has(current))
-      return repositoryFile(path, RepositoryFileState.Unreadable);
+      return answered(path, RepositoryFileState.Unreadable);
     visited.add(current);
-    const entry = tree.entries.get(current);
-    if (entry === undefined)
-      return repositoryFile(path, RepositoryFileState.Absent);
-    const object = `${commit}:${current}`;
+    const entry = treeEntry(tree, current);
+    if (entry === undefined) return { kind: LinkStepKind.Unlisted, current };
+    if (entry === null) return answered(path, RepositoryFileState.Absent);
     if (REGULAR_FILE_MODES.includes(entry.mode))
-      return regularRepositoryFile(run, readBlob, object, path, maxBytes);
+      return { kind: LinkStepKind.Regular, current };
     if (entry.mode !== SYMLINK_MODE)
-      return repositoryFile(path, RepositoryFileState.NotRegularFile);
+      return answered(path, RepositoryFileState.NotRegularFile);
     const target = tree.targets.get(entry.object);
-    assert.ok(target !== undefined);
+    if (target === undefined) return { kind: LinkStepKind.Unread, current };
+    if (target === null) return answered(path, RepositoryFileState.Unreadable);
     const resolved = posix.normalize(
       posix.join(posix.dirname(current), target),
     );
@@ -699,12 +791,105 @@ async function resolveRepositoryFile(
       resolved === PARENT_DIRECTORY ||
       resolved.startsWith(`${PARENT_DIRECTORY}/`)
     )
-      return repositoryFile(path, RepositoryFileState.OutsideRoot);
+      return answered(path, RepositoryFileState.OutsideRoot);
     if (resolved === REPOSITORY_ROOT)
-      return repositoryFile(path, RepositoryFileState.NotRegularFile);
+      return answered(path, RepositoryFileState.NotRegularFile);
     current = resolved;
   }
-  return repositoryFile(path, RepositoryFileState.Unreadable);
+  return answered(path, RepositoryFileState.Unreadable);
+}
+
+function unreadSymlinks(tree: RepositoryTree, current: string): string[] {
+  const entry = tree.entries.get(current);
+  assert.ok(entry?.mode === SYMLINK_MODE);
+  assert.ok(!tree.targets.has(entry.object));
+  const directory = posix.dirname(current);
+  if (!tree.listedDirectories.has(directory)) return [entry.object];
+  const objects: string[] = [];
+  for (const [path, { mode, object }] of tree.entries)
+    if (
+      mode === SYMLINK_MODE &&
+      posix.dirname(path) === directory &&
+      !tree.targets.has(object)
+    )
+      objects.push(object);
+  return objects;
+}
+
+function blockedSteps(
+  tree: RepositoryTree,
+  paths: readonly string[],
+  kind: typeof LinkStepKind.Unlisted | typeof LinkStepKind.Unread,
+): Set<string> {
+  assert.ok(paths.length);
+  const currents = new Set<string>();
+  for (const path of paths) {
+    const step = followLinks(tree, path);
+    if (step.kind === kind) currents.add(step.current);
+  }
+  assert.ok(currents.size <= paths.length);
+  return currents;
+}
+
+async function completeRepositoryTree(
+  run: GitRun,
+  runInput: GitInputRun,
+  commit: string,
+  tree: RepositoryTree,
+  paths: readonly string[],
+): Promise<void> {
+  assert.ok(paths.length);
+  for (let round = 0; round <= TREE_ROUND_LAST; round++) {
+    const directories = new Set<string>();
+    for (const current of blockedSteps(tree, paths, LinkStepKind.Unlisted))
+      directories.add(posix.dirname(current));
+    for (const directory of directories)
+      await listDirectory(run, commit, tree, directory);
+    const objects = new Set<string>();
+    for (const current of blockedSteps(tree, paths, LinkStepKind.Unread))
+      for (const object of unreadSymlinks(tree, current)) objects.add(object);
+    if (objects.size) await readSymlinkTargets(runInput, tree, [...objects]);
+    if (!directories.size && !objects.size) return;
+  }
+  assert.fail("The symlink resolution exceeded its round bound.");
+}
+
+async function resolveRepositoryFiles(
+  run: GitRun,
+  runInput: GitInputRun,
+  readBlob: GitBlobRun,
+  commit: string,
+  paths: readonly string[],
+  maxBytes: number,
+): Promise<RepositoryFile[]> {
+  const tree: RepositoryTree = {
+    entries: new Map(),
+    listedPaths: new Set(),
+    listedDirectories: new Set(),
+    targets: new Map(),
+  };
+  await listPaths(run, commit, tree, paths);
+  await completeRepositoryTree(run, runInput, commit, tree, paths);
+  const files: RepositoryFile[] = [];
+  for (const path of paths) {
+    const step = followLinks(tree, path);
+    if (step.kind === LinkStepKind.Answered) {
+      files.push(step.file);
+      continue;
+    }
+    assert.equal(step.kind, LinkStepKind.Regular);
+    files.push(
+      await regularRepositoryFile(
+        run,
+        readBlob,
+        `${commit}:${step.current}`,
+        path,
+        maxBytes,
+      ),
+    );
+  }
+  assert.equal(files.length, paths.length);
+  return files;
 }
 
 export async function readFilesAtCommit(
@@ -740,7 +925,7 @@ export async function readFilesAtCommit(
       "read repository files",
       async (git) => Buffer.from(await git.binaryCatFile(["blob", object])),
     );
-  const runInput: GitInputRun = (args, input) =>
+  const runInput: GitInputRun = (args, input, maxBytes) =>
     runGitTask(
       directory,
       context,
@@ -751,7 +936,7 @@ export async function readFilesAtCommit(
           cwd: directory,
           signal,
           encoding: "buffer",
-          maxBuffer: UNBOUNDED_OUTPUT_BYTES,
+          maxBuffer: maxBytes,
         });
         const [, { stdout }] = await Promise.all([
           pipeline(Readable.from([input]), child.child.stdin!),
@@ -771,20 +956,14 @@ export async function readFilesAtCommit(
       "origin",
       commit,
     ]);
-    const tree = await repositoryTree(run, runInput, commit, paths);
-    const files: RepositoryFile[] = [];
-    for (const path of paths)
-      files.push(
-        await resolveRepositoryFile(
-          run,
-          readBlob,
-          tree,
-          commit,
-          path,
-          maxBytes,
-        ),
-      );
-    return files;
+    return await resolveRepositoryFiles(
+      run,
+      runInput,
+      readBlob,
+      commit,
+      paths,
+      maxBytes,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
