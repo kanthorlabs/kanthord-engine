@@ -285,7 +285,9 @@ export function authorizeFrozenAction(
         );
   return {
     credential:
-      action.action === RepositoryAction.PullRequest ? policy.credential : null,
+      reused === null && action.action === RepositoryAction.PullRequest
+        ? policy.credential
+        : null,
     platform: policy.platform,
     project_id: policy.project_id,
     facts: {

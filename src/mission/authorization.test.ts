@@ -262,10 +262,9 @@ test("a frozen action reuses only a pull request of the same node and resource",
   const h = actionHarness(t);
   h.assess();
   const reused = h.request();
-  assert.deepEqual(
-    h.frozen({ reusedEvidenceId: reused }).facts.reused_address,
-    h.pullRequest,
-  );
+  const reuse = h.frozen({ reusedEvidenceId: reused });
+  assert.deepEqual(reuse.facts.reused_address, h.pullRequest);
+  assert.equal(reuse.credential, null);
   const branch = h.request(
     {
       kind: PlatformAddressKind.BranchPush,

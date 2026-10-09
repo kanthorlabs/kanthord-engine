@@ -139,16 +139,13 @@ function authorizePerform(
   );
   held.operation = operation;
   held.facts = granted.facts;
-  const reuse = reusesPullRequest({ operation, facts: granted.facts });
   const material =
-    operation === OutboundOperation.GitHubPullRequest
-      ? custody.release(tx, grant, now)
-      : null;
+    granted.credential === null ? null : custody.release(tx, grant, now);
   if (material === null) custody.consume(grant);
   return {
     operation,
     project_id: granted.project_id,
-    credential: reuse ? null : granted.credential,
+    credential: granted.credential,
     material,
   };
 }

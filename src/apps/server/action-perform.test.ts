@@ -826,6 +826,7 @@ test(
       async () => {
         assert.equal(await remoteHead(h.gated.bare, nodeRef), null);
         const calls = h.gitHub.calls.length;
+        const released = h.materials.length;
         const answer = completed(
           await h.perform(second, body(keyOf(closed)), closedEvidence),
         );
@@ -838,6 +839,7 @@ test(
         assert.equal(stored?.credential, null);
         assert.deepEqual(JSON.parse(stored!.result!), answer);
         assert.equal(h.gitHub.calls.length, calls);
+        assert.equal(h.materials.length, released);
         dropped(h.materials);
       },
     );
