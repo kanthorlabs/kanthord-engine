@@ -23,6 +23,7 @@ const clientConfigPath = (env: NodeJS.ProcessEnv) =>
   join(directories(env).config, "cli.yaml");
 
 const EMPTY_OUTPUT = "";
+const STRING_TYPE = "string";
 const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;
 const REGISTRATION_ATTEMPTS = 2;
@@ -234,12 +235,17 @@ test("worker catalog CLI lists ascending pages", async (t) => {
     page.items.map((item: { name: string }) => item.name),
     ["developer@1"],
   );
-  assert.equal(page.next_cursor, null);
-  const cursor = Buffer.from("developer@1").toString("base64url");
-  const second = await command(["worker", "list", "--cursor", cursor], env);
+  assert.equal(typeof page.next_cursor, STRING_TYPE);
+  const second = await command(
+    ["worker", "list", "--limit", "1", "--cursor", page.next_cursor],
+    env,
+  );
   assert.equal(second.code, ExitCode.Success, second.stderr);
   const last = JSON.parse(second.stdout);
-  assert.deepEqual(last.items, []);
+  assert.deepEqual(
+    last.items.map((item: { name: string }) => item.name),
+    ["reviewer@1"],
+  );
   assert.equal(last.next_cursor, null);
 });
 

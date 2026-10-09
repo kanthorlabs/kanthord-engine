@@ -92,7 +92,7 @@ test("every native worker names an agent of the agent catalog", () => {
 });
 
 test("every released worker is a declaration", () => {
-  assert.deepEqual(RELEASED_WORKER_NAMES, ["developer@1"]);
+  assert.deepEqual(RELEASED_WORKER_NAMES, ["developer@1", "reviewer@1"]);
   for (const name of RELEASED_WORKER_NAMES)
     assert.equal(getWorkerDeclaration(name)?.name, name);
 });

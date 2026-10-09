@@ -257,7 +257,7 @@ and their capabilities are:
 
 All five declarations are in the current catalog; native runtime execution and
 external-harness integration remain later work. `list` returns only the released
-worker `developer@1`. `get` and binding validation accept all five declarations. All five require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
+workers `developer@1` and `reviewer@1`. `get` and binding validation accept all five declarations. All five require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`

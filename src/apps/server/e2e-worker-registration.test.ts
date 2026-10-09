@@ -26,6 +26,7 @@ const FAILURE = 1;
 const NO_OUTPUT = "";
 const FIRST_REVISION = 1;
 const FIRST_ITEM = 0;
+const STRING_TYPE = "string";
 const SINGLE_ITEM = 1;
 const SINGLE_INSTANCE = 1;
 const SECOND_BINDING_VERSION = 2;
@@ -246,7 +247,7 @@ test(
       );
       assert.deepEqual(
         page.items.map((item) => item.name),
-        ["developer@1"],
+        ["developer@1", "reviewer@1"],
       );
       assert.equal(page.next_cursor, null);
       assert.equal(page.items[FIRST_ITEM]!.host, HOST);
@@ -269,12 +270,21 @@ test(
         page.items.map((item) => item.name),
         ["developer@1"],
       );
-      assert.equal(page.next_cursor, null);
-      const cursor = Buffer.from("developer@1").toString("base64url");
+      assert.equal(typeof page.next_cursor, STRING_TYPE);
       const next = success<CatalogPage>(
-        await kanthord(["worker", "list", "--cursor", cursor], f.H),
+        await kanthord(
+          ["worker", "list", "--limit", "1", "--cursor", page.next_cursor!],
+          f.H,
+        ),
       );
-      assert.deepEqual(next.items, []);
+      assert.deepEqual(
+        next.items.map((item) => item.name),
+        ["reviewer@1"],
+      );
+      assert.deepEqual(next.items[FIRST_ITEM]!.declared_node_states, [
+        "Waiting",
+        "External.Requested",
+      ]);
       assert.equal(next.next_cursor, null);
     });
     await t.test("E02.3 host-specific catalog fields", async () => {

@@ -77,7 +77,10 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
   },
 };
 
-export const RELEASED_WORKER_NAMES: readonly string[] = ["developer@1"];
+export const RELEASED_WORKER_NAMES: readonly string[] = [
+  "developer@1",
+  "reviewer@1",
+];
 
 export function getWorkerDeclaration(
   workerName: string,
