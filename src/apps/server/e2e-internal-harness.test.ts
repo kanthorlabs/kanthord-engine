@@ -387,6 +387,7 @@ test(
     let outcomeA!: string;
     await t.test(
       "EI10.2 objective publishes object and checkpoint, reviewer verifies",
+      { timeout: JOURNEY_TIMEOUT_MS },
       async () => {
         await waitForNode(f.cli, f.objective, NodeState.Completed);
         await finishedExecutions(f.cli, f.project_id, f.objective, runtimes);
@@ -579,6 +580,7 @@ test(
     );
     await t.test(
       "EI10.5 initiative report and assessment reference both current outcomes",
+      { timeout: JOURNEY_TIMEOUT_MS },
       async () => {
         await waitForNode(f.cli, f.initiative, NodeState.Completed);
         await finishedExecutions(f.cli, f.project_id, f.initiative, runtimes);
