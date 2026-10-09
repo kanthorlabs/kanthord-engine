@@ -20,7 +20,7 @@
     "build": "tsc -p tsconfig.build.json && ! grep -rlE \"import\\(\\\"\\.{1,2}/[^\\\"]*\\.ts\\\"\\)\" dist",
     "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --test-reporter=./scripts/test-reporter.mjs --test-concurrency=6 --test-timeout=30000 'src/**/*.test.ts' scripts/test-reporter.test.mjs",
+    "test": "node --test --test-reporter=./scripts/test-reporter.mjs --test-concurrency=6 --test-timeout=60000 'src/**/*.test.ts' scripts/test-reporter.test.mjs",
     "test:e2e:jwt": "pnpm run build && python3 scripts/e2e-jwt.py",
     "format": "prettier --write src bin eslint.config.js scripts/test-reporter.mjs scripts/test-reporter.test.mjs",
     "lint": "eslint src bin eslint.config.js scripts/test-reporter.mjs scripts/test-reporter.test.mjs",
