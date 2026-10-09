@@ -375,18 +375,7 @@ function journey(h: Harness) {
     const key = `${prefix}${upload.asset_id}`;
     return { evidenceId: submitted.evidence.id, assetId: upload.asset_id, key };
   };
-  const objective = async (
-    nodeId: string,
-    bindingId: string,
-    commit: string,
-    executing?: (x: ExecutionRecord) => Promise<void>,
-  ) => {
-    const e = await passingEvaluation(h.session, h.machine, {
-      nodeId,
-      bindingId,
-      commit,
-      executing,
-    });
+  const request = async (e: ExecutionRecord) => {
     const answer = completed(
       await performer["action.request"](
         { params: { execution_id: e.execution_id }, query: {}, body: null },
@@ -440,7 +429,7 @@ function journey(h: Harness) {
     clean,
     health,
     store,
-    objective,
+    request,
     outbound,
     events,
     state,
@@ -464,7 +453,6 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     },
   });
   let stored!: Stored;
-  let Q = "";
   let c = "";
 
   await t.test(
@@ -481,10 +469,16 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       );
     },
   );
-  await t.test("EJ10.2 P opens a pull request", async () => {
-    await j.objective(h.P, h.gated.id, h.p, async (x) => {
+  const eP = await passingEvaluation(h.session, h.machine, {
+    nodeId: h.P,
+    bindingId: h.gated.id,
+    commit: h.p,
+    executing: async (x) => {
       stored = await j.store(x);
-    });
+    },
+  });
+  await t.test("EJ10.2 P opens a pull request", async () => {
+    await j.request(eP);
     assert.equal(h.s3.objects(stored.key).length, JOURNEY_MATCH_COUNT);
     assert.equal(await j.state(h.P), NodeState.ExternalRequested);
     const rows = await j.outbound(PULL_REQUEST_OPERATION);
@@ -537,10 +531,15 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       inbound_event_id: E1.id,
     });
   });
+  const Q = await h.create("objective-q.md", "objective", [MERGE], h.I);
+  const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "objective q\n");
+  const eQ = await passingEvaluation(h.session, h.machine, {
+    nodeId: Q,
+    bindingId: h.merge.id,
+    commit: q,
+  });
   await t.test("EJ10.4 a merge push lands Q on main", async () => {
-    Q = await h.create("objective-q.md", "objective", [MERGE], h.I);
-    const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "objective q\n");
-    await j.objective(Q, h.merge.id, q);
+    await j.request(eQ);
     const rows = await j.outbound(MERGE_PUSH_OPERATION);
     assert.equal(rows.length, JOURNEY_MATCH_COUNT);
     const [row] = rows;
@@ -575,55 +574,55 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     );
     assert.equal(await j.state(Q), NodeState.Completed);
   });
-  await t.test("EJ10.6 the initiative assessment completes I", async () => {
-    const g = await remoteHead(h.gatedBare.bare, MAIN_REF);
-    assert.ok(g);
-    const oP = await j.outcome(h.P);
-    const oQ = await j.outcome(Q);
-    const x = await h.machine.pull(h.I, NodeState.Executing);
-    const rep = await j.submit(h.I, x, {
-      subject: "report",
-      assets: [
-        {
-          kind: "produced",
-          content: {
-            media_type: "text/markdown",
-            encoding: "base64",
-            data: Buffer.from("P and Q are complete.").toString("base64"),
-          },
+  const g = await remoteHead(h.gatedBare.bare, MAIN_REF);
+  assert.ok(g);
+  const oP = await j.outcome(h.P);
+  const oQ = await j.outcome(Q);
+  const x = await h.machine.pull(h.I, NodeState.Executing);
+  const rep = await j.submit(h.I, x, {
+    subject: "report",
+    assets: [
+      {
+        kind: "produced",
+        content: {
+          media_type: "text/markdown",
+          encoding: "base64",
+          data: Buffer.from("P and Q are complete.").toString("base64"),
         },
-      ],
-    });
-    await h.machine.release(x.execution_id);
-    const x2 = await h.machine.pull(h.I, NodeState.Evaluating);
-    const testedInput = [
-      repositorySnapshot(h.gated.id, g),
-      repositorySnapshot(h.merge.id, c),
-    ];
-    const ir = await j.submit(h.I, x2, {
-      subject: "verification run",
-      assets: [
-        {
-          kind: "produced",
-          content: {
-            media_type: "text/plain",
-            encoding: "base64",
-            data: "b2s=",
-          },
-        },
-      ],
-      verification: {
-        tested_input: testedInput,
-        results: [
-          {
-            command: "true",
-            exit_code: PASSING_EXIT_CODE,
-            signal: null,
-            timed_out: false,
-          },
-        ],
       },
-    });
+    ],
+  });
+  await h.machine.release(x.execution_id);
+  const x2 = await h.machine.pull(h.I, NodeState.Evaluating);
+  const testedInput = [
+    repositorySnapshot(h.gated.id, g),
+    repositorySnapshot(h.merge.id, c),
+  ];
+  const ir = await j.submit(h.I, x2, {
+    subject: "verification run",
+    assets: [
+      {
+        kind: "produced",
+        content: {
+          media_type: "text/plain",
+          encoding: "base64",
+          data: "b2s=",
+        },
+      },
+    ],
+    verification: {
+      tested_input: testedInput,
+      results: [
+        {
+          command: "true",
+          exit_code: PASSING_EXIT_CODE,
+          signal: null,
+          timed_out: false,
+        },
+      ],
+    },
+  });
+  await t.test("EJ10.6 the initiative assessment completes I", async () => {
     const assessed = await j.write<{
       node: { state: string };
       outcome: { result: string };
