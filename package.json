@@ -17,7 +17,7 @@
     "static"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && ! grep -rlE \"import\\(\\\"\\.{1,2}/[^\\\"]*\\.ts\\\"\\)\" dist",
     "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-reporter=./scripts/test-reporter.mjs --test-concurrency=6 --test-timeout=30000 'src/**/*.test.ts' scripts/test-reporter.test.mjs",
@@ -43,7 +43,7 @@
     "lint-staged": "17.0.8",
     "prettier": "3.9.5",
     "supertest": "7.2.2",
-    "typescript": "5.7.2",
+    "typescript": "5.9.3",
     "typescript-eslint": "8.63.0"
   },
   "dependencies": {
