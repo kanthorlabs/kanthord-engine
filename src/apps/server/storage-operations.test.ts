@@ -53,6 +53,7 @@ const RAW_AUTHORIZATION = "AWS4-HMAC-SHA256 storage-operations";
 const ROUTE_NOT_FOUND_CODE = "gateway.routing.not_found";
 const S3_PREFIX = "storage.platform.s3.";
 const HEAD = "HEAD";
+const PUBLISHED_CHECK_REFUSAL = "node_mismatch";
 
 function completed<T>(result: OperationResult<T>): T {
   assert.ok(
@@ -123,6 +124,14 @@ async function setup(t: TestContext) {
             .get() as { count: number }
         ).count,
     );
+  const recordedVersion = (assetId: string) =>
+    fixture.store.transaction((tx) => {
+      const found = tx.database
+        .prepare("SELECT content FROM mission_evidence_asset WHERE id = ?")
+        .get(assetId) as { content: string };
+      return (JSON.parse(found.content) as { object_version?: string })
+        .object_version;
+    });
   const intake = directClient(intakeOperations, fixture.invocation);
   const executionId = execution.execution_id;
   const [checkedUpload, plainUpload] = submitted.uploads;
@@ -141,6 +150,7 @@ async function setup(t: TestContext) {
     materials,
     pins,
     outboundCount,
+    recordedVersion,
     put: (body: {
       node_id: string;
       asset_id: string;
@@ -351,22 +361,29 @@ test(
     );
 
     await t.test(
-      "a check of a published asset answers its recorded version",
+      "a repeat complete answers the recorded result and a check of a published asset refuses",
       async () => {
         const location = `s3://${BUCKET}/${h.keyOf(h.checked)}`;
         assert.equal(completed(await h.complete(h.checked)).uri, location);
-        assert.deepEqual(completed(await h.check(h.checked)), {
-          location,
-          version: CHECKED_VERSION,
+        assert.equal(h.recordedVersion(h.checked), CHECKED_VERSION);
+        const calls = h.s3.calls.length;
+        assert.equal(completed(await h.complete(h.checked)).uri, location);
+        const error = failed(
+          await h.check(h.checked),
+          HttpStatus.Forbidden,
+          MissionErrorCode.AuthorizationRefused,
+        );
+        assert.deepEqual(error.details, {
+          reason: PUBLISHED_CHECK_REFUSAL,
         });
-        assert.equal(h.s3.calls.at(-1)?.version, CHECKED_VERSION);
+        assert.equal(h.s3.calls.length, calls);
       },
     );
 
     await t.test("a refused HEAD answers its result class", async () => {
       h.s3.failNext(HttpStatus.Forbidden);
       const error = failed(
-        await h.check(h.checked),
+        await h.check(h.plain),
         BAD_GATEWAY_STATUS,
         S3_PREFIX + ResultClass.FinalRefusal,
       );
@@ -383,7 +400,7 @@ test(
         h.s3.loseNext(READ_ATTEMPT_LIMIT);
         try {
           const error = failed(
-            await h.check(h.checked, context),
+            await h.check(h.plain, context),
             BAD_GATEWAY_STATUS,
             S3_PREFIX + ResultClass.RetryableRefusal,
           );
