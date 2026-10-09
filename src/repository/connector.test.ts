@@ -237,6 +237,45 @@ function assertNoClone(scratch: string): void {
   assert.deepEqual(readdirSync(scratch), []);
 }
 
+test("every git caller rejects a nonzero exit with an empty stderr", async (t) => {
+  const bin = temporary(t);
+  writeFileSync(join(bin, "git"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  t.after(() => {
+    process.env.PATH = path;
+  });
+  const failed = { code: GIT_FAILED };
+  const address = "file:///silent";
+  await assert.rejects(gitLsRemote(address, background, DEADLINE_MS), failed);
+  await assert.rejects(
+    clone(address, temporary(t), background, DEADLINE_MS),
+    failed,
+  );
+  await assert.rejects(
+    fetchAndCheckout(
+      temporary(t),
+      NODE_BRANCH,
+      BASE_BRANCH,
+      background,
+      DEADLINE_MS,
+    ),
+    failed,
+  );
+  await assert.rejects(
+    pushNodeBranch(temporary(t), NODE_BRANCH, background, DEADLINE_MS),
+    failed,
+  );
+  await assert.rejects(
+    cloneSnapshot(address, "HEAD", temporary(t), background, DEADLINE_MS),
+    failed,
+  );
+  await assert.rejects(
+    resolveBranchCommit(address, BASE_BRANCH, background, DEADLINE_MS),
+    failed,
+  );
+});
+
 test("mergePushFresh lands a merge commit whose second parent is the snapshot", async (t) => {
   const { origin, base, snapshot, scratch, head } = await remote(t);
   const { commit } = await mergePushFresh(

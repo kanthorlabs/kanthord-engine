@@ -109,6 +109,11 @@ interface GitOptions {
   errors?: SimpleGitOptions["errors"];
 }
 
+const failNonzeroExit: SimpleGitOptions["errors"] = (error, result) =>
+  result.exitCode === EXIT_SUCCESS
+    ? error
+    : (error ?? new Error(`git exited with ${result.exitCode}`));
+
 async function runGit(
   directory: string | undefined,
   args: string[],
@@ -148,7 +153,7 @@ async function runGitTask<T>(
     if (deadlineMs <= EXPIRED) throw new Error("Git deadline exceeded");
     const git = simpleGit({
       ...(directory === undefined ? {} : { baseDir: directory }),
-      ...(options.errors === undefined ? {} : { errors: options.errors }),
+      errors: options.errors ?? failNonzeroExit,
       abort: controller.signal,
       timeout: { block: deadlineMs },
     });
