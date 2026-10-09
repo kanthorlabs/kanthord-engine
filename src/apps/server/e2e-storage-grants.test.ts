@@ -36,9 +36,9 @@ const SUCCESSFUL_EXIT = 0;
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
 const FIRST_ATTEMPT = 1;
-const SINGLE_INSTANCE = 1;
-const SINGLE_ITEM = 1;
-const ONE_HOUR_MS = 60 * 60 * 1000;
+const WORKER_INSTANCE_COUNT = 1;
+const OUTBOUND_ROWS_PER_DELETE = 1;
+const PRESIGN_LIFETIME_MS = 60 * 60 * 1000;
 const TIMEOUT = 180000;
 const OBJECT_SIZE = 5;
 const FIRST_BODY = "hello";
@@ -178,7 +178,7 @@ async function setup(t: TestContext) {
       },
       harness: {
         kind: "worker",
-        config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
+        config: { worker: "claude@1", instance_count: WORKER_INSTANCE_COUNT },
       },
     },
   });
@@ -324,7 +324,7 @@ test("E04 storage grants CLI journey", { timeout: TIMEOUT }, async (t) => {
     );
     assert.ok(new URL(upload.put_url).searchParams.has(SIGNATURE_PARAMETER));
     assert.ok(upload.expires_at > before);
-    assert.ok(upload.expires_at <= Date.now() + ONE_HOUR_MS);
+    assert.ok(upload.expires_at <= Date.now() + PRESIGN_LIFETIME_MS);
     key = `${j.prefix}${upload.asset_id}`;
   });
   await t.test("E04.2 a complete before the PUT mismatches", async () => {
@@ -420,7 +420,7 @@ test("E04 storage grants CLI journey", { timeout: TIMEOUT }, async (t) => {
       "--operation",
       DELETE_OPERATION,
     ]);
-    assert.equal(page.items.length, SINGLE_ITEM);
+    assert.equal(page.items.length, OUTBOUND_ROWS_PER_DELETE);
     const [row] = page.items;
     assert.equal(row!.state, OutboundRequestState.Succeeded);
     assert.equal(row!.request_key, upload.asset_id);

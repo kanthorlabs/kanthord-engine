@@ -40,10 +40,11 @@ import {
 
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
-const SINGLE_INSTANCE = 1;
+const WORKER_INSTANCE_COUNT = 1;
 const FIRST_ATTEMPT = 1;
-const SINGLE_CALL = 1;
-const SINGLE_ITEM = 1;
+const PULL_REQUEST_CREATES = 1;
+const OUTBOUND_ROWS_PER_ACTION = 1;
+const LANDED_EVIDENCE_COUNT = 1;
 const FIRST_PULL_REQUEST = 1;
 const TIMEOUT = 180000;
 const SECRET = "test-secret";
@@ -110,7 +111,7 @@ async function setup(t: TestContext) {
       merge: repositoryBinding(MERGE, "merge_push"),
       harness: {
         kind: "worker",
-        config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
+        config: { worker: "claude@1", instance_count: WORKER_INSTANCE_COUNT },
       },
     },
   });
@@ -224,7 +225,7 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
     const posts = h.gitHub.calls.filter(
       (call) => call.method === HttpMethod.Post,
     );
-    assert.equal(posts.length, SINGLE_CALL);
+    assert.equal(posts.length, PULL_REQUEST_CREATES);
     const [create] = posts;
     assert.equal(create!.path, `/repos/owner/${GATED}/pulls`);
     assert.deepEqual(create!.body, {
@@ -236,7 +237,7 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
   });
   await t.test("E03.3 the outbound request succeeded", async () => {
     const page = await h.outbound(PULL_REQUEST_OPERATION);
-    assert.equal(page.items.length, SINGLE_ITEM);
+    assert.equal(page.items.length, OUTBOUND_ROWS_PER_ACTION);
     const [row] = page.items;
     assert.equal(row!.state, OutboundRequestState.Succeeded);
     assert.equal(row!.request_key, `${h.P}/${FIRST_ATTEMPT}/${GATED_KEY}`);
@@ -251,7 +252,7 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
     "E03.4 a repeat creates nothing and the release waits externally",
     async () => {
       await h.request(e2);
-      assert.equal(h.creates(), SINGLE_CALL);
+      assert.equal(h.creates(), PULL_REQUEST_CREATES);
       const released = await h.release(e2.execution_id);
       assert.ok(Number.isInteger(released.ended_at));
       assert.equal((await h.node(h.P)).state, NodeState.ExternalRequested);
@@ -285,7 +286,7 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
         item.provenance.kind === ActorKind.Service &&
         item.provenance.service === ActorService.Mission,
     );
-    assert.equal(landed.length, SINGLE_ITEM);
+    assert.equal(landed.length, LANDED_EVIDENCE_COUNT);
     const asset = landed[FIRST_INDEX]!.assets[FIRST_INDEX]!;
     assert.ok(asset.kind === AssetKind.Repository);
     assert.equal(asset.address.commit, MERGED_COMMIT);

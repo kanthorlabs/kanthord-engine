@@ -7,7 +7,7 @@ import { gatewayFixture } from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
-const EMPTY_COUNT = 0;
+const UNMATCHED_DELETE_COUNT = 0;
 const UNKNOWN_REQUEST = "outbound_request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const SYNTHETIC_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const OUTBOUND = ["intake", "outbound"];
@@ -95,7 +95,7 @@ test("E02.5 outbound delete with force and a valid filter counts zero", async (t
     count: number;
     idempotency_key: string;
   };
-  assert.equal(answer.count, EMPTY_COUNT);
+  assert.equal(answer.count, UNMATCHED_DELETE_COUNT);
   assert.ok(
     ulidSchema.safeParse(answer.idempotency_key).success,
     result.stdout,

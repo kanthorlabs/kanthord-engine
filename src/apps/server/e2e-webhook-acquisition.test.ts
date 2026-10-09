@@ -22,7 +22,7 @@ import { deliver, gatewayFixture } from "./test-support.ts";
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
 const TIMEOUT = 180000;
-const ONE_ITEM = 1;
+const EVENTS_PER_DELIVERY = 1;
 const RESOURCE = "owner/repo";
 const PUSH_EVENT = "push";
 const PING_EVENT = "ping";
@@ -129,7 +129,7 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
       const items = await until(
         events,
         (list) =>
-          list.length === ONE_ITEM &&
+          list.length === EVENTS_PER_DELIVERY &&
           list.every((item) => item.state === InboundEventState.Succeeded),
       );
       const [first] = items;
@@ -143,7 +143,7 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
   await t.test("E06.3 a redelivery stores nothing", async () => {
     const delivered = await send(PUSH_EVENT, FIRST_DELIVERY, PUSH);
     assert.equal(delivered.status, HttpStatus.Accepted);
-    assert.equal((await events()).length, ONE_ITEM);
+    assert.equal((await events()).length, EVENTS_PER_DELIVERY);
   });
 
   await t.test("E06.4 three bad signatures refuse", async () => {
@@ -160,7 +160,7 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
         IntakeErrorCode.InboundEventSignatureInvalid,
       );
     }
-    assert.equal((await events()).length, ONE_ITEM);
+    assert.equal((await events()).length, EVENTS_PER_DELIVERY);
   });
 
   await t.test("E06.5 a signed ping answers the handshake", async () => {
@@ -172,7 +172,7 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
       (await send(PING_EVENT, "d-2", PING, null)).status,
       HttpStatus.Unauthorized,
     );
-    assert.equal((await events()).length, ONE_ITEM);
+    assert.equal((await events()).length, EVENTS_PER_DELIVERY);
   });
 
   await t.test("E06.6 an unknown inbound answers 404", async () => {

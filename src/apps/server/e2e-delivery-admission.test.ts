@@ -49,9 +49,9 @@ import {
 
 const FIRST_INDEX = 0;
 const FIRST_REVISION = 1;
-const SINGLE_INSTANCE = 1;
+const WORKER_INSTANCE_COUNT = 1;
 const FIRST_ATTEMPT = 1;
-const SINGLE_ITEM = 1;
+const LANDED_EVIDENCE_COUNT = 1;
 const FIRST_PULL_REQUEST = 1;
 const UNMATCHED_PULL_REQUEST = 9;
 const SHARED_PULL_REQUEST = 7;
@@ -135,7 +135,7 @@ async function project(c: Cli) {
       gated: repositoryBinding(GATED, "pull_request"),
       harness: {
         kind: "worker",
-        config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
+        config: { worker: "claude@1", instance_count: WORKER_INSTANCE_COUNT },
       },
     },
   });
@@ -343,7 +343,7 @@ test("E08 delivery admission journey", { timeout: TIMEOUT }, async (t) => {
     const landed = evidence.items.filter(
       (item) => item.provenance.kind === ActorKind.Service,
     );
-    assert.equal(landed.length, SINGLE_ITEM);
+    assert.equal(landed.length, LANDED_EVIDENCE_COUNT);
     assert.deepEqual(landed[FIRST_INDEX]!.provenance, {
       kind: ActorKind.Service,
       service: ActorService.Mission,

@@ -19,7 +19,7 @@ const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
 const TIMEOUT = 180000;
 const POLL_INTERVAL_MS = 50;
-const ONE_CALL = 1;
+const VALIDATION_CALLS = 1;
 const VALIDATION_AND_HELD = 2;
 const ANSWERED_CALLS = 2;
 const FIRST_BATCH = 2;
@@ -150,7 +150,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(validation.if_none_match, null);
     const later = await until(
       () => eventsCalls().slice(before),
-      (calls) => calls.length > ONE_CALL,
+      (calls) => calls.length > VALIDATION_CALLS,
     );
     assert.equal(later.length, VALIDATION_AND_HELD);
     assert.equal(later[1]?.status, null);
