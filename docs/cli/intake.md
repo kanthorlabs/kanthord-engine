@@ -154,13 +154,13 @@ is no `inbound update`, `inbound enable`, `inbound disable`, `poll now` or
 | `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inboundId`.                                                                          |
 | `--state <state>`                                          | Optional on `event list`; required with `--from` and `--to` on `event delete`.       | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.    |
 | `--from`, `--to`                                           | Required together with `--state` on `event delete`.                                  | None                         | Send `body.from` and `body.to`, an inclusive range of inbound event identities.                  |
-| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list. Its bound is **[blocked][intake-bounds]**.                     |
+| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                     |
 | `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outboundRequestId`. Prefix `outbound_request_`.                                   |
 | `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.projectId`.                                                                          |
 | `--state <state>` on `outbound list` and `outbound delete` | Optional on `outbound list`; required with `--from` and `--to` on `outbound delete`. | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.    |
 | `--operation <operation>`                                  | Optional on `outbound list`.                                                         | Absent: all operations       | Send `query.operation`; closed set `github.pull_request`, `git.merge_push`, `s3.delete_object`.  |
 | `--from`, `--to` on `outbound delete`                      | Required together with `--state`.                                                    | None                         | Send `body.from` and `body.to`, an inclusive range of outbound request identities.               |
-| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list. Its bound is **[blocked][intake-bounds]**.                     |
+| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                     |
 | `--force` on `outbound delete`                             | Required boolean switch.                                                             | `false`                      | Send `body.force`. Without it the server answers `400` `intake.outbound.request.force_required`. |
 
 Supplied list filters combine by AND. A filter grants no authority. An omitted
@@ -319,8 +319,9 @@ with neither form, with both forms or with the state `pending` answers `400`
 
 **Effects and idempotency:** one transaction deletes the matching `succeeded`,
 `failed` and `discarded` events and answers `{ count }`. A list that names a
-pending event deletes nothing. The bound of rows per call remains
-**[blocked][intake-bounds]**.
+pending event deletes nothing. A range that matches more than 1000 events
+answers `400` `intake.inbound.event.filter_invalid` and deletes nothing; the
+caller narrows the range.
 
 **Statuses:** `200` with `{ count }`; `400`
 `intake.inbound.event.filter_invalid`; `409`
@@ -374,7 +375,9 @@ both filters or with the state `pending` answers `400`
 `succeeded`, `failed` and `discarded` requests and answers `{ count }`. A list
 that names a pending request deletes nothing. A repeat of a deleted request
 key by its caller inserts a new request and calls the write again; `--force`
-accepts that risk. No process deletes an outbound request.
+accepts that risk. A range that matches more than 1000 requests answers `400`
+`intake.outbound.request.filter_invalid` and deletes nothing; the caller
+narrows the range. No process deletes an outbound request.
 
 **Statuses:** `200` with `{ count }`; `400`
 `intake.outbound.request.force_required`; `400`
@@ -449,8 +452,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | HTTP  | Code                                                   | Condition                                                                                                                                                           | Commands                                                                                                                                                                   |
 | ----- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 400   | `credential.platform.mismatch`                         | The requested platform differs from the stored platform.                                                                                                            | `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get`, `intake.storage.delete` |
-| 400   | `intake.inbound.event.filter_invalid`                  | The delete names no filter, both filters or the state `pending`.                                                                                                    | event delete                                                                                                                                                               |
-| 400   | `intake.outbound.request.filter_invalid`               | The delete names no filter, both filters or the state `pending`.                                                                                                    | outbound delete                                                                                                                                                            |
+| 400   | `intake.inbound.event.filter_invalid`                  | The delete names no filter, both filters or the state `pending`, or its range matches more than 1000 rows.                                                          | event delete                                                                                                                                                               |
+| 400   | `intake.outbound.request.filter_invalid`               | The delete names no filter, both filters or the state `pending`, or its range matches more than 1000 rows.                                                          | outbound delete                                                                                                                                                            |
 | 400   | `intake.outbound.request.force_required`               | The delete omits `force: true`.                                                                                                                                     | outbound delete                                                                                                                                                            |
 | 400   | `repository.platform.github.cursor_page_size_mismatch` | A review comment read names another `limit` than its cursor.                                                                                                        | `intake.action.read`                                                                                                                                                       |
 | 401   | `intake.inbound.event.signature_invalid`               | The webhook post fails verification.                                                                                                                                | receipt route                                                                                                                                                              |
