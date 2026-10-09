@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import { stringify } from "yaml";
 import { Command } from "commander";
 import { decode } from "hono/jwt";
-import { loadConfig } from "../../config/index.ts";
+import type { ServerConfig } from "../../config/index.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { isNumber, isObject, isString } from "../../kernel/values.ts";
@@ -69,6 +68,11 @@ function renderClaims(token: string): string {
     return `${key}: ${text}${timestamp}`;
   });
   return `---\n${lines.join("\n")}\n---\n`;
+}
+
+async function loadServerConfig(path: string): Promise<ServerConfig> {
+  const { loadConfig } = await import("../../config/index.ts");
+  return loadConfig(path);
 }
 
 interface GenerateOptions {
@@ -159,7 +163,7 @@ export function addJWTCommand(program: Command): void {
       ) => {
         validateGenerateOptions(username, options);
         if (options.output === undefined) requireTokenTerminal(process.stdout);
-        const config = loadConfig(effectivePath(command));
+        const config = await loadServerConfig(effectivePath(command));
         const { token } =
           options.binding === undefined
             ? await generateHumanJWT(
@@ -184,6 +188,7 @@ export function addJWTCommand(program: Command): void {
               : { endpoint: options.endpoint }),
             token,
           });
+          const { stringify } = await import("yaml");
           writePrivate(path, stringify(document));
           process.stdout.write(`Created ${path}\n`);
         } else if (options.binding === undefined)

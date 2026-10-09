@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import convict, { type Field, type Schema } from "convict";
 import { stringify } from "yaml";
-import { dirname, join, resolve } from "node:path";
-import { directories } from "../kernel/xdg.ts";
+import { dirname } from "node:path";
 import {
   parseMapping,
   inspectTree,
@@ -11,6 +10,7 @@ import {
 } from "../kernel/yaml.ts";
 export { directories, type Directories } from "../kernel/xdg.ts";
 export { parseMapping } from "../kernel/yaml.ts";
+export { configPath } from "./path.ts";
 import { randomBytes } from "node:crypto";
 import { audit, readPrivate } from "../kernel/files.ts";
 import { Diagnostic } from "../kernel/errors.ts";
@@ -38,17 +38,6 @@ export interface ServerConfig extends GlobalConfig {
   agent: AgentConfig;
   worker: WorkerConfig;
   scheduler: SchedulerConfig;
-}
-
-export function configPath(
-  option?: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return resolve(
-    option ??
-      env.KANTHORD_CONFIG ??
-      join(directories(env).config, "kanthord.yaml"),
-  );
 }
 
 convict.addParser({ extension: ["yaml", "yml"], parse: parseMapping });

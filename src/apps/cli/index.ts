@@ -11,14 +11,10 @@ import { intakeOperations } from "../../intake/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError } from "commander";
 import { dirname } from "node:path";
-import { initialConfig, loadConfig, showConfig } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { Diagnostic, diagnostic } from "../../kernel/errors.ts";
 import type { Server } from "../server/index.ts";
-import { runWorker } from "../worker/index.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
-import { openapiPath } from "../../gateway/local.ts";
-import { writeOpenAPI } from "../../gateway/local.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
@@ -68,6 +64,7 @@ export async function initConfig(
   allowedHosts: readonly string[] = [],
   bind?: string,
 ): Promise<void> {
+  const { initialConfig } = await import("../../config/index.ts");
   const content = initialConfig(allowedHosts.map(allowedHost), bind);
   writePrivate(path, content);
   process.stdout.write(`Created ${path}\n`);
@@ -109,7 +106,8 @@ function addConfigCommand(program: Command): void {
     [
       "validate",
       "Validate the stored configuration",
-      (path: string) => {
+      async (path: string) => {
+        const { loadConfig } = await import("../../config/index.ts");
         loadConfig(path);
         process.stdout.write(`Valid configuration: ${path}\n`);
       },
@@ -117,7 +115,8 @@ function addConfigCommand(program: Command): void {
     [
       "show",
       "Show effective configuration with secrets masked",
-      (path: string) => {
+      async (path: string) => {
+        const { showConfig } = await import("../../config/index.ts");
         process.stdout.write(showConfig(path));
       },
     ],
@@ -147,6 +146,18 @@ async function serveServer(
   if (error) throw error;
 }
 
+async function serveWorker(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  if (options.config !== undefined)
+    throw new Diagnostic(
+      "cli.serve.worker_config",
+      "serve worker: --config is not supported; use client options or cli.yaml.",
+    );
+  const { runWorker } = await import("../worker/index.ts");
+  const error = await runWorker(options);
+  if (error) throw error;
+}
+
 function addServeCommand(
   program: Command,
   onServer: (server: Server) => void,
@@ -173,16 +184,7 @@ function addServeCommand(
       "--token <jwt>",
       "Machine JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
     )
-    .action(async (_options, command: Command) => {
-      const options = command.optsWithGlobals();
-      if (options.config !== undefined)
-        throw new Diagnostic(
-          "cli.serve.worker_config",
-          "serve worker: --config is not supported; use client options or cli.yaml.",
-        );
-      const error = await runWorker(options);
-      if (error) throw error;
-    });
+    .action((_options, command: Command) => serveWorker(command));
 }
 
 export function createProgram(
@@ -272,11 +274,14 @@ function addGatewayCommand(program: Command): void {
   gateway
     .command("openapi")
     .description("Emit the package OpenAPI contract locally")
-    .action(() => {
-      const path = openapiPath();
-      writeOpenAPI(apiOperations, dirname(path));
-      process.stdout.write(`${path}\n`);
-    });
+    .action(writePackageOpenAPI);
+}
+
+async function writePackageOpenAPI(): Promise<void> {
+  const { openapiPath, writeOpenAPI } = await import("../../gateway/local.ts");
+  const path = openapiPath();
+  writeOpenAPI(apiOperations, dirname(path));
+  process.stdout.write(`${path}\n`);
 }
 
 export async function runCLI(
