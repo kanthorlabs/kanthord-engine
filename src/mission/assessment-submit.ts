@@ -25,6 +25,7 @@ import {
   insertOutcome,
   readExecutionAssessmentsOfAttempt,
   readLandedCommitEvidence,
+  readRequests,
   type AssessmentRow,
   type OutcomeRow,
 } from "./record-store.ts";
@@ -32,6 +33,7 @@ import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 
 const NO_REQUIRED_ACTIONS = 0;
+const NO_REQUESTS = 0;
 
 function causesRework(
   tx: Transaction,
@@ -39,6 +41,11 @@ function causesRework(
   assessment: AssessmentRow,
 ): boolean {
   if (assessment.result !== AssessmentResult.CriterionNotMet) return false;
+  if (
+    readRequests(tx, assessment.node_id, assessment.attempt).length >
+    NO_REQUESTS
+  )
+    return false;
   const reworks = readExecutionAssessmentsOfAttempt(
     tx,
     assessment.node_id,

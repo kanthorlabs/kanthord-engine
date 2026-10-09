@@ -499,8 +499,8 @@ objective. A task record or a task attempt is not manufactured for convenience.
   judges the criterion of each current task. The result may trigger ordinary closure/blocking under the
   domain rules; clients cannot submit an ordinary node outcome directly.
 - A current execution assessment with the result `criterion-not-met` causes a
-  rework while the attempt holds fewer reworks than `mission.rework_limit`. The
-  reworks of an attempt are its earlier execution assessments with the result
+  rework while the attempt holds fewer reworks than `mission.rework_limit` and
+  no request evidence. The reworks of an attempt are its earlier execution assessments with the result
   `criterion-not-met`. A rework ends the claim, writes no outcome and keeps the
   attempt open. It moves the node from `Evaluating` to `Available` with a job
   when the node is claimable. Every other current assessment that does not pass

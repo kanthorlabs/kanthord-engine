@@ -287,9 +287,8 @@ test("current nonpassing assessments block and a required-action pass keeps eval
   assert.ok(h.store.transaction((tx) => readOpenAttempt(tx, h.node_id)));
 });
 
-test("nonpassing assessment closes into Blocked while preserving its unresolved request", async (t) => {
+test("a criterion-not-met assessment of an attempt with a request closes into Blocked below the rework limit and preserves the request", async (t) => {
   const h = await fixture(t, RepositoryAction.PullRequest);
-  h.dependencies.config.rework_limit = REWORK_OFF;
   await h.submit();
   const request = await h.invoke("evidence.request", {
     params: { node_id: h.node_id },
