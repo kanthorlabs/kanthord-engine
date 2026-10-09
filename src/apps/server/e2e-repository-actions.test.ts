@@ -204,8 +204,7 @@ async function setup(t: TestContext) {
 
 test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
   const h = await setup(t);
-  let e2: ExecutionRecord, e4: ExecutionRecord;
-  let Q: string, q: string;
+  let e2: ExecutionRecord;
 
   await t.test("E03.1 P reaches a passing evaluation claim", async () => {
     e2 = await h.passingEvaluation(h.P, h.gated.id, h.p);
@@ -292,10 +291,10 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(asset.address.commit, MERGED_COMMIT);
     assert.equal((await h.node(h.P)).state, NodeState.Completed);
   });
+  const Q = await h.create("objective-q.md", "objective", [MERGE], h.I);
+  const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "objective q\n");
+  const e4 = await h.passingEvaluation(Q, h.merge.id, q);
   await t.test("E03.7 a merge push lands Q on main", async () => {
-    Q = await h.create("objective-q.md", "objective", [MERGE], h.I);
-    q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "objective q\n");
-    e4 = await h.passingEvaluation(Q, h.merge.id, q);
     const result = await h.request(e4);
     const c = await remoteHead(h.mergeBare.bare, MAIN_REF);
     assert.ok(c && c !== h.mergeBare.head);
