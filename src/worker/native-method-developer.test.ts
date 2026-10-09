@@ -104,6 +104,18 @@ test("developer@1 opens the reviewer from the second agent with its own credenti
             },
           ],
         }),
+      "execution.reworkAssessment.get": async () => ({
+        type: "failure",
+        status: 404,
+        error: {
+          request_id: "request",
+          error: {
+            code: "mission.record.not_found",
+            message: "Not found",
+            details: null,
+          },
+        },
+      }),
       "evidence.submit": async () => complete({ evidence: {} }),
     },
     scheduler: { executionRelease: async () => complete({}) },

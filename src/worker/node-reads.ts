@@ -1,7 +1,14 @@
-import type { ClientOptions, OperationResult } from "../kernel/operation.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import {
+  OperationResultType,
+  type ClientOptions,
+  type OperationResult,
+} from "../kernel/operation.ts";
+import {
+  MissionErrorCode,
   NodeState,
   type Revision,
+  type Assessment,
   type ExecutionObjective,
 } from "../mission/contract.ts";
 import { EndReason, ExecutionRun } from "./execution-run.ts";
@@ -99,6 +106,34 @@ export async function readClearedOutcome(run: ExecutionRun) {
       },
       options,
     ),
+  );
+}
+
+export async function readReworkAssessment(run: ExecutionRun) {
+  return run.call(
+    async (options): Promise<OperationResult<Assessment | null>> => {
+      const result = await run.clients.mission[
+        "execution.reworkAssessment.get"
+      ](
+        {
+          params: { execution_id: run.claim.execution_id },
+          query: {},
+          body: null,
+        },
+        options,
+      );
+      if (
+        result.type === OperationResultType.Failure &&
+        result.status === HttpStatus.NotFound &&
+        result.error.error.code === MissionErrorCode.RecordNotFound
+      )
+        return {
+          type: OperationResultType.Completed,
+          status: HttpStatus.OK,
+          data: null,
+        };
+      return result;
+    },
   );
 }
 

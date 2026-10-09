@@ -115,6 +115,7 @@ export type TaskRunner = (
   state: StepsState,
   task: TaskContent,
   boundary: TaskBoundary,
+  instruction: string | null,
 ) => Promise<TaskResult>;
 
 export async function runStepsObjective(
@@ -129,9 +130,9 @@ export async function runStepsObjective(
         checked.budgetEnd.task,
         checked.budgetEnd.boundary,
       );
-    for (const { task, boundary } of checked.pending) {
+    for (const { task, boundary, instruction } of checked.pending) {
       state.task = task;
-      const result = await taskRunner(state, task, boundary);
+      const result = await taskRunner(state, task, boundary, instruction);
       if (result.kind === TaskResultKind.BudgetEnd)
         return await finishObjective(state, task, result.boundary);
     }
@@ -166,10 +167,11 @@ export async function runTask(
   state: StepsState,
   task: TaskContent,
   initialBoundary: TaskBoundary = TaskBoundary.InProgress,
+  initialInstruction: string | null = null,
   worked = false,
 ): Promise<TaskResult> {
   const budget = state.agent.budget;
-  let instruction: string | null = null;
+  let instruction = initialInstruction;
   let boundary = initialBoundary;
   let workDone = worked;
   const ended = (boundary: TaskBoundary): TaskResult => ({
@@ -240,6 +242,7 @@ export interface StepsState {
   directory: string;
   head: string;
   nodeBranch: string;
+  priorRationale: string | null;
   task?: TaskContent;
 }
 
@@ -293,13 +296,19 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
   return verification;
 }
 
+export interface PendingTask {
+  task: TaskContent;
+  boundary: TaskBoundary;
+  instruction: string | null;
+}
+
 export async function startCheck(state: StepsState): Promise<{
-  pending: { task: TaskContent; boundary: TaskBoundary }[];
+  pending: PendingTask[];
   budgetEnd: { task: TaskContent; boundary: TaskBoundary } | null;
 }> {
   assert.ok(state.revision.tasks);
   assert.ok(state.head);
-  const pending: { task: TaskContent; boundary: TaskBoundary }[] = [];
+  const pending: PendingTask[] = [];
   for (const task of state.revision.tasks) {
     state.task = task;
     const verification = await verifyTask(state, task);
@@ -308,12 +317,12 @@ export async function startCheck(state: StepsState): Promise<{
     if (state.agent.budget.exhausted())
       return { pending, budgetEnd: { task, boundary } };
     if (!passed) {
-      pending.push({ task, boundary });
+      pending.push({ task, boundary, instruction: null });
       continue;
     }
     await state.agent.instruct(
       taskWork(state, task),
-      taskJudgementInstruction(task),
+      taskJudgementInstruction(task, state.priorRationale),
     );
     if (state.agent.budget.exhausted()) {
       return { pending, budgetEnd: { task, boundary } };
@@ -327,7 +336,15 @@ export async function startCheck(state: StepsState): Promise<{
       return { pending, budgetEnd: { task, boundary } };
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
-    if (!judgement.criterion_met) pending.push({ task, boundary });
+    if (!judgement.criterion_met)
+      pending.push({
+        task,
+        boundary,
+        instruction:
+          state.priorRationale === null
+            ? null
+            : criterionRevisionInstruction(state.priorRationale),
+      });
   }
   return { pending, budgetEnd: null };
 }

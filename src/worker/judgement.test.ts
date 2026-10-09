@@ -8,6 +8,7 @@ import {
   evaluationInstruction,
   JUDGEMENT_MARKER,
   repairInstruction,
+  taskJudgementInstruction,
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
 
@@ -106,4 +107,28 @@ const JUDGEMENT_REPAIR =
 
 test("the repair instruction names the marker of the invalid reply", () => {
   assert.equal(repairInstruction(JUDGEMENT_MARKER), JUDGEMENT_REPAIR);
+});
+
+test("a prior rationale adds the reviewer judgement to the task judgement instruction", () => {
+  const task = {
+    id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    filename: "task.md",
+    content: {
+      name: "task",
+      requirement: "work",
+      criterion: "criterion",
+      verifications: ["true"],
+      bindings: [],
+    },
+  };
+  const plain = taskJudgementInstruction(task);
+  assert.equal(taskJudgementInstruction(task, null), plain);
+  assert.doesNotMatch(plain, /The reviewer judged/);
+  assert.equal(
+    taskJudgementInstruction(task, "edge case unmet"),
+    plain.replace(
+      "\nEnd with exactly:",
+      "\nThe reviewer judged: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",
+    ),
+  );
 });

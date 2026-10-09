@@ -73,10 +73,10 @@ async function reviewTask(
 }
 
 export function reviewedTaskRunner(reviewer: ReviewerSessions): TaskRunner {
-  return async (state, task, boundary) => {
+  return async (state, task, boundary, instruction) => {
     const budget = state.agent.budget;
     const base = state.head;
-    let result = await runTask(state, task, boundary);
+    let result = await runTask(state, task, boundary, instruction);
     let findings: readonly Finding[] = [];
     let replies: string | null = null;
     for (let round = FIRST_ROUND; round <= REVIEW_ROUNDS; round++) {
@@ -101,7 +101,7 @@ export function reviewedTaskRunner(reviewer: ReviewerSessions): TaskRunner {
       );
       replies = state.agent.lastText() ?? null;
       const before = state.head;
-      result = await runTask(state, task, TaskBoundary.InProgress, true);
+      result = await runTask(state, task, TaskBoundary.InProgress, null, true);
       if (!hasBlocker(findings) || state.head === before) return result;
     }
     return result;

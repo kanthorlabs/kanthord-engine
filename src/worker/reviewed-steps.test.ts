@@ -30,7 +30,10 @@ import {
 } from "./steps-objective.ts";
 import { reviewedTaskRunner } from "./reviewed-steps.ts";
 import { REVIEW_MARKER, REVIEW_ROUNDS } from "./review.ts";
-import { repairInstruction } from "./judgement.ts";
+import {
+  criterionRevisionInstruction,
+  repairInstruction,
+} from "./judgement.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
 const JUDGEMENT =
@@ -187,6 +190,7 @@ async function fixture(
       agent,
       revision: { tasks: [task] } as Revision,
       ...workspace,
+      priorRationale: null,
     },
     budget,
     provider,
@@ -204,6 +208,7 @@ test("a clean first review completes the task after one review round", async (t)
     h.state,
     task,
     TaskBoundary.InProgress,
+    null,
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
   assert.equal(reviewer.instructions.length, FIRST_ROUND);
@@ -227,6 +232,7 @@ test("a blocker leads to a fix round and a second review with the earlier findin
     h.state,
     task,
     TaskBoundary.InProgress,
+    null,
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
   assert.equal(reviewer.instructions.length, SECOND_ROUND);
@@ -250,6 +256,7 @@ test("a fix round that commits nothing ends the review of the task", async (t) =
     h.state,
     task,
     TaskBoundary.InProgress,
+    null,
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
   assert.equal(reviewer.instructions.length, FIRST_ROUND);
@@ -276,6 +283,7 @@ test("the review stops after the round cap while a blocker stands", async (t) =>
     h.state,
     task,
     TaskBoundary.InProgress,
+    null,
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
   assert.equal(reviewer.instructions.length, REVIEW_ROUNDS);
@@ -293,6 +301,7 @@ test("two review replies without the review line end the review and keep the tas
     h.state,
     task,
     TaskBoundary.InProgress,
+    null,
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
   assert.deepEqual(reviewer.instructions.slice(1), [
@@ -319,9 +328,30 @@ test("one review reply without the review line gets a repair turn and the repair
     h.state,
     task,
     TaskBoundary.InProgress,
+    null,
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
   assert.equal(reviewer.instructions[1], repairInstruction(REVIEW_MARKER));
   assert.ok(reviewer.instructions[2]!.includes(JSON.stringify([BLOCKER])));
   assert.equal(reviewer.closed(), SECOND_ROUND);
+});
+
+test("a start-check revision instruction opens the first work turn of a reviewed task", async (t) => {
+  const h = await fixture(t, [
+    write("a.txt"),
+    fauxAssistantMessage("done"),
+    fauxAssistantMessage(JUDGEMENT),
+  ]);
+  const reviewer = fakeReviewer(h.budget, [CLEAN_REVIEW]);
+  const revision = criterionRevisionInstruction(
+    "The edge case stays unhandled",
+  );
+  const result = await reviewedTaskRunner(reviewer.sessions)(
+    h.state,
+    task,
+    TaskBoundary.RunPassed,
+    revision,
+  );
+  assert.deepEqual(result, { kind: TaskResultKind.Complete });
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes(revision));
 });

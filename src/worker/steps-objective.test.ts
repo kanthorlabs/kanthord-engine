@@ -22,7 +22,11 @@ import {
 } from "./test-support.ts";
 import { EndReason, ExecutionRun } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
-import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
+import {
+  criterionRevisionInstruction,
+  JUDGEMENT_MARKER,
+  repairInstruction,
+} from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
 import { TaskBoundary, type TaskRunner } from "./steps-objective.ts";
@@ -152,6 +156,7 @@ async function fixture(
     agent,
     revision: { tasks } as Revision,
     ...workspace,
+    priorRationale: null as string | null,
     provider,
     bare,
   };
@@ -245,8 +250,18 @@ test("start check judges passing tasks in order and discards verification change
     ),
   ]);
   assert.deepEqual(
-    (await startCheck(h)).pending.map(({ task }) => task.id),
-    [tasks[0]!.id, tasks[2]!.id],
+    (await startCheck(h)).pending.map(({ task, instruction }) => [
+      task.id,
+      instruction,
+    ]),
+    [
+      [tasks[0]!.id, null],
+      [tasks[2]!.id, null],
+    ],
+  );
+  assert.doesNotMatch(
+    JSON.stringify(h.provider.calls[0]),
+    /The reviewer judged/,
   );
   assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
   assert.equal(existsSync(join(h.directory, "dirty")), false);
@@ -657,4 +672,39 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
     await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
     PARTIAL_WORK,
   );
+});
+
+test("the start check judges a task against the prior rationale and revises it with that rationale", async (t) => {
+  const rationale = "The edge case stays unhandled";
+  const current = task("rework", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":false,"rationale":"unmet"}',
+      ),
+      fauxAssistantMessage("revised"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  h.priorRationale = rationale;
+  const checked = await startCheck(h);
+  assert.ok(
+    JSON.stringify(h.provider.calls[0]).includes(
+      `The reviewer judged: ${rationale}. Judge whether the task criterion is met now.`,
+    ),
+  );
+  const revision = criterionRevisionInstruction(rationale);
+  assert.deepEqual(checked.pending, [
+    { task: current, boundary: "run_passed", instruction: revision },
+  ]);
+  const [pending] = checked.pending;
+  assert.deepEqual(
+    await runTask(h, current, pending!.boundary, pending!.instruction),
+    { kind: "complete" },
+  );
+  assert.ok(JSON.stringify(h.provider.calls[1]).includes(revision));
 });

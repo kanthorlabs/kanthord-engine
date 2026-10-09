@@ -65,10 +65,17 @@ export async function parseRepaired<T extends z.ZodType>(
   );
 }
 
-export function taskJudgementInstruction(task: TaskContent): string {
+export function taskJudgementInstruction(
+  task: TaskContent,
+  priorRationale: string | null = null,
+): string {
   assert.ok(task.id);
   assert.ok(task.content.criterion);
-  return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterion_met": true, "rationale": "Explain your judgement"}`;
+  const prior =
+    priorRationale === null
+      ? ""
+      : `\nThe reviewer judged: ${priorRationale}. Judge whether the task criterion is met now.`;
+  return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}${prior}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterion_met": true, "rationale": "Explain your judgement"}`;
 }
 
 export function failedVerificationRationale(

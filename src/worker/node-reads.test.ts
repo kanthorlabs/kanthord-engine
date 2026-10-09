@@ -9,6 +9,7 @@ import {
   nodeKindOf,
   readAllPages,
   readClearedOutcome,
+  readReworkAssessment,
   READ_PAGE_LIMIT,
 } from "./node-reads.ts";
 import { NodeKind } from "./native-agent.ts";
@@ -96,4 +97,33 @@ test("node kind, terminal states and cleared outcome follow the pinned attempt",
     );
   }
   assert.equal(calls, INITIAL_ATTEMPT);
+});
+
+test("the rework assessment read answers null only on a record not found", async (t) => {
+  const assessment = { id: "assessment", rationale: "unmet" };
+  const failure = (status: number, code: string) => ({
+    type: OperationResultType.Failure,
+    status,
+    error: {
+      request_id: "request",
+      error: { code, message: "failed", details: null },
+    },
+  });
+  for (const [answer, expected] of [
+    [
+      { type: OperationResultType.Completed, status: 200, data: assessment },
+      assessment,
+    ],
+    [failure(404, "mission.record.not_found"), null],
+    [failure(404, "mission.execution.revision_above_pin"), ExecutionStop],
+  ] as const) {
+    const run = fixture();
+    t.after(() => run.dispose());
+    run.clients.mission = {
+      "execution.reworkAssessment.get": async () => answer,
+    } as unknown as MethodClients["mission"];
+    if (expected === ExecutionStop)
+      await assert.rejects(readReworkAssessment(run), ExecutionStop);
+    else assert.deepEqual(await readReworkAssessment(run), expected);
+  }
 });

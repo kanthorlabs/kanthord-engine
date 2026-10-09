@@ -28,6 +28,7 @@ import { reviewedTaskRunner } from "./reviewed-steps.ts";
 import {
   nodeKindOf,
   readClearedOutcome,
+  readReworkAssessment,
   readPinnedRevision,
 } from "./node-reads.ts";
 import { prepareStepsWorkspace, runStepsObjective } from "./steps-objective.ts";
@@ -114,6 +115,7 @@ export async function runNativeExecution(
         return runEvaluation(input, run, open);
       if (kind === NodeKind.Initiative)
         return runStepsInitiative(input, run, revision, open);
+      const rework = await readReworkAssessment(run);
       const workspace = await prepareStepsWorkspace(input, run);
       let working: NativeAgent;
       try {
@@ -131,6 +133,7 @@ export async function runNativeExecution(
         revision,
         agent: working,
         ...workspace,
+        priorRationale: rework?.rationale ?? null,
       };
       if (method === WorkerMethod.ReviewedSteps)
         return runStepsObjective(
