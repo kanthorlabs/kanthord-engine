@@ -292,9 +292,11 @@ HTTP `200` returns the summary fields plus:
   judgement stops the execution with `judgement_invalid`, and a second invalid
   review reply ends the review of that task.
   A steps execution reads the assessment that caused the latest rework of its
-  attempt. The task judgement at the start carries the rationale of that
-  assessment, and a task that the agent judges unmet starts its work with a
-  revision instruction that holds the rationale. A reviewer execution whose
+  attempt. When the attempt holds no such assessment, the execution reads the
+  assessment that the cleared outcome names. The task judgement at the start
+  carries the rationale of the first assessment that exists, and a task that the
+  agent judges unmet starts its work with a revision instruction that holds the
+  rationale. A reviewer execution whose
   `criterion-not-met` assessment causes a rework ends with no release, because
   the assessment ends its claim.
   An external harness must release before its `expired_at`.

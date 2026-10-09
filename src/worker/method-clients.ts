@@ -14,7 +14,6 @@ export interface MethodClients {
     | "execution.objective.list"
     | "execution.objective.outcome.list"
     | "execution.objective.evidence.list"
-    | "execution.clearedOutcome.get"
     | "execution.clearedAssessment.get"
     | "execution.reworkAssessment.get"
   >;
