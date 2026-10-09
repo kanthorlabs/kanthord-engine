@@ -352,8 +352,8 @@ The implemented fields are:
 - `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
-- `mission.consecutive_loss_limit`: optional Convict `nat`, default `3`. It
-  holds the consecutive loss limit of the Mission Service.
+- `mission.consecutive_failure_limit`: optional Convict `nat`, default `3`. It
+  holds the consecutive failure limit of the Mission Service.
 - `mission.text_max_bytes`: optional Convict `nat` in UTF-8 bytes, default
   `32768`. It bounds every `Text` value of a Mission write; a stored value keeps
   its length after a change of the bound.

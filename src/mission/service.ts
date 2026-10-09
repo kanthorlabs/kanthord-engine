@@ -56,7 +56,7 @@ import {
   executionObjectiveOutcomes,
   executionObjectiveEvidence,
 } from "./execution-read.ts";
-import { claim, release, loss } from "./transitions.ts";
+import { claim, release, failure } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
 import { authorizeAction, authorizeRequest } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
@@ -140,9 +140,9 @@ export class MissionService
     return release(tx, this.dependencies, ...rest);
   }
 
-  loss(...args: Parameters<MissionTransitions["loss"]>) {
+  failure(...args: Parameters<MissionTransitions["failure"]>) {
     const [tx, ...rest] = args;
-    return loss(tx, this.dependencies, ...rest);
+    return failure(tx, this.dependencies, ...rest);
   }
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;

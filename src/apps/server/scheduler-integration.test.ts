@@ -19,7 +19,9 @@ import {
 import {
   schedulerOperations,
   ClaimState,
+  ExecutionStopReason,
   WorkPullKind,
+  type ExecutionStop,
   WORK_PULL_TIMEOUT_MS,
   SCHEDULER_TIMEOUT_MS,
 } from "../../scheduler/contract.ts";
@@ -45,6 +47,12 @@ const NO_INPUT = { params: {}, query: {}, body: null };
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const NOT_RUNNING = "scheduler.execution.not_running";
 const VALIDATION_FAILED = "gateway.request.validation_failed";
+const OPERATION_FAILED_STOP: ExecutionStop = {
+  reason: ExecutionStopReason.OperationFailed,
+  code: "llm.provider.unavailable",
+};
+const NO_FAILURE_COUNT_RESET = 1;
+const LOST_FAILURE = 2;
 const CONTENT = {
   name: "Work",
   requirement: "Do work",
@@ -294,6 +302,20 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       generalToken,
       options,
     );
+  const stop = (
+    executionId: string,
+    token = generalToken,
+    furtherWork = true,
+  ) =>
+    call(
+      schedulerOperations.executionRelease,
+      {
+        params: { execution_id: executionId },
+        query: {},
+        body: { further_work: furtherWork, stop: OPERATION_FAILED_STOP },
+      },
+      token,
+    );
   const get = (executionId: string) =>
     call(schedulerOperations.executionGet, {
       params: { execution_id: executionId },
@@ -321,6 +343,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
     reviewer,
     pull,
     release,
+    stop,
     get,
     node,
   };
@@ -620,8 +643,8 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
           }),
         );
       }
-      const routing = step.mock.method(h.f.mission, "loss");
-      const limit = h.f.config.mission.consecutive_loss_limit;
+      const routing = step.mock.method(h.f.mission, "failure");
+      const limit = h.f.config.mission.consecutive_failure_limit;
       for (let loss = 1; loss <= limit; loss++) {
         const claim = completed(
           await h.pull(
@@ -663,6 +686,134 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
       }
     });
   }
+});
+
+async function prepareEvaluation(h: Awaited<ReturnType<typeof setup>>) {
+  const first = completed(await h.pull());
+  assert.ok(first.kind === WorkPullKind.Claimed);
+  completed(await h.release(first.execution.execution_id));
+  completed(
+    await h.call(missionOperations["node.ready"], {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        reason: "review",
+        expected_mission_version: 3,
+        expected_state: NodeState.Available,
+        expected_attempt: 1,
+      },
+    }),
+  );
+}
+
+test("real Mission routes stopped and lost claims below and at the failure limit", async (t) => {
+  for (const evaluation of [false, true]) {
+    await t.test(evaluation ? "evaluation" : "steps", async (step) => {
+      const h = await setup(step, "direct");
+      let now = Date.now();
+      step.mock.method(Date, "now", () => now);
+      if (evaluation) await prepareEvaluation(h);
+      const routing = step.mock.method(h.f.mission, "failure");
+      const limit = h.f.config.mission.consecutive_failure_limit;
+      const runtime = evaluation ? h.reviewer : h.general;
+      const token = evaluation ? h.reviewerToken : h.generalToken;
+      for (let failure = 1; failure <= limit; failure++) {
+        now++;
+        const claim = completed(await h.pull(runtime, token));
+        assert.ok(claim.kind === WorkPullKind.Claimed);
+        const lost = failure === LOST_FAILURE;
+        if (lost) {
+          now = claim.execution.expired_at;
+          h.f.scheduler.sweep();
+        } else completed(await h.stop(claim.execution.execution_id, token));
+        assert.equal(routing.mock.calls.length, failure);
+        assert.equal(routing.mock.calls.at(-1)!.arguments[2], failure);
+        const node = await h.node();
+        assert.ok(node.kind !== NodeKind.Task);
+        assert.equal(
+          node.state,
+          failure === limit
+            ? NodeState.Paused
+            : evaluation
+              ? NodeState.Waiting
+              : NodeState.Available,
+        );
+        const queue = completed(
+          await h.call(schedulerOperations.queueList, {
+            params: { project_id: h.project_id },
+            query: {},
+            body: null,
+          }),
+        );
+        assert.equal(
+          queue.items.some((job) => job.node_id === h.node_id),
+          failure < limit,
+        );
+        const execution = completed(await h.get(claim.execution.execution_id));
+        assert.equal(
+          execution.claim_state,
+          lost ? ClaimState.Lost : ClaimState.Finished,
+        );
+        assert.deepEqual(execution.stop, lost ? null : OPERATION_FAILED_STOP);
+      }
+      const read = { params: { node_id: h.node_id }, query: {}, body: null };
+      assert.deepEqual(
+        completed(await h.call(missionOperations["outcome.list"], read)).items,
+        [],
+      );
+      assert.deepEqual(
+        completed(await h.call(missionOperations["assessment.list"], read))
+          .items,
+        [],
+      );
+      assert.equal(
+        completed(
+          await h.call(missionOperations["attempt.get"], {
+            params: { node_id: h.node_id, attempt: FIRST_ATTEMPT },
+            query: {},
+            body: null,
+          }),
+        ).closed_at,
+        null,
+      );
+    });
+  }
+});
+
+test("a release with no stop ends the failure count", async (t) => {
+  const h = await setup(t, "direct");
+  const routing = t.mock.method(h.f.mission, "failure");
+  const limit = h.f.config.mission.consecutive_failure_limit;
+  for (let failure = 1; failure < limit; failure++) {
+    const claim = completed(await h.pull());
+    assert.ok(claim.kind === WorkPullKind.Claimed);
+    completed(await h.stop(claim.execution.execution_id));
+  }
+  const released = completed(await h.pull());
+  assert.ok(released.kind === WorkPullKind.Claimed);
+  completed(await h.release(released.execution.execution_id));
+  const claim = completed(await h.pull());
+  assert.ok(claim.kind === WorkPullKind.Claimed);
+  completed(await h.stop(claim.execution.execution_id));
+  assert.equal(routing.mock.calls.at(-1)!.arguments[2], NO_FAILURE_COUNT_RESET);
+  const node = await h.node();
+  assert.ok(node.kind !== NodeKind.Task);
+  assert.equal(node.state, NodeState.Available);
+});
+
+test("a stop with no further work answers a validation failure", async (t) => {
+  const h = await setup(t, "http");
+  const claim = completed(await h.pull());
+  assert.ok(claim.kind === WorkPullKind.Claimed);
+  refused(
+    await h.stop(claim.execution.execution_id, h.generalToken, false),
+    HttpStatus.BadRequest,
+    VALIDATION_FAILED,
+  );
+  assert.equal(
+    completed(await h.get(claim.execution.execution_id)).claim_state,
+    ClaimState.Running,
+  );
 });
 
 test("sweep and human revocation defeat an already proved release with one terminal routing", async (t) => {

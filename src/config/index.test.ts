@@ -30,7 +30,7 @@ const DEFAULT_BIND = "127.0.0.1";
 const DEFAULT_LOG_LEVEL = "info";
 const DEFAULT_PORT = 31415;
 const DEFAULT_IDEMPOTENCY_TTL = 86400;
-const DEFAULT_CONSECUTIVE_LOSS_LIMIT = 3;
+const DEFAULT_CONSECUTIVE_FAILURE_LIMIT = 3;
 const DEFAULT_TEXT_MAX_BYTES = 32768;
 const DEFAULT_HEARTBEAT_WINDOW = 300;
 const DEFAULT_RELEASE_RESERVE = 600;
@@ -60,7 +60,7 @@ test("service fragments preserve the existing YAML field set", () => {
     heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
   });
   assert.deepEqual(Object.keys(config.mission).sort(), [
-    "consecutive_loss_limit",
+    "consecutive_failure_limit",
     "text_max_bytes",
   ]);
   assert.deepEqual(Object.keys(config.gateway).sort(), [
@@ -198,17 +198,20 @@ test("mission configuration defaults and strict validation", () => {
   const masterKey = randomBytes(32).toString("base64");
   const mission = configuration({ master_key: masterKey }).getProperties()
     .mission;
-  assert.equal(mission.consecutive_loss_limit, DEFAULT_CONSECUTIVE_LOSS_LIMIT);
+  assert.equal(
+    mission.consecutive_failure_limit,
+    DEFAULT_CONSECUTIVE_FAILURE_LIMIT,
+  );
   assert.equal(mission.text_max_bytes, DEFAULT_TEXT_MAX_BYTES);
   assert.doesNotThrow(() =>
     configuration({
       master_key: masterKey,
-      mission: { consecutive_loss_limit: DEFAULT_CONSECUTIVE_LOSS_LIMIT },
+      mission: { consecutive_failure_limit: DEFAULT_CONSECUTIVE_FAILURE_LIMIT },
     }),
   );
   for (const invalidMission of [
     { unknown: true },
-    { consecutive_loss_limit: -1 },
+    { consecutive_failure_limit: -1 },
   ]) {
     assert.throws(
       () => configuration({ master_key: masterKey, mission: invalidMission }),

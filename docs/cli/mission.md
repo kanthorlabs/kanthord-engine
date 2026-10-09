@@ -381,7 +381,7 @@ only.
   [node resume ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#node-resume).
   `Waiting` opens the attempt when the node holds none, as `node ready` does;
   an open attempt stays open. Every other target opens no attempt.
-  It resets no loss count and never invalidates a passing assessment merely by resuming.
+  It resets no failure count and never invalidates a passing assessment merely by resuming.
 - Block accepts `HumanAct`, returns `ControlResult`, and requires `Paused`.
   It records the human reason in an outcome and closes an open attempt.
   When the attempt reads 0, it opens or closes no attempt.

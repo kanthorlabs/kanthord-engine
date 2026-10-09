@@ -113,7 +113,7 @@ engine/
 │   │   ├── control-hold.ts     # Pause, ready, and resume
 │   │   ├── control-close.ts    # Block, discard, and success override
 │   │   ├── control-unblock.ts  # Atomic direction change and next attempt
-│   │   ├── transitions.ts     # Scheduler claim, release admission, and loss
+│   │   ├── transitions.ts     # Scheduler claim, release admission, and failure
 │   │   ├── execution.ts       # Live claim and execution context admission
 │   │   ├── execution-read.ts  # Pinned revisions, attempts and current objective outcomes
 │   │   ├── evidence-content.ts # Binding, byte and verification validation

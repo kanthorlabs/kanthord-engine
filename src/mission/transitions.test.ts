@@ -348,19 +348,19 @@ test("reviewer release requires a current success and every eligible request", (
   assert.equal(h.claim([NodeState.ExternalRequested]), null);
 });
 
-test("loss routes below the limit, pauses at the limit and resume permits another claim", async (t) => {
+test("a failure routes below the limit, pauses at the limit and resume permits another claim", async (t) => {
   const h = fixture(t);
   h.claim();
   h.store.transaction((tx) =>
-    h.service.loss(tx, h.node_id, FIRST_ATTEMPT, NOW),
+    h.service.failure(tx, h.node_id, FIRST_ATTEMPT, NOW),
   );
   assert.equal(h.node().state, NodeState.Available);
   h.claim();
   h.store.transaction((tx) =>
-    h.service.loss(
+    h.service.failure(
       tx,
       h.node_id,
-      h.dependencies.config.consecutive_loss_limit,
+      h.dependencies.config.consecutive_failure_limit,
       NOW,
     ),
   );
@@ -380,7 +380,7 @@ test("loss routes below the limit, pauses at the limit and resume permits anothe
   assert.ok(h.claim());
   h.store.transaction((tx) => {
     setNodeState(tx, h.node_id, NodeState.Evaluating);
-    h.service.loss(tx, h.node_id, FIRST_ATTEMPT, NOW);
+    h.service.failure(tx, h.node_id, FIRST_ATTEMPT, NOW);
   });
   assert.equal(h.node().state, NodeState.Waiting);
 });

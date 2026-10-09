@@ -208,10 +208,10 @@ export interface MissionTransitions {
     furtherWork: boolean,
     now: number,
   ): void;
-  loss(
+  failure(
     tx: Transaction,
     nodeId: string,
-    consecutiveLosses: number,
+    consecutiveFailures: number,
     now: number,
   ): void;
 }

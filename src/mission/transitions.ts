@@ -38,7 +38,7 @@ import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 const NO_ATTEMPT = 0;
 const RESOURCE_KIND_SEGMENT = 0;
 const NO_ELIGIBLE_ACTIONS = 0;
-const NO_CONSECUTIVE_LOSSES = 0;
+const NO_CONSECUTIVE_FAILURES = 0;
 const RELEASE_UNMET = "mission.release.obligation_unmet";
 
 export function claim(
@@ -179,11 +179,11 @@ export function release(
   );
 }
 
-export function loss(
+export function failure(
   tx: Transaction,
   dependencies: Dependencies,
   nodeId: string,
-  consecutiveLosses: number,
+  consecutiveFailures: number,
   now: number,
 ): void {
   const node = requireNode(tx, nodeId);
@@ -191,11 +191,11 @@ export function loss(
     node.state === NodeState.Executing || node.state === NodeState.Evaluating,
   );
   assert.ok(
-    Number.isSafeInteger(consecutiveLosses) &&
-      consecutiveLosses > NO_CONSECUTIVE_LOSSES,
+    Number.isSafeInteger(consecutiveFailures) &&
+      consecutiveFailures > NO_CONSECUTIVE_FAILURES,
   );
   const state =
-    consecutiveLosses >= dependencies.config.consecutive_loss_limit
+    consecutiveFailures >= dependencies.config.consecutive_failure_limit
       ? NodeState.Paused
       : node.state === NodeState.Executing
         ? NodeState.Available

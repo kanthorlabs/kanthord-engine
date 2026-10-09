@@ -228,7 +228,7 @@ test("queue writes wake after commit and refused graph writes never wake", (t) =
   assert.deepEqual(wakes, before);
 });
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
-const CONSECUTIVE_LOSS_LIMIT = 3;
+const CONSECUTIVE_FAILURE_LIMIT = 3;
 const TEXT_MAX_BYTES = 32768;
 const PROJECT_ID = "project_00000000000000000000000000";
 const UNKNOWN_PROJECT_ID = "project_00000000000000000000000001";
@@ -311,7 +311,7 @@ function makeService(
     },
     intakeCheck: { check: unexpectedCollaboration },
     config: {
-      consecutive_loss_limit: CONSECUTIVE_LOSS_LIMIT,
+      consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
       text_max_bytes,
     },
     health,
