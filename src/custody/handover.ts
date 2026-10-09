@@ -27,6 +27,7 @@ import { decrypt, encrypt } from "./envelope.ts";
 export const CUSTODY_REPORT_INVALID = "custody.handover.report_invalid";
 export const REVISION_REVOKED = "credential.revision.revoked";
 const ONE_ROW = 1;
+const NO_MATERIALS = 0;
 
 function invalidReport(): OperationError {
   return new OperationError(
@@ -39,22 +40,23 @@ function invalidReport(): OperationError {
 export function sealMaterial(
   secret: string,
   execution: CustodyExecution,
-  material: Material,
+  materials: readonly Material[],
   platforms: CredentialPlatforms,
 ): HandoverEnvelope {
   const keys = deriveHandoverKeys(secret);
   try {
-    assert(Object.hasOwn(platforms, material.platform));
-    const shape = platforms[material.platform]!.secret_shape;
-    assert(material.credential_id.length);
+    assert(materials.length > NO_MATERIALS);
     const payload = {
-      items: [
-        {
+      items: materials.map((material) => {
+        assert(Object.hasOwn(platforms, material.platform));
+        const shape = platforms[material.platform]!.secret_shape;
+        assert(material.credential_id.length);
+        return {
           credential_id: material.credential_id,
           provider_id: material.platform,
           credential: credentialOfSecret(shape, material.value()),
-        },
-      ],
+        };
+      }),
     };
     return sealEnvelope(
       keys.handover,

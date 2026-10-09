@@ -23,6 +23,7 @@ test("static worker declarations", () => {
   assert.deepEqual(Object.keys(WORKER_CATALOG), [
     "general@1",
     "reviewer@1",
+    "developer@1",
     "claude@1",
     "opencode@1",
   ]);
@@ -30,7 +31,7 @@ test("static worker declarations", () => {
     name: "general@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Steps,
-    agent_name: "swe@1",
+    agent_names: ["swe@1"],
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     declared_node_states: ["Available"],
     required_node_format: requiredNodeFormat,
@@ -39,9 +40,18 @@ test("static worker declarations", () => {
     name: "reviewer@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Evaluation,
-    agent_name: "re@1",
+    agent_names: ["re@1"],
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     declared_node_states: ["Waiting", "External.Requested"],
+    required_node_format: requiredNodeFormat,
+  });
+  assert.deepEqual(getWorkerDeclaration("developer@1"), {
+    name: "developer@1",
+    host: WorkerHost.Kanthord,
+    method: WorkerMethod.ReviewedSteps,
+    agent_names: ["swe@1", "re@1"],
+    resource_budget: { turns: 200, wall_time_ms: 7200000 },
+    declared_node_states: ["Available"],
     required_node_format: requiredNodeFormat,
   });
   assert.deepEqual(getWorkerDeclaration("claude@1"), {

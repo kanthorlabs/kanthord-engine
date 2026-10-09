@@ -747,12 +747,14 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
     authorization: {
       authorizeModelInference: () => {
         if (refused) throw new Error("authorization refused");
-        return {
-          credential: "github",
-          platform,
-          provider_id: platform,
-          agent_provider: "default",
-        };
+        return [
+          {
+            credential: "github",
+            platform,
+            provider_id: platform,
+            agent_provider: "default",
+          },
+        ];
       },
     },
     executions: {
@@ -767,7 +769,8 @@ test("protected release pins once, keeps rotation overlap and refuses revoked or
   });
   const release = () =>
     f.store.transaction((tx) => {
-      const grant = f.component.authorize(tx, identity, execution);
+      const [grant] = f.component.authorize(tx, identity, execution);
+      assert.ok(grant);
       const material = f.component.release(tx, grant, Date.now());
       try {
         assert.deepEqual(material.value(), apiSecret);

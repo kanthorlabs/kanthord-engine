@@ -1,18 +1,25 @@
-import type { ClientOptions, OperationResult } from "../kernel/operation.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import {
+  OperationResultType,
+  type ClientOptions,
+  type OperationResult,
+} from "../kernel/operation.ts";
+import {
+  MissionErrorCode,
   NodeState,
   type Revision,
+  type Assessment,
   type ExecutionObjective,
 } from "../mission/contract.ts";
 import { EndReason, ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
 
 export const READ_PAGE_LIMIT = 1000;
+const FIRST_ATTEMPT = 1;
 export const TERMINAL_STATES: readonly NodeState[] = [
   NodeState.Completed,
   NodeState.Discarded,
 ];
-const FIRST_ATTEMPT = 1;
 
 export async function readAllPages<T>(
   run: ExecutionRun,
@@ -88,18 +95,57 @@ export async function readObjectives(run: ExecutionRun) {
   return { objectives, outcomes, evidence };
 }
 
-export async function readClearedOutcome(run: ExecutionRun) {
-  if (run.claim.attempt === FIRST_ATTEMPT) return null;
-  return run.call((options) =>
-    run.clients.mission["execution.clearedOutcome.get"](
-      {
-        params: { execution_id: run.claim.execution_id },
-        query: {},
-        body: null,
-      },
-      options,
+function nullOnRecordNotFound(
+  result: OperationResult<Assessment>,
+): OperationResult<Assessment | null> {
+  if (
+    result.type === OperationResultType.Failure &&
+    result.status === HttpStatus.NotFound &&
+    result.error.error.code === MissionErrorCode.RecordNotFound
+  )
+    return {
+      type: OperationResultType.Completed,
+      status: HttpStatus.OK,
+      data: null,
+    };
+  return result;
+}
+
+export async function readReworkAssessment(run: ExecutionRun) {
+  return run.call(async (options) =>
+    nullOnRecordNotFound(
+      await run.clients.mission["execution.rework_assessment.get"](
+        {
+          params: { execution_id: run.claim.execution_id },
+          query: {},
+          body: null,
+        },
+        options,
+      ),
     ),
   );
+}
+
+export async function readClearedAssessment(run: ExecutionRun) {
+  if (run.claim.attempt === FIRST_ATTEMPT) return null;
+  return run.call(async (options) =>
+    nullOnRecordNotFound(
+      await run.clients.mission["execution.cleared_assessment.get"](
+        {
+          params: { execution_id: run.claim.execution_id },
+          query: {},
+          body: null,
+        },
+        options,
+      ),
+    ),
+  );
+}
+
+export async function readPriorRationale(run: ExecutionRun) {
+  const assessment =
+    (await readReworkAssessment(run)) ?? (await readClearedAssessment(run));
+  return assessment?.rationale ?? null;
 }
 
 export function allTerminal(

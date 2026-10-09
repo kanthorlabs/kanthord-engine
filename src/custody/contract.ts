@@ -111,7 +111,7 @@ export interface CustodyAuthorization {
       worker_binding_id: string;
       resource_identity: string;
     },
-  ): ModelInferenceAuthorization;
+  ): ModelInferenceAuthorization[];
 }
 
 export type WorkbenchAuthorization = {

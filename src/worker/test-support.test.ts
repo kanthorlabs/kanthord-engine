@@ -21,12 +21,12 @@ test("scripted provider replaces the builtin and records execution auth for each
   await credentials.modify("anthropic", async () => ({ type: "api_key", key }));
   const setup = anthropicSetup();
   const { runtime, model } = await scriptedModelRuntime(provider)({
-    credentials,
-    setup,
-    handoverItem: {
-      credential_id: setup.credential_id,
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
+      store: credentials,
     },
+    agent: setup.agents[0]!,
     signal: new AbortController().signal,
   });
   for (const expected of ["first", "second"]) {

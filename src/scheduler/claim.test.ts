@@ -175,7 +175,7 @@ test("health, tombstones, zero counts and occupied binding counts refuse admissi
 test("runtime and node expiry settle before admission; rollback undoes all claim writes", (t) => {
   const h = claimHarness(t);
   h.store.transaction((tx) => insertExecution(tx, h.row));
-  h.dependencies.transitions.loss = (tx, nodeId, count, now) => {
+  h.dependencies.transitions.failure = (tx, nodeId, count, now) => {
     assert.equal(count, ONE_CALL);
     assert.equal(now, FIXTURE_DEADLINE);
     h.service.insert(tx, nodeId, h.row.project_id, 0);

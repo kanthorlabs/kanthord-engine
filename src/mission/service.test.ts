@@ -228,7 +228,8 @@ test("queue writes wake after commit and refused graph writes never wake", (t) =
   assert.deepEqual(wakes, before);
 });
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
-const CONSECUTIVE_LOSS_LIMIT = 3;
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+const REWORK_LIMIT = 2;
 const TEXT_MAX_BYTES = 32768;
 const PROJECT_ID = "project_00000000000000000000000000";
 const UNKNOWN_PROJECT_ID = "project_00000000000000000000000001";
@@ -311,7 +312,8 @@ function makeService(
     },
     intakeCheck: { check: unexpectedCollaboration },
     config: {
-      consecutive_loss_limit: CONSECUTIVE_LOSS_LIMIT,
+      consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
+      rework_limit: REWORK_LIMIT,
       text_max_bytes,
     },
     health,
@@ -3958,6 +3960,7 @@ test("node.retire rolls back retirement, dependency removal, routing and jobs wh
 function importPreviewFixture(t: TestContext) {
   const f = nodeFixture(t);
   const objectiveId = f.objective();
+  f.create(f.body(NodeKind.Task, objectiveId));
   const entries: ImportEntry[] = f.store.transaction((tx) => {
     const nodes = readMissionNodes(tx, f.mission_id);
     const filenames = new Map(nodes.map((node) => [node.id, node.filename]));
@@ -4241,13 +4244,21 @@ test("import.preview empty set retires every current node without writes or queu
     f.entries.map((entry) => entry.id!).sort(),
   );
   assert.deepEqual(result.violations, []);
-  assert.deepEqual(result.removed_edges, [
-    {
-      kind: EdgeKind.Containment,
-      parent_id: f.node(f.objectiveId)!.parent_id,
-      child_id: f.objectiveId,
-    },
-  ]);
+  assert.deepEqual(
+    result.removed_edges,
+    [
+      {
+        kind: EdgeKind.Containment,
+        parent_id: f.node(f.objectiveId)!.parent_id,
+        child_id: f.objectiveId,
+      },
+      {
+        kind: EdgeKind.Containment,
+        parent_id: f.objectiveId,
+        child_id: f.entries.find((entry) => entry.kind === NodeKind.Task)!.id,
+      },
+    ].sort((left, right) => left.parent_id!.localeCompare(right.parent_id!)),
+  );
   assert.equal(
     result.preview_digest,
     importDigest(
@@ -4294,9 +4305,10 @@ const IMPORT_APPLY_PATH = "/api/mission/:mission_id/import";
 const IMPORT_QUEUE_FAILURE = "import queue insert failed";
 const IMPORT_UPDATED_NAME = "Updated imported content";
 const IMPORT_EXTRA_TASK = "extra-task.md";
+const IMPORT_OTHER_TASK = "other-task.md";
 const IMPORT_NEW_TASK = "new-task.md";
 const IMPORT_NEW_PARENT = "new-parent.md";
-const IMPORT_NODE_COUNT = 4;
+const IMPORT_NODE_COUNT = 5;
 
 function importApplyFixture(
   t: TestContext,
@@ -4334,6 +4346,7 @@ function importApplyFixture(
       depends_on: [OBJECTIVE_FILENAME],
     },
     entry(TASK_FILENAME, NodeKind.Task, OBJECTIVE_FILENAME),
+    entry(IMPORT_OTHER_TASK, NodeKind.Task, OTHER_FILENAME),
   ];
   function snapshot(entries: ImportEntry[] = initial): ImportSnapshot {
     return {
@@ -4663,6 +4676,68 @@ for (const [label, patch, code] of [
   });
 }
 
+const IMPORT_COMMAND = "pnpm test";
+const IMPORT_NEAR_MISS_COMMAND = "pnpm  test";
+
+for (const [label, taskCommand] of [
+  ["a near-miss task command", IMPORT_NEAR_MISS_COMMAND],
+  ["no task", null],
+] as const) {
+  test(`import.preview and import.apply refuse an objective verification uncovered by ${label}`, (t) => {
+    const f = importApplyFixture(t);
+    const snapshot = f.importSnapshot(
+      f.initial.flatMap((item) => {
+        if (item.filename === OBJECTIVE_FILENAME)
+          return [{ ...item, verifications: [IMPORT_COMMAND] }];
+        if (item.filename !== TASK_FILENAME) return [item];
+        return taskCommand === null
+          ? []
+          : [{ ...item, verifications: [taskCommand] }];
+      }),
+    );
+    const violation = f.preview(snapshot).violations[FIRST_ELEMENT_INDEX]!;
+    assert.equal(violation.code, MissionErrorCode.VerificationUncovered);
+    assert.deepEqual(violation.details, {
+      name: OBJECTIVE_FILENAME,
+      command: IMPORT_COMMAND,
+    });
+    const before = f.state();
+    assert.throws(
+      () =>
+        f.apply({
+          ...snapshot,
+          preview_digest: INVALID_RETIRE_DIGEST,
+          confirmed_retirements: [],
+        }),
+      retirementError(
+        MissionErrorCode.VerificationUncovered,
+        {
+          name: OBJECTIVE_FILENAME,
+          command: IMPORT_COMMAND,
+          filename: OBJECTIVE_FILENAME,
+          node_id: violation.node_id,
+        },
+        HttpStatus.BadRequest,
+      ),
+    );
+    assert.deepEqual(f.state(), before);
+  });
+}
+
+test("import.preview accepts an objective verification that a task of the objective holds exactly", (t) => {
+  const f = importApplyFixture(t);
+  const snapshot = f.importSnapshot(
+    f.initial.map((item) =>
+      item.filename === OBJECTIVE_FILENAME
+        ? { ...item, verifications: [IMPORT_COMMAND] }
+        : item.filename === TASK_FILENAME
+          ? { ...item, verifications: [VERIFICATION, IMPORT_COMMAND] }
+          : item,
+    ),
+  );
+  assert.deepEqual(f.preview(snapshot).violations, []);
+});
+
 for (const [state, code] of [
   [NodeState.Executing, MissionErrorCode.ConditionFailed],
   [NodeState.Completed, MissionErrorCode.TerminalChange],
@@ -4829,7 +4904,7 @@ test("import.apply task rename and move, objective retirement and dependency rep
     TASKS_FIELD,
   ]);
   assert.equal(
-    newRevision.tasks?.[FIRST_ELEMENT_INDEX]?.filename,
+    newRevision.tasks?.find((item) => item.id === task)?.filename,
     IMPORT_NEW_TASK,
   );
   assert.equal(newRevision.revision, NEXT_REVISION);
@@ -5008,7 +5083,14 @@ test("import.apply handles filename swaps and new parents without transient uniq
         filename: OBJECTIVE_FILENAME,
         depends_on: [OTHER_FILENAME],
       };
-    if (item.kind === NodeKind.Task) return { ...item, parent: OTHER_FILENAME };
+    if (item.kind === NodeKind.Task)
+      return {
+        ...item,
+        parent:
+          item.parent === OBJECTIVE_FILENAME
+            ? OTHER_FILENAME
+            : OBJECTIVE_FILENAME,
+      };
     return item;
   });
   next.push(f.entry(IMPORT_NEW_PARENT, NodeKind.Initiative));
@@ -5175,6 +5257,7 @@ for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
         [
           INITIATIVE_FILENAME,
           OBJECTIVE_FILENAME,
+          IMPORT_OTHER_TASK,
           OTHER_FILENAME,
           TASK_FILENAME,
         ],
@@ -5186,7 +5269,7 @@ for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
         (entry) => entry.filename === OBJECTIVE_FILENAME,
       )!;
       const task = answer.entries.find(
-        (entry) => entry.kind === NodeKind.Task,
+        (entry) => entry.filename === TASK_FILENAME,
       )!;
       assert.equal(Object.hasOwn(initiative, "parent"), false);
       assert.deepEqual(initiative.depends_on, []);

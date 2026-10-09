@@ -1,5 +1,9 @@
 import { canonicalJSON } from "../kernel/json.ts";
-import { AssessmentResult, type Revision } from "../mission/contract.ts";
+import {
+  AssessmentResult,
+  NodeState,
+  type Revision,
+} from "../mission/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import {
   EndReason,
@@ -24,7 +28,8 @@ import {
   evaluationInstruction,
   evaluationJudgementSchema,
   failedVerificationRationale,
-  parseJudgement,
+  parseRepaired,
+  ReplyRepair,
 } from "./judgement.ts";
 import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-objective.ts";
@@ -81,8 +86,11 @@ async function judge(
     }),
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
-  const judgement = parseJudgement(agent.lastText(), evaluationJudgementSchema);
-  if (!judgement) return run.stop(EndReason.JudgementInvalid);
+  const judgement = await parseRepaired(agent, work, evaluationJudgementSchema);
+  if (judgement === ReplyRepair.BudgetEnd)
+    return run.stop(EndReason.AssessmentAbsent);
+  if (judgement === ReplyRepair.Invalid)
+    return run.stop(EndReason.JudgementInvalid);
   return judgement;
 }
 
@@ -147,6 +155,15 @@ export async function runEvaluation(
       return { kind: ExecutionEndKind.Closed, outcomeId: answer.outcome.id };
     if (answer.assessment.result === AssessmentResult.Success)
       return await requestAndRelease(run);
+    if (
+      answer.assessment.result === AssessmentResult.CriterionNotMet &&
+      !("state" in answer.node && answer.node.state === NodeState.Evaluating)
+    )
+      return {
+        kind: ExecutionEndKind.Ended,
+        reason: EndReason.Revoked,
+        code: null,
+      };
     return run.stop(EndReason.OperationFailed);
   } finally {
     input.workspaces.release(prepared.directory, WorkspaceKind.Execution);

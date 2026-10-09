@@ -228,16 +228,16 @@ test("worker catalog CLI lists ascending pages", async (t) => {
   const help = await command(["worker", "list", "--help"], env);
   assert.equal(help.code, ExitCode.Success);
   assert.match(help.stdout, /--cursor/);
-  const first = await command(["worker", "list", "--limit", "2"], env);
+  const first = await command(["worker", "list", "--limit", "3"], env);
   assert.equal(first.code, ExitCode.Success, first.stderr);
   const page = JSON.parse(first.stdout);
   assert.deepEqual(
     page.items.map((item: { name: string }) => item.name),
-    ["claude@1", "general@1"],
+    ["claude@1", "developer@1", "general@1"],
   );
   assert.equal(typeof page.next_cursor, STRING_TYPE);
   const second = await command(
-    ["worker", "list", "--limit", "2", "--cursor", page.next_cursor],
+    ["worker", "list", "--limit", "3", "--cursor", page.next_cursor],
     env,
   );
   assert.equal(second.code, ExitCode.Success, second.stderr);
@@ -264,7 +264,7 @@ test("worker catalog CLI gets native and external budgets and reports missing wo
     wall_time_ms: 7200000,
   });
   assert.equal(declaration.method, WorkerMethod.Steps);
-  assert.equal(declaration.agent_name, NATIVE_AGENT);
+  assert.deepEqual(declaration.agent_names, [NATIVE_AGENT]);
   assert.ok(!("harness" in declaration));
   const external = await command(["worker", "get", "claude@1"], env);
   assert.equal(external.code, ExitCode.Success, external.stderr);

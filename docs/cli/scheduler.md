@@ -408,6 +408,7 @@ fields are server-owned; the caller supplies none when acquiring work.
 | `expired_at`                            | Timestamp. The fixed deadline that the claim sets once.                                                                                                                                                                                                                                                                                                                                                                              |
 | `created_at`                            | Claim acceptance timestamp.                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `ended_at`                              | End timestamp or `null` before a terminal write.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `stop`                                  | `null`, or the `stop` object of the release that ended the execution: `{ "reason": string, "code": string \| null }`.                                                                                                                                                                                                                                                                                                                |
 | `trace_id`, `root_span_id`              | `TraceID` and `SpanID` under the [trace model](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/tracking-service.impl.md#trace-model): 32 and 16 lower-case hexadecimal characters, never all zero. The Scheduler mints both at the claim until the tracer of the Tracking Service exists.                                                                                                                          |
 
 Trace and span validation follows
@@ -428,9 +429,10 @@ kanthord scheduler execution release <execution-id> --file <path> [--idempotency
 Required opaque `<execution-id>` maps to path `execution_id`, with no default.
 No query fields are accepted. The required file supplies the following fields.
 
-| JSON file field | Requiredness / type | Default and validation                                                                                                                                                                                               |
-| --------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `further_work`  | Required boolean.   | No default. `false` declares no further work for this release; it does not assert success, close an attempt or manufacture an assessment. `true` requests the supported further-work path of the current node state. |
+| JSON file field | Requiredness / type        | Default and validation                                                                                                                                                                                                                                                                                                                                                       |
+| --------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `further_work`  | Required boolean.          | No default. `false` declares no further work for this release; it does not assert success, close an attempt or manufacture an assessment. `true` requests the supported further-work path of the current node state.                                                                                                                                                         |
+| `stop`          | Optional `null` or object. | Default `null`. An object holds the required `reason` and `code`. `reason` is `operation_failed`, `judgement_invalid`, `report_absent`, `action_unsettled` or `assessment_absent`. `code` is the error code of the failed operation, or `null`. A `stop` requires `further_work: true`; a `stop` with `further_work: false` answers 400 `gateway.request.validation_failed`. |
 
 **Effects and prerequisites:**
 
@@ -450,8 +452,16 @@ No query fields are accepted. The required file supplies the following fields.
   request submission, the action-performer path, and assessment-driven claim
   completion belong to later plans. Under that design, a passing assessment
   with no required external action ends the claim without a fresh release.
-- Mission checks the release predicate in the release transaction, before the
-  terminal write, under [the release admission](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-release-admission).
+- A release with a `stop` names the reason that ended the execution, and the
+  execution row keeps it. Mission checks no record for it. The release counts
+  the lost rows and the stopped rows of the attempt after its latest finished
+  row with no `stop`, itself included. Below `mission.consecutive_failure_limit`,
+  Mission returns `Executing` to `Available` and `Evaluating` to `Waiting`, and
+  it inserts the job when the node is claimable. At the limit, Mission moves the
+  node to `Paused`, the attempt stays open, and no job exists. A release with a
+  `stop` writes no outcome and no assessment.
+- Mission checks the release predicate of a release with no `stop` in the
+  release transaction, before the terminal write, under [the release admission](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-release-admission).
   A release that fails it answers 409 `mission.release.obligation_unmet` with
   `details.obligation` of `evidence`, `assessment` or `request`, and it changes
   no execution, no node state and no job.
@@ -472,7 +482,7 @@ cannot release. This answer is not an outcome record or an assertion that the
 node is immediately claimable.
 
 There is no `failure`, `cannotProgress`, `retryBudget`, `force` or arbitrary
-target-state field. Failure dispositions remain an open design gap under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).
+target-state field. A failure disposition other than the `stop` remains an open design gap under [HANDOFF Cannot progress](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#cannot-progress).
 
 ### Liveness, epochs and cancellation boundaries
 

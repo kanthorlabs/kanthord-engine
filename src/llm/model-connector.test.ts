@@ -8,7 +8,7 @@ import type { CredentialStore } from "@earendil-works/pi-ai";
 import {
   SetupRefusal,
   WorkerErrorCode,
-  type ExecutionSetup,
+  type AgentSetup,
 } from "../worker/contract.ts";
 import {
   createModelRuntime as connectorRuntime,
@@ -19,7 +19,7 @@ import { loadPi } from "../agent/pi.ts";
 import { Platform } from "./platforms.ts";
 
 async function createModelRuntime(input: {
-  setup: ExecutionSetup;
+  setup: AgentSetup;
   handoverItem: { credential_id: string; provider_id: string };
   credentials: CredentialStore;
   signal: AbortSignal;
@@ -36,14 +36,12 @@ async function createModelRuntime(input: {
 
 function resolveModel(
   runtime: Awaited<ReturnType<typeof createModelRuntime>>,
-  setup: ExecutionSetup,
+  setup: AgentSetup,
 ) {
   return connectorModel(runtime, setup.effective_configuration);
 }
 
-const setup: ExecutionSetup = {
-  execution_id: "execution",
-  worker_name: "general@1",
+const setup: AgentSetup = {
   agent_name: "swe@1",
   credential_id: "credential",
   effective_configuration: {
@@ -54,8 +52,6 @@ const setup: ExecutionSetup = {
     reasoning_effort: "off",
   },
   metadata: null,
-  resource_budget: { turns: 200, wall_time_ms: 7200000 },
-  repositories: [],
   prompt: { final: "setup prompt" },
 };
 const handoverItem = {
@@ -138,7 +134,7 @@ test("compatible models retain metadata and exact supported reasoning levels", a
   t.mock.method(globalThis, "fetch", () => {
     throw new Error("Unexpected network call");
   });
-  const compatible: ExecutionSetup = {
+  const compatible: AgentSetup = {
     ...setup,
     effective_configuration: {
       ...setup.effective_configuration,
@@ -195,7 +191,7 @@ test("openrouter runs with the built-in pi provider and its credential", async (
   t.mock.method(globalThis, "fetch", () => {
     throw new Error("Unexpected network call");
   });
-  const openrouter: ExecutionSetup = {
+  const openrouter: AgentSetup = {
     ...setup,
     effective_configuration: {
       ...setup.effective_configuration,
@@ -241,7 +237,7 @@ test("openai-codex resolves a built-in model against its OAuth credential", asyn
   t.mock.method(globalThis, "fetch", () => {
     throw new Error("Unexpected network call");
   });
-  const codex: ExecutionSetup = {
+  const codex: AgentSetup = {
     ...setup,
     effective_configuration: {
       ...setup.effective_configuration,
@@ -280,7 +276,7 @@ test("groq runs with the built-in pi provider and no metadata", async (t) => {
   t.mock.method(globalThis, "fetch", () => {
     throw new Error("Unexpected network call");
   });
-  const groq: ExecutionSetup = {
+  const groq: AgentSetup = {
     ...setup,
     effective_configuration: {
       ...setup.effective_configuration,
@@ -310,7 +306,7 @@ test("amazon-bedrock receives its metadata region as the credential env", async 
   t.mock.method(globalThis, "fetch", () => {
     throw new Error("Unexpected network call");
   });
-  const bedrock: ExecutionSetup = {
+  const bedrock: AgentSetup = {
     ...setup,
     effective_configuration: {
       ...setup.effective_configuration,

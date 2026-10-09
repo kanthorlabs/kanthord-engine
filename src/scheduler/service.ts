@@ -282,7 +282,7 @@ export class SchedulerService implements Service, WorkQueue {
       release(
         this.dependencies,
         input.params.execution_id,
-        input.body.further_work,
+        input.body,
         caller,
         (projectId) => this.wake(projectId),
       ),

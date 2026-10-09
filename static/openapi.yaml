@@ -90,6 +90,8 @@ paths:
     $ref: ./openapi/mission/evidence.request.yaml#/pathItem
   /api/mission/execution/{execution_id}/cleared-outcome:
     $ref: ./openapi/mission/execution.clearedOutcome.get.yaml#/pathItem
+  /api/mission/execution/{execution_id}/cleared-assessment:
+    $ref: ./openapi/mission/execution.cleared_assessment.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/evidence/asset/{asset_id}/content:
     $ref: ./openapi/mission/execution.evidence.asset.content.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/evidence:
@@ -106,6 +108,8 @@ paths:
     $ref: ./openapi/mission/execution.revision.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/revision:
     $ref: ./openapi/mission/execution.revision.list.yaml#/pathItem
+  /api/mission/execution/{execution_id}/rework-assessment:
+    $ref: ./openapi/mission/execution.rework_assessment.get.yaml#/pathItem
   /api/mission/{mission_id}/export:
     $ref: ./openapi/mission/export.yaml#/pathItem
   /api/mission/node/{node_id}/attempt/{attempt}/external-action/{action_key}:

@@ -168,6 +168,28 @@ components:
               maximum: 9007199254740991
               description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
             - type: "null"
+        stop:
+          anyOf:
+            - type: object
+              properties:
+                reason:
+                  type: string
+                  enum:
+                    - operation_failed
+                    - judgement_invalid
+                    - report_absent
+                    - action_unsettled
+                    - assessment_absent
+                code:
+                  anyOf:
+                    - type: string
+                      minLength: 1
+                    - type: "null"
+              required:
+                - reason
+                - code
+              additionalProperties: false
+            - type: "null"
         trace_id:
           type: string
           pattern: ^[0-9a-f]{32}$
@@ -186,6 +208,7 @@ components:
         - expired_at
         - created_at
         - ended_at
+        - stop
         - trace_id
         - root_span_id
       additionalProperties: false

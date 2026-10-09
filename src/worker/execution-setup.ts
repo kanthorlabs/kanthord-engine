@@ -13,9 +13,11 @@ import {
   type ExecutionSetup,
 } from "./contract.ts";
 import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
+import type { ResolvedLayer } from "../agent/prompt-layers.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 
 const FIRST_ISSUE_INDEX = 0;
+const NO_AGENTS = 0;
 
 export async function executionSetup(
   dependencies: Pick<
@@ -33,22 +35,25 @@ export async function executionSetup(
 ): Promise<ExecutionSetup> {
   const claim = caller.execution;
   assert.ok(claim);
-  const nativeAgentName = dependencies.store.transaction((tx) => {
+  const nativeAgentNames = dependencies.store.transaction((tx) => {
     const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
     assert.ok(row);
-    return worker.declarationOf(row.worker_name)?.agent_name;
+    return worker.declarationOf(row.worker_name)?.agent_names ?? [];
   });
-  const layers = nativeAgentName
-    ? await dependencies.agentPrompt.compose(nativeAgentName, caller.context)
-    : [];
+  const layers = new Map<string, ResolvedLayer[]>();
+  for (const agentName of nativeAgentNames)
+    layers.set(
+      agentName,
+      await dependencies.agentPrompt.compose(agentName, caller.context),
+    );
   return caller.commit((tx) => {
     const now = Date.now();
     const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
     assert.ok(row);
     const declaration = worker.declarationOf(row.worker_name);
     assert.ok(declaration);
-    const agentName = declaration.agent_name;
-    if (!agentName)
+    const agentNames = declaration.agent_names ?? [];
+    if (agentNames.length === NO_AGENTS)
       throw new OperationError(
         HttpStatus.Conflict,
         WorkerErrorCode.ExecutionNoNativeAgent,
@@ -77,36 +82,47 @@ export async function executionSetup(
       const record = pinned(transaction, name);
       return approvedModels(record.platform, record.metadata);
     };
-    const configuredEntry = row.entries.find(
-      ({ agent }) => agent === agentName,
-    );
-    const entry = configuredEntry
-      ? {
-          agent_provider: configuredEntry.agent_provider,
-          model_identifier: configuredEntry.model_identifier,
-          reasoning_effort: configuredEntry.reasoning_effort,
-        }
-      : null;
-    const view = worker.workerAgentView(
-      tx,
-      row.worker_name,
-      agentName,
-      entry,
-      pinnedModels,
-    );
-    assert.ok(view);
-    if (!view.valid) {
-      const issue = view.issues[FIRST_ISSUE_INDEX];
-      assert.ok(issue);
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        issue.code,
-        "Agent configuration is unavailable or invalid.",
-        { agent_name: agentName, issues: view.issues },
+    const agents = agentNames.map((agentName) => {
+      const configuredEntry = row.entries.find(
+        ({ agent }) => agent === agentName,
       );
-    }
-    assert.ok(view.effective);
-    const record = pinned(tx, view.effective.credential);
+      const entry = configuredEntry
+        ? {
+            agent_provider: configuredEntry.agent_provider,
+            model_identifier: configuredEntry.model_identifier,
+            reasoning_effort: configuredEntry.reasoning_effort,
+          }
+        : null;
+      const view = worker.workerAgentView(
+        tx,
+        row.worker_name,
+        agentName,
+        entry,
+        pinnedModels,
+      );
+      assert.ok(view);
+      if (!view.valid) {
+        const issue = view.issues[FIRST_ISSUE_INDEX];
+        assert.ok(issue);
+        throw new OperationError(
+          HttpStatus.BadRequest,
+          issue.code,
+          "Agent configuration is unavailable or invalid.",
+          { agent_name: agentName, issues: view.issues },
+        );
+      }
+      assert.ok(view.effective);
+      const record = pinned(tx, view.effective.credential);
+      const agentLayers = layers.get(agentName);
+      assert.ok(agentLayers);
+      return {
+        agent_name: agentName,
+        effective_configuration: view.effective,
+        credential_id: record.id,
+        metadata: record.metadata,
+        prompt: { final: systemPrompt(agentLayers, PromptConsumer.Worker) },
+      };
+    });
     const repositories = dependencies
       .repositoryBindingIdsOf(tx, claim.nodeId, claim.pinnedRevision)
       .map((id) => {
@@ -128,13 +144,9 @@ export async function executionSetup(
     return executionSetupSchema.parse({
       execution_id: claim.executionId,
       worker_name: row.worker_name,
-      agent_name: agentName,
-      effective_configuration: view.effective,
-      credential_id: record.id,
-      metadata: record.metadata,
+      agents,
       resource_budget: row.resource_budget ?? declaration.resource_budget,
       repositories,
-      prompt: { final: systemPrompt(layers, PromptConsumer.Worker) },
     });
   });
 }

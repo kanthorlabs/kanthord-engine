@@ -328,15 +328,14 @@ export class CustodyComponent implements Service, CredentialRecords {
     tx: Transaction,
     identity: MachineIdentity,
     execution: CustodyExecution,
-  ): Grant {
+  ): Grant[] {
     assert(tx.database.isTransaction);
     assert.equal(tx.database, this.store.database);
-    const { credential, platform } = this.authorization.authorizeModelInference(
-      tx,
-      identity,
-      execution,
-    );
-    return mintGrant({ credential, platform, execution });
+    return this.authorization
+      .authorizeModelInference(tx, identity, execution)
+      .map(({ credential, platform }) =>
+        mintGrant({ credential, platform, execution }),
+      );
   }
 
   release(tx: Transaction, grant: Grant, now: number): Material {
@@ -486,25 +485,28 @@ export class CustodyComponent implements Service, CredentialRecords {
       execution.runtimeIdentity,
       now,
     );
-    const material = this.release(tx, this.authorize(tx, identity, row), now);
+    const materials: Material[] = [];
     try {
+      for (const grant of this.authorize(tx, identity, row))
+        materials.push(this.release(tx, grant, now));
       const envelope = sealMaterial(
         this.clientSecret(identity.clientId),
         row,
-        material,
+        materials,
         this.platforms,
       );
-      this.logger.info(
-        {
-          execution_id: row.execution_id,
-          worker_binding_id: row.worker_binding_id,
-          credential_id: material.credential_id,
-        },
-        "credential handover",
-      );
+      for (const material of materials)
+        this.logger.info(
+          {
+            execution_id: row.execution_id,
+            worker_binding_id: row.worker_binding_id,
+            credential_id: material.credential_id,
+          },
+          "credential handover",
+        );
       return envelope;
     } finally {
-      material.drop();
+      for (const material of materials) material.drop();
     }
   }
 

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   abortSignal,
@@ -7,12 +6,8 @@ import {
   type Context,
   type CancellationContext,
 } from "../kernel/context.ts";
-import {
-  type ExecutionSetup,
-  WorkerMethod,
-  type HostTools,
-} from "./contract.ts";
-import { ExecutionBudget } from "./budget.ts";
+import type { AgentSetup, ExecutionSetup, HostTools } from "./contract.ts";
+import type { ExecutionBudget } from "./budget.ts";
 import type {
   CompositionRecord,
   WorkPrompt,
@@ -23,7 +18,10 @@ import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { countTurns, pinnedLayers } from "../agent/pinned-layers.ts";
 import { loadPi } from "../agent/pi.ts";
 import { sessionTools } from "./tool-table.ts";
-import type { ModelRuntimeFactory } from "./model-runtime.ts";
+import type {
+  ExecutionCredential,
+  ModelRuntimeFactory,
+} from "./model-runtime.ts";
 
 export const NodeKind = {
   Objective: "objective",
@@ -39,9 +37,10 @@ export interface NativeAgentInput {
     expired_at: number;
   };
   nodeKind: NodeKind;
-  method: WorkerMethod;
-  credentials: CredentialStore;
-  handoverItem: { credential_id: string; provider_id: string };
+  agent: AgentSetup;
+  credential: ExecutionCredential;
+  budget: ExecutionBudget;
+  workspaceAgentFiles: boolean;
   workspace: string;
   hostHome: string;
   modelRuntimeFactory: ModelRuntimeFactory;
@@ -125,10 +124,8 @@ export async function openNativeAgent(
   input: NativeAgentInput,
 ): Promise<NativeAgent> {
   assert.equal(input.claim.execution_id, input.setup.execution_id);
-  const budget = new ExecutionBudget({
-    ...input.claim,
-    resource_budget: input.setup.resource_budget,
-  });
+  assert.equal(input.credential.credential_id, input.agent.credential_id);
+  const budget = input.budget;
   const context = budget.agentContext(input.context);
   const bridge = abortSignal(context);
   let session: AgentSession | undefined;
@@ -145,8 +142,7 @@ export async function openNativeAgent(
               project_prompt: repository.project_prompt,
               working_layer: repository.working_layer,
             },
-            workspace:
-              input.method === WorkerMethod.Evaluation ? null : input.workspace,
+            workspace: input.workspaceAgentFiles ? input.workspace : null,
             hostHome: input.hostHome,
             context,
           }),
@@ -154,9 +150,8 @@ export async function openNativeAgent(
       : [];
     const { runtime, model } = await withDeadline(
       input.modelRuntimeFactory({
-        credentials: input.credentials,
-        handoverItem: input.handoverItem,
-        setup: input.setup,
+        credential: input.credential,
+        agent: input.agent,
         signal: bridge.signal,
       }),
       context,
@@ -167,11 +162,11 @@ export async function openNativeAgent(
       cwd: input.workspace,
       modelRuntime: runtime,
       model,
-      thinkingLevel: input.setup.effective_configuration.reasoning_effort,
-      systemPrompt: input.setup.prompt.final,
+      thinkingLevel: input.agent.effective_configuration.reasoning_effort,
+      systemPrompt: input.agent.prompt.final,
       ...sessionTools(
         pi,
-        input.setup.agent_name,
+        input.agent.agent_name,
         input.workspace,
         budget,
         input.hostTools,
@@ -180,7 +175,7 @@ export async function openNativeAgent(
       hooks: [pins.hook],
       context,
     });
-    pins.pinInference(session, input.setup.prompt.final);
+    pins.pinInference(session, input.agent.prompt.final);
     return nativeAgent(
       session,
       pins,

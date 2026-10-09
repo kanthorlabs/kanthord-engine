@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { ExecutionSetup, HostTools } from "./contract.ts";
+import type { AgentSetup, ExecutionSetup, HostTools } from "./contract.ts";
 
 export const unusedHostTools: HostTools = {
   evidenceUpload: () =>
@@ -35,7 +35,7 @@ export function scriptedModelRuntime(
     runtime.registerNativeProvider(provider.provider);
     return {
       runtime,
-      model: resolveModel(runtime, input.setup.effective_configuration),
+      model: resolveModel(runtime, input.agent.effective_configuration),
     };
   };
 }
@@ -49,12 +49,10 @@ export const WORKING_LAYER_ALL_ON = {
   project_prompt: true,
 };
 
-export function anthropicSetup(
-  overrides: Partial<ExecutionSetup> = {},
-): ExecutionSetup {
-  const setup: ExecutionSetup = {
-    execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    worker_name: "general@1",
+export function anthropicAgent(
+  overrides: Partial<AgentSetup> = {},
+): AgentSetup {
+  return {
     agent_name: "swe@1",
     credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     effective_configuration: {
@@ -65,12 +63,23 @@ export function anthropicSetup(
       reasoning_effort: "off",
     },
     metadata: null,
-    resource_budget: { turns: 200, wall_time_ms: 7200000 },
-    repositories: [],
     prompt: { final: SETUP_PROMPT },
     ...overrides,
   };
-  assert.ok(setup.credential_id);
+}
+
+export function anthropicSetup(
+  overrides: Partial<ExecutionSetup> = {},
+): ExecutionSetup {
+  const setup: ExecutionSetup = {
+    execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    worker_name: "general@1",
+    agents: [anthropicAgent()],
+    resource_budget: { turns: 200, wall_time_ms: 7200000 },
+    repositories: [],
+    ...overrides,
+  };
+  assert.ok(setup.agents.length);
   assert.ok(setup.execution_id);
   return setup;
 }

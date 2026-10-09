@@ -18,7 +18,8 @@ import {
 } from "./execution-store.ts";
 
 export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
-const NO_LOSSES = 0;
+const NO_FAILURES = 0;
+const ENDING_FAILURE = 1;
 export interface SettlementDependencies {
   transitions: MissionTransitions;
 }
@@ -86,6 +87,31 @@ export function executionAttribution(
   };
 }
 
+export function consecutiveFailures(
+  tx: Transaction,
+  ending: ExecutionRow,
+): number {
+  assert.ok(tx.database.isTransaction);
+  const result = tx.database
+    .prepare(
+      `SELECT count(*) AS count FROM scheduler_execution
+    WHERE node_id = ? AND attempt = ? AND id != ?
+    AND (ended_at >= expired_at OR stop IS NOT NULL)
+    AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
+      WHERE node_id = ? AND attempt = ? AND ended_at < expired_at AND stop IS NULL), -1)`,
+    )
+    .get(
+      ending.node_id,
+      ending.attempt,
+      ending.execution_id,
+      ending.node_id,
+      ending.attempt,
+    )!;
+  const count = Number(result.count) + ENDING_FAILURE;
+  assert.ok(Number.isSafeInteger(count) && count > NO_FAILURES);
+  return count;
+}
+
 export function declareLoss(
   tx: Transaction,
   dependencies: SettlementDependencies,
@@ -95,17 +121,12 @@ export function declareLoss(
   assert.equal(row.ended_at, null);
   assert.ok(now >= row.expired_at);
   endExecution(tx, row.execution_id, now);
-  const result = tx.database
-    .prepare(
-      `SELECT count(*) AS count FROM scheduler_execution
-    WHERE node_id = ? AND attempt = ? AND ended_at >= expired_at
-    AND ended_at > coalesce((SELECT max(ended_at) FROM scheduler_execution
-      WHERE node_id = ? AND attempt = ? AND ended_at < expired_at), -1)`,
-    )
-    .get(row.node_id, row.attempt, row.node_id, row.attempt)!;
-  const count = Number(result.count);
-  assert.ok(Number.isSafeInteger(count) && count > NO_LOSSES);
-  dependencies.transitions.loss(tx, row.node_id, count, now);
+  dependencies.transitions.failure(
+    tx,
+    row.node_id,
+    consecutiveFailures(tx, row),
+    now,
+  );
 }
 export function settleNode(
   tx: Transaction,

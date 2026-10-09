@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
-import { ClaimState } from "./contract.ts";
+import { ClaimState, ExecutionStopReason } from "./contract.ts";
 import {
   executionFixture,
   schedulerHarness,
@@ -12,8 +12,10 @@ import {
   insertExecution,
   readExecution,
   claimStateOf,
+  endExecution,
 } from "./execution-store.ts";
 import {
+  consecutiveFailures,
   settleNode,
   settleRuntime,
   revoke,
@@ -23,6 +25,8 @@ import {
 
 const ONE_LOSS = 1;
 const SECOND_LOSS = 2;
+const THIRD_FAILURE = 3;
+const STOP = { reason: ExecutionStopReason.OperationFailed, code: null };
 
 test("credential pins append once in order, retain after end and select only unended executions", (t) => {
   const h = schedulerHarness(t);
@@ -190,6 +194,63 @@ test("consecutive losses reset after a finished row or revocation and isolate at
   });
 });
 
+test("lost and stopped rows count together until a finished row with no stop", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture({ expired_at: FIXTURE_DEADLINE + 100 });
+  const at = (offset: number, overrides = {}) =>
+    executionFixture({
+      node_id: row.node_id,
+      expired_at: FIXTURE_DEADLINE + 100,
+      ...overrides,
+      created_at: FIXTURE_NOW + offset,
+    });
+  h.store.transaction((tx) => {
+    const stopped = at(1);
+    insertExecution(tx, stopped);
+    endExecution(tx, stopped.execution_id, FIXTURE_DEADLINE, STOP);
+    assert.deepEqual(readExecution(tx, stopped.execution_id)?.stop, STOP);
+    assert.equal(consecutiveFailures(tx, stopped), ONE_LOSS);
+    insertExecution(tx, at(2));
+    h.service.settle(tx, row.node_id, FIXTURE_DEADLINE + 100);
+    assert.equal(h.calls.at(-1)!.arguments[2], SECOND_LOSS);
+    const second = at(3, { expired_at: FIXTURE_DEADLINE + 200 });
+    insertExecution(tx, second);
+    endExecution(tx, second.execution_id, FIXTURE_DEADLINE + 101, STOP);
+    assert.equal(consecutiveFailures(tx, second), THIRD_FAILURE);
+    const released = at(4, { expired_at: FIXTURE_DEADLINE + 200 });
+    insertExecution(tx, released);
+    endExecution(tx, released.execution_id, FIXTURE_DEADLINE + 102);
+    assert.equal(readExecution(tx, released.execution_id)?.stop, null);
+    const after = at(5, { expired_at: FIXTURE_DEADLINE + 200 });
+    insertExecution(tx, after);
+    endExecution(tx, after.execution_id, FIXTURE_DEADLINE + 102, STOP);
+    assert.equal(consecutiveFailures(tx, after), ONE_LOSS);
+  });
+});
+
+test("a stopped row that ends in the same millisecond after a finished row counts", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  const row = (offset: number) =>
+    executionFixture({
+      node_id: node,
+      expired_at: FIXTURE_DEADLINE + 100,
+      created_at: FIXTURE_NOW + offset,
+    });
+  h.store.transaction((tx) => {
+    const released = row(1);
+    insertExecution(tx, released);
+    endExecution(tx, released.execution_id, FIXTURE_DEADLINE);
+    const first = row(2);
+    insertExecution(tx, first);
+    endExecution(tx, first.execution_id, FIXTURE_DEADLINE, STOP);
+    const second = row(3);
+    insertExecution(tx, second);
+    endExecution(tx, second.execution_id, FIXTURE_DEADLINE, STOP);
+    assert.equal(consecutiveFailures(tx, second), SECOND_LOSS);
+  });
+});
+
 test("revocation at expiry writes nothing and runtime lookup settles first", (t) => {
   const h = schedulerHarness(t);
   const row = executionFixture();
@@ -245,7 +306,7 @@ test("a failed Mission loss rolls back the terminal write", (t) => {
   const h = schedulerHarness(t);
   const row = executionFixture();
   const failure = new Error("Mission loss failed");
-  h.dependencies.transitions.loss = () => {
+  h.dependencies.transitions.failure = () => {
     throw failure;
   };
   h.store.transaction((tx) => insertExecution(tx, row));

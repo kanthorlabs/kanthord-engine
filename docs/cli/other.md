@@ -356,8 +356,10 @@ The implemented fields are:
 - `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
-- `mission.consecutive_loss_limit`: optional Convict `nat`, default `3`. It
-  holds the consecutive loss limit of the Mission Service.
+- `mission.consecutive_failure_limit`: optional Convict `nat`, default `3`. It
+  holds the consecutive failure limit of the Mission Service.
+- `mission.rework_limit`: optional Convict `nat`, default `2`. It holds the
+  rework limit of the Mission Service. The value `0` turns rework off.
 - `mission.text_max_bytes`: optional Convict `nat` in UTF-8 bytes, default
   `32768`. It bounds every `Text` value of a Mission write; a stored value keeps
   its length after a change of the bound.
@@ -558,6 +560,10 @@ logs one record `Worker application ready` with `runtime_identity`,
 `resource_identity` and `worker_name`. A version mismatch refuses startup with both
 versions in the diagnostic. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
+
+An execution that ends with a release or a closure leaves the instance
+registered, and the application pulls again. A release with a `stop` is a
+release. An execution that ends with no release and no closure exits `1`.
 
 `SIGINT` and `SIGTERM` stop further startup and further work pulls. A stop
 aborts the outstanding work pull. A claim that commits during that abort has no

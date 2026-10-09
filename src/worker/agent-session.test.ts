@@ -73,12 +73,12 @@ test("native session isolates filesystem discovery, settings and session persist
     key: "scripted",
   }));
   const { runtime, model } = await scriptedModelRuntime(provider)({
-    credentials,
-    setup,
-    handoverItem: {
-      credential_id: setup.credential_id,
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
       provider_id: "anthropic",
+      store: credentials,
     },
+    agent: setup.agents[0]!,
     signal: new AbortController().signal,
   });
   const session = await openSession({

@@ -119,10 +119,12 @@ test("published execution objective reads name their operations", () => {
   }
 });
 
-test("published execution evidence and cleared outcome name their operations", () => {
+test("published execution evidence, cleared outcome, cleared assessment and rework assessment name their operations", () => {
   for (const name of [
     "execution.evidence.list",
     "execution.clearedOutcome.get",
+    "execution.cleared_assessment.get",
+    "execution.rework_assessment.get",
   ] as const) {
     const fragment = parse(
       readFileSync(
@@ -691,6 +693,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.execution.objective.outcome.list", AccessPolicy.Client],
   ["mission.execution.objective.evidence.list", AccessPolicy.Client],
   ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
+  ["mission.execution.cleared_assessment.get", AccessPolicy.Client],
+  ["mission.execution.rework_assessment.get", AccessPolicy.Client],
   ["workbench.session.list", AccessPolicy.Human],
   ["workbench.session.create", AccessPolicy.Human],
   ["workbench.session.get", AccessPolicy.Human],
@@ -700,7 +704,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["workbench.session.events", AccessPolicy.Human],
   ["workbench.session.approve", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 148;
+const OPERATION_COUNT = 150;
 
 test("final ERD2 operation inventory agrees with contracts, OpenAPI and live registry", async (t) => {
   const expected = [...OPERATION_INVENTORY].sort();

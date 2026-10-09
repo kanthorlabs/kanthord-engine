@@ -36,7 +36,6 @@ import {
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
-  WorkerMethod,
   workerOperations,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
@@ -47,6 +46,7 @@ import { WORKING_LAYER_ALL_ON } from "../../worker/test-support.ts";
 import {
   WorkspaceRoot,
   WorkspaceKind,
+  ExecutionBudget,
   openNativeAgent,
   renderWorkPrompt,
   runVerifications,
@@ -409,12 +409,12 @@ test(
     });
     const repository = runtimeX.setup.repositories[0]!;
     await t.test("E07.3 execution setup and foreign proof", async () => {
-      assert.deepEqual(runtimeX.setup.effective_configuration, {
+      assert.deepEqual(runtimeX.setup.agents[0]!.effective_configuration, {
         ...DEFAULTS,
         provider: "anthropic",
         credential: "anthro-1",
       });
-      assert.equal(runtimeX.setup.metadata, null);
+      assert.equal(runtimeX.setup.agents[0]!.metadata, null);
       assert.deepEqual(runtimeX.setup.resource_budget, {
         turns: 200,
         wall_time_ms: 7200000,
@@ -429,11 +429,18 @@ test(
         working_layer: WORKING_LAYER_ALL_ON,
       });
       assert.ok(
-        runtimeX.setup.prompt.final.endsWith(framing(PromptConsumer.Worker)),
+        runtimeX.setup.agents[0]!.prompt.final.endsWith(
+          framing(PromptConsumer.Worker),
+        ),
       );
-      assert.ok(runtimeX.setup.prompt.final.includes(SWE_AGENT_PROMPT));
-      assert.ok(!runtimeX.setup.prompt.final.includes(PROJECT));
-      assert.equal(runtimeX.setup.credential_id, runtimeX.item.credential_id);
+      assert.ok(
+        runtimeX.setup.agents[0]!.prompt.final.includes(SWE_AGENT_PROMPT),
+      );
+      assert.ok(!runtimeX.setup.agents[0]!.prompt.final.includes(PROJECT));
+      assert.equal(
+        runtimeX.setup.agents[0]!.credential_id,
+        runtimeX.item.credential_id,
+      );
       const refused = await x.client["execution.setup.get"]({
         params: { execution_id: y.execution.execution_id },
         query: {},
@@ -472,9 +479,17 @@ test(
       setup: runtimeX.setup,
       claim: x.execution,
       nodeKind: "objective",
-      method: WorkerMethod.Steps,
-      credentials: runtimeX.credentials.store,
-      handoverItem: runtimeX.item,
+      agent: runtimeX.setup.agents[0]!,
+      credential: {
+        credential_id: runtimeX.item.credential_id,
+        provider_id: runtimeX.item.provider_id,
+        store: runtimeX.credentials.store,
+      },
+      budget: new ExecutionBudget({
+        ...x.execution,
+        resource_budget: runtimeX.setup.resource_budget,
+      }),
+      workspaceAgentFiles: true,
       workspace: prepared.directory,
       hostHome,
       modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -626,9 +641,17 @@ test(
         setup: runtimeY.setup,
         claim: y.execution,
         nodeKind: "objective",
-        method: WorkerMethod.Steps,
-        credentials: runtimeY.credentials.store,
-        handoverItem: runtimeY.item,
+        agent: runtimeY.setup.agents[0]!,
+        credential: {
+          credential_id: runtimeY.item.credential_id,
+          provider_id: runtimeY.item.provider_id,
+          store: runtimeY.credentials.store,
+        },
+        budget: new ExecutionBudget({
+          ...y.execution,
+          resource_budget: runtimeY.setup.resource_budget,
+        }),
+        workspaceAgentFiles: true,
         workspace: lab.directory,
         hostHome,
         modelRuntimeFactory: scriptedModelRuntime(fake),

@@ -5,6 +5,8 @@ import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   ClaimState,
+  releaseStopSchema,
+  type ReleaseStop,
   type ExecutionRow,
   type ExecutionRecord,
   type InstanceRegistrations,
@@ -13,18 +15,26 @@ import {
 const NO_ROWS = 0;
 const ONE_ROW = 1;
 const credentialList = z.array(identitySchema("credential"));
+const storedStop = releaseStopSchema.nullable();
 const COLUMNS = `id AS execution_id, project_id, node_id,
   worker_binding_id, resource_identity,
   runtime_identity, attempt, pinned_revision,
   credentials, expired_at, trace_id, root_span_id,
-  created_at, ended_at`;
-type StoredRow = Omit<ExecutionRow, "credentials"> & { credentials: string };
+  created_at, ended_at, stop`;
+type StoredRow = Omit<ExecutionRow, "credentials" | "stop"> & {
+  credentials: string;
+  stop: string | null;
+};
 
 function decode(row: StoredRow): ExecutionRow {
   const credentials = credentialList.parse(JSON.parse(row.credentials));
   assert.equal(new Set(credentials).size, credentials.length);
   assert.ok(Number.isSafeInteger(row.attempt) && row.attempt > NO_ROWS);
-  return { ...row, credentials };
+  const stop = storedStop.parse(
+    row.stop === null ? null : JSON.parse(row.stop),
+  );
+  assert.ok(stop === null || row.ended_at !== null);
+  return { ...row, credentials, stop };
 }
 
 export function insertExecution(tx: Transaction, row: ExecutionRow): void {
@@ -32,12 +42,13 @@ export function insertExecution(tx: Transaction, row: ExecutionRow): void {
   assert.ok(
     row.expired_at > row.created_at && Number.isSafeInteger(row.expired_at),
   );
+  assert.ok(row.stop === null || row.ended_at !== null);
   tx.database
     .prepare(
       `INSERT INTO scheduler_execution
     (id, project_id, node_id, worker_binding_id, resource_identity, runtime_identity,
-     attempt, pinned_revision, credentials, expired_at, trace_id, root_span_id, created_at, ended_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     attempt, pinned_revision, credentials, expired_at, trace_id, root_span_id, created_at, ended_at, stop)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.execution_id,
@@ -54,6 +65,7 @@ export function insertExecution(tx: Transaction, row: ExecutionRow): void {
       row.root_span_id,
       row.created_at,
       row.ended_at,
+      row.stop === null ? null : canonicalJSON(row.stop),
     );
 }
 
@@ -123,13 +135,18 @@ export function endExecution(
   tx: Transaction,
   executionId: string,
   now: number,
+  stop: ReleaseStop | null = null,
 ): void {
   assert.ok(Number.isSafeInteger(now) && now >= NO_ROWS);
   const result = tx.database
     .prepare(
-      "UPDATE scheduler_execution SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
+      "UPDATE scheduler_execution SET ended_at = ?, stop = ? WHERE id = ? AND ended_at IS NULL",
     )
-    .run(now, executionId);
+    .run(
+      now,
+      stop === null ? null : canonicalJSON(releaseStopSchema.parse(stop)),
+      executionId,
+    );
   assert.equal(result.changes, ONE_ROW, "exactly one terminal write must win");
 }
 export function listExecutions(

@@ -252,7 +252,7 @@ test("loss probes commit settlement at once and return a new claim", async (t) =
   t.mock.method(Date, "now", () => now);
   const expired = { ...h.row, created_at: now - 1000, expired_at: now };
   h.store.transaction((tx) => insertExecution(tx, expired));
-  h.dependencies.transitions.loss = (tx, nodeId) =>
+  h.dependencies.transitions.failure = (tx, nodeId) =>
     h.service.insert(tx, nodeId, h.row.project_id, 0);
   const result = await h.pull();
   assert.equal(result.kind, WorkPullKind.Claimed);

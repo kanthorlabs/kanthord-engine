@@ -15,7 +15,6 @@ import {
 } from "../../kernel/service.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
-import type { WorkspaceRoot } from "../../worker/index.ts";
 import { workerApi, type WorkerApi } from "./api.ts";
 import {
   register,
@@ -23,10 +22,14 @@ import {
   startHeartbeat,
   type Registration,
 } from "./registration.ts";
-import type {
-  ModelRuntimeFactory,
-  RepositoryTransport,
+import {
+  checkAgentTools,
+  defaultModelRuntimeFactory,
+  WorkspaceRoot,
+  type ModelRuntimeFactory,
+  type RepositoryTransport,
 } from "../../worker/index.ts";
+import { hostExecution } from "./execution.ts";
 import {
   readServerVersion,
   resolveClient,
@@ -106,9 +109,6 @@ export class Worker implements Service {
           "worker: client_secret must be a base64 encoding of exactly 32 bytes.",
         );
       this.clientSecret = secret;
-      throwIfCancelled(this.shutdown);
-      const { checkAgentTools, WorkspaceRoot } =
-        await import("../../worker/index.ts");
       throwIfCancelled(this.shutdown);
       checkAgentTools();
       throwIfCancelled(this.shutdown);
@@ -302,9 +302,6 @@ export class Worker implements Service {
     claim: ExecutionRecord,
     context: Context,
   ): Promise<Diagnostic | null> {
-    const { hostExecution } = await import("./execution.ts");
-    const { defaultModelRuntimeFactory } =
-      await import("../../worker/index.ts");
     return hostExecution({
       claim,
       api: this.api!,

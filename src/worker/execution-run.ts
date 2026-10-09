@@ -8,7 +8,11 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { ClaimState } from "../scheduler/contract.ts";
+import {
+  ClaimState,
+  ExecutionStopReason,
+  type ReleaseStop,
+} from "../scheduler/contract.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -20,12 +24,8 @@ type AssessmentBody = Omit<
 >;
 
 export const EndReason = {
+  ...ExecutionStopReason,
   Revoked: "revoked",
-  OperationFailed: "operation_failed",
-  JudgementInvalid: "judgement_invalid",
-  ReportAbsent: "report_absent",
-  ActionUnsettled: "action_unsettled",
-  AssessmentAbsent: "assessment_absent",
 } as const;
 export type EndReason = (typeof EndReason)[keyof typeof EndReason];
 export const ExecutionEndKind = {
@@ -34,7 +34,11 @@ export const ExecutionEndKind = {
   Ended: "ended",
 } as const;
 export type ExecutionEnd =
-  | { kind: typeof ExecutionEndKind.Released; furtherWork: boolean }
+  | {
+      kind: typeof ExecutionEndKind.Released;
+      furtherWork: boolean;
+      stop?: ReleaseStop;
+    }
   | { kind: typeof ExecutionEndKind.Closed; outcomeId: string }
   | {
       kind: typeof ExecutionEndKind.Ended;
@@ -82,6 +86,7 @@ export class ExecutionRun {
   readonly clients: MethodClients;
   readonly operationContext: CancellationContext;
   private readonly credentials: { release(): Promise<void> };
+  private readonly parent: Context;
   private stopped: ExecutionStop | null = null;
   private settlement: Promise<void> | null = null;
 
@@ -96,6 +101,7 @@ export class ExecutionRun {
     this.claim = input.claim;
     this.clients = input.clients;
     this.credentials = input.credentials;
+    this.parent = input.context;
     this.operationContext = new CancellationContext(
       input.context,
       input.claim.expired_at,
@@ -115,9 +121,26 @@ export class ExecutionRun {
   }
 
   stop(reason: EndReason, code: string | null = null): never {
+    throw this.halt(reason, code);
+  }
+
+  stopOf(error: unknown): ExecutionStop {
+    if (error instanceof ExecutionStop)
+      return this.halt(error.reason, error.code);
+    return this.halt(
+      EndReason.OperationFailed,
+      error instanceof CodedError ? error.code : null,
+    );
+  }
+
+  cleanupContext(): CancellationContext {
+    return new CancellationContext(this.parent, this.claim.expired_at);
+  }
+
+  private halt(reason: EndReason, code: string | null): ExecutionStop {
     this.stopped ??= new ExecutionStop(reason, code);
     this.operationContext.cancel(this.stopped);
-    throw this.stopped;
+    return this.stopped;
   }
 
   private requireActive(): void {
@@ -244,5 +267,53 @@ export class ExecutionRun {
       };
     });
     return { kind: ExecutionEndKind.Released, furtherWork };
+  }
+
+  async releaseStop(stopped: ExecutionStop): Promise<ExecutionEnd> {
+    const reason = stopped.reason;
+    assert.ok(reason !== EndReason.Revoked);
+    const stop: ReleaseStop = { reason, code: stopped.code };
+    const context = this.cleanupContext();
+    try {
+      this.settlement ??= this.credentials.release();
+      await this.settlement;
+      const params = { execution_id: this.claim.execution_id };
+      const result = await this.clients.scheduler.executionRelease(
+        { params, query: {}, body: { further_work: true, stop } },
+        { context, idempotencyKey: ulid() },
+      );
+      if (result.type === OperationResultType.Indeterminate) {
+        const claim = await this.clients.scheduler.claimGet(
+          { params, query: {}, body: null },
+          { context, idempotencyKey: ulid() },
+        );
+        if (
+          claim.type === OperationResultType.Completed &&
+          claim.data.claim_state === ClaimState.Finished &&
+          claim.data.stop !== null
+        )
+          return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
+      }
+      if (result.type === OperationResultType.Completed)
+        return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
+      if (isExecutionEnd(result))
+        return {
+          kind: ExecutionEndKind.Ended,
+          reason: EndReason.Revoked,
+          code:
+            result.type === OperationResultType.Failure
+              ? result.error.error.code
+              : null,
+        };
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+    } finally {
+      context.cancel();
+    }
+    return {
+      kind: ExecutionEndKind.Ended,
+      reason: stopped.reason,
+      code: stopped.code,
+    };
   }
 }

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import type { TaskContent } from "../mission/contract.ts";
+import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import type { Verification, TestedInput } from "./verification.ts";
+import type { NativeAgent } from "./native-agent.ts";
 
 export const JUDGEMENT_MARKER = "kanthord-judgement:";
 const SUCCESS_EXIT = 0;
@@ -22,14 +24,13 @@ export const evaluationJudgementSchema = z.strictObject({
 export function parseJudgement<T extends z.ZodType>(
   text: string | undefined,
   schema: T,
+  marker: string = JUDGEMENT_MARKER,
 ): z.output<T> | null {
-  const line = text
-    ?.split("\n")
-    .findLast((value) => value.startsWith(JUDGEMENT_MARKER));
+  const line = text?.split("\n").findLast((value) => value.startsWith(marker));
   if (!line) return null;
   let value: unknown;
   try {
-    value = JSON.parse(line.slice(JUDGEMENT_MARKER.length));
+    value = JSON.parse(line.slice(marker.length));
   } catch (error) {
     if (error instanceof SyntaxError) return null;
     throw error;
@@ -38,10 +39,43 @@ export function parseJudgement<T extends z.ZodType>(
   return parsed.success ? parsed.data : null;
 }
 
-export function taskJudgementInstruction(task: TaskContent): string {
+export const ReplyRepair = {
+  Invalid: "invalid",
+  BudgetEnd: "budget_end",
+} as const;
+export type ReplyRepair = (typeof ReplyRepair)[keyof typeof ReplyRepair];
+
+export function repairInstruction(marker: string): string {
+  assert.ok(marker);
+  return `The reply holds no valid ${marker} line. Reply again with exactly one such line.`;
+}
+
+export async function parseRepaired<T extends z.ZodType>(
+  agent: NativeAgent,
+  work: WorkPrompt,
+  schema: T,
+  marker: string = JUDGEMENT_MARKER,
+): Promise<z.output<T> | ReplyRepair> {
+  const reply = parseJudgement(agent.lastText(), schema, marker);
+  if (reply !== null) return reply;
+  await agent.instruct(work, repairInstruction(marker));
+  if (agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
+  return (
+    parseJudgement(agent.lastText(), schema, marker) ?? ReplyRepair.Invalid
+  );
+}
+
+export function taskJudgementInstruction(
+  task: TaskContent,
+  priorRationale: string | null = null,
+): string {
   assert.ok(task.id);
   assert.ok(task.content.criterion);
-  return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterion_met": true, "rationale": "Explain your judgement"}`;
+  const prior =
+    priorRationale === null
+      ? ""
+      : `\nPrevious judgement: ${priorRationale}. Judge whether the task criterion is met now.`;
+  return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}${prior}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterion_met": true, "rationale": "Explain your judgement"}`;
 }
 
 export function failedVerificationRationale(
