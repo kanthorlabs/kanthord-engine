@@ -275,6 +275,16 @@ test("E08 delivery admission journey", { timeout: TIMEOUT }, async (t) => {
   assert.equal((await h.node(P.nodeId)).state, NodeState.ExternalRequested);
   const check = await h.check(P.nodeId);
   assert.equal(check.results[FIRST_INDEX]?.resolution, Resolution.Unresolved);
+  const shared = [];
+  for (const filename of ["objective-r.md", "objective-u.md"]) {
+    const o = await h.objective(filename, I);
+    const request = await h.requestPullRequest(o.x2, SHARED_PULL_REQUEST);
+    assert.equal(request.requirement_key, GATED_KEY);
+    await h.release(o.x2.execution_id);
+    assert.equal((await h.node(o.nodeId)).state, NodeState.ExternalRequested);
+    shared.push(o.nodeId);
+  }
+  const R = shared[FIRST_INDEX]!;
 
   await t.test("E08.1 an issue event is undecodable", async () => {
     const answer = completed(
@@ -356,16 +366,6 @@ test("E08 delivery admission journey", { timeout: TIMEOUT }, async (t) => {
     });
   });
   await t.test("E08.6 two requests of one address are ambiguous", async () => {
-    const objectives = [];
-    for (const filename of ["objective-r.md", "objective-u.md"]) {
-      const o = await h.objective(filename, I);
-      const request = await h.requestPullRequest(o.x2, SHARED_PULL_REQUEST);
-      assert.equal(request.requirement_key, GATED_KEY);
-      await h.release(o.x2.execution_id);
-      assert.equal((await h.node(o.nodeId)).state, NodeState.ExternalRequested);
-      objectives.push(o.nodeId);
-    }
-    const R = objectives[FIRST_INDEX]!;
     const answer = completed(
       await h.admit(
         closed(SHARED_PULL_REQUEST, true),
