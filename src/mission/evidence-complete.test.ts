@@ -3,13 +3,17 @@ import { test, type TestContext } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { testHumanIdentity } from "../kernel/test-identity.ts";
+import {
+  testHumanIdentity,
+  testMachineIdentity,
+} from "../kernel/test-identity.ts";
 import {
   AssetKind,
   MissionErrorCode,
   UPLOAD_LIFETIME_MS,
   type StorageBinding,
 } from "./contract.ts";
+import { AssetUse } from "./authorization.ts";
 import { insertEvidence, readEvidence } from "./record-store.ts";
 import { evidenceRecord } from "./record-read.ts";
 import { executionHarness } from "./test-support.ts";
@@ -22,6 +26,9 @@ const FIRST_ASSET_INDEX = 0;
 const NO_CALLS = 0;
 const VERSION = "stored-version";
 const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
+const ISSUED_AT = 100;
+const RACED_CHECK = 1;
+const BOTH_CHECKS = 2;
 
 function fixture(t: TestContext, expired = false) {
   const h = executionHarness(t, IDENTITY);
@@ -129,6 +136,51 @@ test("completion publishes a checked version and a repeat skips Intake", async (
   assert.equal(asset.address.version, VERSION);
   assert.deepEqual(await h.complete(), result);
   assert.equal(h.checks(), SINGLE_ITEM);
+});
+
+test("a complete that races a publishing complete refuses at its check", async (t) => {
+  const h = fixture(t);
+  const machine = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "Harness",
+      resourceIdentity: "worker:claude",
+      issuedAt: ISSUED_AT,
+      projectId: h.project_id,
+    },
+    "jti",
+    h.claim.runtimeIdentity,
+  );
+  let checks = NO_CALLS;
+  let published: unknown = null;
+  h.dependencies.intakeStorage.check = async (_call, assetId) => {
+    checks++;
+    if (checks === RACED_CHECK) {
+      published = await h.complete();
+      h.store.transaction((tx) =>
+        h.service.authorizeEvidenceAsset(
+          tx,
+          machine,
+          assetId,
+          h.claim,
+          AssetUse.Check,
+        ),
+      );
+    }
+    return { location: h.location, version: VERSION };
+  };
+  await assert.rejects(h.complete, {
+    status: 403,
+    code: MissionErrorCode.AuthorizationRefused,
+    details: { reason: "node_mismatch" },
+  });
+  assert.equal(checks, BOTH_CHECKS);
+  assert.deepEqual(published, {
+    asset_id: h.asset_id,
+    evidence_id: h.evidence_id,
+    uri: h.location,
+  });
+  assert.notEqual(h.evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
 });
 
 test("failed remote checks and claims ending during the check keep uploads pending", async (t) => {

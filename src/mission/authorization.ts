@@ -520,7 +520,8 @@ function admitAssetUse(
     return;
   }
   authorizeClaim(tx, dependencies, claim, evidence.node_id);
-  pendingObjectAdmitted(evidence, asset, claim, Date.now());
+  if (!pendingObjectAdmitted(evidence, asset, claim, Date.now()))
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
 }
 
 export function authorizeEvidenceAsset(
