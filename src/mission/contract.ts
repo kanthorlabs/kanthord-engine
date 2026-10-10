@@ -973,6 +973,7 @@ export const unblockSchema = z.strictObject({
   expected_revision: z.number().int().positive(),
   expected_mission_version: z.number().int().positive(),
   change: unblockChangeSchema.optional(),
+  reason: textSchema.optional(),
 });
 export type Unblock = z.infer<typeof unblockSchema>;
 

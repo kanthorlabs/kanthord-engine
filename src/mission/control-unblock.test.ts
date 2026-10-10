@@ -396,3 +396,32 @@ test("unchanged content makes no revision and unsatisfied closure routes unblock
     FIRST_ATTEMPT,
   );
 });
+
+test("unblock accepts an optional nonblank reason and refuses a blank one", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused),
+  });
+  const unblock = (reason: string) =>
+    h.invoke("node.unblock", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        blocked_attempt: NO_ATTEMPT,
+        expected_revision: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
+        reason,
+      },
+    });
+  await assert.rejects(unblock(" "), (error: unknown) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, MissionErrorCode.ContentInvalid);
+    return true;
+  });
+  const result = await unblock("Retry on the current base branch.");
+  assert.ok(result.node.kind !== NodeKind.Task);
+  assert.equal(result.node.state, NodeState.Available);
+});
