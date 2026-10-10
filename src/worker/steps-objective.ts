@@ -189,6 +189,7 @@ export async function runTask(
     kind: TaskResultKind.BudgetEnd,
     boundary,
   });
+  state.run.log("task started", { task_id: task.id });
   while (!budget.exhausted()) {
     boundary = TaskBoundary.InProgress;
     if (workDone) workDone = false;
@@ -207,8 +208,16 @@ export async function runTask(
       state.run.operationContext,
       budget.remainingMs(),
     );
+    state.run.log("task committed", { task_id: task.id, commit: state.head });
     const verification = await verifyTask(state, task);
-    if (!verificationPassed(verification, task.content.verifications)) {
+    const passed = verificationPassed(verification, task.content.verifications);
+    state.run.log("task verified", {
+      task_id: task.id,
+      commit: state.head,
+      passed,
+      exit_codes: verification.results.map((result) => result.exit_code),
+    });
+    if (!passed) {
       boundary = TaskBoundary.RunFailed;
       if (budget.exhausted()) return ended(TaskBoundary.RunFailed);
       instruction = taskRevisionInstruction(
@@ -233,6 +242,11 @@ export async function runTask(
       return ended(TaskBoundary.RunPassed);
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
+    state.run.log("task judged", {
+      task_id: task.id,
+      commit: state.head,
+      criterion_met: judgement.criterion_met,
+    });
     if (judgement.criterion_met) {
       recordJudged(
         objectiveDirectoryOf(state),

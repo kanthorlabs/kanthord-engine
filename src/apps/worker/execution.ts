@@ -8,7 +8,7 @@ import { CodedError, Diagnostic } from "../../kernel/errors.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   runNativeExecution,
-  noTranscript,
+  type TranscriptSink,
   isExecutionEnd,
   EndReason,
   type WorkspaceRoot,
@@ -28,6 +28,7 @@ export interface HostExecutionInput {
   modelRuntimeFactory: ModelRuntimeFactory;
   hostHome: string;
   context: Context;
+  transcript: TranscriptSink;
   log(record: Record<string, unknown>): void;
 }
 const ENDED = "ended";
@@ -74,7 +75,6 @@ export async function hostExecution(
       setup,
       clients: input.api,
       ...handover,
-      transcript: noTranscript,
       context,
       hostTools: (workspace) => ({
         evidenceUpload: async (path, signal) => {

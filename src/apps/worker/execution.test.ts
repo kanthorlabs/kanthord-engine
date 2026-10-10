@@ -80,6 +80,7 @@ test("host takes handover before setup and method, discards on every method end"
       throw new Error("Unexpected inference");
     },
     hostHome: temporary(t),
+    transcript: noTranscript,
     log: () => {},
   };
   let stored: NativeExecutionInput["credentials"] | undefined;

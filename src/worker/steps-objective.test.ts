@@ -46,6 +46,7 @@ const NO_PROVIDER_CALLS = 0;
 const NO_PUSHES = 0;
 const REPAIRED_TASK_CALLS = 3;
 const ONE_JUDGEMENT = 1;
+const TASK_VERIFIED = "task verified";
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -293,7 +294,29 @@ test("task work commits revisions and cleans verification writes before judgemen
       ),
     ],
   );
+  const events = t.mock.method(h.run, "log");
   assert.deepEqual(await runTask(h, current), { kind: "complete" });
+  assert.deepEqual(
+    events.mock.calls.map((call) => call.arguments[0]),
+    [
+      "task started",
+      "task committed",
+      "task verified",
+      "task committed",
+      "task verified",
+      "task judged",
+    ],
+  );
+  const verified = events.mock.calls
+    .filter((call) => call.arguments[0] === TASK_VERIFIED)
+    .map((call) => call.arguments[1].passed);
+  assert.deepEqual(verified, [false, true]);
+  assert.equal(
+    JSON.stringify(events.mock.calls.map((call) => call.arguments[1])).includes(
+      "good",
+    ),
+    false,
+  );
   const log = await simpleGit(h.directory).log();
   const COMMITS = 3;
   assert.equal(log.total, COMMITS);

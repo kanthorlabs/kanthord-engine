@@ -92,6 +92,10 @@ async function judge(
     return run.stop(EndReason.AssessmentAbsent);
   if (judgement === ReplyRepair.Invalid)
     return run.stop(EndReason.JudgementInvalid);
+  run.log("node judged", {
+    result: judgement.result,
+    unmet: judgement.unmet.map((item) => item.id),
+  });
   return { result: judgement.result, rationale: judgementRationale(judgement) };
 }
 

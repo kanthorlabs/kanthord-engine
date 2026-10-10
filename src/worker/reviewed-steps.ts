@@ -2,6 +2,7 @@ import type { TaskContent } from "../mission/contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { diffText } from "./local-git.ts";
 import {
+  FindingKind,
   fixInstruction,
   hasBlocker,
   parseRepairedReview,
@@ -72,6 +73,16 @@ async function reviewTask(
     const review = await parseRepairedReview(agent, taskWork(state, task));
     if (review === ReplyRepair.BudgetEnd) return ReviewStop.BudgetEnd;
     if (review === ReplyRepair.Invalid) return ReviewStop.Invalid;
+    state.run.log("task reviewed", {
+      task_id: task.id,
+      commit: state.head,
+      blockers: review.findings.filter(
+        (finding) => finding.kind === FindingKind.Blocker,
+      ).length,
+      suggestions: review.findings.filter(
+        (finding) => finding.kind === FindingKind.Suggestion,
+      ).length,
+    });
     return review;
   } finally {
     reviewer.close(agent);

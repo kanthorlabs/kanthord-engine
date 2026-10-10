@@ -592,6 +592,15 @@ logs one record `Worker application ready` with `runtime_identity`,
 versions in the diagnostic. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
 
+During an execution, the application logs one info record for each task start
+(`task started`), task commit (`task committed`), verification result (`task
+verified`), task judgement (`task judged`), task review (`task reviewed`) and
+node judgement (`node judged`). A record holds the execution, node, attempt and
+task identities, commits, exit codes and results, and no agent content. The
+application appends the transcript of each agent session to
+`<state>/transcripts/<execution id>.jsonl` with mode 0600, and it keeps the
+newest 50 execution transcripts.
+
 An execution that ends with a release or a closure leaves the instance
 registered, and the application pulls again. A release with a `stop` is a
 release. An execution that ends with no release and no closure exits `1`.
