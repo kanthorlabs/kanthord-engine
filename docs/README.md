@@ -19,7 +19,9 @@ engine/
 │   ├── main.ts                 # Fatal handlers and CLI dispatch
 │   ├── config/                 # Whole configuration assembly and file loading
 │   │   ├── global.ts           # Global schema, types, log destination, and key size
-│   │   └── index.ts            # Compose fragments; locate, load, initialize, and show YAML
+│   │   ├── index.ts            # Compose fragments; locate, load, initialize, and show YAML; configuration version gate
+│   │   ├── steps.ts            # Configuration version, ordered configuration steps, and key rename
+│   │   └── upgrade.ts          # Configuration upgrade of a file text to the binary version
 │   ├── kernel/                 # Transport-neutral runtime and shared vocabulary
 │   │   ├── service.ts          # Service lifecycle and component health contracts
 │   │   ├── context.ts          # Cancellation contexts and native signal bridge

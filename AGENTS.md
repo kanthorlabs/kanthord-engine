@@ -19,7 +19,9 @@ engine/
 │   ├── main.ts                 # Fatal handlers and CLI dispatch
 │   ├── config/                 # Whole configuration assembly and file loading
 │   │   ├── global.ts           # Global schema, types, log destination, and key size
-│   │   └── index.ts            # Compose fragments; locate, load, initialize, and show YAML
+│   │   ├── index.ts            # Compose fragments; locate, load, initialize, and show YAML; configuration version gate
+│   │   ├── steps.ts            # Configuration version, ordered configuration steps, and key rename
+│   │   └── upgrade.ts          # Configuration upgrade of a file text to the binary version
 │   ├── kernel/                 # Transport-neutral runtime and shared vocabulary
 │   │   ├── service.ts          # Service lifecycle and component health contracts
 │   │   ├── context.ts          # Cancellation contexts and native signal bridge
@@ -236,6 +238,7 @@ engine/
 │       ├── cli/                # Non-interactive commands and client configuration
 │       │   ├── index.ts        # Commander dispatch and local configuration and Gateway commands
 │       │   ├── auth.ts         # Authentication command group: local JWT generation, inspection, and claim rendering
+│       │   ├── upgrade.ts      # Upgrade command: backups, pending migrations, and the configuration upgrade
 │       │   ├── config-path.ts  # Shared server configuration path and help text
 │       │   ├── constants.ts    # CLI command names and exit codes
 │       │   ├── credential.ts   # Shared credential command group of a component
@@ -376,6 +379,19 @@ It opens no database and reads no server configuration.
    `src/apps/server/migrations.test.ts`: distinct table prefixes in a shared
    store, and successful application of each service's migrations alone.
 4. Run the ownership tests and `pnpm run verify`.
+5. Expect `serve` to refuse an existing database with
+   `system.database.migration.pending`. Run `kanthord upgrade` on it.
+
+## Add a configuration breaking change
+
+1. Append one step to `CONFIG_STEPS` in `src/config/steps.ts`. Never edit a
+   published step. `CONFIG_VERSION` grows by one.
+2. Use `renameKey` for a key rename. For another change, edit the YAML
+   document in the step and return each change that the step makes.
+3. Add a case to `src/config/upgrade.test.ts` that upgrades a file of the
+   previous version.
+4. Update the field documentation of the owning implementation page and
+   `docs/cli/other.md`. Run `pnpm run verify`.
 
 ## Add a configuration field
 
