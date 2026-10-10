@@ -37,10 +37,10 @@ function snapshot(
   };
 }
 
-function assistant(text: string): SessionEntry {
+function assistant(text: string, id = "e2"): SessionEntry {
   return {
     type: "message",
-    id: "e2",
+    id,
     parentId: "e1",
     timestamp: "2026-10-09T00:00:00.000Z",
     message: { role: "assistant", content: [{ type: "text", text }] },
@@ -49,6 +49,10 @@ function assistant(text: string): SessionEntry {
 
 function fakePort(events: SessionEvents[], entries: SessionEntry[]) {
   const log: string[] = [];
+  const eventCalls: {
+    version: number | undefined;
+    after: string | undefined;
+  }[] = [];
   const port: WorkbenchPort = {
     async create(agentName) {
       log.push(`create ${agentName}`);
@@ -57,7 +61,8 @@ function fakePort(events: SessionEvents[], entries: SessionEntry[]) {
     async message(_id, text) {
       log.push(`message ${text}`);
     },
-    async events() {
+    async events(_id, version, after) {
+      eventCalls.push({ version, after });
       log.push("events");
       return events.shift() ?? snapshot({ run_active: true });
     },
@@ -68,7 +73,7 @@ function fakePort(events: SessionEvents[], entries: SessionEntry[]) {
       log.push(ABORT_LOG);
     },
   };
-  return { port, log };
+  return { port, log, eventCalls };
 }
 
 test("askInSession returns the text of the last assistant message", async () => {
@@ -140,4 +145,28 @@ test("a failed operation fails the session", async () => {
     code: CouncilErrorCode.AgentSessionFailed,
     message: /server stopped/,
   });
+});
+
+test("each events call after the first carries the last version and entry seen", async () => {
+  const first = {
+    ...snapshot({ run_active: true }),
+    version: 4,
+    entries: [assistant("a", "e1"), assistant("b", "e2")],
+  };
+  const second = { ...snapshot({ run_active: true }), version: 5 };
+  const third = {
+    ...snapshot({ run_active: false }),
+    version: 6,
+    entries: [assistant(FINAL_ANSWER, "e3")],
+  };
+  const { port, eventCalls } = fakePort(
+    [first, second, third],
+    [assistant(FINAL_ANSWER, "e3")],
+  );
+  await askInSession(port, "po@1", CONFIGURATION, "hello");
+  assert.deepEqual(eventCalls, [
+    { version: undefined, after: undefined },
+    { version: 4, after: "e2" },
+    { version: 5, after: "e2" },
+  ]);
 });

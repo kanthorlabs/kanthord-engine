@@ -27,6 +27,7 @@ export interface WorkbenchPort {
   events(
     sessionId: string,
     version: number | undefined,
+    after: string | undefined,
   ): Promise<SessionEvents>;
   entries(sessionId: string): Promise<SessionEntry[]>;
   abort(sessionId: string): Promise<void>;
@@ -65,8 +66,13 @@ async function waitForEnd(
 ): Promise<void> {
   const deadline = now() + SESSION_DEADLINE_MS;
   let version: number | undefined;
+  let after: string | undefined;
   for (;;) {
-    const { snapshot, version: next } = await port.events(sessionId, version);
+    const {
+      entries,
+      snapshot,
+      version: next,
+    } = await port.events(sessionId, version, after);
     if (snapshot.error_message) throw failed(agentName, snapshot.error_message);
     if (snapshot.pending_approval)
       throw failed(agentName, "the run waits for an approval");
@@ -74,6 +80,7 @@ async function waitForEnd(
     if (now() >= deadline)
       throw failed(agentName, "the run did not end within 10 minutes");
     version = next;
+    after = entries.at(-1)?.id ?? after;
   }
 }
 
@@ -140,11 +147,14 @@ export function httpWorkbenchPort(
         "workbench.session.message",
       );
     },
-    async events(sessionId, version) {
+    async events(sessionId, version, after) {
       return completed(
         await client["session.events"]({
           params: { session_id: sessionId },
-          query: version === undefined ? {} : { version },
+          query: {
+            ...(version === undefined ? {} : { version }),
+            ...(after === undefined ? {} : { after }),
+          },
           body: null,
         }),
         "workbench.session.events",
