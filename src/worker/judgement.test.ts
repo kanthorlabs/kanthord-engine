@@ -6,6 +6,7 @@ import {
   taskJudgementSchema,
   evaluationJudgementSchema,
   judgementRationale,
+  reportInstruction,
   evaluationInstruction,
   JUDGEMENT_MARKER,
   repairInstruction,
@@ -177,4 +178,10 @@ test("a prior rationale adds the previous judgement to the task judgement instru
       "\nPrevious judgement: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",
     ),
   );
+});
+
+test("the report instruction makes the reply the report and forbids a file", () => {
+  const instruction = reportInstruction([], [], []);
+  assert.match(instruction, /Your reply is the report/);
+  assert.match(instruction, /write no file/);
 });

@@ -148,5 +148,5 @@ export function reportInstruction(
   outcomes: unknown,
   evidence: unknown,
 ): string {
-  return `Write a Markdown report on the outcome of each current objective using its outcome and evidence.\nObjectives: ${JSON.stringify(objectives)}\nOutcomes: ${JSON.stringify(outcomes)}\nEvidence: ${JSON.stringify(evidence)}`;
+  return `Write a Markdown report on the outcome of each current objective using its outcome and evidence. Your reply is the report: give the full report in the reply and write no file, because the reply is the only content that KanthorD stores.\nObjectives: ${JSON.stringify(objectives)}\nOutcomes: ${JSON.stringify(outcomes)}\nEvidence: ${JSON.stringify(evidence)}`;
 }
