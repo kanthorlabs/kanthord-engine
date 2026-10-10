@@ -61,7 +61,7 @@ export function conflictQuestionsMessage(
   round: Round,
 ): string {
   return [
-    "Step: conflict questions. Ask only about the points where the roles below disagree.",
+    "Step: conflict questions. Ask only about the points where the roles below disagree. A conflict question names no role and quotes no answer; it asks about the disputed point itself.",
     context(idea, triage),
     `## Answers\n\n${JSON.stringify(round.answers, null, 2)}`,
     shape({ questions: ["..."] }),
