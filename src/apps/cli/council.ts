@@ -27,14 +27,21 @@ async function council(idea: string, command: Command): Promise<void> {
   const port = httpWorkbenchPort(endpoint, token);
   const record = await runCouncil(
     idea,
-    (agentName, text) =>
-      askInSession(port, agentName, configurations.get(agentName)!, text),
+    (agentName, text, signal) =>
+      askInSession(
+        port,
+        agentName,
+        configurations.get(agentName)!,
+        text,
+        Date.now,
+        signal,
+      ),
     (step) => process.stderr.write(`council: ${step}\n`),
   );
   const files = renderPlanFiles(record.plan);
   writeOutput(out, files, renderRecord(record));
   process.stdout.write(
-    `Wrote ${files.length} plan files and council.md to ${out}\n`,
+    `Wrote ${files.length} plan files and council.md (the record, not a plan file) to ${out}\n`,
   );
 }
 

@@ -63,11 +63,17 @@ async function waitForEnd(
   agentName: string,
   sessionId: string,
   now: () => number,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
   const deadline = now() + SESSION_DEADLINE_MS;
   let version: number | undefined;
   let after: string | undefined;
   for (;;) {
+    if (signal?.aborted)
+      throw failed(
+        agentName,
+        "the run was aborted because another session failed",
+      );
     const {
       entries,
       snapshot,
@@ -90,12 +96,13 @@ export async function askInSession(
   configuration: WorkbenchConfiguration,
   text: string,
   now: () => number = Date.now,
+  signal?: AbortSignal,
 ): Promise<string> {
   let sessionId: string | undefined;
   try {
     sessionId = await port.create(agentName, configuration);
     await port.message(sessionId, text);
-    await waitForEnd(port, agentName, sessionId, now);
+    await waitForEnd(port, agentName, sessionId, now, signal);
     const answer = lastAssistantText(await port.entries(sessionId));
     if (answer === undefined)
       throw failed(agentName, "the run wrote no answer");

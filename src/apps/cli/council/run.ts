@@ -21,9 +21,14 @@ import {
   triageMessage,
 } from "./messages.ts";
 
-export type Ask = (agentName: string, text: string) => Promise<string>;
+export type Ask = (
+  agentName: string,
+  text: string,
+  signal?: AbortSignal,
+) => Promise<string>;
 
 const SECOND_ROUND = 2;
+const REJECTED = "rejected";
 
 async function panel(
   idea: string,
@@ -32,15 +37,29 @@ async function panel(
   ask: Ask,
 ): Promise<Round> {
   const roles = ROLES_BY_COMPLEXITY[triage.complexity];
-  const answers = await Promise.all(
-    roles.map(async (role) =>
-      parseAnswer(
-        await ask(role, roleMessage(idea, triage, questions)),
-        roleAnswerSchema,
-        role,
-      ),
-    ),
+  const controller = new AbortController();
+  const results = await Promise.allSettled(
+    roles.map(async (role) => {
+      try {
+        return parseAnswer(
+          await ask(
+            role,
+            roleMessage(idea, triage, questions),
+            controller.signal,
+          ),
+          roleAnswerSchema,
+          role,
+        );
+      } catch (error) {
+        controller.abort();
+        throw error;
+      }
+    }),
   );
+  const answers = results.map((result) => {
+    if (result.status === REJECTED) throw result.reason;
+    return result.value;
+  });
   return {
     questions,
     answers: Object.fromEntries(

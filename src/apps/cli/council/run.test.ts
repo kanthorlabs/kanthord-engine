@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Diagnostic } from "../../../kernel/errors.ts";
 import {
   COUNCIL_AGENT,
   CouncilErrorCode,
@@ -8,6 +9,7 @@ import {
 } from "./contract.ts";
 import { runCouncil, type Ask } from "./run.ts";
 
+const FAILING_ROLE = "po@1";
 const PLAN = {
   entries: [
     {
@@ -112,5 +114,33 @@ test("an invalid answer fails the run", async () => {
   const ask: Ask = async () => "no json here";
   await assert.rejects(runCouncil("Add login", ask), {
     code: CouncilErrorCode.AnswerInvalid,
+  });
+});
+
+test("a failed role aborts its siblings and fails the run", async () => {
+  const { ask: base } = fakeAsk("M");
+  const observed: Record<string, boolean> = {};
+  const ask: Ask = async (agentName, text, signal) => {
+    if (agentName === COUNCIL_AGENT) return base(agentName, text, signal);
+    if (agentName === FAILING_ROLE)
+      throw new Diagnostic(CouncilErrorCode.AgentSessionFailed, "po@1: quota");
+    await new Promise<void>((resolve) => {
+      if (signal!.aborted) resolve();
+      signal!.addEventListener("abort", () => resolve());
+    });
+    observed[agentName] = signal!.aborted;
+    throw new Diagnostic(
+      CouncilErrorCode.AgentSessionFailed,
+      `${agentName}: aborted`,
+    );
+  };
+  await assert.rejects(runCouncil("Add login", ask), {
+    code: CouncilErrorCode.AgentSessionFailed,
+    message: /po@1: quota/,
+  });
+  assert.deepEqual(observed, {
+    "architect@1": true,
+    "designer@1": true,
+    "user@1": true,
   });
 });

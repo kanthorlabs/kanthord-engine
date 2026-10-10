@@ -170,3 +170,21 @@ test("each events call after the first carries the last version and entry seen",
     { version: 5, after: "e2" },
   ]);
 });
+
+test("an already aborted signal fails the session and aborts it", async () => {
+  const { port, log } = fakePort([], []);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    askInSession(
+      port,
+      "po@1",
+      CONFIGURATION,
+      "hello",
+      Date.now,
+      controller.signal,
+    ),
+    { code: CouncilErrorCode.AgentSessionFailed, message: /aborted/ },
+  );
+  assert.equal(log.at(-1), ABORT_LOG);
+});
