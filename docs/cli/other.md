@@ -37,7 +37,7 @@ Help is a parser facility, not a fourth global command.
    application startup; the runtime calls public API operations afterward.
 6. `kanthord jwt generate [username] [--name <display>] [--config <path>]` — implemented
    human issuance; local, no route.
-7. `kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--config <path>]` —
+7. `kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]` —
    implemented machine issuance; local, no route.
 8. `kanthord jwt inspect [token]` — implemented local decoding; no route.
 
@@ -629,15 +629,16 @@ fails with `cli.jwt.invalid_project` before combination checks. The action then
 checks these conditions in order:
 
 1. A username with `--binding` fails with `cli.jwt.username_with_binding`. `--binding` without `--project` fails with `cli.jwt.binding_without_project`, and `--project` without `--binding` fails with `cli.jwt.project_without_binding`.
-2. `--output` with `--binding` fails with `cli.jwt.output_with_binding`.
-3. `--endpoint` without `--output` fails with `cli.jwt.endpoint_without_output`.
-4. An invalid `--endpoint` fails with `cli.config.invalid_endpoint`.
+2. `--endpoint` without `--output` fails with `cli.jwt.endpoint_without_output`.
+3. An invalid `--endpoint` fails with `cli.config.invalid_endpoint`.
 
 These failures write no file and print no token. Without `--output`, the
 terminal requirement and token output stay unchanged. With `--output`, no
 terminal check applies. Validate the document with the client configuration
-schema, then serialize it as YAML. It holds only `token`, or `endpoint` then
-`token` when `--endpoint` is given.
+schema, then serialize it as YAML. A human token file holds only `token`, or
+`endpoint` then `token` when `--endpoint` is given. A machine token file adds
+`client_secret` after `token`. With `--output`, the command prints neither the
+token nor the client secret.
 
 Create an absent destination directory at `0700`. Write a same-directory
 `0600` temporary file, flush and close it, then link it to the destination
@@ -661,7 +662,7 @@ generates a fresh `jti`. It creates no account or password record.
 ### Machine token
 
 ```text
-kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--config <path>]
+kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]
 ```
 
 - `--binding <binding name>`: required in machine mode; 1 to 63 characters,
@@ -747,17 +748,18 @@ substitution, or other non-terminal stdout fails with
 token signing. Stdin need not be a terminal and is never read.
 
 Without `--output` or `--verbose`, human mode prints exactly `<JWT>\n`.
-Machine mode prints exactly `token: <jwt>\nclient_secret: <secret>\n`, as shown
+Without `--output`, machine mode prints exactly `token: <jwt>\nclient_secret: <secret>\n`, as shown
 above. Exit is `0`. With `--verbose`, the same claim list follows the human JWT
 line or the machine fragment. It adds no client secret to the claims.
 No secret is printed to stderr. Invalid inputs, an absent or invalid
 configuration, failed terminal check, or signing failure exits nonzero without
 a successful token result.
 
-`--output` saves a human token in an absent private client configuration file
-under the [human-token rules](#human-token). It prints only
-`Created <absolute path>\n`, followed by claims when `--verbose` is given.
-It never prints the token, including on a failed publication. Readers use only
+`--output` saves a human token, or a machine token with its `client_secret`, in
+an absent private client configuration file under the [human-token
+rules](#human-token). It prints only `Created <absolute path>\n`, followed by
+claims when `--verbose` is given. It never prints the token or the client
+secret, including on a failed publication. Readers use only
 the default client path. Without `--output`, issuance saves no client
 configuration. Terminal-only output does not detect a terminal recorder.
 
@@ -834,7 +836,6 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `cli.jwt.endpoint_without_output`                | `--endpoint` is given without `--output`.                                                                               | jwt generate                                                          |
 | local           | `cli.jwt.inspect.malformed_token`                | The token is not three base64url segments with a JSON object header and a JSON object payload.                          | jwt inspect                                                           |
 | local           | `cli.jwt.inspect.token_required`                 | No argument, KANTHORD_TOKEN or cli.yaml token supplies a token.                                                         | jwt inspect                                                           |
-| local           | `cli.jwt.output_with_binding`                    | `--output` is combined with `--binding`.                                                                                | jwt generate                                                          |
 | local           | `cli.jwt.binding_without_project`                | `--binding` is given without `--project`.                                                                               | jwt generate                                                          |
 | local           | `cli.jwt.project_without_binding`                | `--project` is given without `--binding`.                                                                               | jwt generate                                                          |
 | local           | `cli.jwt.invalid_project`                        | The `--project` value is not a canonical `project_<ulid>` identity.                                                     | jwt generate                                                          |
