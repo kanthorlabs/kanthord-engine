@@ -54,7 +54,11 @@ engine/
 │   │   ├── contract.ts         # Gateway operation declarations
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
 │   │   ├── client.ts           # HTTP client, client configuration, and server version discovery
-│   │   ├── local.ts            # Local JWT issuance and OpenAPI generation without a server
+│   │   ├── auth/               # Authentication: configuration, JWT issuance and verification
+│   │   │   ├── config.ts       # Authentication version and JWT lifetime configuration fragment
+│   │   │   ├── jwt.ts          # Signing key, client secret, local JWT issuance, and claim validation
+│   │   │   └── authentication.ts # Bearer JWT verification and machine identity resolution
+│   │   ├── local.ts            # OpenAPI generation without a server
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
 │   └── apps/                   # Application entries and composition roots
 │       ├── server/             # Service construction, startup, shutdown, and integration tests

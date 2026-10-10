@@ -61,10 +61,10 @@ A bounded catalogue or single-object read does not inherit them automatically.
 ## `--verbose`
 
 `--verbose` is a root boolean option with default `false`. Commands with no
-verbose output ignore it. `jwt generate` is the one command with verbose
+verbose output ignore it. `auth jwt generate` is the one command with verbose
 output: it prints claims after the human token, the machine `token` and
 `client_secret` fragment, or the `Created <absolute path>` line with `--output`.
-`jwt inspect` always prints claims.
+`auth jwt inspect` always prints claims.
 Place `--verbose` before or after the command.
 
 ## `--endpoint`
@@ -92,7 +92,7 @@ A local service action such as `gateway openapi` may inherit the parser option
 without resolving, validating, or using its value; its command page states that
 exception. Worker-application option support is specified separately under
 [`serve worker`](./other.md#serve-worker).
-`jwt generate --endpoint` only writes the value into the `--output` file and
+`auth jwt generate --endpoint` only writes the value into the `--output` file and
 contacts nothing.
 
 ## `--token`
@@ -155,7 +155,7 @@ manifest carries.
 
 **Implemented local server-configuration option:** `--config <path>` is an
 optional string with no literal option default. It belongs to `config`,
-`serve`, and `jwt generate`, not the root or service commands. Its use by the worker
+`serve`, and `auth jwt generate`, not the root or service commands. Its use by the worker
 application is governed by the separate
 [`serve worker` contract](./other.md#serve-worker), not inferred from server mode.
 
@@ -191,7 +191,7 @@ a directory, a special input device, terminal input, inline JSON, or an implicit
 editor.
 There are no prompts or interactive confirmations. This convention replaces
 neither server/client YAML configuration nor a raw append-log format; none of
-the global `config`, `serve`, or `jwt generate` forms accepts it.
+the global `config`, `serve`, or `auth jwt generate` forms accepts it.
 
 `agent prompt put` reads a UTF-8 text file instead of a JSON file. The path rules above apply.
 

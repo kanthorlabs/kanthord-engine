@@ -222,7 +222,11 @@ engine/
 │   │   ├── contract.ts         # Gateway operation declarations
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
 │   │   ├── client.ts           # HTTP client, client configuration, and server version discovery
-│   │   ├── local.ts            # Local JWT issuance and OpenAPI generation without a server
+│   │   ├── auth/               # Authentication: configuration, JWT issuance and verification
+│   │   │   ├── config.ts       # Authentication version and JWT lifetime configuration fragment
+│   │   │   ├── jwt.ts          # Signing key, client secret, local JWT issuance, and claim validation
+│   │   │   └── authentication.ts # Bearer JWT verification and machine identity resolution
+│   │   ├── local.ts            # OpenAPI generation without a server
 │   │   ├── base-path.ts        # Base path format, prefix stripping, and base href
 │   │   ├── dashboard.ts        # Embedded dashboard assets outside /api
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
@@ -231,7 +235,7 @@ engine/
 │       │   └── index.ts        # Compose configuration, log, store, registry, and services
 │       ├── cli/                # Non-interactive commands and client configuration
 │       │   ├── index.ts        # Commander dispatch and local configuration and Gateway commands
-│       │   ├── jwt.ts          # Local JWT generation, inspection, and claim rendering
+│       │   ├── auth.ts         # Authentication command group: local JWT generation, inspection, and claim rendering
 │       │   ├── config-path.ts  # Shared server configuration path and help text
 │       │   ├── constants.ts    # CLI command names and exit codes
 │       │   ├── credential.ts   # Shared credential command group of a component
@@ -353,7 +357,7 @@ The worker resolves its endpoint and token from options, then
 `KANTHORD_ENDPOINT` / `KANTHORD_TOKEN`, then `cli.yaml` in the configuration
 directory. The default endpoint is `http://127.0.0.1:31415`.
 The worker requires `client_secret` in `cli.yaml` as canonical 32-byte base64.
-It has no option or environment variable. `jwt generate --project <project id> --binding <binding name>`
+It has no option or environment variable. `auth jwt generate --project <project id> --binding <binding name>`
 prints the `token` and `client_secret` fragment for this file. A `master_key`
 field fails with `cli.config.invalid`.
 It checks the host tools and the server package version, opens the state-directory

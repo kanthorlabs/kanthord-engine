@@ -6,7 +6,7 @@ Requirements marked
 
 See the [CLI index](./README.md) for shared conventions and
 [other commands](./other.md) for `serve worker`, server configuration and local
-`jwt generate` issuance. Worker binding edits, instance counts, availability, agent
+`auth jwt generate` issuance. Worker binding edits, instance counts, availability, agent
 entries and effective configuration inspection belong to [Project](./project.md).
 The [Agent](./agent.md) document covers the agent catalog, agent enablement and effective configuration resolution.
 [LLM](./llm.md) covers credential management of LLM platforms.
@@ -166,7 +166,7 @@ does not permit a registration payload. The runtime identity is `worker_instance
 
 The CLI prints one JSON line with `runtime_identity`, `resource_identity`, `worker_name` and `idempotency_key`, saves no configuration and prints no token.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
-worker definition or human account. The credential comes from local `jwt generate`
+worker definition or human account. The credential comes from local `auth jwt generate`
 issuance described in [other commands](./other.md).
 
 A client identity holds at most one live registration. A registration of a
@@ -192,7 +192,7 @@ activity collaborations remain stand-ins under D6/D9 until Plan 03; production
 calls requiring those unwired collaborators fail explicitly. The [Gateway signing
 key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
 revokes every JWT after an increment
-of `gateway.token_version` and a restart.
+of `gateway.auth.version` and a restart.
 
 Source checks: [CLI integration tests](../../src/apps/server/cli-worker.test.ts),
 [registration integration tests](../../src/apps/server/gateway-registration.test.ts)

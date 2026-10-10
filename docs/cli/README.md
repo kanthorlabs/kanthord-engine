@@ -14,21 +14,21 @@ flag names, syntax, defaults, validation, and synopsis markers. Link directly
 to its flag-name headings instead of repeating those definitions. Shared
 non-flag conventions and commands outside these groups live in `other.md`.
 
-| Command group                  | Owning document                                   | Scope                                                                                                   |
-| ------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `project`                      | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and worker binding entries.                            |
-| `llm`                          | [LLM](llm.md)                                     | LLM credential records, metadata revisions and OAuth login sessions.                                    |
-| `repository`                   | [Repository](repository.md)                       | Repository credential records and metadata revisions.                                                   |
-| `storage`                      | [Storage](storage.md)                             | Storage credential records and metadata revisions.                                                      |
-| `mission`                      | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                          |
-| `scheduler`                    | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                    |
-| `intake`                       | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.    |
-| `agent`                        | [Agent](agent.md)                                 | Agent catalog, agent enablement and agent providers.                                                    |
-| `worker`                       | [Worker Service](worker.md)                       | Workers, instance registration, and execution hosting.                                                  |
-| `workbench`                    | [Workbench Service](workbench.md)                 | Human-driven agent sessions; API only.                                                                  |
-| `tracking`                     | [Tracking Service](tracking.md)                   | Telemetry ingestion and trace inspection.                                                               |
-| `gateway`                      | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
-| `config`, `serve`, `jwt`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
+| Command group                   | Owning document                                   | Scope                                                                                                   |
+| ------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `project`                       | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and worker binding entries.                            |
+| `llm`                           | [LLM](llm.md)                                     | LLM credential records, metadata revisions and OAuth login sessions.                                    |
+| `repository`                    | [Repository](repository.md)                       | Repository credential records and metadata revisions.                                                   |
+| `storage`                       | [Storage](storage.md)                             | Storage credential records and metadata revisions.                                                      |
+| `mission`                       | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                          |
+| `scheduler`                     | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                    |
+| `intake`                        | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.    |
+| `agent`                         | [Agent](agent.md)                                 | Agent catalog, agent enablement and agent providers.                                                    |
+| `worker`                        | [Worker Service](worker.md)                       | Workers, instance registration, and execution hosting.                                                  |
+| `workbench`                     | [Workbench Service](workbench.md)                 | Human-driven agent sessions; API only.                                                                  |
+| `tracking`                      | [Tracking Service](tracking.md)                   | Telemetry ingestion and trace inspection.                                                               |
+| `gateway`                       | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
+| `config`, `serve`, `auth`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
 The Project inventory has 14 implemented leaves. The LLM inventory has 14 implemented leaves.
 The Repository inventory has 11 implemented leaves and the Storage inventory has 10.
