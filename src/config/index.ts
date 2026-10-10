@@ -14,6 +14,7 @@ export { configPath } from "./path.ts";
 import { randomBytes } from "node:crypto";
 import { audit, readPrivate } from "../kernel/files.ts";
 import { Diagnostic } from "../kernel/errors.ts";
+import { renameOf } from "./renames.ts";
 import { isObject } from "../kernel/values.ts";
 
 import {
@@ -104,11 +105,17 @@ function inspect(
     return;
   }
   const object = input as Record<string, unknown>;
-  const keys = Object.keys(object);
-  if (
-    keys.length > entries.length ||
-    keys.some((key) => !Object.hasOwn(definition, key))
-  )
+  const undeclared = Object.keys(object).filter(
+    (key) => !Object.hasOwn(definition, key),
+  );
+  const renamed = undeclared
+    .map((key) => renameOf(prefix ? `${prefix}.${key}` : key))
+    .filter((rename) => rename !== undefined);
+  for (const rename of renamed)
+    issues.push(
+      `${rename.from}: renamed to ${rename.to}. Run kanthord config migrate.`,
+    );
+  if (undeclared.length > renamed.length)
     issues.push(`${prefix || "configuration"}: undeclared field.`);
   for (const [key, field] of entries) {
     const path = prefix ? `${prefix}.${key}` : key;

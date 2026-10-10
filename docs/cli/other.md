@@ -24,22 +24,23 @@ syntax separately; it is not a claim that the target surface is implemented.
 
 ## Command inventory
 
-There are eight application/JWT forms below: three configuration commands,
+There are nine application/JWT forms below: four configuration commands,
 two `serve` application forms, two `jwt generate` modes, and `jwt inspect`.
 Help is a parser facility, not a fourth global command.
 
 1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--gateway-base-path <path>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
-4. `kanthord serve [server] [--config <path>]` — implemented; local application
+4. `kanthord config migrate [--config <path>]` — implemented; local, no route.
+5. `kanthord serve [server] [--config <path>]` — implemented; local application
    startup, no outbound API route. Opens the server's HTTP listener.
-5. `kanthord serve worker [--endpoint <url>] [--token <jwt>]` — implemented; local
+6. `kanthord serve worker [--endpoint <url>] [--token <jwt>]` — implemented; local
    application startup; the runtime calls public API operations afterward.
-6. `kanthord jwt generate [username] [--name <display>] [--config <path>]` — implemented
+7. `kanthord jwt generate [username] [--name <display>] [--config <path>]` — implemented
    human issuance; local, no route.
-7. `kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]` —
+8. `kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]` —
    implemented machine issuance; local, no route.
-8. `kanthord jwt inspect [token]` — implemented local decoding; no route.
+9. `kanthord jwt inspect [token]` — implemented local decoding; no route.
 
 Service commands, including local `gateway openapi`, are specified by their
 owning pages in the [index](./README.md).
@@ -470,6 +471,29 @@ It writes no configuration, client file, or database. This is the effective
 configuration of this invocation, not an inspection of a running server's
 already loaded configuration.
 
+### `config migrate`
+
+```text
+kanthord config migrate [--config <path>]
+```
+
+**Implemented; route/access: none, local filesystem.** Read the selected file
+and rewrite each key of the rename table in place, with its value and the
+file's comments preserved. The rename table holds each renamed key and its new
+name; it starts with `mission.consecutive_loss_limit` →
+`mission.consecutive_failure_limit`. The command validates the rewritten
+document before it writes. It then writes the original bytes to an absent
+private backup `<path>.bak-<UTC timestamp>` and replaces the file atomically.
+
+It prints `Renamed <old key> to <new key>` for each change, then
+`Backup: <path>`. A file without a renamed key prints `No renamed key: <path>`
+and writes nothing. A file that holds both the old and the new key fails with
+`system.config.rename_conflict` and changes nothing.
+
+`config validate`, `config show`, `jwt generate` and `serve` keep refusing a
+renamed key with `system.config.invalid_field`. The message names the new key
+and this command.
+
 ## Application startup
 
 ### `serve server`
@@ -877,6 +901,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 400             | `gateway.request.validation_failed`              | The params, query or body fail the operation input schema.                                                              | remote commands                                                       |
 | 404             | `gateway.routing.not_found`                      | No route matches the request path or preflight method, or the path is outside `gateway.base_path`.                      | unmatched HTTP routes                                                 |
 | local           | `system.config.cyclic_alias`                     | A YAML alias creates a cycle.                                                                                           | config validate, config show, jwt generate, serve server              |
+| local           | `system.config.rename_conflict`                  | The configuration holds both a renamed key and its new name.                                                            | config migrate                                                        |
 | local           | `system.config.invalid_field`                    | The server configuration contains an unknown or invalid field.                                                          | config init, config validate, config show, jwt generate, serve server |
 | local           | `system.config.invalid_mapping`                  | The YAML root is not one mapping, or a nested value is not a plain mapping or array.                                    | config validate, config show, jwt generate, serve server              |
 | local           | `system.config.invalid_yaml`                     | The YAML cannot be parsed as one mapping with unique string keys.                                                       | config validate, config show, jwt generate, serve server              |

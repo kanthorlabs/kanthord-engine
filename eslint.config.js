@@ -46,7 +46,8 @@ export default tseslint.config(
         { category: "config-global", pattern: "src/config/global.ts" },
         {
           category: "config",
-          pattern: "src/config/{index.ts,index.test.ts,path.ts,convict.d.ts}",
+          pattern:
+            "src/config/{index.ts,index.test.ts,path.ts,convict.d.ts,renames.ts,migrate.ts,migrate.test.ts}",
         },
         { category: "main", pattern: "src/main.ts" },
       ],

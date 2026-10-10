@@ -78,7 +78,7 @@ function addConfigCommand(program: Command): void {
   );
   const config = program
     .command(CommandName.Config)
-    .description("Create, validate, or show server configuration")
+    .description("Create, validate, show, or migrate server configuration")
     .option("--config <path>", "YAML configuration file");
   configHelp(config);
   config.action(() => config.help());
@@ -125,6 +125,21 @@ function addConfigCommand(program: Command): void {
       async (path: string) => {
         const { showConfig } = await import("../../config/index.ts");
         process.stdout.write(showConfig(path));
+      },
+    ],
+    [
+      "migrate",
+      "Rewrite renamed configuration keys in place and keep a backup",
+      async (path: string) => {
+        const { migrateConfig } = await import("../../config/migrate.ts");
+        const { changes, backup } = migrateConfig(path);
+        if (backup === null) {
+          process.stdout.write(`No renamed key: ${path}\n`);
+          return;
+        }
+        for (const change of changes)
+          process.stdout.write(`Renamed ${change.from} to ${change.to}\n`);
+        process.stdout.write(`Backup: ${backup}\n`);
       },
     ],
   ] as const) {
