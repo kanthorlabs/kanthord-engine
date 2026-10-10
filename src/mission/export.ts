@@ -9,6 +9,7 @@ import {
   NodeKind,
   type ExportAnswer,
   type ExportEntry,
+  type ImportEntry,
   type MissionBindings,
 } from "./contract.ts";
 import { nodeRecord } from "./node-read.ts";
@@ -18,9 +19,9 @@ import { requireMission } from "./write.ts";
 const EXPORT_MAX_BYTES = 10 * 1024 * 1024;
 const TEXT_ENCODING = "utf8";
 
-export function serializePlanFile(entry: ExportEntry): string {
+export function serializePlanFile(entry: ImportEntry): string {
   const front = stringify({
-    id: entry.id,
+    ...(entry.id === undefined ? {} : { id: entry.id }),
     kind: entry.kind,
     ...(entry.parent === undefined ? {} : { parent: entry.parent }),
     ...(entry.kind === NodeKind.Task
