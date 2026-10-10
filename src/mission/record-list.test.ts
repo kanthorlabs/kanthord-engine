@@ -59,6 +59,7 @@ test("action pages cross actionless batches and never derive attempts newer than
       credential: "github",
       base_branch: "main",
       action: id === bindingId ? RepositoryAction.PullRequest : null,
+      landing: "human",
       project_prompt: null,
     };
   };
@@ -256,6 +257,7 @@ test("attempt and external-action reads page in descending order and filter atte
     credential: "github",
     base_branch: "main",
     action: RepositoryAction.PullRequest,
+    landing: "human",
     project_prompt: null,
   });
   h.store.transaction((tx) => {

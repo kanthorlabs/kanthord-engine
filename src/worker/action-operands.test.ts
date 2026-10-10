@@ -22,7 +22,7 @@ const entry: ActionContext["actions"][number] = {
     action: RepositoryAction.PullRequest,
     expected_end_state: "pull_request_merged",
     follows: null,
-    configuration: { base_branch: "main" },
+    configuration: { base_branch: "main", landing: "human" as const },
   },
   resource_identity: "repository:github:owner/gated",
   resolution: ActionResolution.Unrequested,

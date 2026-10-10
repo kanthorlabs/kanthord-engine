@@ -41,6 +41,7 @@ export interface MissionBindings {
     credential: string | null;
     base_branch: string;
     action: "pull_request" | "merge_push" | null;
+    landing: "human" | "kanthord";
     project_prompt: string | null;
   } | null;
   resolveBinding(
@@ -783,7 +784,10 @@ export const frozenActionSchema = z.strictObject({
   action: repositoryActionSchema,
   expected_end_state: expectedEndStateSchema,
   follows: actionKeySchema.nullable(),
-  configuration: z.strictObject({ base_branch: textSchema }),
+  configuration: z.strictObject({
+    base_branch: textSchema,
+    landing: z.enum(["human", "kanthord"]).default("human"),
+  }),
 });
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
 export type PullRequestAddress = Extract<

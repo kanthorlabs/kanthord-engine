@@ -53,6 +53,7 @@ test("Mission proves live claim, node, open attempt and binding before granting 
     credential: "github",
     base_branch: "main",
     action: RepositoryAction.PullRequest,
+    landing: "human",
     project_prompt: null,
   });
   h.store.transaction((tx) =>

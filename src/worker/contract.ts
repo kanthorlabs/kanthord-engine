@@ -160,7 +160,7 @@ export type FrozenAction = {
   action: (typeof RepositoryAction)[keyof typeof RepositoryAction];
   expected_end_state: "pull_request_merged" | "base_branch_pushed";
   follows: string | null;
-  configuration: { base_branch: string };
+  configuration: { base_branch: string; landing: "human" | "kanthord" };
 };
 export const ActionNodeState = {
   Pending: "Pending",

@@ -62,6 +62,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
     credential: "github",
     base_branch: "main",
     action: RepositoryAction.PullRequest,
+    landing: "human",
     project_prompt: null,
   });
   h.store.transaction((tx) => {

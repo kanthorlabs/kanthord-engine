@@ -350,6 +350,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
     credential: HARNESS_CREDENTIAL,
     base_branch: "main",
     action: RepositoryAction.PullRequest as RepositoryAction,
+    landing: "human" as const,
     project_prompt: null,
   };
   h.dependencies.bindings.repositoryPolicyOf = () => ({ ...policy });
@@ -466,6 +467,7 @@ export async function externalRequestHarness(
     credential: "github",
     base_branch: "main",
     action: RepositoryAction.PullRequest,
+    landing: "human" as const,
     project_prompt: null,
   });
   const testedInput = {

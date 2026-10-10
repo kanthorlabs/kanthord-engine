@@ -67,6 +67,11 @@ export const GitHubAction = {
   PullRequest: "pull_request",
   MergePush: "merge_push",
 } as const;
+export const Landing = {
+  Human: "human",
+  KanthorD: "kanthord",
+} as const;
+export type Landing = (typeof Landing)[keyof typeof Landing];
 export const FollowsType = {
   AssessmentPassed: "assessment_passed",
   ActionEndState: "action_end_state",
@@ -170,7 +175,17 @@ export const repositoryConfigSchema = z.strictObject({
             binding: bindingNameSchema,
           }),
         ]),
+        landing: z.enum(Landing).optional(),
       })
+      .refine(
+        (action) =>
+          action.landing === undefined ||
+          action.name === GitHubAction.PullRequest,
+        {
+          path: ["landing"],
+          message: "Only a pull_request action holds a landing choice.",
+        },
+      )
       .optional(),
   }),
   ssh_credential: z.string().min(1),
@@ -436,6 +451,7 @@ export type RepositoryPolicy = {
   credential: string | null;
   base_branch: string;
   action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
+  landing: Landing;
   project_prompt: string | null;
   working_layer: WorkingLayer;
 };

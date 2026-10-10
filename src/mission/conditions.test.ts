@@ -145,6 +145,7 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
       credential: "github",
       base_branch: "main",
       action: RepositoryAction.PullRequest,
+      landing: "human" as const,
       project_prompt: null,
     }),
   };

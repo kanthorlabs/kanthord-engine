@@ -45,6 +45,7 @@ for (const filenames of [
       credential: "github",
       base_branch: "main",
       action: null,
+      landing: "human",
       project_prompt: null,
     });
     const taskIds = [createIdentity("node"), createIdentity("node")];

@@ -53,7 +53,7 @@ function actionable(t: TestContext) {
       action: RepositoryAction.PullRequest,
       expected_end_state: "pull_request_merged",
       follows: null,
-      configuration: { base_branch: "main" },
+      configuration: { base_branch: "main", landing: "human" as const },
     },
     resource_identity: RESOURCE,
     resolution: ActionResolution.Unrequested,
