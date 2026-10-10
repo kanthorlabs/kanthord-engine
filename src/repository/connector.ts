@@ -275,6 +275,21 @@ export async function fetchAndCheckout(
   return (await run(["rev-parse", "HEAD"])).trim();
 }
 
+export async function fetchBase(
+  directory: string,
+  baseBranch: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string> {
+  assert.ok(baseBranch);
+  const end = performance.now() + deadlineMs;
+  const run = (args: string[]) =>
+    runGit(directory, args, context, end - performance.now(), "fetch base");
+  await run(["check-ref-format", "--branch", baseBranch]);
+  await run(["fetch", "--prune", "origin"]);
+  return (await run(["rev-parse", `origin/${baseBranch}`])).trim();
+}
+
 export async function pushNodeBranch(
   directory: string,
   branch: string,

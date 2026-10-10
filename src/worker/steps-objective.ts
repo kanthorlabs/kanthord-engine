@@ -27,6 +27,11 @@ import {
   criterionRevisionInstruction,
 } from "./judgement.ts";
 import { judgedAt, recordJudged } from "./judged-tasks.ts";
+import {
+  RefreshResult,
+  refreshAtClaim,
+  refreshBeforeRelease,
+} from "./base-refresh.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
@@ -37,12 +42,11 @@ async function finishObjective(
   boundary: TaskBoundary | null,
   completedTasks: number,
 ): Promise<ExecutionEnd> {
-  const furtherWork = boundary !== null && boundary !== TaskBoundary.RunFailed;
+  let furtherWork = boundary !== null && boundary !== TaskBoundary.RunFailed;
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   const remaining = () => state.input.claim.expired_at - Date.now();
   try {
-    if (furtherWork) {
-      assert.ok(task);
+    if (furtherWork && task !== null) {
       await state.agent.abort();
       await commitWork(
         state.directory,
@@ -56,6 +60,11 @@ async function finishObjective(
       cleanup,
       remaining(),
     );
+    if (
+      !furtherWork &&
+      !(await refreshBeforeRelease(state, () => allTasksPass(state)))
+    )
+      furtherWork = true;
     await state.input.transport.pushNodeBranch(
       state.directory,
       state.nodeBranch,
@@ -126,6 +135,13 @@ export async function runStepsObjective(
   taskRunner: TaskRunner = runTask,
 ): Promise<ExecutionEnd> {
   try {
+    if ((await refreshAtClaim(state)) === RefreshResult.BudgetEnd)
+      return await finishObjective(
+        state,
+        null,
+        TaskBoundary.InProgress,
+        NO_TASKS,
+      );
     const checked = await startCheck(state);
     if (checked.budgetEnd)
       return await finishObjective(
@@ -326,6 +342,16 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
     cleanup.cancel();
   }
   return verification;
+}
+
+async function allTasksPass(state: StepsState): Promise<boolean> {
+  assert.ok(state.revision.tasks);
+  for (const task of state.revision.tasks) {
+    const verification = await verifyTask(state, task);
+    if (!verificationPassed(verification, task.content.verifications))
+      return false;
+  }
+  return true;
 }
 
 function objectiveDirectoryOf(state: StepsState): string {

@@ -1018,6 +1018,7 @@ export function mappedTransport(
     cloneSnapshot: (address, ...args) =>
       connector.cloneSnapshot(mapped(address), ...args),
     fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
+    fetchBase: (...args) => connector.fetchBase(...args),
     pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
     mergePushFresh: (input, ...args) =>
       connector.mergePushFresh(

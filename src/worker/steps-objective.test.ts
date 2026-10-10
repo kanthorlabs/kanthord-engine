@@ -2,7 +2,7 @@ import { ExecutionBudget } from "./budget.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
 import { test, type TestContext } from "node:test";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
@@ -20,7 +20,7 @@ import {
   scriptedModelRuntime,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
-import { EndReason, ExecutionRun } from "./execution-run.ts";
+import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import {
   criterionRevisionInstruction,
@@ -37,6 +37,11 @@ import {
   runStepsObjective,
   verifyTask,
 } from "./steps-objective.ts";
+import {
+  RefreshResult,
+  refreshAtClaim,
+  refreshBeforeRelease,
+} from "./base-refresh.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
 
@@ -46,6 +51,11 @@ const NO_PROVIDER_CALLS = 0;
 const NO_PUSHES = 0;
 const REPAIRED_TASK_CALLS = 3;
 const ONE_JUDGEMENT = 1;
+const MERGE_COMMIT_FIELDS = 3;
+const MAIN_ADDITION = "added by main";
+const RESOLVED = "resolved";
+const LATE_MAIN_CHANGE = "late main change";
+const DEADLINE_MS = 20000;
 const TASK_VERIFIED = "task verified";
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
@@ -781,4 +791,133 @@ test("the start check judges a task against the prior rationale and revises it w
     { kind: "complete" },
   );
   assert.ok(JSON.stringify(h.provider.calls[1]).includes(revision));
+});
+
+async function advanceBase(
+  h: { bare: string },
+  t: TestContext,
+  content: string,
+  path = "file",
+) {
+  const clone = temporary(t);
+  const git = simpleGit(clone);
+  await git.clone(h.bare, clone, ["--branch", "main"]);
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(clone, path), content);
+  await git.add(path);
+  await git.commit(`base change of ${path}`);
+  await git.push("origin", "main");
+}
+
+async function commitOnNode(directory: string, content: string) {
+  writeFileSync(join(directory, "file"), content);
+  await simpleGit(directory).add("file");
+  await simpleGit(directory).commit("node change");
+}
+
+const NODE_CONTENT = {
+  name: "node",
+  requirement: "node",
+  criterion: "node",
+  verifications: ["true"],
+  bindings: [],
+};
+
+test("the claim refresh merges a moved base branch without a conflict", async (t) => {
+  const h = await fixture(t, [], []);
+  await advanceBase(h, t, MAIN_ADDITION, "other");
+  await h.input.transport.fetchBase(
+    h.directory,
+    "main",
+    background,
+    DEADLINE_MS,
+  );
+  assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
+  assert.equal(readFileSync(join(h.directory, "other"), "utf8"), MAIN_ADDITION);
+  const parents = await simpleGit(h.directory).raw([
+    "rev-list",
+    "--parents",
+    "-n",
+    "1",
+    "HEAD",
+  ]);
+  assert.equal(parents.trim().split(" ").length, MERGE_COMMIT_FIELDS);
+  assert.equal(await refreshAtClaim(h), RefreshResult.Current);
+});
+
+test("the claim refresh lets the agent resolve a merge conflict and commits the merge", async (t) => {
+  const h = await fixture(
+    t,
+    [],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "file", content: RESOLVED }),
+        {
+          stopReason: "toolUse",
+        },
+      ),
+      fauxAssistantMessage("resolved"),
+    ],
+  );
+  h.revision = { content: NODE_CONTENT, tasks: [] } as unknown as Revision;
+  await commitOnNode(h.directory, "node side");
+  await advanceBase(h, t, "main side");
+  await h.input.transport.fetchBase(
+    h.directory,
+    "main",
+    background,
+    DEADLINE_MS,
+  );
+  assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
+  assert.equal(readFileSync(join(h.directory, "file"), "utf8"), RESOLVED);
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes("conflicts"));
+  assert.equal((await simpleGit(h.directory).status()).isClean(), true);
+});
+
+test("the claim refresh aborts the merge and stops when a conflict marker remains", async (t) => {
+  const h = await fixture(
+    t,
+    [],
+    [fauxAssistantMessage("I could not resolve it")],
+  );
+  h.revision = { content: NODE_CONTENT, tasks: [] } as unknown as Revision;
+  await commitOnNode(h.directory, "node side");
+  const before = await simpleGit(h.directory).revparse(["HEAD"]);
+  await advanceBase(h, t, "main side");
+  await h.input.transport.fetchBase(
+    h.directory,
+    "main",
+    background,
+    DEADLINE_MS,
+  );
+  await assert.rejects(refreshAtClaim(h), ExecutionStop);
+  assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), before);
+  assert.equal((await simpleGit(h.directory).status()).isClean(), true);
+});
+
+test("the release refresh merges a clean base change only when every task still passes", async (t) => {
+  const passing = await fixture(t, [task("pass", "true")], []);
+  await advanceBase(passing, t, LATE_MAIN_CHANGE, "other");
+  assert.equal(await refreshBeforeRelease(passing, async () => true), true);
+  assert.equal(
+    readFileSync(join(passing.directory, "other"), "utf8"),
+    LATE_MAIN_CHANGE,
+  );
+  const failing = await fixture(t, [task("fail", "false")], []);
+  const before = failing.head;
+  await advanceBase(failing, t, LATE_MAIN_CHANGE, "other");
+  assert.equal(await refreshBeforeRelease(failing, async () => false), false);
+  assert.equal(failing.head, before);
+  assert.equal(await simpleGit(failing.directory).revparse(["HEAD"]), before);
+});
+
+test("the release refresh refuses a conflicting base change and keeps the node head", async (t) => {
+  const h = await fixture(t, [], []);
+  await commitOnNode(h.directory, "node side");
+  h.head = await simpleGit(h.directory).revparse(["HEAD"]);
+  await advanceBase(h, t, "main side");
+  assert.equal(await refreshBeforeRelease(h, async () => true), false);
+  assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), h.head);
+  assert.equal((await simpleGit(h.directory).status()).isClean(), true);
 });

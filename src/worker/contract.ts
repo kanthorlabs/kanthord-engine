@@ -586,6 +586,12 @@ export interface RepositoryTransport {
     context: Context,
     deadlineMs: number,
   ): Promise<string>;
+  fetchBase(
+    directory: string,
+    baseBranch: string,
+    context: Context,
+    deadlineMs: number,
+  ): Promise<string>;
   pushNodeBranch(
     directory: string,
     branch: string,

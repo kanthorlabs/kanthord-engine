@@ -367,6 +367,7 @@ test(
       cloneSnapshot: (address, ...args) =>
         connector.cloneSnapshot(barePaths.get(address)!, ...args),
       fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
+      fetchBase: (...args) => connector.fetchBase(...args),
       pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
     };
     const workspaces = WorkspaceRoot.open(temporary(t));
