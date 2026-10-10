@@ -51,6 +51,7 @@ export async function requestAndRelease(
   return run.release(false);
 }
 
+const NO_ITEMS = 0;
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
 type OpenAgent = (directory: string) => Promise<NativeAgent>;
 
@@ -64,11 +65,13 @@ async function judge(
   openAgent: OpenAgent,
   objectives: Awaited<ReturnType<typeof readObjectives>> | null,
 ) {
+  const kind = nodeKindOf(revision);
   const commands = verificationCommands(revision);
   if (!verificationPassed(verification, commands))
     return {
       result: AssessmentResult.CriterionNotMet,
       rationale: failedVerificationRationale(verification, commands),
+      proposals: [],
     };
   const agent = await openAgent(directory);
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
@@ -80,6 +83,7 @@ async function judge(
   await agent.instruct(
     work,
     evaluationInstruction({
+      kind,
       tasks: revision.tasks ?? [],
       verification,
       evidence,
@@ -96,7 +100,15 @@ async function judge(
     result: judgement.result,
     unmet: judgement.unmet.map((item) => item.id),
   });
-  return { result: judgement.result, rationale: judgementRationale(judgement) };
+  const proposals = kind === NodeKind.Initiative ? judgement.proposals : [];
+  return {
+    result:
+      proposals.length > NO_ITEMS
+        ? AssessmentResult.Undetermined
+        : judgement.result,
+    rationale: judgementRationale(judgement),
+    proposals,
+  };
 }
 
 export async function runEvaluation(

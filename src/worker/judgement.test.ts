@@ -41,6 +41,7 @@ test("the final marker is strict and invalid handoffs are refused", () => {
       result: "criterion-not-met",
       rationale: "task failed",
       unmet: [{ id: "task", reason: "no test" }],
+      proposals: [],
     },
   );
   assert.equal(
@@ -55,7 +56,7 @@ test("the final marker is strict and invalid handoffs are refused", () => {
       'kanthord-judgement: {"result":"success","rationale":"met"}',
       evaluationJudgementSchema,
     ),
-    { result: "success", rationale: "met", unmet: [] },
+    { result: "success", rationale: "met", unmet: [], proposals: [] },
   );
   assert.equal(
     judgementRationale({
@@ -107,7 +108,7 @@ test("failed and unrun rationale names the command and cause", () => {
       ]),
       `Verification 1 \`check\` ${cause}`,
     );
-  const instruction = evaluationInstruction({
+  const input = {
     tasks: [
       {
         id: "task",
@@ -133,7 +134,15 @@ test("failed and unrun rationale names the command and cause", () => {
       ],
     },
     evidence: [],
-  });
+  };
+  const instruction = evaluationInstruction(input);
+  const initiative = evaluationInstruction({ ...input, kind: "initiative" });
+  assert.doesNotMatch(instruction, /proposals/);
+  assert.match(
+    initiative,
+    /A defect inside a completed objective gets one proposal with objective_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
+  );
+  assert.match(initiative, /"proposals": \[\{"objective_id"/);
   assert.match(instruction, /distinct criterion/);
   assert.match(
     instruction,

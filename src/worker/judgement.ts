@@ -3,11 +3,12 @@ import { z } from "zod";
 import type { TaskContent } from "../mission/contract.ts";
 import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import type { Verification } from "./verification.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import { NodeKind, type NativeAgent } from "./native-agent.ts";
 
 export const JUDGEMENT_MARKER = "kanthord-judgement:";
 const SUCCESS_EXIT = 0;
 const NO_ITEMS = 0;
+const MIN_VERIFICATIONS = 1;
 const AssessmentResult = {
   Success: "success",
   CriterionNotMet: "criterion-not-met",
@@ -21,16 +22,31 @@ const unmetItemSchema = z.strictObject({
   id: z.string().trim().min(1),
   reason: z.string().trim().min(1),
 });
+const proposalTextSchema = z.string().trim().min(1);
+const proposalSchema = z.strictObject({
+  objective_id: proposalTextSchema,
+  name: proposalTextSchema,
+  requirement: proposalTextSchema,
+  criterion: proposalTextSchema,
+  task: z.strictObject({
+    name: proposalTextSchema,
+    requirement: proposalTextSchema,
+    criterion: proposalTextSchema,
+    verifications: z.array(proposalTextSchema).min(MIN_VERIFICATIONS),
+  }),
+});
 export const evaluationJudgementSchema = z
   .strictObject({
     result: z.enum(AssessmentResult),
     rationale: z.string().trim().min(1),
     unmet: z.array(unmetItemSchema).default([]),
+    proposals: z.array(proposalSchema).default([]),
   })
   .refine(
     (judgement) =>
       judgement.result !== AssessmentResult.CriterionNotMet ||
-      judgement.unmet.length > NO_ITEMS,
+      judgement.unmet.length > NO_ITEMS ||
+      judgement.proposals.length > NO_ITEMS,
     { path: ["unmet"] },
   );
 
@@ -134,13 +150,20 @@ export function criterionRevisionInstruction(rationale: string): string {
   return `Revise the task work to meet its criterion. Previous judgement: ${rationale}`;
 }
 
+const INITIATIVE_PROPOSAL_INSTRUCTION =
+  " A defect inside a completed objective gets one proposal with objective_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects.";
+const INITIATIVE_REPLY_EXAMPLE =
+  ', "proposals": [{"objective_id": "node_id_of_the_objective", "name": "Fix objective name", "requirement": "What to repair", "criterion": "When the repair is done", "task": {"name": "Task name", "requirement": "What the task changes", "criterion": "When the task is done", "verifications": ["command"]}}]';
+
 export function evaluationInstruction(input: {
+  kind?: NodeKind;
   tasks: readonly TaskContent[];
   verification: Verification;
   evidence: unknown;
   objectives?: unknown;
 }): string {
-  return `Judge the evidence against the node criterion in the pinned work prompt, every current task criterion below, and the default standard. Inspect the supporting assets at the workspace-relative paths in the review bundle. Weigh each current objective outcome in the supplied objective context. Judge the work, the code and the recorded facts. The prose style and the finding format of a produced report are no ground for criterion-not-met. Give one result: success, criterion-not-met, or undetermined. A default-standard violation requires criterion-not-met. List every unmet item that you find in this one judgement. For criterion-not-met, list each unmet task id, or the node id for an unmet node criterion or default-standard violation, in unmet with the concrete defect as its reason. Write every reason in full; do not cite a finding label such as B1.\nTasks: ${JSON.stringify(input.tasks.map((task) => ({ id: task.id, criterion: task.content.criterion })))}\nTested input: ${JSON.stringify(input.verification.tested_input)}\nVerification results of this evaluation: ${JSON.stringify(input.verification.results)}\nEvidence: ${JSON.stringify(input.evidence)}\nCurrent objective context: ${JSON.stringify(input.objectives ?? null)}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"result": "criterion-not-met", "rationale": "Explain your judgement", "unmet": [{"id": "node_or_task_id", "reason": "The concrete defect"}]}`;
+  const initiative = input.kind === NodeKind.Initiative;
+  return `Judge the evidence against the node criterion in the pinned work prompt, every current task criterion below, and the default standard. Inspect the supporting assets at the workspace-relative paths in the review bundle. Weigh each current objective outcome in the supplied objective context. Judge the work, the code and the recorded facts. The prose style and the finding format of a produced report are no ground for criterion-not-met. Give one result: success, criterion-not-met, or undetermined. A default-standard violation requires criterion-not-met. List every unmet item that you find in this one judgement. For criterion-not-met, list each unmet task id, or the node id for an unmet node criterion or default-standard violation, in unmet with the concrete defect as its reason. Write every reason in full; do not cite a finding label such as B1.${initiative ? INITIATIVE_PROPOSAL_INSTRUCTION : ""}\nTasks: ${JSON.stringify(input.tasks.map((task) => ({ id: task.id, criterion: task.content.criterion })))}\nTested input: ${JSON.stringify(input.verification.tested_input)}\nVerification results of this evaluation: ${JSON.stringify(input.verification.results)}\nEvidence: ${JSON.stringify(input.evidence)}\nCurrent objective context: ${JSON.stringify(input.objectives ?? null)}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"result": "criterion-not-met", "rationale": "Explain your judgement", "unmet": [{"id": "node_or_task_id", "reason": "The concrete defect"}]${initiative ? INITIATIVE_REPLY_EXAMPLE : ""}}`;
 }
 
 export function reportInstruction(

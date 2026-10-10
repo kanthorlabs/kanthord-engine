@@ -18,6 +18,23 @@ import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
+const PROPOSAL = {
+  objective_id: "child",
+  name: "Fix the defect",
+  requirement: "Repair the defect",
+  criterion: "The defect is gone",
+  task: {
+    name: "Repair",
+    requirement: "Change the code",
+    criterion: "The test passes",
+    verifications: ["npm test"],
+  },
+};
+const PROPOSAL_REPLY = `kanthord-judgement: ${JSON.stringify({
+  result: "criterion-not-met",
+  rationale: "defect in child",
+  proposals: [PROPOSAL],
+})}`;
 test("reviewer release accepts only settled or prerequisite-waiting action results", async (t) => {
   for (const kinds of [
     [],
@@ -150,6 +167,22 @@ test("evaluation writes failed-verification assessments without inference and ga
       opens: 1,
       initiative: true,
     },
+    {
+      command: "true",
+      texts: [PROPOSAL_REPLY],
+      result: "undetermined",
+      opens: 1,
+      initiative: true,
+      proposals: [PROPOSAL],
+    },
+    {
+      command: "true",
+      texts: [
+        `kanthord-judgement: ${JSON.stringify({ result: "success", rationale: "met", proposals: [PROPOSAL] })}`,
+      ],
+      result: "success",
+      opens: 1,
+    },
     { command: "true", texts: [""], result: null, opens: 0, refused: true },
   ]) {
     const setup = anthropicSetup({ repositories: [] });
@@ -250,9 +283,14 @@ test("evaluation writes failed-verification assessments without inference and ga
             evidence_ids: string[];
             child_outcome_ids: string[];
             rationale: string;
+            proposals?: unknown[];
           };
         }) => {
           assessments++;
+          assert.deepEqual(
+            input.body.proposals ?? [],
+            scenario.proposals ?? [],
+          );
           assert.ok(reported);
           assert.equal(input.body.result, scenario.result);
           assert.deepEqual(input.body.evidence_ids, ["verification", "placed"]);
@@ -299,7 +337,8 @@ test("evaluation writes failed-verification assessments without inference and ga
           if (scenario.initiative) {
             assert.match(instruction, /child-outcome/);
             assert.match(instruction, /Completed/);
-          }
+            assert.match(instruction, /proposals replace criterion-not-met/);
+          } else assert.doesNotMatch(instruction, /objective_id/);
         },
         lastText: () =>
           scenario.texts[
