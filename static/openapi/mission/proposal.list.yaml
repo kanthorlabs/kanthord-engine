@@ -1,0 +1,221 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.proposal.list
+    tags:
+      - mission
+    description: List fix-objective proposals of an initiative.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: node_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.proposal.list.Input/properties/params/prope\
+            rties/node_id"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.proposal.list.Input/properties/query/proper\
+            ties/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.proposal.list.Input/properties/query/proper\
+            ties/cursor"
+      - name: attempt
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.proposal.list.Input/properties/query/proper\
+            ties/attempt"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.proposal.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.proposal.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            node_id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - node_id
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+            attempt:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.proposal.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 35
+                maxLength: 35
+                pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: proposal_ followed by a canonical 26-character uppercase ULID.
+              node_id:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+              attempt:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              assessment_id:
+                type: string
+                minLength: 37
+                maxLength: 37
+                pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: assessment_ followed by a canonical 26-character uppercase ULID.
+              content:
+                type: object
+                properties:
+                  objective_id:
+                    type: string
+                    minLength: 31
+                    maxLength: 31
+                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: node_ followed by a canonical 26-character uppercase ULID.
+                  name:
+                    type: string
+                    minLength: 1
+                  requirement:
+                    type: string
+                    minLength: 1
+                  criterion:
+                    type: string
+                    minLength: 1
+                  task:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                      requirement:
+                        type: string
+                        minLength: 1
+                      criterion:
+                        type: string
+                        minLength: 1
+                      verifications:
+                        minItems: 1
+                        type: array
+                        items:
+                          type: string
+                          minLength: 1
+                    required:
+                      - name
+                      - requirement
+                      - criterion
+                      - verifications
+                    additionalProperties: false
+                required:
+                  - objective_id
+                  - name
+                  - requirement
+                  - criterion
+                  - task
+                additionalProperties: false
+              objective_node_id:
+                anyOf:
+                  - type: string
+                    minLength: 31
+                    maxLength: 31
+                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: node_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              approved_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              created_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            required:
+              - id
+              - node_id
+              - attempt
+              - assessment_id
+              - content
+              - objective_node_id
+              - approved_at
+              - created_at
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - next_cursor
+      additionalProperties: false

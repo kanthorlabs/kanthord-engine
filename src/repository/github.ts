@@ -25,6 +25,7 @@ const NEXT_PAGE_STEP = 1;
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const PULL_REQUEST_STATE_OPEN = "open";
+const MERGEABLE_STATE_CONFLICT = "dirty";
 const MIN_PULL_REQUEST_NUMBER = 1;
 const NEXT_LINK_PATTERN = /<[^>]*>\s*;\s*rel="next"/;
 const API_VERSION_HEADER = "x-github-api-version";
@@ -150,8 +151,16 @@ export const CheckEndState = {
   Expected: "expected",
   Other: "other",
   None: "none",
+  Conflict: "conflict",
 } as const;
 export type CheckEndState = (typeof CheckEndState)[keyof typeof CheckEndState];
+
+export const MergeMethod = {
+  Merge: "merge",
+  Squash: "squash",
+  Rebase: "rebase",
+} as const;
+export type MergeMethod = (typeof MergeMethod)[keyof typeof MergeMethod];
 
 export const ExpectedEndState = {
   PullRequestMerged: "pull_request_merged",
@@ -188,11 +197,17 @@ const eventListSchema = z.array(
 
 const createdPullRequestSchema = z.looseObject({ number: z.int() });
 const pullRequestListSchema = z.array(z.looseObject({ number: z.int() }));
+const repositorySettingsSchema = z.looseObject({
+  allow_merge_commit: z.boolean().optional(),
+  allow_squash_merge: z.boolean().optional(),
+  allow_rebase_merge: z.boolean().optional(),
+});
 const pullRequestStateSchema = z
   .looseObject({
     state: z.string(),
     merged: z.boolean(),
     merge_commit_sha: z.string().nullable(),
+    mergeable_state: z.string().optional(),
   })
   .superRefine((pullRequest, context) => {
     if (pullRequest.merged && pullRequest.merge_commit_sha === null)
@@ -567,6 +582,49 @@ export class GitHubPlatform {
       : unreadableBody(CallKind.Read);
   }
 
+  async mergeMethodOf(
+    call: GitHubCall,
+    target: GitHubTarget,
+  ): Promise<GitHubAnswer<MergeMethod | null>> {
+    const answer = await this.send(call, target, {
+      kind: CallKind.Read,
+      route: "GET /repos/{owner}/{repo}",
+      parameters: {},
+    });
+    if (!answer.ok) {
+      return answer;
+    }
+    const settings = repositorySettingsSchema.safeParse(answer.value);
+    if (!settings.success) {
+      return unreadableBody(CallKind.Read);
+    }
+    const allowed = [
+      settings.data.allow_merge_commit === true && MergeMethod.Merge,
+      settings.data.allow_squash_merge === true && MergeMethod.Squash,
+      settings.data.allow_rebase_merge === true && MergeMethod.Rebase,
+    ].find((method) => method !== false);
+    return { ok: true, value: allowed ?? null };
+  }
+
+  async mergePullRequest(
+    call: GitHubCall,
+    target: GitHubTarget,
+    merge: { number: number; sha: string; merge_method: MergeMethod },
+  ): Promise<GitHubAnswer<unknown>> {
+    assert.ok(merge.number >= MIN_PULL_REQUEST_NUMBER);
+    assert.ok(merge.sha.length >= MIN_SEGMENT_LENGTH);
+    assert.ok(Object.values(MergeMethod).includes(merge.merge_method));
+    return this.send(call, target, {
+      kind: CallKind.Write,
+      route: "PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge",
+      parameters: {
+        pull_number: merge.number,
+        sha: merge.sha,
+        merge_method: merge.merge_method,
+      },
+    });
+  }
+
   async getPullRequest(
     call: GitHubCall,
     target: GitHubTarget,
@@ -655,9 +713,11 @@ export class GitHubPlatform {
     }
     return {
       end_state:
-        pullRequest.state === PULL_REQUEST_STATE_OPEN
-          ? CheckEndState.None
-          : CheckEndState.Other,
+        pullRequest.state !== PULL_REQUEST_STATE_OPEN
+          ? CheckEndState.Other
+          : pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT
+            ? CheckEndState.Conflict
+            : CheckEndState.None,
       landed_commits: [],
     };
   }

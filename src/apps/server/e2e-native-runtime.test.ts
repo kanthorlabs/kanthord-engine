@@ -304,6 +304,7 @@ test(
       cloneSnapshot: (_address, ...args) =>
         connector.cloneSnapshot(bare, ...args),
       fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
+      fetchBase: (...args) => connector.fetchBase(...args),
       pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
     };
     async function handover(holder: typeof x) {

@@ -9,6 +9,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { ensureDirectory } from "../kernel/files.ts";
 import { identitySchema } from "../kernel/identity.ts";
+import { bindingNameSchema } from "../project/contract.ts";
 import type { Context } from "../kernel/context.ts";
 import type { RepositoryTransport, SshIdentityPin } from "./contract.ts";
 import { nodeBranchOf } from "./node-branch.ts";
@@ -29,6 +30,7 @@ interface Preparation {
 }
 interface WorkspaceRepository {
   binding_id: string;
+  name: string;
   address: string;
   ssh_identity: SshIdentityPin;
   strategy: { base_branch: string };
@@ -160,7 +162,7 @@ export class WorkspaceRoot {
       for (const repository of input.repositories) {
         const target = join(
           directory,
-          identitySchema("binding").parse(repository.binding_id),
+          bindingNameSchema.parse(repository.name),
         );
         assert.ok(!existsSync(target), "Duplicate repository binding");
         ensureDirectory(target);

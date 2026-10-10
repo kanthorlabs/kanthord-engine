@@ -57,6 +57,7 @@ import {
   ProjectErrorCode,
   REPOSITORY_PLATFORM,
   GitHubAction,
+  Landing,
   InstructionFileState,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   SSH_CREDENTIAL_PLATFORM,
@@ -1123,6 +1124,7 @@ export class ProjectService implements Service, ProjectBindings {
       credential: config.credential ?? null,
       base_branch: config.strategy.base_branch,
       action: config.strategy.action?.name ?? null,
+      landing: config.strategy.action?.landing ?? Landing.Human,
       project_prompt: config.project_prompt ?? null,
       working_layer: config.working_layer,
     };

@@ -195,6 +195,11 @@ components:
                                       - type
                                       - binding
                                     additionalProperties: false
+                              landing:
+                                type: string
+                                enum:
+                                  - human
+                                  - kanthord
                             required:
                               - name
                               - follows
@@ -431,6 +436,11 @@ components:
                                           - type
                                           - binding
                                         additionalProperties: false
+                                  landing:
+                                    type: string
+                                    enum:
+                                      - human
+                                      - kanthord
                                 required:
                                   - name
                                   - follows

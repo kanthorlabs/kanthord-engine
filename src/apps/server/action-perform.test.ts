@@ -74,6 +74,8 @@ const GIT_FAILED_CODE = "repository.connector.git_failed";
 const UNKNOWN_CODE = "gateway.invocation.unknown";
 const ROUTE_NOT_FOUND_CODE = "gateway.routing.not_found";
 const PULLS_PATH = "/repos/owner/gated/pulls";
+const KANTHORD_LANDING = "kanthord";
+const MERGE_REFUSED_STATUS = 405;
 const MAIN_REF = "refs/heads/main";
 const UNMAPPED_PLATFORM = "unmapped";
 const GITLAB_PLATFORM = "gitlab";
@@ -134,7 +136,7 @@ async function until(condition: () => boolean) {
   assert.fail("The condition did not hold in time.");
 }
 
-async function setup(t: TestContext) {
+async function setup(t: TestContext, landing = "human") {
   const gitHub = await fakeGitHub(t);
   const pushed = await bareRepository(t, "pushed");
   const gated = await bareRepository(t, "gated");
@@ -191,7 +193,11 @@ async function setup(t: TestContext) {
     "performs",
   ]);
   const mission = await read<{ id: string }>(["mission", "get", project.id]);
-  const repository = (address: string, action: string) => ({
+  const repository = (
+    address: string,
+    action: string,
+    choice: { landing?: string } = {},
+  ) => ({
     kind: "repository",
     config: {
       available: true,
@@ -201,14 +207,18 @@ async function setup(t: TestContext) {
       credential: "github",
       strategy: {
         base_branch: "main",
-        action: { name: action, follows: { type: "assessment_passed" } },
+        action: {
+          name: action,
+          follows: { type: "assessment_passed" },
+          ...choice,
+        },
       },
     },
   });
   await write(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
     bindings: {
-      gated: repository(GATED_ADDRESS, "pull_request"),
+      gated: repository(GATED_ADDRESS, "pull_request", { landing }),
       pushed: repository(PUSHED_ADDRESS, "merge_push"),
       harness: {
         kind: "worker",
@@ -959,6 +969,69 @@ test(
         assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
         writer.pushSnapshotFresh = pushSnapshotFresh;
         writer.landedOn = landedOn;
+      },
+    );
+  },
+);
+
+test(
+  "intake.action.perform merges the pull request at the tested commit for a kanthord landing",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, KANTHORD_LANDING);
+    const G = h.nodes.gated;
+    const execution = await h.evaluated(G, "gated", h.gated.head);
+    const body = (requestKey: string) => ({
+      key: "gated.pull_request",
+      commit: h.gated.head,
+      request_key: requestKey,
+    });
+    const merges = () =>
+      h.gitHub.calls.filter((call) => call.method === HttpMethod.Put);
+    let created: PlatformAddress | null = null;
+
+    await t.test(
+      "a refused merge leaves the created pull request open and answers its address",
+      async () => {
+        h.gitHub.refuseMerge(MERGE_REFUSED_STATUS);
+        let answer: Answer;
+        try {
+          answer = completed(await h.perform(execution, body("create")));
+        } finally {
+          h.gitHub.refuseMerge(null);
+        }
+        assert.ok("kind" in answer, JSON.stringify(answer));
+        assert.equal(answer.kind, PlatformAddressKind.PullRequest);
+        created = answer;
+        assert.equal(h.row("create")?.state, OutboundRequestState.Succeeded);
+        assert.equal(merges().length, ONE_CREATE);
+        assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
+      },
+    );
+
+    await t.test(
+      "a reuse pushes the snapshot and merges the reused pull request with its released credential",
+      async () => {
+        assert.ok(created?.kind === PlatformAddressKind.PullRequest);
+        const evidence = await h.request(
+          G,
+          execution,
+          "gated.pull_request",
+          created,
+        );
+        const answer = completed(
+          await h.perform(execution, body("reuse"), evidence),
+        );
+        assert.deepEqual(answer, created);
+        assert.equal(h.row("reuse")?.credential, GITHUB_CREDENTIAL);
+        const merge = merges().at(-1);
+        assert.equal(merge?.token, GITHUB_KEY);
+        assert.deepEqual(merge?.body, {
+          sha: h.gated.head,
+          merge_method: "merge",
+        });
+        assert.equal(h.gitHub.pulls.at(-1)?.merged, true);
+        dropped(h.materials);
       },
     );
   },

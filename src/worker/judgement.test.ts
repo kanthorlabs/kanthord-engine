@@ -5,6 +5,8 @@ import {
   parseJudgement,
   taskJudgementSchema,
   evaluationJudgementSchema,
+  judgementRationale,
+  reportInstruction,
   evaluationInstruction,
   JUDGEMENT_MARKER,
   repairInstruction,
@@ -12,6 +14,9 @@ import {
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+
+const TWO_GAP_RATIONALE =
+  "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
 
 test("the final marker is strict and invalid handoffs are refused", () => {
   const text =
@@ -30,10 +35,39 @@ test("the final marker is strict and invalid handoffs are refused", () => {
     assert.equal(parseJudgement(invalid, taskJudgementSchema), null);
   assert.deepEqual(
     parseJudgement(
+      'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed","unmet":[{"id":"task","reason":"no test"}]}',
+      evaluationJudgementSchema,
+    ),
+    {
+      result: "criterion-not-met",
+      rationale: "task failed",
+      unmet: [{ id: "task", reason: "no test" }],
+      proposals: [],
+    },
+  );
+  assert.equal(
+    parseJudgement(
       'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed"}',
       evaluationJudgementSchema,
     ),
-    { result: "criterion-not-met", rationale: "task failed" },
+    null,
+  );
+  assert.deepEqual(
+    parseJudgement(
+      'kanthord-judgement: {"result":"success","rationale":"met"}',
+      evaluationJudgementSchema,
+    ),
+    { result: "success", rationale: "met", unmet: [], proposals: [] },
+  );
+  assert.equal(
+    judgementRationale({
+      rationale: "two gaps",
+      unmet: [
+        { id: "task_a", reason: "no route check" },
+        { id: "task_b", reason: "no restart test" },
+      ],
+    }),
+    TWO_GAP_RATIONALE,
   );
 });
 
@@ -75,7 +109,7 @@ test("failed and unrun rationale names the command and cause", () => {
       ]),
       `Verification 1 \`check\` ${cause}`,
     );
-  const instruction = evaluationInstruction(SHIPPED_TEMPLATES, {
+  const input = {
     tasks: [
       {
         id: "task",
@@ -89,14 +123,44 @@ test("failed and unrun rationale names the command and cause", () => {
         },
       },
     ],
-    tested_input: testedInput,
+    verification: {
+      tested_input: testedInput,
+      results: [
+        {
+          command: "npm run verify",
+          exit_code: 0,
+          signal: null,
+          timed_out: false,
+        },
+      ],
+    },
     evidence: [],
+  };
+  const instruction = evaluationInstruction(SHIPPED_TEMPLATES, input);
+  const initiative = evaluationInstruction(SHIPPED_TEMPLATES, {
+    ...input,
+    kind: "initiative",
   });
+  assert.doesNotMatch(instruction, /proposals/);
+  assert.match(
+    initiative,
+    /A defect inside a completed objective gets one proposal with objective_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
+  );
+  assert.match(initiative, /"proposals": \[\{"objective_id"/);
   assert.match(instruction, /distinct criterion/);
+  assert.match(
+    instruction,
+    /Verification results of this evaluation: \[\{"command":"npm run verify","exit_code":0/,
+  );
   assert.match(
     instruction,
     /default-standard violation requires criterion-not-met/,
   );
+  assert.match(
+    instruction,
+    /prose style and the finding format of a produced report are no ground for criterion-not-met/,
+  );
+  assert.match(instruction, /List every unmet item that you find/);
   assert.doesNotMatch(
     instruction,
     /reasoningEffort|modelIdentifier|resourceBudget/,
@@ -135,4 +199,30 @@ test("a prior rationale adds the previous judgement to the task judgement instru
       "\nPrevious judgement: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",
     ),
   );
+});
+
+test("the report instruction makes the reply the report and forbids a file", () => {
+  const instruction = reportInstruction(SHIPPED_TEMPLATES, [], [], [], null);
+  assert.match(instruction, /Your reply is the report/);
+  assert.match(instruction, /write no file/);
+  assert.match(instruction, /every field including fix: and why:/);
+});
+
+test("the report instruction carries the final-snapshot verification", () => {
+  const instruction = reportInstruction(SHIPPED_TEMPLATES, [], [], [], {
+    tested_input: [
+      { kind: "repository", binding_id: "binding", commit: "d6d4973" },
+    ],
+    results: [
+      {
+        command: "npm run verify",
+        exit_code: 0,
+        signal: null,
+        timed_out: false,
+      },
+    ],
+  });
+  assert.match(instruction, /Final-snapshot verification: \{"tested_input"/);
+  assert.match(instruction, /"commit":"d6d4973"/);
+  assert.match(instruction, /"command":"npm run verify","exit_code":0/);
 });

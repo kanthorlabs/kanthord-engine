@@ -16,6 +16,7 @@ import {
   type GitHubTarget,
 } from "../repository/github.ts";
 import { GitStage, GitWriteError } from "../repository/index.ts";
+import { Landing } from "../project/contract.ts";
 import type { ActionCheckDependencies, IntakeCustody } from "./action-check.ts";
 import { addressCodec, decodeAddress } from "./address-codec.ts";
 import {
@@ -172,7 +173,7 @@ function operationOf(action: string, platform: string): OutboundOperationValue {
   return row.operation;
 }
 
-function callAction(
+async function callAction(
   dependencies: ActionCheckDependencies,
   performer: Performer,
   action: Bound,
@@ -180,15 +181,52 @@ function callAction(
   scope: OutboundScope,
 ): Promise<CallAnswer> {
   if (reusesPullRequest(action))
-    return pushSnapshot(dependencies, performer, action.facts, scope);
+    return landed(
+      dependencies,
+      performer,
+      action.facts,
+      { material, scope },
+      await pushSnapshot(dependencies, performer, action.facts, scope),
+    );
   if (action.operation === OutboundOperation.GitHubPullRequest)
-    return createPullRequest(dependencies, performer, action.facts, {
-      material,
-      scope,
-    });
+    return landed(
+      dependencies,
+      performer,
+      action.facts,
+      { material, scope },
+      await createPullRequest(dependencies, performer, action.facts, {
+        material,
+        scope,
+      }),
+    );
   assert.equal(action.operation, OutboundOperation.GitMergePush);
   assert.equal(material, null, "A merge push holds no material.");
   return mergePush(dependencies, action.facts, scope);
+}
+
+async function landed(
+  dependencies: ActionCheckDependencies,
+  performer: Performer,
+  facts: Readonly<ActionFacts>,
+  held: { material: Material | null; scope: OutboundScope },
+  answer: CallAnswer,
+): Promise<CallAnswer> {
+  if (
+    !answer.ok ||
+    facts.frozen_action.configuration.landing !== Landing.KanthorD
+  )
+    return answer;
+  const address = decodeAddress(answer.result);
+  assert.equal(address.kind, AddressKind.PullRequest);
+  const call = gitHubCall(performer, held.material, held.scope);
+  const method = await dependencies.github.mergeMethodOf(call, targetOf(facts));
+  if (!method.ok || method.value === null) return answer;
+  await dependencies.github.mergePullRequest(call, targetOf(facts), {
+    number: address.number,
+    sha: facts.snapshot_commit,
+    merge_method: method.value,
+  });
+  return answer;
 }
 
 async function createPullRequest(

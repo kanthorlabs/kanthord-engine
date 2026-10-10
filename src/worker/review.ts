@@ -44,6 +44,7 @@ export function reviewInstruction(
   templates: PromptTemplates,
   input: {
     task: TaskContent;
+    nodeCriterion: string;
     diff: string;
     findings: readonly Finding[];
     replies: string | null;
@@ -51,9 +52,11 @@ export function reviewInstruction(
 ): string {
   assert.ok(input.task.id);
   assert.ok(input.task.content.criterion);
+  assert.ok(input.nodeCriterion);
   return renderTemplate(templates, PromptTemplate.Review, {
     task_id: input.task.id,
     criterion: input.task.content.criterion,
+    node_criterion: input.nodeCriterion,
     findings: input.findings,
     replies: input.replies,
     diff: input.diff.slice(0, REVIEW_DIFF_MAX_CHARACTERS),

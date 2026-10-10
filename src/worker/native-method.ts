@@ -52,6 +52,7 @@ export interface NativeExecutionInput {
   transcript: TranscriptSink;
   hostTools: (workspace: string) => HostTools;
   context: Context;
+  log?: (record: Record<string, unknown>) => void;
 }
 
 export async function runNativeExecution(

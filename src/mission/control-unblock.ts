@@ -217,6 +217,8 @@ export function unblockNode(
   requireNonterminal(node);
   if (node.attempt !== body.blocked_attempt) stateConflict(node);
   requireControlState(node, [NodeState.Blocked]);
+  if (body.reason !== undefined)
+    validateText(REASON, body.reason, dependencies.config.text_max_bytes);
   const row = readCurrentRevision(tx, nodeId);
   assert.ok(row && node.attempt !== null);
   if (row.revision !== body.expected_revision)

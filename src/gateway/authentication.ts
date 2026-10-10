@@ -33,8 +33,12 @@ export class Authentication {
   private readonly key: Promise<CryptoKey>;
   private readonly machines?: AuthenticationLookups;
 
-  constructor(masterKey: string, dependencies?: AuthenticationLookups) {
-    this.key = signingKey(masterKey);
+  constructor(
+    masterKey: string,
+    tokenVersion: number,
+    dependencies?: AuthenticationLookups,
+  ) {
+    this.key = signingKey(masterKey, tokenVersion);
     this.machines = dependencies;
   }
 

@@ -184,6 +184,10 @@ paths:
     $ref: ./openapi/mission/outcome.get.yaml#/pathItem
   /api/mission/node/{node_id}/outcome:
     $ref: ./openapi/mission/outcome.list.yaml#/pathItem
+  /api/mission/proposal/{proposal_id}/approve:
+    $ref: ./openapi/mission/proposal.approve.yaml#/pathItem
+  /api/mission/node/{node_id}/proposal:
+    $ref: ./openapi/mission/proposal.list.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}/agent/{agent_name}:
     $ref: ./openapi/project/agentConfiguration.get.yaml#/pathItem
   /api/project/{project_id}/binding/{binding_id}/agent:

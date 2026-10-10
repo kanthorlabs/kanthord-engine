@@ -51,6 +51,7 @@ function fixture(t: TestContext) {
     result: AssessmentResult.Success,
     rationale: "Checked",
     tested_input: INPUT,
+    proposals: [],
   };
   const seed = (
     verification: Verification | null,
@@ -319,4 +320,33 @@ test("initiative admission tracks replacement child outcomes and excludes retire
   refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
   h.body.child_outcome_ids = [];
   h.admit();
+});
+
+test("proposals are admitted only for an undetermined initiative with an objective child", (t) => {
+  const h = fixture(t);
+  h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
+  const proposal = {
+    objective_id: createIdentity("node"),
+    name: "Fix",
+    requirement: "Repair",
+    criterion: "Repaired",
+    task: {
+      name: "Task",
+      requirement: "Change",
+      criterion: "Changed",
+      verifications: ["true"],
+    },
+  };
+  const undetermined = {
+    ...h.body,
+    result: AssessmentResult.Undetermined,
+    proposals: [proposal],
+  };
+  refusal(() => h.admit(undetermined, true), VALIDATION, "proposals");
+  refusal(
+    () => h.admit({ ...undetermined, result: AssessmentResult.Success }),
+    VALIDATION,
+    "proposals",
+  );
+  refusal(() => h.admit(undetermined), VALIDATION, "proposals");
 });

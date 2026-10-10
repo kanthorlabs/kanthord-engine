@@ -39,6 +39,7 @@ import { homedir } from "node:os";
 import { Backoff } from "./api.ts";
 import { pullLoop } from "./pull-loop.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
+import { fileTranscript } from "./transcript-file.ts";
 
 const KEEPALIVE_INTERVAL_MS = 60000;
 const CLIENT_SECRET_BYTES = 32;
@@ -312,6 +313,7 @@ export class Worker implements Service {
         this.options.modelRuntimeFactory ?? defaultModelRuntimeFactory,
       hostHome: this.options.env?.HOME ?? homedir(),
       context,
+      transcript: fileTranscript(directories(this.options.env).state),
       log: (record) => this.logRecord(record),
     });
   }

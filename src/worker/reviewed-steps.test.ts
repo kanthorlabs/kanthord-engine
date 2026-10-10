@@ -36,6 +36,8 @@ import {
 } from "./judgement.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
+const NODE_CRITERION = "The node meets its criterion.";
+
 const transport = { ...connector, proveSshIdentity: async () => {} };
 const JUDGEMENT =
   'kanthord-judgement: {"criterion_met": true, "rationale": "met"}';
@@ -189,7 +191,10 @@ async function fixture(
       input,
       run,
       agent,
-      revision: { tasks: [task] } as Revision,
+      revision: {
+        content: { criterion: NODE_CRITERION },
+        tasks: [task],
+      } as Revision,
       ...workspace,
       priorRationale: null,
     },
@@ -216,6 +221,9 @@ test("a clean first review completes the task after one review round", async (t)
   assert.equal(reviewer.closed(), FIRST_ROUND);
   assert.ok(reviewer.instructions[0]!.includes("+++ b/a.txt"));
   assert.ok(reviewer.instructions[0]!.includes("Earlier findings: []"));
+  assert.ok(
+    reviewer.instructions[0]!.includes(`Node criterion: ${NODE_CRITERION}`),
+  );
 });
 
 test("a blocker leads to a fix round and a second review with the earlier findings and the reply", async (t) => {

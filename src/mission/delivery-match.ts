@@ -6,6 +6,7 @@ import {
   AdmissionRefusal,
   AssetKind,
   Disposition,
+  PlatformAddressKind,
   platformAddressSchema,
   type AdmissionAnswer,
   type PlatformAddress,
@@ -68,6 +69,32 @@ export function matchRequests(
       answer: { disposition: Disposition.Duplicate, reason: null },
     };
   return refused(AdmissionRefusal.Unmatched);
+}
+
+export function unresolvedPullRequests(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+): string[] {
+  assert.ok(projectIdSchema.safeParse(projectId).success);
+  assert.ok(resourceIdentity.length);
+  const rows = tx.database
+    .prepare(
+      "SELECT e.id, a.content FROM mission_evidence e JOIN mission_node n ON n.id = e.node_id JOIN mission_mission m ON m.id = n.mission_id JOIN mission_attempt t ON t.node_id = e.node_id AND t.attempt = e.attempt JOIN mission_evidence_asset a ON a.evidence_id = e.id WHERE m.project_id = ? AND e.requirement_key IS NOT NULL AND e.end_state IS NULL AND t.closed_at IS NULL AND a.kind = ? ORDER BY e.id",
+    )
+    .all(projectId, AssetKind.Platform) as unknown as {
+    id: string;
+    content: string;
+  }[];
+  return rows
+    .filter((row) => {
+      const address = platformAddressSchema.parse(JSON.parse(row.content));
+      return (
+        address.kind === PlatformAddressKind.PullRequest &&
+        address.resource_identity === resourceIdentity
+      );
+    })
+    .map((row) => row.id);
 }
 
 function refused(reason: AdmissionRefusal): RequestMatch {

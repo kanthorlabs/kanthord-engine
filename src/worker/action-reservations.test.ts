@@ -103,7 +103,7 @@ test("prune clears only requested actions in the same attempt", () => {
     action: "pull_request",
     expected_end_state: "pull_request_merged",
     follows: null,
-    configuration: { base_branch: "main" },
+    configuration: { base_branch: "main", landing: "human" as const },
   } as const;
   const entries: ActionContext["actions"] = [
     {

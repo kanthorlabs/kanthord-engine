@@ -53,7 +53,10 @@ export function requiredActionsOf(
             ? ExpectedEndState.PullRequestMerged
             : ExpectedEndState.BaseBranchPushed,
         follows: null,
-        configuration: { base_branch: policy.base_branch },
+        configuration: {
+          base_branch: policy.base_branch,
+          landing: policy.landing,
+        },
       }),
     );
   }

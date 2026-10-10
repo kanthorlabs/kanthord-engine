@@ -150,7 +150,7 @@ export type FrozenActionFacts = {
   action: string;
   expected_end_state: string;
   follows: string | null;
-  configuration: { base_branch: string };
+  configuration: { base_branch: string; landing: "human" | "kanthord" };
 };
 export type PullRequestAddressFacts = {
   kind: "pull_request";

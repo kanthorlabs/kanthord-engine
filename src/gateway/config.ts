@@ -9,6 +9,7 @@ export interface GatewayConfig {
   allowed_origins: string[];
   base_path: string;
   token_lifetime: number;
+  token_version: number;
   idempotency_ttl: number;
 }
 const strings = (value: unknown) => {
@@ -53,6 +54,18 @@ export const gatewayConfigSchema = {
     doc: "Token lifetime in seconds.",
     format: "nat",
     default: 31536000,
+  },
+  token_version: {
+    doc: "Signing-key version; an increment invalidates every issued JWT and client secret.",
+    format(value: unknown) {
+      if (
+        !isNumber(value) ||
+        !Number.isSafeInteger(value) ||
+        value <= NO_LIFETIME
+      )
+        throw new Error("expected a positive safe integer");
+    },
+    default: 1,
   },
   idempotency_ttl: {
     doc: "Idempotency record lifetime in seconds.",

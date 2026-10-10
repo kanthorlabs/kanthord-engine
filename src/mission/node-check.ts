@@ -20,7 +20,11 @@ import {
   commitSchema,
   type IntakeCheck,
 } from "./contract.ts";
-import { closeExternalAttempt, requireRunnable } from "./control.ts";
+import {
+  closeExternalAttempt,
+  requireRunnable,
+  transition,
+} from "./control.ts";
 import { actionStatesOf, requiredActionsOf } from "./frozen-action.ts";
 import { requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
@@ -56,7 +60,7 @@ const checkAnswerSchema = z
       : answer.landed_commits.length === NO_LANDED_COMMITS,
   );
 
-function requestContext(
+export function requestContext(
   tx: Transaction,
   dependencies: Dependencies,
   evidenceId: string,
@@ -111,6 +115,14 @@ export function applyEndState(
   const before = claimableMap(tx, mission.id, dependencies.bindings);
   if (request.end_state !== null || answer.end_state === CheckEndState.None)
     return;
+  if (answer.end_state === CheckEndState.Conflict) {
+    if (
+      node.state === NodeState.ExternalRequested &&
+      readOpenAttempt(tx, node.id)?.attempt === request.attempt
+    )
+      transition(tx, dependencies, mission, node, NodeState.Available, now);
+    return;
+  }
   const write = tx.database
     .prepare(
       "UPDATE mission_evidence SET end_state = ? WHERE id = ? AND end_state IS NULL",

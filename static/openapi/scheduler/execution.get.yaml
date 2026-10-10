@@ -180,6 +180,7 @@ components:
                     - report_absent
                     - action_unsettled
                     - assessment_absent
+                    - budget_end
                 code:
                   anyOf:
                     - type: string

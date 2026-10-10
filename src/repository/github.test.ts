@@ -1046,3 +1046,26 @@ test("decodeGitHubEvent answers null for metadata of another shape", () => {
     );
   }
 });
+
+test("an open pull request with merge conflicts folds to the conflict end state", () => {
+  const github = new GitHubPlatform({ baseUrl: "http://127.0.0.1:1" });
+  const open = { state: "open", merged: false, merge_commit_sha: null };
+  assert.equal(
+    github.foldPullRequest(
+      { ...open, mergeable_state: "dirty" },
+      ExpectedEndState.PullRequestMerged,
+    ).end_state,
+    CheckEndState.Conflict,
+  );
+  assert.equal(
+    github.foldPullRequest(
+      { ...open, mergeable_state: "clean" },
+      ExpectedEndState.PullRequestMerged,
+    ).end_state,
+    CheckEndState.None,
+  );
+  assert.equal(
+    github.foldPullRequest(open, ExpectedEndState.PullRequestMerged).end_state,
+    CheckEndState.None,
+  );
+});

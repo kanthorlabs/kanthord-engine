@@ -24,22 +24,23 @@ syntax separately; it is not a claim that the target surface is implemented.
 
 ## Command inventory
 
-There are eight application/JWT forms below: three configuration commands,
+There are nine application/JWT forms below: four configuration commands,
 two `serve` application forms, two `jwt generate` modes, and `jwt inspect`.
 Help is a parser facility, not a fourth global command.
 
 1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--gateway-base-path <path>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
-4. `kanthord serve [server] [--config <path>]` — implemented; local application
+4. `kanthord config migrate [--config <path>]` — implemented; local, no route.
+5. `kanthord serve [server] [--config <path>]` — implemented; local application
    startup, no outbound API route. Opens the server's HTTP listener.
-5. `kanthord serve worker [--endpoint <url>] [--token <jwt>]` — implemented; local
+6. `kanthord serve worker [--endpoint <url>] [--token <jwt>]` — implemented; local
    application startup; the runtime calls public API operations afterward.
-6. `kanthord jwt generate [username] [--name <display>] [--config <path>]` — implemented
+7. `kanthord jwt generate [username] [--name <display>] [--config <path>]` — implemented
    human issuance; local, no route.
-7. `kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--config <path>]` —
+8. `kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]` —
    implemented machine issuance; local, no route.
-8. `kanthord jwt inspect [token]` — implemented local decoding; no route.
+9. `kanthord jwt inspect [token]` — implemented local decoding; no route.
 
 Service commands, including local `gateway openapi`, are specified by their
 owning pages in the [index](./README.md).
@@ -353,11 +354,18 @@ The implemented fields are:
 - `gateway.token_lifetime`: optional Convict `nat` in seconds, default
   `31536000` (one year). Local issuance additionally requires a nonnegative safe
   integer; zero produces an immediately expiring token.
+- `gateway.token_version`: optional positive safe integer, default `1`. It
+  versions the signing key and every client secret. An increment and a server
+  restart invalidate every issued JWT and change every client secret.
 - `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
 - `mission.consecutive_failure_limit`: optional Convict `nat`, default `3`. It
   holds the consecutive failure limit of the Mission Service.
+- `mission.further_work_limit`: optional Convict `nat`, default `3`. It holds
+  the number of consecutive releases of one attempt with a `budget_end` stop
+  before the Mission Service pauses the node. The value `0`
+  turns the limit off.
 - `mission.rework_limit`: optional Convict `nat`, default `2`. It holds the
   rework limit of the Mission Service. The value `0` turns rework off.
 - `mission.text_max_bytes`: optional Convict `nat` in UTF-8 bytes, default
@@ -467,6 +475,29 @@ It writes no configuration, client file, or database. This is the effective
 configuration of this invocation, not an inspection of a running server's
 already loaded configuration.
 
+### `config migrate`
+
+```text
+kanthord config migrate [--config <path>]
+```
+
+**Implemented; route/access: none, local filesystem.** Read the selected file
+and rewrite each key of the rename table in place, with its value and the
+file's comments preserved. The rename table holds each renamed key and its new
+name; it starts with `mission.consecutive_loss_limit` →
+`mission.consecutive_failure_limit`. The command validates the rewritten
+document before it writes. It then writes the original bytes to an absent
+private backup `<path>.bak-<UTC timestamp>` and replaces the file atomically.
+
+It prints `Renamed <old key> to <new key>` for each change, then
+`Backup: <path>`. A file without a renamed key prints `No renamed key: <path>`
+and writes nothing. A file that holds both the old and the new key fails with
+`system.config.rename_conflict` and changes nothing.
+
+`config validate`, `config show`, `jwt generate` and `serve` keep refusing a
+renamed key with `system.config.invalid_field`. The message names the new key
+and this command.
+
 ## Application startup
 
 ### `serve server`
@@ -561,6 +592,15 @@ logs one record `Worker application ready` with `runtime_identity`,
 versions in the diagnostic. A startup
 failure prints its diagnostic, releases what it acquired and exits `1`.
 
+During an execution, the application logs one info record for each task start
+(`task started`), task commit (`task committed`), verification result (`task
+verified`), task judgement (`task judged`), task review (`task reviewed`) and
+node judgement (`node judged`). A record holds the execution, node, attempt and
+task identities, commits, exit codes and results, and no agent content. The
+application appends the transcript of each agent session to
+`<state>/transcripts/<execution id>.jsonl` with mode 0600, and it keeps the
+newest 50 execution transcripts.
+
 An execution that ends with a release or a closure leaves the instance
 registered, and the application pulls again. A release with a `stop` is a
 release. An execution that ends with no release and no closure exits `1`.
@@ -626,15 +666,16 @@ fails with `cli.jwt.invalid_project` before combination checks. The action then
 checks these conditions in order:
 
 1. A username with `--binding` fails with `cli.jwt.username_with_binding`. `--binding` without `--project` fails with `cli.jwt.binding_without_project`, and `--project` without `--binding` fails with `cli.jwt.project_without_binding`.
-2. `--output` with `--binding` fails with `cli.jwt.output_with_binding`.
-3. `--endpoint` without `--output` fails with `cli.jwt.endpoint_without_output`.
-4. An invalid `--endpoint` fails with `cli.config.invalid_endpoint`.
+2. `--endpoint` without `--output` fails with `cli.jwt.endpoint_without_output`.
+3. An invalid `--endpoint` fails with `cli.config.invalid_endpoint`.
 
 These failures write no file and print no token. Without `--output`, the
 terminal requirement and token output stay unchanged. With `--output`, no
 terminal check applies. Validate the document with the client configuration
-schema, then serialize it as YAML. It holds only `token`, or `endpoint` then
-`token` when `--endpoint` is given.
+schema, then serialize it as YAML. A human token file holds only `token`, or
+`endpoint` then `token` when `--endpoint` is given. A machine token file adds
+`client_secret` after `token`. With `--output`, the command prints neither the
+token nor the client secret.
 
 Create an absent destination directory at `0700`. Write a same-directory
 `0600` temporary file, flush and close it, then link it to the destination
@@ -658,7 +699,7 @@ generates a fresh `jti`. It creates no account or password record.
 ### Machine token
 
 ```text
-kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--config <path>]
+kanthord jwt generate --project <project id> --binding <binding name> [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]
 ```
 
 - `--binding <binding name>`: required in machine mode; 1 to 63 characters,
@@ -690,9 +731,8 @@ client_secret: <secret>
 Each line ends with a newline. Paste the fragment below `endpoint:` in private
 `cli.yaml`. The command derives the client secret from the server `master_key`
 and the new token's `sub`. It uses HKDF-SHA256 with an empty salt, the label
-`"worker/client-secret/v1/" + sub`, and 32 output bytes in canonical base64.
-The `v1` matches the current signing-key label. The code does not yet implement
-`token_version`. See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
+`"worker/client-secret/v" + token_version + "/" + sub`, and 32 output bytes in
+canonical base64. See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
 The server stores no client secret. Each new machine token has a different
 client secret. Human mode issues no client secret.
 
@@ -731,10 +771,9 @@ the two-line machine fragment, or the `Created <absolute path>` line with
 
 **Implemented:** both modes read the validated whole server configuration,
 derive the signing key using HKDF-SHA-256 with an empty salt and the label
-`gateway/jwt-hs256/v1`, and sign with HS256. Both include `iat` and `exp` in
+`gateway/jwt-hs256/v<token_version>`, and sign with HS256. Both include `iat` and `exp` in
 JWT Unix seconds and a fresh bare ULID `jti`; `exp = iat + gateway.token_lifetime`.
-The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
-sets the target label to `gateway/jwt-hs256/v<token_version>`.
+`token_version` is `gateway.token_version`, under the [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key).
 The CLI has no lifetime, algorithm, issuer, audience, custom-claims, subject-ID,
 or signing-key override flags.
 The [Gateway JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract.
@@ -746,17 +785,18 @@ substitution, or other non-terminal stdout fails with
 token signing. Stdin need not be a terminal and is never read.
 
 Without `--output` or `--verbose`, human mode prints exactly `<JWT>\n`.
-Machine mode prints exactly `token: <jwt>\nclient_secret: <secret>\n`, as shown
+Without `--output`, machine mode prints exactly `token: <jwt>\nclient_secret: <secret>\n`, as shown
 above. Exit is `0`. With `--verbose`, the same claim list follows the human JWT
 line or the machine fragment. It adds no client secret to the claims.
 No secret is printed to stderr. Invalid inputs, an absent or invalid
 configuration, failed terminal check, or signing failure exits nonzero without
 a successful token result.
 
-`--output` saves a human token in an absent private client configuration file
-under the [human-token rules](#human-token). It prints only
-`Created <absolute path>\n`, followed by claims when `--verbose` is given.
-It never prints the token, including on a failed publication. Readers use only
+`--output` saves a human token, or a machine token with its `client_secret`, in
+an absent private client configuration file under the [human-token
+rules](#human-token). It prints only `Created <absolute path>\n`, followed by
+claims when `--verbose` is given. It never prints the token or the client
+secret, including on a failed publication. Readers use only
 the default client path. Without `--output`, issuance saves no client
 configuration. Terminal-only output does not detect a terminal recorder.
 
@@ -833,7 +873,6 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `cli.jwt.endpoint_without_output`                | `--endpoint` is given without `--output`.                                                                               | jwt generate                                                          |
 | local           | `cli.jwt.inspect.malformed_token`                | The token is not three base64url segments with a JSON object header and a JSON object payload.                          | jwt inspect                                                           |
 | local           | `cli.jwt.inspect.token_required`                 | No argument, KANTHORD_TOKEN or cli.yaml token supplies a token.                                                         | jwt inspect                                                           |
-| local           | `cli.jwt.output_with_binding`                    | `--output` is combined with `--binding`.                                                                                | jwt generate                                                          |
 | local           | `cli.jwt.binding_without_project`                | `--binding` is given without `--project`.                                                                               | jwt generate                                                          |
 | local           | `cli.jwt.project_without_binding`                | `--project` is given without `--binding`.                                                                               | jwt generate                                                          |
 | local           | `cli.jwt.invalid_project`                        | The `--project` value is not a canonical `project_<ulid>` identity.                                                     | jwt generate                                                          |
@@ -875,6 +914,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 400             | `gateway.request.validation_failed`              | The params, query or body fail the operation input schema.                                                              | remote commands                                                       |
 | 404             | `gateway.routing.not_found`                      | No route matches the request path or preflight method, or the path is outside `gateway.base_path`.                      | unmatched HTTP routes                                                 |
 | local           | `system.config.cyclic_alias`                     | A YAML alias creates a cycle.                                                                                           | config validate, config show, jwt generate, serve server              |
+| local           | `system.config.rename_conflict`                  | The configuration holds both a renamed key and its new name.                                                            | config migrate                                                        |
 | local           | `system.config.invalid_field`                    | The server configuration contains an unknown or invalid field.                                                          | config init, config validate, config show, jwt generate, serve server |
 | local           | `system.config.invalid_mapping`                  | The YAML root is not one mapping, or a nested value is not a plain mapping or array.                                    | config validate, config show, jwt generate, serve server              |
 | local           | `system.config.invalid_yaml`                     | The YAML cannot be parsed as one mapping with unique string keys.                                                       | config validate, config show, jwt generate, serve server              |

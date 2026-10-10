@@ -189,6 +189,7 @@ export function composeServices(options: {
     stores: { [StoreName.Operational]: options.store },
     idempotencyTtl: options.config.gateway.idempotency_ttl,
     masterKey: options.config.master_key,
+    tokenVersion: options.config.gateway.token_version,
     tokenLifetime: options.config.gateway.token_lifetime,
     lookups: {
       scheduler: {
@@ -274,7 +275,11 @@ export function composeServices(options: {
       objectPut: (...args) => mission.authorizeObjectPut(...args),
     },
     clientSecret: (clientId) =>
-      deriveClientSecret(options.config.master_key, clientId),
+      deriveClientSecret(
+        options.config.master_key,
+        options.config.gateway.token_version,
+        clientId,
+      ),
     store: options.store,
     envelopeKey,
     logger: options.logger,

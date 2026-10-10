@@ -9,6 +9,7 @@ import {
   clone,
   cloneSnapshot,
   fetchAndCheckout,
+  fetchBase,
   pushNodeBranch,
   mergePushFresh,
   pushSnapshotFresh,
@@ -55,6 +56,7 @@ export class RepositoryComponent implements GitWriter {
   clone = clone;
   cloneSnapshot = cloneSnapshot;
   fetchAndCheckout = fetchAndCheckout;
+  fetchBase = fetchBase;
   pushNodeBranch = pushNodeBranch;
   mergePushFresh = mergePushFresh;
   pushSnapshotFresh = pushSnapshotFresh;

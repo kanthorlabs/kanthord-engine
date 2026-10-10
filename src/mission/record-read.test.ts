@@ -72,6 +72,7 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
       credential: "github",
       base_branch: "main",
       action,
+      landing: "human" as const,
       project_prompt: null,
     }),
   };

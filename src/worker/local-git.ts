@@ -9,6 +9,7 @@ import { childEnvironment } from "./tool-table.ts";
 const EXPIRED = 0;
 const CLEAN_STATUS = "";
 const FIRST_ATTEMPT = 1;
+const NO_CONFLICTS = 0;
 const INTERACTIVE_HELPERS = [
   "PAGER",
   "GIT_PAGER",
@@ -128,4 +129,113 @@ export async function diffText(
   assert.match(from, /^[a-f0-9]{40,64}$/);
   assert.match(to, /^[a-f0-9]{40,64}$/);
   return run(directory, ["diff", from, to], context, deadlineMs);
+}
+
+export async function unmergedFiles(
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  const output = await run(
+    directory,
+    ["diff", "--name-only", "--diff-filter=U"],
+    context,
+    deadlineMs,
+  );
+  return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
+}
+
+export async function isAncestor(
+  directory: string,
+  ancestor: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<boolean> {
+  const end = performance.now() + deadlineMs;
+  const target = await run(
+    directory,
+    ["rev-parse", ancestor],
+    context,
+    end - performance.now(),
+  );
+  const base = await run(
+    directory,
+    ["merge-base", "HEAD", ancestor],
+    context,
+    end - performance.now(),
+  );
+  return base.trim() === target.trim();
+}
+
+export async function mergeRef(
+  directory: string,
+  ref: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  const end = performance.now() + deadlineMs;
+  let failure: unknown = null;
+  await run(
+    directory,
+    ["merge", "--no-edit", "--no-ff", ref],
+    context,
+    end - performance.now(),
+  ).catch((error: unknown) => {
+    failure = error;
+  });
+  const conflicts = await unmergedFiles(
+    directory,
+    context,
+    end - performance.now(),
+  );
+  if (conflicts.length === NO_CONFLICTS && failure !== null) throw failure;
+  return conflicts;
+}
+
+export async function concludeMerge(
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  const end = performance.now() + deadlineMs;
+  await run(directory, ["add", "--all"], context, end - performance.now());
+  await run(
+    directory,
+    ["commit", "--no-edit"],
+    context,
+    end - performance.now(),
+  );
+}
+
+export async function abortMerge(
+  directory: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  await run(directory, ["merge", "--abort"], context, deadlineMs);
+}
+
+export async function resetTo(
+  directory: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<void> {
+  await run(directory, ["reset", "--hard", commit], context, deadlineMs);
+}
+
+export async function conflictMarkerFiles(
+  directory: string,
+  files: readonly string[],
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  assert.ok(files.length > NO_CONFLICTS);
+  const output = await run(
+    directory,
+    ["grep", "--no-index", "-l", "-E", "^(<{7}|>{7})( |$)", "--", ...files],
+    context,
+    deadlineMs,
+  ).catch(() => CLEAN_STATUS);
+  return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
 }

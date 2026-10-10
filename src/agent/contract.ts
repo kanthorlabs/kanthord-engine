@@ -106,6 +106,7 @@ export const PromptTemplate = {
   Repair: "repair",
   Review: "review",
   Fix: "fix",
+  Conflict: "conflict",
 } as const;
 export type PromptTemplate =
   (typeof PromptTemplate)[keyof typeof PromptTemplate];

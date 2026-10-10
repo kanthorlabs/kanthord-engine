@@ -375,7 +375,7 @@ test(
             action: RepositoryAction.PullRequest,
             expected_end_state: ExpectedEndState.PullRequestMerged,
             follows: null,
-            configuration: { base_branch: "main" },
+            configuration: { base_branch: "main", landing: "human" },
           },
         ]);
         assert.equal(attempt.closed_at, null);

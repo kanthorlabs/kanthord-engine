@@ -40,6 +40,7 @@ import {
   BINDING_CHECK_TIMEOUT_MS,
   FollowsType,
   GitHubAction,
+  Landing,
   InstructionFileState,
   INSTANCE_COUNT_MIN,
   INSTANCE_COUNT_MAX,
@@ -3064,6 +3065,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       credential: original.config.credential,
       base_branch: original.config.strategy.base_branch,
       action: GitHubAction.PullRequest,
+      landing: Landing.Human,
       project_prompt: projectPrompt,
       working_layer: original.config.working_layer,
     });
@@ -4039,4 +4041,26 @@ test("binding.check refuses a static violation with the write code before any SS
   );
   assert.deepEqual(sshCalls, []);
   assert.deepEqual(credentialCalls, []);
+});
+
+test("a pull request strategy holds a landing choice and other actions refuse one", () => {
+  const strategy = (name: string, landing?: string) =>
+    repositoryConfigSchema.shape.strategy.safeParse({
+      base_branch: "main",
+      action: {
+        name,
+        follows: { type: FollowsType.AssessmentPassed },
+        ...(landing === undefined ? {} : { landing }),
+      },
+    });
+  assert.equal(
+    strategy(GitHubAction.PullRequest, Landing.KanthorD).success,
+    true,
+  );
+  assert.equal(strategy(GitHubAction.PullRequest).success, true);
+  assert.equal(
+    strategy(GitHubAction.MergePush, Landing.KanthorD).success,
+    false,
+  );
+  assert.equal(strategy(GitHubAction.PullRequest, "robot").success, false);
 });

@@ -605,7 +605,9 @@ test(
           asset.id,
         ]);
         assert.equal(content.media_type, MARKDOWN);
-        assert.equal(Buffer.from(content.data, "base64").toString(), REPORT);
+        const stored = Buffer.from(content.data, "base64").toString();
+        assert.ok(stored.startsWith("## Facts recorded by KanthorD"));
+        assert.ok(stored.endsWith(`## Assessment\n\n${REPORT}`));
         const verification = evidence.items.find(
           (item) => item.verification,
         )!.verification!;

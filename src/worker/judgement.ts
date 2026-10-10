@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import type { TaskContent } from "../mission/contract.ts";
 import type { WorkPrompt } from "../agent/prompt-composer.ts";
-import type { Verification, TestedInput } from "./verification.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { Verification } from "./verification.ts";
+import { NodeKind, type NativeAgent } from "./native-agent.ts";
 import { PromptTemplate, type PromptTemplates } from "../agent/contract.ts";
 import { renderTemplate } from "../agent/prompt-templates.ts";
 
 export const JUDGEMENT_MARKER = "kanthord-judgement:";
 const SUCCESS_EXIT = 0;
+const NO_ITEMS = 0;
+const MIN_VERIFICATIONS = 1;
 const AssessmentResult = {
   Success: "success",
   CriterionNotMet: "criterion-not-met",
@@ -18,10 +20,46 @@ export const taskJudgementSchema = z.strictObject({
   criterion_met: z.boolean(),
   rationale: z.string().trim().min(1),
 });
-export const evaluationJudgementSchema = z.strictObject({
-  result: z.enum(AssessmentResult),
-  rationale: z.string().trim().min(1),
+const unmetItemSchema = z.strictObject({
+  id: z.string().trim().min(1),
+  reason: z.string().trim().min(1),
 });
+const proposalTextSchema = z.string().trim().min(1);
+const proposalSchema = z.strictObject({
+  objective_id: proposalTextSchema,
+  name: proposalTextSchema,
+  requirement: proposalTextSchema,
+  criterion: proposalTextSchema,
+  task: z.strictObject({
+    name: proposalTextSchema,
+    requirement: proposalTextSchema,
+    criterion: proposalTextSchema,
+    verifications: z.array(proposalTextSchema).min(MIN_VERIFICATIONS),
+  }),
+});
+export const evaluationJudgementSchema = z
+  .strictObject({
+    result: z.enum(AssessmentResult),
+    rationale: z.string().trim().min(1),
+    unmet: z.array(unmetItemSchema).default([]),
+    proposals: z.array(proposalSchema).default([]),
+  })
+  .refine(
+    (judgement) =>
+      judgement.result !== AssessmentResult.CriterionNotMet ||
+      judgement.unmet.length > NO_ITEMS ||
+      judgement.proposals.length > NO_ITEMS,
+    { path: ["unmet"] },
+  );
+
+export function judgementRationale(judgement: {
+  rationale: string;
+  unmet: readonly { id: string; reason: string }[];
+}): string {
+  if (judgement.unmet.length === NO_ITEMS) return judgement.rationale;
+  const lines = judgement.unmet.map((item) => `- ${item.id}: ${item.reason}`);
+  return `${judgement.rationale}\nUnmet:\n${lines.join("\n")}`;
+}
 
 export function parseJudgement<T extends z.ZodType>(
   text: string | undefined,
@@ -132,18 +170,21 @@ export function criterionRevisionInstruction(
 export function evaluationInstruction(
   templates: PromptTemplates,
   input: {
+    kind?: NodeKind;
     tasks: readonly TaskContent[];
-    tested_input: TestedInput;
+    verification: Verification;
     evidence: unknown;
     objectives?: unknown;
   },
 ): string {
   return renderTemplate(templates, PromptTemplate.Evaluation, {
+    initiative: input.kind === NodeKind.Initiative,
     tasks: input.tasks.map((task) => ({
       id: task.id,
       criterion: task.content.criterion,
     })),
-    tested_input: input.tested_input,
+    tested_input: input.verification.tested_input,
+    results: input.verification.results,
     evidence: input.evidence,
     objectives: input.objectives ?? null,
     marker: JUDGEMENT_MARKER,
@@ -155,10 +196,12 @@ export function reportInstruction(
   objectives: unknown,
   outcomes: unknown,
   evidence: unknown,
+  verification: Verification | null,
 ): string {
   return renderTemplate(templates, PromptTemplate.Report, {
     objectives,
     outcomes,
     evidence,
+    verification,
   });
 }

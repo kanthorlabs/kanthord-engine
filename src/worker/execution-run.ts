@@ -11,6 +11,7 @@ import type { MethodClients } from "./method-clients.ts";
 import {
   ClaimState,
   ExecutionStopReason,
+  type BudgetLimit,
   type ReleaseStop,
 } from "../scheduler/contract.ts";
 
@@ -87,6 +88,7 @@ export class ExecutionRun {
   readonly operationContext: CancellationContext;
   private readonly credentials: { release(): Promise<void> };
   private readonly parent: Context;
+  private readonly logSink: (record: Record<string, unknown>) => void;
   private stopped: ExecutionStop | null = null;
   private settlement: Promise<void> | null = null;
 
@@ -95,6 +97,7 @@ export class ExecutionRun {
     clients: MethodClients;
     credentials: { release(): Promise<void> };
     context: Context;
+    log?: (record: Record<string, unknown>) => void;
   }) {
     assert.ok(input.claim.execution_id);
     assert.ok(input.claim.node_id);
@@ -102,10 +105,21 @@ export class ExecutionRun {
     this.clients = input.clients;
     this.credentials = input.credentials;
     this.parent = input.context;
+    this.logSink = input.log ?? (() => {});
     this.operationContext = new CancellationContext(
       input.context,
       input.claim.expired_at,
     );
+  }
+
+  log(msg: string, fields: Record<string, unknown>): void {
+    this.logSink({
+      msg,
+      execution_id: this.claim.execution_id,
+      node_id: this.claim.node_id,
+      attempt: this.claim.attempt,
+      ...fields,
+    });
   }
 
   context() {
@@ -233,14 +247,22 @@ export class ExecutionRun {
     return answer.items;
   }
 
-  async release(furtherWork: boolean): Promise<ExecutionEnd> {
+  async release(
+    furtherWork: boolean,
+    budgetEnd: BudgetLimit | null = null,
+  ): Promise<ExecutionEnd> {
+    assert.ok(budgetEnd === null || furtherWork);
+    const stop: ReleaseStop | null =
+      budgetEnd === null
+        ? null
+        : { reason: ExecutionStopReason.BudgetEnd, code: budgetEnd };
     await this.settleCredentials();
     await this.call(async (options) => {
       const result = await this.clients.scheduler.executionRelease(
         {
           params: { execution_id: this.claim.execution_id },
           query: {},
-          body: { further_work: furtherWork },
+          body: { further_work: furtherWork, stop },
         },
         options,
       );
@@ -266,7 +288,9 @@ export class ExecutionRun {
         },
       };
     });
-    return { kind: ExecutionEndKind.Released, furtherWork };
+    return stop === null
+      ? { kind: ExecutionEndKind.Released, furtherWork }
+      : { kind: ExecutionEndKind.Released, furtherWork, stop };
   }
 
   async releaseStop(stopped: ExecutionStop): Promise<ExecutionEnd> {

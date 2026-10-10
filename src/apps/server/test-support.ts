@@ -461,7 +461,11 @@ export async function gatewayFixture(
     endpoint,
     request,
     token: (
-      await generateHumanJWT(config.master_key, config.gateway.token_lifetime)
+      await generateHumanJWT(
+        config.master_key,
+        config.gateway.token_version,
+        config.gateway.token_lifetime,
+      )
     ).token,
     machineToken: async (
       projectId: string,
@@ -471,6 +475,7 @@ export async function gatewayFixture(
       (
         await generateMachineJWT(
           config.master_key,
+          config.gateway.token_version,
           config.gateway.token_lifetime,
           { projectId, bindingName },
           name,
@@ -530,6 +535,14 @@ const NO_HOLD_PASS = 0;
 const HOLD_PASS_STEP = 1;
 const GITHUB_PULL_ROUTE =
   /^\/repos\/([^/]+)\/([^/]+)\/pulls(?:\/([1-9][0-9]*)(\/comments)?)?$/;
+const GITHUB_MERGE_ROUTE =
+  /^\/repos\/([^/]+)\/([^/]+)\/pulls\/([1-9][0-9]*)\/merge$/;
+const GITHUB_REPOSITORY_ROUTE = /^\/repos\/([^/]+)\/([^/]+)$/;
+const GITHUB_REPOSITORY_SETTINGS = {
+  allow_merge_commit: true,
+  allow_squash_merge: true,
+  allow_rebase_merge: true,
+};
 const GITHUB_TOKEN_SCHEME = /^(?:token|bearer) /i;
 const GITHUB_MERGE_SHA = /^[a-f0-9]{40}$/;
 const GITHUB_NOT_FOUND = { message: "Not Found" };
@@ -582,6 +595,7 @@ interface FakeGitHubState {
   events: Map<string, unknown[]>;
   failEvents: number | null;
   eventsHold: FakeEventsHold | null;
+  refuseMerge: number | null;
 }
 
 interface FakeGitHubAnswer {
@@ -593,6 +607,10 @@ const createPullSchema = z.looseObject({
   head: z.string().min(GITHUB_MIN_SEGMENT_LENGTH),
   base: z.string().min(GITHUB_MIN_SEGMENT_LENGTH),
   title: z.string(),
+});
+const mergePullSchema = z.looseObject({
+  sha: z.string().regex(GITHUB_MERGE_SHA),
+  merge_method: z.enum(["merge", "squash", "rebase"]),
 });
 
 async function readGitHubBody(request: IncomingMessage): Promise<unknown> {
@@ -816,13 +834,37 @@ async function gitHubRequest(
   }
   if (method === HttpMethod.Get && state.failPulls !== null)
     return reply({ status: state.failPulls, body: GITHUB_SCRIPTED_FAILURE });
-  const answer = routePull(state, method, url, body);
+  const answer = GITHUB_REPOSITORY_ROUTE.test(url.pathname)
+    ? { status: HttpStatus.OK, body: GITHUB_REPOSITORY_SETTINGS }
+    : GITHUB_MERGE_ROUTE.test(url.pathname)
+      ? mergePull(state, url, body)
+      : routePull(state, method, url, body);
   if (method !== HttpMethod.Get && state.dropNext) {
     state.dropNext = false;
     response.destroy();
     return;
   }
   reply(answer);
+}
+
+function mergePull(
+  state: FakeGitHubState,
+  url: URL,
+  body: unknown,
+): FakeGitHubAnswer {
+  const [, owner, repo, number] = GITHUB_MERGE_ROUTE.exec(url.pathname) ?? [];
+  assert.ok(owner && repo && number);
+  if (state.refuseMerge !== null)
+    return { status: state.refuseMerge, body: GITHUB_SCRIPTED_FAILURE };
+  const { sha } = mergePullSchema.parse(body);
+  const pull = changePull(state, +number);
+  const mergeCommit = createHash("sha1")
+    .update(`${sha}:${number}`)
+    .digest("hex");
+  pull.state = FakePullState.Closed;
+  pull.merged = true;
+  pull.merge_commit_sha = mergeCommit;
+  return { status: HttpStatus.OK, body: { sha: mergeCommit, merged: true } };
 }
 
 function changePull(state: FakeGitHubState, number: number): FakePullRequest {
@@ -872,6 +914,7 @@ export async function fakeGitHub(t: TestContext) {
     events: new Map(),
     failEvents: null,
     eventsHold: null,
+    refuseMerge: null,
   };
   const failures: unknown[] = [];
   let releaseGate = () => {};
@@ -931,6 +974,10 @@ export async function fakeGitHub(t: TestContext) {
       assert.equal(pull.state, FakePullState.Closed);
       assert.equal(pull.merged, false);
       pull.state = FakePullState.Open;
+    },
+    refuseMerge(status: number | null): void {
+      assert.ok(status === null || Number.isInteger(status));
+      state.refuseMerge = status;
     },
     respondNext(status: number, body: unknown): void {
       assert.ok(Number.isInteger(status));
@@ -1013,6 +1060,7 @@ export function mappedTransport(
     cloneSnapshot: (address, ...args) =>
       connector.cloneSnapshot(mapped(address), ...args),
     fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
+    fetchBase: (...args) => connector.fetchBase(...args),
     pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
     mergePushFresh: (input, ...args) =>
       connector.mergePushFresh(

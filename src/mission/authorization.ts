@@ -18,6 +18,7 @@ import {
   OBJECT_SIZE_MAX,
   PlatformAddressKind,
   RepositoryAction,
+  RepositoryLanding,
   platformAddressSchema,
   testedInputSchema,
   type ActionFacts,
@@ -285,7 +286,9 @@ export function authorizeFrozenAction(
         );
   return {
     credential:
-      reused === null && action.action === RepositoryAction.PullRequest
+      action.action === RepositoryAction.PullRequest &&
+      (reused === null ||
+        action.configuration.landing === RepositoryLanding.KanthorD)
         ? policy.credential
         : null,
     platform: policy.platform,

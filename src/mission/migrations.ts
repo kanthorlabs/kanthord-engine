@@ -107,7 +107,23 @@ const createExecutionRecordTables: Migration = (database) => {
   `);
 };
 
+const createProposalTable: Migration = (database) => {
+  database.exec(`
+    CREATE TABLE mission_proposal (
+      id TEXT NOT NULL PRIMARY KEY,
+      node_id TEXT NOT NULL REFERENCES mission_node(id),
+      attempt INTEGER NOT NULL,
+      assessment_id TEXT NOT NULL REFERENCES mission_assessment(id),
+      content TEXT NOT NULL,
+      objective_node_id TEXT REFERENCES mission_node(id),
+      approved_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+  `);
+};
+
 export const missionMigrations: readonly Migration[] = [
   createMissionTables,
   createExecutionRecordTables,
+  createProposalTable,
 ];

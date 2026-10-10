@@ -5,6 +5,7 @@ import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   ClaimState,
+  ExecutionStopReason,
   releaseStopSchema,
   type ReleaseStop,
   type ExecutionRow,
@@ -214,4 +215,31 @@ export function executionRecord(
     },
     claim_state: claimStateOf(row, now),
   };
+}
+
+export function consecutiveStalls(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): number {
+  assert.ok(tx.database.isTransaction);
+  const result = tx.database
+    .prepare(
+      `SELECT count(*) AS count FROM scheduler_execution
+    WHERE node_id = ? AND attempt = ? AND json_extract(stop, '$.reason') = ?
+    AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
+      WHERE node_id = ? AND attempt = ? AND ended_at IS NOT NULL
+      AND coalesce(json_extract(stop, '$.reason'), '') != ?), -1)`,
+    )
+    .get(
+      nodeId,
+      attempt,
+      ExecutionStopReason.BudgetEnd,
+      nodeId,
+      attempt,
+      ExecutionStopReason.BudgetEnd,
+    )!;
+  const count = Number(result.count);
+  assert.ok(Number.isSafeInteger(count) && count >= NO_ROWS);
+  return count;
 }

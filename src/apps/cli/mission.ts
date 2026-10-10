@@ -26,6 +26,7 @@ import {
 } from "./mission-support.ts";
 import { addControlCommands } from "./mission-control.ts";
 import { addRecordCommands } from "./mission-record.ts";
+import { addProposalCommands } from "./mission-proposal.ts";
 import { addEvidenceCommands } from "./mission-evidence.ts";
 import { addExecutionCommands } from "./mission-execution.ts";
 import {
@@ -591,6 +592,7 @@ export function addMissionCommand(program: Command): void {
     );
   addNodeCommands(mission);
   addRecordCommands(mission);
+  addProposalCommands(mission);
   addEvidenceCommands(mission);
   addExecutionCommands(mission);
   addEdgeCommands(mission);

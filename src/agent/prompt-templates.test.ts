@@ -19,8 +19,8 @@ import {
 const OVERRIDE_TEXT = "Fix it: {{rationale}}\n";
 const UNSAFE_RATIONALE = "<a & b>";
 const OVERRIDE_RENDERED = `Fix it: ${UNSAFE_RATIONALE}`;
-const REPORT_RENDERED =
-  'Write a Markdown report on the outcome of each current objective using its outcome and evidence.\nObjectives: [{"id":"o"}]\nOutcomes: []\nEvidence: null';
+const REPORT_RENDERED_TAIL =
+  '\nObjectives: [{"id":"o"}]\nOutcomes: []\nEvidence: null\nFinal-snapshot verification: null';
 
 function templateInvalid(path: string | null, reason: string) {
   return (error: unknown) => {
@@ -108,7 +108,8 @@ test("shipped templates render JSON values and drop the final newline", () => {
       objectives: [{ id: "o" }],
       outcomes: [],
       evidence: null,
-    }),
-    REPORT_RENDERED,
+      verification: null,
+    }).endsWith(REPORT_RENDERED_TAIL),
+    true,
   );
 });

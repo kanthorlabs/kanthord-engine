@@ -13,6 +13,7 @@ const TRUNCATION_NOTE = `\n[The diff ends at ${REVIEW_DIFF_MAX_CHARACTERS} chara
 const NO_REPLY = "Reply of the engineer to the earlier findings: none\n";
 const ENGINEER_REPLY = "B1 - status:FIXED";
 const DIFF = "diff --git a/x b/x";
+const NODE_CRITERION = "The node is done.";
 const task: TaskContent = {
   id: "task-a",
   filename: "task-a.md",
@@ -36,6 +37,7 @@ const finding: Finding = {
 test("a review instruction holds the diff, the findings and the reply of the engineer", () => {
   const text = reviewInstruction(SHIPPED_TEMPLATES, {
     task,
+    nodeCriterion: NODE_CRITERION,
     diff: DIFF,
     findings: [finding],
     replies: ENGINEER_REPLY,
@@ -49,6 +51,7 @@ test("a review instruction holds the diff, the findings and the reply of the eng
 test("a review instruction without a reply writes none and bounds a long diff", () => {
   const text = reviewInstruction(SHIPPED_TEMPLATES, {
     task,
+    nodeCriterion: NODE_CRITERION,
     diff: "x".repeat(REVIEW_DIFF_MAX_CHARACTERS + 1),
     findings: [],
     replies: null,
@@ -60,4 +63,33 @@ test("a review instruction without a reply writes none and bounds a long diff", 
     ),
   );
   assert.ok(!text.includes("x".repeat(REVIEW_DIFF_MAX_CHARACTERS + 1)));
+});
+
+test("the task review judges the task criterion, the touched node criterion items and the default standard", () => {
+  const instruction = reviewInstruction(SHIPPED_TEMPLATES, {
+    task: {
+      id: "node_01M4HN8TEAWE05REAK13K4E6MA",
+      filename: "hardening-routes.md",
+      content: {
+        name: "Drop the echo route",
+        requirement: "Remove POST /echo.",
+        criterion: "POST /echo answers 404.",
+        verifications: ["npm run verify"],
+        bindings: [],
+      },
+    },
+    nodeCriterion: "No production route exists solely to make a test pass.",
+    diff: "",
+    findings: [],
+    replies: null,
+  });
+  assert.match(
+    instruction,
+    /every item of the node criterion that the task touches, and the default standard/,
+  );
+  assert.match(instruction, /Task criterion: POST \/echo answers 404\./);
+  assert.match(
+    instruction,
+    /Node criterion: No production route exists solely to make a test pass\./,
+  );
 });

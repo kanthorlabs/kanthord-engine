@@ -17,6 +17,7 @@ import { errorSchema } from "../kernel/errors.ts";
 export const MISSION_SERVICE_NAME = "mission";
 export const MISSION_IDENTITY_PREFIX = "mission";
 export const NODE_IDENTITY_PREFIX = "node";
+export const PROPOSAL_IDENTITY_PREFIX = "proposal";
 export const MISSION_INITIAL_VERSION = 1;
 export const MISSION_OPERATION_TIMEOUT_MS = 30000;
 
@@ -41,6 +42,7 @@ export interface MissionBindings {
     credential: string | null;
     base_branch: string;
     action: "pull_request" | "merge_push" | null;
+    landing: "human" | "kanthord";
     project_prompt: string | null;
   } | null;
   resolveBinding(
@@ -150,6 +152,7 @@ export const CheckEndState = {
   Expected: "expected",
   Other: "other",
   None: "none",
+  Conflict: "conflict",
 } as const;
 export const checkEndStateSchema = z.enum(CheckEndState);
 
@@ -207,6 +210,7 @@ export interface MissionTransitions {
     tx: Transaction,
     execution: { execution_id: string; node_id: string; attempt: number },
     furtherWork: boolean,
+    stalledReleases: number,
     now: number,
   ): void;
   failure(
@@ -228,6 +232,7 @@ export const MissionErrorCode = {
   EvidenceRequestAssetRefused: "mission.evidence.request_asset_refused",
   AssessmentEvidenceUnpublished: "mission.assessment.evidence_unpublished",
   AssessmentVerificationFailed: "mission.assessment.verification_failed",
+  ProposalAlreadyApproved: "mission.proposal.already_approved",
   NoUnresolvedRequest: "mission.node.no_unresolved_request",
   RecordNotFound: "mission.record.not_found",
   ExecutionContextMismatch: "mission.execution.context_mismatch",
@@ -388,6 +393,10 @@ export const RepositoryAction = {
 } as const;
 export const repositoryActionSchema = z.enum(RepositoryAction);
 export type RepositoryAction = z.infer<typeof repositoryActionSchema>;
+export const RepositoryLanding = {
+  Human: "human",
+  KanthorD: "kanthord",
+} as const;
 export const ExpectedEndState = {
   PullRequestMerged: "pull_request_merged",
   BaseBranchPushed: "base_branch_pushed",
@@ -781,7 +790,10 @@ export const frozenActionSchema = z.strictObject({
   action: repositoryActionSchema,
   expected_end_state: expectedEndStateSchema,
   follows: actionKeySchema.nullable(),
-  configuration: z.strictObject({ base_branch: textSchema }),
+  configuration: z.strictObject({
+    base_branch: textSchema,
+    landing: z.enum(RepositoryLanding).default(RepositoryLanding.Human),
+  }),
 });
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
 export type PullRequestAddress = Extract<
@@ -973,6 +985,7 @@ export const unblockSchema = z.strictObject({
   expected_revision: z.number().int().positive(),
   expected_mission_version: z.number().int().positive(),
   change: unblockChangeSchema.optional(),
+  reason: textSchema.optional(),
 });
 export type Unblock = z.infer<typeof unblockSchema>;
 
@@ -1066,6 +1079,36 @@ export const evidenceSubmitSchema = executionContextSchema.extend({
   verification: verificationSchema.optional(),
 });
 export type EvidenceSubmit = z.infer<typeof evidenceSubmitSchema>;
+export const PROPOSAL_MAX = 10;
+export const proposalTaskSchema = contentSchema.omit({ bindings: true });
+export type ProposalTask = z.infer<typeof proposalTaskSchema>;
+export const proposalContentSchema = z.strictObject({
+  objective_id: identitySchema(NODE_IDENTITY_PREFIX),
+  ...contentSchema.pick({ name: true, requirement: true, criterion: true })
+    .shape,
+  task: proposalTaskSchema,
+});
+export type ProposalContent = z.infer<typeof proposalContentSchema>;
+export const proposalSchema = z.strictObject({
+  id: identitySchema(PROPOSAL_IDENTITY_PREFIX),
+  node_id: identitySchema(NODE_IDENTITY_PREFIX),
+  attempt: z.number().int().nonnegative(),
+  assessment_id: identitySchema("assessment"),
+  content: proposalContentSchema,
+  objective_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
+  approved_at: timestamp.nullable(),
+  created_at: timestamp,
+});
+export type Proposal = z.infer<typeof proposalSchema>;
+export const proposalApproveSchema = z.strictObject({
+  expected_mission_version: z.number().int().positive(),
+  reason: textSchema.optional(),
+});
+export type ProposalApprove = z.infer<typeof proposalApproveSchema>;
+export const proposalApproveResultSchema = z.strictObject({
+  objective: nodeChangeSchema,
+  initiative: controlResultSchema,
+});
 export const assessmentSubmitSchema = executionContextSchema.extend({
   evidence_ids: z
     .array(identitySchema("evidence"))
@@ -1078,6 +1121,7 @@ export const assessmentSubmitSchema = executionContextSchema.extend({
   result: assessmentResultSchema,
   rationale: textSchema,
   tested_input: testedInputSchema,
+  proposals: z.array(proposalContentSchema).max(PROPOSAL_MAX).default([]),
 });
 export type AssessmentSubmit = z.infer<typeof assessmentSubmitSchema>;
 export const evidenceRequestSchema = executionContextSchema.extend({
@@ -1705,6 +1749,34 @@ export const missionOperations = {
     ),
     output: externalActionSchema,
     description: "Get a required external action of an attempt.",
+  },
+  "proposal.list": {
+    ...readOperation,
+    id: "mission.proposal.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:node_id/proposal",
+    input: readInput(
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({ ...pageQuery, attempt: attemptSelector(0).optional() }),
+    ),
+    output: pageOf(proposalSchema),
+    description: "List fix-objective proposals of an initiative.",
+  },
+  "proposal.approve": {
+    ...writeOperation,
+    id: "mission.proposal.approve",
+    method: HttpMethod.Post,
+    path: "/api/mission/proposal/:proposal_id/approve",
+    input: z.strictObject({
+      params: z.strictObject({
+        proposal_id: identitySchema(PROPOSAL_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: proposalApproveSchema,
+    }),
+    output: proposalApproveResultSchema,
+    description:
+      "Approve a fix-objective proposal, create its objective and unblock the initiative.",
   },
   "node.unblock": {
     ...writeOperation,

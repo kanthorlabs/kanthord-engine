@@ -175,6 +175,9 @@ components:
                 - content
                 - reason
               additionalProperties: false
+            reason:
+              type: string
+              minLength: 1
           required:
             - blocked_attempt
             - expected_revision
@@ -1646,8 +1649,15 @@ components:
                           base_branch:
                             type: string
                             minLength: 1
+                          landing:
+                            default: human
+                            type: string
+                            enum:
+                              - human
+                              - kanthord
                         required:
                           - base_branch
+                          - landing
                         additionalProperties: false
                     required:
                       - key

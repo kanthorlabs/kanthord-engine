@@ -19,10 +19,13 @@ import {
   insertAssessment,
   readOpenAttempt,
 } from "./record-store.ts";
-import { setNodeState, insertNode } from "./store.ts";
+import { setNodeState, insertNode, readNode } from "./store.ts";
 import { readCurrentRevision, insertRevision } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
 import { controlHarness } from "./test-support.ts";
+
+const NO_STALLS = 0;
+const FURTHER_WORK_LIMIT = 3;
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
@@ -59,6 +62,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
     credential: "github",
     base_branch: "main",
     action: RepositoryAction.PullRequest,
+    landing: "human",
     project_prompt: null,
   });
   h.store.transaction((tx) => {
@@ -78,7 +82,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
     h.store.transaction((tx) =>
       h.service.claim(tx, h.node_id, states, opener, NOW),
     );
-  const release = (furtherWork = false) =>
+  const release = (furtherWork = false, stalledReleases = NO_STALLS) =>
     h.store.transaction((tx) =>
       h.service.release(
         tx,
@@ -88,6 +92,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
           attempt: FIRST_ATTEMPT,
         },
         furtherWork,
+        stalledReleases,
         NOW,
       ),
     );
@@ -198,6 +203,22 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
     .prepare("UPDATE mission_node SET state = ?, retired_at = ? WHERE id = ?")
     .run(NodeState.Available, NOW, h.node_id);
   assert.equal(h.claim(), null);
+});
+
+test("further-work releases without progress pause the node at the further-work limit", (t) => {
+  const h = fixture(t);
+  h.claim();
+  h.release(true, FURTHER_WORK_LIMIT - 1);
+  assert.equal(
+    h.store.transaction((tx) => readNode(tx, h.node_id))!.state,
+    NodeState.Available,
+  );
+  h.claim();
+  h.release(true, FURTHER_WORK_LIMIT);
+  assert.equal(
+    h.store.transaction((tx) => readNode(tx, h.node_id))!.state,
+    NodeState.Paused,
+  );
 });
 
 test("initiative claim refuses nonterminal objectives and task claim is never admitted", (t) => {

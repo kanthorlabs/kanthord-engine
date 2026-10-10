@@ -225,6 +225,24 @@ test("an admission end state adds the inbound event identity to the landed-commi
   assert.equal(h.node().state, NodeState.Completed);
 });
 
+test("a conflicting pull request returns the node to rework and keeps the request unresolved", async (t) => {
+  const h = await fixture(t);
+  h.dependencies.intakeCheck.check = async () => ({
+    end_state: CheckEndState.Conflict,
+    landed_commits: [],
+  });
+  assert.equal(
+    (await h.check()).results[FIRST_RESULT_INDEX]!.resolution,
+    Resolution.Unresolved,
+  );
+  assert.equal(h.node().state, NodeState.Available);
+  assert.equal(h.node().attempt, FIRST_ATTEMPT);
+  assert.equal(
+    h.store.transaction((tx) => readEvidence(tx, h.request.id))!.end_state,
+    null,
+  );
+});
+
 test("other checks block while none stays unresolved and failed checks retain failure envelopes", async (t) => {
   const h = await fixture(t);
   h.dependencies.intakeCheck.check = async () => ({

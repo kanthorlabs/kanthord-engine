@@ -951,6 +951,44 @@ test("jwt --output creates a private default client file with a verifiable human
   assert.doesNotMatch(result.stdout + result.stderr, JWT_OUTPUT);
 });
 
+test("jwt --output with --binding writes the machine token and client secret to a private file and prints neither", async (t) => {
+  const env = environment(temporary(t));
+  writePrivate(env.KANTHORD_CONFIG!, initialConfig());
+  const config = loadConfig(env.KANTHORD_CONFIG!);
+  const path = join(temporary(t), "worker", "cli.yaml");
+  const result = invocation(
+    [
+      "jwt",
+      "generate",
+      "--project",
+      PROJECT_ID,
+      "--binding",
+      "developer",
+      "--output",
+      path,
+      "--endpoint",
+      "http://127.0.0.1:31415",
+    ],
+    env,
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stdout, `Created ${path}\n`);
+  assert.equal(statSync(path).mode & 0o7777, PRIVATE_FILE_MODE);
+  const document = parse(readFileSync(path, "utf8"));
+  assert.deepEqual(Object.keys(document), [
+    "endpoint",
+    "token",
+    "client_secret",
+  ]);
+  const sub = String(decode(document.token).payload.sub);
+  assert.equal(
+    document.client_secret,
+    deriveClientSecret(config.master_key, config.gateway.token_version, sub),
+  );
+  assert.ok(!(result.stdout + result.stderr).includes(document.token));
+  assert.ok(!(result.stdout + result.stderr).includes(document.client_secret));
+});
+
 test("jwt --output resolves an explicit relative export path and writes the endpoint before the token", (t) => {
   const env = environment(temporary(t));
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
@@ -1017,11 +1055,11 @@ test("jwt output validation precedes configuration loading and writes no file or
         "--endpoint",
         "ftp://x",
       ],
-      "cli.jwt.output_with_binding",
+      "cli.config.invalid_endpoint",
     ],
     [
       ["--project", PROJECT_ID, "--output", "--binding", "x"],
-      "cli.jwt.output_with_binding",
+      "system.config.not_found",
     ],
     [
       ["--binding", "x", "--output", "--endpoint", "ftp://x"],
@@ -1132,7 +1170,11 @@ test("jwt accepts display names and issues fresh machine identities without open
     const claims = decode(token).payload;
     assert.equal(
       clientSecret,
-      deriveClientSecret(config.master_key, String(claims.sub)),
+      deriveClientSecret(
+        config.master_key,
+        config.gateway.token_version,
+        String(claims.sub),
+      ),
     );
     assert.equal(
       Buffer.from(clientSecret, "base64").length,
@@ -1245,6 +1287,7 @@ test("jwt group, verbose generation, inspection and token precedence", (t) => {
   const machineToken = tokenLine!.slice("token: ".length);
   const machineSecret = deriveClientSecret(
     loadConfig(env.KANTHORD_CONFIG!).master_key,
+    loadConfig(env.KANTHORD_CONFIG!).gateway.token_version,
     String(decode(machineToken).payload.sub),
   );
   assert.equal(tokenLine, `token: ${machineToken}`);

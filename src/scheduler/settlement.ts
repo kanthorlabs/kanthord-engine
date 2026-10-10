@@ -4,11 +4,12 @@ import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
-import type {
-  ExecutionRow,
-  MissionTransitions,
-  InstanceRegistrations,
-  WorkerBindings,
+import {
+  ExecutionStopReason,
+  type ExecutionRow,
+  type MissionTransitions,
+  type InstanceRegistrations,
+  type WorkerBindings,
 } from "./contract.ts";
 import {
   endExecution,
@@ -96,16 +97,22 @@ export function consecutiveFailures(
     .prepare(
       `SELECT count(*) AS count FROM scheduler_execution
     WHERE node_id = ? AND attempt = ? AND id != ?
-    AND (ended_at >= expired_at OR stop IS NOT NULL)
+    AND (ended_at >= expired_at
+      OR coalesce(json_extract(stop, '$.reason'), ?) != ?)
     AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
-      WHERE node_id = ? AND attempt = ? AND ended_at < expired_at AND stop IS NULL), -1)`,
+      WHERE node_id = ? AND attempt = ? AND ended_at < expired_at
+      AND coalesce(json_extract(stop, '$.reason'), ?) = ?), -1)`,
     )
     .get(
       ending.node_id,
       ending.attempt,
       ending.execution_id,
+      ExecutionStopReason.BudgetEnd,
+      ExecutionStopReason.BudgetEnd,
       ending.node_id,
       ending.attempt,
+      ExecutionStopReason.BudgetEnd,
+      ExecutionStopReason.BudgetEnd,
     )!;
   const count = Number(result.count) + ENDING_FAILURE;
   assert.ok(Number.isSafeInteger(count) && count > NO_FAILURES);

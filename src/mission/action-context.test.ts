@@ -48,6 +48,7 @@ function harness(t: TestContext) {
     credential: "github",
     base_branch: "main",
     action: RepositoryAction.PullRequest,
+    landing: "human",
     project_prompt: null,
   });
   const read = (attempt = FIRST_ATTEMPT) =>

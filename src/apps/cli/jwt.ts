@@ -102,17 +102,26 @@ function validateGenerateOptions(
       "cli.jwt.project_without_binding",
       "jwt generate: --project requires --binding.",
     );
-  if (options.output !== undefined && options.binding !== undefined)
-    throw new Diagnostic(
-      "cli.jwt.output_with_binding",
-      "jwt generate: --output cannot be combined with --binding.",
-    );
   if (options.endpoint !== undefined && options.output === undefined)
     throw new Diagnostic(
       "cli.jwt.endpoint_without_output",
       "jwt generate: --endpoint requires --output.",
     );
   if (options.endpoint !== undefined) validateClientEndpoint(options.endpoint);
+}
+
+async function machineClientSecret(
+  config: { master_key: string; gateway: { token_version: number } },
+  token: string,
+): Promise<string> {
+  const { decode } = await import("hono/jwt");
+  const { sub } = decode(token).payload;
+  assert.ok(isString(sub));
+  return deriveClientSecret(
+    config.master_key,
+    config.gateway.token_version,
+    sub,
+  );
 }
 
 export function addJWTCommand(program: Command): void {
@@ -168,16 +177,22 @@ export function addJWTCommand(program: Command): void {
           options.binding === undefined
             ? await generateHumanJWT(
                 config.master_key,
+                config.gateway.token_version,
                 config.gateway.token_lifetime,
                 username,
                 options.name,
               )
             : await generateMachineJWT(
                 config.master_key,
+                config.gateway.token_version,
                 config.gateway.token_lifetime,
                 { projectId: options.project!, bindingName: options.binding },
                 options.name,
               );
+        const clientSecret =
+          options.binding === undefined
+            ? undefined
+            : await machineClientSecret(config, token);
         if (options.output !== undefined) {
           const path = isString(options.output)
             ? resolve(options.output)
@@ -187,21 +202,19 @@ export function addJWTCommand(program: Command): void {
               ? {}
               : { endpoint: options.endpoint }),
             token,
+            ...(clientSecret === undefined
+              ? {}
+              : { client_secret: clientSecret }),
           });
           const { stringify } = await import("yaml");
           writePrivate(path, stringify(document));
           process.stdout.write(`Created ${path}\n`);
-        } else if (options.binding === undefined)
+        } else if (clientSecret === undefined)
           process.stdout.write(`${token}\n`);
-        else {
-          const { decode } = await import("hono/jwt");
-          const { sub } = decode(token).payload;
-          assert.ok(isString(sub));
-          const clientSecret = deriveClientSecret(config.master_key, sub);
+        else
           process.stdout.write(
             `token: ${token}\nclient_secret: ${clientSecret}\n`,
           );
-        }
         if (command.optsWithGlobals().verbose)
           process.stdout.write(await renderClaims(token));
       },

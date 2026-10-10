@@ -232,6 +232,8 @@ components:
               type: string
             fix:
               type: string
+            conflict:
+              type: string
           required:
             - work
             - layer-message
@@ -245,6 +247,7 @@ components:
             - repair
             - review
             - fix
+            - conflict
           additionalProperties: false
         resource_budget:
           type: object

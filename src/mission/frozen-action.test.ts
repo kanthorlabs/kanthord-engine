@@ -48,6 +48,7 @@ test("required actions preserve pinned policies across later revisions and omit 
         credential: "github",
         base_branch: BASE_BRANCH,
         action: RepositoryAction.PullRequest,
+        landing: "human" as const,
         project_prompt: null,
       },
     ],
@@ -63,6 +64,7 @@ test("required actions preserve pinned policies across later revisions and omit 
         credential: "github",
         base_branch: "develop",
         action: RepositoryAction.MergePush,
+        landing: "human" as const,
         project_prompt: null,
       },
     ],
@@ -120,7 +122,7 @@ test("required actions preserve pinned policies across later revisions and omit 
       action: RepositoryAction.PullRequest,
       expected_end_state: ExpectedEndState.PullRequestMerged,
       follows: null,
-      configuration: { base_branch: BASE_BRANCH },
+      configuration: { base_branch: BASE_BRANCH, landing: "human" },
     };
     assert.deepEqual(requiredActionsOf(tx, bindings, nodeId, FIRST_ATTEMPT), [
       expected,
@@ -185,7 +187,7 @@ test("eligibility requires a satisfied predecessor and an unrequested action", (
       action: RepositoryAction.PullRequest,
       expected_end_state: ExpectedEndState.PullRequestMerged,
       follows: null,
-      configuration: { base_branch: BASE_BRANCH },
+      configuration: { base_branch: BASE_BRANCH, landing: "human" },
     },
     request: null,
     resolution: Resolution.Unrequested,

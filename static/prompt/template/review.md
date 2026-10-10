@@ -1,4 +1,6 @@
-Review the change of task {{task_id}} against its criterion and the default standard. Task criterion: {{criterion}}
+Review the change of task {{task_id}} against its criterion, every item of the node criterion that the task touches, and the default standard. The node review applies the same standard to the whole node.
+Task criterion: {{criterion}}
+Node criterion: {{node_criterion}}
 The diff below is the change. Read the workspace files when the diff does not give enough context.
 Report every finding that stands now. Keep the id of an earlier finding that still stands. Drop an earlier finding when the change fixes it or when the reply of the engineer refutes it. A change that widens the task is no finding.
 Earlier findings: {{json findings}}

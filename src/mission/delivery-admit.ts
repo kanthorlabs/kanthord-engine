@@ -16,13 +16,18 @@ import {
   CONTENT_ENCODING,
   Disposition,
   MissionErrorCode,
+  PlatformAddressKind,
   type AdmissionAnswer,
   type deliveryAdmitSchema,
   type IntakeCheck,
   type PlatformAddress,
 } from "./contract.ts";
-import { MatchKind, matchRequests } from "./delivery-match.ts";
-import { applyEndState } from "./node-check.ts";
+import {
+  MatchKind,
+  matchRequests,
+  unresolvedPullRequests,
+} from "./delivery-match.ts";
+import { applyEndState, requestContext } from "./node-check.ts";
 import { readEvidence } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 
@@ -32,6 +37,9 @@ type Checked = {
   evidenceId: string;
   address: PlatformAddress;
   check: CheckAnswer;
+};
+type BaseChecked = {
+  base: { evidenceId: string; check: CheckAnswer }[];
 };
 
 const ACCEPTED: AdmissionAnswer = {
@@ -54,7 +62,7 @@ async function prepareAdmission(
   dependencies: Dependencies,
   caller: CallerContext,
   input: AdmissionInput,
-): Promise<AdmissionAnswer | Checked> {
+): Promise<AdmissionAnswer | Checked | BaseChecked> {
   const address = dependencies.decoder.decode({
     platform: input.platform,
     resource: input.resource,
@@ -69,13 +77,71 @@ async function prepareAdmission(
   const match = dependencies.store.transaction((tx) =>
     matchRequests(tx, input.project_id, address),
   );
-  if (match.kind === MatchKind.Answer) return match.answer;
+  if (match.kind === MatchKind.Answer)
+    return address.kind === PlatformAddressKind.BranchPush
+      ? checkBaseRequests(dependencies, caller, input, address, match.answer)
+      : match.answer;
   assert.equal(match.kind, MatchKind.Request);
   const check = await dependencies.intakeCheck.check(
     caller.context,
     match.evidence_id,
   );
   return { evidenceId: match.evidence_id, address, check };
+}
+
+async function checkBaseRequests(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  input: AdmissionInput,
+  address: Extract<
+    PlatformAddress,
+    { kind: typeof PlatformAddressKind.BranchPush }
+  >,
+  unmatched: AdmissionAnswer,
+): Promise<AdmissionAnswer | BaseChecked> {
+  const selected = dependencies.store.transaction((tx) =>
+    unresolvedPullRequests(
+      tx,
+      input.project_id,
+      address.resource_identity,
+    ).filter(
+      (evidenceId) =>
+        requestContext(tx, dependencies, evidenceId).frozen_action.configuration
+          .base_branch === address.branch,
+    ),
+  );
+  if (selected.length === NO_SELECTED_REQUESTS) return unmatched;
+  const base: BaseChecked["base"] = [];
+  for (const evidenceId of selected)
+    base.push({
+      evidenceId,
+      check: await dependencies.intakeCheck.check(caller.context, evidenceId),
+    });
+  return { base };
+}
+
+function commitBaseAdmission(
+  tx: Transaction,
+  dependencies: Dependencies,
+  input: AdmissionInput,
+  checked: BaseChecked,
+): AdmissionAnswer {
+  const now = Date.now();
+  for (const { evidenceId, check } of checked.base) {
+    if (check.end_state === CheckEndState.None) continue;
+    const request = readEvidence(tx, evidenceId);
+    assert.ok(request !== null);
+    if (request.end_state !== null) continue;
+    if (
+      dependencies.schedulerClaims.liveExecutionOf(tx, request.node_id, now) !==
+      null
+    )
+      continue;
+    applyEndState(tx, dependencies, evidenceId, check, now, {
+      inboundEventId: input.inbound_event_id,
+    });
+  }
+  return ACCEPTED;
 }
 
 function commitAdmission(
@@ -116,6 +182,7 @@ function commitAdmission(
 }
 
 const NO_RUNNING_ADMISSIONS = 0;
+const NO_SELECTED_REQUESTS = 0;
 
 export class AdmissionQueue {
   private running = NO_RUNNING_ADMISSIONS;
@@ -173,7 +240,9 @@ async function admitOne(
   const answer = caller.commit((tx) =>
     "disposition" in prepared
       ? prepared
-      : commitAdmission(tx, dependencies, input, prepared),
+      : "base" in prepared
+        ? commitBaseAdmission(tx, dependencies, input, prepared)
+        : commitAdmission(tx, dependencies, input, prepared),
   );
   dependencies.wakeup.wake(input.project_id);
   return answer;

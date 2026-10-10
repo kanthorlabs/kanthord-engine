@@ -44,6 +44,7 @@ test("issuance preserves human subjects and names, and generates fresh machine s
   const fixture = await gatewayFixture(t, { lookups: fakeLookups() });
   const human = await generateHumanJWT(
     fixture.config.master_key,
+    fixture.config.gateway.token_version,
     TOKEN_LIFETIME,
     HUMAN_USERNAME,
     HUMAN_NAME,
@@ -71,6 +72,7 @@ test("issuance preserves human subjects and names, and generates fresh machine s
   assert.notEqual(rechecked, identity);
   const machine = await generateMachineJWT(
     fixture.config.master_key,
+    fixture.config.gateway.token_version,
     TOKEN_LIFETIME,
     { projectId: TEST_PROJECT_ID, bindingName: TEST_WORKER_BINDING },
   );
@@ -229,6 +231,7 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
     await assert.rejects(
       generateHumanJWT(
         fixture.config.master_key,
+        fixture.config.gateway.token_version,
         TOKEN_LIFETIME,
         HUMAN_USERNAME,
         value,
@@ -238,6 +241,7 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
     await assert.rejects(
       generateMachineJWT(
         fixture.config.master_key,
+        fixture.config.gateway.token_version,
         TOKEN_LIFETIME,
         { projectId: TEST_PROJECT_ID, bindingName: TEST_WORKER_BINDING },
         value,
@@ -246,10 +250,15 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
     );
   }
   await assert.rejects(
-    generateMachineJWT(fixture.config.master_key, TOKEN_LIFETIME, {
-      projectId: TEST_PROJECT_ID,
-      bindingName: " ",
-    }),
+    generateMachineJWT(
+      fixture.config.master_key,
+      fixture.config.gateway.token_version,
+      TOKEN_LIFETIME,
+      {
+        projectId: TEST_PROJECT_ID,
+        bindingName: " ",
+      },
+    ),
     /binding:/,
   );
 });
@@ -301,18 +310,28 @@ test("machine resolution receives issuance milliseconds and rechecks group avail
 test("machine issuance validates the project identity and binding name", async (t) => {
   const fixture = await authenticationFixture(t);
   await assert.rejects(
-    generateMachineJWT(fixture.config.master_key, TOKEN_LIFETIME, {
-      projectId: "invalid",
-      bindingName: TEST_WORKER_BINDING,
-    }),
+    generateMachineJWT(
+      fixture.config.master_key,
+      fixture.config.gateway.token_version,
+      TOKEN_LIFETIME,
+      {
+        projectId: "invalid",
+        bindingName: TEST_WORKER_BINDING,
+      },
+    ),
     { code: "cli.jwt.invalid_project" },
   );
   for (const bindingName of [" ", "B", "b".repeat(64)])
     await assert.rejects(
-      generateMachineJWT(fixture.config.master_key, TOKEN_LIFETIME, {
-        projectId: TEST_PROJECT_ID,
-        bindingName,
-      }),
+      generateMachineJWT(
+        fixture.config.master_key,
+        fixture.config.gateway.token_version,
+        TOKEN_LIFETIME,
+        {
+          projectId: TEST_PROJECT_ID,
+          bindingName,
+        },
+      ),
       { code: "gateway.authentication.invalid_binding" },
     );
 });

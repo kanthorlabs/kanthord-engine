@@ -271,7 +271,7 @@ kanthord worker get <worker-name>
 HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
-- `method: "steps" | "evaluation" | "reviewed_steps"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. The first agent does the work, and `re@1` of `developer@1` reviews each task commit.
+- `method: "steps" | "evaluation" | "reviewed_steps"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. The first agent does the work, and `re@1` of `developer@1` reviews each task commit against the task criterion, every node criterion item that the task touches, and the default standard.
 - `resource_budget` for every worker, with a required positive safe integer
   `wall_time_ms` and an optional positive safe integer `turns`.
   `general@1`, `reviewer@1` and `developer@1` default to
@@ -292,6 +292,12 @@ HTTP `200` returns the summary fields plus:
   judgement, the evaluation judgement and the review reply. A second invalid
   judgement stops the execution with `judgement_invalid`, and a second invalid
   review reply ends the review of that task.
+  An evaluation judgement of an initiative may carry `proposals`: one
+  fix-objective proposal for each defect inside a completed objective. Each
+  proposal holds `objective_id`, `name`, `requirement`, `criterion` and one
+  `task`. When `proposals` is not empty, the reviewer submits the result
+  `undetermined` with the proposals. The reviewer drops `proposals` for an
+  objective. See `mission proposal approve` in the [Mission CLI](mission.md).
   A steps execution reads the assessment that caused the latest rework of its
   attempt. When the attempt holds no such assessment, the execution reads the
   assessment that the cleared outcome names. The task judgement at the start
