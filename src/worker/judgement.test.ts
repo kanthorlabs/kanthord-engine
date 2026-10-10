@@ -143,6 +143,11 @@ test("failed and unrun rationale names the command and cause", () => {
     instruction,
     /default-standard violation requires criterion-not-met/,
   );
+  assert.match(
+    instruction,
+    /prose style and the finding format of a produced report are no ground for criterion-not-met/,
+  );
+  assert.match(instruction, /List every unmet item that you find/);
   assert.doesNotMatch(
     instruction,
     /reasoningEffort|modelIdentifier|resourceBudget/,
