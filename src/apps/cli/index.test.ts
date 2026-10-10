@@ -32,6 +32,7 @@ import { clientConfigPath, resolveClient } from "../../gateway/client.ts";
 import { ExitCode } from "./constants.ts";
 
 const EMPTY_OUTPUT = "";
+const USED_OUTPUT_CONTENT = "x";
 const JWT_OUTPUT = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const PROJECT_GET = "get";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -1630,4 +1631,31 @@ test("intake event mutations print the generated key when the result is indeterm
       /retry with --idempotency-key [0-9A-HJKMNP-TV-Z]{26}/,
     );
   }
+});
+
+test("council refuses a missing token and a used output directory before I/O", (t) => {
+  const directory = temporary(t);
+  const env = environment(directory);
+  const out = join(directory, "out");
+  const missing = invocation(["council", "Add login", "--out", out], env);
+  assert.equal(missing.status, ExitCode.Failure);
+  assert.match(missing.stderr, /^cli\.council\.token_required:/);
+  assert.equal(missing.stdout, EMPTY_OUTPUT);
+  writeFileSync(out, USED_OUTPUT_CONTENT);
+  const used = invocation(
+    [
+      "council",
+      "Add login",
+      "--out",
+      out,
+      "--endpoint",
+      "http://127.0.0.1:1",
+      "--token",
+      "x",
+    ],
+    env,
+  );
+  assert.equal(used.status, ExitCode.Failure);
+  assert.match(used.stderr, /^cli\.council\.output_directory_not_empty:/);
+  assert.equal(readFileSync(out, "utf8"), USED_OUTPUT_CONTENT);
 });
