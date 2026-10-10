@@ -1,6 +1,7 @@
 export const PROGRAM_NAME = "kanthord";
 export const CommandName = {
   Config: "config",
+  Upgrade: "upgrade",
   Serve: "serve",
   Auth: "auth",
   Gateway: "gateway",

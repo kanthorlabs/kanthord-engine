@@ -5,7 +5,7 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse, stringify } from "yaml";
 import { ulid } from "ulid";
-import { configuration } from "../../config/index.ts";
+import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
   createIdentity,
@@ -199,7 +199,10 @@ async function setup(t: TestContext) {
   writePrivate(
     join(directory, "issuance.yaml"),
     stringify(
-      configuration({ master_key: fixture.config.master_key }).getProperties(),
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: fixture.config.master_key,
+      }).getProperties(),
     ),
   );
   const A = {

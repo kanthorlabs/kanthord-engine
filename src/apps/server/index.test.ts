@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { stringify } from "yaml";
-import { configuration } from "../../config/index.ts";
+import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { createServer } from "node:http";
 import { writePrivate } from "../../kernel/files.ts";
@@ -108,6 +108,7 @@ function layout(directory: string) {
   ])
     mkdirSync(join(path, "kanthord"), { mode: 0o700, recursive: true });
   const config = configuration({
+    version: CONFIG_VERSION,
     master_key: Buffer.alloc(32).toString("base64"),
     gateway: { port: 0, allowed_hosts: ["localhost"] },
   }).getProperties();

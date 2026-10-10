@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import { test, type TestContext } from "node:test";
 import { stringify } from "yaml";
 import { z } from "zod";
-import { configuration } from "../../config/index.ts";
+import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import {
   gatewayOperations,
@@ -223,6 +223,7 @@ function serveEnvironment(directory: string): NodeJS.ProcessEnv {
       recursive: true,
     });
   const config = configuration({
+    version: CONFIG_VERSION,
     master_key: randomBytes(32).toString("base64"),
     gateway: { port: 0, allowed_hosts: ["localhost"] },
   }).getProperties();

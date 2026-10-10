@@ -5,6 +5,7 @@ import { isObject, isString } from "./values.ts";
 
 export const IN_MEMORY_DATABASE = ":memory:";
 const DATABASE_PROBE_OK = 1;
+const NO_RECORDED_MIGRATION = 0;
 
 export interface Transaction {
   readonly database: DatabaseSync;
@@ -14,6 +15,15 @@ export type Migrations = ReadonlyArray<{
   service: string;
   migrations: readonly Migration[];
 }>;
+export interface PendingMigration {
+  readonly service: string;
+  readonly from: number;
+  readonly to: number;
+}
+export interface MigrationPlan {
+  readonly fresh: boolean;
+  readonly pending: readonly PendingMigration[];
+}
 
 /** One connection and transaction owner for the operational database. */
 function sqliteReason(error: unknown): string {
@@ -89,7 +99,7 @@ export class Store {
     }
   }
 
-  migrate(services: Migrations): void {
+  plan(services: Migrations): MigrationPlan {
     const known = new Map(
       services.map((entry) => [entry.service, entry.migrations]),
     );
@@ -121,21 +131,35 @@ export class Store {
       )
         throw new Diagnostic(
           "system.database.migration.incompatible_history",
-          "migration: incompatible recorded history.",
+          `${this.path}: the recorded migration history is newer than this binary or comes from another history. Install the matching kanthord or restore the database backup.`,
         );
       versions.set(name, version);
     }
+    return {
+      fresh: records.length === NO_RECORDED_MIGRATION,
+      pending: services
+        .map(({ service, migrations }) => ({
+          service,
+          from: versions.get(service) ?? NO_RECORDED_MIGRATION,
+          to: migrations.length,
+        }))
+        .filter(({ from, to }) => from < to),
+    };
+  }
+
+  migrate(services: Migrations): void {
+    const { pending } = this.plan(services);
     this.transaction(({ database }) =>
       database.exec(
         "CREATE TABLE IF NOT EXISTS migration(service TEXT NOT NULL, version INTEGER NOT NULL, applied_at INTEGER NOT NULL, PRIMARY KEY(service, version))",
       ),
     );
-    for (const { service, migrations } of services) {
-      for (
-        let index = versions.get(service) ?? 0;
-        index < migrations.length;
-        index++
-      ) {
+    const lists = new Map(
+      services.map((entry) => [entry.service, entry.migrations]),
+    );
+    for (const { service, from, to } of pending) {
+      const migrations = lists.get(service)!;
+      for (let index = from; index < to; index++) {
         this.transaction(({ database }) => {
           migrations[index]!(database);
           database
@@ -144,6 +168,24 @@ export class Store {
         });
       }
     }
+  }
+
+  backup(path: string): void {
+    if (audit(path, "file", true))
+      throw new Diagnostic(
+        "system.database.backup_failed",
+        `${path}: cannot write the database backup: the file exists.`,
+      );
+    try {
+      this.database.prepare("VACUUM INTO ?").run(path);
+    } catch (error) {
+      throw new Diagnostic(
+        "system.database.backup_failed",
+        `${path}: cannot write the database backup: ${sqliteReason(error)}.`,
+        { cause: error },
+      );
+    }
+    audit(path, "file");
   }
 
   healthcheck(): boolean {

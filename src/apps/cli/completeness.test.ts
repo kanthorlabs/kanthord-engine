@@ -62,6 +62,7 @@ const API_ONLY_OPERATIONS = [
 ];
 const TOP_LEVEL_NAMES = new Set([
   "config",
+  "upgrade",
   "serve",
   "auth",
   "project",
@@ -167,7 +168,8 @@ function programLeaves(program: Command): string[] {
     assert.ok(depth <= MAX_COMMANDS);
     if (
       command.registeredArguments.length > NO_ITEMS ||
-      (depth > TOP_LEVEL_DEPTH && command.commands.length === NO_ITEMS)
+      (command.commands.length === NO_ITEMS &&
+        (depth > TOP_LEVEL_DEPTH || !Object.hasOwn(LATER_GROUPS, path)))
     )
       leaves.push(path);
     pending.push(

@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { simpleGit } from "simple-git";
 import { parse, stringify } from "yaml";
-import { configuration } from "../../config/index.ts";
+import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { handoverPayloadSchema } from "../../custody/contract.ts";
 import { executionCredentialStore } from "../../custody/index.ts";
@@ -231,7 +231,10 @@ test(
     writePrivate(
       join(directory, "server.yaml"),
       stringify(
-        configuration({ master_key: f.config.master_key }).getProperties(),
+        configuration({
+          version: CONFIG_VERSION,
+          master_key: f.config.master_key,
+        }).getProperties(),
       ),
     );
     function machine(binding: string) {

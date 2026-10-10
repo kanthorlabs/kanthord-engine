@@ -24,14 +24,14 @@ syntax separately; it is not a claim that the target surface is implemented.
 
 ## Command inventory
 
-There are nine application/JWT forms below: four configuration commands,
-two `serve` application forms, two `auth jwt generate` modes, and `auth jwt inspect`.
-Help is a parser facility, not a fourth global command.
+There are nine application/JWT forms below: three configuration commands,
+`upgrade`, two `serve` application forms, two `auth jwt generate` modes, and
+`auth jwt inspect`. Help is a parser facility, not a fifth global command.
 
 1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--gateway-base-path <path>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
-4. `kanthord config migrate [--config <path>]` — implemented; local, no route.
+4. `kanthord upgrade [--config <path>]` — implemented; local, no route.
 5. `kanthord serve [server] [--config <path>]` — implemented; local application
    startup, no outbound API route. Opens the server's HTTP listener.
 6. `kanthord serve worker [--endpoint <url>] [--token <jwt>]` — implemented; local
@@ -49,8 +49,8 @@ owning pages in the [index](./README.md).
 
 ### Closed root names and option scope
 
-**Implemented and target requirement:** the three global root names are
-`config`, `serve`, and `auth`. The four component root names are `llm`, `repository`,
+**Implemented and target requirement:** the four global root names are
+`config`, `upgrade`, `serve`, and `auth`. The four component root names are `llm`, `repository`,
 `storage`, and `agent`. The six service root names are `project`, `mission`,
 `scheduler`, `worker`, `tracking`, and `gateway`. These are disjoint, closed sets.
 `server` and the application form of `worker` are operands of `serve`, never new
@@ -336,6 +336,9 @@ and reasons without field values or YAML excerpts.
 
 The implemented fields are:
 
+- `version`: optional positive safe integer, default `1`. It holds the
+  configuration version. A value other than the version of the binary fails
+  with `system.config.version_behind` or `system.config.version_ahead`.
 - `master_key`: required canonical base64 encoding of exactly 32 bytes. There
   is no usable default. `config init` generates it using `crypto.randomBytes`.
 - `log.level`: optional enum `trace|debug|info|warn|error|fatal`, default `info`.
@@ -358,8 +361,8 @@ The implemented fields are:
 - `gateway.auth.token_lifetime`: optional Convict `nat` in seconds, default
   `31536000` (one year). Local issuance additionally requires a nonnegative safe
   integer; zero produces an immediately expiring token.
-- The former keys `gateway.token_version` and `gateway.token_lifetime` fail
-  validation with their new names. `kanthord config migrate` moves them.
+- The former keys `gateway.token_version` and `gateway.token_lifetime` belong
+  to configuration version 1. `kanthord upgrade` moves them.
 - `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
@@ -478,28 +481,45 @@ It writes no configuration, client file, or database. This is the effective
 configuration of this invocation, not an inspection of a running server's
 already loaded configuration.
 
-### `config migrate`
+### `upgrade`
 
 ```text
-kanthord config migrate [--config <path>]
+kanthord upgrade [--config <path>]
 ```
 
-**Implemented; route/access: none, local filesystem.** Read the selected file
-and rewrite each key of the rename table in place, with its value and the
-file's comments preserved. The rename table holds each renamed key and its new
-name; it starts with `mission.consecutive_loss_limit` →
-`mission.consecutive_failure_limit`. The command validates the rewritten
-document before it writes. It then writes the original bytes to an absent
-private backup `<path>.bak-<UTC timestamp>` and replaces the file atomically.
+**Implemented; route/access: none, local filesystem and database.** Bring the
+selected configuration file and `kanthord.db` of the data directory to the
+versions of this binary. Stop the server before this command.
 
-It prints `Renamed <old key> to <new key>` for each change, then
-`Backup: <path>`. A file without a renamed key prints `No renamed key: <path>`
-and writes nothing. A file that holds both the old and the new key fails with
-`system.config.rename_conflict` and changes nothing.
+- The root field `version` holds the configuration version. A file without it
+  is version 1. `config init` writes the version of the binary.
+- The binary holds one ordered configuration step per version, in
+  `src/config/steps.ts`. Step 1 renames `mission.consecutive_loss_limit`,
+  `gateway.token_version` and `gateway.token_lifetime`.
+- The database version is the migration history of each service.
 
-`config validate`, `config show`, `auth jwt generate` and `serve` keep refusing a
-renamed key with `system.config.invalid_field`. The message names the new key
-and this command.
+The command runs in this order:
+
+1. Read the file and apply the steps from its version in memory. Validate the
+   result. A version newer than the binary fails with
+   `system.config.version_ahead`. A file that holds both an old key and its new
+   key fails with `system.config.rename_conflict`.
+2. If `kanthord.db` exists, open it with its exclusive lock and validate its
+   migration history. A running server makes this fail with
+   `system.database.initialization_failed` (`database is locked`).
+3. If nothing changes, print `Up to date: <path>` and write nothing.
+4. Write the backups with one UTC timestamp: the original configuration to
+   `<path>.bak-<timestamp>`, and the database with `VACUUM INTO` to
+   `kanthord.db.bak-<timestamp>` in the data directory. Print `Backup: <path>`
+   for each. An existing backup path fails the command.
+5. Apply the pending migrations, one transaction each. Print
+   `Migrated <service> from version <a> to version <b>` for each service.
+6. Replace the configuration file atomically. Print
+   `Renamed <old key> to <new key>` for each rename, then
+   `Upgraded configuration version <a> to configuration version <b>: <path>`.
+
+A rerun after a failure resumes from the recorded state. Steps 1 to 4 write
+nothing to the configuration or the database.
 
 ## Application startup
 
@@ -520,7 +540,7 @@ constructs the server rather than calling an API operation.
 - [`--help`](./common-flags.md#--help): no runtime is started.
 
 Load configuration, open the operational log, acquire the exclusive operational
-database, apply migrations, compose the currently implemented Project, Worker,
+database, apply every migration to a database without a recorded migration, compose the currently implemented Project, Worker,
 and Gateway services, and open the listener only after domain startup. Starting
 the current composition does not establish implementation of the future
 Mission, Scheduler, Tracking, or native-worker runtime contracts.
@@ -538,7 +558,7 @@ Output: operational JSON log records go to stderr by default or the configured
 log file. Startup prints no token and requires no terminal. A successfully
 running process remains alive rather than exiting after readiness. A missing
 or invalid configuration, permissions failure, database lock contention,
-migration failure, or listener failure stops startup and exits `1`; startup
+pending migration on a database with a recorded migration, migration failure, or listener failure stops startup and exits `1`; startup
 releases resources already acquired. Committed migrations are not rolled back
 by later startup failure.
 
@@ -919,7 +939,9 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | 400             | `gateway.request.validation_failed`              | The params, query or body fail the operation input schema.                                                              | remote commands                                                            |
 | 404             | `gateway.routing.not_found`                      | No route matches the request path or preflight method, or the path is outside `gateway.base_path`.                      | unmatched HTTP routes                                                      |
 | local           | `system.config.cyclic_alias`                     | A YAML alias creates a cycle.                                                                                           | config validate, config show, auth jwt generate, serve server              |
-| local           | `system.config.rename_conflict`                  | The configuration holds both a renamed key and its new name.                                                            | config migrate                                                             |
+| local           | `system.config.rename_conflict`                  | The configuration holds both a renamed key and its new name.                                                            | upgrade                                                                    |
+| local           | `system.config.version_ahead`                    | The configuration version is newer than the binary.                                                                     | config validate, config show, auth jwt generate, serve server, upgrade     |
+| local           | `system.config.version_behind`                   | The configuration version is older than the binary. Run `kanthord upgrade`.                                             | config validate, config show, auth jwt generate, serve server              |
 | local           | `system.config.invalid_field`                    | The server configuration contains an unknown or invalid field.                                                          | config init, config validate, config show, auth jwt generate, serve server |
 | local           | `system.config.invalid_mapping`                  | The YAML root is not one mapping, or a nested value is not a plain mapping or array.                                    | config validate, config show, auth jwt generate, serve server              |
 | local           | `system.config.invalid_yaml`                     | The YAML cannot be parsed as one mapping with unique string keys.                                                       | config validate, config show, auth jwt generate, serve server              |
@@ -931,7 +953,9 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `system.context.deadline_exceeded`               | The operation deadline expires.                                                                                         | remote commands                                                            |
 | local           | `system.database.initialization_failed`          | The operational database cannot be initialized. The message names the SQLite reason, for example `database is locked`.  | serve server                                                               |
 | local           | `system.database.migration.duplicate_service`    | Two migration lists claim the same service name.                                                                        | serve server                                                               |
-| local           | `system.database.migration.incompatible_history` | Stored migrations differ from the daemon migration list.                                                                | serve server                                                               |
+| local           | `system.database.backup_failed`                  | The database backup cannot be written, or its path exists.                                                              | upgrade                                                                    |
+| local           | `system.database.migration.incompatible_history` | Stored migrations differ from the daemon migration list.                                                                | serve server, upgrade                                                      |
+| local           | `system.database.migration.pending`              | A database with a recorded migration has a pending migration. Run `kanthord upgrade`.                                   | serve server                                                               |
 | local           | `system.database.open_failed`                    | The operational SQLite store cannot open.                                                                               | serve server                                                               |
 | local           | `system.files.create_failed`                     | A private state or configuration directory cannot be created.                                                           | config init, serve server, auth jwt generate --output                      |
 | local           | `system.files.inspect_failed`                    | The process cannot inspect a required private file or directory.                                                        | config commands, auth jwt generate, serve server, serve worker             |

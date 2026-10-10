@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { parse, stringify } from "yaml";
-import { configuration, directories } from "../../config/index.ts";
+import {
+  configuration,
+  directories,
+  CONFIG_VERSION,
+} from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -295,7 +299,10 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
   writePrivate(
     configPath,
     stringify(
-      configuration({ master_key: fixture.config.master_key }).getProperties(),
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: fixture.config.master_key,
+      }).getProperties(),
     ),
   );
   const entry = new URL("../../main.ts", import.meta.url).href;

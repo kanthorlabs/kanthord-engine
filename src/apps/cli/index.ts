@@ -78,7 +78,7 @@ function addConfigCommand(program: Command): void {
   );
   const config = program
     .command(CommandName.Config)
-    .description("Create, validate, show, or migrate server configuration")
+    .description("Create, validate, or show server configuration")
     .option("--config <path>", "YAML configuration file");
   configHelp(config);
   config.action(() => config.help());
@@ -127,26 +127,28 @@ function addConfigCommand(program: Command): void {
         process.stdout.write(showConfig(path));
       },
     ],
-    [
-      "migrate",
-      "Rewrite renamed configuration keys in place and keep a backup",
-      async (path: string) => {
-        const { migrateConfig } = await import("../../config/migrate.ts");
-        const { changes, backup } = migrateConfig(path);
-        if (backup === null) {
-          process.stdout.write(`No renamed key: ${path}\n`);
-          return;
-        }
-        for (const change of changes)
-          process.stdout.write(`Renamed ${change.from} to ${change.to}\n`);
-        process.stdout.write(`Backup: ${backup}\n`);
-      },
-    ],
   ] as const) {
     const command = config.command(name).description(description);
     configHelp(command);
     command.action(() => action(effectivePath(command)));
   }
+}
+
+function addUpgradeCommand(program: Command): void {
+  assert.equal(program.name(), PROGRAM_NAME);
+  const command = program
+    .command(CommandName.Upgrade)
+    .description(
+      "Upgrade the stored configuration and database to this binary and keep backups",
+    )
+    .option("--config <path>", "YAML configuration file");
+  configHelp(command);
+  command.action(async () => {
+    const { upgrade } = await import("./upgrade.ts");
+    await upgrade(effectivePath(command), (line) =>
+      process.stdout.write(`${line}\n`),
+    );
+  });
 }
 
 async function serveServer(
@@ -233,6 +235,7 @@ export function createProgram(
     );
   });
   addConfigCommand(program);
+  addUpgradeCommand(program);
   addServeCommand(program, onServer);
   addAuthCommand(program);
   addLlmCommand(program);

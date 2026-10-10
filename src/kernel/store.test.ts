@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { temporary } from "./test-support.ts";
@@ -13,6 +19,7 @@ const FULL_SYNCHRONOUS_MODE = 2;
 const PRESERVED_VALUE = "preserved";
 const COMMITTED_PREFIX_LENGTH = 1;
 const COMPLETE_HISTORY_LENGTH = 2;
+const PRIVATE_FILE_MODE = 0o600;
 
 test("exclusive WAL ownership refuses a second process and releases after close", (t) => {
   const path = join(temporary(t), "kanthord.db");
@@ -157,4 +164,55 @@ test("transactions reject async and nested writes, and roll back the operation",
     store.close();
   }
   assert.equal(store.healthcheck(), false);
+});
+
+test("plan reads the history without a write and backup copies a consistent private file", (t) => {
+  const directory = temporary(t);
+  const path = join(directory, "kanthord.db");
+  const backup = join(directory, "kanthord.db.bak");
+  const create = (database: Store["database"]) =>
+    database.exec(
+      "CREATE TABLE first (value TEXT); INSERT INTO first VALUES ('preserved')",
+    );
+  const extend = (database: Store["database"]) =>
+    database.exec("CREATE TABLE second (value TEXT)");
+  const store = new Store(path);
+  try {
+    assert.deepEqual(store.plan([{ service: "one", migrations: [create] }]), {
+      fresh: true,
+      pending: [{ service: "one", from: 0, to: 1 }],
+    });
+    assert.equal(
+      store.database
+        .prepare("SELECT name FROM sqlite_master WHERE name='migration'")
+        .get(),
+      undefined,
+    );
+    store.migrate([{ service: "one", migrations: [create] }]);
+    const services = [{ service: "one", migrations: [create, extend] }];
+    assert.deepEqual(store.plan(services), {
+      fresh: false,
+      pending: [{ service: "one", from: 1, to: 2 }],
+    });
+    store.backup(backup);
+    assert.throws(() => store.backup(backup), /the file exists/);
+    store.migrate(services);
+    assert.deepEqual(store.plan(services), { fresh: false, pending: [] });
+  } finally {
+    store.close();
+  }
+  assert.equal(statSync(backup).mode & 0o7777, PRIVATE_FILE_MODE);
+  const copy = new Store(backup);
+  try {
+    assert.equal(
+      copy.database.prepare("SELECT value FROM first").get()?.value,
+      PRESERVED_VALUE,
+    );
+    assert.deepEqual(
+      copy.plan([{ service: "one", migrations: [create, extend] }]).pending,
+      [{ service: "one", from: 1, to: 2 }],
+    );
+  } finally {
+    copy.close();
+  }
 });

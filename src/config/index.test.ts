@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { temporary } from "../kernel/test-support.ts";
 import {
   configuration,
+  CONFIG_VERSION,
   configPath,
   initialConfig,
   loadConfig,
@@ -54,6 +55,7 @@ test("service fragments preserve the existing YAML field set", () => {
     "master_key",
     "mission",
     "scheduler",
+    "version",
     "worker",
   ]);
   assert.deepEqual(Object.keys(config.worker), ["heartbeat_window"]);
@@ -93,12 +95,16 @@ test("service fragments preserve the existing YAML field set", () => {
 test("gateway base path defaults to the root and accepts only a prefix without a trailing slash", () => {
   const masterKey = randomBytes(32).toString("base64");
   assert.equal(
-    configuration({ master_key: masterKey }).getProperties().gateway.base_path,
+    configuration({
+      version: CONFIG_VERSION,
+      master_key: masterKey,
+    }).getProperties().gateway.base_path,
     ROOT_BASE_PATH,
   );
   for (const base_path of ["/", "/s/kanthord", "/a.b_c~d-e"])
     assert.equal(
       configuration({
+        version: CONFIG_VERSION,
         master_key: masterKey,
         gateway: { base_path },
       }).getProperties().gateway.base_path,
@@ -116,7 +122,12 @@ test("gateway base path defaults to the root and accepts only a prefix without a
     null,
   ])
     assert.throws(
-      () => configuration({ master_key: masterKey, gateway: { base_path } }),
+      () =>
+        configuration({
+          version: CONFIG_VERSION,
+          master_key: masterKey,
+          gateway: { base_path },
+        }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
         assert.match(error.message, /gateway\.base_path/);
@@ -128,7 +139,10 @@ test("gateway base path defaults to the root and accepts only a prefix without a
 test("worker configuration defaults and strict validation", () => {
   const masterKey = randomBytes(32).toString("base64");
   assert.deepEqual(
-    configuration({ master_key: masterKey }).getProperties().worker,
+    configuration({
+      version: CONFIG_VERSION,
+      master_key: masterKey,
+    }).getProperties().worker,
     {
       heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
     },
@@ -142,7 +156,12 @@ test("worker configuration defaults and strict validation", () => {
     { unknown: true },
   ]) {
     assert.throws(
-      () => configuration({ master_key: masterKey, worker }),
+      () =>
+        configuration({
+          version: CONFIG_VERSION,
+          master_key: masterKey,
+          worker,
+        }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
         assert.match(error.message, /worker/);
@@ -155,7 +174,10 @@ test("worker configuration defaults and strict validation", () => {
 test("agent prompt configuration defaults the agent directory to agents and accepts strings", () => {
   const masterKey = randomBytes(32).toString("base64");
   assert.deepEqual(
-    configuration({ master_key: masterKey }).getProperties().agent,
+    configuration({
+      version: CONFIG_VERSION,
+      master_key: masterKey,
+    }).getProperties().agent,
     {
       prompt: { system_file: "", agent_directory: "agents", host_file: true },
     },
@@ -166,8 +188,11 @@ test("agent prompt configuration defaults the agent directory to agents and acce
     host_file: false,
   };
   assert.deepEqual(
-    configuration({ master_key: masterKey, agent: { prompt } }).getProperties()
-      .agent.prompt,
+    configuration({
+      version: CONFIG_VERSION,
+      master_key: masterKey,
+      agent: { prompt },
+    }).getProperties().agent.prompt,
     prompt,
   );
   for (const bad of [
@@ -181,7 +206,12 @@ test("agent prompt configuration defaults the agent directory to agents and acce
     { x: "" },
   ])
     assert.throws(
-      () => configuration({ master_key: masterKey, agent: { prompt: bad } }),
+      () =>
+        configuration({
+          version: CONFIG_VERSION,
+          master_key: masterKey,
+          agent: { prompt: bad },
+        }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
         return true;
@@ -215,8 +245,10 @@ test("config init emits Worker and Scheduler fields", (t) => {
 test("Scheduler reserve accepts only a positive safe integer", () => {
   const masterKey = randomBytes(32).toString("base64");
   assert.equal(
-    configuration({ master_key: masterKey }).getProperties().scheduler
-      .release_reserve,
+    configuration({
+      version: CONFIG_VERSION,
+      master_key: masterKey,
+    }).getProperties().scheduler.release_reserve,
     DEFAULT_RELEASE_RESERVE,
   );
   for (const releaseReserve of [
@@ -230,6 +262,7 @@ test("Scheduler reserve accepts only a positive safe integer", () => {
     assert.throws(
       () =>
         configuration({
+          version: CONFIG_VERSION,
           master_key: masterKey,
           scheduler: { release_reserve: releaseReserve },
         }),
@@ -244,8 +277,10 @@ test("Scheduler reserve accepts only a positive safe integer", () => {
 
 test("mission configuration defaults and strict validation", () => {
   const masterKey = randomBytes(32).toString("base64");
-  const mission = configuration({ master_key: masterKey }).getProperties()
-    .mission;
+  const mission = configuration({
+    version: CONFIG_VERSION,
+    master_key: masterKey,
+  }).getProperties().mission;
   assert.equal(
     mission.consecutive_failure_limit,
     DEFAULT_CONSECUTIVE_FAILURE_LIMIT,
@@ -254,6 +289,7 @@ test("mission configuration defaults and strict validation", () => {
   assert.equal(mission.text_max_bytes, DEFAULT_TEXT_MAX_BYTES);
   assert.doesNotThrow(() =>
     configuration({
+      version: CONFIG_VERSION,
       master_key: masterKey,
       mission: {
         consecutive_failure_limit: DEFAULT_CONSECUTIVE_FAILURE_LIMIT,
@@ -267,7 +303,12 @@ test("mission configuration defaults and strict validation", () => {
     { rework_limit: -1 },
   ]) {
     assert.throws(
-      () => configuration({ master_key: masterKey, mission: invalidMission }),
+      () =>
+        configuration({
+          version: CONFIG_VERSION,
+          master_key: masterKey,
+          mission: invalidMission,
+        }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
         assert.match(error.message, /mission/);
@@ -281,7 +322,10 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   const directory = temporary(t);
   const path = join(directory, "kanthord.yaml");
   const masterKey = randomBytes(32).toString("base64");
-  writePrivate(path, `master_key: ${masterKey}\ngateway:\n  port: 12345\n`);
+  writePrivate(
+    path,
+    `version: ${CONFIG_VERSION}\nmaster_key: ${masterKey}\ngateway:\n  port: 12345\n`,
+  );
   const previous = process.env.GATEWAY_PORT;
   process.env.GATEWAY_PORT = "9999";
   t.after(() => {
@@ -296,7 +340,11 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   );
   assert.match(showConfig(path), /\[Sensitive\]/);
   assert.throws(
-    () => configuration({ gateway: { bind: "localhost", port: -1 } }),
+    () =>
+      configuration({
+        version: CONFIG_VERSION,
+        gateway: { bind: "localhost", port: -1 },
+      }),
     (error: Error) => {
       assert.match(error.message, /master_key/);
       assert.match(error.message, /gateway.bind/);
@@ -305,7 +353,12 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
     },
   );
   assert.throws(
-    () => configuration({ master_key: masterKey, unexpected: "secret-marker" }),
+    () =>
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: masterKey,
+        unexpected: "secret-marker",
+      }),
     (error: Error) => {
       assert.doesNotMatch(error.message, /secret-marker/);
       return true;
@@ -315,7 +368,8 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
 
 test("configuration rejects malformed secrets and accepts its initial document", () => {
   assert.throws(
-    () => configuration({ master_key: "secret-marker" }),
+    () =>
+      configuration({ version: CONFIG_VERSION, master_key: "secret-marker" }),
     /master_key/,
   );
   assert.doesNotThrow(() => configuration(parseMapping(initialConfig())));
@@ -389,7 +443,12 @@ test("strict validation rejects dotted and prototype keys before Convict can dis
     "gateway:\n  __proto__: {secret-marker: ignored}",
   ]) {
     assert.throws(
-      () => configuration(parseMapping(`master_key: ${masterKey}\n${source}`)),
+      () =>
+        configuration(
+          parseMapping(
+            `version: ${CONFIG_VERSION}\nmaster_key: ${masterKey}\n${source}`,
+          ),
+        ),
       (error: Error) => {
         assert.match(error.message, /undeclared field/);
         assert.doesNotMatch(error.message, /secret-marker/);
@@ -403,6 +462,7 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
   assert.throws(
     () =>
       configuration({
+        version: CONFIG_VERSION,
         master_key: null,
         log: { level: null, destination: null },
         gateway: {
@@ -434,6 +494,7 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
     },
   );
   const config = configuration({
+    version: CONFIG_VERSION,
     master_key: randomBytes(32).toString("base64"),
   }).getProperties();
   assert.equal(config.log.level, DEFAULT_LOG_LEVEL);
@@ -443,6 +504,7 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
     assert.throws(
       () =>
         configuration({
+          version: CONFIG_VERSION,
           master_key: randomBytes(32).toString("base64"),
           gateway: { idempotency_ttl: idempotencyTtl },
         }),
@@ -453,6 +515,7 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
 test("configuration accepts ordinary aliases", () => {
   const value = parseMapping("first: &hosts [localhost]\nsecond: *hosts");
   const config = configuration({
+    version: CONFIG_VERSION,
     master_key: randomBytes(32).toString("base64"),
     gateway: { allowed_hosts: value.first, allowed_origins: value.second },
   }).getProperties();
@@ -465,19 +528,31 @@ test("programmatic configuration cannot bypass cycle and structure checks", () =
   const cycle: Record<string, unknown> = {};
   cycle.self = cycle;
   assert.throws(
-    () => configuration({ master_key: masterKey, extra: cycle }),
+    () =>
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: masterKey,
+        extra: cycle,
+      }),
     /cyclic aliases/,
   );
   assert.throws(
     () =>
       configuration({
+        version: CONFIG_VERSION,
         master_key: masterKey,
         gateway: { allowed_hosts: Array<string>(4096).fill("localhost") },
       }),
     /too many values/,
   );
   assert.throws(
-    () => configuration({ master_key: masterKey, log: null, gateway: [] }),
+    () =>
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: masterKey,
+        log: null,
+        gateway: [],
+      }),
     {
       message: "log: expected a mapping.\ngateway: expected a mapping.",
     },

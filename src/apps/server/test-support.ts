@@ -19,7 +19,7 @@ import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import type { TestContext } from "node:test";
 import pino from "pino";
 import { z } from "zod";
-import { configuration } from "../../config/index.ts";
+import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { custodyMigrations } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import { schedulerMigrations } from "../../scheduler/index.ts";
@@ -335,6 +335,7 @@ export async function gatewayFixture(
 ) {
   process.umask(0o077);
   const config = configuration({
+    version: CONFIG_VERSION,
     master_key: randomBytes(32).toString("base64"),
     gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},

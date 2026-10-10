@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { parse, stringify } from "yaml";
-import { configuration } from "../../config/index.ts";
+import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
@@ -141,7 +141,10 @@ export async function workerAcceptance(t: TestContext, host = false) {
   writePrivate(
     configPath,
     stringify(
-      configuration({ master_key: fixture.config.master_key }).getProperties(),
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: fixture.config.master_key,
+      }).getProperties(),
     ),
   );
   function machine(name: string) {

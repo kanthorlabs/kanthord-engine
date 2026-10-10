@@ -53,7 +53,11 @@ import {
 } from "../../kernel/service.ts";
 import { OperationalLog } from "../../kernel/log.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { Store, type Transaction } from "../../kernel/store.ts";
+import {
+  Store,
+  type Migrations,
+  type Transaction,
+} from "../../kernel/store.ts";
 import {
   HealthRegistry,
   HealthScope,
@@ -644,6 +648,20 @@ export function composeServices(options: {
   };
 }
 
+export const serverMigrations: Migrations = [
+  { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
+  { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
+  { service: "gateway", migrations: gatewayMigrations },
+  { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
+  { service: "worker", migrations: workerMigrations },
+  { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
+  { service: "project", migrations: projectMigrations },
+  { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
+  { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
+];
+
+export const DATABASE_FILE = "kanthord.db";
+
 export class Server implements Service {
   readonly health = new HealthRegistry();
   private readonly path: string;
@@ -696,19 +714,15 @@ export class Server implements Service {
       audit(join(paths.state, "kanthord.log"), "file", true);
       this.log = new OperationalLog(config.log, paths.state);
       this.releases.push(() => this.log!.close());
-      this.store = new Store(join(paths.data, "kanthord.db"));
+      this.store = new Store(join(paths.data, DATABASE_FILE));
       this.releases.push(() => this.store!.close());
-      this.store.migrate([
-        { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
-        { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
-        { service: "gateway", migrations: gatewayMigrations },
-        { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
-        { service: "worker", migrations: workerMigrations },
-        { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
-        { service: "project", migrations: projectMigrations },
-        { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
-        { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
-      ]);
+      const plan = this.store.plan(serverMigrations);
+      if (!plan.fresh && plan.pending.length)
+        throw new Diagnostic(
+          "system.database.migration.pending",
+          `${this.store.path}: the database has pending migrations. Run kanthord upgrade.`,
+        );
+      this.store.migrate(serverMigrations);
       throwIfCancelled(this.shutdown);
       const {
         scheduler,

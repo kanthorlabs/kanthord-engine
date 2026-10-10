@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { parse, stringify } from "yaml";
 import { ulid } from "ulid";
-import { configuration } from "../../config/index.ts";
+import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import {
   handoverPayloadSchema,
   type CredentialAnswer,
@@ -288,7 +288,10 @@ async function setup(t: TestContext) {
   writePrivate(
     join(directory, "server.yaml"),
     stringify(
-      configuration({ master_key: fixture.config.master_key }).getProperties(),
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: fixture.config.master_key,
+      }).getProperties(),
     ),
   );
   const general = machine(directory, projectId, "general-a", human);

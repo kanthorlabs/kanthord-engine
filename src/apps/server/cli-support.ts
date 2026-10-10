@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { isNumber, isString } from "../../kernel/values.ts";
 import { parse, stringify } from "yaml";
-import { configuration } from "../../config/index.ts";
+import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
@@ -62,7 +62,12 @@ export function generateMachineToken(input: {
   const path = join(input.env.XDG_CONFIG_HOME, "issuance.yaml");
   writePrivate(
     path,
-    stringify(configuration({ master_key: input.masterKey }).getProperties()),
+    stringify(
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: input.masterKey,
+      }).getProperties(),
+    ),
     true,
   );
   const args = [

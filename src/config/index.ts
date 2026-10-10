@@ -11,10 +11,15 @@ import {
 export { directories, type Directories } from "../kernel/xdg.ts";
 export { parseMapping } from "../kernel/yaml.ts";
 export { configPath } from "./path.ts";
+export { CONFIG_VERSION } from "./steps.ts";
 import { randomBytes } from "node:crypto";
 import { audit, readPrivate } from "../kernel/files.ts";
 import { Diagnostic } from "../kernel/errors.ts";
-import { renameOf } from "./renames.ts";
+import {
+  ABSENT_CONFIG_VERSION,
+  CONFIG_VERSION,
+  CONFIG_VERSION_FIELD,
+} from "./steps.ts";
 import { isObject } from "../kernel/values.ts";
 
 import {
@@ -34,6 +39,7 @@ import {
 } from "../scheduler/config.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 export interface ServerConfig extends GlobalConfig {
+  version: number;
   gateway: GatewayConfig;
   mission: MissionConfig;
   agent: AgentConfig;
@@ -52,7 +58,25 @@ const fragments = {
   worker: workerConfigSchema,
   scheduler: schedulerConfigSchema,
 };
+function isConfigVersion(value: unknown): value is number {
+  return (
+    Number.isSafeInteger(value) && (value as number) >= ABSENT_CONFIG_VERSION
+  );
+}
+
+const versionSchema = {
+  [CONFIG_VERSION_FIELD]: {
+    doc: "Configuration version. kanthord upgrade sets it.",
+    default: ABSENT_CONFIG_VERSION,
+    format(value: unknown) {
+      if (!isConfigVersion(value))
+        throw new Error("required positive safe integer");
+    },
+  },
+};
+
 const schema = {
+  ...versionSchema,
   ...globalConfigSchema,
   ...Object.fromEntries(
     Object.entries(fragments).filter(
@@ -108,14 +132,7 @@ function inspect(
   const undeclared = Object.keys(object).filter(
     (key) => !Object.hasOwn(definition, key),
   );
-  const renamed = undeclared
-    .map((key) => renameOf(prefix ? `${prefix}.${key}` : key))
-    .filter((rename) => rename !== undefined);
-  for (const rename of renamed)
-    issues.push(
-      `${rename.from}: renamed to ${rename.to}. Run kanthord config migrate.`,
-    );
-  if (undeclared.length > renamed.length)
+  if (undeclared.length)
     issues.push(`${prefix || "configuration"}: undeclared field.`);
   for (const [key, field] of entries) {
     const path = prefix ? `${prefix}.${key}` : key;
@@ -131,8 +148,35 @@ function inspect(
   }
 }
 
+export function configVersion(value: unknown): number {
+  const version =
+    isObject(value) && Object.hasOwn(value, CONFIG_VERSION_FIELD)
+      ? (value as Record<string, unknown>)[CONFIG_VERSION_FIELD]
+      : ABSENT_CONFIG_VERSION;
+  if (!isConfigVersion(version))
+    throw new Diagnostic(
+      "system.config.invalid_field",
+      `${CONFIG_VERSION_FIELD}: invalid or missing value.`,
+    );
+  if (version > CONFIG_VERSION)
+    throw new Diagnostic(
+      "system.config.version_ahead",
+      `configuration version ${version} is newer than configuration version ${CONFIG_VERSION} of this binary. Install a newer kanthord or restore the configuration backup.`,
+    );
+  return version;
+}
+
 export function configuration(value: unknown) {
   inspectTree(value, { remaining: MAX_CONFIG_NODES }, new Set());
+  const version =
+    isObject(value) && !Array.isArray(value)
+      ? configVersion(value)
+      : CONFIG_VERSION;
+  if (version < CONFIG_VERSION)
+    throw new Diagnostic(
+      "system.config.version_behind",
+      `configuration version ${version} is older than configuration version ${CONFIG_VERSION} of this binary. Run kanthord upgrade.`,
+    );
   const issues: string[] = [];
   // Inspect the raw keys before Convict can flatten or discard any of them.
   inspect(schema, value, "", issues);
@@ -158,14 +202,18 @@ export function configuration(value: unknown) {
   return config;
 }
 
-export function loadConfig(path: string): ServerConfig {
+export function readConfig(path: string): string {
   if (!audit(path, "file", true))
     throw new Diagnostic(
       "system.config.not_found",
       `${path}: configuration is absent. Run kanthord config init --config ${JSON.stringify(path)}.`,
     );
   audit(dirname(path), "directory");
-  return configuration(parseMapping(readPrivate(path))).getProperties();
+  return readPrivate(path);
+}
+
+export function loadConfig(path: string): ServerConfig {
+  return configuration(parseMapping(readConfig(path))).getProperties();
 }
 
 export function initialConfig(
@@ -175,6 +223,7 @@ export function initialConfig(
 ): string {
   return stringify(
     configuration({
+      [CONFIG_VERSION_FIELD]: CONFIG_VERSION,
       master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
       gateway: {
         bind,
