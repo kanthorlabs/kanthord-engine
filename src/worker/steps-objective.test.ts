@@ -227,6 +227,7 @@ test("objective checkpoints budget-ended work and refuses release after a failed
   assert.deepEqual(await runStepsObjective(h), {
     kind: "released",
     furtherWork: true,
+    stop: { reason: "budget_end", code: "turns" },
   });
   assert.ok(released);
   const log = await simpleGit(h.bare).raw([
@@ -695,8 +696,11 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
   assert.deepEqual(await executionBoundary(h.run, () => runStepsObjective(h)), {
     kind: "released",
     furtherWork: true,
+    stop: { reason: "budget_end", code: "wall_time" },
   });
-  assert.deepEqual(bodies, [{ further_work: true, progress: false }]);
+  assert.deepEqual(bodies, [
+    { further_work: true, stop: { reason: "budget_end", code: "wall_time" } },
+  ]);
   const branch = `refs/heads/${h.nodeBranch}`;
   assert.match(
     await simpleGit(h.bare).raw(["log", "-1", "--format=%s", branch]),

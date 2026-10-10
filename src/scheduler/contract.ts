@@ -52,13 +52,26 @@ export const ExecutionStopReason = {
   ReportAbsent: "report_absent",
   ActionUnsettled: "action_unsettled",
   AssessmentAbsent: "assessment_absent",
+  BudgetEnd: "budget_end",
 } as const;
+export const BudgetLimit = {
+  Turns: "turns",
+  WallTime: "wall_time",
+} as const;
+export type BudgetLimit = (typeof BudgetLimit)[keyof typeof BudgetLimit];
 export const executionStopReasonSchema = z.enum(ExecutionStopReason);
 export type ExecutionStopReason = z.infer<typeof executionStopReasonSchema>;
-export const releaseStopSchema = z.strictObject({
-  reason: executionStopReasonSchema,
-  code: z.string().min(1).nullable(),
-});
+export const releaseStopSchema = z
+  .strictObject({
+    reason: executionStopReasonSchema,
+    code: z.string().min(1).nullable(),
+  })
+  .refine(
+    (stop) =>
+      (stop.reason === ExecutionStopReason.BudgetEnd) ===
+      Object.values(BudgetLimit).some((limit) => limit === stop.code),
+    { path: ["code"] },
+  );
 export type ReleaseStop = z.infer<typeof releaseStopSchema>;
 export const traceIdSchema = z
   .string()
@@ -118,7 +131,6 @@ export const executionReleaseSchema = z
   .strictObject({
     further_work: z.boolean(),
     stop: releaseStopSchema.nullable().default(null),
-    progress: z.boolean().default(true),
   })
   .refine((release) => release.stop === null || release.further_work, {
     path: ["stop"],

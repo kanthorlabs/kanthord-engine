@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { CancellationContext, type Context } from "../kernel/context.ts";
+import { BudgetLimit } from "../scheduler/contract.ts";
 
 const BUDGET_FLOOR = 0;
 export class ExecutionBudget {
@@ -54,6 +55,12 @@ export class ExecutionBudget {
   }
   exhausted(): boolean {
     return this.exhaustedAt(this.endedTurns);
+  }
+  limit(): BudgetLimit {
+    assert.ok(this.exhausted(), "A limit names an exhausted budget.");
+    return this.turns !== undefined && this.endedTurns >= this.turns
+      ? BudgetLimit.Turns
+      : BudgetLimit.WallTime;
   }
   exhaustedAfterTurn(): boolean {
     return this.exhaustedAt(this.endedTurns + 1);

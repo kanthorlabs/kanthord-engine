@@ -10,28 +10,34 @@ import {
   FIXTURE_DEADLINE,
 } from "./test-support.ts";
 import {
+  consecutiveStalls,
   insertExecution,
-  markStalled,
   readExecution,
   claimStateOf,
 } from "./execution-store.ts";
 import {
+  BudgetLimit,
   ClaimState,
   ExecutionStopReason,
   schedulerOperations,
   type ReleaseStop,
 } from "./contract.ts";
-import { EXECUTION_NOT_RUNNING } from "./settlement.ts";
+import { consecutiveFailures, EXECUTION_NOT_RUNNING } from "./settlement.ts";
 
 const WAKE_CALL_COUNT = 1;
 const NO_STALLS = 0;
 const PRIOR_STALLS = 2;
 const CURRENT_STALL = 1;
 const FIRST_FAILURE = 1;
+const SECOND_FAILURE = 2;
 const RELEASE_ROUTING = "release";
 const STOP: ReleaseStop = {
   reason: ExecutionStopReason.JudgementInvalid,
   code: null,
+};
+const BUDGET_END: ReleaseStop = {
+  reason: ExecutionStopReason.BudgetEnd,
+  code: BudgetLimit.Turns,
 };
 function harness(t: TestContext) {
   const h = schedulerHarness(t);
@@ -51,11 +57,7 @@ function harness(t: TestContext) {
     },
     commit: (write) => h.store.transaction(write),
   };
-  const release = (
-    furtherWork = false,
-    stop?: ReleaseStop,
-    progress?: boolean,
-  ) =>
+  const release = (furtherWork = false, stop?: ReleaseStop) =>
     h.invoke(
       "executionRelease",
       {
@@ -64,7 +66,6 @@ function harness(t: TestContext) {
         body: {
           further_work: furtherWork,
           ...(stop && { stop }),
-          ...(progress !== undefined && { progress }),
         },
       },
       caller,
@@ -101,7 +102,7 @@ test("release routes once, ends at the transaction reading and wakes after commi
   assert.deepEqual(wakes, [h.row.project_id]);
 });
 
-test("a further-work release without progress routes the count of consecutive stalled releases", async (t) => {
+test("a budget-end release routes the count of consecutive budget ends and stores its stop", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   t.mock.method(h.service, "wake", () => {});
@@ -112,13 +113,56 @@ test("a further-work release without progress routes the count of consecutive st
         project_id: h.row.project_id,
         attempt: h.row.attempt,
         ended_at: FIXTURE_NOW,
+        stop: BUDGET_END,
       });
       insertExecution(tx, prior);
-      markStalled(tx, prior.execution_id);
     }
   });
-  await h.release(true, undefined, false);
+  await h.release(true, BUDGET_END);
+  assert.equal(h.calls.length, WAKE_CALL_COUNT);
   assert.equal(h.calls[0]!.arguments[3], PRIOR_STALLS + CURRENT_STALL);
+  assert.deepEqual(h.read().stop, BUDGET_END);
+});
+
+test("a budget end is no failure and resets the failure count", (t) => {
+  const h = harness(t);
+  const countAfter = (stops: ReleaseStop[]) =>
+    h.store.transaction((tx) => {
+      for (const stop of stops)
+        insertExecution(
+          tx,
+          executionFixture({
+            node_id: h.row.node_id,
+            project_id: h.row.project_id,
+            attempt: h.row.attempt,
+            ended_at: FIXTURE_NOW,
+            stop,
+          }),
+        );
+      return consecutiveFailures(tx, h.row);
+    });
+  assert.equal(countAfter([STOP, BUDGET_END]), FIRST_FAILURE);
+  assert.equal(countAfter([STOP]), SECOND_FAILURE);
+});
+
+test("a failure stop between budget ends resets the budget-end count", (t) => {
+  const h = harness(t);
+  const count = h.store.transaction((tx) => {
+    for (const stop of [BUDGET_END, STOP, BUDGET_END]) {
+      insertExecution(
+        tx,
+        executionFixture({
+          node_id: h.row.node_id,
+          project_id: h.row.project_id,
+          attempt: h.row.attempt,
+          ended_at: FIXTURE_NOW,
+          stop,
+        }),
+      );
+    }
+    return consecutiveStalls(tx, h.row.node_id, h.row.attempt);
+  });
+  assert.equal(count, CURRENT_STALL);
 });
 
 test("Mission refusal rolls back all release writes and sends no wake", async (t) => {
@@ -216,8 +260,17 @@ test("the release input refuses a stop with no further work", () => {
     }).success,
     false,
   );
+  for (const stop of [
+    { reason: ExecutionStopReason.BudgetEnd, code: null },
+    { reason: ExecutionStopReason.OperationFailed, code: BudgetLimit.Turns },
+  ])
+    assert.equal(
+      input.safeParse({ params, query: {}, body: { further_work: true, stop } })
+        .success,
+      false,
+    );
   assert.deepEqual(
     input.parse({ params, query: {}, body: { further_work: false } }).body,
-    { further_work: false, stop: null, progress: true },
+    { further_work: false, stop: null },
   );
 });

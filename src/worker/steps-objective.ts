@@ -42,7 +42,8 @@ async function finishObjective(
   boundary: TaskBoundary | null,
   completedTasks: number,
 ): Promise<ExecutionEnd> {
-  let furtherWork = boundary !== null && boundary !== TaskBoundary.RunFailed;
+  const budgetEnd = boundary !== null && boundary !== TaskBoundary.RunFailed;
+  let furtherWork = budgetEnd;
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   const remaining = () => state.input.claim.expired_at - Date.now();
   try {
@@ -87,7 +88,12 @@ async function finishObjective(
         ],
       });
     }
-    return await state.run.release(furtherWork, completedTasks > NO_TASKS);
+    return await state.run.release(
+      furtherWork,
+      budgetEnd && completedTasks === NO_TASKS
+        ? state.agent.budget.limit()
+        : null,
+    );
   } finally {
     cleanup.cancel();
   }

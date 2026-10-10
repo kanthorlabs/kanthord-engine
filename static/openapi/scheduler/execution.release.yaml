@@ -91,6 +91,7 @@ components:
                         - report_absent
                         - action_unsettled
                         - assessment_absent
+                        - budget_end
                     code:
                       anyOf:
                         - type: string
@@ -101,9 +102,6 @@ components:
                     - code
                   additionalProperties: false
                 - type: "null"
-            progress:
-              default: true
-              type: boolean
           required:
             - further_work
           additionalProperties: false

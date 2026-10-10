@@ -201,7 +201,7 @@ test("lost release answers reconcile only a finished claim", async (t) => {
     const calls: string[] = [];
     run.clients.scheduler = {
       executionRelease: async (input: { body: unknown }) => {
-        assert.deepEqual(input.body, { further_work: false, progress: true });
+        assert.deepEqual(input.body, { further_work: false, stop: null });
         calls.push("release");
         return { type: OperationResultType.Indeterminate };
       },

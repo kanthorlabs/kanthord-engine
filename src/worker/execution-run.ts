@@ -11,6 +11,7 @@ import type { MethodClients } from "./method-clients.ts";
 import {
   ClaimState,
   ExecutionStopReason,
+  type BudgetLimit,
   type ReleaseStop,
 } from "../scheduler/contract.ts";
 
@@ -246,14 +247,22 @@ export class ExecutionRun {
     return answer.items;
   }
 
-  async release(furtherWork: boolean, progress = true): Promise<ExecutionEnd> {
+  async release(
+    furtherWork: boolean,
+    budgetEnd: BudgetLimit | null = null,
+  ): Promise<ExecutionEnd> {
+    assert.ok(budgetEnd === null || furtherWork);
+    const stop: ReleaseStop | null =
+      budgetEnd === null
+        ? null
+        : { reason: ExecutionStopReason.BudgetEnd, code: budgetEnd };
     await this.settleCredentials();
     await this.call(async (options) => {
       const result = await this.clients.scheduler.executionRelease(
         {
           params: { execution_id: this.claim.execution_id },
           query: {},
-          body: { further_work: furtherWork, progress },
+          body: { further_work: furtherWork, stop },
         },
         options,
       );
@@ -279,7 +288,9 @@ export class ExecutionRun {
         },
       };
     });
-    return { kind: ExecutionEndKind.Released, furtherWork };
+    return stop === null
+      ? { kind: ExecutionEndKind.Released, furtherWork }
+      : { kind: ExecutionEndKind.Released, furtherWork, stop };
   }
 
   async releaseStop(stopped: ExecutionStop): Promise<ExecutionEnd> {

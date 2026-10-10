@@ -96,7 +96,7 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
         executionRelease: async (input: { body: unknown }) => {
           assert.deepEqual(input.body, {
             further_work: scenario.further,
-            progress: true,
+            stop: null,
           });
           return completed({});
         },

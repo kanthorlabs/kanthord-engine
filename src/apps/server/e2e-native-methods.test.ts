@@ -530,9 +530,11 @@ test(
           tool("write", { path: "notes.txt", content: "partial" }),
           tool("write", { path: "never.txt", content: "never" }),
         ]);
+        const budgetEnd = { reason: "budget_end", code: "turns" };
         assert.deepEqual(answer.result, {
           kind: "released",
           furtherWork: true,
+          stop: budgetEnd,
         });
         assert.equal(answer.provider.calls.length, SINGLE_ITEM);
         assert.deepEqual((await evidence(B)).items, []);
@@ -557,12 +559,13 @@ test(
         );
         const AVAILABLE = "Available";
         assert.equal(await state(B), AVAILABLE);
-        const claim = await read<{ claim_state: string }>(
+        const claim = await read<{ claim_state: string; stop: unknown }>(
           ["scheduler", "claim", "get", answer.execution.execution_id],
           lab.env,
         );
         const FINISHED = "finished";
         assert.equal(claim.claim_state, FINISHED);
+        assert.deepEqual(claim.stop, budgetEnd);
       },
     );
     await t.test(
