@@ -57,7 +57,8 @@ owning pages in the [index](./README.md).
 `storage`, and `agent`. The six service root names are `project`, `mission`,
 `scheduler`, `worker`, `tracking`, and `gateway`. These are disjoint, closed sets.
 `server` and the application form of `worker` are operands of `serve`, never new
-root commands. `cli` is not a `serve` operand.
+root commands. `cli` is not a `serve` operand. `council` is a client command root of its own and belongs to
+none of these sets.
 
 - [`--config`](./common-flags.md#--config) selects server configuration only
   where the local command declares it; service commands reject it.
