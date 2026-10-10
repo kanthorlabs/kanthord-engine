@@ -60,7 +60,7 @@ const checkAnswerSchema = z
       : answer.landed_commits.length === NO_LANDED_COMMITS,
   );
 
-function requestContext(
+export function requestContext(
   tx: Transaction,
   dependencies: Dependencies,
   evidenceId: string,

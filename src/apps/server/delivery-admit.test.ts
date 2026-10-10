@@ -34,6 +34,7 @@ const SINGLE_LANDED_COMMIT = 1;
 const NO_LANDED_COMMITS = 0;
 const CHECK_FAILURE_CODE = "repository.platform.github.retryable_refusal";
 const BAD_GATEWAY_STATUS = 502;
+const PUSHED_COMMIT = "a".repeat(40);
 
 function closed(number: number, merged: boolean): string {
   return Buffer.from(
@@ -41,6 +42,16 @@ function closed(number: number, merged: boolean): string {
       action: "closed",
       number,
       pull_request: { merged },
+      repository: { full_name: RESOURCE },
+    }),
+  ).toString("base64");
+}
+
+function pushed(branch: string): string {
+  return Buffer.from(
+    JSON.stringify({
+      ref: `refs/heads/${branch}`,
+      after: PUSHED_COMMIT,
       repository: { full_name: RESOURCE },
     }),
   ).toString("base64");
@@ -448,4 +459,27 @@ test("admissions run one at a time and a failed admission releases the next", as
   await rejectsWith(first, CHECK_FAILURE_CODE);
   assert.equal((await second).disposition, Disposition.AcceptedObservation);
   assert.equal(started.length, SINGLE_CALL + SINGLE_CALL);
+});
+
+test("a push to the base branch rechecks the pull request and returns a conflicting node to rework", async (t) => {
+  const h = await fixture(t);
+  h.answer(CheckEndState.Conflict);
+  assert.deepEqual(await h.admit(undefined, pushed("main"), "push"), {
+    disposition: Disposition.AcceptedObservation,
+    reason: null,
+  });
+  assert.deepEqual(h.checks, [h.request.id]);
+  assert.equal((await requestOf(h))?.end_state, undefined);
+  assert.equal(h.node().state, NodeState.Available);
+});
+
+test("a push to another branch selects no pull request and answers unmatched", async (t) => {
+  const h = await fixture(t);
+  h.answer(CheckEndState.Conflict);
+  assert.deepEqual(await h.admit(undefined, pushed("feature"), "push"), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Unmatched,
+  });
+  assert.equal(h.checks.length, NO_CALLS);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
 });
