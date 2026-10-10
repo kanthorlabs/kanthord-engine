@@ -1,0 +1,1 @@
+The merge of origin/{{base_branch}} into the node branch conflicts. Resolve every conflict in these files so that the base branch change and the node work both stay intact: {{files}}. Remove every conflict marker. Do not commit and do not abort the merge.

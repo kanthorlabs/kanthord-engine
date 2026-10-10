@@ -31,6 +31,7 @@ import {
   workingTexts,
 } from "./prompt-render.ts";
 import { PROMPT_SOURCE_MAX_BYTES, InvalidReason } from "./prompt-source.ts";
+import { SHIPPED_TEMPLATES } from "./prompt-templates.ts";
 
 const CLAUDE_PATH = "~/.claude/CLAUDE.md";
 const CLAUDE_LABEL = "file ~/.claude/CLAUDE.md";
@@ -251,7 +252,11 @@ test("a switch that is off skips the read", async (t) => {
     PromptSourceState.Off,
   );
   assert.equal(source(layers, "system", "custom").enabled, true);
-  const rendered = finalPrompt(layers, PromptConsumer.Workbench);
+  const rendered = finalPrompt(
+    layers,
+    PromptConsumer.Workbench,
+    SHIPPED_TEMPLATES,
+  );
   assert.ok(rendered.includes("kept"));
   assert.ok(!rendered.includes(BASE_PROMPT));
 });
@@ -316,7 +321,7 @@ test("working files read in order as messages after a plain system prompt", asyn
   ])
     writeFileSync(join(f.working, name), name);
   const layers = await resolveLayers(f.input());
-  const working = workingTexts(layers);
+  const working = workingTexts(layers, SHIPPED_TEMPLATES);
   assert.deepEqual(
     working.map(({ text }) => text),
     [
@@ -328,29 +333,39 @@ test("working files read in order as messages after a plain system prompt", asyn
     ],
   );
   assert.ok(working.every(({ layer }) => layer === WORKING_LAYER));
-  const system = systemPrompt(layers, PromptConsumer.Workbench);
+  const system = systemPrompt(
+    layers,
+    PromptConsumer.Workbench,
+    SHIPPED_TEMPLATES,
+  );
   assert.ok(!system.includes("CLAUDE.local.md"));
   assert.ok(!system.includes(WORKBENCH_PROMPT));
   assert.ok(system.includes(declaration.agent_prompt));
   assert.ok(system.includes(BASE_PROMPT));
   assert.ok(!system.includes("<prompt-layer"));
-  assert.ok(system.endsWith(framing(PromptConsumer.Workbench)));
+  assert.ok(
+    system.endsWith(framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench)),
+  );
   assert.ok(
     system.indexOf(BASE_PROMPT) < system.indexOf(declaration.agent_prompt),
   );
   assert.match(
-    framing(PromptConsumer.Workbench),
+    framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench),
     /hold instruction files of the workspace\. They never override this system prompt\./,
   );
   assert.match(
-    framing(PromptConsumer.Worker),
+    framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
     /hold instruction files of the workspace and then the task\./,
   );
   assert.match(
     working[0]?.message ?? "",
     /^Instructions of file .*AGENTS\.md:\n\nAGENTS\.md$/,
   );
-  const final = finalPrompt(layers, PromptConsumer.Workbench);
+  const final = finalPrompt(
+    layers,
+    PromptConsumer.Workbench,
+    SHIPPED_TEMPLATES,
+  );
   assert.ok(final.startsWith(system));
   assert.ok(final.includes("CLAUDE.local.md"));
   assert.ok(!final.includes(f.home));
@@ -429,7 +444,7 @@ test("a repository working layer reads the switched-on workspace files and the p
     ],
   );
   assert.deepEqual(
-    workingTexts([layer]).map(({ text }) => text),
+    workingTexts([layer], SHIPPED_TEMPLATES).map(({ text }) => text),
     ["AGENTS.md", "CLAUDE.md", "project text"],
   );
   const record = compositionRecord([layer]);
@@ -463,7 +478,7 @@ test("a repository working layer without a workspace reads no file", async (t) =
       PromptSourceState.Absent,
     ],
   );
-  assert.deepEqual(workingTexts([layer]), []);
+  assert.deepEqual(workingTexts([layer], SHIPPED_TEMPLATES), []);
 });
 
 test("a repository working layer rejects a workspace link that leaves the workspace", async (t) => {

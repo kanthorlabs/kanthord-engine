@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { z } from "zod";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -30,6 +31,7 @@ import {
   effectiveConfigurationSchema,
   PromptView,
   type PromptLayerAnswer,
+  type PromptTemplates,
   AgentErrorCode,
   AGENT_PROVIDER_TARGET_KIND,
   LIST_LIMIT_DEFAULT,
@@ -69,6 +71,7 @@ import {
   type ResolvedLayer,
 } from "./prompt-layers.ts";
 import { finalPrompt, PromptConsumer } from "./prompt-render.ts";
+import { resolveTemplates, templateDirectory } from "./prompt-templates.ts";
 
 const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
@@ -787,6 +790,14 @@ export class AgentComponent {
     });
   }
 
+  promptTemplates(context: Context): Promise<PromptTemplates> {
+    const { config, dataDirectory } = this.dependencies;
+    const agentDirectory = config.prompt.agent_directory
+      ? resolve(dataDirectory, config.prompt.agent_directory)
+      : null;
+    return resolveTemplates(templateDirectory(agentDirectory), context);
+  }
+
   declare(registry: OperationRegistry): void {
     registry.register(agentOperations["enablement.list"], ({ query }, caller) =>
       caller.commit((tx) => {
@@ -822,6 +833,7 @@ export class AgentComponent {
         const final = finalPrompt(
           layers,
           repository ? PromptConsumer.Worker : PromptConsumer.Workbench,
+          await this.promptTemplates(caller.context),
         );
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agent_name);

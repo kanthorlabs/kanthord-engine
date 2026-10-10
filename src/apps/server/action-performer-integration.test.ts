@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { setImmediate } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import type { z } from "zod";
 import { ulid } from "ulid";
@@ -29,6 +28,7 @@ import {
 } from "../../kernel/operation.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { OperationError } from "../../kernel/errors.ts";
+import { until } from "./cli-support.ts";
 import {
   FAKE_SSH_IDENTITY,
   fakeGitHub,
@@ -43,9 +43,7 @@ const SINGLE_CALL = 1;
 const TWO_INSTANCES = 2;
 const SECOND_REVISION = 2;
 const SUCCESSFUL_EXIT = 0;
-const INITIAL_POLL_COUNT = 0;
 const NO_CALLS = 0;
-const POLLS = 100;
 const REDIRECTION = 300;
 const COMMIT = "b".repeat(40);
 const REPOSITORY_BINDING = "repo";
@@ -374,12 +372,7 @@ test("both adapters serialize one execution and replay the completed request", a
   const release = h.gitHub.hold();
   const key = ulid();
   const first = h.request(HTTP, key);
-  for (
-    let poll = INITIAL_POLL_COUNT;
-    poll < POLLS && h.creates() === NO_CALLS;
-    poll++
-  )
-    await setImmediate();
+  await until(h.creates, (count) => count !== NO_CALLS);
   assert.equal(h.creates(), SINGLE_CALL);
   const second = h.request(DIRECT);
   release();

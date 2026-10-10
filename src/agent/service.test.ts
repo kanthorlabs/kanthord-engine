@@ -43,6 +43,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { CodedError, OperationError } from "../kernel/errors.ts";
 import { ProjectErrorCode } from "../project/contract.ts";
 import { framing, PromptConsumer } from "./prompt-render.ts";
+import { SHIPPED_TEMPLATES } from "./prompt-templates.ts";
 
 const PROVIDER_CAPABILITY = "model-list read";
 const DEFAULT_REASONING = "off";
@@ -227,6 +228,51 @@ test("agent read answers the layers, the working layer of the workbench and the 
   assert.equal(final.prompt.final, answer.prompt.final);
 });
 
+test("agent read renders the framing and layer messages from the template files of the agent directory", async (t) => {
+  const root = temporary(t);
+  const templates = join(root, "agents", "prompts");
+  mkdirSync(templates, { recursive: true });
+  writeFileSync(join(templates, "framing-workbench.md"), "Custom framing.\n");
+  writeFileSync(
+    join(templates, "layer-message.md"),
+    "From {{source}}: {{text}}\n",
+  );
+  const working = join(root, "working");
+  mkdirSync(working);
+  writeFileSync(join(working, "AGENTS.md"), WORKING_TEXT);
+  const f = enablementFixture(t, {
+    config: {
+      prompt: { system_file: "", agent_directory: "agents", host_file: true },
+    },
+    dataDirectory: root,
+    hostHome: root,
+    workbenchDirectory: () => working,
+  });
+  const operation = agentOperations.get;
+  const read = async () =>
+    operation.output.parse(
+      await f.registry.get(operation.id).handler(
+        operation.input.parse({
+          params: { agent_name: AGENT },
+          query: { view: "final" },
+          body: null,
+        }),
+        f.caller,
+      ),
+    );
+  const answer = await read();
+  assert.ok(answer.prompt.final.includes("Custom framing."));
+  assert.ok(
+    answer.prompt.final.includes(`From file ${WORKING_PATH}: ${WORKING_TEXT}`),
+  );
+  writeFileSync(join(templates, "layer-message.md"), "{{#if}}");
+  await assert.rejects(read(), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, AgentErrorCode.PromptTemplateInvalid);
+    return true;
+  });
+});
+
 test("agent read with a repository binding answers its working layer and the worker framing", async (t) => {
   const root = temporary(t);
   const allOn = {
@@ -308,7 +354,11 @@ test("agent read with a repository binding answers its working layer and the wor
   assert.equal(prompt.origin, PromptOrigin.Database);
   assert.equal(prompt.state, PromptSourceState.Present);
   assert.equal(prompt.text, PROJECT_TEXT);
-  assert.ok(on.answer.prompt.final.includes(framing(PromptConsumer.Worker)));
+  assert.ok(
+    on.answer.prompt.final.includes(
+      framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+    ),
+  );
   assert.ok(on.answer.prompt.final.includes(PROJECT_TEXT));
   assert.ok(!on.answer.prompt.final.includes("deferred"));
   const empty = await working("binding-empty");

@@ -205,6 +205,50 @@ components:
               - metadata
               - prompt
             additionalProperties: false
+        templates:
+          type: object
+          properties:
+            work:
+              type: string
+            layer-message:
+              type: string
+            framing-worker:
+              type: string
+            framing-workbench:
+              type: string
+            task-judgement:
+              type: string
+            task-revision:
+              type: string
+            criterion-revision:
+              type: string
+            evaluation:
+              type: string
+            report:
+              type: string
+            repair:
+              type: string
+            review:
+              type: string
+            fix:
+              type: string
+            conflict:
+              type: string
+          required:
+            - work
+            - layer-message
+            - framing-worker
+            - framing-workbench
+            - task-judgement
+            - task-revision
+            - criterion-revision
+            - evaluation
+            - report
+            - repair
+            - review
+            - fix
+            - conflict
+          additionalProperties: false
         resource_budget:
           type: object
           properties:
@@ -301,6 +345,7 @@ components:
         - execution_id
         - worker_name
         - agents
+        - templates
         - resource_budget
         - repositories
       additionalProperties: false

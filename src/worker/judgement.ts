@@ -4,6 +4,8 @@ import type { TaskContent } from "../mission/contract.ts";
 import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import type { Verification } from "./verification.ts";
 import { NodeKind, type NativeAgent } from "./native-agent.ts";
+import { PromptTemplate, type PromptTemplates } from "../agent/contract.ts";
+import { renderTemplate } from "../agent/prompt-templates.ts";
 
 export const JUDGEMENT_MARKER = "kanthord-judgement:";
 const SUCCESS_EXIT = 0;
@@ -83,12 +85,16 @@ export const ReplyRepair = {
 } as const;
 export type ReplyRepair = (typeof ReplyRepair)[keyof typeof ReplyRepair];
 
-export function repairInstruction(marker: string): string {
+export function repairInstruction(
+  templates: PromptTemplates,
+  marker: string,
+): string {
   assert.ok(marker);
-  return `The reply holds no valid ${marker} line. Reply again with exactly one such line.`;
+  return renderTemplate(templates, PromptTemplate.Repair, { marker });
 }
 
 export async function parseRepaired<T extends z.ZodType>(
+  templates: PromptTemplates,
   agent: NativeAgent,
   work: WorkPrompt,
   schema: T,
@@ -96,7 +102,7 @@ export async function parseRepaired<T extends z.ZodType>(
 ): Promise<z.output<T> | ReplyRepair> {
   const reply = parseJudgement(agent.lastText(), schema, marker);
   if (reply !== null) return reply;
-  await agent.instruct(work, repairInstruction(marker));
+  await agent.instruct(work, repairInstruction(templates, marker));
   if (agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
   return (
     parseJudgement(agent.lastText(), schema, marker) ?? ReplyRepair.Invalid
@@ -104,16 +110,18 @@ export async function parseRepaired<T extends z.ZodType>(
 }
 
 export function taskJudgementInstruction(
+  templates: PromptTemplates,
   task: TaskContent,
   priorRationale: string | null = null,
 ): string {
   assert.ok(task.id);
   assert.ok(task.content.criterion);
-  const prior =
-    priorRationale === null
-      ? ""
-      : `\nPrevious judgement: ${priorRationale}. Judge whether the task criterion is met now.`;
-  return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}${prior}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterion_met": true, "rationale": "Explain your judgement"}`;
+  return renderTemplate(templates, PromptTemplate.TaskJudgement, {
+    task_id: task.id,
+    criterion: task.content.criterion,
+    prior_rationale: priorRationale,
+    marker: JUDGEMENT_MARKER,
+  });
 }
 
 export function failedVerificationRationale(
@@ -138,39 +146,62 @@ export function failedVerificationRationale(
 }
 
 export function taskRevisionInstruction(
+  templates: PromptTemplates,
   verification: Verification,
   commands: readonly string[],
 ): string {
-  return `Revise the task work to satisfy its criterion and verifications. ${failedVerificationRationale(verification, commands)}\nVerification results: ${JSON.stringify(verification.results)}`;
+  return renderTemplate(templates, PromptTemplate.TaskRevision, {
+    rationale: failedVerificationRationale(verification, commands),
+    results: verification.results,
+  });
 }
 
-export function criterionRevisionInstruction(rationale: string): string {
+export function criterionRevisionInstruction(
+  templates: PromptTemplates,
+  rationale: string,
+): string {
   assert.ok(rationale.trim());
   assert.ok(rationale.length);
-  return `Revise the task work to meet its criterion. Previous judgement: ${rationale}`;
+  return renderTemplate(templates, PromptTemplate.CriterionRevision, {
+    rationale,
+  });
 }
 
-const INITIATIVE_PROPOSAL_INSTRUCTION =
-  " A defect inside a completed objective gets one proposal with objective_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects.";
-const INITIATIVE_REPLY_EXAMPLE =
-  ', "proposals": [{"objective_id": "node_id_of_the_objective", "name": "Fix objective name", "requirement": "What to repair", "criterion": "When the repair is done", "task": {"name": "Task name", "requirement": "What the task changes", "criterion": "When the task is done", "verifications": ["command"]}}]';
-
-export function evaluationInstruction(input: {
-  kind?: NodeKind;
-  tasks: readonly TaskContent[];
-  verification: Verification;
-  evidence: unknown;
-  objectives?: unknown;
-}): string {
-  const initiative = input.kind === NodeKind.Initiative;
-  return `Judge the evidence against the node criterion in the pinned work prompt, every current task criterion below, and the default standard. Inspect the supporting assets at the workspace-relative paths in the review bundle. Weigh each current objective outcome in the supplied objective context. Judge the work, the code and the recorded facts. The prose style and the finding format of a produced report are no ground for criterion-not-met. Give one result: success, criterion-not-met, or undetermined. A default-standard violation requires criterion-not-met. List every unmet item that you find in this one judgement. For criterion-not-met, list each unmet task id, or the node id for an unmet node criterion or default-standard violation, in unmet with the concrete defect as its reason. Write every reason in full; do not cite a finding label such as B1.${initiative ? INITIATIVE_PROPOSAL_INSTRUCTION : ""}\nTasks: ${JSON.stringify(input.tasks.map((task) => ({ id: task.id, criterion: task.content.criterion })))}\nTested input: ${JSON.stringify(input.verification.tested_input)}\nVerification results of this evaluation: ${JSON.stringify(input.verification.results)}\nEvidence: ${JSON.stringify(input.evidence)}\nCurrent objective context: ${JSON.stringify(input.objectives ?? null)}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"result": "criterion-not-met", "rationale": "Explain your judgement", "unmet": [{"id": "node_or_task_id", "reason": "The concrete defect"}]${initiative ? INITIATIVE_REPLY_EXAMPLE : ""}}`;
+export function evaluationInstruction(
+  templates: PromptTemplates,
+  input: {
+    kind?: NodeKind;
+    tasks: readonly TaskContent[];
+    verification: Verification;
+    evidence: unknown;
+    objectives?: unknown;
+  },
+): string {
+  return renderTemplate(templates, PromptTemplate.Evaluation, {
+    initiative: input.kind === NodeKind.Initiative,
+    tasks: input.tasks.map((task) => ({
+      id: task.id,
+      criterion: task.content.criterion,
+    })),
+    tested_input: input.verification.tested_input,
+    results: input.verification.results,
+    evidence: input.evidence,
+    objectives: input.objectives ?? null,
+    marker: JUDGEMENT_MARKER,
+  });
 }
 
 export function reportInstruction(
+  templates: PromptTemplates,
   objectives: unknown,
   outcomes: unknown,
   evidence: unknown,
   verification: Verification | null,
 ): string {
-  return `Write a Markdown report on the outcome of each current objective using its outcome and evidence. Your reply is the report: give the full report in the reply and write no file, because the reply is the only content that KanthorD stores. KanthorD puts a facts section before your reply. That section lists every objective, node, outcome and assessment identifier and the final-snapshot verification below. Do not copy an identifier or a commit. Assess each objective, the adequacy of its tests and the security behavior against the node criterion, using the data below. Write each blocker or suggestion in the full finding format, with every field including fix: and why:.\nObjectives: ${JSON.stringify(objectives)}\nOutcomes: ${JSON.stringify(outcomes)}\nEvidence: ${JSON.stringify(evidence)}\nFinal-snapshot verification: ${JSON.stringify(verification)}`;
+  return renderTemplate(templates, PromptTemplate.Report, {
+    objectives,
+    outcomes,
+    evidence,
+    verification,
+  });
 }

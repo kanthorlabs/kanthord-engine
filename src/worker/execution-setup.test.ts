@@ -22,6 +22,7 @@ import {
 } from "../agent/prompt-render.ts";
 import { anthropicSetup, WORKING_LAYER_ALL_ON } from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 const SSH_CREDENTIAL = "kanthorlabs-ssh";
 const SYSTEM_TEXT = "system layer text";
@@ -95,6 +96,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const dependencies = {
     store,
     agentPrompt: {
+      templates: async () => SHIPPED_TEMPLATES,
       compose: async (agentName: string) => {
         composed.push(agentName);
         return promptLayers;
@@ -150,9 +152,13 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const [answered] = answer.agents;
   assert.ok(answered);
   assert.deepEqual(answered.prompt, {
-    final: systemPrompt(promptLayers, PromptConsumer.Worker),
+    final: systemPrompt(promptLayers, PromptConsumer.Worker, SHIPPED_TEMPLATES),
   });
-  assert.ok(answered.prompt.final.endsWith(framing(PromptConsumer.Worker)));
+  assert.ok(
+    answered.prompt.final.endsWith(
+      framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+    ),
+  );
   assert.ok(answered.prompt.final.includes(SYSTEM_TEXT));
   assert.ok(answered.prompt.final.includes(AGENT_TEXT));
   assert.ok(!answered.prompt.final.includes(WORKING_TEXT));
@@ -236,6 +242,7 @@ test("setup answers one entry per agent of developer@1 with its own prompt and p
     {
       store,
       agentPrompt: {
+        templates: async () => SHIPPED_TEMPLATES,
         compose: async (agentName: string) => [
           layerOf(PromptLayerKind.Agent, PromptLayer.AgentLayer, agentName),
         ],

@@ -19,6 +19,7 @@ import type { Transaction } from "../kernel/store.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   effectiveConfigurationSchema,
+  promptTemplatesSchema,
   type AgentView,
   type ApprovedModelsFn,
 } from "../agent/contract.ts";
@@ -648,6 +649,7 @@ export const executionSetupSchema = z.strictObject({
   execution_id: identitySchema("execution"),
   worker_name: z.string().min(1),
   agents: z.array(agentSetupSchema).min(1),
+  templates: promptTemplatesSchema,
   resource_budget: resourceBudgetSchema,
   repositories: z.array(
     z.strictObject({

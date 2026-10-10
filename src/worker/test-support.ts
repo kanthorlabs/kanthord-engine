@@ -12,6 +12,7 @@ import {
 } from "./model-runtime.ts";
 import { loadPi } from "../agent/pi.ts";
 import type { ScriptedProvider } from "../agent/test-support.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 export {
   scriptedProvider,
   type ScriptedProvider,
@@ -75,6 +76,7 @@ export function anthropicSetup(
     execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     worker_name: "general@1",
     agents: [anthropicAgent()],
+    templates: SHIPPED_TEMPLATES,
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     repositories: [],
     ...overrides,

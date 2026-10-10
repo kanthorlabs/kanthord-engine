@@ -61,7 +61,7 @@ async function reviewTask(
     if (budget.exhausted()) return ReviewStop.BudgetEnd;
     await agent.instruct(
       taskWork(state, task),
-      reviewInstruction({
+      reviewInstruction(state.input.setup.templates, {
         task,
         nodeCriterion: state.revision.content.criterion,
         diff,
@@ -70,7 +70,11 @@ async function reviewTask(
       }),
     );
     if (budget.exhausted()) return ReviewStop.BudgetEnd;
-    const review = await parseRepairedReview(agent, taskWork(state, task));
+    const review = await parseRepairedReview(
+      state.input.setup.templates,
+      agent,
+      taskWork(state, task),
+    );
     if (review === ReplyRepair.BudgetEnd) return ReviewStop.BudgetEnd;
     if (review === ReplyRepair.Invalid) return ReviewStop.Invalid;
     state.run.log("task reviewed", {
@@ -114,7 +118,7 @@ export function reviewedTaskRunner(reviewer: ReviewerSessions): TaskRunner {
       if (budget.exhausted()) return budgetEndAfterWork;
       await state.agent.instruct(
         taskWork(state, task),
-        fixInstruction(findings),
+        fixInstruction(state.input.setup.templates, findings),
       );
       replies = state.agent.lastText() ?? null;
       const before = state.head;

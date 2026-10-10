@@ -29,13 +29,20 @@ import {
   scriptedModelRuntime,
   scriptedProvider,
 } from "./test-support.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 function composedPrompt(first: string, second: string) {
   const layer = (text: string) =>
-    layerText(PromptLayer.WorkingLayer, "owner", "source", text);
+    layerText(
+      SHIPPED_TEMPLATES,
+      PromptLayer.WorkingLayer,
+      "owner",
+      "source",
+      text,
+    );
   return {
     systemPrompt: [
-      framing(PromptConsumer.Worker),
+      framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
       getAgentDeclaration("swe@1")!.agent_prompt,
     ].join("\n"),
     layers: { global: layer(first), project: layer(second) },
@@ -46,7 +53,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
   const expectedKey = "scripted";
   const cwd = temporary(t);
   const composed = composedPrompt("GLOBAL_MARKER", "PROJECT_MARKER");
-  const work = renderWorkPrompt({
+  const work = renderWorkPrompt(SHIPPED_TEMPLATES, {
     node_id: "node",
     revision: 1,
     content: {
@@ -263,7 +270,7 @@ for (const isSplitTurn of [false, true]) {
       "complete global source",
       "complete project source",
     );
-    const work = renderWorkPrompt({
+    const work = renderWorkPrompt(SHIPPED_TEMPLATES, {
       node_id: "node",
       revision: INITIAL_ATTEMPT,
       content: {

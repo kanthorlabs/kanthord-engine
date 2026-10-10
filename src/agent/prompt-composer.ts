@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import type { InvalidReason } from "./prompt-source.ts";
+import { PromptTemplate, type PromptTemplates } from "./contract.ts";
+import { renderTemplate } from "./prompt-templates.ts";
 
 export const PromptLayer = {
   Work: "work prompt",
@@ -43,6 +45,7 @@ export function digest(text: string): string {
 }
 
 export function layerText(
+  templates: PromptTemplates,
   layer: PromptLayer,
   owner: string,
   source: string,
@@ -55,23 +58,37 @@ export function layerText(
     owner,
     source,
     text,
-    message: `Instructions of ${source}:\n\n${text}`,
+    message: renderTemplate(templates, PromptTemplate.LayerMessage, {
+      source,
+      text,
+    }),
   };
 }
 
-export function renderWorkPrompt(unit: {
-  node_id: string;
-  revision: number;
-  content: {
-    name: string;
-    requirement: string;
-    criterion: string;
-    verifications: string[];
-  };
-}): WorkPrompt {
+export function renderWorkPrompt(
+  templates: PromptTemplates,
+  unit: {
+    node_id: string;
+    revision: number;
+    content: {
+      name: string;
+      requirement: string;
+      criterion: string;
+      verifications: string[];
+    };
+  },
+): WorkPrompt {
   assert.ok(unit.node_id);
   assert.ok(Number.isSafeInteger(unit.revision));
   const { name, requirement, criterion, verifications } = unit.content;
-  const text = `# ${name}\n\n## Requirement\n\n${requirement}\n\n## Criterion\n\n${criterion}\n\n## Verifications\n\n${verifications.map((command, index) => `${index + 1}. ${command}`).join("\n")}`;
+  const text = renderTemplate(templates, PromptTemplate.Work, {
+    name,
+    requirement,
+    criterion,
+    verifications: verifications.map((command, index) => ({
+      number: index + 1,
+      command,
+    })),
+  });
   return { text, digest: digest(text) };
 }

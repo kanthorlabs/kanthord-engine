@@ -35,6 +35,7 @@ import type { RepositoryTransport } from "./contract.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import { renderWorkPrompt } from "../agent/prompt-composer.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 const EXPECTED_CALL_COUNT = 1;
 const NO_RELEASES = 0;
@@ -93,7 +94,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
   });
   stopOnEnd(run, agent);
   const pending = agent.prompt(
-    renderWorkPrompt({
+    renderWorkPrompt(SHIPPED_TEMPLATES, {
       node_id: claim.node_id,
       revision: 1,
       content: {

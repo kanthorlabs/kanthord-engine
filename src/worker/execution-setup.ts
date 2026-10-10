@@ -46,6 +46,7 @@ export async function executionSetup(
       agentName,
       await dependencies.agentPrompt.compose(agentName, caller.context),
     );
+  const templates = await dependencies.agentPrompt.templates(caller.context);
   return caller.commit((tx) => {
     const now = Date.now();
     const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
@@ -120,7 +121,9 @@ export async function executionSetup(
         effective_configuration: view.effective,
         credential_id: record.id,
         metadata: record.metadata,
-        prompt: { final: systemPrompt(agentLayers, PromptConsumer.Worker) },
+        prompt: {
+          final: systemPrompt(agentLayers, PromptConsumer.Worker, templates),
+        },
       };
     });
     const repositories = dependencies
@@ -145,6 +148,7 @@ export async function executionSetup(
       execution_id: claim.executionId,
       worker_name: row.worker_name,
       agents,
+      templates,
       resource_budget: row.resource_budget ?? declaration.resource_budget,
       repositories,
     });

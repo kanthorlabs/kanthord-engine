@@ -1,4 +1,6 @@
+import { PromptTemplate, type PromptTemplates } from "../agent/contract.ts";
 import { renderWorkPrompt } from "../agent/prompt-composer.ts";
+import { renderTemplate } from "../agent/prompt-templates.ts";
 import { EndReason } from "./execution-run.ts";
 import {
   abortMerge,
@@ -25,14 +27,18 @@ function baseBranchOf(state: StepsState): string {
 }
 
 export function conflictInstruction(
+  templates: PromptTemplates,
   baseBranch: string,
   files: readonly string[],
 ): string {
-  return `The merge of origin/${baseBranch} into the node branch conflicts. Resolve every conflict in these files so that the base branch change and the node work both stay intact: ${files.join(", ")}. Remove every conflict marker. Do not commit and do not abort the merge.`;
+  return renderTemplate(templates, PromptTemplate.Conflict, {
+    base_branch: baseBranch,
+    files: files.join(", "),
+  });
 }
 
 function nodeWork(state: StepsState) {
-  return renderWorkPrompt({
+  return renderWorkPrompt(state.input.setup.templates, {
     node_id: state.input.claim.node_id,
     revision: state.input.claim.pinned_revision,
     content: state.revision.content,
@@ -57,7 +63,7 @@ export async function refreshAtClaim(
   if (conflicts.length > NO_FILES) {
     await state.agent.instruct(
       nodeWork(state),
-      conflictInstruction(base, conflicts),
+      conflictInstruction(state.input.setup.templates, base, conflicts),
     );
     if (budget.exhausted()) {
       await abortMerge(state.directory, context, budget.remainingMs());

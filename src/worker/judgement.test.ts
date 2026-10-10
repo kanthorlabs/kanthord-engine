@@ -13,6 +13,7 @@ import {
   taskJudgementInstruction,
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 const TWO_GAP_RATIONALE =
   "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
@@ -135,8 +136,11 @@ test("failed and unrun rationale names the command and cause", () => {
     },
     evidence: [],
   };
-  const instruction = evaluationInstruction(input);
-  const initiative = evaluationInstruction({ ...input, kind: "initiative" });
+  const instruction = evaluationInstruction(SHIPPED_TEMPLATES, input);
+  const initiative = evaluationInstruction(SHIPPED_TEMPLATES, {
+    ...input,
+    kind: "initiative",
+  });
   assert.doesNotMatch(instruction, /proposals/);
   assert.match(
     initiative,
@@ -167,7 +171,10 @@ const JUDGEMENT_REPAIR =
   "The reply holds no valid kanthord-judgement: line. Reply again with exactly one such line.";
 
 test("the repair instruction names the marker of the invalid reply", () => {
-  assert.equal(repairInstruction(JUDGEMENT_MARKER), JUDGEMENT_REPAIR);
+  assert.equal(
+    repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
+    JUDGEMENT_REPAIR,
+  );
 });
 
 test("a prior rationale adds the previous judgement to the task judgement instruction", () => {
@@ -182,11 +189,11 @@ test("a prior rationale adds the previous judgement to the task judgement instru
       bindings: [],
     },
   };
-  const plain = taskJudgementInstruction(task);
-  assert.equal(taskJudgementInstruction(task, null), plain);
+  const plain = taskJudgementInstruction(SHIPPED_TEMPLATES, task);
+  assert.equal(taskJudgementInstruction(SHIPPED_TEMPLATES, task, null), plain);
   assert.doesNotMatch(plain, /Previous judgement/);
   assert.equal(
-    taskJudgementInstruction(task, "edge case unmet"),
+    taskJudgementInstruction(SHIPPED_TEMPLATES, task, "edge case unmet"),
     plain.replace(
       "\nEnd with exactly:",
       "\nPrevious judgement: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",
@@ -195,14 +202,14 @@ test("a prior rationale adds the previous judgement to the task judgement instru
 });
 
 test("the report instruction makes the reply the report and forbids a file", () => {
-  const instruction = reportInstruction([], [], [], null);
+  const instruction = reportInstruction(SHIPPED_TEMPLATES, [], [], [], null);
   assert.match(instruction, /Your reply is the report/);
   assert.match(instruction, /write no file/);
   assert.match(instruction, /every field including fix: and why:/);
 });
 
 test("the report instruction carries the final-snapshot verification", () => {
-  const instruction = reportInstruction([], [], [], {
+  const instruction = reportInstruction(SHIPPED_TEMPLATES, [], [], [], {
     tested_input: [
       { kind: "repository", binding_id: "binding", commit: "d6d4973" },
     ],

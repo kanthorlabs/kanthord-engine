@@ -21,6 +21,7 @@ import type { ExecutionSetup } from "../../worker/contract.ts";
 import { workerApi } from "./api.ts";
 import { testClaim } from "./test-support.ts";
 import { hostExecution } from "./execution.ts";
+import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
 test("host takes handover before setup and method, discards on every method end", async (t) => {
@@ -50,6 +51,7 @@ test("host takes handover before setup and method, discards on every method end"
         prompt: { final: "setup prompt" },
       },
     ],
+    templates: SHIPPED_TEMPLATES,
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     repositories: [],
   };

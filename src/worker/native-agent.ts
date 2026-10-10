@@ -156,7 +156,7 @@ export async function openNativeAgent(
       }),
       context,
     );
-    const pins = pinnedLayers(workingTexts(layers));
+    const pins = pinnedLayers(workingTexts(layers, input.setup.templates));
     const pi = await withDeadline(loadPi(), context);
     session = await openSession({
       cwd: input.workspace,

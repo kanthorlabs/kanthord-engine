@@ -60,6 +60,7 @@ import {
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
 import { instanceRecord, listInstanceRecords } from "./instance-record.ts";
 import type { ResolvedLayer } from "../agent/prompt-layers.ts";
+import type { PromptTemplates } from "../agent/contract.ts";
 import type { WorkerConfig } from "./config.ts";
 import {
   HeartbeatClock,
@@ -92,6 +93,7 @@ export interface Dependencies {
   config: WorkerConfig;
   agentPrompt: {
     compose(agentName: string, context: Context): Promise<ResolvedLayer[]>;
+    templates(context: Context): Promise<PromptTemplates>;
   };
   store: Store;
   workerBindingOf: WorkerBindingOf;
