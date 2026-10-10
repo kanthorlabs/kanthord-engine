@@ -13,7 +13,7 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import { createInvocation } from "./index.ts";
-import { generateHumanJWT } from "./local.ts";
+import { generateHumanJWT } from "./auth/jwt.ts";
 import { isHumanIdentity, isMachineIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
 import { OperationError as GatewayError } from "../kernel/errors.ts";
@@ -23,12 +23,12 @@ import { OperationResultType } from "../kernel/operation.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { gatewayOperations } from "./contract.ts";
 import { AccessPolicy, OperationLifetime } from "../kernel/operation.ts";
-import { KANTHORD_AUTH_USERNAME } from "./local.ts";
+import { KANTHORD_AUTH_USERNAME } from "./auth/jwt.ts";
 import { CancellationContext } from "../kernel/context.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { compareRouteSpecificity } from "./service.ts";
 
-const TOKEN_VERSION = 1;
+const AUTH_VERSION = 1;
 const NEXT_VERSION_STEP = 1;
 
 const HUMAN_USERNAME = "ulrich";
@@ -187,7 +187,7 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     );
   }
   const otherMasterKey = Buffer.alloc(32, 1).toString("base64");
-  const foreign = await generateHumanJWT(otherMasterKey, TOKEN_VERSION, 600);
+  const foreign = await generateHumanJWT(otherMasterKey, AUTH_VERSION, 600);
   assert.equal(
     (
       await fixture.request("/api/identity", {
@@ -198,8 +198,8 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
   );
   const fresh = await generateHumanJWT(
     fixture.config.master_key,
-    fixture.config.gateway.token_version,
-    fixture.config.gateway.token_lifetime,
+    fixture.config.gateway.auth.version,
+    fixture.config.gateway.auth.token_lifetime,
   );
   assert.equal(
     (
@@ -213,8 +213,7 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     registry: fixture.gateway.registry,
     stores: { [StoreName.Operational]: fixture.store },
     masterKey: otherMasterKey,
-    tokenVersion: TOKEN_VERSION,
-    tokenLifetime: fixture.config.gateway.token_lifetime,
+    authVersion: AUTH_VERSION,
   });
   t.after(() => rotated.stop());
   await assert.rejects(
@@ -225,8 +224,7 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     registry: fixture.gateway.registry,
     stores: { [StoreName.Operational]: fixture.store },
     masterKey: fixture.config.master_key,
-    tokenVersion: fixture.config.gateway.token_version + NEXT_VERSION_STEP,
-    tokenLifetime: fixture.config.gateway.token_lifetime,
+    authVersion: fixture.config.gateway.auth.version + NEXT_VERSION_STEP,
   });
   t.after(() => versioned.stop());
   await assert.rejects(
@@ -244,7 +242,7 @@ test("a JWT issued for an explicit username authenticates that human over HTTP a
   const fixture = await gatewayFixture(t, { registry });
   const { token } = await generateHumanJWT(
     fixture.config.master_key,
-    fixture.config.gateway.token_version,
+    fixture.config.gateway.auth.version,
     600,
     "ulrich",
   );
@@ -271,7 +269,7 @@ test("a JWT issued for an explicit username authenticates that human over HTTP a
   }
   const reissued = await generateHumanJWT(
     fixture.config.master_key,
-    fixture.config.gateway.token_version,
+    fixture.config.gateway.auth.version,
     600,
     "ulrich",
   );
@@ -286,7 +284,7 @@ test("a JWT issued for an explicit username authenticates that human over HTTP a
   await assert.rejects(
     generateHumanJWT(
       fixture.config.master_key,
-      fixture.config.gateway.token_version,
+      fixture.config.gateway.auth.version,
       600,
       "",
     ),

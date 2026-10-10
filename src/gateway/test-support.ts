@@ -16,7 +16,7 @@ import type { Registration } from "../worker/contract.ts";
 import {
   Authentication,
   type AuthenticationLookups,
-} from "./authentication.ts";
+} from "./auth/authentication.ts";
 import { gatewayConfigSchema, type GatewayConfig } from "./config.ts";
 import type { InventoryCollector } from "./contract.ts";
 import { gatewayMigrations } from "./migrations.ts";
@@ -27,7 +27,7 @@ import {
   generateHumanJWT,
   generateMachineJWT,
   KANTHORD_AUTH_USERNAME,
-} from "./local.ts";
+} from "./auth/jwt.ts";
 
 type TestConfig = GlobalConfig & { gateway: GatewayConfig };
 export const TEST_WORKER_BINDING = "binding";
@@ -81,8 +81,8 @@ async function tokens(config: TestConfig) {
     token: (
       await generateHumanJWT(
         config.master_key,
-        config.gateway.token_version,
-        config.gateway.token_lifetime,
+        config.gateway.auth.version,
+        config.gateway.auth.token_lifetime,
       )
     ).token,
     machineToken: async (
@@ -93,8 +93,8 @@ async function tokens(config: TestConfig) {
       (
         await generateMachineJWT(
           config.master_key,
-          config.gateway.token_version,
-          config.gateway.token_lifetime,
+          config.gateway.auth.version,
+          config.gateway.auth.token_lifetime,
           { projectId, bindingName },
           name,
         )
@@ -114,7 +114,7 @@ export async function authenticationFixture(
   t.after(() => store.close());
   const authentication = new Authentication(
     config.master_key,
-    config.gateway.token_version,
+    config.gateway.auth.version,
     lookups,
   );
   return { config, store, authentication, ...(await tokens(config)) };
@@ -136,8 +136,7 @@ export function composeGateway(options: {
     stores: { [StoreName.Operational]: options.store },
     idempotencyTtl: options.config.gateway.idempotency_ttl,
     masterKey: options.config.master_key,
-    tokenVersion: options.config.gateway.token_version,
-    tokenLifetime: options.config.gateway.token_lifetime,
+    authVersion: options.config.gateway.auth.version,
     lookups: options.lookups,
   });
   const gateway = new GatewayService({

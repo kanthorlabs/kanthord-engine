@@ -33,7 +33,10 @@ test("machine issuance helper preserves group claims and independently derives p
     statSync(join(env.XDG_CONFIG_HOME!, "issuance.yaml")).mode & MODE_MASK,
     PRIVATE_MODE,
   );
-  const inspected = await kanthord(["jwt", "inspect", first.token], env);
+  const inspected = await kanthord(
+    ["auth", "jwt", "inspect", first.token],
+    env,
+  );
   assert.equal(inspected.code, SUCCESS);
   assert.equal(inspected.stderr, NO_STDERR);
   const documents = parseAllDocuments(inspected.stdout);

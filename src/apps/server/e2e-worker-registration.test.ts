@@ -100,6 +100,7 @@ function machineToken(
   assert.ok(identitySchema("project").safeParse(projectId).success);
   assert.ok(name);
   const args = [
+    "auth",
     "jwt",
     "generate",
     "--project",

@@ -13,7 +13,7 @@ import {
 } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import { createInvocation, gatewayMigrations } from "./index.ts";
-import { generateHumanJWT } from "./local.ts";
+import { generateHumanJWT } from "./auth/jwt.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
   testMachineIdentity,
@@ -21,7 +21,7 @@ import {
 } from "../kernel/test-identity.ts";
 import type { ExecutionProofRow } from "../kernel/operation.ts";
 
-const TOKEN_VERSION = 1;
+const AUTH_VERSION = 1;
 
 const operation = {
   id: "test.commit.read",
@@ -54,11 +54,10 @@ async function fixture(t: TestContext, registry: OperationRegistry) {
     registry,
     stores: { [StoreName.Operational]: store },
     masterKey,
-    tokenVersion: TOKEN_VERSION,
-    tokenLifetime: 600,
+    authVersion: AUTH_VERSION,
   });
   t.after(() => invocation.stop());
-  const { token } = await generateHumanJWT(masterKey, TOKEN_VERSION, 600);
+  const { token } = await generateHumanJWT(masterKey, AUTH_VERSION, 600);
   return { invocation, token };
 }
 
@@ -158,8 +157,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
     registry,
     stores: { [StoreName.Operational]: store },
     masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
-    tokenVersion: TOKEN_VERSION,
-    tokenLifetime: 600,
+    authVersion: AUTH_VERSION,
     lookups: {
       project: {
         resolveWorkerGroup: async () => ({

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { hkdfSync, randomBytes } from "node:crypto";
 import { test } from "node:test";
-import { deriveClientSecret } from "./local.ts";
+import { deriveClientSecret } from "./jwt.ts";
 
-const TOKEN_VERSION = 1;
-const NEXT_TOKEN_VERSION = 2;
+const AUTH_VERSION = 1;
+const NEXT_AUTH_VERSION = 2;
 
 const KEY_BYTES = 32;
 const SUBJECT = "client_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -12,7 +12,7 @@ const OTHER_SUBJECT = "client_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 
 test("client secrets use HKDF-SHA256 and bind to the master key and machine subject", () => {
   const masterKey = randomBytes(KEY_BYTES).toString("base64");
-  const secret = deriveClientSecret(masterKey, TOKEN_VERSION, SUBJECT);
+  const secret = deriveClientSecret(masterKey, AUTH_VERSION, SUBJECT);
   const expected = Buffer.from(
     hkdfSync(
       "sha256",
@@ -23,15 +23,15 @@ test("client secrets use HKDF-SHA256 and bind to the master key and machine subj
     ),
   ).toString("base64");
   assert.equal(secret, expected);
-  assert.equal(deriveClientSecret(masterKey, TOKEN_VERSION, SUBJECT), secret);
+  assert.equal(deriveClientSecret(masterKey, AUTH_VERSION, SUBJECT), secret);
   assert.notEqual(
-    deriveClientSecret(masterKey, TOKEN_VERSION, OTHER_SUBJECT),
+    deriveClientSecret(masterKey, AUTH_VERSION, OTHER_SUBJECT),
     secret,
   );
   assert.notEqual(
     deriveClientSecret(
       randomBytes(KEY_BYTES).toString("base64"),
-      TOKEN_VERSION,
+      AUTH_VERSION,
       SUBJECT,
     ),
     secret,
@@ -40,10 +40,10 @@ test("client secrets use HKDF-SHA256 and bind to the master key and machine subj
   assert.equal(Buffer.from(secret, "base64").toString("base64"), secret);
 });
 
-test("a token version increment changes every client secret", () => {
+test("an auth version increment changes every client secret", () => {
   const masterKey = randomBytes(KEY_BYTES).toString("base64");
-  const next = deriveClientSecret(masterKey, NEXT_TOKEN_VERSION, SUBJECT);
-  assert.notEqual(next, deriveClientSecret(masterKey, TOKEN_VERSION, SUBJECT));
+  const next = deriveClientSecret(masterKey, NEXT_AUTH_VERSION, SUBJECT);
+  assert.notEqual(next, deriveClientSecret(masterKey, AUTH_VERSION, SUBJECT));
   assert.equal(
     next,
     Buffer.from(
@@ -51,7 +51,7 @@ test("a token version increment changes every client secret", () => {
         "sha256",
         Buffer.from(masterKey, "base64"),
         Buffer.alloc(0),
-        `worker/client-secret/v${NEXT_TOKEN_VERSION}/${SUBJECT}`,
+        `worker/client-secret/v${NEXT_AUTH_VERSION}/${SUBJECT}`,
         KEY_BYTES,
       ),
     ).toString("base64"),

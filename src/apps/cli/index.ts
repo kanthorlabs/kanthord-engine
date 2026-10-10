@@ -21,7 +21,7 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
 import { addAgentCommand } from "./agent.ts";
-import { addJWTCommand } from "./jwt.ts";
+import { addAuthCommand } from "./auth.ts";
 import { configHelp, effectivePath } from "./config-path.ts";
 import { addLlmCommand } from "./llm.ts";
 import { addRepositoryCommand } from "./repository.ts";
@@ -234,7 +234,7 @@ export function createProgram(
   });
   addConfigCommand(program);
   addServeCommand(program, onServer);
-  addJWTCommand(program);
+  addAuthCommand(program);
   addLlmCommand(program);
   addRepositoryCommand(program);
   addStorageCommand(program);

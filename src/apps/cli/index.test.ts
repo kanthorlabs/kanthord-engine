@@ -17,7 +17,7 @@ import { IdentityKind, CLIENT_IDENTITY_PREFIX } from "../../kernel/caller.ts";
 import {
   deriveClientSecret,
   KANTHORD_AUTH_USERNAME,
-} from "../../gateway/local.ts";
+} from "../../gateway/auth/jwt.ts";
 import { decode, verify } from "hono/jwt";
 import { identitySchema } from "../../kernel/identity.ts";
 import { deriveKey } from "../../kernel/json.ts";
@@ -80,7 +80,7 @@ test("CLI help works offline, config help resolves its path, and unsupported nam
   for (const name of [
     "config",
     "serve",
-    "jwt",
+    "auth",
     "gateway",
     "project",
     "mission",
@@ -802,6 +802,8 @@ test("removed authentication commands and excess arguments fail without promptin
   assert.equal(help.status, ExitCode.Success);
   assert.doesNotMatch(help.stdout, /login|logout|\bjwt\b/);
   for (const args of [
+    ["jwt"],
+    ["jwt", "generate"],
     ["gateway", "jwt"],
     ["gateway", "logout"],
     ["gateway", "register"],
@@ -858,18 +860,18 @@ test("validate/show and serve never create or repair configuration and never dis
   assert.match(show.stdout, /\[Sensitive\]/);
 });
 
-test("top-level jwt uses its optional username or the constant default, the configured key and lifetime, and terminal-only output", async (t) => {
+test("auth jwt uses its optional username or the constant default, the configured key and lifetime, and terminal-only output", async (t) => {
   const directory = temporary(t);
   const env = environment(directory);
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
   const config = loadConfig(env.KANTHORD_CONFIG!);
-  config.gateway.token_lifetime = TOKEN_LIFETIME_SECONDS;
+  config.gateway.auth.token_lifetime = TOKEN_LIFETIME_SECONDS;
   writePrivate(env.KANTHORD_CONFIG!, stringify(config), true);
-  const redirected = invocation(["jwt", "generate"], env);
+  const redirected = invocation(["auth", "jwt", "generate"], env);
   assert.equal(redirected.status, ExitCode.Failure);
   assert.equal(redirected.stdout, EMPTY_OUTPUT);
   assert.match(redirected.stderr, /terminal/);
-  const help = invocation(["jwt", "generate", "--help"], env);
+  const help = invocation(["auth", "jwt", "generate", "--help"], env);
   assert.equal(help.status, ExitCode.Success);
   assert.match(help.stdout, /--config <path>/);
   assert.match(help.stdout, /--output \[path\]/);
@@ -879,13 +881,14 @@ test("top-level jwt uses its optional username or the constant default, the conf
   assert.match(helpText, /creates an absent file only/);
   assert.match(helpText, /readers use only the default path/);
   assert.match(helpText, /Endpoint written to the --output file/);
-  assert.match(help.stdout, /Usage: kanthord jwt generate .*\[username\]/);
+  assert.match(help.stdout, /Usage: kanthord auth jwt generate .*\[username\]/);
   assert.ok(help.stdout.includes(KANTHORD_AUTH_USERNAME));
   assert.ok(help.stdout.includes(env.KANTHORD_CONFIG!));
   const tokens: string[] = [];
   for (const username of [undefined, "ulrich", "u".repeat(64)]) {
     const result = invocation(
       [
+        "auth",
         "jwt",
         "generate",
         ...(username === undefined ? [] : [username]),
@@ -916,7 +919,7 @@ test("top-level jwt uses its optional username or the constant default, the conf
   assert.equal(new Set(tokens).size, tokens.length);
   assert.deepEqual(readdirSync(directory), ["kanthord.yaml"]);
   for (const args of [[""], [" "], ["u".repeat(65)], ["ulrich", "extra"]]) {
-    const invalid = invocation(["jwt", "generate", ...args], env, true);
+    const invalid = invocation(["auth", "jwt", "generate", ...args], env, true);
     assert.notEqual(invalid.status, ExitCode.Success);
     assert.equal(invalid.stdout, EMPTY_OUTPUT);
   }
@@ -926,7 +929,7 @@ test("jwt --output creates a private default client file with a verifiable human
   const env = environment(temporary(t));
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
   const config = loadConfig(env.KANTHORD_CONFIG!);
-  const result = invocation(["jwt", "generate", "--output"], env);
+  const result = invocation(["auth", "jwt", "generate", "--output"], env);
   const path = clientConfigPath(env);
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stdout, `Created ${path}\n`);
@@ -958,6 +961,7 @@ test("jwt --output with --binding writes the machine token and client secret to 
   const path = join(temporary(t), "worker", "cli.yaml");
   const result = invocation(
     [
+      "auth",
       "jwt",
       "generate",
       "--project",
@@ -983,7 +987,7 @@ test("jwt --output with --binding writes the machine token and client secret to 
   const sub = String(decode(document.token).payload.sub);
   assert.equal(
     document.client_secret,
-    deriveClientSecret(config.master_key, config.gateway.token_version, sub),
+    deriveClientSecret(config.master_key, config.gateway.auth.version, sub),
   );
   assert.ok(!(result.stdout + result.stderr).includes(document.token));
   assert.ok(!(result.stdout + result.stderr).includes(document.client_secret));
@@ -999,7 +1003,16 @@ test("jwt --output resolves an explicit relative export path and writes the endp
   const endpoint = "https://tunnel.example";
   const username = "ulrich";
   const result = invocation(
-    ["jwt", "generate", username, "--output", path, "--endpoint", endpoint],
+    [
+      "auth",
+      "jwt",
+      "generate",
+      username,
+      "--output",
+      path,
+      "--endpoint",
+      endpoint,
+    ],
     env,
   );
   assert.equal(result.status, ExitCode.Success, result.stderr);
@@ -1026,7 +1039,10 @@ test("jwt --output refuses an existing destination without changing its bytes or
     "endpoint: https://existing.example\ntoken: keep-this-token\n";
   writePrivate(path, content);
   const before = readdirSync(directory, { recursive: true });
-  const result = invocation(["jwt", "generate", "--output", "--verbose"], env);
+  const result = invocation(
+    ["auth", "jwt", "generate", "--output", "--verbose"],
+    env,
+  );
   assert.equal(result.status, ExitCode.Failure);
   assert.match(result.stderr, /^system\.files\.publish_failed:/);
   assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -1043,7 +1059,7 @@ test("jwt output validation precedes configuration loading and writes no file or
   const cases: [string[], string][] = [
     [
       ["ulrich", "--output", "--binding", "x", "--endpoint", "ftp://x"],
-      "cli.jwt.username_with_binding",
+      "cli.auth.jwt.username_with_binding",
     ],
     [
       [
@@ -1063,19 +1079,19 @@ test("jwt output validation precedes configuration loading and writes no file or
     ],
     [
       ["--binding", "x", "--output", "--endpoint", "ftp://x"],
-      "cli.jwt.binding_without_project",
+      "cli.auth.jwt.binding_without_project",
     ],
     [
       ["--project", PROJECT_ID, "--output", "--endpoint", "ftp://x"],
-      "cli.jwt.project_without_binding",
+      "cli.auth.jwt.project_without_binding",
     ],
-    [["--project", "invalid"], "cli.jwt.invalid_project"],
+    [["--project", "invalid"], "gateway.authentication.invalid_project"],
     ...[" ", "B", "b".repeat(64)].map((binding): [string[], string] => [
       ["--binding", binding],
       "gateway.authentication.invalid_binding",
     ]),
-    [["--endpoint", "http://x"], "cli.jwt.endpoint_without_output"],
-    [["--endpoint", "ftp://x"], "cli.jwt.endpoint_without_output"],
+    [["--endpoint", "http://x"], "cli.auth.jwt.endpoint_without_output"],
+    [["--endpoint", "ftp://x"], "cli.auth.jwt.endpoint_without_output"],
     ...[
       "ftp://x",
       "relative",
@@ -1089,7 +1105,7 @@ test("jwt output validation precedes configuration loading and writes no file or
     [["--output"], "system.config.not_found"],
   ];
   for (const [options, code] of cases) {
-    const result = invocation(["jwt", "generate", ...options], env);
+    const result = invocation(["auth", "jwt", "generate", ...options], env);
     assert.equal(result.status, ExitCode.Failure);
     assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
     assert.equal(result.stdout, EMPTY_OUTPUT);
@@ -1101,12 +1117,15 @@ test("jwt output validation precedes configuration loading and writes no file or
 test("jwt --verbose --output prints creation then the existing claim list without the token", (t) => {
   const env = environment(temporary(t));
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
-  const result = invocation(["jwt", "generate", "--verbose", "--output"], env);
+  const result = invocation(
+    ["auth", "jwt", "generate", "--verbose", "--output"],
+    env,
+  );
   assert.equal(result.status, ExitCode.Success, result.stderr);
   assert.equal(result.stderr, EMPTY_OUTPUT);
   const path = clientConfigPath(env);
   const { token } = parse(readFileSync(path, "utf8"));
-  const inspected = invocation(["jwt", "inspect", token], env);
+  const inspected = invocation(["auth", "jwt", "inspect", token], env);
   assert.equal(inspected.status, ExitCode.Success, inspected.stderr);
   assert.equal(result.stdout, `Created ${path}\n${inspected.stdout}`);
   assert.ok(!result.stdout.includes(token));
@@ -1120,7 +1139,7 @@ test("JWT generation requires terminal output before loading configuration in bo
     [],
     ["--project", PROJECT_ID, "--binding", "worker-binding"],
   ]) {
-    const result = invocation(["jwt", "generate", ...options], env);
+    const result = invocation(["auth", "jwt", "generate", ...options], env);
     assert.equal(result.status, ExitCode.Failure);
     assert.equal(result.stdout, EMPTY_OUTPUT);
     assert.match(result.stderr, /^cli\.output\.terminal_required:/);
@@ -1135,7 +1154,7 @@ test("jwt accepts display names and issues fresh machine identities without open
   const name = "A display name";
   const binding = "worker-binding";
   const human = invocation(
-    ["jwt", "generate", "ulrich", "--name", name],
+    ["auth", "jwt", "generate", "ulrich", "--name", name],
     env,
     true,
   );
@@ -1149,6 +1168,7 @@ test("jwt accepts display names and issues fresh machine identities without open
   for (let index = 0; index < ISSUANCES; index++) {
     const result = invocation(
       [
+        "auth",
         "jwt",
         "generate",
         "--project",
@@ -1172,7 +1192,7 @@ test("jwt accepts display names and issues fresh machine identities without open
       clientSecret,
       deriveClientSecret(
         config.master_key,
-        config.gateway.token_version,
+        config.gateway.auth.version,
         String(claims.sub),
       ),
     );
@@ -1200,15 +1220,15 @@ test("jwt accepts display names and issues fresh machine identities without open
   assert.equal(sessions.size, ISSUANCES);
   assert.equal(secrets.size, ISSUANCES);
   const conflict = invocation(
-    ["jwt", "generate", "ulrich", "--binding", binding],
+    ["auth", "jwt", "generate", "ulrich", "--binding", binding],
     env,
     true,
   );
   assert.equal(conflict.status, ExitCode.Failure);
-  assert.match(conflict.stderr, /^cli\.jwt\.username_with_binding:/);
+  assert.match(conflict.stderr, /^cli\.auth\.jwt\.username_with_binding:/);
   assert.equal(conflict.stdout, EMPTY_OUTPUT);
   const redirected = invocation(
-    ["jwt", "generate", "--project", PROJECT_ID, "--binding", binding],
+    ["auth", "jwt", "generate", "--project", PROJECT_ID, "--binding", binding],
     env,
   );
   assert.equal(redirected.status, ExitCode.Failure);
@@ -1220,23 +1240,30 @@ test("jwt accepts display names and issues fresh machine identities without open
     ["--binding", " "],
     ["--binding", "b".repeat(129)],
   ]) {
-    const invalid = invocation(["jwt", "generate", ...options], env, true);
+    const invalid = invocation(
+      ["auth", "jwt", "generate", ...options],
+      env,
+      true,
+    );
     assert.equal(invalid.status, ExitCode.Failure);
     assert.equal(invalid.stdout, EMPTY_OUTPUT);
   }
   assert.deepEqual(readdirSync(directory), ["kanthord.yaml"]);
 });
 
-test("jwt group, verbose generation, inspection and token precedence", (t) => {
+test("auth jwt group, verbose generation, inspection and token precedence", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
   writePrivate(env.KANTHORD_CONFIG!, initialConfig());
-  const group = invocation(["jwt"], env);
+  const auth = invocation(["auth"], env);
+  assert.equal(auth.status, ExitCode.Success);
+  assert.match(auth.stdout, /\bjwt\b/);
+  const group = invocation(["auth", "jwt"], env);
   assert.equal(group.status, ExitCode.Success);
   assert.match(group.stdout, /generate/);
   assert.match(group.stdout, /inspect/);
   const generated = invocation(
-    ["jwt", "generate", "ulrich", "--verbose"],
+    ["auth", "jwt", "generate", "ulrich", "--verbose"],
     env,
     true,
   );
@@ -1260,17 +1287,22 @@ test("jwt group, verbose generation, inspection and token precedence", (t) => {
   }
   assert.ok(claimList.startsWith("---\n"));
   assert.ok(claimList.endsWith("---\n"));
-  const rootVerbose = invocation(["--verbose", "jwt", "generate"], env, true);
+  const rootVerbose = invocation(
+    ["--verbose", "auth", "jwt", "generate"],
+    env,
+    true,
+  );
   assert.equal(rootVerbose.status, ExitCode.Success, rootVerbose.stderr);
   assert.match(rootVerbose.stdout, /^\S+\n---\n/);
-  const plain = invocation(["jwt", "generate"], env, true);
+  const plain = invocation(["auth", "jwt", "generate"], env, true);
   assert.equal(plain.status, ExitCode.Success, plain.stderr);
   assert.match(plain.stdout, /^\S+\n$/);
-  const inspect = invocation(["jwt", "inspect", token], env);
+  const inspect = invocation(["auth", "jwt", "inspect", token], env);
   assert.equal(inspect.status, ExitCode.Success, inspect.stderr);
   assert.equal(inspect.stdout, claimList);
   const machine = invocation(
     [
+      "auth",
       "jwt",
       "generate",
       "--project",
@@ -1287,12 +1319,15 @@ test("jwt group, verbose generation, inspection and token precedence", (t) => {
   const machineToken = tokenLine!.slice("token: ".length);
   const machineSecret = deriveClientSecret(
     loadConfig(env.KANTHORD_CONFIG!).master_key,
-    loadConfig(env.KANTHORD_CONFIG!).gateway.token_version,
+    loadConfig(env.KANTHORD_CONFIG!).gateway.auth.version,
     String(decode(machineToken).payload.sub),
   );
   assert.equal(tokenLine, `token: ${machineToken}`);
   assert.equal(secretLine, `client_secret: ${machineSecret}`);
-  const machineInspect = invocation(["jwt", "inspect", machineToken], env);
+  const machineInspect = invocation(
+    ["auth", "jwt", "inspect", machineToken],
+    env,
+  );
   assert.equal(machineInspect.status, ExitCode.Success, machineInspect.stderr);
   assert.equal(machineClaims.join("\n"), machineInspect.stdout);
   assert.match(machineInspect.stdout, new RegExp(`project_id: ${PROJECT_ID}`));
@@ -1305,32 +1340,38 @@ test("jwt group, verbose generation, inspection and token precedence", (t) => {
   const other = plain.stdout.trim();
   writePrivate(clientConfigPath(env), `token: ${other}\n`);
   assert.equal(
-    invocation(["jwt", "inspect"], env).stdout,
-    invocation(["jwt", "inspect", other], env).stdout,
+    invocation(["auth", "jwt", "inspect"], env).stdout,
+    invocation(["auth", "jwt", "inspect", other], env).stdout,
   );
   assert.equal(
-    invocation(["jwt", "inspect"], { ...env, KANTHORD_TOKEN: token }).stdout,
+    invocation(["auth", "jwt", "inspect"], { ...env, KANTHORD_TOKEN: token })
+      .stdout,
     claimList,
   );
   assert.equal(
-    invocation(["jwt", "inspect", other], { ...env, KANTHORD_TOKEN: token })
-      .stdout,
-    invocation(["jwt", "inspect", other], env).stdout,
+    invocation(["auth", "jwt", "inspect", other], {
+      ...env,
+      KANTHORD_TOKEN: token,
+    }).stdout,
+    invocation(["auth", "jwt", "inspect", other], env).stdout,
   );
-  const absent = invocation(["jwt", "inspect"], environment(temporary(t)));
+  const absent = invocation(
+    ["auth", "jwt", "inspect"],
+    environment(temporary(t)),
+  );
   assert.equal(absent.status, ExitCode.Failure);
-  assert.match(absent.stderr, /^cli\.jwt\.inspect\.token_required:/);
+  assert.match(absent.stderr, /^cli\.auth\.jwt\.inspect\.token_required:/);
   for (const invalid of [
     "not-a-jwt",
     `${Buffer.from("{}").toString("base64url")}.${Buffer.from("[]").toString("base64url")}.sig`,
   ]) {
-    const result = invocation(["jwt", "inspect", invalid], env);
+    const result = invocation(["auth", "jwt", "inspect", invalid], env);
     assert.equal(result.status, ExitCode.Failure);
-    assert.match(result.stderr, /^cli\.jwt\.inspect\.malformed_token:/);
+    assert.match(result.stderr, /^cli\.auth\.jwt\.inspect\.malformed_token:/);
     assert.ok(!result.stderr.includes(invalid));
   }
   assert.notEqual(
-    invocation(["jwt", "inspect", "--config", "x"], env).status,
+    invocation(["auth", "jwt", "inspect", "--config", "x"], env).status,
     ExitCode.Success,
   );
   const baseline = invocation(["config", "validate"], env);

@@ -66,6 +66,7 @@ export function generateMachineToken(input: {
     true,
   );
   const args = [
+    "auth",
     "jwt",
     "generate",
     "--project",

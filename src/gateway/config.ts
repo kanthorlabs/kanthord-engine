@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import { isString, isNumber } from "../kernel/values.ts";
 import { ROOT_BASE_PATH, BASE_PATH_FORMAT } from "./base-path.ts";
+import { authConfigSchema, type AuthConfig } from "./auth/config.ts";
 const NO_LIFETIME = 0;
 export interface GatewayConfig {
   bind: string;
@@ -8,8 +9,7 @@ export interface GatewayConfig {
   allowed_hosts: string[];
   allowed_origins: string[];
   base_path: string;
-  token_lifetime: number;
-  token_version: number;
+  auth: AuthConfig;
   idempotency_ttl: number;
 }
 const strings = (value: unknown) => {
@@ -50,23 +50,7 @@ export const gatewayConfigSchema = {
         throw new Error("expected / or a path without a trailing slash");
     },
   },
-  token_lifetime: {
-    doc: "Token lifetime in seconds.",
-    format: "nat",
-    default: 31536000,
-  },
-  token_version: {
-    doc: "Signing-key version; an increment invalidates every issued JWT and client secret.",
-    format(value: unknown) {
-      if (
-        !isNumber(value) ||
-        !Number.isSafeInteger(value) ||
-        value <= NO_LIFETIME
-      )
-        throw new Error("expected a positive safe integer");
-    },
-    default: 1,
-  },
+  auth: authConfigSchema,
   idempotency_ttl: {
     doc: "Idempotency record lifetime in seconds.",
     format(value: unknown) {

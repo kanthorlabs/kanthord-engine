@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { join, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import { ulid } from "ulid";
-import { deriveClientSecret } from "../../gateway/local.ts";
+import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import {
   directories,
   configPath,
@@ -189,8 +189,7 @@ export function composeServices(options: {
     stores: { [StoreName.Operational]: options.store },
     idempotencyTtl: options.config.gateway.idempotency_ttl,
     masterKey: options.config.master_key,
-    tokenVersion: options.config.gateway.token_version,
-    tokenLifetime: options.config.gateway.token_lifetime,
+    authVersion: options.config.gateway.auth.version,
     lookups: {
       scheduler: {
         executionOf: (executionId) => scheduler.executionOf(executionId),
@@ -277,7 +276,7 @@ export function composeServices(options: {
     clientSecret: (clientId) =>
       deriveClientSecret(
         options.config.master_key,
-        options.config.gateway.token_version,
+        options.config.gateway.auth.version,
         clientId,
       ),
     store: options.store,

@@ -134,6 +134,7 @@ function machine(
   env: NodeJS.ProcessEnv,
 ) {
   const args = [
+    "auth",
     "jwt",
     "generate",
     "--project",

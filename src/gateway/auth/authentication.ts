@@ -1,7 +1,7 @@
 import { verify } from "hono/jwt";
-import { identitySchema } from "../kernel/identity.ts";
-import { isString } from "../kernel/values.ts";
-import { background, type Context } from "../kernel/context.ts";
+import { identitySchema } from "../../kernel/identity.ts";
+import { isString } from "../../kernel/values.ts";
+import { background, type Context } from "../../kernel/context.ts";
 import {
   IdentityKind,
   CLIENT_IDENTITY_PREFIX,
@@ -13,15 +13,15 @@ import {
   type HumanIdentity,
   type MachineIdentity,
   type CallerIdentity,
-} from "../kernel/caller.ts";
+} from "../../kernel/caller.ts";
 import {
   mintHumanIdentity,
   mintMachineIdentity,
-} from "../kernel/caller-mint.ts";
-import type { ProjectBindings } from "../project/contract.ts";
-import type { WorkerRegistrations } from "../worker/contract.ts";
-import { validText, signingKey } from "./local.ts";
-import { unauthorized } from "./errors.ts";
+} from "../../kernel/caller-mint.ts";
+import type { ProjectBindings } from "../../project/contract.ts";
+import type { WorkerRegistrations } from "../../worker/contract.ts";
+import { validText, signingKey } from "./jwt.ts";
+import { unauthorized } from "../errors.ts";
 const MILLISECONDS_PER_SECOND = 1000;
 const BEARER_PREFIX_LENGTH = 7;
 const clientIdentitySchema = identitySchema(CLIENT_IDENTITY_PREFIX);
@@ -35,10 +35,10 @@ export class Authentication {
 
   constructor(
     masterKey: string,
-    tokenVersion: number,
+    authVersion: number,
     dependencies?: AuthenticationLookups,
   ) {
-    this.key = signingKey(masterKey, tokenVersion);
+    this.key = signingKey(masterKey, authVersion);
     this.machines = dependencies;
   }
 

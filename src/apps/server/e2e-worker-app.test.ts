@@ -300,6 +300,7 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
   );
   const entry = new URL("../../main.ts", import.meta.url).href;
   const args = [
+    "auth",
     "jwt",
     "generate",
     "--project",

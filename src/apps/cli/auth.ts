@@ -15,7 +15,7 @@ import {
   parseBindingName,
   parseProjectId,
   requireTokenTerminal,
-} from "../../gateway/local.ts";
+} from "../../gateway/auth/jwt.ts";
 import {
   clientConfigPath,
   clientSchema,
@@ -25,6 +25,7 @@ import {
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { configHelp, effectivePath } from "./config-path.ts";
 
+const JWT = "jwt";
 const IAT_CLAIM = "iat";
 const EXP_CLAIM = "exp";
 const MAX_DATE_SECONDS = 8640000000000;
@@ -46,8 +47,8 @@ async function claims(token: string): Promise<Record<string, unknown>> {
     return payload;
   } catch {
     throw new Diagnostic(
-      "cli.jwt.inspect.malformed_token",
-      "jwt inspect: expected three base64url segments with a JSON object header and payload.",
+      "cli.auth.jwt.inspect.malformed_token",
+      "auth jwt inspect: expected three base64url segments with a JSON object header and payload.",
     );
   }
 }
@@ -89,29 +90,29 @@ function validateGenerateOptions(
 ): void {
   if (options.binding !== undefined && username !== undefined)
     throw new Diagnostic(
-      "cli.jwt.username_with_binding",
-      "jwt: a username cannot be combined with --binding.",
+      "cli.auth.jwt.username_with_binding",
+      "auth jwt: a username cannot be combined with --binding.",
     );
   if (options.binding !== undefined && options.project === undefined)
     throw new Diagnostic(
-      "cli.jwt.binding_without_project",
-      "jwt generate: --binding requires --project.",
+      "cli.auth.jwt.binding_without_project",
+      "auth jwt generate: --binding requires --project.",
     );
   if (options.project !== undefined && options.binding === undefined)
     throw new Diagnostic(
-      "cli.jwt.project_without_binding",
-      "jwt generate: --project requires --binding.",
+      "cli.auth.jwt.project_without_binding",
+      "auth jwt generate: --project requires --binding.",
     );
   if (options.endpoint !== undefined && options.output === undefined)
     throw new Diagnostic(
-      "cli.jwt.endpoint_without_output",
-      "jwt generate: --endpoint requires --output.",
+      "cli.auth.jwt.endpoint_without_output",
+      "auth jwt generate: --endpoint requires --output.",
     );
   if (options.endpoint !== undefined) validateClientEndpoint(options.endpoint);
 }
 
 async function machineClientSecret(
-  config: { master_key: string; gateway: { token_version: number } },
+  config: { master_key: string; gateway: { auth: { version: number } } },
   token: string,
 ): Promise<string> {
   const { decode } = await import("hono/jwt");
@@ -119,18 +120,22 @@ async function machineClientSecret(
   assert.ok(isString(sub));
   return deriveClientSecret(
     config.master_key,
-    config.gateway.token_version,
+    config.gateway.auth.version,
     sub,
   );
 }
 
-export function addJWTCommand(program: Command): void {
+export function addAuthCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
-    !program.commands.some((command) => command.name() === CommandName.JWT),
+    !program.commands.some((command) => command.name() === CommandName.Auth),
   );
-  const jwt = program
-    .command(CommandName.JWT)
+  const auth = program
+    .command(CommandName.Auth)
+    .description("Authentication commands");
+  auth.action(() => auth.help());
+  const jwt = auth
+    .command(JWT)
     .description("Generate or inspect a JWT locally");
   jwt.action(() => jwt.help());
   const generate = jwt
@@ -177,15 +182,15 @@ export function addJWTCommand(program: Command): void {
           options.binding === undefined
             ? await generateHumanJWT(
                 config.master_key,
-                config.gateway.token_version,
-                config.gateway.token_lifetime,
+                config.gateway.auth.version,
+                config.gateway.auth.token_lifetime,
                 username,
                 options.name,
               )
             : await generateMachineJWT(
                 config.master_key,
-                config.gateway.token_version,
-                config.gateway.token_lifetime,
+                config.gateway.auth.version,
+                config.gateway.auth.token_lifetime,
                 { projectId: options.project!, bindingName: options.binding },
                 options.name,
               );
@@ -230,8 +235,8 @@ export function addJWTCommand(program: Command): void {
       const resolved = resolveClient({ token }).token;
       if (!resolved?.trim())
         throw new Diagnostic(
-          "cli.jwt.inspect.token_required",
-          "jwt inspect: supply a token argument, KANTHORD_TOKEN or cli.yaml token.",
+          "cli.auth.jwt.inspect.token_required",
+          "auth jwt inspect: supply a token argument, KANTHORD_TOKEN or cli.yaml token.",
         );
       process.stdout.write(await renderClaims(resolved));
     });

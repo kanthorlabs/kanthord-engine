@@ -2,26 +2,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decode, sign } from "hono/jwt";
 import { ulid } from "ulid";
-import { background } from "../kernel/context.ts";
-import { deriveKey } from "../kernel/json.ts";
-import { identitySchema } from "../kernel/identity.ts";
-import { HttpStatus } from "../kernel/http.ts";
+import { background } from "../../kernel/context.ts";
+import { deriveKey } from "../../kernel/json.ts";
+import { identitySchema } from "../../kernel/identity.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import {
   fakeLookups,
   authenticationFixture,
   gatewayFixture,
   TEST_WORKER_BINDING,
   TEST_PROJECT_ID,
-} from "./test-support.ts";
+} from "../test-support.ts";
 import {
   CLIENT_IDENTITY_PREFIX,
   IdentityKind,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_HUMAN_USERNAME_LENGTH,
-} from "../kernel/caller.ts";
-import { generateHumanJWT, generateMachineJWT } from "./local.ts";
-import { isHumanIdentity, isMachineIdentity } from "../kernel/caller.ts";
-import { gatewayOperations } from "./contract.ts";
+} from "../../kernel/caller.ts";
+import { generateHumanJWT, generateMachineJWT } from "./jwt.ts";
+import { isHumanIdentity, isMachineIdentity } from "../../kernel/caller.ts";
+import { gatewayOperations } from "../contract.ts";
 
 const TOKEN_LIFETIME = 600;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -44,7 +44,7 @@ test("issuance preserves human subjects and names, and generates fresh machine s
   const fixture = await gatewayFixture(t, { lookups: fakeLookups() });
   const human = await generateHumanJWT(
     fixture.config.master_key,
-    fixture.config.gateway.token_version,
+    fixture.config.gateway.auth.version,
     TOKEN_LIFETIME,
     HUMAN_USERNAME,
     HUMAN_NAME,
@@ -72,7 +72,7 @@ test("issuance preserves human subjects and names, and generates fresh machine s
   assert.notEqual(rechecked, identity);
   const machine = await generateMachineJWT(
     fixture.config.master_key,
-    fixture.config.gateway.token_version,
+    fixture.config.gateway.auth.version,
     TOKEN_LIFETIME,
     { projectId: TEST_PROJECT_ID, bindingName: TEST_WORKER_BINDING },
   );
@@ -231,7 +231,7 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
     await assert.rejects(
       generateHumanJWT(
         fixture.config.master_key,
-        fixture.config.gateway.token_version,
+        fixture.config.gateway.auth.version,
         TOKEN_LIFETIME,
         HUMAN_USERNAME,
         value,
@@ -241,7 +241,7 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
     await assert.rejects(
       generateMachineJWT(
         fixture.config.master_key,
-        fixture.config.gateway.token_version,
+        fixture.config.gateway.auth.version,
         TOKEN_LIFETIME,
         { projectId: TEST_PROJECT_ID, bindingName: TEST_WORKER_BINDING },
         value,
@@ -252,7 +252,7 @@ test("human and machine claims enforce distinct subjects and binding rules", asy
   await assert.rejects(
     generateMachineJWT(
       fixture.config.master_key,
-      fixture.config.gateway.token_version,
+      fixture.config.gateway.auth.version,
       TOKEN_LIFETIME,
       {
         projectId: TEST_PROJECT_ID,
@@ -312,20 +312,20 @@ test("machine issuance validates the project identity and binding name", async (
   await assert.rejects(
     generateMachineJWT(
       fixture.config.master_key,
-      fixture.config.gateway.token_version,
+      fixture.config.gateway.auth.version,
       TOKEN_LIFETIME,
       {
         projectId: "invalid",
         bindingName: TEST_WORKER_BINDING,
       },
     ),
-    { code: "cli.jwt.invalid_project" },
+    { code: "gateway.authentication.invalid_project" },
   );
   for (const bindingName of [" ", "B", "b".repeat(64)])
     await assert.rejects(
       generateMachineJWT(
         fixture.config.master_key,
-        fixture.config.gateway.token_version,
+        fixture.config.gateway.auth.version,
         TOKEN_LIFETIME,
         {
           projectId: TEST_PROJECT_ID,

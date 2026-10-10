@@ -145,7 +145,7 @@ class Run:
 
     def jwt(self, *args):
         master, slave = pty.openpty()
-        child = subprocess.Popen([NODE, "bin/kanthord.mjs", "jwt", "generate", *args],
+        child = subprocess.Popen([NODE, "bin/kanthord.mjs", "auth", "jwt", "generate", *args],
                                  cwd=ENGINE, env=self.env, stdin=subprocess.DEVNULL,
                                  stdout=slave, stderr=subprocess.PIPE)
         os.close(slave)
@@ -219,9 +219,9 @@ class Run:
           const config = loadConfig(file);
           config.gateway.port = Number(process.env.E2E_PORT);
           config.gateway.allowed_hosts = [`127.0.0.1:${config.gateway.port}`];
-          config.gateway.token_lifetime = 600;
+          config.gateway.auth.token_lifetime = 600;
           writePrivate(file, stringify(config), true);
-          writePrivate(file + '.expired', stringify({...config, gateway: {...config.gateway, token_lifetime: 0}}));
+          writePrivate(file + '.expired', stringify({...config, gateway: {...config.gateway, auth: {...config.gateway.auth, token_lifetime: 0}}}));
           const other = {...config, master_key: randomBytes(32).toString('base64')};
           writePrivate(file + '.wrong-key', stringify(other));
           console.log(JSON.stringify({masterKey: config.master_key, otherKey: other.master_key}));
@@ -248,7 +248,7 @@ class Run:
         self.step("cli-generation", {
             "default": self.inspect(default, prepared["masterKey"], "kanthorlabs"),
             "explicit": self.inspect(custom, prepared["masterKey"], self.tag),
-            "commands": ["kanthord jwt generate", f"kanthord jwt generate {self.tag}"],
+            "commands": ["kanthord auth jwt generate", f"kanthord auth jwt generate {self.tag}"],
         })
         observations = []
         for name, token, username in [("default", default, "kanthorlabs"), ("explicit", custom, self.tag)]:
@@ -288,6 +288,9 @@ class Run:
         for name in ["jwt", "login", "logout"]:
             removed = self.command(["gateway", name])
             require(removed.returncode == 1 and not removed.stdout, "Removed gateway command remains available")
+        for args in [["jwt"], ["jwt", "generate"]]:
+            removed = self.command(args)
+            require(removed.returncode == 1 and not removed.stdout, "Removed top-level jwt command remains available")
         require(not (self.home / "config/kanthord/cli.yaml").exists(), "CLI unexpectedly saved credentials")
         status, contract = self.request("/api/openapi/gateway/verify.yaml")
         require(status == 200 and "gateway.verify" in contract and "x-access-policy: human" in contract and "bearerAuth:" in contract, "Published verification contract missing")

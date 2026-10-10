@@ -3,7 +3,7 @@ import type { Store } from "../kernel/store.ts";
 import {
   Authentication,
   type AuthenticationLookups,
-} from "./authentication.ts";
+} from "./auth/authentication.ts";
 import { Idempotency } from "./idempotency.ts";
 import { Invocation, type ExecutionLookup } from "./invocation.ts";
 export { GatewayService, type GatewayDependencies } from "./service.ts";
@@ -17,13 +17,12 @@ export function createInvocation(options: {
   stores: Record<StoreName, Store>;
   idempotencyTtl?: number;
   masterKey: string;
-  tokenVersion: number;
-  tokenLifetime: number;
+  authVersion: number;
   lookups?: AuthenticationLookups & { scheduler?: ExecutionLookup };
 }): Invocation {
   const authentication = new Authentication(
     options.masterKey,
-    options.tokenVersion,
+    options.authVersion,
     options.lookups,
   );
   const idempotency = new Idempotency(options.idempotencyTtl);

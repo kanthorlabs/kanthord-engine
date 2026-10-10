@@ -63,7 +63,7 @@ const API_ONLY_OPERATIONS = [
 const TOP_LEVEL_NAMES = new Set([
   "config",
   "serve",
-  "jwt",
+  "auth",
   "project",
   "mission",
   "scheduler",

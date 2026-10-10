@@ -118,7 +118,7 @@ export default tseslint.config(
                 {
                   to: element("service", {
                     captured: { name: "gateway" },
-                    fileInternalPath: "{client,local}.ts",
+                    fileInternalPath: "{client.ts,local.ts,auth/jwt.ts}",
                   }),
                 },
               ],
@@ -151,7 +151,7 @@ export default tseslint.config(
                 {
                   to: element("service", {
                     captured: { name: "gateway" },
-                    fileInternalPath: "{client,local}.ts",
+                    fileInternalPath: "{client.ts,local.ts,auth/jwt.ts}",
                   }),
                 },
               ],

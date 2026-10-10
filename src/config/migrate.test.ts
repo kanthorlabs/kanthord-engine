@@ -16,6 +16,8 @@ const NEW_KEY = "consecutive_failure_limit";
 const INVALID_FIELD = "system.config.invalid_field";
 const RENAME_CONFLICT = "system.config.rename_conflict";
 const MIGRATED_LIMIT = 4;
+const MIGRATED_VERSION = 2;
+const MIGRATED_LIFETIME = 600;
 
 function oldConfig(): string {
   return `${COMMENT}\n${initialConfig().replace(`${NEW_KEY}: 3`, `${OLD_KEY}: 4`)}`;
@@ -69,4 +71,43 @@ test("migrate refuses a file that holds the old and the new key and changes noth
       error instanceof Diagnostic && error.code === RENAME_CONFLICT,
   );
   assert.equal(readFileSync(path, "utf8"), both);
+});
+
+test("migrate moves the gateway token keys into the nested auth mapping", (t) => {
+  const path = join(temporary(t), "kanthord.yaml");
+  const nested = `  auth:\n    version: 1\n    token_lifetime: 31536000\n`;
+  const flat = initialConfig().replace(
+    nested,
+    `  token_lifetime: ${MIGRATED_LIFETIME}\n  token_version: ${MIGRATED_VERSION}\n`,
+  );
+  assert.notEqual(flat, initialConfig());
+  writePrivate(path, flat);
+  assert.throws(
+    () => loadConfig(path),
+    (error: unknown) =>
+      error instanceof Diagnostic &&
+      error.code === INVALID_FIELD &&
+      error.message.includes(
+        "gateway.token_version: renamed to gateway.auth.version. Run kanthord config migrate.",
+      ) &&
+      error.message.includes(
+        "gateway.token_lifetime: renamed to gateway.auth.token_lifetime. Run kanthord config migrate.",
+      ),
+  );
+  const migration = migrateConfig(path, NOW);
+  assert.deepEqual(migration.changes, [
+    { from: "gateway.token_version", to: "gateway.auth.version" },
+    { from: "gateway.token_lifetime", to: "gateway.auth.token_lifetime" },
+  ]);
+  const migrated = readFileSync(path, "utf8");
+  assert.ok(!migrated.includes("token_version"));
+  assert.ok(
+    migrated.includes(
+      `  auth:\n    version: ${MIGRATED_VERSION}\n    token_lifetime: ${MIGRATED_LIFETIME}\n`,
+    ),
+  );
+  assert.deepEqual(loadConfig(path).gateway.auth, {
+    version: MIGRATED_VERSION,
+    token_lifetime: MIGRATED_LIFETIME,
+  });
 });

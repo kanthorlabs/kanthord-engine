@@ -30,7 +30,7 @@ import {
 } from "../kernel/context.ts";
 import type { GatewayConfig } from "./config.ts";
 import { Diagnostic, asError } from "../kernel/errors.ts";
-import type { Authentication } from "./authentication.ts";
+import type { Authentication } from "./auth/authentication.ts";
 import { GatewayError, respondError } from "./errors.ts";
 import type { Idempotency } from "./idempotency.ts";
 import type { Invocation } from "./invocation.ts";

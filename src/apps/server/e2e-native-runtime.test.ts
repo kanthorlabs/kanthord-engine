@@ -236,6 +236,7 @@ test(
     );
     function machine(binding: string) {
       const args = [
+        "auth",
         "jwt",
         "generate",
         "--project",

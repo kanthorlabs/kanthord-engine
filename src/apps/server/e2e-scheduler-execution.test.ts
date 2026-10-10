@@ -72,6 +72,7 @@ function machineToken(
   assert.ok(projectId);
   assert.ok(binding);
   const args = [
+    "auth",
     "jwt",
     "generate",
     "--project",

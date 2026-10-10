@@ -2,7 +2,7 @@ export const PROGRAM_NAME = "kanthord";
 export const CommandName = {
   Config: "config",
   Serve: "serve",
-  JWT: "jwt",
+  Auth: "auth",
   Gateway: "gateway",
   Worker: "worker",
   Agent: "agent",

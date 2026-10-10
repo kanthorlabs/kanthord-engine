@@ -13,7 +13,7 @@ import type { z } from "zod";
 import { ulid } from "ulid";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { deriveClientSecret } from "../../gateway/local.ts";
+import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import {
   handoverPayloadSchema,
   SecretShape,
@@ -588,7 +588,7 @@ async function setup(
   const keys = deriveHandoverKeys(
     deriveClientSecret(
       f.config.master_key,
-      f.config.gateway.token_version,
+      f.config.gateway.auth.version,
       claims.sub,
     ),
   );
@@ -792,7 +792,7 @@ async function workerBoundaryRoundTrip(h: Awaited<ReturnType<typeof setup>>) {
         token: h.token,
         clientSecret: deriveClientSecret(
           h.f.config.master_key,
-          h.f.config.gateway.token_version,
+          h.f.config.gateway.auth.version,
           claims.sub,
         ),
         executionId: h.execution.execution_id,

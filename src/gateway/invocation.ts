@@ -4,7 +4,7 @@ import { digest } from "../kernel/json.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import { lifecycle } from "../kernel/service.ts";
-import { Authentication } from "./authentication.ts";
+import { Authentication } from "./auth/authentication.ts";
 import {
   isHumanIdentity,
   isMachineIdentity,

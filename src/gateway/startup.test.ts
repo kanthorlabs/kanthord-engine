@@ -6,7 +6,7 @@ import pino from "pino";
 import { decode } from "hono/jwt";
 import { temporary } from "../kernel/test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
-import { KANTHORD_AUTH_USERNAME } from "./local.ts";
+import { KANTHORD_AUTH_USERNAME } from "./auth/jwt.ts";
 import { Store } from "../kernel/store.ts";
 import { configuration } from "./test-support.ts";
 import { gatewayMigrations } from "./index.ts";

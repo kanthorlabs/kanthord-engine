@@ -68,8 +68,11 @@ import { createIdentity } from "../../kernel/identity.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { isString } from "../../kernel/values.ts";
 import { OperationError as GatewayError } from "../../kernel/errors.ts";
-import { KANTHORD_AUTH_USERNAME } from "../../gateway/local.ts";
-import { generateHumanJWT, generateMachineJWT } from "../../gateway/local.ts";
+import { KANTHORD_AUTH_USERNAME } from "../../gateway/auth/jwt.ts";
+import {
+  generateHumanJWT,
+  generateMachineJWT,
+} from "../../gateway/auth/jwt.ts";
 import { HealthRegistry } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 
@@ -463,8 +466,8 @@ export async function gatewayFixture(
     token: (
       await generateHumanJWT(
         config.master_key,
-        config.gateway.token_version,
-        config.gateway.token_lifetime,
+        config.gateway.auth.version,
+        config.gateway.auth.token_lifetime,
       )
     ).token,
     machineToken: async (
@@ -475,8 +478,8 @@ export async function gatewayFixture(
       (
         await generateMachineJWT(
           config.master_key,
-          config.gateway.token_version,
-          config.gateway.token_lifetime,
+          config.gateway.auth.version,
+          config.gateway.auth.token_lifetime,
           { projectId, bindingName },
           name,
         )

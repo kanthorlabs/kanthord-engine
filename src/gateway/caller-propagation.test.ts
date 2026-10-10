@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { directClient } from "./index.ts";
-import { generateHumanJWT } from "./local.ts";
+import { generateHumanJWT } from "./auth/jwt.ts";
 import { gatewayOperations } from "./contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { z } from "zod";
@@ -24,8 +24,8 @@ test("one direct client forwards each call's identity without retaining a previo
   for (const username of usernames) {
     const issued = await generateHumanJWT(
       fixture.config.master_key,
-      fixture.config.gateway.token_version,
-      fixture.config.gateway.token_lifetime,
+      fixture.config.gateway.auth.version,
+      fixture.config.gateway.auth.token_lifetime,
       username,
     );
     const identity = await fixture.gateway.authentication.authenticate(

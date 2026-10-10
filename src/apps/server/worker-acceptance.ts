@@ -146,6 +146,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
   );
   function machine(name: string) {
     const args = [
+      "auth",
       "jwt",
       "generate",
       "--project",

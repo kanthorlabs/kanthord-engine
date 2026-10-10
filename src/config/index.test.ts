@@ -23,7 +23,7 @@ import {
 } from "./index.ts";
 import { writePrivate } from "../kernel/files.ts";
 
-const FIRST_TOKEN_VERSION = 1;
+const FIRST_AUTH_VERSION = 1;
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
@@ -73,14 +73,17 @@ test("service fragments preserve the existing YAML field set", () => {
   assert.deepEqual(Object.keys(config.gateway).sort(), [
     "allowed_hosts",
     "allowed_origins",
+    "auth",
     "base_path",
     "bind",
     "idempotency_ttl",
     "port",
-    "token_lifetime",
-    "token_version",
   ]);
-  assert.equal(config.gateway.token_version, FIRST_TOKEN_VERSION);
+  assert.deepEqual(Object.keys(config.gateway.auth).sort(), [
+    "token_lifetime",
+    "version",
+  ]);
+  assert.equal(config.gateway.auth.version, FIRST_AUTH_VERSION);
   assert.deepEqual(config.gateway.allowed_origins, [
     "http://127.0.0.1:27182",
     "http://localhost:27182",
@@ -407,7 +410,7 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
           port: -1,
           allowed_hosts: null,
           allowed_origins: null,
-          token_lifetime: null,
+          auth: { token_lifetime: null },
         },
       }),
     (error: Error) => {
@@ -421,7 +424,7 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
           "gateway.port",
           "gateway.allowed_hosts",
           "gateway.allowed_origins",
-          "gateway.token_lifetime",
+          "gateway.auth.token_lifetime",
         ]
           .map((path) => `${path}: invalid or missing value.`)
           .join("\n"),
