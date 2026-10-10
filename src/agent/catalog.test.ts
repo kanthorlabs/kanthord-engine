@@ -2,14 +2,29 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import {
+  ARCHITECT_AGENT_PROMPT,
+  COUNCIL_AGENT_PROMPT,
+  DESIGNER_AGENT_PROMPT,
+  PO_AGENT_PROMPT,
   RE_AGENT_PROMPT,
+  SECURITY_AGENT_PROMPT,
   SWE_AGENT_PROMPT,
+  USER_AGENT_PROMPT,
   WORKBENCH_PROMPT,
 } from "./prompt-assets.ts";
 import { AGENT_DECLARATIONS, getAgentDeclaration } from "./catalog.ts";
 
 test("static agent declarations", () => {
-  assert.deepEqual(Object.keys(AGENT_DECLARATIONS), ["swe@1", "re@1"]);
+  assert.deepEqual(Object.keys(AGENT_DECLARATIONS), [
+    "swe@1",
+    "re@1",
+    "council@1",
+    "po@1",
+    "designer@1",
+    "user@1",
+    "architect@1",
+    "security@1",
+  ]);
   assert.deepEqual(getAgentDeclaration("swe@1"), {
     agent_name: "swe@1",
     agent_prompt: SWE_AGENT_PROMPT,
@@ -32,6 +47,29 @@ test("static agent declarations", () => {
       "reasoning_effort",
     ],
   });
+  const councilPrompts = {
+    "council@1": COUNCIL_AGENT_PROMPT,
+    "po@1": PO_AGENT_PROMPT,
+    "designer@1": DESIGNER_AGENT_PROMPT,
+    "user@1": USER_AGENT_PROMPT,
+    "architect@1": ARCHITECT_AGENT_PROMPT,
+    "security@1": SECURITY_AGENT_PROMPT,
+  };
+  for (const [agentName, agentPrompt] of Object.entries(councilPrompts)) {
+    assert.deepEqual(getAgentDeclaration(agentName), {
+      agent_name: agentName,
+      agent_prompt: agentPrompt,
+      host_tools: [],
+      tools: [],
+      overridable_fields: [
+        "agent_provider",
+        "model_identifier",
+        "reasoning_effort",
+      ],
+    });
+    assert.ok(agentPrompt.startsWith("## Role"));
+    assert.ok(agentPrompt.includes(agentName));
+  }
 });
 
 test("agent prompts are valid published UTF-8 assets", () => {
@@ -40,7 +78,18 @@ test("agent prompts are valid published UTF-8 assets", () => {
   const newline = "\n";
   const firstPrintable = 32;
   const deleteCharacter = 127;
-  for (const file of ["base.md", "swe@1.md", "re@1.md", "workbench.md"]) {
+  for (const file of [
+    "base.md",
+    "swe@1.md",
+    "re@1.md",
+    "workbench.md",
+    "council@1.md",
+    "po@1.md",
+    "designer@1.md",
+    "user@1.md",
+    "architect@1.md",
+    "security@1.md",
+  ]) {
     const bytes = readFileSync(
       new URL(`../../static/prompt/${file}`, import.meta.url),
     );
