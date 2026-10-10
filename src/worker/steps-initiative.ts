@@ -13,6 +13,7 @@ import type { StepsInput } from "./steps-objective.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../kernel/context.ts";
 import { runVerifications } from "./verification.ts";
+import { reportFacts } from "./report-facts.ts";
 
 export const REPORT_SUBJECT = "Report on current objective outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
@@ -70,8 +71,9 @@ export async function runStepsInitiative(
       ),
     );
     if (agent.budget.exhausted()) return await run.release(true);
-    const report = agent.lastText();
-    if (!report?.trim()) run.stop(EndReason.ReportAbsent);
+    const assessment = agent.lastText();
+    if (!assessment?.trim()) run.stop(EndReason.ReportAbsent);
+    const report = `${reportFacts(current.objectives, current.outcomes, verification)}\n\n## Assessment\n\n${assessment}`;
     if (!allTerminal((await readObjectives(run)).objectives))
       return await run.release(true);
     await run.submitEvidence(input.claim.node_id, {

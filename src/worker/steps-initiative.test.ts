@@ -83,13 +83,12 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
           body: { assets: { content: { data: string } }[] };
         }) => {
           evidence++;
-          assert.equal(
-            Buffer.from(
-              input.body.assets[0]!.content.data,
-              "base64",
-            ).toString(),
-            scenario.report,
-          );
+          const stored = Buffer.from(
+            input.body.assets[0]!.content.data,
+            "base64",
+          ).toString();
+          assert.ok(stored.startsWith("## Facts recorded by KanthorD"));
+          assert.ok(stored.endsWith(`## Assessment\n\n${scenario.report}`));
           return completed({ evidence: {} });
         },
       },
