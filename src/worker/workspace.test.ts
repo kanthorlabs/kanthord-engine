@@ -96,6 +96,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
   const objectiveId = createIdentity("node");
   const repository = {
     binding_id: createIdentity("binding"),
+    name: "todoapp-repo",
     address: origin,
     ssh_identity: {
       host: "github.com",
@@ -143,7 +144,11 @@ test("workspace preparation refreshes objective branches and creates disposable 
   });
   assert.equal(snapshot.head, pushed);
   workspace.release(snapshot.directory, WorkspaceKind.Execution);
-  const another = { ...repository, binding_id: createIdentity("binding") };
+  const another = {
+    ...repository,
+    binding_id: createIdentity("binding"),
+    name: "other-repo",
+  };
   const initiative = await workspace.prepareInitiative({
     ...common,
     executionId: createIdentity("execution"),
@@ -157,6 +162,8 @@ test("workspace preparation refreshes objective branches and creates disposable 
       commit: base,
     })),
   );
+  for (const name of [repository.name, another.name])
+    assert.ok(existsSync(join(initiative.directory, name, ".git")));
   workspace.release(initiative.directory, WorkspaceKind.Execution);
   const empty = await workspace.prepareInitiative({
     ...common,
@@ -198,6 +205,7 @@ test("a drifted SSH identity stops every workspace preparation before its git op
   };
   const repository = {
     binding_id: createIdentity("binding"),
+    name: "todoapp-repo",
     address: "git@kanthorlabs.github.com:kanthorlabs/kanthord.git",
     ssh_identity: {
       host: "kanthorlabs.github.com",
