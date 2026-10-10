@@ -25,6 +25,7 @@ const NEXT_PAGE_STEP = 1;
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const PULL_REQUEST_STATE_OPEN = "open";
+const MERGEABLE_STATE_CONFLICT = "dirty";
 const MIN_PULL_REQUEST_NUMBER = 1;
 const NEXT_LINK_PATTERN = /<[^>]*>\s*;\s*rel="next"/;
 const API_VERSION_HEADER = "x-github-api-version";
@@ -150,6 +151,7 @@ export const CheckEndState = {
   Expected: "expected",
   Other: "other",
   None: "none",
+  Conflict: "conflict",
 } as const;
 export type CheckEndState = (typeof CheckEndState)[keyof typeof CheckEndState];
 
@@ -193,6 +195,7 @@ const pullRequestStateSchema = z
     state: z.string(),
     merged: z.boolean(),
     merge_commit_sha: z.string().nullable(),
+    mergeable_state: z.string().optional(),
   })
   .superRefine((pullRequest, context) => {
     if (pullRequest.merged && pullRequest.merge_commit_sha === null)
@@ -655,9 +658,11 @@ export class GitHubPlatform {
     }
     return {
       end_state:
-        pullRequest.state === PULL_REQUEST_STATE_OPEN
-          ? CheckEndState.None
-          : CheckEndState.Other,
+        pullRequest.state !== PULL_REQUEST_STATE_OPEN
+          ? CheckEndState.Other
+          : pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT
+            ? CheckEndState.Conflict
+            : CheckEndState.None,
       landed_commits: [],
     };
   }

@@ -150,6 +150,7 @@ export const CheckEndState = {
   Expected: "expected",
   Other: "other",
   None: "none",
+  Conflict: "conflict",
 } as const;
 export const checkEndStateSchema = z.enum(CheckEndState);
 
