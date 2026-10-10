@@ -168,12 +168,14 @@ export function addJWTCommand(program: Command): void {
           options.binding === undefined
             ? await generateHumanJWT(
                 config.master_key,
+                config.gateway.token_version,
                 config.gateway.token_lifetime,
                 username,
                 options.name,
               )
             : await generateMachineJWT(
                 config.master_key,
+                config.gateway.token_version,
                 config.gateway.token_lifetime,
                 { projectId: options.project!, bindingName: options.binding },
                 options.name,
@@ -197,7 +199,11 @@ export function addJWTCommand(program: Command): void {
           const { decode } = await import("hono/jwt");
           const { sub } = decode(token).payload;
           assert.ok(isString(sub));
-          const clientSecret = deriveClientSecret(config.master_key, sub);
+          const clientSecret = deriveClientSecret(
+            config.master_key,
+            config.gateway.token_version,
+            sub,
+          );
           process.stdout.write(
             `token: ${token}\nclient_secret: ${clientSecret}\n`,
           );

@@ -353,6 +353,9 @@ The implemented fields are:
 - `gateway.token_lifetime`: optional Convict `nat` in seconds, default
   `31536000` (one year). Local issuance additionally requires a nonnegative safe
   integer; zero produces an immediately expiring token.
+- `gateway.token_version`: optional positive safe integer, default `1`. It
+  versions the signing key and every client secret. An increment and a server
+  restart invalidate every issued JWT and change every client secret.
 - `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
@@ -690,9 +693,8 @@ client_secret: <secret>
 Each line ends with a newline. Paste the fragment below `endpoint:` in private
 `cli.yaml`. The command derives the client secret from the server `master_key`
 and the new token's `sub`. It uses HKDF-SHA256 with an empty salt, the label
-`"worker/client-secret/v1/" + sub`, and 32 output bytes in canonical base64.
-The `v1` matches the current signing-key label. The code does not yet implement
-`token_version`. See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
+`"worker/client-secret/v" + token_version + "/" + sub`, and 32 output bytes in
+canonical base64. See the [client-secret ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-client-secret).
 The server stores no client secret. Each new machine token has a different
 client secret. Human mode issues no client secret.
 
@@ -731,10 +733,9 @@ the two-line machine fragment, or the `Created <absolute path>` line with
 
 **Implemented:** both modes read the validated whole server configuration,
 derive the signing key using HKDF-SHA-256 with an empty salt and the label
-`gateway/jwt-hs256/v1`, and sign with HS256. Both include `iat` and `exp` in
+`gateway/jwt-hs256/v<token_version>`, and sign with HS256. Both include `iat` and `exp` in
 JWT Unix seconds and a fresh bare ULID `jti`; `exp = iat + gateway.token_lifetime`.
-The [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key)
-sets the target label to `gateway/jwt-hs256/v<token_version>`.
+`token_version` is `gateway.token_version`, under the [Gateway signing key ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-signing-key).
 The CLI has no lifetime, algorithm, issuer, audience, custom-claims, subject-ID,
 or signing-key override flags.
 The [Gateway JWT ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#the-jwt) declares the closed header and claim contract.

@@ -79,7 +79,11 @@ function storeAt(path = ":memory:"): Store {
 async function tokens(config: TestConfig) {
   return {
     token: (
-      await generateHumanJWT(config.master_key, config.gateway.token_lifetime)
+      await generateHumanJWT(
+        config.master_key,
+        config.gateway.token_version,
+        config.gateway.token_lifetime,
+      )
     ).token,
     machineToken: async (
       projectId: string,
@@ -89,6 +93,7 @@ async function tokens(config: TestConfig) {
       (
         await generateMachineJWT(
           config.master_key,
+          config.gateway.token_version,
           config.gateway.token_lifetime,
           { projectId, bindingName },
           name,
@@ -107,7 +112,11 @@ export async function authenticationFixture(
   }).getProperties();
   const store = storeAt();
   t.after(() => store.close());
-  const authentication = new Authentication(config.master_key, lookups);
+  const authentication = new Authentication(
+    config.master_key,
+    config.gateway.token_version,
+    lookups,
+  );
   return { config, store, authentication, ...(await tokens(config)) };
 }
 
@@ -127,6 +136,7 @@ export function composeGateway(options: {
     stores: { [StoreName.Operational]: options.store },
     idempotencyTtl: options.config.gateway.idempotency_ttl,
     masterKey: options.config.master_key,
+    tokenVersion: options.config.gateway.token_version,
     tokenLifetime: options.config.gateway.token_lifetime,
     lookups: options.lookups,
   });

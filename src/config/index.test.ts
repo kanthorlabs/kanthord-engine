@@ -22,6 +22,8 @@ import {
   showConfig,
 } from "./index.ts";
 import { writePrivate } from "../kernel/files.ts";
+
+const FIRST_TOKEN_VERSION = 1;
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
@@ -75,7 +77,9 @@ test("service fragments preserve the existing YAML field set", () => {
     "idempotency_ttl",
     "port",
     "token_lifetime",
+    "token_version",
   ]);
+  assert.equal(config.gateway.token_version, FIRST_TOKEN_VERSION);
   assert.deepEqual(config.gateway.allowed_origins, [
     "http://127.0.0.1:27182",
     "http://localhost:27182",

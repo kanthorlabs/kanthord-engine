@@ -461,7 +461,11 @@ export async function gatewayFixture(
     endpoint,
     request,
     token: (
-      await generateHumanJWT(config.master_key, config.gateway.token_lifetime)
+      await generateHumanJWT(
+        config.master_key,
+        config.gateway.token_version,
+        config.gateway.token_lifetime,
+      )
     ).token,
     machineToken: async (
       projectId: string,
@@ -471,6 +475,7 @@ export async function gatewayFixture(
       (
         await generateMachineJWT(
           config.master_key,
+          config.gateway.token_version,
           config.gateway.token_lifetime,
           { projectId, bindingName },
           name,

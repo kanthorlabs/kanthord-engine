@@ -433,6 +433,7 @@ test("a new invocation loses replay but registration retains its natural-key ide
     registry: fixture.gateway.registry,
     stores: { [StoreName.Operational]: fixture.store },
     masterKey: fixture.config.master_key,
+    tokenVersion: fixture.config.gateway.token_version,
     tokenLifetime: fixture.config.gateway.token_lifetime,
     lookups: fixture.machines,
   });

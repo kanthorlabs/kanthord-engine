@@ -1132,7 +1132,11 @@ test("jwt accepts display names and issues fresh machine identities without open
     const claims = decode(token).payload;
     assert.equal(
       clientSecret,
-      deriveClientSecret(config.master_key, String(claims.sub)),
+      deriveClientSecret(
+        config.master_key,
+        config.gateway.token_version,
+        String(claims.sub),
+      ),
     );
     assert.equal(
       Buffer.from(clientSecret, "base64").length,
@@ -1245,6 +1249,7 @@ test("jwt group, verbose generation, inspection and token precedence", (t) => {
   const machineToken = tokenLine!.slice("token: ".length);
   const machineSecret = deriveClientSecret(
     loadConfig(env.KANTHORD_CONFIG!).master_key,
+    loadConfig(env.KANTHORD_CONFIG!).gateway.token_version,
     String(decode(machineToken).payload.sub),
   );
   assert.equal(tokenLine, `token: ${machineToken}`);

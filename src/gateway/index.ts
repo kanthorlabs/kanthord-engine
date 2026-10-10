@@ -17,10 +17,15 @@ export function createInvocation(options: {
   stores: Record<StoreName, Store>;
   idempotencyTtl?: number;
   masterKey: string;
+  tokenVersion: number;
   tokenLifetime: number;
   lookups?: AuthenticationLookups & { scheduler?: ExecutionLookup };
 }): Invocation {
-  const authentication = new Authentication(options.masterKey, options.lookups);
+  const authentication = new Authentication(
+    options.masterKey,
+    options.tokenVersion,
+    options.lookups,
+  );
   const idempotency = new Idempotency(options.idempotencyTtl);
   return new Invocation(
     options.registry,

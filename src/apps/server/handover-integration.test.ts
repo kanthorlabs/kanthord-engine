@@ -583,7 +583,11 @@ async function setup(
     Buffer.from(token.split(".")[1]!, "base64url").toString("utf8"),
   );
   const keys = deriveHandoverKeys(
-    deriveClientSecret(f.config.master_key, claims.sub),
+    deriveClientSecret(
+      f.config.master_key,
+      f.config.gateway.token_version,
+      claims.sub,
+    ),
   );
   const handover = (
     executionId = execution.execution_id,
@@ -783,7 +787,11 @@ async function workerBoundaryRoundTrip(h: Awaited<ReturnType<typeof setup>>) {
       JSON.stringify({
         endpoint: h.f.endpoint,
         token: h.token,
-        clientSecret: deriveClientSecret(h.f.config.master_key, claims.sub),
+        clientSecret: deriveClientSecret(
+          h.f.config.master_key,
+          h.f.config.gateway.token_version,
+          claims.sub,
+        ),
         executionId: h.execution.execution_id,
         runtimeIdentity: h.runtime_identity,
       }),
