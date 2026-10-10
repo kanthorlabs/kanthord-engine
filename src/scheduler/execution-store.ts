@@ -215,3 +215,29 @@ export function executionRecord(
     claim_state: claimStateOf(row, now),
   };
 }
+
+export function markStalled(tx: Transaction, executionId: string): void {
+  const result = tx.database
+    .prepare("UPDATE scheduler_execution SET stalled = 1 WHERE id = ?")
+    .run(executionId);
+  assert.equal(result.changes, ONE_ROW);
+}
+
+export function consecutiveStalls(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): number {
+  assert.ok(tx.database.isTransaction);
+  const result = tx.database
+    .prepare(
+      `SELECT count(*) AS count FROM scheduler_execution
+    WHERE node_id = ? AND attempt = ? AND stalled = 1
+    AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
+      WHERE node_id = ? AND attempt = ? AND ended_at IS NOT NULL AND stalled = 0), -1)`,
+    )
+    .get(nodeId, attempt, nodeId, attempt)!;
+  const count = Number(result.count);
+  assert.ok(Number.isSafeInteger(count) && count >= NO_ROWS);
+  return count;
+}

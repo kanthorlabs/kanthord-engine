@@ -101,6 +101,9 @@ components:
                     - code
                   additionalProperties: false
                 - type: "null"
+            progress:
+              default: true
+              type: boolean
           required:
             - further_work
           additionalProperties: false

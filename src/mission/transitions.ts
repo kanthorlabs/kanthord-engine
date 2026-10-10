@@ -39,6 +39,7 @@ const NO_ATTEMPT = 0;
 const RESOURCE_KIND_SEGMENT = 0;
 const NO_ELIGIBLE_ACTIONS = 0;
 const NO_CONSECUTIVE_FAILURES = 0;
+const NO_FURTHER_WORK_LIMIT = 0;
 const RELEASE_UNMET = "mission.release.obligation_unmet";
 
 export function claim(
@@ -136,6 +137,7 @@ export function release(
   dependencies: Dependencies,
   execution: { execution_id: string; node_id: string; attempt: number },
   furtherWork: boolean,
+  stalledReleases: number,
   now: number,
 ): void {
   const node = requireNode(tx, execution.node_id);
@@ -163,12 +165,17 @@ export function release(
     )
       refuse(ReleaseObligation.Request);
   }
+  const limit = dependencies.config.further_work_limit;
+  const stalledOut =
+    furtherWork && limit > NO_FURTHER_WORK_LIMIT && stalledReleases >= limit;
   const state =
     node.state === NodeState.Evaluating
       ? NodeState.ExternalRequested
-      : furtherWork
-        ? NodeState.Available
-        : NodeState.Waiting;
+      : stalledOut
+        ? NodeState.Paused
+        : furtherWork
+          ? NodeState.Available
+          : NodeState.Waiting;
   transition(
     tx,
     dependencies,

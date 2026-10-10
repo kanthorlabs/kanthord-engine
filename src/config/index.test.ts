@@ -66,6 +66,7 @@ test("service fragments preserve the existing YAML field set", () => {
   });
   assert.deepEqual(Object.keys(config.mission).sort(), [
     "consecutive_failure_limit",
+    "further_work_limit",
     "rework_limit",
     "text_max_bytes",
   ]);

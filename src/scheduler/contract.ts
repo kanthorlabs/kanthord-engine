@@ -118,6 +118,7 @@ export const executionReleaseSchema = z
   .strictObject({
     further_work: z.boolean(),
     stop: releaseStopSchema.nullable().default(null),
+    progress: z.boolean().default(true),
   })
   .refine((release) => release.stop === null || release.further_work, {
     path: ["stop"],
@@ -206,6 +207,7 @@ export interface MissionTransitions {
     tx: Transaction,
     execution: { execution_id: string; node_id: string; attempt: number },
     furtherWork: boolean,
+    stalledReleases: number,
     now: number,
   ): void;
   failure(

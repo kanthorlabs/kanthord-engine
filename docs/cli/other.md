@@ -362,6 +362,10 @@ The implemented fields are:
 
 - `mission.consecutive_failure_limit`: optional Convict `nat`, default `3`. It
   holds the consecutive failure limit of the Mission Service.
+- `mission.further_work_limit`: optional Convict `nat`, default `3`. It holds
+  the number of consecutive further-work releases of one attempt with
+  `progress: false` before the Mission Service pauses the node. The value `0`
+  turns the limit off.
 - `mission.rework_limit`: optional Convict `nat`, default `2`. It holds the
   rework limit of the Mission Service. The value `0` turns rework off.
 - `mission.text_max_bytes`: optional Convict `nat` in UTF-8 bytes, default

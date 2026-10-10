@@ -43,6 +43,7 @@ import {
 import { getRevision } from "./node-read.ts";
 
 const CONSECUTIVE_FAILURE_LIMIT = 3;
+const FURTHER_WORK_LIMIT = 3;
 const REWORK_LIMIT = 2;
 const TEXT_MAX_BYTES = 32768;
 const FIXTURE_TIME = 100;
@@ -242,6 +243,7 @@ export function missionHarness(
     decoder: { decode: unexpectedCollaboration },
     config: {
       consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
+      further_work_limit: FURTHER_WORK_LIMIT,
       rework_limit: REWORK_LIMIT,
       text_max_bytes: TEXT_MAX_BYTES,
     },

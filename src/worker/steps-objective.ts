@@ -26,13 +26,16 @@ import {
   taskRevisionInstruction,
   criterionRevisionInstruction,
 } from "./judgement.ts";
+import { judgedAt, recordJudged } from "./judged-tasks.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
+const NO_TASKS = 0;
 
 async function finishObjective(
   state: StepsState,
   task: TaskContent | null,
   boundary: TaskBoundary | null,
+  completedTasks: number,
 ): Promise<ExecutionEnd> {
   const furtherWork = boundary !== null && boundary !== TaskBoundary.RunFailed;
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
@@ -75,7 +78,7 @@ async function finishObjective(
         ],
       });
     }
-    return await state.run.release(furtherWork);
+    return await state.run.release(furtherWork, completedTasks > NO_TASKS);
   } finally {
     cleanup.cancel();
   }
@@ -129,14 +132,22 @@ export async function runStepsObjective(
         state,
         checked.budgetEnd.task,
         checked.budgetEnd.boundary,
+        NO_TASKS,
       );
+    let completedTasks = NO_TASKS;
     for (const { task, boundary, instruction } of checked.pending) {
       state.task = task;
       const result = await taskRunner(state, task, boundary, instruction);
       if (result.kind === TaskResultKind.BudgetEnd)
-        return await finishObjective(state, task, result.boundary);
+        return await finishObjective(
+          state,
+          task,
+          result.boundary,
+          completedTasks,
+        );
+      completedTasks++;
     }
-    return await finishObjective(state, null, null);
+    return await finishObjective(state, null, null, completedTasks);
   } catch (error) {
     const stopped = state.run.stopOf(error);
     if (stopped.reason !== EndReason.Revoked) await checkpointOnStop(state);
@@ -222,7 +233,14 @@ export async function runTask(
       return ended(TaskBoundary.RunPassed);
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
-    if (judgement.criterion_met) return { kind: TaskResultKind.Complete };
+    if (judgement.criterion_met) {
+      recordJudged(
+        objectiveDirectoryOf(state),
+        judgedTaskOf(state, task),
+        state.head,
+      );
+      return { kind: TaskResultKind.Complete };
+    }
     instruction = criterionRevisionInstruction(judgement.rationale);
   }
   return ended(boundary);
@@ -296,6 +314,18 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
   return verification;
 }
 
+function objectiveDirectoryOf(state: StepsState): string {
+  return state.input.workspaces.objectiveKey(state.input.claim.node_id);
+}
+
+function judgedTaskOf(state: StepsState, task: TaskContent) {
+  return {
+    attempt: state.input.claim.attempt,
+    revision: state.input.claim.pinned_revision,
+    taskId: task.id,
+  };
+}
+
 export interface PendingTask {
   task: TaskContent;
   boundary: TaskBoundary;
@@ -320,6 +350,12 @@ export async function startCheck(state: StepsState): Promise<{
       pending.push({ task, boundary, instruction: null });
       continue;
     }
+    if (
+      judgedAt(objectiveDirectoryOf(state), judgedTaskOf(state, task)) ===
+        state.head &&
+      !state.priorRationale?.includes(task.id)
+    )
+      continue;
     if (state.priorRationale?.includes(task.id)) {
       pending.push({
         task,
@@ -344,6 +380,12 @@ export async function startCheck(state: StepsState): Promise<{
       return { pending, budgetEnd: { task, boundary } };
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
+    if (judgement.criterion_met)
+      recordJudged(
+        objectiveDirectoryOf(state),
+        judgedTaskOf(state, task),
+        state.head,
+      );
     if (!judgement.criterion_met)
       pending.push({
         task,

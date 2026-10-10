@@ -11,6 +11,7 @@ import {
 } from "./test-support.ts";
 import {
   insertExecution,
+  markStalled,
   readExecution,
   claimStateOf,
 } from "./execution-store.ts";
@@ -23,6 +24,9 @@ import {
 import { EXECUTION_NOT_RUNNING } from "./settlement.ts";
 
 const WAKE_CALL_COUNT = 1;
+const NO_STALLS = 0;
+const PRIOR_STALLS = 2;
+const CURRENT_STALL = 1;
 const FIRST_FAILURE = 1;
 const RELEASE_ROUTING = "release";
 const STOP: ReleaseStop = {
@@ -47,13 +51,21 @@ function harness(t: TestContext) {
     },
     commit: (write) => h.store.transaction(write),
   };
-  const release = (furtherWork = false, stop?: ReleaseStop) =>
+  const release = (
+    furtherWork = false,
+    stop?: ReleaseStop,
+    progress?: boolean,
+  ) =>
     h.invoke(
       "executionRelease",
       {
         params: { execution_id: row.execution_id },
         query: {},
-        body: { further_work: furtherWork, ...(stop && { stop }) },
+        body: {
+          further_work: furtherWork,
+          ...(stop && { stop }),
+          ...(progress !== undefined && { progress }),
+        },
       },
       caller,
     );
@@ -83,9 +95,30 @@ test("release routes once, ends at the transaction reading and wakes after commi
       attempt: h.row.attempt,
     },
     true,
+    NO_STALLS,
     FIXTURE_NOW,
   ]);
   assert.deepEqual(wakes, [h.row.project_id]);
+});
+
+test("a further-work release without progress routes the count of consecutive stalled releases", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) => {
+    for (let index = 0; index < PRIOR_STALLS; index++) {
+      const prior = executionFixture({
+        node_id: h.row.node_id,
+        project_id: h.row.project_id,
+        attempt: h.row.attempt,
+        ended_at: FIXTURE_NOW,
+      });
+      insertExecution(tx, prior);
+      markStalled(tx, prior.execution_id);
+    }
+  });
+  await h.release(true, undefined, false);
+  assert.equal(h.calls[0]!.arguments[3], PRIOR_STALLS + CURRENT_STALL);
 });
 
 test("Mission refusal rolls back all release writes and sends no wake", async (t) => {
@@ -185,6 +218,6 @@ test("the release input refuses a stop with no further work", () => {
   );
   assert.deepEqual(
     input.parse({ params, query: {}, body: { further_work: false } }).body,
-    { further_work: false, stop: null },
+    { further_work: false, stop: null, progress: true },
   );
 });

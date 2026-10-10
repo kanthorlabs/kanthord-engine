@@ -233,14 +233,14 @@ export class ExecutionRun {
     return answer.items;
   }
 
-  async release(furtherWork: boolean): Promise<ExecutionEnd> {
+  async release(furtherWork: boolean, progress = true): Promise<ExecutionEnd> {
     await this.settleCredentials();
     await this.call(async (options) => {
       const result = await this.clients.scheduler.executionRelease(
         {
           params: { execution_id: this.claim.execution_id },
           query: {},
-          body: { further_work: furtherWork },
+          body: { further_work: furtherWork, progress },
         },
         options,
       );

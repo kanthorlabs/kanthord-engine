@@ -207,6 +207,7 @@ export interface MissionTransitions {
     tx: Transaction,
     execution: { execution_id: string; node_id: string; attempt: number },
     furtherWork: boolean,
+    stalledReleases: number,
     now: number,
   ): void;
   failure(

@@ -77,7 +77,7 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
         kind: "released",
         furtherWork: false,
       });
-      assert.deepEqual(releases, [{ further_work: false }]);
+      assert.deepEqual(releases, [{ further_work: false, progress: true }]);
     } else {
       assert.deepEqual(
         await executionBoundary(run, () => requestAndRelease(run)),

@@ -663,7 +663,7 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
     kind: "released",
     furtherWork: true,
   });
-  assert.deepEqual(bodies, [{ further_work: true }]);
+  assert.deepEqual(bodies, [{ further_work: true, progress: false }]);
   const branch = `refs/heads/${h.nodeBranch}`;
   assert.match(
     await simpleGit(h.bare).raw(["log", "-1", "--format=%s", branch]),
@@ -673,6 +673,30 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
     await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
     PARTIAL_WORK,
   );
+});
+
+test("the start check skips the judgement of a task judged met at the current head", async (t) => {
+  const current = task("judged", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  assert.deepEqual((await startCheck(h)).pending, []);
+  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
+  assert.deepEqual((await startCheck(h)).pending, []);
+  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
+  h.priorRationale = `Unmet:\n- ${current.id}: still open`;
+  const reworked = await startCheck(h);
+  assert.deepEqual(
+    reworked.pending.map((pending) => pending.task.id),
+    [current.id],
+  );
+  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
 });
 
 test("the start check revises a task that the prior rationale names without a judgement", async (t) => {

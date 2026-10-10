@@ -94,7 +94,10 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
       },
       scheduler: {
         executionRelease: async (input: { body: unknown }) => {
-          assert.deepEqual(input.body, { further_work: scenario.further });
+          assert.deepEqual(input.body, {
+            further_work: scenario.further,
+            progress: true,
+          });
           return completed({});
         },
       },
