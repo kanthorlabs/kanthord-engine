@@ -14,6 +14,7 @@ import {
   CustodyComponent,
   custodyMigrations,
   deriveEnvelopeKey,
+  enforceMasterKey,
   grantFacts,
 } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
@@ -122,6 +123,7 @@ import {
 } from "../../kernel/context.ts";
 
 export type { RepositoryConnector } from "../../project/contract.ts";
+export { enforceMasterKey, verifyMasterKey } from "../../custody/index.ts";
 
 function resultOf<T>(result: OperationResult<T>): T {
   if (result.type === OperationResultType.Completed) return result.data;
@@ -723,6 +725,7 @@ export class Server implements Service {
           `${this.store.path}: the database has pending migrations. Run kanthord upgrade.`,
         );
       this.store.migrate(serverMigrations);
+      enforceMasterKey(this.store, config.master_key, this.path);
       throwIfCancelled(this.shutdown);
       const {
         scheduler,

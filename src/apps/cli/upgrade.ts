@@ -14,9 +14,10 @@ export async function upgrade(
   write: (line: string) => void,
   now: Date = new Date(),
 ): Promise<void> {
-  const { readConfig } = await import("../../config/index.ts");
+  const { configuration, readConfig } = await import("../../config/index.ts");
+  const { parseMapping } = await import("../../kernel/yaml.ts");
   const { upgradeConfig } = await import("../../config/upgrade.ts");
-  const { serverMigrations, DATABASE_FILE } =
+  const { serverMigrations, DATABASE_FILE, verifyMasterKey } =
     await import("../server/index.ts");
   const original = readConfig(path);
   const config = upgradeConfig(original);
@@ -26,6 +27,13 @@ export async function upgrade(
     : null;
   try {
     const pending = store?.plan(serverMigrations).pending ?? [];
+    if (store)
+      verifyMasterKey(
+        store,
+        configuration(parseMapping(config.content ?? original)).getProperties()
+          .master_key,
+        path,
+      );
     if (config.content === null && !pending.length) {
       write(`Up to date: ${path}`);
       return;

@@ -17,4 +17,17 @@ const createCredentialTable: Migration = (database) => {
   `);
 };
 
-export const custodyMigrations: readonly Migration[] = [createCredentialTable];
+const createMasterKeyTable: Migration = (database) => {
+  database.exec(`
+    CREATE TABLE custody_master_key (
+      id INTEGER NOT NULL PRIMARY KEY,
+      verifier BLOB NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+};
+
+export const custodyMigrations: readonly Migration[] = [
+  createCredentialTable,
+  createMasterKeyTable,
+];

@@ -522,6 +522,61 @@ test("serve rejects unsafe owned directories/files and releases earlier resource
   assert.deepEqual(readdirSync(data), ["kanthord.db"]);
 });
 
+const MASTER_KEY_ROWS = 1;
+
+test("serve refuses another master_key against an existing database and writes nothing", async (t) => {
+  const paths = layout(temporary(t));
+  const listener = createServer();
+  await new Promise<void>((resolve) =>
+    listener.listen(0, "127.0.0.1", resolve),
+  );
+  t.after(
+    () => new Promise<void>((resolve) => listener.close(() => resolve())),
+  );
+  const address = listener.address();
+  assert.ok(address && !isString(address));
+  paths.config.gateway.port = address.port;
+  const serve = () =>
+    spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
+      ],
+      { env: paths.env, encoding: "utf8", timeout: 10000 },
+    );
+  const rows = () => {
+    const store = new Store(paths.database);
+    const snapshot = {
+      keys: store.database.prepare("SELECT * FROM custody_master_key").all(),
+      history: store.database.prepare("SELECT * FROM migration").all(),
+    };
+    store.close();
+    return snapshot;
+  };
+  writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
+  assert.match(serve().stderr, /cannot bind/);
+  const recorded = rows();
+  assert.equal(recorded.keys.length, MASTER_KEY_ROWS);
+
+  const foreign = {
+    ...paths.config,
+    master_key: Buffer.alloc(32, 7).toString("base64"),
+  };
+  writePrivate(paths.env.KANTHORD_CONFIG!, stringify(foreign), true);
+  const refused = serve();
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, /system\.config\.master_key_mismatch/);
+  assert.match(refused.stderr, /Restore the configuration file/);
+  assert.doesNotMatch(refused.stderr, new RegExp(foreign.master_key));
+  assert.deepEqual(rows(), recorded);
+
+  writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
+  assert.match(serve().stderr, /cannot bind/);
+  assert.deepEqual(rows(), recorded);
+});
+
 test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains and releases the database", async (t) => {
   const paths = layout(temporary(t));
   const child = spawn(

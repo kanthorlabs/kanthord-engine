@@ -11,7 +11,11 @@ import {
 import { writePrivate } from "../../kernel/files.ts";
 import { Store } from "../../kernel/store.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { DATABASE_FILE, serverMigrations } from "../server/index.ts";
+import {
+  DATABASE_FILE,
+  enforceMasterKey,
+  serverMigrations,
+} from "../server/index.ts";
 import { ExitCode } from "./constants.ts";
 
 const entry = new URL("../../main.ts", import.meta.url).href;
@@ -153,4 +157,46 @@ test("upgrade refuses a configuration version newer than the binary and writes n
   assert.match(result.stderr, /system\.config\.version_ahead/);
   assert.equal(readFileSync(paths.config, "utf8"), newer);
   assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), []);
+});
+
+test("upgrade refuses another master_key before the backups and the migrations", (t) => {
+  const paths = layout(temporary(t));
+  const otherService = serverMigrations.find(
+    ({ service, migrations }) =>
+      service !== BEHIND_SERVICE.service && migrations.length,
+  )!;
+  const store = new Store(paths.database);
+  store.migrate(
+    serverMigrations.map((entry) =>
+      entry.service === otherService.service
+        ? { ...entry, migrations: entry.migrations.slice(0, -1) }
+        : entry,
+    ),
+  );
+  enforceMasterKey(store, Buffer.alloc(32, 1).toString("base64"), paths.config);
+  const history = store.database.prepare("SELECT * FROM migration").all();
+  store.close();
+  const foreign = currentConfig().replace(
+    /^master_key: .*$/m,
+    `master_key: ${Buffer.alloc(32, 2).toString("base64")}`,
+  );
+  writePrivate(paths.config, foreign);
+
+  const refused = run(paths.env, "upgrade");
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, /system\.config\.master_key_mismatch/);
+  assert.match(refused.stderr, /Restore the configuration file/);
+  assert.equal(readFileSync(paths.config, "utf8"), foreign);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_CONFIG_HOME!, "kanthord")), [
+    "kanthord.yaml",
+  ]);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+  const after = new Store(paths.database);
+  assert.deepEqual(
+    after.database.prepare("SELECT * FROM migration").all(),
+    history,
+  );
+  after.close();
 });

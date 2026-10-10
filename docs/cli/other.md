@@ -341,6 +341,8 @@ The implemented fields are:
   with `system.config.version_behind` or `system.config.version_ahead`.
 - `master_key`: required canonical base64 encoding of exactly 32 bytes. There
   is no usable default. `config init` generates it using `crypto.randomBytes`.
+  The first start records a verifier of it in the database. A later start or
+  `upgrade` with another value fails with `system.config.master_key_mismatch`.
 - `log.level`: optional enum `trace|debug|info|warn|error|fatal`, default `info`.
 - `log.destination`: optional enum `stderr|file`, default `stderr`; `file` uses
   `kanthord.log` in the XDG state directory.
@@ -956,6 +958,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `system.database.backup_failed`                  | The database backup cannot be written, or its path exists.                                                              | upgrade                                                                    |
 | local           | `system.database.migration.incompatible_history` | Stored migrations differ from the daemon migration list.                                                                | serve server, upgrade                                                      |
 | local           | `system.database.migration.pending`              | A database with a recorded migration has a pending migration. Run `kanthord upgrade`.                                   | serve server                                                               |
+| local           | `system.config.master_key_mismatch`              | `master_key` does not match the database. Restore the configuration file that created it, or the matching backup.       | serve server                                                               |
 | local           | `system.database.open_failed`                    | The operational SQLite store cannot open.                                                                               | serve server                                                               |
 | local           | `system.files.create_failed`                     | A private state or configuration directory cannot be created.                                                           | config init, serve server, auth jwt generate --output                      |
 | local           | `system.files.inspect_failed`                    | The process cannot inspect a required private file or directory.                                                        | config commands, auth jwt generate, serve server, serve worker             |

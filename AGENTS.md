@@ -94,6 +94,7 @@ engine/
 │   │   ├── names.ts            # Credential name form and reserved names
 │   │   ├── service.ts          # Record functions, suitability, release, handover, and inventory
 │   │   ├── payload.ts         # Normalized execution credential and stored secret conversion
+│   │   ├── key-check.ts       # master_key record: verifier, start enforcement, and read-only upgrade check
 │   │   ├── execution-store.ts # Isolated execution credential view and serialized refresh reports
 │   │   ├── workbench-store.ts # Workbench credential view over the newest live revision
 │   │   └── client.ts          # Public execution credential store builder, error and type
