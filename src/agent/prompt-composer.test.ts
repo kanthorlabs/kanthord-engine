@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderWorkPrompt } from "./prompt-composer.ts";
+import { SHIPPED_TEMPLATES } from "./prompt-templates.ts";
 
 test("work prompts retain commands and exact text with no tag", () => {
-  const work = renderWorkPrompt({
+  const work = renderWorkPrompt(SHIPPED_TEMPLATES, {
     node_id: "node",
     revision: 3,
     content: {

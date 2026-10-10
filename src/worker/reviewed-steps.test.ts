@@ -34,6 +34,7 @@ import {
   criterionRevisionInstruction,
   repairInstruction,
 } from "./judgement.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
 const JUDGEMENT =
@@ -305,7 +306,7 @@ test("two review replies without the review line end the review and keep the tas
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
   assert.deepEqual(reviewer.instructions.slice(1), [
-    repairInstruction(REVIEW_MARKER),
+    repairInstruction(SHIPPED_TEMPLATES, REVIEW_MARKER),
   ]);
   assert.equal(reviewer.closed(), FIRST_ROUND);
 });
@@ -331,7 +332,10 @@ test("one review reply without the review line gets a repair turn and the repair
     null,
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
-  assert.equal(reviewer.instructions[1], repairInstruction(REVIEW_MARKER));
+  assert.equal(
+    reviewer.instructions[1],
+    repairInstruction(SHIPPED_TEMPLATES, REVIEW_MARKER),
+  );
   assert.ok(reviewer.instructions[2]!.includes(JSON.stringify([BLOCKER])));
   assert.equal(reviewer.closed(), SECOND_ROUND);
 });
@@ -344,6 +348,7 @@ test("a start-check revision instruction opens the first work turn of a reviewed
   ]);
   const reviewer = fakeReviewer(h.budget, [CLEAN_REVIEW]);
   const revision = criterionRevisionInstruction(
+    SHIPPED_TEMPLATES,
     "The edge case stays unhandled",
   );
   const result = await reviewedTaskRunner(reviewer.sessions)(

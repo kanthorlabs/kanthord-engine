@@ -201,6 +201,7 @@ export async function runTask(
       boundary = TaskBoundary.RunFailed;
       if (budget.exhausted()) return ended(TaskBoundary.RunFailed);
       instruction = taskRevisionInstruction(
+        state.input.setup.templates,
         verification,
         task.content.verifications,
       );
@@ -210,10 +211,11 @@ export async function runTask(
     if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
     await state.agent.instruct(
       taskWork(state, task),
-      taskJudgementInstruction(task),
+      taskJudgementInstruction(state.input.setup.templates, task),
     );
     if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
     const judgement = await parseRepaired(
+      state.input.setup.templates,
       state.agent,
       taskWork(state, task),
       taskJudgementSchema,
@@ -223,7 +225,10 @@ export async function runTask(
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
     if (judgement.criterion_met) return { kind: TaskResultKind.Complete };
-    instruction = criterionRevisionInstruction(judgement.rationale);
+    instruction = criterionRevisionInstruction(
+      state.input.setup.templates,
+      judgement.rationale,
+    );
   }
   return ended(boundary);
 }
@@ -264,7 +269,7 @@ export function prepareStepsWorkspace(input: StepsInput, run: ExecutionRun) {
 }
 
 export function taskWork(state: StepsState, task: TaskContent) {
-  return renderWorkPrompt({
+  return renderWorkPrompt(state.input.setup.templates, {
     node_id: task.id,
     revision: state.input.claim.pinned_revision,
     content: task.content,
@@ -322,12 +327,17 @@ export async function startCheck(state: StepsState): Promise<{
     }
     await state.agent.instruct(
       taskWork(state, task),
-      taskJudgementInstruction(task, state.priorRationale),
+      taskJudgementInstruction(
+        state.input.setup.templates,
+        task,
+        state.priorRationale,
+      ),
     );
     if (state.agent.budget.exhausted()) {
       return { pending, budgetEnd: { task, boundary } };
     }
     const judgement = await parseRepaired(
+      state.input.setup.templates,
       state.agent,
       taskWork(state, task),
       taskJudgementSchema,
@@ -343,7 +353,10 @@ export async function startCheck(state: StepsState): Promise<{
         instruction:
           state.priorRationale === null
             ? null
-            : criterionRevisionInstruction(state.priorRationale),
+            : criterionRevisionInstruction(
+                state.input.setup.templates,
+                state.priorRationale,
+              ),
       });
   }
   return { pending, budgetEnd: null };

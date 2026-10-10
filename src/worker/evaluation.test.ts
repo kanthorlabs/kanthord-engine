@@ -15,6 +15,7 @@ import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { ActionResultKind } from "./contract.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
@@ -290,11 +291,16 @@ test("evaluation writes failed-verification assessments without inference and ga
         budget: {
           exhausted: () =>
             scenario.budgetEndsOnRepair === true &&
-            instructions.at(-1) === repairInstruction(JUDGEMENT_MARKER),
+            instructions.at(-1) ===
+              repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
         },
         instruct: async (_work: WorkPrompt, instruction: string) => {
           instructions.push(instruction);
-          if (instruction === repairInstruction(JUDGEMENT_MARKER)) return;
+          if (
+            instruction ===
+            repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER)
+          )
+            return;
           assert.ok(instruction.includes(assetId));
           if (scenario.initiative) {
             assert.match(instruction, /child-outcome/);
@@ -328,7 +334,8 @@ test("evaluation writes failed-verification assessments without inference and ga
       });
     assert.equal(opens, scenario.opens);
     assert.equal(
-      instructions.at(-1) === repairInstruction(JUDGEMENT_MARKER),
+      instructions.at(-1) ===
+        repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
       scenario.repaired === true,
     );
     assert.equal(

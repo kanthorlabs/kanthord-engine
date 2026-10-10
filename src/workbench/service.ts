@@ -34,6 +34,7 @@ import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
 import type { ResolvedLayer } from "../agent/prompt-layers.ts";
+import type { PromptTemplates } from "../agent/contract.ts";
 import {
   systemPrompt,
   PromptConsumer,
@@ -93,6 +94,7 @@ export interface Dependencies {
   hostHome?: string;
   agentPrompt: {
     compose(agentName: string, context: Context): Promise<ResolvedLayer[]>;
+    templates(context: Context): Promise<PromptTemplates>;
   };
   agentConfiguration: {
     validateEntry(
@@ -356,8 +358,9 @@ export class WorkbenchService implements Service {
         session.agentName,
         context,
       );
-      const prompt = systemPrompt(layers, PromptConsumer.Workbench);
-      const pins = pinnedLayers(workingTexts(layers));
+      const templates = await this.dependencies.agentPrompt.templates(context);
+      const prompt = systemPrompt(layers, PromptConsumer.Workbench, templates);
+      const pins = pinnedLayers(workingTexts(layers, templates));
       const builtin = builtinTools(
         await loadPi(),
         session.agentName,

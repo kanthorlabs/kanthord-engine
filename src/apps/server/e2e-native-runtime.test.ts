@@ -66,6 +66,7 @@ import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
+import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
 const SUCCESSFUL_EXIT = 0;
 const ZERO_BYTE = 0;
@@ -430,7 +431,7 @@ test(
       });
       assert.ok(
         runtimeX.setup.agents[0]!.prompt.final.endsWith(
-          framing(PromptConsumer.Worker),
+          framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
         ),
       );
       assert.ok(
@@ -499,7 +500,7 @@ test(
     await t.test(
       "E07.5 layered inference and execution credentials",
       async () => {
-        const work = renderWorkPrompt(runtimeX.revision);
+        const work = renderWorkPrompt(SHIPPED_TEMPLATES, runtimeX.revision);
         const turns = t.mock.method(agent.budget, "turnEnded");
         await agent.prompt(work);
         assert.ok(existsSync(join(prepared.directory, "hello.txt")));
@@ -508,7 +509,9 @@ test(
         for (const call of provider.calls) {
           assert.equal(call.apiKey, SECRET);
           assert.ok(
-            call.systemPrompt?.includes(framing(PromptConsumer.Worker)),
+            call.systemPrompt?.includes(
+              framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+            ),
           );
           assert.ok(
             call.systemPrompt?.includes(
@@ -659,7 +662,9 @@ test(
       });
       try {
         const turns = t.mock.method(labAgent.budget, "turnEnded");
-        await labAgent.prompt(renderWorkPrompt(runtimeY.revision));
+        await labAgent.prompt(
+          renderWorkPrompt(SHIPPED_TEMPLATES, runtimeY.revision),
+        );
         assert.equal(labAgent.budget.exhausted(), true);
         assert.equal(fake.calls.length, SINGLE_CALL);
         assert.equal(turns.mock.callCount(), SINGLE_TURN);

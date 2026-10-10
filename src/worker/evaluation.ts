@@ -71,14 +71,14 @@ async function judge(
     };
   const agent = await openAgent(directory);
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
-  const work = renderWorkPrompt({
+  const work = renderWorkPrompt(input.setup.templates, {
     node_id: input.claim.node_id,
     revision: input.claim.pinned_revision,
     content: revision.content,
   });
   await agent.instruct(
     work,
-    evaluationInstruction({
+    evaluationInstruction(input.setup.templates, {
       tasks: revision.tasks ?? [],
       tested_input: verification.tested_input,
       evidence,
@@ -86,7 +86,12 @@ async function judge(
     }),
   );
   if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
-  const judgement = await parseRepaired(agent, work, evaluationJudgementSchema);
+  const judgement = await parseRepaired(
+    input.setup.templates,
+    agent,
+    work,
+    evaluationJudgementSchema,
+  );
   if (judgement === ReplyRepair.BudgetEnd)
     return run.stop(EndReason.AssessmentAbsent);
   if (judgement === ReplyRepair.Invalid)

@@ -34,6 +34,9 @@ importers:
       graphology:
         specifier: 0.26.0
         version: 0.26.0(graphology-types@0.24.8)
+      handlebars:
+        specifier: 4.7.9
+        version: 4.7.9
       hono:
         specifier: 4.13.3
         version: 4.13.3

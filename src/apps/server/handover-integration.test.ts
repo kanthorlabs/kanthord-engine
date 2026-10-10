@@ -52,6 +52,7 @@ import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
+import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
 const SECRET = "test_handover-integration-secret-one";
 const REFRESHED = "test_handover-integration-secret-two";
@@ -135,7 +136,9 @@ for (const adapter of ["direct", "http"] as const) {
     });
     assert.equal(answer.agents[0]!.metadata, null);
     assert.ok(
-      answer.agents[0]!.prompt.final.endsWith(framing(PromptConsumer.Worker)),
+      answer.agents[0]!.prompt.final.endsWith(
+        framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+      ),
     );
     assert.ok(answer.agents[0]!.prompt.final.includes(SWE_AGENT_PROMPT));
     assert.deepEqual(answer.repositories[0], {

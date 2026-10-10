@@ -37,6 +37,7 @@ import {
   runStepsObjective,
   verifyTask,
 } from "./steps-objective.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
 
@@ -578,7 +579,7 @@ test("one invalid task judgement gets a repair turn and a valid second reply com
   assert.deepEqual(await runTask(h, current), { kind: "complete" });
   assert.ok(
     JSON.stringify(h.provider.calls.at(-1)).includes(
-      repairInstruction(JUDGEMENT_MARKER),
+      repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
     ),
   );
 });
@@ -641,7 +642,10 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
     const instruct = h.agent.instruct.bind(h.agent);
     h.agent.instruct = async (work, instruction) => {
       await instruct(work, instruction);
-      if (instruction !== repairInstruction(JUDGEMENT_MARKER)) return;
+      if (
+        instruction !== repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER)
+      )
+        return;
       writeFileSync(join(h.directory, PARTIAL_WORK), PARTIAL_WORK);
       h.agent.budget.exhausted = () => true;
     };
@@ -697,7 +701,7 @@ test("the start check judges a task against the prior rationale and revises it w
       `Previous judgement: ${rationale}. Judge whether the task criterion is met now.`,
     ),
   );
-  const revision = criterionRevisionInstruction(rationale);
+  const revision = criterionRevisionInstruction(SHIPPED_TEMPLATES, rationale);
   assert.deepEqual(checked.pending, [
     { task: current, boundary: "run_passed", instruction: revision },
   ]);

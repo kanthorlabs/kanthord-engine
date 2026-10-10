@@ -373,6 +373,7 @@ export function composeServices(options: {
     config: options.config.worker,
     agentPrompt: {
       compose: (name, context) => agent.composePrompt(name, context),
+      templates: (context) => agent.promptTemplates(context),
     },
     store: options.store,
     workerBindingOf: (tx, projectId, resourceIdentity) =>
@@ -552,6 +553,7 @@ export function composeServices(options: {
     stateDirectory: options.stateDirectory,
     agentPrompt: {
       compose: (name, context) => agent.composePrompt(name, context),
+      templates: (context) => agent.promptTemplates(context),
     },
     agentConfiguration: {
       validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),

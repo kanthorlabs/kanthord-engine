@@ -34,6 +34,7 @@ import {
   SETUP_PROMPT,
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -48,7 +49,7 @@ const TOOL_RESULT = "toolResult";
 const START_POLLS = 100;
 const JUDGED = "judged";
 const TRANSCRIPT_MESSAGES = 5;
-const WORK = renderWorkPrompt({
+const WORK = renderWorkPrompt(SHIPPED_TEMPLATES, {
   node_id: NODE,
   revision: 1,
   content: {

@@ -4,6 +4,8 @@ import type { TaskContent } from "../mission/contract.ts";
 import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import type { Verification, TestedInput } from "./verification.ts";
 import type { NativeAgent } from "./native-agent.ts";
+import { PromptTemplate, type PromptTemplates } from "../agent/contract.ts";
+import { renderTemplate } from "../agent/prompt-templates.ts";
 
 export const JUDGEMENT_MARKER = "kanthord-judgement:";
 const SUCCESS_EXIT = 0;
@@ -45,12 +47,16 @@ export const ReplyRepair = {
 } as const;
 export type ReplyRepair = (typeof ReplyRepair)[keyof typeof ReplyRepair];
 
-export function repairInstruction(marker: string): string {
+export function repairInstruction(
+  templates: PromptTemplates,
+  marker: string,
+): string {
   assert.ok(marker);
-  return `The reply holds no valid ${marker} line. Reply again with exactly one such line.`;
+  return renderTemplate(templates, PromptTemplate.Repair, { marker });
 }
 
 export async function parseRepaired<T extends z.ZodType>(
+  templates: PromptTemplates,
   agent: NativeAgent,
   work: WorkPrompt,
   schema: T,
@@ -58,7 +64,7 @@ export async function parseRepaired<T extends z.ZodType>(
 ): Promise<z.output<T> | ReplyRepair> {
   const reply = parseJudgement(agent.lastText(), schema, marker);
   if (reply !== null) return reply;
-  await agent.instruct(work, repairInstruction(marker));
+  await agent.instruct(work, repairInstruction(templates, marker));
   if (agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
   return (
     parseJudgement(agent.lastText(), schema, marker) ?? ReplyRepair.Invalid
@@ -66,16 +72,18 @@ export async function parseRepaired<T extends z.ZodType>(
 }
 
 export function taskJudgementInstruction(
+  templates: PromptTemplates,
   task: TaskContent,
   priorRationale: string | null = null,
 ): string {
   assert.ok(task.id);
   assert.ok(task.content.criterion);
-  const prior =
-    priorRationale === null
-      ? ""
-      : `\nPrevious judgement: ${priorRationale}. Judge whether the task criterion is met now.`;
-  return `Judge whether the task criterion is met, respecting the default standard. Task ${task.id}: ${task.content.criterion}${prior}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"criterion_met": true, "rationale": "Explain your judgement"}`;
+  return renderTemplate(templates, PromptTemplate.TaskJudgement, {
+    task_id: task.id,
+    criterion: task.content.criterion,
+    prior_rationale: priorRationale,
+    marker: JUDGEMENT_MARKER,
+  });
 }
 
 export function failedVerificationRationale(
@@ -100,31 +108,57 @@ export function failedVerificationRationale(
 }
 
 export function taskRevisionInstruction(
+  templates: PromptTemplates,
   verification: Verification,
   commands: readonly string[],
 ): string {
-  return `Revise the task work to satisfy its criterion and verifications. ${failedVerificationRationale(verification, commands)}\nVerification results: ${JSON.stringify(verification.results)}`;
+  return renderTemplate(templates, PromptTemplate.TaskRevision, {
+    rationale: failedVerificationRationale(verification, commands),
+    results: verification.results,
+  });
 }
 
-export function criterionRevisionInstruction(rationale: string): string {
+export function criterionRevisionInstruction(
+  templates: PromptTemplates,
+  rationale: string,
+): string {
   assert.ok(rationale.trim());
   assert.ok(rationale.length);
-  return `Revise the task work to meet its criterion. Previous judgement: ${rationale}`;
+  return renderTemplate(templates, PromptTemplate.CriterionRevision, {
+    rationale,
+  });
 }
 
-export function evaluationInstruction(input: {
-  tasks: readonly TaskContent[];
-  tested_input: TestedInput;
-  evidence: unknown;
-  objectives?: unknown;
-}): string {
-  return `Judge the evidence against the node criterion in the pinned work prompt, every current task criterion below, and the default standard. Inspect the supporting assets at the workspace-relative paths in the review bundle. Weigh each current objective outcome in the supplied objective context. Give one result: success, criterion-not-met, or undetermined. A default-standard violation requires criterion-not-met. Name each current task whose criterion is unmet in the rationale.\nTasks: ${JSON.stringify(input.tasks.map((task) => ({ id: task.id, criterion: task.content.criterion })))}\nTested input: ${JSON.stringify(input.tested_input)}\nEvidence: ${JSON.stringify(input.evidence)}\nCurrent objective context: ${JSON.stringify(input.objectives ?? null)}\nEnd with exactly:\n${JUDGEMENT_MARKER} {"result": "success", "rationale": "Explain your judgement"}`;
+export function evaluationInstruction(
+  templates: PromptTemplates,
+  input: {
+    tasks: readonly TaskContent[];
+    tested_input: TestedInput;
+    evidence: unknown;
+    objectives?: unknown;
+  },
+): string {
+  return renderTemplate(templates, PromptTemplate.Evaluation, {
+    tasks: input.tasks.map((task) => ({
+      id: task.id,
+      criterion: task.content.criterion,
+    })),
+    tested_input: input.tested_input,
+    evidence: input.evidence,
+    objectives: input.objectives ?? null,
+    marker: JUDGEMENT_MARKER,
+  });
 }
 
 export function reportInstruction(
+  templates: PromptTemplates,
   objectives: unknown,
   outcomes: unknown,
   evidence: unknown,
 ): string {
-  return `Write a Markdown report on the outcome of each current objective using its outcome and evidence.\nObjectives: ${JSON.stringify(objectives)}\nOutcomes: ${JSON.stringify(outcomes)}\nEvidence: ${JSON.stringify(evidence)}`;
+  return renderTemplate(templates, PromptTemplate.Report, {
+    objectives,
+    outcomes,
+    evidence,
+  });
 }

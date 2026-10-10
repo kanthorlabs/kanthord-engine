@@ -35,14 +35,19 @@ export async function runStepsInitiative(
     if (budget.exhausted()) return await run.release(true);
     const agent = await openAgent(directory);
     if (agent.budget.exhausted()) return await run.release(true);
-    const work = renderWorkPrompt({
+    const work = renderWorkPrompt(input.setup.templates, {
       node_id: input.claim.node_id,
       revision: input.claim.pinned_revision,
       content: revision.content,
     });
     await agent.instruct(
       work,
-      reportInstruction(current.objectives, current.outcomes, current.evidence),
+      reportInstruction(
+        input.setup.templates,
+        current.objectives,
+        current.outcomes,
+        current.evidence,
+      ),
     );
     if (agent.budget.exhausted()) return await run.release(true);
     const report = agent.lastText();

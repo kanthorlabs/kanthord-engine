@@ -11,6 +11,7 @@ import {
   taskJudgementInstruction,
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
+import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
 test("the final marker is strict and invalid handoffs are refused", () => {
   const text =
@@ -74,7 +75,7 @@ test("failed and unrun rationale names the command and cause", () => {
       ]),
       `Verification 1 \`check\` ${cause}`,
     );
-  const instruction = evaluationInstruction({
+  const instruction = evaluationInstruction(SHIPPED_TEMPLATES, {
     tasks: [
       {
         id: "task",
@@ -106,7 +107,10 @@ const JUDGEMENT_REPAIR =
   "The reply holds no valid kanthord-judgement: line. Reply again with exactly one such line.";
 
 test("the repair instruction names the marker of the invalid reply", () => {
-  assert.equal(repairInstruction(JUDGEMENT_MARKER), JUDGEMENT_REPAIR);
+  assert.equal(
+    repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
+    JUDGEMENT_REPAIR,
+  );
 });
 
 test("a prior rationale adds the previous judgement to the task judgement instruction", () => {
@@ -121,11 +125,11 @@ test("a prior rationale adds the previous judgement to the task judgement instru
       bindings: [],
     },
   };
-  const plain = taskJudgementInstruction(task);
-  assert.equal(taskJudgementInstruction(task, null), plain);
+  const plain = taskJudgementInstruction(SHIPPED_TEMPLATES, task);
+  assert.equal(taskJudgementInstruction(SHIPPED_TEMPLATES, task, null), plain);
   assert.doesNotMatch(plain, /Previous judgement/);
   assert.equal(
-    taskJudgementInstruction(task, "edge case unmet"),
+    taskJudgementInstruction(SHIPPED_TEMPLATES, task, "edge case unmet"),
     plain.replace(
       "\nEnd with exactly:",
       "\nPrevious judgement: edge case unmet. Judge whether the task criterion is met now.\nEnd with exactly:",

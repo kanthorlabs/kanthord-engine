@@ -53,6 +53,9 @@ const fakeCollaborations = {
     compose: async () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    templates: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
   },
   workerBindingRowOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");

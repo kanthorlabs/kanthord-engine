@@ -93,6 +93,30 @@ export const PROMPT_SWITCHES: Record<PromptScope, readonly string[]> = {
   [PromptScope.Workbench]: Object.values(WorkbenchPromptSource),
 };
 
+export const PromptTemplate = {
+  Work: "work",
+  LayerMessage: "layer-message",
+  FramingWorker: "framing-worker",
+  FramingWorkbench: "framing-workbench",
+  TaskJudgement: "task-judgement",
+  TaskRevision: "task-revision",
+  CriterionRevision: "criterion-revision",
+  Evaluation: "evaluation",
+  Report: "report",
+  Repair: "repair",
+  Review: "review",
+  Fix: "fix",
+} as const;
+export type PromptTemplate =
+  (typeof PromptTemplate)[keyof typeof PromptTemplate];
+export type PromptTemplates = Readonly<Record<PromptTemplate, string>>;
+
+export const promptTemplatesSchema = z.strictObject(
+  Object.fromEntries(
+    Object.values(PromptTemplate).map((name) => [name, z.string()]),
+  ) as { [Name in PromptTemplate]: z.ZodString },
+);
+
 export const AgentErrorCode = {
   AgentNotFound: "agent.catalog.not_found",
   NotFound: "agent.enablement.not_found",
@@ -115,6 +139,7 @@ export const AgentErrorCode = {
   PromptTooLarge: "agent.prompt.too_large",
   PromptAgentLayerEmpty: "agent.prompt.agent_layer_empty",
   PromptSwitchLocked: "agent.prompt.switch_locked",
+  PromptTemplateInvalid: "agent.prompt.template_invalid",
 } as const;
 
 export type AgentProviderItem = {

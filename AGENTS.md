@@ -64,13 +64,14 @@ engine/
 │   │   ├── migrations.ts       # agent_enablement and agent_prompt tables
 │   │   ├── config.ts           # Prompt system file and agent directory configuration fragment
 │   │   ├── catalog.ts          # Static agent declarations
-│   │   ├── prompt-assets.ts    # Byte-exact packaged base, agent and workbench prompts
+│   │   ├── prompt-assets.ts    # Byte-exact packaged base, agent, workbench and template prompts
 │   │   ├── pi.ts               # Cached offline SDK loader and isolated agent directory
 │   │   ├── agent-session.ts    # Isolated sessions and setup deadlines
 │   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
 │   │   ├── prompt-composer.ts  # Layer selection, attribution, digests and work prompts
 │   │   ├── prompt-layers.ts    # System, agent and working layer sources, switches and states
 │   │   ├── prompt-render.ts    # Framing, system prompt, pinned working texts and final prompt
+│   │   ├── prompt-templates.ts # Handlebars template resolution, overrides and rendering
 │   │   ├── prompts.ts          # agent_prompt settings reads and writes
 │   │   ├── prompt-locks.ts     # Configuration locks of prompt switches
 │   │   ├── pinned-layers.ts    # Context and inference pins across compaction
@@ -247,6 +248,7 @@ engine/
 │           └── index.ts        # Client resolution, version check, and cancellable lifetime
 ├── static/                     # Packaged generated OpenAPI assets
 │   ├── prompt/                 # Byte-exact base, swe@1, re@1 and workbench prompt assets
+│   │   └── template/           # Shipped Handlebars templates of agent-facing texts
 │   ├── openapi.yaml             # Root contract index and package version
 │   └── openapi/                # Service path items and shared schemas
 │       ├── gateway/            # Gateway operation documents
