@@ -271,7 +271,7 @@ kanthord worker get <worker-name>
 HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
-- `method: "steps" | "evaluation" | "reviewed_steps"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. The first agent does the work, and `re@1` of `developer@1` reviews each task commit.
+- `method: "steps" | "evaluation" | "reviewed_steps"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. The first agent does the work, and `re@1` of `developer@1` reviews each task commit against the task criterion, every node criterion item that the task touches, and the default standard.
 - `resource_budget` for every worker, with a required positive safe integer
   `wall_time_ms` and an optional positive safe integer `turns`.
   `general@1`, `reviewer@1` and `developer@1` default to

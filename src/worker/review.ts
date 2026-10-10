@@ -41,13 +41,17 @@ export function boundedDiff(diff: string): string {
 
 export function reviewInstruction(input: {
   task: TaskContent;
+  nodeCriterion: string;
   diff: string;
   findings: readonly Finding[];
   replies: string | null;
 }): string {
   assert.ok(input.task.id);
   assert.ok(input.task.content.criterion);
-  return `Review the change of task ${input.task.id} against its criterion and the default standard. Task criterion: ${input.task.content.criterion}
+  assert.ok(input.nodeCriterion);
+  return `Review the change of task ${input.task.id} against its criterion, every item of the node criterion that the task touches, and the default standard. The node review applies the same standard to the whole node.
+Task criterion: ${input.task.content.criterion}
+Node criterion: ${input.nodeCriterion}
 The diff below is the change. Read the workspace files when the diff does not give enough context.
 Report every finding that stands now. Keep the id of an earlier finding that still stands. Drop an earlier finding when the change fixes it or when the reply of the engineer refutes it. A change that widens the task is no finding.
 Earlier findings: ${JSON.stringify(input.findings)}

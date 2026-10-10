@@ -60,7 +60,13 @@ async function reviewTask(
     if (budget.exhausted()) return ReviewStop.BudgetEnd;
     await agent.instruct(
       taskWork(state, task),
-      reviewInstruction({ task, diff, findings, replies }),
+      reviewInstruction({
+        task,
+        nodeCriterion: state.revision.content.criterion,
+        diff,
+        findings,
+        replies,
+      }),
     );
     if (budget.exhausted()) return ReviewStop.BudgetEnd;
     const review = await parseRepairedReview(agent, taskWork(state, task));
