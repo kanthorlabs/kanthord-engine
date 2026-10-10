@@ -345,6 +345,14 @@ test("published heartbeat projection names its operation and carries no 204 cont
 const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
   ["assessment.list", "mission.assessment.submit", "properties", "node"],
   ["node.unblock", "mission.node.unblock", "properties", "node"],
+  [
+    "proposal.approve",
+    "mission.proposal.approve",
+    "properties",
+    "initiative",
+    "properties",
+    "node",
+  ],
   ["node.override", "mission.node.override", "properties", "node"],
   ["node.block", "mission.node.block", "properties", "node"],
   ["node.discard", "mission.node.discard", "properties", "node"],
@@ -685,6 +693,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.node.resume", AccessPolicy.Human],
   ["mission.node.block", AccessPolicy.Human],
   ["mission.node.unblock", AccessPolicy.Human],
+  ["mission.proposal.list", AccessPolicy.Human],
+  ["mission.proposal.approve", AccessPolicy.Human],
   ["mission.node.ready", AccessPolicy.Human],
   ["mission.node.override", AccessPolicy.Human],
   ["mission.node.discard", AccessPolicy.Human],
@@ -749,8 +759,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 173;
-const ROUTED_OPERATION_COUNT = 164;
+const OPERATION_COUNT = 175;
+const ROUTED_OPERATION_COUNT = 166;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = ["intake.action.check", "mission.delivery.admit"];

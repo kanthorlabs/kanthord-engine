@@ -562,6 +562,59 @@ components:
                       - binding_id
                       - commit
                     additionalProperties: false
+            proposals:
+              default: []
+              maxItems: 10
+              type: array
+              items:
+                type: object
+                properties:
+                  objective_id:
+                    type: string
+                    minLength: 31
+                    maxLength: 31
+                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: node_ followed by a canonical 26-character uppercase ULID.
+                  name:
+                    type: string
+                    minLength: 1
+                  requirement:
+                    type: string
+                    minLength: 1
+                  criterion:
+                    type: string
+                    minLength: 1
+                  task:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                      requirement:
+                        type: string
+                        minLength: 1
+                      criterion:
+                        type: string
+                        minLength: 1
+                      verifications:
+                        minItems: 1
+                        type: array
+                        items:
+                          type: string
+                          minLength: 1
+                    required:
+                      - name
+                      - requirement
+                      - criterion
+                      - verifications
+                    additionalProperties: false
+                required:
+                  - objective_id
+                  - name
+                  - requirement
+                  - criterion
+                  - task
+                additionalProperties: false
           required:
             - execution_id
             - attempt

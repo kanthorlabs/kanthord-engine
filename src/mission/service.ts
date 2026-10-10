@@ -48,6 +48,8 @@ import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
+import { approveProposal } from "./proposal-approve.ts";
+import { proposalPage, requireProposal } from "./proposal-read.ts";
 import { completeEvidence } from "./evidence-complete.ts";
 import { requestEvidence } from "./evidence-request.ts";
 import { submitEvidence } from "./evidence-submit.ts";
@@ -452,6 +454,25 @@ export class MissionService
         ),
     );
     registry.register(
+      missionOperations["proposal.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) => proposalPage(tx, params.node_id, query)),
+    );
+    registry.register(
+      missionOperations["proposal.approve"],
+      ({ params, body }, caller) =>
+        this.commitGraph(caller, { proposal_id: params.proposal_id }, (tx) =>
+          approveProposal(
+            tx,
+            this.dependencies,
+            params.proposal_id,
+            body,
+            humanActor(caller),
+            Date.now(),
+          ),
+        ),
+    );
+    registry.register(
       missionOperations["node.unblock"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
@@ -831,7 +852,8 @@ export class MissionService
 
   private commitGraph<T>(
     caller: CallerContext,
-    scope: { mission_id: string } | { node_id: string },
+    scope:
+      { mission_id: string } | { node_id: string } | { proposal_id: string },
     write: (tx: Transaction) => T,
   ): T {
     let projectId: string | null = null;
@@ -840,7 +862,10 @@ export class MissionService
       const missionId =
         "mission_id" in scope
           ? scope.mission_id
-          : requireNode(tx, scope.node_id).mission_id;
+          : "node_id" in scope
+            ? requireNode(tx, scope.node_id).mission_id
+            : requireNode(tx, requireProposal(tx, scope.proposal_id).node_id)
+                .mission_id;
       projectId = requireMission(tx, missionId).project_id;
       return result;
     });

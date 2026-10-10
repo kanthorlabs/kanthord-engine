@@ -6,6 +6,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   AssessmentResult,
   NodeState,
+  PROPOSAL_IDENTITY_PREFIX,
   type AssessmentSubmit,
 } from "./contract.ts";
 import { admitAssessment } from "./assessment-admit.ts";
@@ -18,6 +19,7 @@ import { currencyOf } from "./currency.ts";
 import { admitExecution, requireEvaluationClaim } from "./execution.ts";
 import { requiredActionsOf } from "./frozen-action.ts";
 import { nodeRecord, requireNode } from "./node-read.ts";
+import { insertProposal } from "./proposal-store.ts";
 import { assessmentRecord, outcomeRecord } from "./record-read.ts";
 import {
   closeAttempt,
@@ -126,6 +128,17 @@ export function submitAssessment(
       ),
       created_at: now,
     });
+    for (const proposal of body.proposals)
+      insertProposal(tx, {
+        id: createIdentity(PROPOSAL_IDENTITY_PREFIX),
+        node_id: node.id,
+        attempt: attempt.attempt,
+        assessment_id: assessment.id,
+        content: canonicalJSON(proposal),
+        objective_node_id: null,
+        approved_at: null,
+        created_at: now,
+      });
     transition(
       tx,
       dependencies,

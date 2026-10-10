@@ -31,6 +31,8 @@ import { readMissionNodes, type NodeRow } from "./store.ts";
 const FIRST_COVERING_INDEX = 0;
 const NO_REQUIRED_VERIFICATIONS = 0;
 const SINGLE_COVERING_VERIFICATION = 1;
+const NO_PROPOSALS = 0;
+const PROPOSALS_FIELD = "proposals";
 
 function requireChildren(
   tx: Transaction,
@@ -59,6 +61,48 @@ function requireChildren(
     !expected.every((id) => childOutcomeIds.includes(id))
   )
     invalidExecutionInput("child_outcome_ids");
+}
+
+function requireProposals(
+  tx: Transaction,
+  dependencies: Dependencies,
+  node: NodeRow,
+  body: AssessmentSubmit,
+): void {
+  if (body.proposals.length === NO_PROPOSALS) return;
+  if (
+    node.kind !== NodeKind.Initiative ||
+    body.result !== AssessmentResult.Undetermined
+  )
+    invalidExecutionInput(PROPOSALS_FIELD);
+  const objectives = new Set(
+    readMissionNodes(tx, node.mission_id)
+      .filter(
+        (child) =>
+          child.parent_id === node.id &&
+          child.kind === NodeKind.Objective &&
+          child.retired_at === null,
+      )
+      .map((child) => child.id),
+  );
+  for (const proposal of body.proposals) {
+    if (!objectives.has(proposal.objective_id))
+      invalidExecutionInput(PROPOSALS_FIELD);
+    for (const text of [
+      proposal.name,
+      proposal.requirement,
+      proposal.criterion,
+      proposal.task.name,
+      proposal.task.requirement,
+      proposal.task.criterion,
+      ...proposal.task.verifications,
+    ])
+      requireTextBound(
+        PROPOSALS_FIELD,
+        text,
+        dependencies.config.text_max_bytes,
+      );
+  }
 }
 
 function requireResult(
@@ -144,6 +188,7 @@ export function admitAssessment(
       );
   }
   requireChildren(tx, node, body.child_outcome_ids);
+  requireProposals(tx, dependencies, node, body);
   requireTestedInput(
     tx,
     dependencies.bindings,

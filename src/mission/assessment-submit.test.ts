@@ -232,6 +232,7 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
     result: AssessmentResult.Success,
     rationale: "Passed",
     tested_input: address,
+    proposals: [],
   };
   const submit = (input = body) =>
     h.invoke("assessment.submit", {

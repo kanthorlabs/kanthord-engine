@@ -56,6 +56,7 @@ const MISSION_EVIDENCE_TABLE = "mission_evidence";
 const MISSION_EVIDENCE_ASSET_TABLE = "mission_evidence_asset";
 const MISSION_ASSESSMENT_TABLE = "mission_assessment";
 const MISSION_OUTCOME_TABLE = "mission_outcome";
+const MISSION_PROPOSAL_TABLE = "mission_proposal";
 const MISSION_ATTEMPT_OPEN_INDEX = "mission_attempt_open";
 const MISSION_EVIDENCE_REQUEST_INDEX = "mission_evidence_request";
 const MISSION_ASSESSMENT_SEQUENCE_INDEX = "mission_assessment_sequence";
@@ -66,6 +67,7 @@ const ERD2_MISSION_TABLES = [
   MISSION_EVIDENCE_ASSET_TABLE,
   MISSION_ASSESSMENT_TABLE,
   MISSION_OUTCOME_TABLE,
+  MISSION_PROPOSAL_TABLE,
 ];
 const MISSION_TABLES = [
   MISSION_MISSION_TABLE,
@@ -101,6 +103,7 @@ const ALL_TABLES = [
   MISSION_NODE_TABLE,
   MISSION_NODE_REVISION_TABLE,
   MISSION_OUTCOME_TABLE,
+  MISSION_PROPOSAL_TABLE,
   PROJECT_BINDING_TABLE,
   PROJECT_PROJECT_TABLE,
   SCHEDULER_EXECUTION_TABLE,
@@ -295,7 +298,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-one tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -422,6 +425,9 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
     "mission_evidence_asset.evidence_id->mission_evidence.id",
     "mission_outcome.assessment_id->mission_assessment.id",
     "mission_outcome.node_id->mission_node.id",
+    "mission_proposal.assessment_id->mission_assessment.id",
+    "mission_proposal.node_id->mission_node.id",
+    "mission_proposal.objective_node_id->mission_node.id",
   ]);
 }
 
