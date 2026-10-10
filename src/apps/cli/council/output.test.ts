@@ -28,7 +28,7 @@ const TASK = {
   kind: "task" as const,
   parent: "login-objective.md",
   bindings: [] as [],
-  verifications: ["grep -q 'a: b' src/login.tsx"],
+  verifications: ["  grep -q 'a: b' src/login.tsx \n"],
   name: "Login form",
   requirement: "\n  The form takes an email and a password.\n\n",
   criterion: "The form submits.",
@@ -168,4 +168,31 @@ test("writeOutput writes the plan files and the record", (t) => {
     "Every role asks for it.",
   ])
     assert.ok(text.includes(part), part);
+});
+
+test("renderPlanFiles refuses the record filename as a plan filename", () => {
+  assert.throws(
+    () =>
+      renderPlanFiles({
+        ...PLAN,
+        entries: [{ ...INITIATIVE, filename: RECORD_FILENAME }],
+      }),
+    { code: CouncilErrorCode.PlanFileInvalid, message: /reserved/ },
+  );
+});
+
+test("renderPlanFiles refuses an objective or a task with no parent", () => {
+  for (const entry of [OBJECTIVE, TASK]) {
+    const parentless = { ...entry, parent: undefined };
+    assert.throws(
+      () =>
+        renderPlanFiles({
+          ...PLAN,
+          entries: [INITIATIVE, OBJECTIVE, TASK].map((item) =>
+            item === entry ? parentless : item,
+          ),
+        }),
+      { code: CouncilErrorCode.PlanFileInvalid, message: /names a parent/ },
+    );
+  }
 });

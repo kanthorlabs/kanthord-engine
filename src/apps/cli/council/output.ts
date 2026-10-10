@@ -42,6 +42,7 @@ function normalized(entry: PlanEntry): PlanEntry {
     name: entry.name.trim(),
     requirement: entry.requirement.trim(),
     criterion: entry.criterion.trim(),
+    verifications: entry.verifications.map((command) => command.trim()),
   };
 }
 
@@ -50,6 +51,11 @@ function checkSet(entries: readonly PlanEntry[]): void {
   for (const entry of entries) {
     if (!planFileNameSchema.safeParse(entry.filename).success)
       throw invalid(entry.filename, "the filename is not lower-case-words.md");
+    if (entry.filename === RECORD_FILENAME)
+      throw invalid(
+        entry.filename,
+        "the filename is reserved for the council record",
+      );
     if (kinds.has(entry.filename))
       throw invalid(entry.filename, "the filename repeats");
     kinds.set(entry.filename, entry.kind);
@@ -57,6 +63,8 @@ function checkSet(entries: readonly PlanEntry[]): void {
   for (const entry of entries) {
     if (entry.kind === NodeKind.Task && entry.depends_on !== undefined)
       throw invalid(entry.filename, "a task holds no depends_on");
+    if (entry.parent === undefined && PARENT_KIND[entry.kind] !== undefined)
+      throw invalid(entry.filename, "an objective or a task names a parent");
     if (
       entry.parent !== undefined &&
       kinds.get(entry.parent) !== PARENT_KIND[entry.kind]
