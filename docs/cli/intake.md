@@ -425,6 +425,13 @@ for an action without a row in the action table, and a CLI write answers `503`
 `intake.outbound.request.cli_unavailable` when its binary is missing or too
 old.
 
+For a `pull_request` action with the landing `kanthord`, `intake.action.perform`
+merges the pull request after it creates the pull request or pushes the snapshot
+to a reused pull request. The merge sends the tested commit as the head guard.
+The merge uses the first method that the repository allows, in the order
+`merge`, `squash`, `rebase`. A refused or failed merge leaves the pull request
+open and changes no answer.
+
 ## Output and failure conventions
 
 The commands follow [shared output and exit behavior](./other.md#output-and-exit-behavior):

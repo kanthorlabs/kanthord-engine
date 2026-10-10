@@ -391,6 +391,10 @@ export const RepositoryAction = {
 } as const;
 export const repositoryActionSchema = z.enum(RepositoryAction);
 export type RepositoryAction = z.infer<typeof repositoryActionSchema>;
+export const RepositoryLanding = {
+  Human: "human",
+  KanthorD: "kanthord",
+} as const;
 export const ExpectedEndState = {
   PullRequestMerged: "pull_request_merged",
   BaseBranchPushed: "base_branch_pushed",
@@ -786,7 +790,7 @@ export const frozenActionSchema = z.strictObject({
   follows: actionKeySchema.nullable(),
   configuration: z.strictObject({
     base_branch: textSchema,
-    landing: z.enum(["human", "kanthord"]).default("human"),
+    landing: z.enum(RepositoryLanding).default(RepositoryLanding.Human),
   }),
 });
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
