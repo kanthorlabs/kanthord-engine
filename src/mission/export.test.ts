@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ImportEntry } from "./contract.ts";
-import { serializePlanFile } from "./export.ts";
+import { serializePlanFile } from "./plan-file.ts";
 import { parsePlanFile } from "./parser.ts";
 
 test("serializePlanFile writes no id for an entry without an id and parses back", () => {
