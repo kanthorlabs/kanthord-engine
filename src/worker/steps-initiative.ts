@@ -12,6 +12,7 @@ import { WorkspaceKind } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../kernel/context.ts";
+import { runVerifications } from "./verification.ts";
 
 export const REPORT_SUBJECT = "Report on current objective outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
@@ -26,9 +27,18 @@ export async function runStepsInitiative(
     ...input.claim,
     resource_budget: input.setup.resource_budget,
   });
-  const { directory } = input.workspaces.prepareExecution({
+  const deadline = Math.min(
+    input.claim.created_at + input.setup.resource_budget.wall_time_ms,
+    input.claim.expired_at,
+  );
+  const workspace = await input.workspaces.prepareInitiative({
     executionId: input.claim.execution_id,
+    transport: input.transport,
+    context: run.operationContext,
+    deadlineMs: deadline - Date.now(),
+    repositories: input.setup.repositories,
   });
+  const { directory } = workspace;
   try {
     const current = await readObjectives(run);
     if (!allTerminal(current.objectives)) return await run.release(true);
@@ -40,9 +50,24 @@ export async function runStepsInitiative(
       revision: input.claim.pinned_revision,
       content: revision.content,
     });
+    const verification =
+      workspace.tested_input === null
+        ? null
+        : await runVerifications({
+            directory,
+            commands: revision.content.verifications,
+            tested_input: workspace.tested_input,
+            deadline: budget.wallDeadline(),
+            context: run.operationContext,
+          });
     await agent.instruct(
       work,
-      reportInstruction(current.objectives, current.outcomes, current.evidence),
+      reportInstruction(
+        current.objectives,
+        current.outcomes,
+        current.evidence,
+        verification,
+      ),
     );
     if (agent.budget.exhausted()) return await run.release(true);
     const report = agent.lastText();

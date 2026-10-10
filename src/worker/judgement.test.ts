@@ -181,7 +181,27 @@ test("a prior rationale adds the previous judgement to the task judgement instru
 });
 
 test("the report instruction makes the reply the report and forbids a file", () => {
-  const instruction = reportInstruction([], [], []);
+  const instruction = reportInstruction([], [], [], null);
   assert.match(instruction, /Your reply is the report/);
   assert.match(instruction, /write no file/);
+  assert.match(instruction, /every field including fix: and why:/);
+});
+
+test("the report instruction carries the final-snapshot verification", () => {
+  const instruction = reportInstruction([], [], [], {
+    tested_input: [
+      { kind: "repository", binding_id: "binding", commit: "d6d4973" },
+    ],
+    results: [
+      {
+        command: "npm run verify",
+        exit_code: 0,
+        signal: null,
+        timed_out: false,
+      },
+    ],
+  });
+  assert.match(instruction, /Final-snapshot verification: \{"tested_input"/);
+  assert.match(instruction, /"commit":"d6d4973"/);
+  assert.match(instruction, /"command":"npm run verify","exit_code":0/);
 });

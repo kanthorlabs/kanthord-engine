@@ -147,6 +147,7 @@ export function reportInstruction(
   objectives: unknown,
   outcomes: unknown,
   evidence: unknown,
+  verification: Verification | null,
 ): string {
-  return `Write a Markdown report on the outcome of each current objective using its outcome and evidence. Your reply is the report: give the full report in the reply and write no file, because the reply is the only content that KanthorD stores.\nObjectives: ${JSON.stringify(objectives)}\nOutcomes: ${JSON.stringify(outcomes)}\nEvidence: ${JSON.stringify(evidence)}`;
+  return `Write a Markdown report on the outcome of each current objective using its outcome and evidence. Your reply is the report: give the full report in the reply and write no file, because the reply is the only content that KanthorD stores. Record each final-snapshot verification command below with its exit code and the tested commit. Write each blocker or suggestion in the full finding format, with every field including fix: and why:.\nObjectives: ${JSON.stringify(objectives)}\nOutcomes: ${JSON.stringify(outcomes)}\nEvidence: ${JSON.stringify(evidence)}\nFinal-snapshot verification: ${JSON.stringify(verification)}`;
 }
