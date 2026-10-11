@@ -460,6 +460,11 @@ export async function startCheck(state: StepsState): Promise<{
       return { pending, budgetEnd: { task, boundary } };
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
+    state.run.log("task judged", {
+      task_id: task.id,
+      commit: state.head,
+      criterion_met: judgement.criterion_met,
+    });
     if (judgement.criterion_met)
       recordJudged(
         objectiveDirectoryOf(state),

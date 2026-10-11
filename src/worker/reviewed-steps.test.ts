@@ -5,7 +5,12 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { background } from "../kernel/context.ts";
+import {
+  background,
+  DeadlineExceeded,
+  throwIfCancelled,
+  type CancellationContext,
+} from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import * as connector from "../repository/connector.ts";
@@ -367,4 +372,41 @@ test("a start-check revision instruction opens the first work turn of a reviewed
   );
   assert.deepEqual(result, { kind: TaskResultKind.Complete });
   assert.ok(JSON.stringify(h.provider.calls[0]).includes(revision));
+});
+
+test("a review that its agent deadline cuts ends as a budget end after the passing run", async (t) => {
+  const h = await fixture(t, [
+    write("a.txt"),
+    fauxAssistantMessage("done"),
+    fauxAssistantMessage(JUDGEMENT),
+  ]);
+  const instructions: string[] = [];
+  let context: CancellationContext | undefined;
+  const agent = {
+    budget: h.budget,
+    async instruct(_work: unknown, text: string) {
+      throwIfCancelled(context!);
+      instructions.push(text);
+      context!.cancel(new DeadlineExceeded());
+    },
+    lastText: () => undefined,
+  } as unknown as NativeAgent;
+  const sessions = {
+    open: async () => {
+      context = h.budget.agentContext(h.state.run.operationContext);
+      return agent;
+    },
+    close: () => {},
+  };
+  const result = await reviewedTaskRunner(sessions)(
+    h.state,
+    task,
+    TaskBoundary.InProgress,
+    null,
+  );
+  assert.deepEqual(result, {
+    kind: TaskResultKind.BudgetEnd,
+    boundary: TaskBoundary.RunPassed,
+  });
+  assert.equal(instructions.length, FIRST_ROUND);
 });

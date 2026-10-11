@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { background } from "../kernel/context.ts";
+import { background, DeadlineExceeded } from "../kernel/context.ts";
+import { BudgetLimit } from "../scheduler/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 
 test("budget bounds wall time, counts turns and keeps cleanup until execution expiry", (t) => {
@@ -59,4 +60,29 @@ test("remaining wall time measures monotonic elapsed time", (t) => {
   assert.equal(budget.remainingMs(), before - 1000);
   now += 10000;
   assert.equal(budget.remainingMs(), exhausted);
+});
+
+test("an agent context that reaches its deadline ends the budget", (t) => {
+  const exhausted = 0;
+  let monotonic = 0;
+  t.mock.method(performance, "now", () => monotonic);
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+  const input = {
+    created_at: 0,
+    expired_at: 10000,
+    resource_budget: { wall_time_ms: 5000 },
+  };
+  const budget = new ExecutionBudget(input);
+  monotonic = 1000;
+  t.mock.timers.setTime(1500);
+  const agent = budget.agentContext(background);
+  monotonic = 4500;
+  t.mock.timers.tick(3500);
+  assert.ok(agent.err() instanceof DeadlineExceeded);
+  assert.equal(budget.exhausted(), true);
+  assert.equal(budget.remainingMs(), exhausted);
+  assert.equal(budget.limit(), BudgetLimit.WallTime);
+  const open = new ExecutionBudget({ ...input, created_at: Date.now() });
+  open.agentContext(background).cancel();
+  assert.equal(open.exhausted(), false);
 });
