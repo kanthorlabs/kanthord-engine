@@ -178,7 +178,7 @@ async function setup(t: TestContext) {
       pushed: repository(PUSHED_ADDRESS, "merge_push"),
       harness: {
         kind: "worker",
-        config: { worker: "claude@1", instance_count: SINGLE_INSTANCE },
+        config: { worker: "claude-code@1", instance_count: SINGLE_INSTANCE },
       },
     },
   });

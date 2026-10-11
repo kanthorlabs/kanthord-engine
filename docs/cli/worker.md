@@ -247,13 +247,13 @@ The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
 and their capabilities are:
 
-| Worker        | Host                           | Method / agent                   | Declared node states                         |
-| ------------- | ------------------------------ | -------------------------------- | -------------------------------------------- |
-| `general@1`   | kanthord                       | steps / `swe@1`                  | `Available`                                  |
-| `reviewer@1`  | kanthord                       | evaluation / `re@1`              | `Waiting`, `External.Requested`              |
-| `developer@1` | kanthord                       | reviewed_steps / `swe@1`, `re@1` | `Available`                                  |
-| `claude@1`    | external harness `claude-code` | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
-| `opencode@1`  | external harness `opencode`    | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
+| Worker          | Host                           | Method / agent                   | Declared node states                         |
+| --------------- | ------------------------------ | -------------------------------- | -------------------------------------------- |
+| `general@1`     | kanthord                       | steps / `swe@1`                  | `Available`                                  |
+| `reviewer@1`    | kanthord                       | evaluation / `re@1`              | `Waiting`, `External.Requested`              |
+| `developer@1`   | kanthord                       | reviewed_steps / `swe@1`, `re@1` | `Available`                                  |
+| `claude-code@1` | external harness `claude-code` | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
+| `opencode@1`    | external harness `opencode`    | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
 
 All five declarations are in the current catalog; native runtime execution and
 external-harness integration remain later work. `list` returns only the released
@@ -275,7 +275,7 @@ HTTP `200` returns the summary fields plus:
 - `resource_budget` for every worker, with a required positive safe integer
   `wall_time_ms` and an optional positive safe integer `turns`.
   `general@1`, `reviewer@1` and `developer@1` default to
-  `{ turns: 200, wall_time_ms: 7200000 }`; `claude@1` and `opencode@1`
+  `{ turns: 200, wall_time_ms: 7200000 }`; `claude-code@1` and `opencode@1`
   default to `{ wall_time_ms: 7200000 }`. Every worker binding may override the
   default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
   defines a turn as one `turn_end` event of the pi agent loop and measures wall

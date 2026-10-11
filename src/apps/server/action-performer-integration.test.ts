@@ -173,7 +173,7 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
           },
           harness: {
             kind: "worker",
-            config: { worker: "claude@1", instance_count: TWO_INSTANCES },
+            config: { worker: "claude-code@1", instance_count: TWO_INSTANCES },
           },
         },
       },

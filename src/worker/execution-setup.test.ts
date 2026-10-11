@@ -170,7 +170,10 @@ test("setup answers the system and agent prompt after its single snapshot and su
   await assert.rejects(
     executionSetup(
       dependencies,
-      { ...worker, declarationOf: () => getWorkerDeclaration("claude@1")! },
+      {
+        ...worker,
+        declarationOf: () => getWorkerDeclaration("claude-code@1")!,
+      },
       caller,
     ),
     (error) =>

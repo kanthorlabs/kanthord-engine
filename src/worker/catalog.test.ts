@@ -25,7 +25,7 @@ test("static worker declarations", () => {
     "general@1",
     "reviewer@1",
     "developer@1",
-    "claude@1",
+    "claude-code@1",
     "opencode@1",
   ]);
   assert.deepEqual(getWorkerDeclaration("general@1"), {
@@ -55,8 +55,8 @@ test("static worker declarations", () => {
     declared_node_states: ["Available"],
     required_node_format: requiredNodeFormat,
   });
-  assert.deepEqual(getWorkerDeclaration("claude@1"), {
-    name: "claude@1",
+  assert.deepEqual(getWorkerDeclaration("claude-code@1"), {
+    name: "claude-code@1",
     host: WorkerHost.ExternalHarness,
     harness: "claude-code",
     resource_budget: { wall_time_ms: 7200000 },
@@ -76,7 +76,7 @@ test("static worker declarations", () => {
 test("worker agent lookup returns a fresh array", () => {
   assert.deepEqual(agentsOfWorker("general@1"), ["swe@1"]);
   assert.deepEqual(agentsOfWorker("reviewer@1"), ["re@1"]);
-  assert.deepEqual(agentsOfWorker("claude@1"), []);
+  assert.deepEqual(agentsOfWorker("claude-code@1"), []);
   assert.deepEqual(agentsOfWorker("opencode@1"), []);
   assert.deepEqual(agentsOfWorker("unknown"), []);
   assert.notStrictEqual(
