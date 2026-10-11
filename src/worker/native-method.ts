@@ -104,6 +104,7 @@ export async function runNativeExecution(
           modelRuntimeFactory: input.modelRuntimeFactory,
           hostTools: input.hostTools(workspace),
           context: run.operationContext,
+          turnCheck: () => run.checkClaim(),
         });
         opened.set(native, stopOnEnd(run, native));
         return native;

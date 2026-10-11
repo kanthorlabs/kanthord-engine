@@ -53,25 +53,48 @@ export const ExecutionStopReason = {
   ActionUnsettled: "action_unsettled",
   AssessmentAbsent: "assessment_absent",
   BudgetEnd: "budget_end",
+  ProviderFailed: "provider_failed",
+  NoProgress: "no_progress",
 } as const;
 export const BudgetLimit = {
   Turns: "turns",
   WallTime: "wall_time",
 } as const;
 export type BudgetLimit = (typeof BudgetLimit)[keyof typeof BudgetLimit];
+export const ProviderFailure = {
+  RateLimited: "rate_limited",
+  QuotaExhausted: "quota_exhausted",
+  Unauthorized: "unauthorized",
+  BadRequest: "bad_request",
+  Unavailable: "unavailable",
+} as const;
+export type ProviderFailure =
+  (typeof ProviderFailure)[keyof typeof ProviderFailure];
 export const executionStopReasonSchema = z.enum(ExecutionStopReason);
 export type ExecutionStopReason = z.infer<typeof executionStopReasonSchema>;
+
+function stopCodeFits(stop: {
+  reason: ExecutionStopReason;
+  code: string | null;
+}): boolean {
+  const budgetCode = Object.values(BudgetLimit).some(
+    (limit) => limit === stop.code,
+  );
+  const providerCode = Object.values(ProviderFailure).some(
+    (failure) => failure === stop.code,
+  );
+  if (stop.reason === ExecutionStopReason.BudgetEnd) return budgetCode;
+  if (stop.reason === ExecutionStopReason.ProviderFailed) return providerCode;
+  if (stop.reason === ExecutionStopReason.NoProgress) return stop.code === null;
+  return !budgetCode && !providerCode;
+}
+
 export const releaseStopSchema = z
   .strictObject({
     reason: executionStopReasonSchema,
     code: z.string().min(1).nullable(),
   })
-  .refine(
-    (stop) =>
-      (stop.reason === ExecutionStopReason.BudgetEnd) ===
-      Object.values(BudgetLimit).some((limit) => limit === stop.code),
-    { path: ["code"] },
-  );
+  .refine(stopCodeFits, { path: ["code"] });
 export type ReleaseStop = z.infer<typeof releaseStopSchema>;
 export const traceIdSchema = z
   .string()

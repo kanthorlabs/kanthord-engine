@@ -188,6 +188,31 @@ export class ExecutionRun {
     );
   }
 
+  async checkClaim(): Promise<void> {
+    this.requireActive();
+    let result: OperationResult<{ claim_state: ClaimState }>;
+    try {
+      result = await this.clients.scheduler.claimGet(
+        {
+          params: { execution_id: this.claim.execution_id },
+          query: {},
+          body: null,
+        },
+        { context: this.operationContext, idempotencyKey: ulid() },
+      );
+    } catch {
+      this.requireActive();
+      return;
+    }
+    this.requireActive();
+    if (
+      (result.type === OperationResultType.Completed &&
+        result.data.claim_state !== ClaimState.Running) ||
+      isExecutionEnd(result)
+    )
+      this.stop(EndReason.Revoked);
+  }
+
   async settleCredentials(): Promise<void> {
     this.requireActive();
     this.settlement ??= this.credentials.release();

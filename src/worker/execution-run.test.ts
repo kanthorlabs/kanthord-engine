@@ -310,3 +310,49 @@ test("a stop release that the scheduler refuses as ended ends the run as revoked
     });
   }
 });
+
+test("the claim check stops the run as revoked only on a definite end", async () => {
+  const answers: (() => Promise<OperationResult<unknown>>)[] = [
+    async () => ({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: { claim_state: "running" },
+    }),
+    async () => {
+      throw new Error("network down");
+    },
+    async () => ({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: { claim_state: "finished" },
+    }),
+  ];
+  const run = fixture();
+  run.clients.scheduler = {
+    claimGet: () => answers.shift()!(),
+  } as unknown as MethodClients["scheduler"];
+  await run.checkClaim();
+  await run.checkClaim();
+  await assert.rejects(
+    run.checkClaim(),
+    (error) =>
+      error instanceof ExecutionStop && error.reason === EndReason.Revoked,
+  );
+  await assert.rejects(run.checkClaim(), ExecutionStop);
+});
+
+test("the claim check stops the run as revoked when the server refuses the execution", async () => {
+  const run = fixture();
+  run.clients.scheduler = {
+    claimGet: async () => ({
+      type: OperationResultType.Failure,
+      status: 409,
+      error: { error: { code: EXECUTION_NOT_RUNNING, message: "ended" } },
+    }),
+  } as unknown as MethodClients["scheduler"];
+  await assert.rejects(
+    run.checkClaim(),
+    (error) =>
+      error instanceof ExecutionStop && error.reason === EndReason.Revoked,
+  );
+});
