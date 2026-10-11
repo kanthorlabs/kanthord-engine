@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { stringify } from "yaml";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
@@ -11,26 +10,13 @@ import {
   type ExportEntry,
   type MissionBindings,
 } from "./contract.ts";
+import { serializePlanFile } from "./plan-file.ts";
 import { nodeRecord } from "./node-read.ts";
 import { readDependencies, readMissionNodes, type NodeRow } from "./store.ts";
 import { requireMission } from "./write.ts";
 
 const EXPORT_MAX_BYTES = 10 * 1024 * 1024;
 const TEXT_ENCODING = "utf8";
-
-export function serializePlanFile(entry: ExportEntry): string {
-  const front = stringify({
-    id: entry.id,
-    kind: entry.kind,
-    ...(entry.parent === undefined ? {} : { parent: entry.parent }),
-    ...(entry.kind === NodeKind.Task
-      ? {}
-      : { depends_on: entry.depends_on ?? [] }),
-    bindings: entry.bindings,
-    verifications: entry.verifications,
-  });
-  return `---\n${front}---\n# ${entry.name}\n\n## Requirement\n\n${entry.requirement}\n\n## Criterion\n\n${entry.criterion}\n`;
-}
 
 function exportEntry(
   tx: Transaction,

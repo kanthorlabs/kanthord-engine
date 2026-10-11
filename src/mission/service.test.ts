@@ -65,7 +65,7 @@ import { nodeRecord } from "./node-read.ts";
 import { getRevision } from "./node-read.ts";
 import { openAttempt, closeAttempt, readOpenAttempt } from "./record-store.ts";
 import { importDigest, normalizeImportSnapshot } from "./import.ts";
-import { serializePlanFile } from "./export.ts";
+import { serializePlanFile } from "./plan-file.ts";
 import { parsePlanFile } from "./parser.ts";
 import { MissionService, humanActor, type Dependencies } from "./service.ts";
 import { CONTENT_FIELDS, TASKS_FIELD, ContentField } from "./content.ts";

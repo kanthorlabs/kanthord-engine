@@ -32,6 +32,7 @@ import { addIntakeCommand } from "./intake.ts";
 import { addTrackingCommand } from "./tracking.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
 import { addSchedulerCommand } from "./scheduler.ts";
+import { addCouncilCommand } from "./council.ts";
 import {
   CommandName,
   ExitCode,
@@ -246,6 +247,7 @@ export function createProgram(
   addAgentCommand(program);
   addProjectCommand(program);
   addSchedulerCommand(program);
+  addCouncilCommand(program);
   addMissionCommand(program);
   addIntakeCommand(program);
   addTrackingCommand(program);

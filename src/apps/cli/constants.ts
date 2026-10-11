@@ -15,6 +15,7 @@ export const CommandName = {
   Intake: "intake",
   Scheduler: "scheduler",
   Tracking: "tracking",
+  Council: "council",
 } as const;
 export const SERVER_APPLICATION = "server";
 export const ExitCode = { Success: 0, Failure: 1 } as const;

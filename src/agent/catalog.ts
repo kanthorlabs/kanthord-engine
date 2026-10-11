@@ -1,5 +1,14 @@
 import { HostTool } from "../worker/contract.ts";
-import { RE_AGENT_PROMPT, SWE_AGENT_PROMPT } from "./prompt-assets.ts";
+import {
+  ARCHITECT_AGENT_PROMPT,
+  COUNCIL_AGENT_PROMPT,
+  DESIGNER_AGENT_PROMPT,
+  PO_AGENT_PROMPT,
+  RE_AGENT_PROMPT,
+  SECURITY_AGENT_PROMPT,
+  SWE_AGENT_PROMPT,
+  USER_AGENT_PROMPT,
+} from "./prompt-assets.ts";
 
 export interface AgentDeclaration {
   agent_name: string;
@@ -19,6 +28,23 @@ export const BuiltinTool = {
   Bash: "bash",
 } as const;
 export type BuiltinTool = (typeof BuiltinTool)[keyof typeof BuiltinTool];
+
+function councilDeclaration(
+  agentName: string,
+  agentPrompt: string,
+): AgentDeclaration {
+  return {
+    agent_name: agentName,
+    agent_prompt: agentPrompt,
+    host_tools: [],
+    tools: [],
+    overridable_fields: [
+      "agent_provider",
+      "model_identifier",
+      "reasoning_effort",
+    ],
+  };
+}
 
 export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
   "swe@1": {
@@ -56,6 +82,12 @@ export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
       "reasoning_effort",
     ],
   },
+  "council@1": councilDeclaration("council@1", COUNCIL_AGENT_PROMPT),
+  "po@1": councilDeclaration("po@1", PO_AGENT_PROMPT),
+  "designer@1": councilDeclaration("designer@1", DESIGNER_AGENT_PROMPT),
+  "user@1": councilDeclaration("user@1", USER_AGENT_PROMPT),
+  "architect@1": councilDeclaration("architect@1", ARCHITECT_AGENT_PROMPT),
+  "security@1": councilDeclaration("security@1", SECURITY_AGENT_PROMPT),
 };
 
 export function getAgentDeclaration(

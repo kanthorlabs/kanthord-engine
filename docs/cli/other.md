@@ -24,9 +24,9 @@ syntax separately; it is not a claim that the target surface is implemented.
 
 ## Command inventory
 
-There are nine application/JWT forms below: three configuration commands,
-`upgrade`, two `serve` application forms, two `auth jwt generate` modes, and
-`auth jwt inspect`. Help is a parser facility, not a fifth global command.
+There are ten application/JWT/council forms below: three configuration commands,
+`upgrade`, two `serve` application forms, two `auth jwt generate` modes,
+`auth jwt inspect` and `council`. Help is a parser facility, not a fifth global command.
 
 1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--gateway-base-path <path>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
@@ -41,6 +41,9 @@ There are nine application/JWT forms below: three configuration commands,
 8. `kanthord auth jwt generate --project <project id> --binding <binding name> [--name <display>] [--output [path]] [--endpoint <url>] [--config <path>]` —
    implemented machine issuance; local, no route.
 9. `kanthord auth jwt inspect [token]` — implemented local decoding; no route.
+10. `kanthord council <idea> --out <dir> [--endpoint <url>] [--token <jwt>]` — implemented; client of
+    the agent enablement read and the workbench session operations. Writes Mission Service plan files
+    and `council.md` into an absent or empty directory. Design: `docs/brainstorm/specs/2026-10-09-council-design.md`.
 
 Service commands, including local `gateway openapi`, are specified by their
 owning pages in the [index](./README.md).
@@ -54,7 +57,8 @@ owning pages in the [index](./README.md).
 `storage`, and `agent`. The six service root names are `project`, `mission`,
 `scheduler`, `worker`, `tracking`, and `gateway`. These are disjoint, closed sets.
 `server` and the application form of `worker` are operands of `serve`, never new
-root commands. `cli` is not a `serve` operand.
+root commands. `cli` is not a `serve` operand. `council` is a client command root of its own and belongs to
+none of these sets.
 
 - [`--config`](./common-flags.md#--config) selects server configuration only
   where the local command declares it; service commands reject it.
@@ -972,6 +976,12 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `repository.connector.tool_missing`              | Bash, git or ssh cannot run, exits with an error or has unrecognized version output.                                    | serve server, serve worker                                                 |
 | local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                    | serve server, serve worker                                                 |
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation. | serve worker, binding apply                                                |
+| local           | `cli.council.token_required`                     | No human token is configured.                                                                                           | council                                                                    |
+| local           | `cli.council.agent_not_enabled`                  | One of the six council agents has no enablement or a disabled one. The message lists every missing agent.               | council                                                                    |
+| local           | `cli.council.output_directory_not_empty`         | `--out` names a regular file or a directory that is not empty.                                                          | council                                                                    |
+| local           | `cli.council.agent_session_failed`               | A workbench session of the run fails, waits for an approval, or does not end within 10 minutes. Nothing is written.     | council                                                                    |
+| local           | `cli.council.answer_invalid`                     | An answer holds no JSON value that matches the schema of its step. Nothing is written.                                  | council                                                                    |
+| local           | `cli.council.plan_file_invalid`                  | A plan entry has a bad or repeated filename, a parent or a dependency outside the set, or does not read back unchanged. | council                                                                    |
 
 The internal error `system.composition.unwired` means that the composition root's
 stand-in was called before its collaboration was implemented. It throws before
