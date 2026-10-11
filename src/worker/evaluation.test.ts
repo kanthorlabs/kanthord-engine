@@ -54,6 +54,7 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     };
     const releases: unknown[] = [];
     const clients = {
@@ -197,6 +198,7 @@ test("evaluation writes failed-verification assessments without inference and ga
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     };
     const assetId = createIdentity("evidence_asset");
     const address = { kind: "produced", sha256: "a".repeat(64) };

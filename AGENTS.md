@@ -215,6 +215,9 @@ engine/
 │   │   ├── evaluation.ts       # Verification evidence, assessment and action requests
 │   │   ├── transcript.ts       # Execution transcript sink and no-op implementation
 │   │   ├── native-method.ts    # Injected native method dispatch and resource lifetime
+│   │   ├── telemetry.ts        # Span recorder, span identities and the telemetry sink seam
+│   │   ├── agent-telemetry.ts  # pi session events as turn and tool spans
+│   │   ├── method-telemetry.ts # Phase, task, verification, judgement and evaluation spans
 │   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and entry validation
 │   ├── workbench/              # Workbench Service: human-driven agent sessions
 │   │   ├── contract.ts         # Workbench operations, schemas, and error codes
@@ -223,7 +226,13 @@ engine/
 │   │   ├── sessions.ts         # Workbench directory, pi session list, create, find, and stored configuration
 │   │   ├── tools.ts            # Built-in tools and one tool per human operation without secret material
 │   │   └── service.ts          # Session lifecycle, configuration, credential grant, runs, approvals, and operation handlers
-│   ├── tracking/               # [planned] Telemetry ingestion, storage, and retention
+│   ├── tracking/               # Tracking Service: execution traces in tracking.db
+│   │   ├── contract.ts         # Tracking operations, record schemas, limits and collaboration types
+│   │   ├── index.ts            # Service and migrations
+│   │   ├── migrations.ts       # Trace, span, record and telemetry text tables
+│   │   ├── trace-store.ts      # Transaction-owned trace, span, record and text rows
+│   │   ├── admission.ts        # Record admission, span merge and refusal reasons
+│   │   └── service.ts          # Root span at claim and release, telemetry write and reads
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
@@ -253,6 +262,7 @@ engine/
 │       │   ├── intake.ts       # Intake command group and outbound request commands
 │       │   ├── intake-inbound.ts # Intake inbound commands
 │       │   ├── intake-event.ts # Intake inbound event commands
+│       │   ├── tracking.ts     # Tracking command group
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Remote worker application skeleton
 │           ├── api.ts          # Server operation clients and bounded backoff

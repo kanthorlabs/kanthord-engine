@@ -121,6 +121,7 @@ async function fixture(
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
+    root_span_id: "1".repeat(16),
   };
   const input = {
     claim,

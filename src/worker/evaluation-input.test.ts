@@ -71,6 +71,7 @@ test("B3 review bundle places all supporting assets beside repositories and remo
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     };
     const first = createIdentity("evidence_asset");
     const second = createIdentity("evidence_asset");
@@ -188,6 +189,7 @@ test("evaluation places a produced report privately and preserves command order"
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
+    root_span_id: "1".repeat(16),
   };
   const assetId = createIdentity("evidence_asset");
   const address = { kind: "produced", sha256: "a".repeat(64) };

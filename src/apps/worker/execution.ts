@@ -18,6 +18,7 @@ import {
 import { completed, HandoverRefused, takeHandover } from "./handover.ts";
 import { retryIndeterminate, type WorkerApi } from "./api.ts";
 import { uploadEvidence } from "./evidence-upload.ts";
+import { HttpTelemetrySink } from "./telemetry-sink.ts";
 
 export interface HostExecutionInput {
   claim: ExecutionRecord;
@@ -45,6 +46,12 @@ export async function hostExecution(
     input.context,
     input.claim.expired_at,
   );
+  const telemetry = new HttpTelemetrySink({
+    executionId: input.claim.execution_id,
+    send: (request, options) =>
+      input.api.tracking.telemetryWrite(request, options),
+    log: input.log,
+  });
   try {
     throwIfCancelled(context);
     handover = await takeHandover({ ...input, context });
@@ -76,6 +83,7 @@ export async function hostExecution(
       clients: input.api,
       ...handover,
       context,
+      telemetry,
       hostTools: (workspace) => ({
         evidenceUpload: async (path, signal) => {
           const uploadContext = new CancellationContext(context);
@@ -136,6 +144,7 @@ export async function hostExecution(
     );
   } finally {
     handover?.credentials.discard();
+    telemetry.close();
     context.cancel();
   }
 }

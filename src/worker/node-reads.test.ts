@@ -29,6 +29,7 @@ function fixture(attempt = 1) {
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     },
     clients: {} as MethodClients,
     credentials: { release: async () => {} },

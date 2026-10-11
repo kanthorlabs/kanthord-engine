@@ -17,6 +17,7 @@ test("transcript records the execution identity and session messages before disp
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
+    root_span_id: "1".repeat(16),
   };
   const run = new ExecutionRun({
     claim,
