@@ -68,6 +68,7 @@ function caller(store: Store, execution = true): CallerContext {
           executionId: TRACE.execution_id,
           projectId: TRACE.project_id,
           nodeId: TRACE.node_id,
+          nodeBranch: `kanthord/${TRACE.node_id}`,
           attempt: TRACE.attempt,
           pinnedRevision: 1,
           runtimeIdentity: RUNTIME,

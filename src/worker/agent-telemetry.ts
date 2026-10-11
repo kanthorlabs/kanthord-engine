@@ -4,7 +4,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { SpanStatus, type Attributes } from "../tracking/contract.ts";
 import { isObject, isString } from "../kernel/values.ts";
-import { providerFailureOf } from "./provider-failure.ts";
+import { providerFailureOf } from "../llm/provider-failure.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 
 const TURN_START = "turn_start";
