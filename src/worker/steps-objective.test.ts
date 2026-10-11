@@ -63,6 +63,7 @@ const TASK_VERIFIED = "task verified";
 const RESTART_ATTEMPT = 2;
 const RESTART_WORK = "restart work";
 const SECOND_JUDGEMENT = 2;
+const TASK_JUDGED = "task judged";
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -269,6 +270,7 @@ test("start check judges passing tasks in order and discards verification change
       'kanthord-judgement: {"criterion_met":false,"rationale":"unmet"}',
     ),
   ]);
+  const events = t.mock.method(h.run, "log");
   assert.deepEqual(
     (await startCheck(h)).pending.map(({ task, instruction }) => [
       task.id,
@@ -277,6 +279,15 @@ test("start check judges passing tasks in order and discards verification change
     [
       [tasks[0]!.id, null],
       [tasks[2]!.id, null],
+    ],
+  );
+  assert.deepEqual(
+    events.mock.calls
+      .filter((call) => call.arguments[0] === TASK_JUDGED)
+      .map((call) => call.arguments[1]),
+    [
+      { task_id: tasks[1]!.id, commit: h.head, criterion_met: true },
+      { task_id: tasks[2]!.id, commit: h.head, criterion_met: false },
     ],
   );
   assert.doesNotMatch(
