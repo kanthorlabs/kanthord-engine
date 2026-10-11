@@ -264,6 +264,14 @@ paths:
     $ref: ./openapi/storage/credential.update_metadata.yaml#/pathItem
   /api/storage/credential/{credential_name}/verify:
     $ref: ./openapi/storage/credential.verify.yaml#/pathItem
+  /api/tracking/trace/{trace_id}/span:
+    $ref: ./openapi/tracking/span.list.yaml#/pathItem
+  /api/tracking/execution/{execution_id}/telemetry:
+    $ref: ./openapi/tracking/telemetry.write.yaml#/pathItem
+  /api/tracking/trace/{trace_id}/text/{text_id}:
+    $ref: ./openapi/tracking/text.get.yaml#/pathItem
+  /api/tracking/trace/{trace_id}:
+    $ref: ./openapi/tracking/trace.get.yaml#/pathItem
   /api/workbench/session/{session_id}/abort:
     $ref: ./openapi/workbench/session.abort.yaml#/pathItem
   /api/workbench/session/{session_id}/approve:

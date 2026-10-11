@@ -1,4 +1,4 @@
-import { StoreName, type OperationRegistry } from "../kernel/operation.ts";
+import { type OperationRegistry, type StoreMap } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
 import {
   Authentication,
@@ -14,7 +14,7 @@ export { directClient } from "./direct-client.ts";
 export { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 export function createInvocation(options: {
   registry: OperationRegistry;
-  stores: Record<StoreName, Store>;
+  stores: StoreMap<Store>;
   idempotencyTtl?: number;
   masterKey: string;
   authVersion: number;

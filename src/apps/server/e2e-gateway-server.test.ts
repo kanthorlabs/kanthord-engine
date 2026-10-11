@@ -89,6 +89,7 @@ const FIXTURE_SERVICE_NAMES = [
   "project",
   "mission",
   "intake",
+  "tracking",
 ];
 const SERVER_SERVICE_NAMES = ["server", ...FIXTURE_SERVICE_NAMES];
 const EMPTY_OWNER = { global: {}, projects: {} };
@@ -536,7 +537,7 @@ test("E07.6 custody refuses removing a model used by an enablement", async (t) =
   });
 });
 
-test("E07.7 real serve liveness exposes all nine maps (requires local git and ssh)", async (t) => {
+test("E07.7 real serve liveness exposes all ten maps (requires local git and ssh)", async (t) => {
   const env = serveEnvironment(temporary(t));
   const entry = new URL("../../main.ts", import.meta.url).href;
   const child = spawn(

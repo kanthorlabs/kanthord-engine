@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { z } from "zod";
 import type { Store } from "../kernel/store.ts";
 import { digest } from "../kernel/json.ts";
@@ -15,7 +16,7 @@ import { GatewayError, failure, unauthorized } from "./errors.ts";
 import {
   AccessPolicy,
   OperationLifetime,
-  type StoreName,
+  type StoreMap,
   type ExecutionProofRow,
   type ExecutionClaim,
 } from "../kernel/operation.ts";
@@ -55,7 +56,7 @@ export class Invocation {
   private readonly registry: OperationRegistry;
   readonly authentication: Authentication;
   readonly idempotency: Idempotency;
-  private readonly stores: Record<StoreName, Store>;
+  private readonly stores: StoreMap<Store>;
   private readonly shutdown = new CancellationContext();
   private readonly streams = new Set<Promise<void>>();
   private stopTask?: Promise<Error | null>;
@@ -66,7 +67,7 @@ export class Invocation {
     registry: OperationRegistry,
     authentication: Authentication,
     idempotency: Idempotency,
-    stores: Record<StoreName, Store>,
+    stores: StoreMap<Store>,
     scheduler?: ExecutionLookup,
   ) {
     this.registry = registry;
@@ -119,7 +120,7 @@ export class Invocation {
     return (
       !this.stopped &&
       this.registry.healthcheck() &&
-      Object.values(this.stores).every((store) => store.healthcheck())
+      Object.values(this.stores).every((store) => store?.healthcheck() ?? false)
     );
   }
 
@@ -393,12 +394,12 @@ export class Invocation {
           write: (transaction: import("../kernel/store.ts").Transaction) => T,
         ): T => {
           if (committed) throw new Error("caller.commit: called twice.");
-          const response = this.stores[operation.store].transaction(
-            (transaction) => {
-              const body = operation.output.parse(write(transaction));
-              return { status: operation.status, body };
-            },
-          );
+          const store = this.stores[operation.store];
+          assert.ok(store, `caller.commit: store ${operation.store} is absent`);
+          const response = store.transaction((transaction) => {
+            const body = operation.output.parse(write(transaction));
+            return { status: operation.status, body };
+          });
           committed = response;
           return response.body as T;
         },
