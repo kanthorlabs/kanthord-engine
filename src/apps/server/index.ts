@@ -94,6 +94,7 @@ import {
 } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
+import { loadPi } from "../../agent/pi.ts";
 import {
   RepositoryComponent,
   RepositoryCredentials,
@@ -171,6 +172,9 @@ export function composeServices(options: {
   oauthProviders?: ConstructorParameters<
     typeof LlmComponent
   >[0]["oauthProviders"];
+  loadModelRuntime?: ConstructorParameters<
+    typeof LlmComponent
+  >[0]["loadModelRuntime"];
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
@@ -304,6 +308,7 @@ export function composeServices(options: {
       agent.agentProvidersDependentOn(tx, name),
     enablementsDependentOnModel: (tx, name, model) =>
       agent.enablementsDependentOnModel(tx, name, model),
+    loadModelRuntime: options.loadModelRuntime ?? loadPi,
   });
   const agent: AgentComponent = new AgentComponent({
     store: options.store,

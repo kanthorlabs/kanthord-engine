@@ -32,10 +32,12 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import {
   LlmErrorCode,
   llmOperations,
+  MODEL_CHECK_TIMEOUT_MS,
   PROVIDER_CHECK_TIMEOUT_MS,
   providerCheckBodySchema,
   type EnablementsDependentOnModelFn,
   type LlmCredentialAnswer,
+  type ModelCheckAnswer,
   type ProviderCheckAnswer,
 } from "./contract.ts";
 import {
@@ -46,6 +48,8 @@ import {
   OAuthLogin,
   type OAuthSecret,
 } from "./login.ts";
+import { checkModel } from "./model-check.ts";
+import type { ModelRuntimeModule } from "./model-connector.ts";
 import {
   approvedModels,
   CAPABILITY_NONE,
@@ -70,6 +74,7 @@ export interface Dependencies {
   now?: () => number;
   agentProvidersDependentOn: AgentProvidersDependentOnFn;
   enablementsDependentOnModel: EnablementsDependentOnModelFn;
+  loadModelRuntime: () => Promise<ModelRuntimeModule>;
 }
 
 const CredentialErrorCode = {
@@ -109,6 +114,7 @@ export class LlmComponent implements Service {
   private acceptingLogins = true;
   private readonly agentProvidersDependentOn: AgentProvidersDependentOnFn;
   private readonly enablementsDependentOnModel: EnablementsDependentOnModelFn;
+  private readonly loadModelRuntime: () => Promise<ModelRuntimeModule>;
   private readonly platformSet: CredentialPlatformSet;
 
   constructor(dependencies: Dependencies) {
@@ -122,6 +128,7 @@ export class LlmComponent implements Service {
     this.now = dependencies.now ?? Date.now;
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
+    this.loadModelRuntime = dependencies.loadModelRuntime;
     this.platformSet = {
       platforms: LLM_PLATFORMS,
       check_metadata: (tx, revision) => this.checkMetadata(tx, revision),
@@ -221,6 +228,9 @@ export class LlmComponent implements Service {
     registry.register(llmOperations.provider_check, (input, caller) =>
       this.providerCheck(input, caller),
     );
+    registry.register(llmOperations.model_check, (input, caller) =>
+      this.modelCheck(input, caller),
+    );
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {
@@ -288,6 +298,54 @@ export class LlmComponent implements Service {
           ),
       );
       throwIfCancelled(caller.context);
+      return caller.commit(() => answer);
+    } finally {
+      context.cancel();
+    }
+  }
+
+  private async modelCheck(
+    input: typeof llmOperations.model_check.input._output,
+    caller: CallerContext,
+  ): Promise<ModelCheckAnswer> {
+    const { body } = input;
+    const material = this.store.transaction((tx) =>
+      this.records.checkMaterial(tx, this.platformSet, body.credential),
+    );
+    if (!material || !isLlmPlatform(material.platform))
+      throw new OperationError(
+        HttpStatus.NotFound,
+        LlmErrorCode.ModelCredentialNotFound,
+        "Credential not found.",
+      );
+    const context = new CancellationContext(
+      caller.context,
+      Date.now() + MODEL_CHECK_TIMEOUT_MS,
+    );
+    try {
+      const answer = await checkModel(
+        {
+          credential: body.credential,
+          platform: material.platform,
+          secret: material.secret(),
+          metadata: material.metadata,
+          model_identifier: body.model_identifier,
+          reasoning_effort: body.reasoning_effort,
+        },
+        await this.loadModelRuntime(),
+        context,
+      );
+      throwIfCancelled(caller.context);
+      if (answer.message !== null)
+        this.logger.info(
+          {
+            credential: body.credential,
+            model_identifier: body.model_identifier,
+            result: answer.result,
+            reason: answer.message,
+          },
+          "model check failed",
+        );
       return caller.commit(() => answer);
     } finally {
       context.cancel();

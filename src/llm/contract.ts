@@ -23,6 +23,7 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { ProviderFailure } from "../scheduler/contract.ts";
 
 export const LLM_COMPONENT_NAME = "llm";
 
@@ -33,9 +34,14 @@ export const LlmErrorCode = {
   ProviderInvalidInput: "llm.provider.invalid_input",
   ProviderCheckUnsupported: "llm.provider.check_unsupported",
   ProviderCredentialNotFound: "llm.provider.credential_not_found",
+  ModelCredentialNotFound: "llm.model.credential_not_found",
+  ModelUnknown: "llm.model.model_unknown",
+  ModelReasoningUnsupported: "llm.model.reasoning_unsupported",
 } as const;
 
 export const PROVIDER_CHECK_TIMEOUT_MS = 10000;
+export const MODEL_CHECK_OPERATION_TIMEOUT_MS = 60000;
+export const MODEL_CHECK_TIMEOUT_MS = 50000;
 
 export type AgentEnablement = { agent_name: string };
 export type EnablementsDependentOnModelFn = (
@@ -83,6 +89,22 @@ export const providerCheckAnswerSchema = z.strictObject({
     .nullable(),
 });
 export type ProviderCheckAnswer = z.infer<typeof providerCheckAnswerSchema>;
+export const modelCheckBodySchema = z.strictObject({
+  credential: z.string().min(1),
+  model_identifier: z.string().min(1),
+  reasoning_effort: z.string().min(1),
+});
+export const ModelCheckResult = {
+  Ok: "ok",
+  ...ProviderFailure,
+} as const;
+export type ModelCheckResult =
+  (typeof ModelCheckResult)[keyof typeof ModelCheckResult];
+export const modelCheckAnswerSchema = z.strictObject({
+  result: z.enum(ModelCheckResult),
+  message: z.string().nullable(),
+});
+export type ModelCheckAnswer = z.infer<typeof modelCheckAnswerSchema>;
 const loginCodeAnswerSchema = z.strictObject({ session_id: z.string() });
 const loginStatusAnswerSchema = z.strictObject({
   session_id: z.string(),
@@ -385,5 +407,27 @@ export const llmOperations = {
     output: providerCheckAnswerSchema,
     description:
       "Check the connection of an LLM credential through its LLM provider and read its model list when the check reads one.",
+  },
+  model_check: {
+    id: "llm.model.check",
+    service: LLM_COMPONENT_NAME,
+    method: HttpMethod.Post,
+    path: "/api/llm/model/check",
+    access: AccessPolicy.Human,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: MODEL_CHECK_OPERATION_TIMEOUT_MS,
+    mutation: false,
+    body: true,
+    maxBodyBytes: METADATA_MAX_BODY_BYTES,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyParams,
+      query: emptyQuery,
+      body: modelCheckBodySchema,
+    }),
+    output: modelCheckAnswerSchema,
+    description:
+      "Check one tool round trip of a model and a reasoning effort through an LLM credential.",
   },
 } as const satisfies Record<string, Operation>;

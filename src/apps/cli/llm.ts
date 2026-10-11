@@ -32,7 +32,10 @@ const LOGIN_MODE_BROWSER = "browser";
 const LOGIN_MODE_DEVICE = "device";
 const PROVIDER = "provider";
 const CHECK = "check";
+const MODEL = "model";
 const CREDENTIAL_OPTION = "--credential";
+const MODEL_OPTION = "--model";
+const REASONING_EFFORT_OPTION = "--reasoning-effort";
 
 const LLM_GROUP: CredentialGroup = {
   name: CommandName.Llm,
@@ -137,6 +140,28 @@ async function providerCheck(command: Command): Promise<void> {
   );
 }
 
+function modelCheckCode(reason: string): string {
+  return `cli.${CommandName.Llm}.${MODEL}.${CHECK}.${reason}`;
+}
+
+async function modelCheck(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, modelCheckCode(TOKEN_REQUIRED));
+  const result = await httpClient(llmOperations, endpoint, token).model_check({
+    params: {},
+    query: {},
+    body: {
+      credential: options.credential,
+      model_identifier: options.model,
+      reasoning_effort: options.reasoningEffort,
+    },
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, modelCheckCode(INDETERMINATE)))}\n`,
+  );
+}
+
 export function addLlmCommand(program: Command): void {
   const credential = addCredentialCommand(program, LLM_GROUP);
   const component = credential.parent;
@@ -154,6 +179,29 @@ export function addLlmCommand(program: Command): void {
       singleUse(CREDENTIAL_OPTION),
     )
     .action((_options, command: Command) => providerCheck(command));
+  const model = component.command(MODEL).description("LLM model commands");
+  model.action(() => model.help());
+  model
+    .command(CHECK)
+    .description(
+      "Check one tool round trip of a model and a reasoning effort as JSON",
+    )
+    .requiredOption(
+      "--credential <credential-name>",
+      "Credential name",
+      singleUse(CREDENTIAL_OPTION),
+    )
+    .requiredOption(
+      "--model <model-identifier>",
+      "Model identifier",
+      singleUse(MODEL_OPTION),
+    )
+    .requiredOption(
+      "--reasoning-effort <level>",
+      "Reasoning effort",
+      singleUse(REASONING_EFFORT_OPTION),
+    )
+    .action((_options, command: Command) => modelCheck(command));
   credential
     .command(LOGIN_STATUS)
     .description("Get a login session status as JSON")
