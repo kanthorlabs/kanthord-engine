@@ -15,6 +15,7 @@ import {
   type RepositoryFile,
 } from "./contract.ts";
 import { CheckEndState, ExpectedEndState, type CheckFold } from "./github.ts";
+import { NODE_BRANCH_PATTERN } from "./node-branch.ts";
 import {
   parseSshIdentity,
   SshErrorCode,
@@ -62,6 +63,7 @@ const PERMISSION_BITS = 0o777;
 const COMMIT_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const EXIT_SUCCESS = 0;
 const EXIT_NOT_ANCESTOR = 1;
+const EXIT_DETACHED_HEAD = 1;
 const NO_EXIT = -1;
 const MERGE_IDENTITY = {
   GIT_AUTHOR_NAME: "kanthord",
@@ -270,8 +272,16 @@ export async function fetchAndCheckout(
     await run(["for-each-ref", "--format=%(refname)", ref])
   ).trim();
   const target = found.split("\n").includes(ref) ? branch : baseBranch;
+  const current = await runGitExit(
+    directory,
+    ["symbolic-ref", "--quiet", "--short", "HEAD"],
+    context,
+    end - performance.now(),
+    "fetch and checkout",
+    [EXIT_SUCCESS, EXIT_DETACHED_HEAD],
+  );
   await run(["checkout", "--force", "-B", branch, `origin/${target}`, "--"]);
-  await run(["clean", "-ffd"]);
+  await run(["clean", current.output.trim() === branch ? "-ffd" : "-ffdx"]);
   return (await run(["rev-parse", "HEAD"])).trim();
 }
 
@@ -296,7 +306,7 @@ export async function pushNodeBranch(
   context: Context,
   deadlineMs: number,
 ): Promise<void> {
-  assert.match(branch, /^kanthord\/node_[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
+  assert.match(branch, NODE_BRANCH_PATTERN);
   assert.ok(directory !== EMPTY_STRING);
   await runGit(
     directory,

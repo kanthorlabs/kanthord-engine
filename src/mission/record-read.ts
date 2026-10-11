@@ -57,6 +57,7 @@ export function attemptRecord(
     node_id: row.node_id,
     attempt: row.attempt,
     node_revision: row.node_revision,
+    start_point: row.start_point,
     required_external_actions: requiredActionsOf(
       tx,
       bindings,

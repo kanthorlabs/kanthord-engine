@@ -23,6 +23,7 @@ const CLAIM = {
   node_id: "node",
   attempt: 1,
   pinned_revision: 2,
+  node_branch: `kanthord/${"node"}`,
   created_at: Date.now(),
   expired_at: Date.now() + 60000,
   trace_id: "trace",

@@ -12,6 +12,8 @@ import {
   AssessmentResult,
   ReleaseObligation,
   RepositoryAction,
+  StartPoint,
+  missionOperations,
   type AssetKind as AssetType,
 } from "./contract.ts";
 import {
@@ -29,6 +31,8 @@ const FURTHER_WORK_LIMIT = 3;
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+const THIRD_ATTEMPT = 3;
 const NOW = 100;
 const NO_ATTEMPT = 0;
 const INSERT = "workQueue.insert";
@@ -168,12 +172,17 @@ test("claim rechecks stale jobs, opens once, and preserves the open attempt pin"
     project_id: h.project_id,
     attempt: FIRST_ATTEMPT,
     node_revision: FIRST_ATTEMPT,
+    node_branch: `kanthord/${h.node_id}`,
   });
   assert.deepEqual(
     JSON.parse(
       h.store.transaction((tx) => readOpenAttempt(tx, h.node_id))!.opened_by,
     ),
     h.opener,
+  );
+  assert.equal(
+    h.store.transaction((tx) => readOpenAttempt(tx, h.node_id))!.start_point,
+    StartPoint.BaseBranch,
   );
   h.release(true);
   h.store.transaction((tx) => {
@@ -404,4 +413,57 @@ test("a failure routes below the limit, pauses at the limit and resume permits a
     h.service.failure(tx, h.node_id, FIRST_ATTEMPT, NOW);
   });
   assert.equal(h.node().state, NodeState.Waiting);
+});
+
+test("an unblock from the base branch starts a new node branch that later attempts continue", async (t) => {
+  const h = fixture(t);
+  const restartBranch = `kanthord/${h.node_id}-a2`;
+  const blockAndUnblock = async (attempt: number, startPoint?: StartPoint) => {
+    h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+    await h.invoke("node.block", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: h.body(NodeState.Paused, attempt),
+    });
+    return h.invoke("node.unblock", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        blocked_attempt: attempt,
+        expected_revision: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
+        ...(startPoint === undefined ? {} : { start_point: startPoint }),
+      },
+    });
+  };
+  assert.equal(h.claim()?.node_branch, `kanthord/${h.node_id}`);
+  const invalid = {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+      start_point: "fresh",
+    },
+  };
+  assert.equal(
+    missionOperations["node.unblock"].input.safeParse(invalid).success,
+    false,
+  );
+  const restarted = await blockAndUnblock(FIRST_ATTEMPT, StartPoint.BaseBranch);
+  assert.equal(restarted.attempt?.attempt, SECOND_ATTEMPT);
+  assert.equal(restarted.attempt?.start_point, StartPoint.BaseBranch);
+  const steps = h.claim();
+  assert.equal(steps?.attempt, SECOND_ATTEMPT);
+  assert.equal(steps?.node_branch, restartBranch);
+  const continued = await blockAndUnblock(SECOND_ATTEMPT);
+  assert.equal(continued.attempt?.attempt, THIRD_ATTEMPT);
+  assert.equal(continued.attempt?.start_point, StartPoint.NodeBranch);
+  assert.equal(h.claim()?.node_branch, restartBranch);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Waiting));
+  const evaluation = h.claim([NodeState.Waiting]);
+  assert.equal(evaluation?.kind, ClaimKind.Evaluation);
+  assert.equal(evaluation?.attempt, THIRD_ATTEMPT);
+  assert.equal(evaluation?.node_branch, restartBranch);
 });

@@ -15,8 +15,8 @@ import { background } from "../kernel/context.ts";
 import * as connector from "../repository/connector.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { nodeBranchOf } from "../repository/node-branch.ts";
 import {
-  nodeBranchOf,
   SCRATCH_DIRECTORY,
   WorkspaceKind,
   WorkspaceRoot,
@@ -24,6 +24,7 @@ import {
 } from "./workspace.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
+const FIRST_ATTEMPT = 1;
 
 test("workspace root audits private mode and keys refuse foreign identities", (t) => {
   const expectedBranch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -39,7 +40,10 @@ test("workspace root audits private mode and keys refuse foreign identities", (t
       createIdentity("execution"),
     ),
   );
-  assert.equal(nodeBranchOf("node_01ARZ3NDEKTSV4RRFFQ69G5FAA"), expectedBranch);
+  assert.equal(
+    nodeBranchOf("node_01ARZ3NDEKTSV4RRFFQ69G5FAA", FIRST_ATTEMPT),
+    expectedBranch,
+  );
   chmodSync(workspace.root, 0o755);
   assert.throws(() => WorkspaceRoot.open(state), {
     code: "system.files.invalid_permissions",
@@ -112,6 +116,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
   const first = await workspace.prepareObjective({
     ...common,
     objectiveId,
+    nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
     repository,
   });
   assert.equal(first.head, base);
@@ -130,6 +135,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
   const second = await workspace.prepareObjective({
     ...common,
     objectiveId,
+    nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
     repository,
   });
   assert.equal(second.directory, first.directory);
@@ -179,12 +185,14 @@ test("workspace preparation refreshes objective branches and creates disposable 
     workspace.prepareObjective({
       ...common,
       objectiveId: failedId,
+      nodeBranch: nodeBranchOf(failedId, FIRST_ATTEMPT),
       repository: { ...repository, address: join(state, "missing") },
     }),
   );
   const retried = await workspace.prepareObjective({
     ...common,
     objectiveId: failedId,
+    nodeBranch: nodeBranchOf(failedId, FIRST_ATTEMPT),
     repository,
   });
   assert.equal(retried.head, base);
@@ -226,6 +234,7 @@ test("a drifted SSH identity stops every workspace preparation before its git op
     workspace.prepareObjective({
       ...common,
       objectiveId: createIdentity("node"),
+      nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       repository,
     }),
     (error) => error === drift,
@@ -278,6 +287,7 @@ test("an objective workspace excludes the scratch directory from git once", asyn
     context: background,
     deadlineMs: 10000,
     objectiveId,
+    nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
     repository: {
       binding_id: createIdentity("binding"),
       name: "todoapp-repo",
@@ -315,4 +325,128 @@ test("an objective workspace excludes the scratch directory from git once", asyn
     workspace.objectiveKey(objectiveId),
     WorkspaceKind.Objective,
   );
+});
+
+const RESTART_ATTEMPT = 2;
+
+async function restartFixture(t: test.TestContext) {
+  const state = temporary(t);
+  const origin = join(state, "origin");
+  const seed = join(state, "seed");
+  mkdirSync(origin);
+  mkdirSync(seed);
+  await simpleGit(origin).init(true);
+  const git = simpleGit(seed);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  const commit = async (directory: string, file: string, value: string) => {
+    writeFileSync(join(directory, file), value);
+    await simpleGit(directory).add(file);
+    await simpleGit(directory).raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      value,
+    ]);
+    return (await simpleGit(directory).revparse(["HEAD"])).trim();
+  };
+  await commit(seed, ".gitignore", "ignored.txt\n");
+  const base = (await git.revparse(["HEAD"])).trim();
+  await git.addRemote("origin", origin);
+  await git.push("origin", "main");
+  const workspace = WorkspaceRoot.open(state);
+  const objectiveId = createIdentity("node");
+  const repository = {
+    binding_id: createIdentity("binding"),
+    name: "todoapp-repo",
+    address: origin,
+    ssh_identity: {
+      host: "github.com",
+      hostname: "github.com",
+      port: 22,
+      identity_file: "~/.ssh/id_test",
+    },
+    strategy: { base_branch: "main" },
+  };
+  const prepare = async (startAttempt: number) => {
+    const prepared = await workspace.prepareObjective({
+      transport,
+      context: background,
+      deadlineMs: 10000,
+      objectiveId,
+      nodeBranch: nodeBranchOf(objectiveId, startAttempt),
+      repository,
+    });
+    workspace.release(
+      workspace.objectiveKey(objectiveId),
+      WorkspaceKind.Objective,
+    );
+    return prepared;
+  };
+  const remoteHead = async (branch: string) =>
+    (await simpleGit(origin).revparse([`refs/heads/${branch}`])).trim();
+  return { origin, seed, base, commit, prepare, remoteHead, git };
+}
+
+test("a restart from the base branch checks out the base, pushes a new node branch and leaves the earlier branch", async (t) => {
+  const h = await restartFixture(t);
+  const first = await h.prepare(FIRST_ATTEMPT);
+  assert.equal(first.head, h.base);
+  const earlier = await h.commit(first.directory, "work", "rejected");
+  await transport.pushNodeBranch(
+    first.directory,
+    first.nodeBranch,
+    background,
+    10000,
+  );
+  const restart = await h.prepare(RESTART_ATTEMPT);
+  assert.equal(restart.directory, first.directory);
+  assert.equal(restart.nodeBranch, `${first.nodeBranch}-a2`);
+  assert.equal(restart.head, h.base);
+  const fresh = await h.commit(restart.directory, "work", "fresh");
+  await transport.pushNodeBranch(
+    restart.directory,
+    restart.nodeBranch,
+    background,
+    10000,
+  );
+  assert.equal(await h.remoteHead(restart.nodeBranch), fresh);
+  assert.equal(await h.remoteHead(first.nodeBranch), earlier);
+  assert.equal(
+    (await simpleGit(restart.directory).raw(["rev-list", fresh]))
+      .split("\n")
+      .includes(earlier),
+    false,
+  );
+  const continued = await h.prepare(RESTART_ATTEMPT);
+  assert.equal(continued.nodeBranch, restart.nodeBranch);
+  assert.equal(continued.head, fresh);
+});
+
+test("a branch switch removes the scratch directory and ignored files and a checkout of the same branch keeps them", async (t) => {
+  const h = await restartFixture(t);
+  const first = await h.prepare(FIRST_ATTEMPT);
+  const scratch = join(first.directory, SCRATCH_DIRECTORY);
+  const ignored = join(first.directory, "ignored.txt");
+  const untracked = join(first.directory, "untracked.txt");
+  const leave = () => {
+    mkdirSync(scratch, { recursive: true });
+    writeFileSync(join(scratch, "probe.mjs"), "x");
+    writeFileSync(ignored, "x");
+    writeFileSync(untracked, "x");
+  };
+  leave();
+  const same = await h.prepare(FIRST_ATTEMPT);
+  assert.equal(same.directory, first.directory);
+  assert.equal(existsSync(scratch), true);
+  assert.equal(existsSync(ignored), true);
+  assert.equal(existsSync(untracked), false);
+  leave();
+  await h.prepare(RESTART_ATTEMPT);
+  assert.equal(existsSync(scratch), false);
+  assert.equal(existsSync(ignored), false);
+  assert.equal(existsSync(untracked), false);
 });

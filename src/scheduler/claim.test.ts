@@ -70,6 +70,7 @@ export function claimHarness(
       project_id: row.project_id,
       attempt: 1,
       node_revision: PIN,
+      node_branch: `kanthord/${nodeId}-a2`,
     };
   };
   const claim = (now = FIXTURE_NOW) =>
@@ -88,6 +89,12 @@ test("claim pins binding, attempt, revision, trace and the fixed effective deadl
   assert.equal(first.outcome, ClaimOutcome.Claimed);
   assert.equal(first.row!.expired_at, FIXTURE_NOW + WALL_TIME + RESERVE_MS);
   assert.equal(first.row!.pinned_revision, PIN);
+  assert.equal(first.row!.node_branch, `kanthord/${h.row.node_id}-a2`);
+  assert.equal(
+    h.store.transaction((tx) => readExecution(tx, first.row!.execution_id))!
+      .node_branch,
+    `kanthord/${h.row.node_id}-a2`,
+  );
   assert.equal(first.row!.worker_binding_id, h.binding.binding_id);
   assert.deepEqual(first.row!.credentials, []);
   assert.equal(Object.hasOwn(first.row!, "kind"), false);
@@ -142,6 +149,7 @@ test("selection preserves priority and age while skipping a stale job", (t) => {
       project_id: h.row.project_id,
       attempt: 1,
       node_revision: PIN,
+      node_branch: `kanthord/${nodeId}`,
     };
   };
   assert.equal(h.claim().row!.node_id, nodes[2]);
