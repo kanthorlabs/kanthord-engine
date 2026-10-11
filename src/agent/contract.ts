@@ -372,6 +372,17 @@ export const agentEnablementSchema = z.strictObject({
   revision: z.number().int().positive(),
 });
 
+export const agentCooldownSchema = z.strictObject({
+  cooldown_id: z.string().min(1),
+  credential: z.string().min(1),
+  model_identifier: z.string().min(1),
+  code: z.enum(AdvancingProviderFailure),
+  strikes: z.number().int().positive(),
+  started_at: z.number().int().nonnegative(),
+  until_at: z.number().int().nonnegative(),
+  execution_id: z.string().min(1),
+});
+
 export const CONFIGURATION_DESCRIPTION =
   "The Agent component validates the whole configuration. `model_identifier` belongs to `getBuiltinModels(provider)` of pi-ai 0.86.0 or to the `models` metadata of the `openai-compatible` credential. `reasoning_effort` belongs to the supported reasoning levels of that model. JSON Schema validates neither lookup.";
 export const effectiveConfigurationSchema = z
@@ -701,6 +712,39 @@ export const agentOperations = {
     output: z.strictObject({ items: z.array(agentModelSchema) }),
     description:
       "List the models and reasoning efforts of one credential for one agent provider kind, before an enablement names it.",
+  },
+  "cooldown.list": {
+    ...enablementOperation,
+    id: "agent.cooldown.list",
+    method: HttpMethod.Get,
+    path: "/api/agent/cooldown",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: z.strictObject({ items: z.array(agentCooldownSchema) }),
+    description:
+      "List the cooldowns of the fallback chain entries, live and expired, by credential and model.",
+  },
+  "cooldown.clear": {
+    ...enablementOperation,
+    id: "agent.cooldown.clear",
+    method: HttpMethod.Delete,
+    path: "/api/agent/cooldown/:cooldown_id",
+    mutation: true,
+    body: false,
+    status: HttpStatus.NoContent,
+    input: z.strictObject({
+      params: z.strictObject({ cooldown_id: z.string().min(1) }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: z.null(),
+    description:
+      "Clear one cooldown so that the next claim can select its chain entry again.",
   },
   "prompt.put": {
     ...enablementMutation,

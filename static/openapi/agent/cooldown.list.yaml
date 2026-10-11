@@ -1,0 +1,113 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: agent.cooldown.list
+    tags:
+      - agent
+    description: List the cooldowns of the fallback chain entries, live and expired,
+      by credential and model.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters: []
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/agent.cooldown.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    agent.cooldown.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    agent.cooldown.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              cooldown_id:
+                type: string
+                minLength: 1
+              credential:
+                type: string
+                minLength: 1
+              model_identifier:
+                type: string
+                minLength: 1
+              code:
+                type: string
+                enum:
+                  - rate_limited
+                  - quota_exhausted
+                  - unavailable
+              strikes:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+              started_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              until_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              execution_id:
+                type: string
+                minLength: 1
+            required:
+              - cooldown_id
+              - credential
+              - model_identifier
+              - code
+              - strikes
+              - started_at
+              - until_at
+              - execution_id
+            additionalProperties: false
+      required:
+        - items
+      additionalProperties: false

@@ -32,6 +32,7 @@ import {
   type PromptSettings,
   type StoredPromptSettings,
   agentModelSchema,
+  agentCooldownSchema,
   effectiveConfigurationSchema,
   PromptView,
   type PromptLayerAnswer,
@@ -68,7 +69,9 @@ import {
 import { promptSettings, savePromptSettings } from "./prompts.ts";
 import {
   cooldownOf,
+  deleteCooldown,
   deleteCooldownOf,
+  listCooldowns,
   startCooldown,
   type CooldownKey,
 } from "./cooldowns.ts";
@@ -991,6 +994,23 @@ export class AgentComponent {
           items: page.items.map(wireRecord),
           next_cursor: page.next_cursor,
         };
+      }),
+    );
+    registry.register(agentOperations["cooldown.list"], (_input, caller) =>
+      caller.commit((tx) => ({
+        items: listCooldowns(tx).map((row) => agentCooldownSchema.parse(row)),
+      })),
+    );
+    registry.register(agentOperations["cooldown.clear"], ({ params }, caller) =>
+      caller.commit((tx) => {
+        if (!deleteCooldown(tx, params.cooldown_id))
+          throw new OperationError(
+            HttpStatus.NotFound,
+            AgentErrorCode.CooldownNotFound,
+            "Agent cooldown not found.",
+            { cooldown_id: params.cooldown_id },
+          );
+        return null;
       }),
     );
     registry.register(agentOperations["model.list"], ({ query }, caller) =>

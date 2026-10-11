@@ -46,6 +46,12 @@ const providerAddBodySchema = z.strictObject({
 const ENABLEMENT = "enablement";
 const PROVIDER = "provider";
 const MODEL = "model";
+const COOLDOWN = "cooldown";
+const CLEAR = "clear";
+const COOLDOWN_LIST_TOKEN_REQUIRED = "cli.agent.cooldown.list.token_required";
+const COOLDOWN_LIST_INDETERMINATE = "cli.agent.cooldown.list.indeterminate";
+const COOLDOWN_CLEAR_TOKEN_REQUIRED = "cli.agent.cooldown.clear.token_required";
+const COOLDOWN_CLEAR_INDETERMINATE = "cli.agent.cooldown.clear.indeterminate";
 const LIST = "list";
 const GET = "get";
 const PUT = "put";
@@ -531,6 +537,35 @@ async function credentialModelList(command: Command): Promise<void> {
   );
 }
 
+async function cooldownList(command: Command): Promise<void> {
+  const { endpoint, token } = resolveClient(command.optsWithGlobals());
+  requireToken(token, COOLDOWN_LIST_TOKEN_REQUIRED);
+  const result = await httpClient(agentOperations, endpoint, token)[
+    "cooldown.list"
+  ]({ params: {}, query: {}, body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, COOLDOWN_LIST_INDETERMINATE))}\n`,
+  );
+}
+
+async function cooldownClear(
+  cooldownId: string,
+  command: Command,
+): Promise<void> {
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, COOLDOWN_CLEAR_TOKEN_REQUIRED);
+  const key = resolveKey(options);
+  const result = await httpClient(agentOperations, endpoint, token)[
+    "cooldown.clear"
+  ](
+    { params: { cooldown_id: cooldownId }, query: {}, body: null },
+    { idempotencyKey: key },
+  );
+  handleMutationResult(result, COOLDOWN_CLEAR_INDETERMINATE, key);
+  process.stdout.write(`${JSON.stringify({ idempotency_key: key })}\n`);
+}
+
 export function addAgentCommand(program: Command): void {
   assert.equal(program.name(), PROGRAM_NAME);
   assert.ok(
@@ -582,6 +617,22 @@ export function addAgentCommand(program: Command): void {
       singleUse("--credential"),
     )
     .action((_options, command: Command) => credentialModelList(command));
+  const cooldown = agent
+    .command(COOLDOWN)
+    .description("Inspect and clear fallback chain cooldowns");
+  cooldown.action(() => cooldown.help());
+  cooldown
+    .command(LIST)
+    .description("List the cooldowns as JSON")
+    .action((_options, command: Command) => cooldownList(command));
+  cooldown
+    .command(CLEAR)
+    .description("Clear one cooldown")
+    .argument("<cooldown-id>", "Cooldown identity")
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action((cooldownId: string, _options, command: Command) =>
+      cooldownClear(cooldownId, command),
+    );
   const prompt = agent
     .command(PROMPT)
     .description("Manage the prompt settings");
