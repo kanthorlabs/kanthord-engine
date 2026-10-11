@@ -122,8 +122,16 @@ const createProposalTable: Migration = (database) => {
   `);
 };
 
+const addAttemptStartPoint: Migration = (database) => {
+  database.exec(`
+    ALTER TABLE mission_attempt ADD COLUMN start_point TEXT NOT NULL DEFAULT 'node_branch';
+    UPDATE mission_attempt SET start_point = 'base_branch' WHERE attempt = 1;
+  `);
+};
+
 export const missionMigrations: readonly Migration[] = [
   createMissionTables,
   createExecutionRecordTables,
   createProposalTable,
+  addAttemptStartPoint,
 ];

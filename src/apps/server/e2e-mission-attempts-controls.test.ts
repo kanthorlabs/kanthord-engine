@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { join } from "node:path";
+import { ulid } from "ulid";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
@@ -13,6 +14,7 @@ import {
   RepositoryAction,
   ExpectedEndState,
   Resolution,
+  StartPoint,
   type ControlResult,
   type Node,
   type NodeChange,
@@ -40,6 +42,8 @@ const THIRD_MISSION_VERSION = 3;
 const FOURTH_MISSION_VERSION = 4;
 const VERSION = 5;
 const NUMBER_TYPE = "number";
+const BAD_REQUEST = 400;
+const VALIDATION_FAILED = "gateway.request.validation_failed";
 const JOURNEY_TIMEOUT_MS = 300000;
 const SCENARIO_TIMEOUT_MS = 30000;
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -181,6 +185,8 @@ async function setup(t: TestContext) {
     write,
     refuses,
     env,
+    endpoint: fixture.endpoint,
+    token: fixture.token,
     project_id: project.id,
     mission_id: mission.id,
     initiativeId,
@@ -326,13 +332,41 @@ test(
       },
     );
     await scenario("E01.6 unblock opens exactly the next attempt", async () => {
-      const answer = await control("unblock", h.objectiveId, {
+      const unblock = {
         blocked_attempt: FIRST_ATTEMPT,
         expected_revision: h.revision,
         expected_mission_version: VERSION,
-      });
+      };
+      const refused = await fetch(
+        `${h.endpoint}/api/mission/node/${h.objectiveId}/unblock`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${h.token}`,
+            "content-type": "application/json",
+            "Idempotency-Key": ulid(),
+          },
+          body: JSON.stringify({ ...unblock, start_point: "fresh" }),
+        },
+      );
+      assert.equal(refused.status, BAD_REQUEST);
+      assert.equal(
+        ((await refused.json()) as { error: { code: string } }).error.code,
+        VALIDATION_FAILED,
+      );
+      const blocked = await h.read<Node>([
+        "mission",
+        "node",
+        "get",
+        h.objectiveId,
+      ]);
+      assert.ok(blocked.kind !== NodeKind.Task);
+      assert.equal(blocked.state, NodeState.Blocked);
+      assert.equal(blocked.attempt, FIRST_ATTEMPT);
+      const answer = await control("unblock", h.objectiveId, unblock);
       state(answer, NodeState.Available);
       assert.equal(answer.attempt?.attempt, SECOND_ATTEMPT);
+      assert.equal(answer.attempt?.start_point, StartPoint.NodeBranch);
       assert.equal(answer.attempt?.opened_by.kind, ActorKind.Human);
       assert.equal(answer.outcome, null);
     });
@@ -357,6 +391,11 @@ test(
       ]);
       assert.equal(typeof closed.closed_at, NUMBER_TYPE);
       assert.deepEqual(closed.outcome_ids, [blockedOutcome]);
+      assert.deepEqual(
+        list.items.map((item) => item.start_point),
+        [StartPoint.NodeBranch, StartPoint.BaseBranch],
+      );
+      assert.equal(closed.start_point, StartPoint.BaseBranch);
     });
     await scenario(
       "E01.8 attempt reads frozen repository requirements",

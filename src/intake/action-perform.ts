@@ -43,7 +43,6 @@ import {
   type ReadBack,
 } from "./outbound.ts";
 
-const NODE_BRANCH_PREFIX = "kanthord/";
 const PULL_REQUEST_TITLE_PREFIX = "kanthord ";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const ACTION_UNMAPPED_STATUS = 422;
@@ -240,7 +239,7 @@ async function createPullRequest(
     call,
     targetOf(facts),
     {
-      head: NODE_BRANCH_PREFIX + performer.claim.nodeId,
+      head: performer.claim.nodeBranch,
       base: facts.frozen_action.configuration.base_branch,
       title: PULL_REQUEST_TITLE_PREFIX + performer.claim.nodeId,
     },
@@ -289,7 +288,7 @@ async function pushSnapshot(
     await dependencies.gitWriter.pushSnapshotFresh(
       {
         address: facts.repository.address,
-        branch: NODE_BRANCH_PREFIX + performer.claim.nodeId,
+        branch: performer.claim.nodeBranch,
         commit: facts.snapshot_commit,
       },
       scope.context,
@@ -344,7 +343,7 @@ async function openPullRequest(
     call,
     targetOf(facts),
     {
-      head: NODE_BRANCH_PREFIX + performer.claim.nodeId,
+      head: performer.claim.nodeBranch,
       base: facts.frozen_action.configuration.base_branch,
     },
   );
@@ -389,7 +388,7 @@ async function landedSnapshot(
   const landing = await dependencies.gitWriter.landedOn(
     {
       address: facts.repository.address,
-      branch: NODE_BRANCH_PREFIX + performer.claim.nodeId,
+      branch: performer.claim.nodeBranch,
       commit: facts.snapshot_commit,
     },
     scope.context,

@@ -46,9 +46,11 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     node_id: createIdentity("node"),
     attempt: 1,
     pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
+    root_span_id: "1".repeat(16),
   };
   const run = new ExecutionRun({
     claim,
@@ -150,9 +152,11 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     node_id: createIdentity("node"),
     attempt: 1,
     pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
+    root_span_id: "1".repeat(16),
   };
   const assetId = createIdentity("evidence_asset");
   const address = { kind: "produced", sha256: "a".repeat(64) };
@@ -250,9 +254,11 @@ test("native entry runs an initiative report with the scripted provider", async 
     node_id: createIdentity("node"),
     attempt: 1,
     pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
+    root_span_id: "1".repeat(16),
   };
   const provider = scriptedProvider([
     fauxAssistantMessage("All objectives completed."),
@@ -322,9 +328,11 @@ test("refused execution evidence aborts the agent and prevents later server oper
       node_id: "node",
       attempt: 1,
       pinned_revision: 1,
+      node_branch: `kanthord/${"node"}`,
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     };
     let aborts = 0;
     let releases = 0;

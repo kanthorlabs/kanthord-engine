@@ -39,8 +39,16 @@ const addExecutionStop: Migration = (database) => {
   database.exec(`ALTER TABLE scheduler_execution ADD COLUMN stop TEXT;`);
 };
 
+const addExecutionNodeBranch: Migration = (database) => {
+  database.exec(`
+    ALTER TABLE scheduler_execution ADD COLUMN node_branch TEXT NOT NULL DEFAULT '';
+    UPDATE scheduler_execution SET node_branch = 'kanthord/' || node_id;
+  `);
+};
+
 export const schedulerMigrations: readonly Migration[] = [
   createJobTable,
   createExecutionTable,
   addExecutionStop,
+  addExecutionNodeBranch,
 ];

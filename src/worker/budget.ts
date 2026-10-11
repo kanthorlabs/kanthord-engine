@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { CancellationContext, type Context } from "../kernel/context.ts";
+import {
+  CancellationContext,
+  DeadlineExceeded,
+  type Context,
+} from "../kernel/context.ts";
 import { BudgetLimit } from "../scheduler/contract.ts";
 
 const BUDGET_FLOOR = 0;
@@ -12,6 +16,7 @@ export class ExecutionBudget {
   private readonly turns?: number;
   private endedTurns = BUDGET_FLOOR;
   private readonly agents = new Set<CancellationContext>();
+  private deadlineReached = false;
 
   constructor(input: {
     created_at: number;
@@ -43,6 +48,7 @@ export class ExecutionBudget {
     return this.deadline;
   }
   remainingMs(): number {
+    if (this.deadlineReached) return BUDGET_FLOOR;
     return Math.max(
       BUDGET_FLOOR,
       this.remaining - (performance.now() - this.started),
@@ -77,7 +83,10 @@ export class ExecutionBudget {
     assert.ok(Number.isSafeInteger(this.deadline));
     const context = new CancellationContext(parent, this.deadline);
     this.agents.add(context);
-    context.onCancel(() => this.agents.delete(context));
+    context.onCancel((error) => {
+      this.agents.delete(context);
+      if (error instanceof DeadlineExceeded) this.deadlineReached = true;
+    });
     if (this.exhausted()) context.cancel();
     return context;
   }

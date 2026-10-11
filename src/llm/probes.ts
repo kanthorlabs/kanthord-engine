@@ -39,7 +39,7 @@ export const OPENCODE_GO_PROVIDER_ID = "opencode-go";
 export const OPENCODE_GO_CHECK_MODEL = "deepseek-v4-flash";
 export const OPENCODE_GO_CHECK_MAX_TOKENS = 1;
 export const MODEL_CALL_CHECK_PROMPT = "What time is it?";
-const MODEL_CALL_FAILURES: readonly string[] = ["error", "aborted"];
+export const MODEL_CALL_FAILURES: readonly string[] = ["error", "aborted"];
 const ERROR_MESSAGE_STATUS = /^([1-5]\d{2})[:\s]/;
 const UNAUTHORIZED_STATUSES: readonly number[] = [
   HttpStatus.Unauthorized,

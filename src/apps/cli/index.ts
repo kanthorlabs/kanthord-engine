@@ -29,6 +29,8 @@ import { addStorageCommand } from "./storage.ts";
 import { addProjectCommand } from "./project.ts";
 import { addMissionCommand } from "./mission.ts";
 import { addIntakeCommand } from "./intake.ts";
+import { addTrackingCommand } from "./tracking.ts";
+import { trackingOperations } from "../../tracking/contract.ts";
 import { addSchedulerCommand } from "./scheduler.ts";
 import {
   CommandName,
@@ -246,15 +248,7 @@ export function createProgram(
   addSchedulerCommand(program);
   addMissionCommand(program);
   addIntakeCommand(program);
-  for (const name of [CommandName.Tracking]) {
-    const group = program
-      .command(name)
-      .description(
-        `${name[0]!.toUpperCase()}${name.slice(1)} Service commands (not implemented)`,
-      )
-      .option("--endpoint <url>", "Server endpoint");
-    group.action(() => group.help());
-  }
+  addTrackingCommand(program);
   addWorkerCommand(program);
   addGatewayCommand(program);
   const names = program.commands.map((command) => command.name());
@@ -336,6 +330,7 @@ const apiOperations = [
   ...Object.values(missionOperations),
   ...Object.values(workbenchOperations),
   ...Object.values(intakeOperations),
+  ...Object.values(trackingOperations),
 ];
 const allOperationIds = apiOperations.map((operation) => operation.id);
 assert.equal(

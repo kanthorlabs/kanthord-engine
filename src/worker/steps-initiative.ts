@@ -14,6 +14,7 @@ import { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../kernel/context.ts";
 import { runVerifications } from "./verification.ts";
 import { reportFacts } from "./report-facts.ts";
+import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
 
 export const REPORT_SUBJECT = "Report on current objective outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
@@ -55,6 +56,10 @@ export async function runStepsInitiative(
       workspace.tested_input === null
         ? null
         : await runVerifications({
+            observe: verificationObserver(
+              run.spans,
+              testedCommitOf(workspace.tested_input),
+            ),
             directory,
             commands: revision.content.verifications,
             tested_input: workspace.tested_input,

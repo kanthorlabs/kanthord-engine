@@ -25,9 +25,11 @@ import {
 import {
   readOpenAttempt,
   openAttempt,
+  readBranchStartAttempt,
   readReleaseEvidence,
   readAssets,
 } from "./record-store.ts";
+import { nodeBranchOf } from "../repository/node-branch.ts";
 import { claimableMap } from "./routing.ts";
 import { requireNode } from "./node-read.ts";
 import { requireMission } from "./write.ts";
@@ -82,6 +84,10 @@ export function claim(
     project_id: requireMission(tx, node.mission_id).project_id,
     attempt: attempt.attempt,
     node_revision: attempt.node_revision,
+    node_branch: nodeBranchOf(
+      nodeId,
+      readBranchStartAttempt(tx, nodeId, attempt.attempt),
+    ),
   };
 }
 

@@ -31,6 +31,7 @@ export function executionFixture(
     runtime_identity: createIdentity("worker_instance"),
     attempt: 1,
     pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     credentials: [],
     expired_at: FIXTURE_DEADLINE,
     trace_id: FIXTURE_TRACE_ID,
@@ -55,6 +56,7 @@ export function schedulerHarness(
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
   ]);
   const calls: { method: string; arguments: unknown[] }[] = [];
+  const telemetry: { method: string; arguments: unknown[] }[] = [];
   const record = (method: string, args: unknown[]) => {
     calls.push({ method, arguments: args });
   };
@@ -97,6 +99,12 @@ export function schedulerHarness(
         return { trace_id: FIXTURE_TRACE_ID, root_span_id: FIXTURE_SPAN_ID };
       },
     },
+    telemetry: {
+      executionOpened: (...args) =>
+        telemetry.push({ method: "executionOpened", arguments: args }),
+      executionEnded: (...args) =>
+        telemetry.push({ method: "executionEnded", arguments: args }),
+    },
     ...overrides,
   };
   const service = new SchedulerService(dependencies);
@@ -116,5 +124,5 @@ export function schedulerHarness(
       await registered.handler(operation.input.parse(input), caller),
     ) as z.output<(typeof schedulerOperations)[K]["output"]>;
   }
-  return { store, service, registry, dependencies, calls, invoke };
+  return { store, service, registry, dependencies, calls, telemetry, invoke };
 }

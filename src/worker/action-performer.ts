@@ -175,7 +175,7 @@ export class ActionPerformer {
       );
     const prepared = entries.map((entry) => ({
       entry,
-      operands: operandsOf(claim.nodeId, context, entry),
+      operands: operandsOf(claim.nodeBranch, context, entry),
       key: {
         nodeId: claim.nodeId,
         attempt: claim.attempt,

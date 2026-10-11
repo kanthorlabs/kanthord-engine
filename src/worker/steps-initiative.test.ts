@@ -56,9 +56,11 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
       node_id: createIdentity("node"),
       attempt: 1,
       pinned_revision: 1,
+      node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     };
     const workspaces = WorkspaceRoot.open(temporary(t));
     let reads = 0;
@@ -159,9 +161,11 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
       node_id: createIdentity("node"),
       attempt: 1,
       pinned_revision: 1,
+      node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       created_at: Date.now() - (duringOpen ? 0 : 10000),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     };
     const page = async () => ({
       type: "completed",

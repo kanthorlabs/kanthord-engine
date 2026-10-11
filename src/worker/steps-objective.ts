@@ -31,6 +31,15 @@ import {
   criterionRevisionInstruction,
 } from "./judgement.ts";
 import { judgedAt, recordJudged } from "./judged-tasks.ts";
+import { Phase } from "./telemetry.ts";
+import {
+  judgementEnd,
+  judgementSpan,
+  phaseSpan,
+  taskEnd,
+  taskSpan,
+  verificationObserver,
+} from "./method-telemetry.ts";
 import {
   RefreshResult,
   refreshAtClaim,
@@ -48,6 +57,25 @@ async function finishObjective(
   completedTasks: number,
 ): Promise<ExecutionEnd> {
   const budgetEnd = boundary !== null && boundary !== TaskBoundary.RunFailed;
+  const furtherWork = await state.run.spans.within(
+    phaseSpan(Phase.Finish),
+    () => settleObjective(state, task, budgetEnd),
+  );
+  return await state.run.release(
+    furtherWork,
+    budgetEnd && completedTasks === NO_TASKS
+      ? state.agent.budget.limit()
+      : null,
+  );
+}
+
+async function settleObjective(
+  state: StepsState,
+  task: TaskContent | null,
+  budgetEnd: boolean,
+): Promise<boolean> {
+  assert.ok(state.directory);
+  assert.ok(task === null || task.id);
   let furtherWork = budgetEnd;
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   const remaining = () => state.input.claim.expired_at - Date.now();
@@ -93,12 +121,7 @@ async function finishObjective(
         ],
       });
     }
-    return await state.run.release(
-      furtherWork,
-      budgetEnd && completedTasks === NO_TASKS
-        ? state.agent.budget.limit()
-        : null,
-    );
+    return furtherWork;
   } finally {
     cleanup.cancel();
   }
@@ -145,15 +168,11 @@ export async function runStepsObjective(
   state: StepsState,
   taskRunner: TaskRunner = runTask,
 ): Promise<ExecutionEnd> {
+  const spans = state.run.spans;
   try {
-    if ((await refreshAtClaim(state)) === RefreshResult.BudgetEnd)
-      return await finishObjective(
-        state,
-        null,
-        TaskBoundary.InProgress,
-        NO_TASKS,
-      );
-    const checked = await startCheck(state);
+    const checked = await spans.within(phaseSpan(Phase.Start), () =>
+      startObjective(state),
+    );
     if (checked.budgetEnd)
       return await finishObjective(
         state,
@@ -161,20 +180,15 @@ export async function runStepsObjective(
         checked.budgetEnd.boundary,
         NO_TASKS,
       );
-    let completedTasks = NO_TASKS;
-    for (const { task, boundary, instruction } of checked.pending) {
-      state.task = task;
-      const result = await taskRunner(state, task, boundary, instruction);
-      if (result.kind === TaskResultKind.BudgetEnd)
-        return await finishObjective(
-          state,
-          task,
-          result.boundary,
-          completedTasks,
-        );
-      completedTasks++;
-    }
-    return await finishObjective(state, null, null, completedTasks);
+    const ran = await spans.within(phaseSpan(Phase.Tasks), () =>
+      runPending(state, checked.pending, taskRunner),
+    );
+    return await finishObjective(
+      state,
+      ran.task,
+      ran.boundary,
+      ran.completedTasks,
+    );
   } catch (error) {
     const stopped = state.run.stopOf(error);
     if (stopped.reason !== EndReason.Revoked) await checkpointOnStop(state);
@@ -185,6 +199,73 @@ export async function runStepsObjective(
       WorkspaceKind.Objective,
     );
   }
+}
+
+async function startObjective(state: StepsState): Promise<StartCheck> {
+  assert.ok(state.revision.tasks);
+  assert.ok(state.head);
+  if ((await refreshAtClaim(state)) === RefreshResult.BudgetEnd)
+    return {
+      pending: [],
+      budgetEnd: { task: null, boundary: TaskBoundary.InProgress },
+    };
+  return await startCheck(state);
+}
+
+async function runPending(
+  state: StepsState,
+  pending: readonly PendingTask[],
+  taskRunner: TaskRunner,
+): Promise<{
+  task: TaskContent | null;
+  boundary: TaskBoundary | null;
+  completedTasks: number;
+}> {
+  assert.ok(state.revision.tasks);
+  assert.ok(pending.length <= state.revision.tasks.length);
+  let completedTasks = NO_TASKS;
+  for (const { task, boundary, instruction } of pending) {
+    state.task = task;
+    const result = await state.run.spans.within(
+      taskSpan(state.run.spans, task),
+      () => taskRunner(state, task, boundary, instruction),
+      taskEnd,
+    );
+    if (result.kind === TaskResultKind.BudgetEnd)
+      return { task, boundary: result.boundary, completedTasks };
+    completedTasks++;
+  }
+  return { task: null, boundary: null, completedTasks };
+}
+
+async function judgeTask(
+  state: StepsState,
+  task: TaskContent,
+  priorRationale: string | null,
+) {
+  assert.ok(state.head);
+  assert.ok(task.content.criterion);
+  return state.run.spans.within(
+    judgementSpan(state.run.spans, task, state.head),
+    async () => {
+      await state.agent.instruct(
+        taskWork(state, task),
+        taskJudgementInstruction(
+          state.input.setup.templates,
+          task,
+          priorRationale,
+        ),
+      );
+      if (state.agent.budget.exhausted()) return ReplyRepair.BudgetEnd;
+      return await parseRepaired(
+        state.input.setup.templates,
+        state.agent,
+        taskWork(state, task),
+        taskJudgementSchema,
+      );
+    },
+    judgementEnd,
+  );
 }
 
 export const TaskResultKind = {
@@ -265,17 +346,7 @@ export async function runTask(
     }
     boundary = TaskBoundary.RunPassed;
     if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
-    await state.agent.instruct(
-      taskWork(state, task),
-      taskJudgementInstruction(state.input.setup.templates, task),
-    );
-    if (budget.exhausted()) return ended(TaskBoundary.RunPassed);
-    const judgement = await parseRepaired(
-      state.input.setup.templates,
-      state.agent,
-      taskWork(state, task),
-      taskJudgementSchema,
-    );
+    const judgement = await judgeTask(state, task, null);
     if (judgement === ReplyRepair.BudgetEnd)
       return ended(TaskBoundary.RunPassed);
     if (judgement === ReplyRepair.Invalid)
@@ -325,6 +396,7 @@ export function prepareStepsWorkspace(input: StepsInput, run: ExecutionRun) {
   assert.equal(input.claim.execution_id, input.setup.execution_id);
   return input.workspaces.prepareObjective({
     objectiveId: input.claim.node_id,
+    nodeBranch: input.claim.node_branch,
     repository,
     transport: input.transport,
     context: run.operationContext,
@@ -353,6 +425,7 @@ async function verifyTaskRun(
   task: TaskContent,
 ): Promise<VerificationRun> {
   const run = await runVerificationsWithOutput({
+    observe: verificationObserver(state.run.spans, state.head),
     directory: state.directory,
     commands: task.content.verifications,
     tested_input: {
@@ -404,10 +477,12 @@ export interface PendingTask {
   instruction: string | null;
 }
 
-export async function startCheck(state: StepsState): Promise<{
+export interface StartCheck {
   pending: PendingTask[];
-  budgetEnd: { task: TaskContent; boundary: TaskBoundary } | null;
-}> {
+  budgetEnd: { task: TaskContent | null; boundary: TaskBoundary } | null;
+}
+
+export async function startCheck(state: StepsState): Promise<StartCheck> {
   assert.ok(state.revision.tasks);
   assert.ok(state.head);
   const pending: PendingTask[] = [];
@@ -439,27 +514,16 @@ export async function startCheck(state: StepsState): Promise<{
       });
       continue;
     }
-    await state.agent.instruct(
-      taskWork(state, task),
-      taskJudgementInstruction(
-        state.input.setup.templates,
-        task,
-        state.priorRationale,
-      ),
-    );
-    if (state.agent.budget.exhausted()) {
-      return { pending, budgetEnd: { task, boundary } };
-    }
-    const judgement = await parseRepaired(
-      state.input.setup.templates,
-      state.agent,
-      taskWork(state, task),
-      taskJudgementSchema,
-    );
+    const judgement = await judgeTask(state, task, state.priorRationale);
     if (judgement === ReplyRepair.BudgetEnd)
       return { pending, budgetEnd: { task, boundary } };
     if (judgement === ReplyRepair.Invalid)
       state.run.stop(EndReason.JudgementInvalid);
+    state.run.log("task judged", {
+      task_id: task.id,
+      commit: state.head,
+      criterion_met: judgement.criterion_met,
+    });
     if (judgement.criterion_met)
       recordJudged(
         objectiveDirectoryOf(state),
