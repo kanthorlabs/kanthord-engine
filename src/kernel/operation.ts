@@ -76,6 +76,7 @@ export interface ExecutionClaim {
   nodeId: string;
   attempt: number;
   pinnedRevision: number;
+  nodeBranch: string;
   runtimeIdentity: string;
   workerBindingId: string;
 }
@@ -85,6 +86,7 @@ export interface ExecutionProofRow {
   node_id: string;
   attempt: number;
   pinned_revision: number;
+  node_branch: string;
   runtime_identity: string;
   worker_binding_id: string;
   ended_at: number | null;

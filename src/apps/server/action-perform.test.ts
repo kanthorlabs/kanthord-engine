@@ -25,6 +25,7 @@ import { temporary } from "../../kernel/test-support.ts";
 import {
   MissionErrorCode,
   PlatformAddressKind,
+  StartPoint,
   missionOperations,
   type PlatformAddress,
   type Revision,
@@ -969,6 +970,115 @@ test(
         assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
         writer.pushSnapshotFresh = pushSnapshotFresh;
         writer.landedOn = landedOn;
+      },
+    );
+  },
+);
+
+test(
+  "intake.action.perform uses the node branch of the claim after a restart from the base branch",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const G = h.nodes.gated;
+    const earlierBranch = `kanthord/${G}`;
+    const restartBranch = `kanthord/${G}-a2`;
+    const address = (number: number): PlatformAddress => ({
+      kind: PlatformAddressKind.PullRequest,
+      resource_identity: h.resource("gated"),
+      number,
+    });
+    const first = await h.evaluated(G, "gated", h.gated.head);
+    assert.equal(first.node_branch, earlierBranch);
+    const closed = h.gitHub.open({
+      owner: "owner",
+      repo: "gated",
+      head: earlierBranch,
+      base: "main",
+    });
+    const closedEvidence = await h.requested(
+      G,
+      first,
+      "gated.pull_request",
+      address(closed),
+    );
+    h.gitHub.close(closed);
+    await h.write(["mission", "node", "check", G], {
+      expected_mission_version: await h.version(),
+    });
+    await h.write(["mission", "node", "unblock", G], {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_REVISION,
+      expected_mission_version: await h.version(),
+      start_point: StartPoint.BaseBranch,
+    });
+    const snapshot = await commitOnBranch(t, h.gated.bare, SNAPSHOT_BRANCH);
+    const second = await h.evaluated(G, "gated", snapshot);
+    assert.equal(second.attempt, SECOND_ATTEMPT);
+    assert.equal(second.node_branch, restartBranch);
+    const body = (requestKey: string) => ({
+      key: "gated.pull_request",
+      commit: snapshot,
+      request_key: requestKey,
+    });
+
+    await t.test(
+      "the create and its read-back name the restart branch",
+      async () => {
+        h.gitHub.dropNextAfterApply();
+        completed(await h.perform(second, body("create")));
+        const found = completed(await h.perform(second, body("create")));
+        const pull = h.gitHub.pulls.at(-1);
+        assert.ok(pull);
+        assert.equal(pull.head, restartBranch);
+        assert.deepEqual(found, address(pull.number));
+        assert.ok(
+          h.gitHub.calls
+            .filter(
+              (call) =>
+                call.method === HttpMethod.Post && call.path === PULLS_PATH,
+            )
+            .every(
+              (call) => (call.body as { head: string }).head === restartBranch,
+            ),
+        );
+      },
+    );
+
+    await t.test(
+      "the reuse push and its read-back name the restart branch",
+      async () => {
+        const writer = h.fixture.gitWriter;
+        const pushSnapshotFresh = writer.pushSnapshotFresh;
+        const landedOn = writer.landedOn;
+        const branches: string[] = [];
+        writer.pushSnapshotFresh = (input, ...args) => {
+          branches.push(input.branch);
+          return pushSnapshotFresh(input, ...args);
+        };
+        writer.landedOn = (input, ...args) => {
+          branches.push(input.branch);
+          return landedOn(input, ...args);
+        };
+        try {
+          assert.deepEqual(
+            completed(await h.perform(second, body("reuse"), closedEvidence)),
+            address(closed),
+          );
+        } finally {
+          writer.pushSnapshotFresh = pushSnapshotFresh;
+          writer.landedOn = landedOn;
+        }
+        assert.ok(branches.length > NO_ROWS);
+        assert.ok(branches.every((branch) => branch === restartBranch));
+        assert.equal(
+          await remoteHead(h.gated.bare, `refs/heads/${restartBranch}`),
+          snapshot,
+        );
+        assert.equal(
+          await remoteHead(h.gated.bare, `refs/heads/${earlierBranch}`),
+          null,
+        );
       },
     );
   },

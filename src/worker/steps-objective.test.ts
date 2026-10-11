@@ -10,6 +10,7 @@ import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import * as connector from "../repository/connector.ts";
+import { nodeBranchOf } from "../repository/node-branch.ts";
 import type { Revision, TaskContent } from "../mission/contract.ts";
 import { NodeKind, openNativeAgent } from "./native-agent.ts";
 import {
@@ -59,6 +60,9 @@ const RESOLVED = "resolved";
 const LATE_MAIN_CHANGE = "late main change";
 const DEADLINE_MS = 20000;
 const TASK_VERIFIED = "task verified";
+const RESTART_ATTEMPT = 2;
+const RESTART_WORK = "restart work";
+const SECOND_JUDGEMENT = 2;
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -112,6 +116,7 @@ async function fixture(
     node_id: createIdentity("node"),
     attempt: 1,
     pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
@@ -741,6 +746,19 @@ test("the start check skips the judgement of a task judged met at the current he
   assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
 });
 
+test("the start check does not reuse a judgement of the previous attempt", async (t) => {
+  const current = task("judged", "true");
+  const met = fauxAssistantMessage(
+    'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+  );
+  const h = await fixture(t, [current], [met, met]);
+  assert.deepEqual((await startCheck(h)).pending, []);
+  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
+  h.input.claim.attempt = RESTART_ATTEMPT;
+  assert.deepEqual((await startCheck(h)).pending, []);
+  assert.equal(h.provider.calls.length, SECOND_JUDGEMENT);
+});
+
 test("the start check revises a task that the prior rationale names without a judgement", async (t) => {
   const named = task("named", "true");
   const other = task("other", "true");
@@ -853,6 +871,49 @@ test("the claim refresh merges a moved base branch without a conflict", async (t
   ]);
   assert.equal(parents.trim().split(" ").length, MERGE_COMMIT_FIELDS);
   assert.equal(await refreshAtClaim(h), RefreshResult.Current);
+});
+
+test("an attempt that continues a restart branch checks out that branch and merges the moved base", async (t) => {
+  const h = await fixture(t, [], []);
+  const nodeId = h.input.claim.node_id;
+  const restartBranch = nodeBranchOf(nodeId, RESTART_ATTEMPT);
+  await simpleGit(h.directory).raw(["checkout", "-b", restartBranch]);
+  await commitOnNode(h.directory, RESTART_WORK);
+  const restartHead = (await simpleGit(h.directory).revparse(["HEAD"])).trim();
+  await h.input.transport.pushNodeBranch(
+    h.directory,
+    restartBranch,
+    background,
+    DEADLINE_MS,
+  );
+  await advanceBase(h, t, MAIN_ADDITION, "other");
+  h.input.workspaces.release(
+    h.input.workspaces.objectiveKey(nodeId),
+    WorkspaceKind.Objective,
+  );
+  const prepared = await h.input.workspaces.prepareObjective({
+    objectiveId: nodeId,
+    nodeBranch: restartBranch,
+    repository: h.input.setup.repositories[0]!,
+    transport: h.input.transport,
+    context: background,
+    deadlineMs: DEADLINE_MS,
+  });
+  assert.equal(prepared.head, restartHead);
+  assert.equal(
+    (await simpleGit(prepared.directory).branch()).current,
+    restartBranch,
+  );
+  const state = { ...h, ...prepared };
+  assert.equal(await refreshAtClaim(state), RefreshResult.Merged);
+  assert.equal(
+    readFileSync(join(prepared.directory, "other"), "utf8"),
+    MAIN_ADDITION,
+  );
+  assert.equal(
+    readFileSync(join(prepared.directory, "file"), "utf8"),
+    RESTART_WORK,
+  );
 });
 
 test("the claim refresh lets the agent resolve a merge conflict and commits the merge", async (t) => {

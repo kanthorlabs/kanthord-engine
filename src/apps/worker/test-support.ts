@@ -12,6 +12,7 @@ export function testClaim(): ExecutionRecord {
     },
     attempt: 1,
     pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     credentials: [],
     claim_state: "running",
     expired_at: Date.now() + 60000,

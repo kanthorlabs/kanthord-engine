@@ -57,6 +57,7 @@ export interface MethodClaim {
   node_id: string;
   attempt: number;
   pinned_revision: number;
+  node_branch: string;
   created_at: number;
   expired_at: number;
   trace_id: string;

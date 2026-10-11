@@ -25,6 +25,7 @@ function fixture(attempt = 1) {
       node_id: "node",
       attempt,
       pinned_revision: 1,
+      node_branch: `kanthord/${"node"}`,
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",

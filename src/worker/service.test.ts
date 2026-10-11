@@ -155,6 +155,7 @@ test("action handler forwards only the proved claim and caller before its commit
     nodeId: createIdentity("node"),
     attempt: 1,
     pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     runtimeIdentity: createIdentity("worker_instance"),
     workerBindingId: createIdentity("binding"),
   };
@@ -1213,6 +1214,7 @@ test("handover handlers pass the proven execution and one transactional clock re
     nodeId: createIdentity("node"),
     attempt: 1,
     pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     runtimeIdentity: createIdentity("worker_instance"),
     workerBindingId: createIdentity("binding"),
   };

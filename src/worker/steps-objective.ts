@@ -325,6 +325,7 @@ export function prepareStepsWorkspace(input: StepsInput, run: ExecutionRun) {
   assert.equal(input.claim.execution_id, input.setup.execution_id);
   return input.workspaces.prepareObjective({
     objectiveId: input.claim.node_id,
+    nodeBranch: input.claim.node_branch,
     repository,
     transport: input.transport,
     context: run.operationContext,

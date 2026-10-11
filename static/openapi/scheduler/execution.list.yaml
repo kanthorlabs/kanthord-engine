@@ -188,6 +188,9 @@ components:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
+              node_branch:
+                type: string
+                minLength: 1
               credentials:
                 type: array
                 items:
@@ -257,6 +260,7 @@ components:
               - claimant
               - attempt
               - pinned_revision
+              - node_branch
               - credentials
               - claim_state
               - expired_at

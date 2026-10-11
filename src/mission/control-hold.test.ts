@@ -9,6 +9,7 @@ import {
   ResumeTarget,
   EndState,
   RepositoryAction,
+  StartPoint,
 } from "./contract.ts";
 import { ControlError } from "./control.ts";
 import { openAttempt, readAttempt, insertEvidence } from "./record-store.ts";
@@ -72,6 +73,7 @@ for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
     assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Waiting);
     assert.equal(result.attempt?.node_revision, FIRST_ATTEMPT);
+    assert.equal(result.attempt?.start_point, StartPoint.BaseBranch);
     assert.deepEqual(result.attempt?.opened_by, h.actor);
     assert.ok(h.calls.some((call) => call.method === INSERT));
     await h.invoke("node.pause", {
@@ -136,6 +138,7 @@ test("resume Waiting at attempt 0 opens attempt 1 as ready does; Available opens
   assert.equal(resumed.node.state, NodeState.Waiting);
   assert.equal(h.node().attempt, FIRST_ATTEMPT);
   assert.equal(resumed.attempt?.node_revision, FIRST_ATTEMPT);
+  assert.equal(resumed.attempt?.start_point, StartPoint.BaseBranch);
   assert.deepEqual(resumed.attempt?.opened_by, h.actor);
   assert.ok(h.calls.some((call) => call.method === INSERT));
 });

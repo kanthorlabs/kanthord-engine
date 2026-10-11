@@ -10,10 +10,12 @@ import {
   type AssetKind,
   type AssessmentResult,
   type EndState,
+  StartPoint,
 } from "./contract.ts";
 import { readNode } from "./store.ts";
 
 const ATTEMPT_INCREMENT = 1;
+const FIRST_ATTEMPT = 1;
 const EXPECTED_ROW_CHANGE = 1;
 const SEQUENCE_LOWER_BOUND = 0;
 const stringSetSchema = z.array(z.string());
@@ -22,6 +24,7 @@ export interface AttemptRow {
   node_id: string;
   attempt: number;
   node_revision: number;
+  start_point: StartPoint;
   opened_by: string;
   opened_at: number;
   closed_at: number | null;
@@ -82,6 +85,7 @@ export function openAttempt(
   nodeRevision: number,
   openedBy: Actor,
   now: number,
+  startPoint: StartPoint = StartPoint.NodeBranch,
 ): AttemptRow {
   const node = readNode(tx, nodeId);
   assert.ok(node && node.kind !== NodeKind.Task && node.attempt !== null);
@@ -89,19 +93,28 @@ export function openAttempt(
     tx.database.isTransaction &&
       Number.isSafeInteger(node.attempt + ATTEMPT_INCREMENT),
   );
+  const attempt = node.attempt + ATTEMPT_INCREMENT;
   const row: AttemptRow = {
     node_id: nodeId,
-    attempt: node.attempt + ATTEMPT_INCREMENT,
+    attempt,
     node_revision: nodeRevision,
+    start_point: attempt === FIRST_ATTEMPT ? StartPoint.BaseBranch : startPoint,
     opened_by: canonicalJSON(openedBy),
     opened_at: now,
     closed_at: null,
   };
   tx.database
     .prepare(
-      "INSERT INTO mission_attempt (node_id, attempt, node_revision, opened_by, opened_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO mission_attempt (node_id, attempt, node_revision, start_point, opened_by, opened_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
-    .run(nodeId, row.attempt, nodeRevision, row.opened_by, now);
+    .run(
+      nodeId,
+      row.attempt,
+      nodeRevision,
+      row.start_point,
+      row.opened_by,
+      now,
+    );
   const result = tx.database
     .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
     .run(row.attempt, nodeId);
@@ -160,6 +173,21 @@ export function listAttempts(
       "SELECT * FROM mission_attempt WHERE node_id = ? AND (? IS NULL OR attempt < ?) ORDER BY attempt DESC LIMIT ?",
     )
     .all(nodeId, after, after, count) as unknown as AttemptRow[];
+}
+export function readBranchStartAttempt(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): number {
+  const row = tx.database
+    .prepare(
+      "SELECT max(attempt) AS attempt FROM mission_attempt WHERE node_id = ? AND attempt <= ? AND start_point = ?",
+    )
+    .get(nodeId, attempt, StartPoint.BaseBranch) as {
+    attempt: number | null;
+  };
+  assert.ok(row.attempt !== null && row.attempt >= FIRST_ATTEMPT);
+  return row.attempt;
 }
 export function readAttemptPins(
   tx: Transaction,
