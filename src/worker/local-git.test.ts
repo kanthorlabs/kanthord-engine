@@ -6,6 +6,7 @@ import { simpleGit } from "simple-git";
 import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
+  addedFiles,
   checkpointCommitMessage,
   commitWork,
   discardChanges,
@@ -105,4 +106,32 @@ test("work commits ignore the interactive helpers of the host environment", asyn
   assert.ok(head);
   await discardChanges(directory, background, 10000);
   assert.equal(await headCommit(directory, background, 10000), head);
+});
+
+test("added files list only the files that the branch adds against its base", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  const commit = (message: string) =>
+    git.raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      message,
+    ]);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  writeFileSync(join(directory, "kept"), "base");
+  await git.add("kept");
+  await commit("base");
+  await git.raw(["checkout", "-b", "work"]);
+  writeFileSync(join(directory, "kept"), "changed");
+  writeFileSync(join(directory, "debug.mjs"), "scratch");
+  await git.add(["kept", "debug.mjs"]);
+  await commit("work");
+  assert.deepEqual(await addedFiles(directory, "main", background, 10000), [
+    "debug.mjs",
+  ]);
 });

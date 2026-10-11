@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  appendFileSync,
   existsSync,
   lstatSync,
   readdirSync,
+  readFileSync,
   rmSync,
   utimesSync,
 } from "node:fs";
@@ -16,6 +18,8 @@ import { nodeBranchOf } from "./node-branch.ts";
 export { nodeBranchOf } from "./node-branch.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
+export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
+const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const WORKSPACE_RETENTION_MS = 7 * 24 * 3600 * 1000;
 export const SWEEP_INTERVAL_MS = 3600000;
 export const WorkspaceKind = {
@@ -106,6 +110,7 @@ export class WorkspaceRoot {
         input.context,
         end - performance.now(),
       );
+      excludeScratch(directory);
       return { directory, head, nodeBranch };
     } catch (error) {
       this.held.delete(key);
@@ -244,4 +249,13 @@ export class WorkspaceRoot {
     clearInterval(this.timer);
     this.timer = undefined;
   }
+}
+
+function excludeScratch(directory: string): void {
+  const exclude = join(directory, ...GIT_EXCLUDE);
+  const text = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+  if (text.split("\n").includes(SCRATCH_DIRECTORY)) return;
+  ensureDirectory(dirname(exclude));
+  const separator = !text || text.endsWith("\n") ? "" : "\n";
+  appendFileSync(exclude, `${separator}${SCRATCH_DIRECTORY}\n`);
 }

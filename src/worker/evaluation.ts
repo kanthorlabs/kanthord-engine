@@ -20,15 +20,15 @@ import {
 import { NodeKind, type NativeAgent } from "./native-agent.ts";
 import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
 import {
-  runVerifications,
+  runVerificationsWithOutput,
   verificationPassed,
-  type Verification,
+  type VerificationRun,
 } from "./verification.ts";
 import {
   evaluationInstruction,
   evaluationJudgementSchema,
   judgementRationale,
-  failedVerificationRationale,
+  failedVerificationReport,
   parseRepaired,
   ReplyRepair,
 } from "./judgement.ts";
@@ -52,6 +52,7 @@ export async function requestAndRelease(
 }
 
 const NO_ITEMS = 0;
+const VERIFICATION_RERUNS = 2;
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
 type OpenAgent = (directory: string) => Promise<NativeAgent>;
 
@@ -60,17 +61,18 @@ async function judge(
   run: ExecutionRun,
   revision: Revision,
   evidence: unknown,
-  verification: Verification,
+  verificationRun: VerificationRun,
   directory: string,
   openAgent: OpenAgent,
   objectives: Awaited<ReturnType<typeof readObjectives>> | null,
 ) {
   const kind = nodeKindOf(revision);
   const commands = verificationCommands(revision);
+  const verification = verificationRun.verification;
   if (!verificationPassed(verification, commands))
     return {
       result: AssessmentResult.CriterionNotMet,
-      rationale: failedVerificationRationale(verification, commands),
+      rationale: failedVerificationReport(verificationRun, commands),
       proposals: [],
     };
   const agent = await openAgent(directory);
@@ -130,13 +132,15 @@ export async function runEvaluation(
       ...input.claim,
       resource_budget: input.setup.resource_budget,
     });
-    const verification = await runVerifications({
+    const verificationRun = await runVerificationsWithOutput({
       directory: prepared.directory,
       commands: verificationCommands(revision),
       tested_input: prepared.tested_input,
       deadline: budget.wallDeadline(),
       context: run.operationContext,
+      reruns: VERIFICATION_RERUNS,
     });
+    const verification = verificationRun.verification;
     const recorded = await run.submitEvidence(input.claim.node_id, {
       subject: VERIFICATION_SUBJECT,
       assets: [
@@ -162,7 +166,7 @@ export async function runEvaluation(
       run,
       revision,
       prepared.reviewBundle,
-      verification,
+      verificationRun,
       prepared.directory,
       openAgent,
       objectives,

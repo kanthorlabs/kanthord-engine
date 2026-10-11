@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import type { TaskContent } from "../mission/contract.ts";
 import type { WorkPrompt } from "../agent/prompt-composer.ts";
-import type { Verification } from "./verification.ts";
+import type { Verification, VerificationRun } from "./verification.ts";
 import { NodeKind, type NativeAgent } from "./native-agent.ts";
 import { PromptTemplate, type PromptTemplates } from "../agent/contract.ts";
 import { renderTemplate } from "../agent/prompt-templates.ts";
@@ -143,6 +143,24 @@ export function failedVerificationRationale(
   if (result.timed_out) return `${prefix} reached its deadline.`;
   if (result.signal) return `${prefix} was ended by signal ${result.signal}.`;
   return `${prefix} failed with exit code ${result.exit_code}.`;
+}
+
+export function failedVerificationReport(
+  run: VerificationRun,
+  commands: readonly string[],
+): string {
+  const rationale = failedVerificationRationale(run.verification, commands);
+  const parts = [rationale];
+  if (run.flaky.at(-1))
+    parts.push(
+      "The command passed on a rerun of the same commit, so the test is flaky. Make it deterministic.",
+    );
+  const output = run.outputs.at(-1);
+  if (output)
+    parts.push(
+      `Output of the failed run (the last 4 KiB):\n\n\`\`\`text\n${output}\n\`\`\``,
+    );
+  return parts.join("\n\n");
 }
 
 export function taskRevisionInstruction(

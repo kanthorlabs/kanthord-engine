@@ -3,6 +3,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   statSync,
   utimesSync,
   writeFileSync,
@@ -16,6 +17,7 @@ import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
   nodeBranchOf,
+  SCRATCH_DIRECTORY,
   WorkspaceKind,
   WorkspaceRoot,
   WORKSPACE_RETENTION_MS,
@@ -246,4 +248,71 @@ test("a drifted SSH identity stops every workspace preparation before its git op
     (error) => error === drift,
   );
   assert.deepEqual(proved, Array(3).fill(repository.ssh_identity.host));
+});
+
+const SCRATCH_ENTRIES = 1;
+const NO_UNTRACKED = 0;
+
+test("an objective workspace excludes the scratch directory from git once", async (t) => {
+  const state = temporary(t);
+  const origin = join(state, "origin");
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  writeFileSync(join(origin, "file"), "base");
+  await git.add("file");
+  await git.raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "base",
+  ]);
+  const workspace = WorkspaceRoot.open(state);
+  const objectiveId = createIdentity("node");
+  const input = {
+    transport,
+    context: background,
+    deadlineMs: 10000,
+    objectiveId,
+    repository: {
+      binding_id: createIdentity("binding"),
+      name: "todoapp-repo",
+      address: origin,
+      ssh_identity: {
+        host: "github.com",
+        hostname: "github.com",
+        port: 22,
+        identity_file: "~/.ssh/id_test",
+      },
+      strategy: { base_branch: "main" },
+    },
+  };
+  const prepared = await workspace.prepareObjective(input);
+  workspace.release(
+    workspace.objectiveKey(objectiveId),
+    WorkspaceKind.Objective,
+  );
+  await workspace.prepareObjective(input);
+  const exclude = readFileSync(
+    join(prepared.directory, ".git", "info", "exclude"),
+    "utf8",
+  );
+  assert.equal(
+    exclude.split("\n").filter((line) => line === SCRATCH_DIRECTORY).length,
+    SCRATCH_ENTRIES,
+  );
+  mkdirSync(join(prepared.directory, SCRATCH_DIRECTORY));
+  writeFileSync(join(prepared.directory, SCRATCH_DIRECTORY, "probe.mjs"), "x");
+  assert.equal(
+    (await simpleGit(prepared.directory).status()).not_added.length,
+    NO_UNTRACKED,
+  );
+  workspace.release(
+    workspace.objectiveKey(objectiveId),
+    WorkspaceKind.Objective,
+  );
 });

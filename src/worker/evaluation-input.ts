@@ -1,3 +1,4 @@
+import { addedFiles } from "./local-git.ts";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { abortSignal, CancellationContext } from "../kernel/context.ts";
@@ -126,6 +127,12 @@ async function prepareWorkspace(
           commit: snapshot.commit,
         },
         evidenceIds: [snapshot.evidenceId],
+        addedFiles: await addedFiles(
+          workspace.directory,
+          `origin/${repository.strategy.base_branch}`,
+          run.operationContext,
+          deadline - Date.now(),
+        ),
       };
     }
   }
@@ -136,7 +143,7 @@ async function prepareWorkspace(
           repositories: input.setup.repositories,
         })
       : { ...input.workspaces.prepareExecution(common), tested_input: null };
-  return { ...workspace, evidenceIds: [] as string[] };
+  return { ...workspace, evidenceIds: [] as string[], addedFiles: [] };
 }
 
 export async function prepareEvaluation(
@@ -181,6 +188,7 @@ export async function prepareEvaluation(
       reviewBundle: {
         evidence: evidence.filter((item) => evidenceIds.has(item.id)),
         assets,
+        added_files: workspace.addedFiles,
       },
     };
   } catch (error) {
