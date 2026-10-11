@@ -3,6 +3,7 @@ import { CancellationContext, type Context } from "../kernel/context.ts";
 import { BudgetLimit } from "../scheduler/contract.ts";
 
 const BUDGET_FLOOR = 0;
+export const COMMAND_LIMIT_MS = 600000;
 export class ExecutionBudget {
   private readonly deadline: number;
   private readonly expiredAt: number;
