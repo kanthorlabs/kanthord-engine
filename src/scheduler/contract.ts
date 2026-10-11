@@ -128,6 +128,7 @@ export const executionRecordSchema = z.strictObject({
   claimant: claimantSchema,
   attempt: positiveInteger,
   pinned_revision: positiveInteger,
+  node_branch: z.string().min(1),
   credentials: z.array(identitySchema("credential")),
   claim_state: claimStateSchema,
   expired_at: timestamp,
@@ -173,6 +174,7 @@ export interface ExecutionRow {
   runtime_identity: string;
   attempt: number;
   pinned_revision: number;
+  node_branch: string;
   credentials: string[];
   expired_at: number;
   trace_id: string;
@@ -237,6 +239,7 @@ export interface MissionTransitions {
     project_id: string;
     attempt: number;
     node_revision: number;
+    node_branch: string;
   } | null;
   release(
     tx: Transaction,

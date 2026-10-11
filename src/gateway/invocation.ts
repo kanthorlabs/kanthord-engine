@@ -109,6 +109,7 @@ export class Invocation {
       nodeId: row.node_id,
       attempt: row.attempt,
       pinnedRevision: row.pinned_revision,
+      nodeBranch: row.node_branch,
       runtimeIdentity: row.runtime_identity,
       workerBindingId: row.worker_binding_id,
     };

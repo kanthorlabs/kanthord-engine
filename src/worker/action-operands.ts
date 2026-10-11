@@ -7,10 +7,9 @@ import {
   type ActionContext,
   type ActionOperands,
 } from "./contract.ts";
-import { nodeBranchOf } from "./node-branch.ts";
 
 export function operandsOf(
-  nodeId: string,
+  nodeBranch: string,
   context: ActionContext,
   entry: ActionContext["actions"][number],
 ): ActionOperands {
@@ -30,7 +29,7 @@ export function operandsOf(
       { requirement_key: entry.action.key },
     );
   return {
-    nodeBranch: nodeBranchOf(nodeId),
+    nodeBranch,
     baseBranch: entry.action.configuration.base_branch,
     commit: testedInput.commit,
     reusedAddress: null,

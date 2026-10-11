@@ -138,6 +138,7 @@ async function fixture(
     node_id: createIdentity("node"),
     attempt: 1,
     pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",

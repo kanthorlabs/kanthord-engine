@@ -58,6 +58,7 @@ function harness(t: TestContext) {
       project_id: row.project_id,
       attempt: 1,
       node_revision: 1,
+      node_branch: `kanthord/${nodeId}`,
     };
   };
   h.store.database.exec("CREATE TABLE attempts (node_id TEXT PRIMARY KEY)");

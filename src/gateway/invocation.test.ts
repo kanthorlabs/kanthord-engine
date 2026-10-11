@@ -110,6 +110,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
     worker_binding_id: createIdentity("binding"),
     attempt: 1,
     pinned_revision: 2,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     expired_at: now + 100,
     ended_at: null,
   };
@@ -148,6 +149,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
       workerBindingId: row.worker_binding_id,
       attempt: row.attempt,
       pinnedRevision: row.pinned_revision,
+      nodeBranch: row.node_branch,
     };
     assert.deepEqual(caller.execution, claim);
     return caller.commit(() => COMMITTED_VALUE);

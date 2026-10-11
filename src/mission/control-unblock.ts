@@ -8,6 +8,7 @@ import {
   NodeKind,
   NodeState,
   RevisionWrite,
+  StartPoint,
   TaskChange,
   type Content,
   type HumanActor,
@@ -241,7 +242,15 @@ export function unblockNode(
           actor,
           now,
         );
-  if (node.attempt > NO_ATTEMPT) openAttempt(tx, nodeId, revision, actor, now);
+  if (node.attempt > NO_ATTEMPT)
+    openAttempt(
+      tx,
+      nodeId,
+      revision,
+      actor,
+      now,
+      body.start_point ?? StartPoint.NodeBranch,
+    );
   transition(tx, dependencies, mission, node, NodeState.Available, now);
   return controlResult(tx, dependencies, nodeId, null, actor, now);
 }

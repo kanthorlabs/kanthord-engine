@@ -13,6 +13,7 @@ test("transcript records the execution identity and session messages before disp
     node_id: "node",
     attempt: 2,
     pinned_revision: 1,
+    node_branch: `kanthord/${"node"}`,
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
