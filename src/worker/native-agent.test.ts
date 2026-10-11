@@ -39,6 +39,7 @@ import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const PROVIDER_CALL_COUNT = 3;
+const CALLS_BEFORE_FAILED_CHECK = 1;
 const TRANSCRIPT_LENGTH_BEFORE = 3;
 const SINGLE_TURN_BUDGET = 1;
 const SINGLE_CALL_COUNT = 1;
@@ -70,6 +71,7 @@ async function fixture(
   options: {
     method?: WorkerMethod;
     prepare?: (workspace: string, hostHome: string) => void;
+    turnCheck?: (context: CancellationContext) => Promise<void>;
   } = {},
 ) {
   const setup = anthropicSetup(overrides);
@@ -111,6 +113,7 @@ async function fixture(
     hostHome,
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context,
+    turnCheck: options.turnCheck && (() => options.turnCheck!(context)),
   });
   t.after(() => agent.dispose());
   return { agent, provider, workspace, context };
@@ -429,4 +432,27 @@ test("native instructions preserve pinned work and expose copied transcript and 
     h.agent.transcript().map((message) => (message as { role: string }).role),
     ["system", "user", "assistant", "user", "assistant"],
   );
+});
+
+test("a failed turn check ends the prompt before the next model call", async (t) => {
+  const h = await fixture(
+    t,
+    [
+      tool("write", { path: "first.txt", content: CONTENT }),
+      tool("write", { path: "second.txt", content: CONTENT }),
+      fauxAssistantMessage("done"),
+    ],
+    {},
+    unusedHostTools,
+    {
+      turnCheck: async (context) => {
+        context.cancel();
+        throw new Error("claim revoked");
+      },
+    },
+  );
+  await h.agent.prompt(WORK);
+  assert.ok(existsSync(join(h.workspace, "first.txt")));
+  assert.equal(existsSync(join(h.workspace, "second.txt")), false);
+  assert.equal(h.provider.calls.length, CALLS_BEFORE_FAILED_CHECK);
 });

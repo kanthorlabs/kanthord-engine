@@ -8,6 +8,7 @@ import {
   schedulerOperations,
   traceIdSchema,
   spanIdSchema,
+  releaseStopSchema,
 } from "./contract.ts";
 import {
   executionFixture,
@@ -104,4 +105,18 @@ test("Trace protocol identities refuse all-zero, uppercase and wrong lengths", (
     ])
       assert.ok(!schema.safeParse(invalid).success);
   }
+});
+
+test("a release stop code fits its reason", () => {
+  const fits = (reason: string, code: string | null) =>
+    releaseStopSchema.safeParse({ reason, code }).success;
+  assert.equal(fits("provider_failed", "quota_exhausted"), true);
+  assert.equal(fits("provider_failed", null), false);
+  assert.equal(fits("provider_failed", "turns"), false);
+  assert.equal(fits("no_progress", null), true);
+  assert.equal(fits("no_progress", "rate_limited"), false);
+  assert.equal(fits("operation_failed", "rate_limited"), false);
+  assert.equal(fits("operation_failed", "gateway.request.invalid"), true);
+  assert.equal(fits("budget_end", "turns"), true);
+  assert.equal(fits("budget_end", null), false);
 });

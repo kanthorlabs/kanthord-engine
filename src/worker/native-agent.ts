@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   abortSignal,
   throwIfCancelled,
@@ -22,6 +24,8 @@ import type {
   ExecutionCredential,
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { providerFailureOf } from "./provider-failure.ts";
 
 export const NodeKind = {
   Objective: "objective",
@@ -46,6 +50,7 @@ export interface NativeAgentInput {
   modelRuntimeFactory: ModelRuntimeFactory;
   hostTools: HostTools;
   context: Context;
+  turnCheck?: () => Promise<void>;
 }
 export interface NativeAgent {
   prompt(work: WorkPrompt): Promise<void>;
@@ -58,6 +63,22 @@ export interface NativeAgent {
   dispose(): void;
 }
 
+const ASSISTANT_ROLE = "assistant";
+const PROVIDER_ERROR = "error";
+
+function providerFailure(
+  messages: readonly AgentMessage[],
+): ExecutionStop | null {
+  const last = messages.findLast(
+    (message): message is AssistantMessage => message.role === ASSISTANT_ROLE,
+  );
+  if (last?.stopReason !== PROVIDER_ERROR) return null;
+  return new ExecutionStop(
+    EndReason.ProviderFailed,
+    providerFailureOf(last.errorMessage ?? ""),
+  );
+}
+
 function nativeAgent(
   opened: AgentSession,
   pins: ReturnType<typeof pinnedLayers>,
@@ -65,13 +86,27 @@ function nativeAgent(
   composition: CompositionRecord,
   context: CancellationContext,
   disposeSignal: () => void,
+  turnCheck: () => Promise<void>,
 ): NativeAgent {
   let session: AgentSession | null = opened;
   const finishTurn = opened.agent.finishTurn;
-  opened.agent.finishTurn = async (turn, signal) =>
-    budget.exhaustedAfterTurn()
-      ? { action: "end" }
-      : ((await finishTurn?.(turn, signal)) ?? undefined);
+  opened.agent.finishTurn = async (turn, signal) => {
+    if (budget.exhaustedAfterTurn()) return { action: "end" };
+    try {
+      await turnCheck();
+    } catch {
+      return { action: "end" };
+    }
+    return (await finishTurn?.(turn, signal)) ?? undefined;
+  };
+  const settle = async (text: string) => {
+    assert.ok(session);
+    await session.prompt(text, { expandPromptTemplates: false });
+    await session.waitForIdle();
+    if (context.err()) return;
+    const failed = providerFailure(session.messages);
+    if (failed) throw failed;
+  };
   let unsubscribeTurns: (() => void) | null = countTurns(opened, () => {
     budget.turnEnded();
     if (budget.exhausted()) void session?.abort();
@@ -86,8 +121,7 @@ function nativeAgent(
       assert.ok(session);
       throwIfCancelled(context);
       pins.setWork(work);
-      await session.prompt(work.text, { expandPromptTemplates: false });
-      await session.waitForIdle();
+      await settle(work.text);
     },
     async abort() {
       await session?.abort();
@@ -96,8 +130,7 @@ function nativeAgent(
       assert.ok(session);
       throwIfCancelled(context);
       pins.setWork(work);
-      await session.prompt(text, { expandPromptTemplates: false });
-      await session.waitForIdle();
+      await settle(text);
     },
     lastText() {
       assert.ok(session);
@@ -183,6 +216,7 @@ export async function openNativeAgent(
       compositionRecord(layers),
       context,
       bridge.dispose,
+      input.turnCheck ?? (async () => {}),
     );
   } catch (error) {
     session?.dispose();

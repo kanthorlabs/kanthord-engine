@@ -43,6 +43,7 @@ import {
   refreshBeforeRelease,
 } from "./base-refresh.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import { ProviderFailure } from "../scheduler/contract.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
 
@@ -928,4 +929,75 @@ test("the release refresh refuses a conflicting base change and keeps the node h
   assert.equal(await refreshBeforeRelease(h, async () => true), false);
   assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), h.head);
   assert.equal((await simpleGit(h.directory).status()).isClean(), true);
+});
+
+const VERIFIED_BEFORE_NO_PROGRESS = 2;
+
+async function stopOf(work: Promise<unknown>): Promise<ExecutionStop> {
+  try {
+    await work;
+  } catch (error) {
+    assert.ok(error instanceof ExecutionStop);
+    return error;
+  }
+  return assert.fail("The task loop did not stop.");
+}
+
+test("a revision that changes nothing twice stops the task with no_progress", async (t) => {
+  const current = task("stuck", "false");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("still nothing"),
+    ],
+  );
+  const events = t.mock.method(h.run, "log");
+  const stopped = await stopOf(runTask(h, current));
+  assert.equal(stopped.reason, EndReason.NoProgress);
+  assert.equal(stopped.code, null);
+  assert.deepEqual(
+    events.mock.calls
+      .map((call) => call.arguments[0])
+      .filter((msg) => msg === TASK_VERIFIED).length,
+    VERIFIED_BEFORE_NO_PROGRESS,
+  );
+});
+
+test("a revoked claim stops the task loop before the next cycle", async (t) => {
+  const current = task("revoked", "false");
+  const h = await fixture(t, [current], [fauxAssistantMessage("never")]);
+  h.run.clients.scheduler = {
+    claimGet: async () => ({
+      type: "completed",
+      status: 200,
+      data: { claim_state: "finished" },
+    }),
+  } as unknown as MethodClients["scheduler"];
+  const events = t.mock.method(h.run, "log");
+  const stopped = await stopOf(runTask(h, current));
+  assert.equal(stopped.reason, EndReason.Revoked);
+  assert.deepEqual(
+    events.mock.calls.map((call) => call.arguments[0]),
+    ["task started"],
+  );
+});
+
+test("a provider error reply stops the task with provider_failed and its code", async (t) => {
+  const current = task("provider", "false");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "403 Forbidden: only agentic harnesses",
+      }),
+    ],
+  );
+  const stopped = await stopOf(runTask(h, current));
+  assert.equal(stopped.reason, EndReason.ProviderFailed);
+  assert.equal(stopped.code, ProviderFailure.Unauthorized);
 });

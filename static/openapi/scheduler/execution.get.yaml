@@ -181,6 +181,8 @@ components:
                     - action_unsettled
                     - assessment_absent
                     - budget_end
+                    - provider_failed
+                    - no_progress
                 code:
                   anyOf:
                     - type: string

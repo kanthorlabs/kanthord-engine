@@ -39,6 +39,7 @@ import {
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
+const NO_PROGRESS_LIMIT = 2;
 
 async function finishObjective(
   state: StepsState,
@@ -215,20 +216,27 @@ export async function runTask(
     kind: TaskResultKind.BudgetEnd,
     boundary,
   });
+  let revisingFailedRun = false;
+  let unchangedRevisions = 0;
   state.run.log("task started", { task_id: task.id });
   while (!budget.exhausted()) {
+    await state.run.checkClaim();
     boundary = TaskBoundary.InProgress;
     if (workDone) workDone = false;
     else if (instruction === null)
       await state.agent.prompt(taskWork(state, task));
     else await state.agent.instruct(taskWork(state, task), instruction);
     if (budget.exhausted()) return ended(TaskBoundary.InProgress);
-    await commitWork(
+    const commit = await commitWork(
       state.directory,
       taskCommitMessage(task.id, state.input.claim.attempt),
       state.run.operationContext,
       budget.remainingMs(),
     );
+    unchangedRevisions =
+      revisingFailedRun && commit === null ? unchangedRevisions + 1 : 0;
+    if (unchangedRevisions >= NO_PROGRESS_LIMIT)
+      state.run.stop(EndReason.NoProgress);
     state.head = await headCommit(
       state.directory,
       state.run.operationContext,
@@ -243,6 +251,7 @@ export async function runTask(
       passed,
       exit_codes: verification.results.map((result) => result.exit_code),
     });
+    revisingFailedRun = !passed;
     if (!passed) {
       boundary = TaskBoundary.RunFailed;
       if (budget.exhausted()) return ended(TaskBoundary.RunFailed);
