@@ -51,7 +51,7 @@ engine/
 │   │   ├── credential.ts       # Repository credential routes over custody records and binding dependents
 │   │   └── github.ts           # GitHub platform implementation: per-call octokit client, result classes, the delivery classification and the event decoder
 │   ├── llm/                    # LLM component: LLM platforms, credential routes, OAuth login sessions, and the model connector
-│   │   ├── contract.ts         # LLM credential route group, login and provider check operations, and error codes
+│   │   ├── contract.ts         # LLM credential route group, login, provider check and model check operations, and error codes
 │   │   ├── index.ts            # Component and platform table exports
 │   │   ├── platforms.ts        # LLM platform validators, metadata schemas, and model defaults
 │   │   ├── provider.ts         # LLM provider interface and healthcheck status of a connection
@@ -59,6 +59,9 @@ engine/
 │   │   ├── sessions.ts         # In-memory OAuth login sessions
 │   │   ├── login.ts            # pi-ai OAuth login flow and interaction adapter
 │   │   ├── model-connector.ts  # Model runtime and model from a released credential
+│   │   ├── model-check.ts      # Model check: one tool round trip through the model runtime of a released credential
+│   │   ├── provider-failure.ts # Provider failure code of a model error text
+│   │   ├── test-support.ts     # Scripted model runtime module
 │   │   └── service.ts          # Credential routes, metadata rules, login lifecycle, and healthchecks
 │   ├── agent/                  # Agent component: agent catalog, enablements, effective configuration, and provider healthchecks
 │   │   ├── contract.ts         # Agent routes, enablement and configuration schemas, and error codes

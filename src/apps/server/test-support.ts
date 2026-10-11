@@ -326,6 +326,9 @@ export async function gatewayFixture(
     path?: string;
     scheduler?: Partial<SchedulerConfig>;
     oauthProviders?: Parameters<typeof composeServices>[0]["oauthProviders"];
+    loadModelRuntime?: Parameters<
+      typeof composeServices
+    >[0]["loadModelRuntime"];
     workbenchModelRuntimeFactory?: Parameters<
       typeof composeServices
     >[0]["workbenchModelRuntimeFactory"];
@@ -378,6 +381,7 @@ export async function gatewayFixture(
     github: options.github,
     repositoryTransport: options.repositoryTransport,
     oauthProviders: options.oauthProviders,
+    loadModelRuntime: options.loadModelRuntime,
     bindings: options.machines?.project,
     registrations: options.machines?.worker,
     inventoryOverrides: options.inventoryOverrides,

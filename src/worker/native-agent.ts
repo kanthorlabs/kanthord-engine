@@ -25,7 +25,7 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
-import { providerFailureOf } from "./provider-failure.ts";
+import { providerFailureOf } from "../llm/provider-failure.ts";
 
 export const NodeKind = {
   Objective: "objective",

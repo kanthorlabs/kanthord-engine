@@ -602,6 +602,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["llm.credential.check", AccessPolicy.Human],
   ["llm.credential.verify", AccessPolicy.Human],
   ["llm.provider.check", AccessPolicy.Human],
+  ["llm.model.check", AccessPolicy.Human],
   ["repository.credential.create", AccessPolicy.Human],
   ["repository.credential.list", AccessPolicy.Human],
   ["repository.credential.get", AccessPolicy.Human],
@@ -759,8 +760,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 175;
-const ROUTED_OPERATION_COUNT = 166;
+const OPERATION_COUNT = 176;
+const ROUTED_OPERATION_COUNT = 167;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = ["intake.action.check", "mission.delivery.admit"];

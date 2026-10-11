@@ -4,8 +4,8 @@
 
 ## Scope
 
-This specification covers the `kanthord llm credential` group and the `kanthord llm provider` group, with
-**14 command leaves, all implemented**. The LLM component is a shared component, not a service.
+This specification covers the `kanthord llm credential` group, the `kanthord llm provider` group and the `kanthord llm model` group, with
+**15 command leaves, all implemented**. The LLM component is a shared component, not a service.
 It owns the credential routes of its platforms and OAuth login sessions. A credential belongs to no project.
 Custody declares no route and keeps the record functions that these routes call.
 
@@ -88,6 +88,13 @@ Its synopsis follows `kanthord llm provider`.
 | #   | Synopsis after `kanthord llm provider`     | HTTP route                     | Operation ID         | Access/status |
 | --- | ------------------------------------------ | ------------------------------ | -------------------- | ------------- |
 | 14  | `check --credential <credential-name> [R]` | `POST /api/llm/provider/check` | `llm.provider.check` | `human`       |
+
+The [`model check`](#model-check) is a server-wide read under `human` access with the `[R]` flags.
+Its synopsis follows `kanthord llm model`.
+
+| #   | Synopsis after `kanthord llm model`                                                              | HTTP route                  | Operation ID      | Access/status |
+| --- | ------------------------------------------------------------------------------------------------ | --------------------------- | ----------------- | ------------- |
+| 15  | `check --credential <credential-name> --model <model-identifier> --reasoning-effort <level> [R]` | `POST /api/llm/model/check` | `llm.model.check` | `human`       |
 
 A name whose platform belongs to another component answers `404 credential.credential.not_found` on every command that takes a name.
 A `create` with a platform of another component answers `400 credential.platform.unsupported`.
@@ -358,6 +365,38 @@ The answer supplies model ids, not limits or reasoning levels, and no key.
 The human saves approved models through a credential metadata revision.
 The `openai-codex` check and the `opencode-go` check make a model call; the `opencode-go` check calls `deepseek-v4-flash`.
 
+## `model check`
+
+```text
+kanthord llm model check --credential <credential-name> --model <model-identifier> --reasoning-effort <level> [R]
+```
+
+The [model check contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-model-check) declares `llm.model.check`, a server-wide read under `human` access, at `POST /api/llm/model/check`.
+It has no project or binding.
+Every option is required, with no default.
+`--credential` uses the `CredentialName` form of [Names and identities](#names-and-identities).
+The body is exactly `{ credential, model_identifier, reasoning_effort }`; params and query are empty.
+No raw key reaches this operation. No mutation key is accepted.
+
+The operation accepts a credential of every LLM platform.
+The component builds the model runtime of an execution from the material that custody releases.
+It runs one tool round trip: a tool definition, a tool call of the model, a tool result and a final answer.
+The operation stores nothing, pins no credential revision and caches nothing.
+The enablement write does not call it.
+The check has a 50 s deadline.
+
+HTTP `200` answers `{ result, message }`:
+
+- `result` is `ok`, `rate_limited`, `quota_exhausted`, `unavailable`, `bad_request` or `unauthorized`.
+- `ok`: the model calls the tool and answers after the tool result. `message` is `null`.
+- Every other value is the provider failure code of the model call. `message` is the redacted failure text.
+- `bad_request` with the message `The model did not call the tool.` means the model answers without a tool call.
+- `unauthorized` with the message `The access token is expired.` means an OAuth access token is past its expiry. The check never refreshes OAuth.
+- `unavailable` also covers a check that ends before the model answers.
+
+The CLI exits with `0` for every `200` answer, also when `result` is not `ok`.
+Every code of the table below exits nonzero.
+
 ## Error codes
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).
@@ -392,6 +431,9 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `llm.provider.invalid_input`                 | The provider check input fails validation.                                                      | provider check                                                         |
 | 400   | `llm.provider.check_unsupported`             | The platform of the credential has no LLM provider.                                             | provider check                                                         |
 | 404   | `llm.provider.credential_not_found`          | The credential does not exist, or its platform belongs to another component.                    | provider check                                                         |
+| 404   | `llm.model.credential_not_found`             | The credential does not exist, or its platform belongs to another component.                    | model check                                                            |
+| 400   | `llm.model.model_unknown`                    | The model is not in the model list of the credential.                                           | model check                                                            |
+| 400   | `llm.model.reasoning_unsupported`            | The model does not support the reasoning effort.                                                | model check                                                            |
 | 409   | `credential.revision.revoked`                | A pinned use names a revoked revision.                                                          | worker handover, worker credential (API only)                          |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.

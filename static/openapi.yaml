@@ -84,6 +84,8 @@ paths:
     $ref: ./openapi/llm/credential.update_metadata.yaml#/pathItem
   /api/llm/credential/{credential_name}/verify:
     $ref: ./openapi/llm/credential.verify.yaml#/pathItem
+  /api/llm/model/check:
+    $ref: ./openapi/llm/model.check.yaml#/pathItem
   /api/llm/provider/check:
     $ref: ./openapi/llm/provider.check.yaml#/pathItem
   /api/mission/assessment/{assessment_id}:
