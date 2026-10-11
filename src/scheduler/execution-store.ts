@@ -4,6 +4,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  agentSelectionSchema,
   ClaimState,
   ExecutionStopReason,
   releaseStopSchema,
@@ -16,15 +17,20 @@ import {
 const NO_ROWS = 0;
 const ONE_ROW = 1;
 const credentialList = z.array(identitySchema("credential"));
+const selectionList = z.array(agentSelectionSchema);
 const storedStop = releaseStopSchema.nullable();
 const COLUMNS = `id AS execution_id, project_id, node_id,
   worker_binding_id, resource_identity,
   runtime_identity, attempt, pinned_revision,
   credentials, expired_at, trace_id, root_span_id,
-  created_at, ended_at, stop`;
-type StoredRow = Omit<ExecutionRow, "credentials" | "stop"> & {
+  created_at, ended_at, stop, agent_selections`;
+type StoredRow = Omit<
+  ExecutionRow,
+  "credentials" | "stop" | "agent_selections"
+> & {
   credentials: string;
   stop: string | null;
+  agent_selections: string | null;
 };
 
 function decode(row: StoredRow): ExecutionRow {
@@ -35,7 +41,10 @@ function decode(row: StoredRow): ExecutionRow {
     row.stop === null ? null : JSON.parse(row.stop),
   );
   assert.ok(stop === null || row.ended_at !== null);
-  return { ...row, credentials, stop };
+  const agentSelections = selectionList.parse(
+    row.agent_selections === null ? [] : JSON.parse(row.agent_selections),
+  );
+  return { ...row, credentials, stop, agent_selections: agentSelections };
 }
 
 export function insertExecution(tx: Transaction, row: ExecutionRow): void {
@@ -48,8 +57,9 @@ export function insertExecution(tx: Transaction, row: ExecutionRow): void {
     .prepare(
       `INSERT INTO scheduler_execution
     (id, project_id, node_id, worker_binding_id, resource_identity, runtime_identity,
-     attempt, pinned_revision, credentials, expired_at, trace_id, root_span_id, created_at, ended_at, stop)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     attempt, pinned_revision, credentials, expired_at, trace_id, root_span_id, created_at, ended_at, stop,
+     agent_selections)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       row.execution_id,
@@ -67,6 +77,7 @@ export function insertExecution(tx: Transaction, row: ExecutionRow): void {
       row.created_at,
       row.ended_at,
       row.stop === null ? null : canonicalJSON(row.stop),
+      canonicalJSON(selectionList.parse(row.agent_selections)),
     );
 }
 

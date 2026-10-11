@@ -13,6 +13,7 @@ export function testClaim(): ExecutionRecord {
     attempt: 1,
     pinned_revision: 1,
     credentials: [],
+    agent_selections: [],
     claim_state: "running",
     expired_at: Date.now() + 60000,
     created_at: Date.now(),

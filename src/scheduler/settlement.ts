@@ -5,6 +5,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  AdvancingProviderFailure,
   ExecutionStopReason,
   type ExecutionRow,
   type MissionTransitions,
@@ -91,6 +92,7 @@ export function executionAttribution(
 export function consecutiveFailures(
   tx: Transaction,
   ending: ExecutionRow,
+  endingCounts = true,
 ): number {
   assert.ok(tx.database.isTransaction);
   const result = tx.database
@@ -98,7 +100,9 @@ export function consecutiveFailures(
       `SELECT count(*) AS count FROM scheduler_execution
     WHERE node_id = ? AND attempt = ? AND id != ?
     AND (ended_at >= expired_at
-      OR coalesce(json_extract(stop, '$.reason'), ?) != ?)
+      OR (coalesce(json_extract(stop, '$.reason'), ?) != ?
+        AND NOT (json_extract(stop, '$.reason') = ?
+          AND json_extract(stop, '$.code') IN (SELECT value FROM json_each(?)))))
     AND rowid > coalesce((SELECT max(rowid) FROM scheduler_execution
       WHERE node_id = ? AND attempt = ? AND ended_at < expired_at
       AND coalesce(json_extract(stop, '$.reason'), ?) = ?), -1)`,
@@ -109,13 +113,16 @@ export function consecutiveFailures(
       ending.execution_id,
       ExecutionStopReason.BudgetEnd,
       ExecutionStopReason.BudgetEnd,
+      ExecutionStopReason.ProviderFailed,
+      canonicalJSON(Object.values(AdvancingProviderFailure)),
       ending.node_id,
       ending.attempt,
       ExecutionStopReason.BudgetEnd,
       ExecutionStopReason.BudgetEnd,
     )!;
-  const count = Number(result.count) + ENDING_FAILURE;
-  assert.ok(Number.isSafeInteger(count) && count > NO_FAILURES);
+  const count =
+    Number(result.count) + (endingCounts ? ENDING_FAILURE : NO_FAILURES);
+  assert.ok(Number.isSafeInteger(count) && count >= NO_FAILURES);
   return count;
 }
 

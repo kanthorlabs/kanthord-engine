@@ -6,6 +6,7 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { DEFAULT_RELEASE_RESERVE_SECONDS } from "./config.ts";
 import {
+  AgentChoiceKind,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
   type ExecutionRow,
@@ -38,6 +39,7 @@ export function executionFixture(
     created_at: FIXTURE_NOW,
     ended_at: null,
     stop: null,
+    agent_selections: [],
     ...overrides,
   };
   assert.ok(row.attempt > NO_REVISION);
@@ -78,6 +80,11 @@ export function schedulerHarness(
         record("instanceHealthcheck", args);
         return true;
       },
+    },
+    agentChains: {
+      select: () => ({ kind: AgentChoiceKind.Selected, selections: [] }),
+      providerFailure: () => {},
+      success: () => {},
     },
     declarations: {
       declarationOf: (...args) => {

@@ -199,7 +199,7 @@ export function failure(
   );
   assert.ok(
     Number.isSafeInteger(consecutiveFailures) &&
-      consecutiveFailures > NO_CONSECUTIVE_FAILURES,
+      consecutiveFailures >= NO_CONSECUTIVE_FAILURES,
   );
   const state =
     consecutiveFailures >= dependencies.config.consecutive_failure_limit

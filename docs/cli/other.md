@@ -368,6 +368,12 @@ The implemented fields are:
 - `gateway.idempotency_ttl`: optional positive safe integer in seconds, default
   `86400`. The idempotency component uses it as the TTL of an in-memory record.
 
+- `agent.cooldown.rate_limited_ms`, `agent.cooldown.unavailable_ms`,
+  `agent.cooldown.quota_exhausted_ms`: optional Convict `nat` in milliseconds,
+  defaults `60000`, `60000` and `3600000`. Each holds the base cooldown of a
+  fallback chain entry after that provider failure. Each strike doubles it.
+- `agent.cooldown.max_ms`: optional Convict `nat` in milliseconds, default
+  `86400000`. It caps a cooldown.
 - `mission.consecutive_failure_limit`: optional Convict `nat`, default `3`. It
   holds the consecutive failure limit of the Mission Service.
 - `mission.further_work_limit`: optional Convict `nat`, default `3`. It holds

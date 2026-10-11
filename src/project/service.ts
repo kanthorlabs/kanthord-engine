@@ -668,6 +668,8 @@ export class ProjectService implements Service, ProjectBindings {
       entry,
       effective: view.effective,
       chain: view.chain,
+      active_position: view.active_position,
+      cooling: view.cooling,
       valid: view.valid,
       issues: view.issues,
     };

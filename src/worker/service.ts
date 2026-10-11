@@ -51,6 +51,8 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { authorizeModelInference } from "./authorization.ts";
+import { agentChoice } from "./agent-selection.ts";
+import type { AgentChoice } from "../scheduler/contract.ts";
 import {
   agentsOfWorker,
   getWorkerDeclaration,
@@ -121,6 +123,9 @@ export class WorkerService implements Service {
       identity,
       execution,
     );
+  }
+  agentChoice(tx: Transaction, workerBindingId: string): AgentChoice {
+    return agentChoice(this.dependencies, this, tx, workerBindingId);
   }
   readonly registrations: WorkerRegistrations;
   readonly heartbeatClock: HeartbeatClock;

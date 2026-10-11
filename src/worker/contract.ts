@@ -21,6 +21,7 @@ import {
   effectiveConfigurationSchema,
   promptTemplatesSchema,
   type AgentView,
+  type AgentSelection,
   type ApprovedModelsFn,
   type DefaultConfiguration,
 } from "../agent/contract.ts";
@@ -467,6 +468,7 @@ export interface SchedulerClaims {
     runtimeIdentity: string,
     now: number,
   ): { activity: InstanceActivity; execution_id: string | null };
+  agentSelectionsOf(tx: Transaction, executionId: string): AgentSelection[];
 }
 
 export type WorkerEntry = {
@@ -507,6 +509,14 @@ export interface AgentConfiguration {
     entry: WorkerEntry | null,
     approvedModels?: ApprovedModelsFn,
   ): WorkerAgentView | null;
+  selectAgent(
+    tx: Transaction,
+    agentName: string,
+    entry: WorkerEntry | null,
+  ):
+    | { kind: "selected"; selection: AgentSelection }
+    | { kind: "cooling"; until_at: number }
+    | { kind: "invalid" };
 }
 
 export interface WorkerRegistrations {

@@ -9,6 +9,12 @@ import {
   type Operation,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import {
+  AdvancingProviderFailure,
+  ChainLevelName,
+  isAdvancingProviderFailure,
+  type AgentSelection as SchedulerAgentSelection,
+} from "../scheduler/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
 export const ENABLEMENT_MAX_BODY_BYTES = 64 * 1024;
@@ -135,6 +141,8 @@ export const AgentErrorCode = {
   OverrideNotAllowed: "agent.configuration.override_not_allowed",
   InvalidConfiguration: "agent.configuration.invalid",
   FallbackDuplicate: "agent.configuration.fallback_duplicate",
+  ChainCooling: "agent.configuration.chain_cooling",
+  CooldownNotFound: "agent.cooldown.not_found",
   ModelUnknown: "agent.configuration.model_unknown",
   ReasoningUnsupported: "agent.configuration.reasoning_effort_unsupported",
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
@@ -173,21 +181,34 @@ export type AgentEnablement = {
   revision: number;
 };
 
-export const ChainLevel = {
-  Enablement: "enablement",
-  Binding: "binding",
-} as const;
+export const ChainLevel = ChainLevelName;
 export type ChainLevel = (typeof ChainLevel)[keyof typeof ChainLevel];
 
-export type ChainEntry = {
-  position: number;
-  level: ChainLevel;
-  agent_provider: string;
-  provider: string;
+export const AdvancingFailure = AdvancingProviderFailure;
+export type AdvancingFailure = AdvancingProviderFailure;
+export const isAdvancingFailure = isAdvancingProviderFailure;
+
+export type AgentCooldown = {
+  cooldown_id: string;
   credential: string;
   model_identifier: string;
-  reasoning_effort: string;
+  code: string;
+  strikes: number;
+  started_at: number;
+  until_at: number;
+  execution_id: string;
 };
+
+export type AgentSelection = SchedulerAgentSelection;
+
+export type ChainEntry = Omit<AgentSelection, "agent_name"> & {
+  cooldown: Pick<
+    AgentCooldown,
+    "cooldown_id" | "code" | "strikes" | "until_at"
+  > | null;
+};
+
+export type ChainCooling = { code: string; until_at: number };
 
 export type AgentProviderDependent = {
   agent_name: string;
@@ -210,6 +231,8 @@ export type AgentView = {
     reasoning_effort: string;
   } | null;
   chain: ChainEntry[];
+  active_position: number | null;
+  cooling: ChainCooling | null;
   valid: boolean;
   issues: Array<{ path: string[]; code: string }>;
 };
