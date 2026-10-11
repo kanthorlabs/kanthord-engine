@@ -135,7 +135,10 @@ async function project(c: Cli) {
       gated: repositoryBinding(GATED, "pull_request"),
       harness: {
         kind: "worker",
-        config: { worker: "claude@1", instance_count: WORKER_INSTANCE_COUNT },
+        config: {
+          worker: "claude-code@1",
+          instance_count: WORKER_INSTANCE_COUNT,
+        },
       },
     },
   });

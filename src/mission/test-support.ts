@@ -80,7 +80,7 @@ export function executionHarness(t: TestContext, identity: CallerIdentity) {
   h.dependencies.executionAttribution.of = () => ({
     client_id: actor.client_id,
     name: actor.name,
-    worker_name: "claude@1",
+    worker_name: "claude-code@1",
   });
   h.caller.execution = claim;
   h.store.transaction((tx) => {
