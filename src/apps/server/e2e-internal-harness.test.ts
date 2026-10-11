@@ -160,6 +160,7 @@ async function setupInternal(t: TestContext) {
         { name: "default", provider: "anthropic", credential: "anthro-1" },
       ],
       default_configuration: DEFAULTS,
+      fallback_configurations: [],
     });
   const project = await cli.read<{ id: string }>([
     "project",

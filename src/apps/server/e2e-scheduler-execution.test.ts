@@ -169,6 +169,7 @@ async function setup(t: TestContext, short = false) {
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
         default_configuration: CONFIGURATION,
+        fallback_configurations: [],
       },
     );
     assert.equal(result.revision, INITIAL_ENABLEMENT_REVISION);

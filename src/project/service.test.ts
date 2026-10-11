@@ -2256,7 +2256,7 @@ test("agent views page sorted declarations and copy worker views with stripped e
     credential: "credential",
   };
   const issues = [{ path: ["model_identifier"], code: "example.issue" }];
-  const view = { defaults, effective, valid: false, issues };
+  const view = { defaults, effective, chain: [], valid: false, issues };
   const f = writeFixture(t, {
     workerAgentsOf: (worker) => {
       assert.equal(worker, NATIVE_WORKER);

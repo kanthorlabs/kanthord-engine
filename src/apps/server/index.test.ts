@@ -454,6 +454,7 @@ test("composed Custody and Worker share credential and enablement collaborations
           model_identifier: MODEL_NAME,
           reasoning_effort: REASONING_LEVEL,
         },
+        fallback_configurations: [],
       }),
     },
   );

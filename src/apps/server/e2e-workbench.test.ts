@@ -163,6 +163,7 @@ async function workbenchFixture(
             model_identifier: SONNET,
             reasoning_effort: OFF,
           },
+          fallback_configurations: [],
         },
       },
       options,

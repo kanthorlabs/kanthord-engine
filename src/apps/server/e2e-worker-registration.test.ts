@@ -177,6 +177,7 @@ async function setup(t: TestContext) {
       { name: "default", provider: "anthropic", credential: "anthro-1" },
     ],
     default_configuration: CONFIGURATION,
+    fallback_configurations: [],
   });
   const enabled = success<{ revision: number }>(
     await kanthord(

@@ -170,6 +170,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
             { name: "default", provider: "anthropic", credential: "anthro" },
           ],
           default_configuration: CONFIGURATION,
+          fallback_configurations: [],
         },
       }),
     );

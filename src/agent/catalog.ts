@@ -38,6 +38,7 @@ export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
       "agent_provider",
       "model_identifier",
       "reasoning_effort",
+      "fallback_configurations",
     ],
   },
   "re@1": {
@@ -54,6 +55,7 @@ export const AGENT_DECLARATIONS: Readonly<Record<string, AgentDeclaration>> = {
       "agent_provider",
       "model_identifier",
       "reasoning_effort",
+      "fallback_configurations",
     ],
   },
 };

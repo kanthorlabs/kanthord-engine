@@ -22,6 +22,7 @@ import {
   promptTemplatesSchema,
   type AgentView,
   type ApprovedModelsFn,
+  type DefaultConfiguration,
 } from "../agent/contract.ts";
 export const SourceState = {
   Present: "present",
@@ -472,6 +473,7 @@ export type WorkerEntry = {
   agent_provider?: string;
   model_identifier?: string;
   reasoning_effort?: string;
+  fallback_configurations?: DefaultConfiguration[];
 };
 
 export type CredentialMetadataRecord = {

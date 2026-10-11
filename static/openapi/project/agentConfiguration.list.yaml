@@ -131,6 +131,9 @@ components:
                 anyOf:
                   - {}
                   - type: "null"
+              chain:
+                type: array
+                items: {}
               valid:
                 type: boolean
               issues:
@@ -156,6 +159,7 @@ components:
               - defaults
               - entry
               - effective
+              - chain
               - valid
               - issues
             additionalProperties: false

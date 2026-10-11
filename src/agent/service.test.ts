@@ -12,6 +12,8 @@ import { AgentComponent, type Dependencies } from "./service.ts";
 import {
   agentOperations,
   AgentErrorCode,
+  ChainLevel,
+  FALLBACK_CONFIGURATIONS_MAX,
   PromptOrigin,
   PromptLayerKind,
   PromptScope,
@@ -79,6 +81,7 @@ const defaults = {
 const putBody = {
   agent_providers: [provider],
   default_configuration: defaults,
+  fallback_configurations: [],
 };
 const binding = { binding_id: "binding", worker_name: WORKER, entry: null };
 const fakeCollaborations: Omit<Dependencies, "store"> = {
@@ -495,6 +498,7 @@ test("resource inventory includes every live provider across pages without write
         EnablementState.Enabled,
         [provider],
         defaults,
+        [],
       );
     }
     insertEnablementRevision(
@@ -503,6 +507,7 @@ test("resource inventory includes every live provider across pages without write
       EnablementState.Enabled,
       [provider, SPECIAL_PROVIDER],
       defaults,
+      [],
     );
     insertEnablementRevision(
       tx,
@@ -510,6 +515,7 @@ test("resource inventory includes every live provider across pages without write
       EnablementState.Disabled,
       [provider],
       defaults,
+      [],
     );
     insertEnablementRevision(
       tx,
@@ -517,6 +523,7 @@ test("resource inventory includes every live provider across pages without write
       EnablementState.Enabled,
       [provider],
       defaults,
+      [],
     );
     insertEnablementRevision(
       tx,
@@ -524,6 +531,7 @@ test("resource inventory includes every live provider across pages without write
       EnablementState.Enabled,
       [provider],
       defaults,
+      [],
       Date.now(),
     );
   });
@@ -871,6 +879,7 @@ test("put rejects duplicate names, duplicate credentials, absent defaults, provi
       f.invoke("enablement.put", {
         ...putBody,
         default_configuration: { ...defaults, agent_provider: UNKNOWN },
+        fallback_configurations: [],
       }),
     AgentErrorCode.ProviderNotFound,
     HttpStatus.NotFound,
@@ -952,6 +961,7 @@ test("put collects binding validation failures and validates its defaults first"
         ...putBody,
         expected_revision: 1,
         default_configuration: { ...defaults, model_identifier: MISSING_MODEL },
+        fallback_configurations: [],
       }),
     AgentErrorCode.ModelUnknown,
   );
@@ -968,6 +978,7 @@ test("anthropic uses the built-in catalog, not absent credential metadata", (t) 
       f.invoke("enablement.put", {
         ...putBody,
         default_configuration: { ...defaults, model_identifier: MISSING_MODEL },
+        fallback_configurations: [],
       }),
     AgentErrorCode.ModelUnknown,
   );
@@ -987,6 +998,7 @@ test("openai-codex uses the built-in catalog and refuses an unknown model", (t) 
   const body = (modelIdentifier: string) => ({
     agent_providers: [codex],
     default_configuration: { ...defaults, model_identifier: modelIdentifier },
+    fallback_configurations: [],
   });
   refuses(
     () => f.invoke("enablement.put", body(MODEL)),
@@ -1010,6 +1022,7 @@ test("openrouter uses the built-in catalog and refuses an unknown model", (t) =>
   const body = (modelIdentifier: string) => ({
     agent_providers: [router],
     default_configuration: { ...defaults, model_identifier: modelIdentifier },
+    fallback_configurations: [],
   });
   refuses(
     () => f.invoke("enablement.put", body(MODEL)),
@@ -1033,6 +1046,7 @@ test("groq uses the built-in catalog and refuses an unknown model", (t) => {
   const body = (modelIdentifier: string) => ({
     agent_providers: [groq],
     default_configuration: { ...defaults, model_identifier: modelIdentifier },
+    fallback_configurations: [],
   });
   refuses(
     () => f.invoke("enablement.put", body(MODEL)),
@@ -1071,6 +1085,7 @@ test("openai-compatible approved models establish models and reasoning levels, i
       f.invoke("enablement.put", {
         ...customBody,
         default_configuration: { ...defaults, reasoning_effort: "high" },
+        fallback_configurations: [],
       }),
     AgentErrorCode.ReasoningUnsupported,
   );
@@ -1094,6 +1109,7 @@ test("openai-compatible approved models establish models and reasoning levels, i
       ...customBody,
       expected_revision: 1,
       default_configuration: { ...defaults, reasoning_effort: "high" },
+      fallback_configurations: [],
     }).revision,
     SECOND_REVISION,
   );
@@ -1255,6 +1271,7 @@ test("Agent collaborations report provider and effective model dependencies with
         ...defaults,
         model_identifier: "claude-haiku-4-5",
       },
+      fallback_configurations: [],
     },
     { agent_name: OTHER_AGENT },
   );
@@ -1280,6 +1297,7 @@ test("Agent collaborations report provider and effective model dependencies with
         "agent_name",
         "agent_providers",
         "default_configuration",
+        "fallback_configurations",
         "revision",
         "state",
       ]);
@@ -1303,6 +1321,7 @@ test("model dependency lookup enumerates all live pages, deduplicates, and exclu
         EnablementState.Disabled,
         [provider],
         defaults,
+        [],
       );
     insertEnablementRevision(
       tx,
@@ -1310,6 +1329,7 @@ test("model dependency lookup enumerates all live pages, deduplicates, and exclu
       EnablementState.Enabled,
       [provider],
       defaults,
+      [],
       Date.now(),
     );
     assert.equal(
@@ -1327,6 +1347,7 @@ test("agentView resolves valid configurations and returns precise issues without
   assert.deepEqual(view(), {
     defaults: null,
     effective: null,
+    chain: [],
     valid: false,
     issues: [{ path: [], code: AgentErrorCode.Unavailable }],
   });
@@ -1339,6 +1360,15 @@ test("agentView resolves valid configurations and returns precise issues without
       provider: provider.provider,
       credential: provider.credential,
     },
+    chain: [
+      {
+        position: 0,
+        level: ChainLevel.Enablement,
+        ...defaults,
+        provider: provider.provider,
+        credential: provider.credential,
+      },
+    ],
     valid: true,
     issues: [],
   });
@@ -1362,6 +1392,7 @@ test("agentView resolves valid configurations and returns precise issues without
     assert.deepEqual(view(entry), {
       defaults,
       effective: null,
+      chain: [],
       valid: false,
       issues: [{ path: [path], code }],
     });
@@ -1369,6 +1400,7 @@ test("agentView resolves valid configurations and returns precise issues without
   assert.deepEqual(view(), {
     defaults: null,
     effective: null,
+    chain: [],
     valid: false,
     issues: [{ path: [], code: AgentErrorCode.Unavailable }],
   });
@@ -1976,4 +2008,280 @@ test("prompt inputs refuse an unknown switch and a wrong agent name", () => {
     }),
     true,
   );
+});
+
+const HAIKU = "claude-haiku-4-5";
+const OPUS = "claude-opus-4-5";
+const spareHaiku = {
+  agent_provider: spare.name,
+  model_identifier: HAIKU,
+  reasoning_effort: DEFAULT_REASONING,
+};
+const primaryOpus = {
+  agent_provider: provider.name,
+  model_identifier: OPUS,
+  reasoning_effort: DEFAULT_REASONING,
+};
+const chainBody = {
+  agent_providers: [provider, spare],
+  default_configuration: defaults,
+  fallback_configurations: [spareHaiku, primaryOpus],
+};
+
+function chainOf(
+  f: ReturnType<typeof enablementFixture>,
+  entry: AgentEntry | null,
+) {
+  return f.store
+    .transaction((tx) => f.agent.agentView(tx, AGENT, entry))
+    ?.chain.map(({ position, level, agent_provider, model_identifier }) => ({
+      position,
+      level,
+      agent_provider,
+      model_identifier,
+    }));
+}
+
+test("put stores the fallback chain and the agent view resolves an inherited, a replaced and an empty tail", (t) => {
+  const f = enablementFixture(t);
+  assert.deepEqual(
+    f.invoke("enablement.put", chainBody).fallback_configurations,
+    [spareHaiku, primaryOpus],
+  );
+  assert.deepEqual(
+    f.invoke("enablement.get").fallback_configurations,
+    chainBody.fallback_configurations,
+  );
+  const enablement = ChainLevel.Enablement;
+  const bound = ChainLevel.Binding;
+  assert.deepEqual(chainOf(f, null), [
+    {
+      position: 0,
+      level: enablement,
+      agent_provider: provider.name,
+      model_identifier: MODEL,
+    },
+    {
+      position: 1,
+      level: enablement,
+      agent_provider: spare.name,
+      model_identifier: HAIKU,
+    },
+    {
+      position: 2,
+      level: enablement,
+      agent_provider: provider.name,
+      model_identifier: OPUS,
+    },
+  ]);
+  const view = f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null));
+  assert.equal(view?.chain[1]?.credential, spare.credential);
+  assert.deepEqual(chainOf(f, { fallback_configurations: [primaryOpus] }), [
+    {
+      position: 0,
+      level: enablement,
+      agent_provider: provider.name,
+      model_identifier: MODEL,
+    },
+    {
+      position: 1,
+      level: bound,
+      agent_provider: provider.name,
+      model_identifier: OPUS,
+    },
+  ]);
+  assert.deepEqual(chainOf(f, { fallback_configurations: [] }), [
+    {
+      position: 0,
+      level: enablement,
+      agent_provider: provider.name,
+      model_identifier: MODEL,
+    },
+  ]);
+  assert.deepEqual(chainOf(f, spareHaiku), [
+    {
+      position: 0,
+      level: bound,
+      agent_provider: spare.name,
+      model_identifier: HAIKU,
+    },
+    {
+      position: 1,
+      level: enablement,
+      agent_provider: provider.name,
+      model_identifier: OPUS,
+    },
+  ]);
+});
+
+test("put refuses a missing tail, a long tail, a duplicate tail entry and an invalid tail entry", (t) => {
+  const f = enablementFixture(t);
+  const withoutTail = {
+    agent_providers: chainBody.agent_providers,
+    default_configuration: chainBody.default_configuration,
+  };
+  assert.throws(() => f.invoke("enablement.put", withoutTail));
+  const longTail = Array.from(
+    { length: FALLBACK_CONFIGURATIONS_MAX + 1 },
+    () => primaryOpus,
+  );
+  assert.throws(() =>
+    f.invoke("enablement.put", {
+      ...chainBody,
+      fallback_configurations: longTail,
+    }),
+  );
+  for (const tail of [
+    [primaryOpus, { ...primaryOpus, reasoning_effort: "high" }],
+    [{ ...defaults, reasoning_effort: "high" }],
+  ])
+    refuses(
+      () =>
+        f.invoke("enablement.put", {
+          ...chainBody,
+          fallback_configurations: tail,
+        }),
+      AgentErrorCode.FallbackDuplicate,
+    );
+  refuses(
+    () =>
+      f.invoke("enablement.put", {
+        ...chainBody,
+        fallback_configurations: [
+          { ...primaryOpus, model_identifier: MISSING_MODEL },
+        ],
+      }),
+    AgentErrorCode.ModelUnknown,
+  );
+  refuses(
+    () =>
+      f.invoke("enablement.put", {
+        ...chainBody,
+        fallback_configurations: [{ ...primaryOpus, agent_provider: UNKNOWN }],
+      }),
+    AgentErrorCode.ProviderNotFound,
+    HttpStatus.NotFound,
+  );
+  assert.equal(
+    f.store.transaction((tx) => getLatestRevision(tx, AGENT)),
+    null,
+  );
+});
+
+test("provider removal and omission are refused while a fallback entry names the provider", (t) => {
+  let entries: AgentDependentBinding[] = [];
+  const f = enablementFixture(t, { entriesOfAgent: () => entries });
+  f.invoke("enablement.put", chainBody);
+  refuses(
+    () =>
+      f.invoke(
+        REMOVE_PROVIDER,
+        { expected_revision: FIRST_REVISION },
+        { agent_name: AGENT, provider_name: spare.name },
+      ),
+    AgentErrorCode.ProviderInUse,
+    HttpStatus.Conflict,
+    { agent_name: AGENT, dependents: [{ kind: "fallback_configurations" }] },
+  );
+  f.invoke("enablement.put", {
+    ...chainBody,
+    expected_revision: FIRST_REVISION,
+    fallback_configurations: [primaryOpus],
+  });
+  entries = [{ ...binding, entry: { fallback_configurations: [spareHaiku] } }];
+  refuses(
+    () =>
+      f.invoke(
+        REMOVE_PROVIDER,
+        { expected_revision: SECOND_REVISION },
+        { agent_name: AGENT, provider_name: spare.name },
+      ),
+    AgentErrorCode.ProviderInUse,
+    HttpStatus.Conflict,
+    {
+      agent_name: AGENT,
+      dependents: [{ binding_id: binding.binding_id, worker_name: WORKER }],
+    },
+  );
+  refuses(
+    () =>
+      f.invoke("enablement.put", {
+        ...chainBody,
+        expected_revision: SECOND_REVISION,
+        agent_providers: [provider],
+        fallback_configurations: [primaryOpus],
+      }),
+    AgentErrorCode.ProviderInUse,
+    HttpStatus.Conflict,
+    {
+      agent_name: AGENT,
+      bindings: [{ binding_id: binding.binding_id, worker_name: WORKER }],
+    },
+  );
+});
+
+test("a binding entry takes a tail alone and refuses a duplicate or an invalid tail entry", (t) => {
+  const f = enablementFixture(t);
+  f.invoke("enablement.put", chainBody);
+  const validate = (entry: AgentEntry) =>
+    f.store.transaction((tx) => f.agent.validateEntry(tx, AGENT, entry));
+  for (const entry of [
+    { fallback_configurations: [] },
+    { fallback_configurations: [spareHaiku] },
+    { ...spareHaiku, fallback_configurations: [primaryOpus] },
+  ])
+    assert.doesNotThrow(() => validate(entry));
+  for (const entry of [
+    { fallback_configurations: [spareHaiku, spareHaiku] },
+    { fallback_configurations: [{ ...defaults, reasoning_effort: "high" }] },
+    { ...spareHaiku, fallback_configurations: [spareHaiku] },
+  ])
+    refuses(() => validate(entry), AgentErrorCode.FallbackDuplicate);
+  refuses(
+    () =>
+      validate({
+        fallback_configurations: [
+          { ...spareHaiku, reasoning_effort: "invented" },
+        ],
+      }),
+    AgentErrorCode.ReasoningUnsupported,
+  );
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.agent.agentView(tx, AGENT, {
+        fallback_configurations: [
+          { ...spareHaiku, model_identifier: MISSING_MODEL },
+        ],
+      }),
+    ),
+    {
+      defaults,
+      effective: null,
+      chain: [],
+      valid: false,
+      issues: [
+        {
+          path: ["fallback_configurations", "0", "model_identifier"],
+          code: AgentErrorCode.ModelUnknown,
+        },
+      ],
+    },
+  );
+});
+
+test("a model named only by a fallback entry makes its enablement a model dependent", (t) => {
+  const f = enablementFixture(t);
+  f.invoke("enablement.put", chainBody);
+  f.store.transaction((tx) => {
+    assert.deepEqual(
+      f.agent
+        .enablementsDependentOnModel(tx, spare.credential, HAIKU)
+        .map(({ agent_name }) => agent_name),
+      [AGENT],
+    );
+    assert.deepEqual(
+      f.agent.enablementsDependentOnModel(tx, spare.credential, OPUS),
+      [],
+    );
+  });
 });

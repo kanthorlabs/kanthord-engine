@@ -16,6 +16,7 @@ export const ENABLEMENT_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
+export const FALLBACK_CONFIGURATIONS_MAX = 7;
 
 export const PROMPT_MAX_BODY_BYTES = 64 * 1024;
 export const PROMPT_TEXT_MAX_BYTES = 32768;
@@ -133,6 +134,7 @@ export const AgentErrorCode = {
   ProviderRequired: "agent.enablement.provider.required",
   OverrideNotAllowed: "agent.configuration.override_not_allowed",
   InvalidConfiguration: "agent.configuration.invalid",
+  FallbackDuplicate: "agent.configuration.fallback_duplicate",
   ModelUnknown: "agent.configuration.model_unknown",
   ReasoningUnsupported: "agent.configuration.reasoning_effort_unsupported",
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
@@ -159,6 +161,7 @@ export type AgentEntry = {
   agent_provider?: string;
   model_identifier?: string;
   reasoning_effort?: string;
+  fallback_configurations?: DefaultConfiguration[];
 };
 
 export type AgentEnablement = {
@@ -166,7 +169,24 @@ export type AgentEnablement = {
   state: string;
   agent_providers: AgentProviderItem[];
   default_configuration: DefaultConfiguration;
+  fallback_configurations: DefaultConfiguration[];
   revision: number;
+};
+
+export const ChainLevel = {
+  Enablement: "enablement",
+  Binding: "binding",
+} as const;
+export type ChainLevel = (typeof ChainLevel)[keyof typeof ChainLevel];
+
+export type ChainEntry = {
+  position: number;
+  level: ChainLevel;
+  agent_provider: string;
+  provider: string;
+  credential: string;
+  model_identifier: string;
+  reasoning_effort: string;
 };
 
 export type AgentProviderDependent = {
@@ -189,6 +209,7 @@ export type AgentView = {
     model_identifier: string;
     reasoning_effort: string;
   } | null;
+  chain: ChainEntry[];
   valid: boolean;
   issues: Array<{ path: string[]; code: string }>;
 };
@@ -315,11 +336,16 @@ export const defaultConfigurationSchema = z.strictObject({
   reasoning_effort: reasoningEffortSchema,
 });
 
+export const fallbackConfigurationsSchema = z
+  .array(defaultConfigurationSchema)
+  .max(FALLBACK_CONFIGURATIONS_MAX);
+
 export const agentEnablementSchema = z.strictObject({
   agent_name: z.string(),
   state: z.enum(["enabled", "disabled"]),
   agent_providers: z.array(agentProviderItemSchema),
   default_configuration: defaultConfigurationSchema,
+  fallback_configurations: fallbackConfigurationsSchema,
   revision: z.number().int().positive(),
 });
 
@@ -550,6 +576,7 @@ export const agentOperations = {
         expected_revision: z.number().int().positive().optional(),
         agent_providers: z.array(agentProviderItemSchema).min(1),
         default_configuration: defaultConfigurationSchema,
+        fallback_configurations: fallbackConfigurationsSchema,
       }),
     }),
     description:

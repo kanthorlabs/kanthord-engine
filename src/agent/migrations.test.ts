@@ -38,6 +38,7 @@ test("agent migration creates the agent enablement schema", () => {
         { name: "default_configuration", type: "TEXT", notnull: 1, pk: 0 },
         { name: "created_at", type: "INTEGER", notnull: 1, pk: 0 },
         { name: "removed_at", type: "INTEGER", notnull: 0, pk: 0 },
+        { name: "fallback_configurations", type: "TEXT", notnull: 1, pk: 0 },
       ],
     );
     assert.deepEqual(

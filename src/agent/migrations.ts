@@ -32,7 +32,14 @@ const createPromptTable: Migration = (database) => {
   `);
 };
 
+const addEnablementFallbackConfigurations: Migration = (database) => {
+  database.exec(
+    `ALTER TABLE agent_enablement ADD COLUMN fallback_configurations TEXT NOT NULL DEFAULT '[]';`,
+  );
+};
+
 export const agentMigrations: readonly Migration[] = [
   createEnablementTable,
   createPromptTable,
+  addEnablementFallbackConfigurations,
 ];

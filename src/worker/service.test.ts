@@ -313,6 +313,7 @@ const defaults = {
 const putBody = {
   agent_providers: [provider],
   default_configuration: defaults,
+  fallback_configurations: [],
 };
 
 test("registration admission is idempotent, bounded by the latest slot count and rolled back with its transaction", (t) => {
@@ -1474,6 +1475,7 @@ test("workerAgentView answers null outside the agents of the worker and delegate
   assert.deepEqual(view(), {
     defaults: null,
     effective: null,
+    chain: [],
     valid: false,
     issues: [{ path: [], code: AgentErrorCode.Unavailable }],
   });

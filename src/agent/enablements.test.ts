@@ -54,6 +54,7 @@ test("inserts successive revisions with canonical JSON and prefixed ids", () => 
       EnablementState.Enabled,
       providers,
       defaults,
+      [],
     );
     const second = insertEnablementRevision(
       tx,
@@ -61,6 +62,7 @@ test("inserts successive revisions with canonical JSON and prefixed ids", () => 
       EnablementState.Disabled,
       providers,
       defaults,
+      [],
     );
     assert.equal(first.revision, FIRST_REVISION);
     assert.equal(second.revision, SECOND_REVISION);
@@ -93,6 +95,7 @@ test("latest revision includes tombstones while live lookup does not", () => {
       EnablementState.Enabled,
       providers,
       defaults,
+      [],
     );
     assert.deepEqual(getEnablement(tx, "alpha"), first);
     const removed = insertEnablementRevision(
@@ -101,6 +104,7 @@ test("latest revision includes tombstones while live lookup does not", () => {
       EnablementState.Disabled,
       providers,
       defaults,
+      [],
       Date.now(),
     );
     assert.equal(removed.revision, SECOND_REVISION);
@@ -112,6 +116,7 @@ test("latest revision includes tombstones while live lookup does not", () => {
       EnablementState.Enabled,
       providers,
       defaults,
+      [],
     );
     assert.equal(restored.revision, THIRD_REVISION);
     assert.deepEqual(getEnablement(tx, "alpha"), restored);
@@ -127,6 +132,7 @@ test("pagination skips tombstones before limiting and validates cursors", () => 
         EnablementState.Enabled,
         providers,
         defaults,
+        [],
       );
     }
     insertEnablementRevision(
@@ -135,6 +141,7 @@ test("pagination skips tombstones before limiting and validates cursors", () => 
       EnablementState.Disabled,
       providers,
       defaults,
+      [],
       Date.now(),
     );
     const first = listEnablements(tx, 1, null);
@@ -172,6 +179,7 @@ test("credential dependents exclude tombstones and retain provider names", () =>
       EnablementState.Enabled,
       providers,
       defaults,
+      [],
     );
     insertEnablementRevision(
       tx,
@@ -179,6 +187,7 @@ test("credential dependents exclude tombstones and retain provider names", () =>
       EnablementState.Enabled,
       providers,
       defaults,
+      [],
     );
     insertEnablementRevision(
       tx,
@@ -186,6 +195,7 @@ test("credential dependents exclude tombstones and retain provider names", () =>
       EnablementState.Disabled,
       providers,
       defaults,
+      [],
       Date.now(),
     );
     assert.deepEqual(agentProvidersDependentOn(tx, "secret"), [
@@ -203,17 +213,26 @@ test("model lookup matches the selected provider credential and model on live ro
       EnablementState.Enabled,
       providers,
       defaults,
+      [],
     );
-    insertEnablementRevision(tx, "bravo", EnablementState.Enabled, providers, {
-      ...defaults,
-      agent_provider: "other",
-    });
+    insertEnablementRevision(
+      tx,
+      "bravo",
+      EnablementState.Enabled,
+      providers,
+      {
+        ...defaults,
+        agent_provider: "other",
+      },
+      [],
+    );
     insertEnablementRevision(
       tx,
       "charlie",
       EnablementState.Enabled,
       providers,
       { ...defaults, model_identifier: "model-b" },
+      [],
     );
     insertEnablementRevision(
       tx,
@@ -221,6 +240,7 @@ test("model lookup matches the selected provider credential and model on live ro
       EnablementState.Enabled,
       providers,
       defaults,
+      [],
     );
     insertEnablementRevision(
       tx,
@@ -228,6 +248,7 @@ test("model lookup matches the selected provider credential and model on live ro
       EnablementState.Disabled,
       providers,
       defaults,
+      [],
       Date.now(),
     );
     assert.deepEqual(enablementsByModel(tx, "secret", "model-a"), [matching]);

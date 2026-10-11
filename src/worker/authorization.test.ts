@@ -63,6 +63,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
               valid,
               issues: valid ? [] : issues,
               defaults: null,
+              chain: [],
               effective: valid
                 ? {
                     agent_provider: entry?.agent_provider ?? "default",
@@ -167,6 +168,7 @@ test("Worker authorizes one credential per distinct credential of the agents of 
             valid: true,
             issues: [],
             defaults: null,
+            chain: [],
             effective: {
               agent_provider: "default",
               provider: "anthropic",

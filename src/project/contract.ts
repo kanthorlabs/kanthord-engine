@@ -11,6 +11,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
 import { ResourceStatus } from "../kernel/health.ts";
+import { fallbackConfigurationsSchema } from "../agent/contract.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
 export const BINDING_VERIFY_TIMEOUT_MS = 30000;
@@ -209,6 +210,7 @@ export const workerConfigSchema = z.strictObject({
         agent_provider: z.string().optional(),
         model_identifier: z.string().optional(),
         reasoning_effort: z.string().optional(),
+        fallback_configurations: fallbackConfigurationsSchema.optional(),
       }),
     )
     .optional(),
@@ -400,6 +402,11 @@ export type WorkerEntry = {
   agent_provider?: string;
   model_identifier?: string;
   reasoning_effort?: string;
+  fallback_configurations?: Array<{
+    agent_provider: string;
+    model_identifier: string;
+    reasoning_effort: string;
+  }>;
 };
 export type AgentDependentBinding = {
   binding_id: string;
@@ -429,6 +436,15 @@ export type WorkerAgentView = {
     model_identifier: string;
     reasoning_effort: string;
   } | null;
+  chain: Array<{
+    position: number;
+    level: string;
+    agent_provider: string;
+    provider: string;
+    credential: string;
+    model_identifier: string;
+    reasoning_effort: string;
+  }>;
   valid: boolean;
   issues: Array<{ path: string[]; code: string }>;
 };
@@ -510,6 +526,7 @@ const agentConfigItem = z.strictObject({
   defaults: z.unknown().nullable(),
   entry: z.unknown().nullable(),
   effective: z.unknown().nullable(),
+  chain: z.array(z.unknown()),
   valid: z.boolean(),
   issues: z.array(
     z.strictObject({ path: z.array(z.string()), code: z.string() }),
