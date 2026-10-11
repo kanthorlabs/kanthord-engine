@@ -223,3 +223,33 @@ test("verification ends a command at its own limit before the execution deadline
   ]);
   assert.match(run.outputs[0] ?? "", /started/);
 });
+
+const FAILED_EXIT = 1;
+
+test("a failed command that passes on a rerun is flaky and still fails", async (t) => {
+  const directory = temporary(t);
+  const input = {
+    directory,
+    commands: ["test -f once || { touch once; echo first-failure; exit 1; }"],
+    tested_input: { kind: "produced" as const, sha256: "hash" },
+    deadline: Date.now() + 10000,
+    context: background,
+    reruns: 2,
+  };
+  const flaky = await runVerificationsWithOutput(input);
+  assert.deepEqual(flaky.flaky, [true]);
+  assert.equal(flaky.verification.results[0]?.exit_code, FAILED_EXIT);
+  assert.match(flaky.outputs[0] ?? "", /first-failure/);
+  assert.equal(verificationPassed(flaky.verification, input.commands), false);
+  const stable = await runVerificationsWithOutput({
+    ...input,
+    commands: ["false"],
+  });
+  assert.deepEqual(stable.flaky, [false]);
+  const unchecked = await runVerificationsWithOutput({
+    ...input,
+    commands: ["test -f twice || { touch twice; exit 1; }"],
+    reruns: 0,
+  });
+  assert.deepEqual(unchecked.flaky, [false]);
+});

@@ -154,6 +154,7 @@ test("B3 review bundle places all supporting assets beside repositories and remo
       assert.deepEqual(result.evidenceIds, ["support"]);
       const ASSET_REVIEW_COUNT = 2;
       assert.equal(result.reviewBundle.assets.length, ASSET_REVIEW_COUNT);
+      assert.deepEqual(result.reviewBundle.added_files, []);
       assert.equal(
         (result.tested_input as unknown[]).length,
         ASSET_REVIEW_COUNT,

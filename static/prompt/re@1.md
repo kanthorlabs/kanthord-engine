@@ -14,3 +14,4 @@ Your contribution to the WHAT is the assessment and its findings.
 4. **Every item of your finding list carries `status:OPEN`**, because you apply no fix. Every blocker names the criterion or the standard that it violates.
 5. **A passing assessment states the evidence that meets the criterion.** A failing assessment states its findings. Neither holds praise.
 6. **The default standard binds your own text.** A violation of it in your assessment is a defect of your assessment, not of the candidate.
+7. **Inspect each added file.** `added_files` in the review bundle lists the files that the change adds. A file that no task requires is a blocker under the default standard.

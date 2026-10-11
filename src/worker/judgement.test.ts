@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   failedVerificationRationale,
+  failedVerificationReport,
   parseJudgement,
   taskJudgementSchema,
   evaluationJudgementSchema,
@@ -253,4 +254,28 @@ test("the task revision carries the output of the failed verification when it ha
     "",
   );
   assert.doesNotMatch(withoutOutput, /Output of the last verification/);
+});
+
+test("a failed verification report names a flaky command and carries its output", () => {
+  const run = {
+    verification: {
+      tested_input: { kind: "produced" as const, sha256: "hash" },
+      results: [
+        { command: "npm test", exit_code: 1, signal: null, timed_out: false },
+      ],
+    },
+    outputs: ["✖ order is created_at DESC"],
+    flaky: [true],
+  };
+  const report = failedVerificationReport(run, ["npm test"]);
+  assert.match(report, /^Verification 1 `npm test` failed with exit code 1\./);
+  assert.match(
+    report,
+    /passed on a rerun of the same commit, so the test is flaky/,
+  );
+  assert.match(report, /```text\n✖ order is created_at DESC\n```$/);
+  assert.doesNotMatch(
+    failedVerificationReport({ ...run, flaky: [false] }, ["npm test"]),
+    /flaky/,
+  );
 });

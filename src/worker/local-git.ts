@@ -145,6 +145,23 @@ export async function unmergedFiles(
   return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
 }
 
+export async function addedFiles(
+  directory: string,
+  base: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  assert.ok(base);
+  assert.ok(!base.startsWith("-"));
+  const output = await run(
+    directory,
+    ["diff", "--name-only", "--diff-filter=A", `${base}...HEAD`, "--"],
+    context,
+    deadlineMs,
+  );
+  return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
+}
+
 export async function isAncestor(
   directory: string,
   ancestor: string,

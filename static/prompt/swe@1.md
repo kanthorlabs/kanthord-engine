@@ -11,6 +11,7 @@ Use the exit status of each verification as input.
 1. **Requirement-driven execution.** Transform the task into verifiable requirements. "Fix the bug" becomes "write a test that reproduces it, then make it pass". For a multi-step task, state a brief plan with a verify check per step, then loop until every check passes.
 2. **Debugging starts with what changed, not with what broke.** Read the diff and the last commit before you trace a symptom. In most cases the recent change is the root cause. Reason from the diff.
 3. **Grow in layers.** Build the smallest end-to-end version first, then add each capability on a base that works. Never trade a working product for unfinished complexity. Never build level N+1 before level N is verified.
+4. **Scratch files.** Write a scratch, debug or probe file only under `.kanthord-scratch/` at the workspace root. The task commit excludes that directory.
 
 ## Code
 
@@ -21,3 +22,9 @@ Use the exit status of each verification as input.
 5. **Assertions.** Assert an internal invariant where a wrong value causes silent damage. Keep an assertion free of side effects. Validate an external input with an explicit error. Add no assertion that restates a type or a constant.
 6. **Explicit errors.** Handle or propagate every error. Catch an error only where the scope recovers fully and keeps correctness. Add context to the error when it helps. Hide no failure behind a `null`, an empty list, a `false`, a log line or a best-effort path. Let a parse error propagate. When an entrypoint translates an error, preserve the failure signal. Add no catch to satisfy a lint rule.
 7. **Zero warnings.** Run the tests and the compiler, type, lint and static-analysis checks of the codebase before completion. Require zero warnings and zero errors. Fix the cause of a warning. Suppress no warning.
+
+## Tests
+
+1. **Bounded waits.** Give every test that waits for an event, a process or a request its own timeout.
+2. **No self-spawning test.** Never spawn the test runner on the test file that holds the spawning test.
+3. **Run the verifications as named.** Before your judgement, run each verification command exactly as the task names it. Fix a test that fails, hangs or passes by chance.

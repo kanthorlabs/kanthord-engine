@@ -20,6 +20,7 @@ export interface Verification {
 export interface VerificationRun {
   verification: Verification;
   outputs: string[];
+  flaky: boolean[];
 }
 const SUCCESS = 0;
 const PROCESS_ABSENT = "ESRCH";
@@ -33,6 +34,7 @@ export interface VerificationInput {
   deadline: number;
   context: Context;
   commandLimitMs?: number;
+  reruns?: number;
 }
 
 function outputTail(chunks: Buffer[]): string {
@@ -126,17 +128,36 @@ export async function runVerificationsWithOutput(
   assert.ok(Number.isSafeInteger(input.deadline));
   const results: Verification["results"] = [];
   const outputs: string[] = [];
+  const flaky: boolean[] = [];
   for (const command of input.commands) {
     if (Date.now() >= input.deadline || input.context.err()) break;
     const { result, output } = await runCommand(command, input);
     results.push(result);
     outputs.push(output);
-    if (result.exit_code !== SUCCESS) break;
+    if (result.exit_code === SUCCESS) {
+      flaky.push(false);
+      continue;
+    }
+    flaky.push(!result.timed_out && (await passesOnRerun(command, input)));
+    break;
   }
   return {
     verification: { tested_input: input.tested_input, results },
     outputs,
+    flaky,
   };
+}
+
+async function passesOnRerun(
+  command: string,
+  input: VerificationInput,
+): Promise<boolean> {
+  for (let rerun = 0; rerun < (input.reruns ?? 0); rerun++) {
+    if (Date.now() >= input.deadline || input.context.err()) return false;
+    if ((await runCommand(command, input)).result.exit_code === SUCCESS)
+      return true;
+  }
+  return false;
 }
 
 export async function runVerifications(
