@@ -264,7 +264,9 @@ for (const adapter of ["direct", "http"] as const) {
   });
 
   test(`${adapter} external execution refuses native setup`, async (t) => {
-    const h = await setup(t, adapter, undefined, { workerName: "claude@1" });
+    const h = await setup(t, adapter, undefined, {
+      workerName: "claude-code@1",
+    });
     refused(
       await h.call(
         workerOperations["execution.setup.get"],

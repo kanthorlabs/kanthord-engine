@@ -266,7 +266,7 @@ test("worker catalog CLI gets native and external budgets and reports missing wo
   assert.equal(declaration.method, WorkerMethod.Steps);
   assert.deepEqual(declaration.agent_names, [NATIVE_AGENT]);
   assert.ok(!("harness" in declaration));
-  const external = await command(["worker", "get", "claude@1"], env);
+  const external = await command(["worker", "get", "claude-code@1"], env);
   assert.equal(external.code, ExitCode.Success, external.stderr);
   const harness = JSON.parse(external.stdout);
   assert.deepEqual(harness.resource_budget, { wall_time_ms: 7200000 });

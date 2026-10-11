@@ -112,7 +112,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     details: { reason: AuthorizationRefusal.BindingRemoved },
   });
   row.tombstone = false;
-  row.worker_name = "claude@1";
+  row.worker_name = "claude-code@1";
   assert.throws(authorize, {
     code: WorkerErrorCode.AuthorizationRefused,
     details: { reason: AuthorizationRefusal.NoNativeAgent },

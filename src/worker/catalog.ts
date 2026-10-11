@@ -59,8 +59,8 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     declared_node_states: ["Available"],
     required_node_format: REQUIRED_NODE_FORMAT,
   },
-  "claude@1": {
-    name: "claude@1",
+  "claude-code@1": {
+    name: "claude-code@1",
     host: WorkerHost.ExternalHarness,
     harness: "claude-code",
     resource_budget: EXTERNAL_RESOURCE_BUDGET,

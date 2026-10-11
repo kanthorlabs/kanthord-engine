@@ -106,7 +106,7 @@ test("instance records distinguish native/external placement and pure Scheduler 
     );
     const executionId = createIdentity("execution");
     const before = readAllLive(tx);
-    for (const workerName of ["general@1", "claude@1"])
+    for (const workerName of ["general@1", "claude-code@1"])
       for (const activity of Object.values(InstanceActivity)) {
         const record = instanceRecord(
           tx,

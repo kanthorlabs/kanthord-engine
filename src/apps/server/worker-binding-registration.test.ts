@@ -37,7 +37,7 @@ test("binding availability changes end real registrations atomically and count r
             : {
                 main: {
                   kind: BindingKind.Worker,
-                  config: { worker: "claude@1", instance_count: count },
+                  config: { worker: "claude-code@1", instance_count: count },
                 },
               },
       },

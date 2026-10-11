@@ -109,7 +109,7 @@ const fakeCollaborations = {
     name: "test_worker/%",
     project_name: "test_project",
     revision: 1,
-    worker_name: "claude@1",
+    worker_name: "claude-code@1",
     instance_count: 1,
     resource_budget: null,
     entries: [],
@@ -1368,7 +1368,9 @@ test("catalog reads expose host-specific budgets and refuse unknown names and ma
     turns: 200,
     wall_time_ms: 7200000,
   });
-  const external = f.invoke("catalog.get", null, { worker_name: "claude@1" });
+  const external = f.invoke("catalog.get", null, {
+    worker_name: "claude-code@1",
+  });
   assert.equal(external.host, WorkerHost.ExternalHarness);
   assert.ok("harness" in external && external.harness === EXTERNAL_HARNESS);
   assert.ok(!("method" in external) && !("agent_name" in external));
@@ -1435,9 +1437,9 @@ test("validateEntry refuses unknown workers and external entries and validates e
     { agent_name: AGENT },
   );
   refuses(() => validate(null, UNKNOWN), AgentErrorCode.InvalidConfiguration);
-  assert.doesNotThrow(() => validate(null, "claude@1"));
+  assert.doesNotThrow(() => validate(null, "claude-code@1"));
   refuses(
-    () => validate({ model_identifier: MODEL }, "claude@1"),
+    () => validate({ model_identifier: MODEL }, "claude-code@1"),
     AgentErrorCode.InvalidConfiguration,
   );
   f.invokeAgent("enablement.put", putBody);
@@ -1451,7 +1453,7 @@ test("validateEntry refuses unknown workers and external entries and validates e
 test("workerAgentsOf lists the native agent of a worker", (t) => {
   const f = enablementFixture(t);
   assert.deepEqual(f.worker.workerAgentsOf(WORKER), [AGENT]);
-  assert.deepEqual(f.worker.workerAgentsOf("claude@1"), []);
+  assert.deepEqual(f.worker.workerAgentsOf("claude-code@1"), []);
   assert.deepEqual(f.worker.workerAgentsOf(UNKNOWN), []);
 });
 
@@ -1468,7 +1470,7 @@ test("workerAgentView answers null outside the agents of the worker and delegate
   assert.equal(view(null, UNKNOWN), null);
   assert.equal(view(null, WORKER, UNKNOWN), null);
   assert.equal(view(null, WORKER, OTHER_AGENT), null);
-  assert.equal(view(null, "claude@1"), null);
+  assert.equal(view(null, "claude-code@1"), null);
   assert.deepEqual(view(), {
     defaults: null,
     effective: null,

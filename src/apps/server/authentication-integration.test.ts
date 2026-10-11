@@ -76,7 +76,7 @@ test("a removed and rebound worker group refuses old tokens on HTTP and direct a
   const bindings = {
     machine: {
       kind: BindingKind.Worker,
-      config: { worker: "claude@1", instance_count: 1 },
+      config: { worker: "claude-code@1", instance_count: 1 },
     },
   };
   const first = await projects["bindingSet.write"]({
