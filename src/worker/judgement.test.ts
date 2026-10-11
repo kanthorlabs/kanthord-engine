@@ -11,6 +11,7 @@ import {
   JUDGEMENT_MARKER,
   repairInstruction,
   taskJudgementInstruction,
+  taskRevisionInstruction,
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
@@ -225,4 +226,31 @@ test("the report instruction carries the final-snapshot verification", () => {
   assert.match(instruction, /Final-snapshot verification: \{"tested_input"/);
   assert.match(instruction, /"commit":"d6d4973"/);
   assert.match(instruction, /"command":"npm run verify","exit_code":0/);
+});
+
+test("the task revision carries the output of the failed verification when it has one", () => {
+  const verification: Verification = {
+    tested_input: { kind: "produced", sha256: "hash" },
+    results: [
+      { command: "npm test", exit_code: 1, signal: null, timed_out: false },
+    ],
+  };
+  const withOutput = taskRevisionInstruction(
+    SHIPPED_TEMPLATES,
+    verification,
+    ["npm test"],
+    "✖ shutdown test timed out",
+  );
+  assert.match(
+    withOutput,
+    /Verification 1 `npm test` failed with exit code 1\./,
+  );
+  assert.match(withOutput, /```text\n✖ shutdown test timed out\n```$/);
+  const withoutOutput = taskRevisionInstruction(
+    SHIPPED_TEMPLATES,
+    verification,
+    ["npm test"],
+    "",
+  );
+  assert.doesNotMatch(withoutOutput, /Output of the last verification/);
 });

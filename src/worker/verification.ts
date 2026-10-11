@@ -17,29 +17,64 @@ export interface Verification {
     timed_out: boolean;
   }[];
 }
+export interface VerificationRun {
+  verification: Verification;
+  outputs: string[];
+}
 const SUCCESS = 0;
 const PROCESS_ABSENT = "ESRCH";
+const OUTPUT_TAIL_BYTES = 4096;
+const OUTPUT_GRACE_MS = 1000;
+export const COMMAND_LIMIT_MS = 600000;
 export interface VerificationInput {
   directory: string;
   commands: readonly string[];
   tested_input: TestedInput;
   deadline: number;
   context: Context;
+  commandLimitMs?: number;
+}
+
+function outputTail(chunks: Buffer[]): string {
+  const output = Buffer.concat(chunks);
+  return output
+    .subarray(Math.max(0, output.length - OUTPUT_TAIL_BYTES))
+    .toString("utf8");
 }
 
 function runCommand(
   command: string,
   input: VerificationInput,
-): Promise<Verification["results"][number]> {
+): Promise<{ result: Verification["results"][number]; output: string }> {
   assert.ok(command);
   assert.ok(Number.isSafeInteger(input.deadline));
+  const deadline = Math.min(
+    input.deadline,
+    Date.now() + (input.commandLimitMs ?? COMMAND_LIMIT_MS),
+  );
   return new Promise((resolve, reject) => {
     const child = spawn("bash", ["-c", command], {
       cwd: input.directory,
       env: childEnvironment(process.env),
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
+    const chunks: Buffer[] = [];
+    let kept = 0;
+    const keep = (chunk: Buffer) => {
+      chunks.push(chunk);
+      kept += chunk.length;
+      for (
+        let first = chunks[0];
+        first && kept - first.length >= OUTPUT_TAIL_BYTES;
+        first = chunks[0]
+      ) {
+        chunks.shift();
+        kept -= first.length;
+      }
+    };
+    child.stdout.on("data", keep);
+    child.stderr.on("data", keep);
     let timedOut = false;
     const kill = () => {
       if (!child.pid) return;
@@ -59,32 +94,55 @@ function runCommand(
         timedOut = true;
         kill();
       },
-      Math.max(SUCCESS, input.deadline - Date.now()),
+      Math.max(SUCCESS, deadline - Date.now()),
     );
     const unsubscribe = input.context.onCancel(kill);
+    let finished = false;
     const finish = (exitCode: number | null, signal: string | null) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       unsubscribe();
-      resolve({ command, exit_code: exitCode, signal, timed_out: timedOut });
+      resolve({
+        result: { command, exit_code: exitCode, signal, timed_out: timedOut },
+        output: outputTail(chunks),
+      });
     };
     child.once("error", () => finish(null, null));
-    child.once("exit", finish);
+    child.once("exit", (exitCode, signal) => {
+      const grace = setTimeout(() => finish(exitCode, signal), OUTPUT_GRACE_MS);
+      child.once("close", () => {
+        clearTimeout(grace);
+        finish(exitCode, signal);
+      });
+    });
   });
+}
+
+export async function runVerificationsWithOutput(
+  input: VerificationInput,
+): Promise<VerificationRun> {
+  assert.ok(input.directory);
+  assert.ok(Number.isSafeInteger(input.deadline));
+  const results: Verification["results"] = [];
+  const outputs: string[] = [];
+  for (const command of input.commands) {
+    if (Date.now() >= input.deadline || input.context.err()) break;
+    const { result, output } = await runCommand(command, input);
+    results.push(result);
+    outputs.push(output);
+    if (result.exit_code !== SUCCESS) break;
+  }
+  return {
+    verification: { tested_input: input.tested_input, results },
+    outputs,
+  };
 }
 
 export async function runVerifications(
   input: VerificationInput,
 ): Promise<Verification> {
-  assert.ok(input.directory);
-  assert.ok(Number.isSafeInteger(input.deadline));
-  const results: Verification["results"] = [];
-  for (const command of input.commands) {
-    if (Date.now() >= input.deadline || input.context.err()) break;
-    const result = await runCommand(command, input);
-    results.push(result);
-    if (result.exit_code !== SUCCESS) break;
-  }
-  return { tested_input: input.tested_input, results };
+  return (await runVerificationsWithOutput(input)).verification;
 }
 
 export function verificationPassed(

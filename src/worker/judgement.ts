@@ -149,10 +149,12 @@ export function taskRevisionInstruction(
   templates: PromptTemplates,
   verification: Verification,
   commands: readonly string[],
+  output: string,
 ): string {
   return renderTemplate(templates, PromptTemplate.TaskRevision, {
     rationale: failedVerificationRationale(verification, commands),
     results: verification.results,
+    output,
   });
 }
 

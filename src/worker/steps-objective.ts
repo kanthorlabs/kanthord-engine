@@ -17,7 +17,11 @@ import {
   taskCommitMessage,
   checkpointCommitMessage,
 } from "./local-git.ts";
-import { runVerifications, verificationPassed } from "./verification.ts";
+import {
+  runVerificationsWithOutput,
+  verificationPassed,
+  type VerificationRun,
+} from "./verification.ts";
 import {
   parseRepaired,
   ReplyRepair,
@@ -231,7 +235,7 @@ export async function runTask(
       budget.remainingMs(),
     );
     state.run.log("task committed", { task_id: task.id, commit: state.head });
-    const verification = await verifyTask(state, task);
+    const { verification, outputs } = await verifyTaskRun(state, task);
     const passed = verificationPassed(verification, task.content.verifications);
     state.run.log("task verified", {
       task_id: task.id,
@@ -246,6 +250,7 @@ export async function runTask(
         state.input.setup.templates,
         verification,
         task.content.verifications,
+        outputs.at(-1) ?? "",
       );
       continue;
     }
@@ -331,7 +336,14 @@ export function taskWork(state: StepsState, task: TaskContent) {
 }
 
 export async function verifyTask(state: StepsState, task: TaskContent) {
-  const verification = await runVerifications({
+  return (await verifyTaskRun(state, task)).verification;
+}
+
+async function verifyTaskRun(
+  state: StepsState,
+  task: TaskContent,
+): Promise<VerificationRun> {
+  const run = await runVerificationsWithOutput({
     directory: state.directory,
     commands: task.content.verifications,
     tested_input: {
@@ -352,7 +364,7 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
   } finally {
     cleanup.cancel();
   }
-  return verification;
+  return run;
 }
 
 async function allTasksPass(state: StepsState): Promise<boolean> {

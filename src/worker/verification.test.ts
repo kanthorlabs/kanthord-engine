@@ -8,6 +8,7 @@ import { background, CancellationContext } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   runVerifications,
+  runVerificationsWithOutput,
   verificationPassed,
   type VerificationInput,
 } from "./verification.ts";
@@ -175,4 +176,50 @@ test("verification child gets no provider environment key", async (t) => {
   });
   assert.equal(verificationPassed(result, commands), true);
   assert.equal(result.results.length, commands.length);
+});
+
+const OUTPUT_TAIL_BYTES = 4096;
+const LIMIT_BOUND_MS = 10000;
+
+test("verification keeps the last 4 KiB of the output of each command", async (t) => {
+  const run = await runVerificationsWithOutput({
+    directory: temporary(t),
+    commands: [
+      "echo out; echo err >&2",
+      "head -c 5000 /dev/zero | tr '\\0' a; printf END; exit 2",
+    ],
+    tested_input: { kind: "produced", sha256: "hash" },
+    deadline: Date.now() + 10000,
+    context: background,
+  });
+  assert.deepEqual(
+    run.verification.results.map(({ exit_code: exitCode }) => exitCode),
+    [0, 2],
+  );
+  assert.match(run.outputs[0] ?? "", /out/);
+  assert.match(run.outputs[0] ?? "", /err/);
+  assert.equal(run.outputs[1]?.length, OUTPUT_TAIL_BYTES);
+  assert.ok(run.outputs[1]?.endsWith("aEND"));
+});
+
+test("verification ends a command at its own limit before the execution deadline", async (t) => {
+  const started = Date.now();
+  const run = await runVerificationsWithOutput({
+    directory: temporary(t),
+    commands: ["echo started; sleep 30", "true"],
+    tested_input: { kind: "produced", sha256: "hash" },
+    deadline: Date.now() + 60000,
+    context: background,
+    commandLimitMs: 1000,
+  });
+  assert.ok(Date.now() - started < LIMIT_BOUND_MS);
+  assert.deepEqual(run.verification.results, [
+    {
+      command: "echo started; sleep 30",
+      exit_code: null,
+      signal: "SIGKILL",
+      timed_out: true,
+    },
+  ]);
+  assert.match(run.outputs[0] ?? "", /started/);
 });
