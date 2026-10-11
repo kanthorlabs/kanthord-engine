@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BashToolOptions } from "@earendil-works/pi-coding-agent";
 import { temporary } from "../kernel/test-support.ts";
-import { ExecutionBudget } from "./budget.ts";
+import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { loadPi } from "../agent/pi.ts";
 import {
   checkAgentTools,
@@ -34,7 +34,10 @@ test("native tool declarations preserve the catalog allowlists", async () => {
   }
 });
 
-test("child environment removes provider keys and bash timeout stays below the budget", async (t) => {
+const MILLISECONDS_PER_SECOND = 1000;
+const MODEL_TIMEOUT_SECONDS = 30;
+
+test("child environment removes provider keys and bash timeout stays below the budget and the command limit", async (t) => {
   const env = {
     ANTHROPIC_API_KEY: "secret",
     OPENAI_API_KEY: "secret",
@@ -95,6 +98,19 @@ test("child environment removes provider keys and bash timeout stays below the b
     captured!.operations!.exec("true", cwd, { onData: () => {} }),
     /resource budget ended/,
   );
+  const long = new ExecutionBudget({
+    created_at: now,
+    expired_at: now + 7200000,
+    resource_budget: { wall_time_ms: 7200000 },
+  });
+  sessionTools(mockPi, "swe@1", cwd, long, unusedHostTools);
+  await captured!.operations!.exec("true", cwd, { onData: () => {} });
+  assert.ok(timeout! < COMMAND_LIMIT_MS / MILLISECONDS_PER_SECOND);
+  await captured!.operations!.exec("true", cwd, {
+    timeout: MODEL_TIMEOUT_SECONDS,
+    onData: () => {},
+  });
+  assert.equal(timeout, MODEL_TIMEOUT_SECONDS);
   assert.deepEqual(
     sessionTools(pi, "re@1", cwd, budget, unusedHostTools).customTools,
     [],

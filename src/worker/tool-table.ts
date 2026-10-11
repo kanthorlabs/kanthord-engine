@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Diagnostic } from "../kernel/errors.ts";
-import type { ExecutionBudget } from "./budget.ts";
+import { COMMAND_LIMIT_MS, type ExecutionBudget } from "./budget.ts";
 import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
 import { loadPi, piAgentDirectory, type PiCodingAgent } from "../agent/pi.ts";
 
@@ -46,7 +46,8 @@ export function sessionTools(
     operations: {
       exec: (command, directory, options) => {
         const limit = Math.floor(
-          (budget.remainingMs() - 1) / MILLISECONDS_PER_SECOND,
+          (Math.min(budget.remainingMs(), COMMAND_LIMIT_MS) - 1) /
+            MILLISECONDS_PER_SECOND,
         );
         if (limit < MINIMUM_SECONDS)
           return Promise.reject(new Error("resource budget ended"));

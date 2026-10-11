@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import type { Context } from "../kernel/context.ts";
 import { childEnvironment } from "./tool-table.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 
 export type TestedInput =
   | { kind: "repository"; binding_id: string; commit: string }
@@ -26,7 +27,6 @@ const SUCCESS = 0;
 const PROCESS_ABSENT = "ESRCH";
 const OUTPUT_TAIL_BYTES = 4096;
 const OUTPUT_GRACE_MS = 1000;
-export const COMMAND_LIMIT_MS = 600000;
 export interface VerificationInput {
   directory: string;
   commands: readonly string[];
