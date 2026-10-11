@@ -22,8 +22,14 @@ export const OperationLifetime = {
 export type OperationLifetime =
   (typeof OperationLifetime)[keyof typeof OperationLifetime];
 
-export const StoreName = { Operational: "operational" } as const;
+export const StoreName = {
+  Operational: "operational",
+  Tracking: "tracking",
+} as const;
 export type StoreName = (typeof StoreName)[keyof typeof StoreName];
+export type StoreMap<S = unknown> = {
+  readonly [StoreName.Operational]: S;
+} & Readonly<Partial<Record<StoreName, S>>>;
 
 const NO_TIMEOUT_MS = 0;
 const API_PATH_PREFIX = "/api/";

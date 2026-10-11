@@ -5,6 +5,7 @@ import { gatewayOperations } from "../../gateway/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
+import { trackingOperations } from "../../tracking/contract.ts";
 import type { Context } from "../../kernel/context.ts";
 import {
   OperationResultType,
@@ -18,6 +19,7 @@ export function workerApi(endpoint: string, token?: string) {
     worker: httpClient(workerOperations, endpoint, token),
     scheduler: httpClient(schedulerOperations, endpoint, token),
     mission: httpClient(missionOperations, endpoint, token),
+    tracking: httpClient(trackingOperations, endpoint, token),
   };
   assert.ok(api.worker.register);
   return api;

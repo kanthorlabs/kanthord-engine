@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import type { CallerContext } from "../kernel/operation.ts";
-import { ExecutionStopReason, type ExecutionRelease } from "./contract.ts";
+import {
+  ExecutionStopReason,
+  type ExecutionRelease,
+  type ExecutionRow,
+} from "./contract.ts";
+import { ExecutionEnd } from "../tracking/contract.ts";
+import { executionTrace } from "./telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import { consecutiveStalls, endExecution } from "./execution-store.ts";
 import { consecutiveFailures, requireRunning } from "./settlement.ts";
@@ -17,9 +23,11 @@ export function release(
   const proof = caller.execution;
   assert.ok(proof, "release requires an execution proof");
   assert.equal(proof.executionId, executionId);
+  let released: ExecutionRow | undefined;
   const result = caller.commit((tx) => {
     const now = Date.now();
     const row = requireRunning(tx, executionId, proof.runtimeIdentity, now);
+    released = row;
     if (
       body.stop !== null &&
       body.stop.reason !== ExecutionStopReason.BudgetEnd
@@ -44,6 +52,13 @@ export function release(
       now,
     );
     return { execution_id: executionId, ended_at: now };
+  });
+  assert.ok(released, "a committed release read its execution");
+  dependencies.telemetry.executionEnded({
+    trace: executionTrace(released),
+    ended_at: result.ended_at,
+    end: ExecutionEnd.Finished,
+    stop: body.stop,
   });
   wake(proof.projectId);
   return result;

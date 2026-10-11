@@ -25,6 +25,7 @@ const FIXTURE_SERVICE_NAMES = [
   "project",
   "mission",
   "intake",
+  "tracking",
 ];
 const EMPTY_OWNER = { global: {}, projects: {} };
 const input = { params: {}, query: {}, body: null };

@@ -79,6 +79,7 @@ test("developer@1 opens the reviewer from the second agent with its own credenti
     created_at: Date.now(),
     expired_at: Date.now() + 60000,
     trace_id: "trace",
+    root_span_id: "1".repeat(16),
   };
   const content = (name: string) => ({
     name,

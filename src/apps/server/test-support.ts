@@ -41,7 +41,7 @@ import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { composeServices } from "./index.ts";
+import { composeServices, trackingDatabaseMigrations } from "./index.ts";
 import { RepositoryComponent, type GitWriter } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
 import type { RepositoryTransport } from "../../worker/index.ts";
@@ -100,6 +100,7 @@ export const domainHealth = {
   worker: { registrations: 200 },
   mission: { operations: 200 },
   intake: { events: 200 },
+  tracking: { store: 200 },
 };
 
 export function toolStubs(t: TestContext): string {
@@ -355,9 +356,12 @@ export async function gatewayFixture(
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
     { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
   ]);
+  const trackingStore = new Store(":memory:");
+  trackingStore.migrate(trackingDatabaseMigrations);
   const logs: string[] = [];
   const {
     scheduler,
+    tracking,
     custody,
     gateway,
     project,
@@ -373,6 +377,7 @@ export async function gatewayFixture(
   } = composeServices({
     config,
     store,
+    trackingStore,
     stateDirectory: options.stateDirectory ?? temporary(t),
     workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
     registry: options.registry,
@@ -423,6 +428,7 @@ export async function gatewayFixture(
         worker,
         custody,
         scheduler,
+        tracking,
       ]) {
         const error = await service.stop();
         if (error) failures.push(error);
@@ -431,6 +437,7 @@ export async function gatewayFixture(
         throw new AggregateError(failures, "Fixture cleanup failed.");
     } finally {
       store.close();
+      trackingStore.close();
     }
   });
   for (const service of [
@@ -442,6 +449,7 @@ export async function gatewayFixture(
     intake,
     workbench,
     gateway,
+    tracking,
   ]) {
     const error = await service.start();
     if (error) throw error;
@@ -466,6 +474,8 @@ export async function gatewayFixture(
     gateway,
     invocation,
     store,
+    tracking,
+    trackingStore,
     endpoint,
     request,
     token: (

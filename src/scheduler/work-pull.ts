@@ -10,6 +10,7 @@ import type { WaitingPulls } from "./wakeup.ts";
 import { claimOnce, ClaimOutcome, type ClaimResult } from "./claim.ts";
 import { executionRecord } from "./execution-store.ts";
 import { settleRuntime } from "./settlement.ts";
+import { executionTrace } from "./telemetry.ts";
 
 const WINDOW_ENDED = 0;
 export interface PullDependencies extends Dependencies {
@@ -91,6 +92,11 @@ function commit(
     } as const;
   });
   if (settled) dependencies.waiting.wake(identity.projectId);
+  if (answer.kind === WorkPullKind.Claimed)
+    dependencies.telemetry.executionOpened(
+      executionTrace(answer.execution),
+      answer.execution.created_at,
+    );
   return answer;
 }
 

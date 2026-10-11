@@ -23,6 +23,7 @@ import {
 } from "./test-support.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 
+const EXECUTION_ENDED = "executionEnded";
 const PROJECT_PREFIX = "project";
 const NODE_PREFIX = "node";
 const REQUEST_PREFIX = "request";
@@ -411,6 +412,8 @@ test("run owns the 30-second loss sweep and quiescence stops it permanently", as
     h.store.transaction((tx) => readExecution(tx, row.execution_id))?.ended_at,
     FIXTURE_DEADLINE,
   );
+  assert.equal(h.telemetry.length, ONE_ROW);
+  assert.equal(h.telemetry[0]?.method, EXECUTION_ENDED);
   await h.service.quiesce();
   const later = executionFixture();
   h.store.transaction((tx) => insertExecution(tx, later));

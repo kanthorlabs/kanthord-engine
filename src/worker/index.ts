@@ -36,3 +36,4 @@ export {
   type UploadResult,
 } from "./contract.ts";
 export { evidenceUploadTool } from "./host-tools.ts";
+export type { TelemetrySink } from "./telemetry.ts";

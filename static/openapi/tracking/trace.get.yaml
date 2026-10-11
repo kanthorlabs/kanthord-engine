@@ -1,0 +1,109 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: tracking.trace.get
+    tags:
+      - tracking
+    description: Read the header of one trace.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: trace_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/tracking.trace.get.Input/properties/params/properti\
+            es/trace_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.trace.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.trace.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            trace_id:
+              type: string
+              pattern: ^[0-9a-f]{32}$
+          required:
+            - trace_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.trace.get.Output:
+      type: object
+      properties:
+        trace_id:
+          type: string
+          pattern: ^[0-9a-f]{32}$
+        project_id:
+          anyOf:
+            - type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            - type: "null"
+        execution_id:
+          anyOf:
+            - type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+            - type: "null"
+        root_span_id:
+          type: string
+          pattern: ^[0-9a-f]{16}$
+        created_at:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+      required:
+        - trace_id
+        - project_id
+        - execution_id
+        - root_span_id
+        - created_at
+      additionalProperties: false
