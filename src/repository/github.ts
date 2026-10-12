@@ -34,6 +34,8 @@ const RATE_LIMIT_EXHAUSTED = "0";
 const IF_NONE_MATCH_HEADER = "if-none-match";
 const NOT_MODIFIED_STATUS = 304;
 const EVENT_PAGE_SIZE = 100;
+const REVIEW_PAGE_SIZE = 100;
+const REVIEW_PAGE_LIMIT = 30;
 const EVENT_ID_PATTERN = /^(0|[1-9][0-9]*)$/;
 const SAME_ORDER = 0;
 const BEFORE_ORDER = -1;
@@ -155,6 +157,15 @@ export const CheckEndState = {
 } as const;
 export type CheckEndState = (typeof CheckEndState)[keyof typeof CheckEndState];
 
+export const ReviewState = {
+  Approved: "APPROVED",
+  ChangesRequested: "CHANGES_REQUESTED",
+  Dismissed: "DISMISSED",
+} as const;
+const DECISIVE_REVIEW_STATES: ReadonlySet<string> = new Set(
+  Object.values(ReviewState),
+);
+
 export const MergeMethod = {
   Merge: "merge",
   Squash: "squash",
@@ -217,6 +228,18 @@ const pullRequestStateSchema = z
         message: "A merged pull request names its merge commit.",
       });
   });
+
+const pullRequestHeadSchema = z.looseObject({
+  head: z.looseObject({ sha: z.string().min(MIN_SEGMENT_LENGTH) }),
+});
+const reviewListSchema = z.array(
+  z.looseObject({
+    user: z.looseObject({ id: z.int() }).nullable(),
+    state: z.string(),
+    commit_id: z.string().nullable().optional(),
+  }),
+);
+type Review = z.infer<typeof reviewListSchema>[number];
 
 export interface GitHubOptions {
   baseUrl?: string;
@@ -507,6 +530,20 @@ function canonicalEventBody(event: object): Uint8Array | null {
   }
 }
 
+function changesRequested(reviews: readonly Review[], head: string): boolean {
+  assert.ok(head.length >= MIN_SEGMENT_LENGTH);
+  const latest = new Map<number, Review>();
+  for (const review of reviews) {
+    if (review.user !== null && DECISIVE_REVIEW_STATES.has(review.state))
+      latest.set(review.user.id, review);
+  }
+  return [...latest.values()].some(
+    (review) =>
+      review.state === ReviewState.ChangesRequested &&
+      review.commit_id === head,
+  );
+}
+
 export function hasNextLink(link: string | null): boolean {
   assert.ok(link === null || isString(link));
   return (
@@ -664,6 +701,33 @@ export class GitHubPlatform {
     return { ok: true, value: { body: answer.value.data, next_cursor: next } };
   }
 
+  async listReviews(
+    call: GitHubCall,
+    target: GitHubTarget,
+    pullRequest: { number: number },
+  ): Promise<GitHubAnswer<unknown[]>> {
+    assert.ok(Number.isInteger(pullRequest.number));
+    assert.ok(pullRequest.number >= MIN_PULL_REQUEST_NUMBER);
+    const reviews: unknown[] = [];
+    for (let page = FIRST_PAGE; page <= REVIEW_PAGE_LIMIT; page += 1) {
+      const answer = await this.#exchange(call, target, {
+        kind: CallKind.Read,
+        route: "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+        parameters: {
+          pull_number: pullRequest.number,
+          per_page: REVIEW_PAGE_SIZE,
+          page,
+        },
+      });
+      if (!answer.ok) return answer;
+      if (!Array.isArray(answer.value.data))
+        return unreadableBody(CallKind.Read);
+      reviews.push(...(answer.value.data as unknown[]));
+      if (!hasNextLink(answer.value.link)) return { ok: true, value: reviews };
+    }
+    return unreadableBody(CallKind.Read);
+  }
+
   async listEvents(
     call: GitHubCall,
     query: GitHubEventsQuery,
@@ -700,6 +764,7 @@ export class GitHubPlatform {
 
   foldPullRequest(
     body: unknown,
+    reviews: unknown,
     expectedEndState: ExpectedEndState,
   ): CheckFold {
     assert.equal(expectedEndState, ExpectedEndState.PullRequestMerged);
@@ -711,13 +776,15 @@ export class GitHubPlatform {
         landed_commits: [pullRequest.merge_commit_sha],
       };
     }
+    if (pullRequest.state !== PULL_REQUEST_STATE_OPEN)
+      return { end_state: CheckEndState.Other, landed_commits: [] };
+    const { head } = pullRequestHeadSchema.parse(body);
     return {
-      end_state:
-        pullRequest.state !== PULL_REQUEST_STATE_OPEN
-          ? CheckEndState.Other
-          : pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT
-            ? CheckEndState.Conflict
-            : CheckEndState.None,
+      end_state: changesRequested(reviewListSchema.parse(reviews), head.sha)
+        ? CheckEndState.Other
+        : pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT
+          ? CheckEndState.Conflict
+          : CheckEndState.None,
       landed_commits: [],
     };
   }
