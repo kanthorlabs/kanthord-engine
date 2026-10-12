@@ -45,6 +45,7 @@ const KEEPALIVE_INTERVAL_MS = 60000;
 const CLIENT_SECRET_BYTES = 32;
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const WORKER_STOP_EXIT_FAILURE = 1;
+const ANSWER_INVALID = "gateway.client.answer_invalid";
 
 function ignoreHangup(): void {}
 
@@ -80,6 +81,7 @@ export class Worker implements Service {
     task: Promise<Diagnostic | null>;
   };
   private executionLive = false;
+  private registrationKept = false;
 
   constructor(options: WorkerOptions = {}) {
     this.options = options;
@@ -189,7 +191,7 @@ export class Worker implements Service {
           () => process.exit(WORKER_STOP_EXIT_FAILURE),
           WORKER_STOP_WATCHDOG_MS,
         );
-        if (this.registration) {
+        if (this.registration && !this.registrationKept) {
           const failure = await deregister(
             this.api!,
             this.registration.runtime_identity,
@@ -256,6 +258,7 @@ export class Worker implements Service {
             return this.registering;
           },
         });
+        if (failure?.code === ANSWER_INVALID) this.registrationKept = true;
         if (failure) throw failure;
       });
       const wasStopping = this.shutdown.err() !== null;

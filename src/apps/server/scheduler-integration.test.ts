@@ -47,6 +47,7 @@ const NO_INPUT = { params: {}, query: {}, body: null };
 const PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const NOT_RUNNING = "scheduler.execution.not_running";
 const VALIDATION_FAILED = "gateway.request.validation_failed";
+const ANSWER_INVALID = "gateway.client.answer_invalid";
 const OPERATION_FAILED_STOP: ReleaseStop = {
   reason: ExecutionStopReason.OperationFailed,
   code: "llm.provider.unavailable",
@@ -885,4 +886,63 @@ test("ended executions remain readable after reopening a file store", async (t) 
   );
   assert.equal(result.claim_state, ClaimState.Finished);
   assert.ok(result.ended_at !== null);
+});
+
+test("a claim that its worker cannot read stays running and a restart with the same identity resumes it", async (t) => {
+  const h = await setup(t, HTTP_ADAPTER);
+  const workerA = httpClient(
+    schedulerOperations,
+    h.f.endpoint,
+    h.generalToken,
+    async (url, init) => {
+      const response = await fetch(url, init);
+      const body = (await response.json()) as {
+        kind: string;
+        execution?: Record<string, unknown>;
+      };
+      if (body.execution) body.execution.future_field = "x";
+      return Response.json(body, { status: response.status });
+    },
+  );
+  refused(
+    await workerA.workPull({
+      params: {},
+      query: {},
+      body: {
+        resource_identity: "worker:kanthord:general",
+        runtime_identity: h.general,
+      },
+    }),
+    HttpStatus.OK,
+    ANSWER_INVALID,
+  );
+  const [lost] = completed(
+    await h.call(schedulerOperations.executionList, {
+      params: { project_id: h.project_id },
+      query: {},
+      body: null,
+    }),
+  ).items;
+  assert.ok(lost);
+  assert.equal(lost.claim_state, ClaimState.Running);
+  assert.equal(lost.claimant.runtime_identity, h.general);
+  const restarted = completed(
+    await h.call(workerOperations.register, NO_INPUT, h.generalToken),
+  ).runtime_identity;
+  assert.equal(restarted, h.general);
+  const resumed = completed(await h.pull());
+  assert.ok(resumed.kind === WorkPullKind.Claimed);
+  assert.equal(resumed.execution.execution_id, lost.execution_id);
+  assert.equal(resumed.execution.claim_state, ClaimState.Running);
+  completed(
+    await h.call(
+      workerOperations.handover,
+      {
+        params: {},
+        query: {},
+        body: { execution_id: resumed.execution.execution_id },
+      },
+      h.generalToken,
+    ),
+  );
 });

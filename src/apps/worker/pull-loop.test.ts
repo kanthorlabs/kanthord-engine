@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CancellationContext } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
+import { httpClient } from "../../gateway/client.ts";
+import { schedulerOperations } from "../../scheduler/contract.ts";
 import { Backoff, workerApi } from "./api.ts";
 import { pullLoop } from "./pull-loop.ts";
 import { testClaim } from "./test-support.ts";
@@ -12,6 +14,7 @@ const REGISTRATION = {
   worker_name: "general@1",
 };
 const ONCE = 1;
+const ANSWER_INVALID = "gateway.client.answer_invalid";
 test("claim admission precedes hosting even when shutdown races the pull", async (t) => {
   const api = workerApi("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
@@ -158,4 +161,38 @@ test("expired registration registers again while authentication refusal ends the
   });
   assert.equal(result?.code, terminal);
   assert.equal(registrations, ONCE);
+});
+
+test("a claim answer that fails its schema ends the loop after one pull", async () => {
+  const api = workerApi("http://127.0.0.1:1");
+  const shutdown = new CancellationContext();
+  let pulls = 0;
+  api.scheduler = httpClient(
+    schedulerOperations,
+    "http://127.0.0.1:1",
+    undefined,
+    async () => {
+      if (++pulls > ONCE) shutdown.cancel();
+      return Response.json({
+        kind: "claimed",
+        execution: { ...testClaim(), future_field: "x" },
+      });
+    },
+  );
+  const result = await pullLoop({
+    api,
+    registration: REGISTRATION,
+    backoff: new Backoff(),
+    shutdown,
+    host: async () => {
+      assert.fail("Unexpected claim");
+    },
+    register: async () => {
+      assert.fail("Unexpected registration");
+    },
+    pulling: () => {},
+    claimed: () => assert.fail("Unexpected claim"),
+  });
+  assert.equal(result?.code, ANSWER_INVALID);
+  assert.equal(pulls, ONCE);
 });
