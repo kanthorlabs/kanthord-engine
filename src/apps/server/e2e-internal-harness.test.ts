@@ -748,6 +748,7 @@ test("local mapped repository clones main and publishes only the node branch", a
     checkout,
     TEST_BRANCH,
     "main",
+    false,
     background,
     GIT_TIMEOUT_MS,
   );

@@ -460,6 +460,7 @@ test(
     const prepared = await root.prepareObjective({
       objectiveId: x.execution.node_id,
       nodeBranch: x.execution.node_branch,
+      pushed: false,
       repository,
       transport,
       context: background,
@@ -637,6 +638,7 @@ test(
       const lab = await root.prepareObjective({
         objectiveId: y.execution.node_id,
         nodeBranch: y.execution.node_branch,
+        pushed: false,
         repository: runtimeY.setup.repositories[0]!,
         transport,
         context: background,
