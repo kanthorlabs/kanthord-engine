@@ -133,14 +133,28 @@ test("connector clones, resumes and pushes only fast-forward node branches and i
   const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
   await clone(origin, first, background, DEADLINE_MS);
   assert.equal(
-    await fetchAndCheckout(first, branch, "main", background, DEADLINE_MS),
+    await fetchAndCheckout(
+      first,
+      branch,
+      "main",
+      false,
+      background,
+      DEADLINE_MS,
+    ),
     base,
   );
   const pushed = await commit(first, "pushed");
   await pushNodeBranch(first, branch, background, DEADLINE_MS);
   await clone(origin, second, background, DEADLINE_MS);
   assert.equal(
-    await fetchAndCheckout(second, branch, "main", background, DEADLINE_MS),
+    await fetchAndCheckout(
+      second,
+      branch,
+      "main",
+      false,
+      background,
+      DEADLINE_MS,
+    ),
     pushed,
   );
   await simpleGit(second).reset(["--hard", base]);
@@ -257,6 +271,7 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
       temporary(t),
       NODE_BRANCH,
       BASE_BRANCH,
+      false,
       background,
       DEADLINE_MS,
     ),

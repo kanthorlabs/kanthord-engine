@@ -120,6 +120,8 @@ test("developer@1 opens the reviewer from the second agent with its own credenti
       }),
       "execution.cleared_assessment.get": async () =>
         complete({ id: createIdentity("assessment"), rationale: "unmet" }),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
       "evidence.submit": async () => complete({ evidence: {} }),
     },
     scheduler: { executionRelease: async () => complete({}) },

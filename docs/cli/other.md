@@ -978,6 +978,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `repository.connector.tool_missing`              | Bash, git or ssh cannot run, exits with an error or has unrecognized version output.                                    | serve server, serve worker                                                 |
 | local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                    | serve server, serve worker                                                 |
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation. | serve worker, binding apply                                                |
+| local           | `repository.node_branch.missing`                 | A record shows a push of the node branch and the remote holds no such branch; the steps execution stops.                | serve worker                                                               |
 
 The internal error `system.composition.unwired` means that the composition root's
 stand-in was called before its collaboration was implemented. It throws before

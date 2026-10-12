@@ -152,7 +152,15 @@ async function fixture(
   };
   const run = new ExecutionRun({
     claim,
-    clients: {} as MethodClients,
+    clients: {
+      mission: {
+        "execution.evidence.list": async () => ({
+          type: "completed",
+          status: 200,
+          data: { items: [], next_cursor: null },
+        }),
+      },
+    } as unknown as MethodClients,
     credentials: { release: async () => {} },
     context: background,
   });
