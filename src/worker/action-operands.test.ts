@@ -12,7 +12,7 @@ import {
 } from "./contract.ts";
 import { operandsOf } from "./action-operands.ts";
 
-const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAV-a2";
 const BINDING = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const COMMIT = "b".repeat(40);
 const entry: ActionContext["actions"][number] = {
@@ -46,10 +46,10 @@ function context(testedInput: TestedInput): ActionContext {
   };
 }
 
-test("action operands come from the admitted assessment and pinned action", () => {
-  const operands = operandsOf(NODE, context(snapshot), entry);
+test("action operands come from the claim branch, the admitted assessment and the pinned action", () => {
+  const operands = operandsOf(NODE_BRANCH, context(snapshot), entry);
   assert.deepEqual(operands, {
-    nodeBranch: "kanthord/" + NODE,
+    nodeBranch: NODE_BRANCH,
     baseBranch: "main",
     commit: COMMIT,
     reusedAddress: null,
@@ -66,14 +66,14 @@ test("non-repository, aggregate and wrong-binding snapshots are refused", () => 
     { kind: TestedInputKind.Object, location: "s3://bucket/key" },
   ];
   for (const input of inputs)
-    assert.throws(() => operandsOf(NODE, context(input), entry), {
+    assert.throws(() => operandsOf(NODE_BRANCH, context(input), entry), {
       code: WorkerErrorCode.SnapshotAbsent,
       status: 409,
     });
   assert.throws(
     () =>
       operandsOf(
-        NODE,
+        NODE_BRANCH,
         { ...context(snapshot), current_assessment: null },
         entry,
       ),

@@ -1,0 +1,103 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: llm.model.check
+    tags:
+      - llm
+    description: Check one tool round trip of a model and a reasoning effort through
+      an LLM credential.
+    x-access-policy: human
+    x-timeout-ms: 60000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/llm.model.check.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/llm.model.check.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    llm.model.check.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            credential:
+              type: string
+              minLength: 1
+            model_identifier:
+              type: string
+              minLength: 1
+            reasoning_effort:
+              type: string
+              minLength: 1
+          required:
+            - credential
+            - model_identifier
+            - reasoning_effort
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    llm.model.check.Output:
+      type: object
+      properties:
+        result:
+          type: string
+          enum:
+            - ok
+            - rate_limited
+            - quota_exhausted
+            - unauthorized
+            - bad_request
+            - unavailable
+        message:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - result
+        - message
+      additionalProperties: false

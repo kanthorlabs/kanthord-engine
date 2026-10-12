@@ -196,6 +196,7 @@ export type ClaimAdmission = {
   project_id: string;
   attempt: number;
   node_revision: number;
+  node_branch: string;
 };
 
 export interface MissionTransitions {
@@ -415,6 +416,12 @@ export const ResumeTarget = {
 } as const;
 export const resumeTargetSchema = z.enum(ResumeTarget);
 export type ResumeTarget = z.infer<typeof resumeTargetSchema>;
+export const StartPoint = {
+  BaseBranch: "base_branch",
+  NodeBranch: "node_branch",
+} as const;
+export const startPointSchema = z.enum(StartPoint);
+export type StartPoint = z.infer<typeof startPointSchema>;
 export const ReleaseObligation = {
   Evidence: "evidence",
   Assessment: "assessment",
@@ -855,6 +862,7 @@ export const attemptSchema = z.strictObject({
   node_id: identitySchema("node"),
   attempt: z.number().int().positive(),
   node_revision: z.number().int().positive(),
+  start_point: startPointSchema,
   required_external_actions: z.array(frozenActionSchema),
   opened_at: timestamp,
   closed_at: timestamp.nullable(),
@@ -986,6 +994,7 @@ export const unblockSchema = z.strictObject({
   expected_mission_version: z.number().int().positive(),
   change: unblockChangeSchema.optional(),
   reason: textSchema.optional(),
+  start_point: startPointSchema.optional(),
 });
 export type Unblock = z.infer<typeof unblockSchema>;
 

@@ -54,8 +54,7 @@ owning pages in the [index](./README.md).
 `storage`, and `agent`. The six service root names are `project`, `mission`,
 `scheduler`, `worker`, `tracking`, and `gateway`. These are disjoint, closed sets.
 `server` and the application form of `worker` are operands of `serve`, never new
-root commands. `cli` is not a `serve` operand. The current `tracking` group
-exposes help only.
+root commands. `cli` is not a `serve` operand.
 
 - [`--config`](./common-flags.md#--config) selects server configuration only
   where the local command declares it; service commands reject it.
@@ -239,11 +238,11 @@ dedicated indeterminate exit code. These names describe the adapter contract,
 not a universal CLI output envelope. Local commands have no remote
 `OperationResult`; their command-specific effects and errors apply.
 
-A proposed batch command may declare exit `1` for an unsuccessful domain result
-while preserving a valid completed response on stdout. For example,
-[Tracking ingestion](./tracking.md#output-and-failure-conventions) reports refused
-records this way. The transport result remains `Completed`; it must not be
-misreported as an API failure or an indeterminate response.
+A batch operation can answer a completed response that holds refused records.
+For example, the
+[Tracking telemetry write](./tracking.md#output-and-failure-conventions) reports
+a disposition for each record. The transport result remains `Completed`; it must
+not be misreported as an API failure or an indeterminate response.
 
 ### Idempotency and retries
 

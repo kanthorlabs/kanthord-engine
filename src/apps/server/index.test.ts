@@ -520,7 +520,7 @@ test("serve rejects unsafe owned directories/files and releases earlier resource
     undefined,
   );
   store.close();
-  assert.deepEqual(readdirSync(data), ["kanthord.db"]);
+  assert.deepEqual(readdirSync(data), ["kanthord.db", "tracking.db"]);
 });
 
 const MASTER_KEY_ROWS = 1;
@@ -649,6 +649,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
       mission: { operations: 200 },
       project: { bindings: 200 },
       intake: { events: 200 },
+      tracking: { store: 200 },
       gateway: {
         listener: 200,
         authentication: 200,
@@ -790,7 +791,7 @@ test("server lifecycle returns errors, reports owned health and releases every r
     const stopping = broken.stop(); assert.equal(stopping, broken.stop());
     const error = await stopping;
     assert.ok(error instanceof AggregateError);
-    assert.deepEqual(error.errors, [storeFailure, logFailure]);
+    assert.deepEqual(error.errors, [storeFailure, storeFailure, logFailure]);
     assert.equal(await joined, error);
     assert.deepEqual(await broken.healthcheck(), { gateway: 503, store: 503, log: 503 });
     assert.equal(output, '');
@@ -882,7 +883,7 @@ test("server quiesces concurrently, drains Intake with direct calls available, j
     const drainEnd = serviceCount + serviceCount;
     assert.deepEqual(shutdown.slice(0, serviceCount), ['quiesce-scheduler', 'quiesce-custody', 'quiesce-worker', 'quiesce-mission', 'quiesce-project', 'quiesce-intake', 'quiesce-gateway']);
     assert.deepEqual(shutdown.slice(serviceCount, drainEnd).sort(), ['drain-custody', 'drain-gateway', 'drain-intake', 'drain-mission', 'drain-project', 'drain-scheduler', 'drain-worker']);
-    assert.deepEqual(shutdown.slice(drainEnd), ['stop-gateway', 'stop-intake', 'stop-project', 'stop-mission', 'stop-worker', 'stop-custody', 'stop-scheduler', 'store', 'log']);
+    assert.deepEqual(shutdown.slice(drainEnd), ['stop-gateway', 'stop-intake', 'stop-project', 'stop-mission', 'stop-worker', 'stop-custody', 'stop-scheduler', 'store', 'store', 'log']);
   `,
     ],
     { env: paths.env, encoding: "utf8", timeout: 15000 },

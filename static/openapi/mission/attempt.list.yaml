@@ -114,6 +114,11 @@ components:
                 type: integer
                 exclusiveMinimum: 0
                 maximum: 9007199254740991
+              start_point:
+                type: string
+                enum:
+                  - base_branch
+                  - node_branch
               required_external_actions:
                 type: array
                 items:
@@ -257,6 +262,7 @@ components:
               - node_id
               - attempt
               - node_revision
+              - start_point
               - required_external_actions
               - opened_at
               - closed_at

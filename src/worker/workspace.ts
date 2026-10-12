@@ -14,8 +14,6 @@ import { identitySchema } from "../kernel/identity.ts";
 import { bindingNameSchema } from "../project/contract.ts";
 import type { Context } from "../kernel/context.ts";
 import type { RepositoryTransport, SshIdentityPin } from "./contract.ts";
-import { nodeBranchOf } from "./node-branch.ts";
-export { nodeBranchOf } from "./node-branch.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
 export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
@@ -69,6 +67,7 @@ export class WorkspaceRoot {
   async prepareObjective(
     input: Preparation & {
       objectiveId: string;
+      nodeBranch: string;
       repository: WorkspaceRepository;
     },
   ): Promise<{ directory: string; head: string; nodeBranch: string }> {
@@ -97,7 +96,6 @@ export class WorkspaceRoot {
           end - performance.now(),
         );
       }
-      const nodeBranch = nodeBranchOf(input.objectiveId);
       await input.transport.proveSshIdentity(
         input.repository.ssh_identity,
         input.context,
@@ -105,13 +103,13 @@ export class WorkspaceRoot {
       );
       const head = await input.transport.fetchAndCheckout(
         directory,
-        nodeBranch,
+        input.nodeBranch,
         input.repository.strategy.base_branch,
         input.context,
         end - performance.now(),
       );
       excludeScratch(directory);
-      return { directory, head, nodeBranch };
+      return { directory, head, nodeBranch: input.nodeBranch };
     } catch (error) {
       this.held.delete(key);
       if (!existing) rmSync(directory, { recursive: true, force: true });

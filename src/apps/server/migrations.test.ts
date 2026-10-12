@@ -479,6 +479,7 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
       ["created_at", "INTEGER", 1, 0],
       ["ended_at", "INTEGER", 0, 0],
       ["stop", "TEXT", 0, 0],
+      ["node_branch", "TEXT", 1, 0],
       ["agent_selections", "TEXT", 0, 0],
     ],
   );
@@ -508,6 +509,58 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
         .get(SCHEDULER_EXECUTION_TABLE)?.sql,
     ),
     /\bCHECK\s*\(/i,
+  );
+});
+
+test("the start point and node branch migrations backfill the behavior of every earlier execution", (t) => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  t.after(() => store.close());
+  const nodeId = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+  const startPointMigration = missionMigrations.length - 1;
+  const nodeBranchMigration = schedulerMigrations.length - 2;
+  store.migrate([
+    {
+      service: SCHEDULER_SERVICE_NAME,
+      migrations: schedulerMigrations.slice(0, nodeBranchMigration),
+    },
+    {
+      service: MISSION_SERVICE_NAME,
+      migrations: missionMigrations.slice(0, startPointMigration),
+    },
+  ]);
+  store.database.exec(`
+    INSERT INTO mission_mission VALUES ('mission_01ARZ3NDEKTSV4RRFFQ69G5FAA', 'project_01ARZ3NDEKTSV4RRFFQ69G5FAA', 1, 1);
+    INSERT INTO mission_node (id, mission_id, kind, filename, state, attempt, created_at) VALUES ('${nodeId}', 'mission_01ARZ3NDEKTSV4RRFFQ69G5FAA', 'objective', 'a.md', 'available', 2, 1);
+    INSERT INTO mission_attempt VALUES ('${nodeId}', 1, 1, '{}', 1, 2);
+    INSERT INTO mission_attempt VALUES ('${nodeId}', 2, 1, '{}', 2, NULL);
+    INSERT INTO scheduler_execution VALUES ('execution_01ARZ3NDEKTSV4RRFFQ69G5FAA', 'project_01ARZ3NDEKTSV4RRFFQ69G5FAA', '${nodeId}', 'binding_01ARZ3NDEKTSV4RRFFQ69G5FAA', 'worker:kanthord:general', 'worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA', 2, 1, '[]', 2, '${"1".repeat(32)}', '${"2".repeat(16)}', 1, NULL, NULL);
+  `);
+  store.migrate([
+    { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
+    { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
+  ]);
+  assert.deepEqual(
+    store.database
+      .prepare(
+        "SELECT attempt, start_point FROM mission_attempt ORDER BY attempt",
+      )
+      .all()
+      .map((row) => [row.attempt, row.start_point]),
+    [
+      [1, "base_branch"],
+      [2, "node_branch"],
+    ],
+  );
+  assert.equal(
+    store.database.prepare("SELECT node_branch FROM scheduler_execution").get()
+      ?.node_branch,
+    `kanthord/${nodeId}`,
+  );
+  assert.equal(
+    store.database
+      .prepare("SELECT agent_selections FROM scheduler_execution")
+      .get()?.agent_selections,
+    null,
   );
 });
 

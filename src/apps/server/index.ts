@@ -19,6 +19,7 @@ import {
 } from "../../custody/index.ts";
 import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import {
+  executionTrace,
   SchedulerService,
   schedulerMigrations,
 } from "../../scheduler/index.ts";
@@ -26,6 +27,8 @@ import {
   SCHEDULER_SERVICE_NAME,
   type WorkQueue,
 } from "../../scheduler/contract.ts";
+import { TrackingService, trackingMigrations } from "../../tracking/index.ts";
+import { TRACKING_SERVICE_NAME } from "../../tracking/contract.ts";
 import { MissionService, missionMigrations } from "../../mission/index.ts";
 import {
   MISSION_SERVICE_NAME,
@@ -94,6 +97,7 @@ import {
 } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
+import { loadPi } from "../../agent/pi.ts";
 import {
   RepositoryComponent,
   RepositoryCredentials,
@@ -162,6 +166,7 @@ export function projectScopedIntakeInventory(
 export function composeServices(options: {
   config: ServerConfig;
   store: Store;
+  trackingStore: Store;
   stateDirectory: string;
   logger: Logger;
   health: HealthRegistry;
@@ -171,6 +176,9 @@ export function composeServices(options: {
   oauthProviders?: ConstructorParameters<
     typeof LlmComponent
   >[0]["oauthProviders"];
+  loadModelRuntime?: ConstructorParameters<
+    typeof LlmComponent
+  >[0]["loadModelRuntime"];
   registry?: OperationRegistry;
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
@@ -192,7 +200,10 @@ export function composeServices(options: {
   const registry = options.registry ?? new OperationRegistry();
   const invocation = createInvocation({
     registry,
-    stores: { [StoreName.Operational]: options.store },
+    stores: {
+      [StoreName.Operational]: options.store,
+      [StoreName.Tracking]: options.trackingStore,
+    },
     idempotencyTtl: options.config.gateway.idempotency_ttl,
     masterKey: options.config.master_key,
     authVersion: options.config.gateway.auth.version,
@@ -257,6 +268,21 @@ export function composeServices(options: {
         root_span_id: randomBytes(8).toString("hex"),
       }),
     },
+    telemetry: {
+      executionOpened: (trace, createdAt) =>
+        tracking.executionOpened(trace, createdAt),
+      executionEnded: (end) => tracking.executionEnded(end),
+    },
+    health: options.health,
+  });
+  const tracking = new TrackingService({
+    store: options.trackingStore,
+    executions: {
+      traceOf: (executionId) => {
+        const row = scheduler.executionOf(executionId);
+        return row === undefined ? undefined : executionTrace(row);
+      },
+    },
     health: options.health,
   });
   const workQueue: WorkQueue = {
@@ -313,6 +339,7 @@ export function composeServices(options: {
       agent.agentProvidersDependentOn(tx, name),
     enablementsDependentOnModel: (tx, name, model) =>
       agent.enablementsDependentOnModel(tx, name, model),
+    loadModelRuntime: options.loadModelRuntime ?? loadPi,
   });
   const agent: AgentComponent = new AgentComponent({
     store: options.store,
@@ -591,6 +618,7 @@ export function composeServices(options: {
       ),
   });
   scheduler.declare(registry);
+  tracking.declare(registry);
   llm.declare(registry);
   agent.declare(registry);
   repositoryCredentials.declare(registry);
@@ -637,9 +665,13 @@ export function composeServices(options: {
       ),
     options.logger,
   );
-  registry.seal({ [StoreName.Operational]: options.store });
+  registry.seal({
+    [StoreName.Operational]: options.store,
+    [StoreName.Tracking]: options.trackingStore,
+  });
   return {
     scheduler,
+    tracking,
     workQueue,
     custody,
     llm,
@@ -674,6 +706,27 @@ export const serverMigrations: Migrations = [
 ];
 
 export const DATABASE_FILE = "kanthord.db";
+export const TRACKING_DATABASE_FILE = "tracking.db";
+export const trackingDatabaseMigrations: Migrations = [
+  { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
+];
+
+function openStore(path: string, migrations: Migrations): Store {
+  const store = new Store(path);
+  try {
+    const plan = store.plan(migrations);
+    if (!plan.fresh && plan.pending.length)
+      throw new Diagnostic(
+        "system.database.migration.pending",
+        `${store.path}: the database has pending migrations. Run kanthord upgrade.`,
+      );
+    store.migrate(migrations);
+    return store;
+  } catch (error) {
+    store.close();
+    throw error;
+  }
+}
 
 export class Server implements Service {
   readonly health = new HealthRegistry();
@@ -727,19 +780,18 @@ export class Server implements Service {
       audit(join(paths.state, "kanthord.log"), "file", true);
       this.log = new OperationalLog(config.log, paths.state);
       this.releases.push(() => this.log!.close());
-      this.store = new Store(join(paths.data, DATABASE_FILE));
+      this.store = openStore(join(paths.data, DATABASE_FILE), serverMigrations);
       this.releases.push(() => this.store!.close());
-      const plan = this.store.plan(serverMigrations);
-      if (!plan.fresh && plan.pending.length)
-        throw new Diagnostic(
-          "system.database.migration.pending",
-          `${this.store.path}: the database has pending migrations. Run kanthord upgrade.`,
-        );
-      this.store.migrate(serverMigrations);
+      const trackingStore = openStore(
+        join(paths.data, TRACKING_DATABASE_FILE),
+        trackingDatabaseMigrations,
+      );
+      this.releases.push(() => trackingStore.close());
       enforceMasterKey(this.store, config.master_key, this.path);
       throwIfCancelled(this.shutdown);
       const {
         scheduler,
+        tracking,
         custody,
         llm,
         worker,
@@ -752,6 +804,7 @@ export class Server implements Service {
       } = composeServices({
         config,
         store: this.store,
+        trackingStore,
         stateDirectory: paths.state,
         logger: this.log.logger,
         health: this.health,
@@ -760,6 +813,7 @@ export class Server implements Service {
       this.invocation = invocation;
       this.releases.push(() => invocation.stop());
       const services = [
+        tracking,
         scheduler,
         custody,
         llm,

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
@@ -36,6 +37,12 @@ import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import { ActionResultKind } from "./contract.ts";
+import {
+  evaluationEnd,
+  evaluationSpan,
+  testedCommitOf,
+  verificationObserver,
+} from "./method-telemetry.ts";
 
 export const ACCEPTED_ITEM_KINDS: readonly ActionResultKind[] = [
   ActionResultKind.Submitted,
@@ -118,6 +125,70 @@ async function judge(
   };
 }
 
+type PreparedEvaluation = Awaited<ReturnType<typeof prepareEvaluation>>;
+
+async function evaluate(
+  input: StepsInput,
+  run: ExecutionRun,
+  revision: Revision,
+  prepared: PreparedEvaluation,
+  openAgent: OpenAgent,
+) {
+  assert.ok(prepared.directory);
+  assert.equal(input.claim.execution_id, input.setup.execution_id);
+  const kind = nodeKindOf(revision);
+  const budget = new ExecutionBudget({
+    ...input.claim,
+    resource_budget: input.setup.resource_budget,
+  });
+  const verificationRun = await runVerificationsWithOutput({
+    observe: verificationObserver(
+      run.spans,
+      testedCommitOf(prepared.tested_input),
+    ),
+    directory: prepared.directory,
+    commands: verificationCommands(revision),
+    tested_input: prepared.tested_input,
+    deadline: budget.wallDeadline(),
+    context: run.operationContext,
+    reruns: VERIFICATION_RERUNS,
+  });
+  const verification = verificationRun.verification;
+  const recorded = await run.submitEvidence(input.claim.node_id, {
+    subject: VERIFICATION_SUBJECT,
+    assets: [
+      {
+        kind: "produced",
+        content: {
+          media_type: "application/json",
+          encoding: "base64",
+          data: Buffer.from(canonicalJSON(verification.results)).toString(
+            "base64",
+          ),
+        },
+      },
+    ],
+    verification,
+  });
+  const objectives =
+    kind === NodeKind.Initiative ? await readObjectives(run) : null;
+  const judgement = await judge(
+    input,
+    run,
+    revision,
+    prepared.reviewBundle,
+    verificationRun,
+    prepared.directory,
+    openAgent,
+    objectives,
+  );
+  return {
+    evidence_ids: [recorded.id, ...prepared.evidenceIds],
+    child_outcome_ids: objectives?.outcomes.map((outcome) => outcome.id) ?? [],
+    ...judgement,
+  };
+}
+
 export async function runEvaluation(
   input: StepsInput,
   run: ExecutionRun,
@@ -128,53 +199,13 @@ export async function runEvaluation(
   const kind = nodeKindOf(revision);
   const prepared = await prepareEvaluation(input, run, kind, evidence);
   try {
-    const budget = new ExecutionBudget({
-      ...input.claim,
-      resource_budget: input.setup.resource_budget,
-    });
-    const verificationRun = await runVerificationsWithOutput({
-      directory: prepared.directory,
-      commands: verificationCommands(revision),
-      tested_input: prepared.tested_input,
-      deadline: budget.wallDeadline(),
-      context: run.operationContext,
-      reruns: VERIFICATION_RERUNS,
-    });
-    const verification = verificationRun.verification;
-    const recorded = await run.submitEvidence(input.claim.node_id, {
-      subject: VERIFICATION_SUBJECT,
-      assets: [
-        {
-          kind: "produced",
-          content: {
-            media_type: "application/json",
-            encoding: "base64",
-            data: Buffer.from(canonicalJSON(verification.results)).toString(
-              "base64",
-            ),
-          },
-        },
-      ],
-      verification,
-    });
-    const objectives =
-      kind === NodeKind.Initiative ? await readObjectives(run) : null;
-    const childOutcomeIds =
-      objectives?.outcomes.map((outcome) => outcome.id) ?? [];
-    const judgement = await judge(
-      input,
-      run,
-      revision,
-      prepared.reviewBundle,
-      verificationRun,
-      prepared.directory,
-      openAgent,
-      objectives,
+    const assessment = await run.spans.within(
+      evaluationSpan(run.spans, testedCommitOf(prepared.tested_input)),
+      () => evaluate(input, run, revision, prepared, openAgent),
+      evaluationEnd,
     );
     const answer = await run.submitAssessment(input.claim.node_id, {
-      evidence_ids: [recorded.id, ...prepared.evidenceIds],
-      child_outcome_ids: childOutcomeIds,
-      ...judgement,
+      ...assessment,
       tested_input: prepared.tested_input,
     });
     if (answer.outcome)

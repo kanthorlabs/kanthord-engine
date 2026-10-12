@@ -8,6 +8,7 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import type { MethodClients } from "./method-clients.ts";
+import { noTelemetry, SpanRecorder, type TelemetrySink } from "./telemetry.ts";
 import {
   ClaimState,
   ExecutionStopReason,
@@ -49,6 +50,9 @@ export type ExecutionEnd =
 export const EXECUTION_PROOF_FAILED =
   "gateway.invocation.execution_proof_failed";
 export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
+const NO_TELEMETRY_FAULTS = 0;
+const TELEMETRY_FLUSH_MS = 5000;
+const UNNAMED_WORKER = "unnamed";
 const FORBIDDEN = 403;
 const CONFLICT = 409;
 
@@ -57,9 +61,11 @@ export interface MethodClaim {
   node_id: string;
   attempt: number;
   pinned_revision: number;
+  node_branch: string;
   created_at: number;
   expired_at: number;
   trace_id: string;
+  root_span_id: string;
 }
 
 export function isExecutionEnd(result: OperationResult<unknown>): boolean {
@@ -86,6 +92,7 @@ export class ExecutionRun {
   readonly claim: MethodClaim;
   readonly clients: MethodClients;
   readonly operationContext: CancellationContext;
+  readonly spans: SpanRecorder;
   private readonly credentials: { release(): Promise<void> };
   private readonly parent: Context;
   private readonly logSink: (record: Record<string, unknown>) => void;
@@ -98,10 +105,17 @@ export class ExecutionRun {
     credentials: { release(): Promise<void> };
     context: Context;
     log?: (record: Record<string, unknown>) => void;
+    telemetry?: TelemetrySink;
+    workerName?: string;
   }) {
     assert.ok(input.claim.execution_id);
     assert.ok(input.claim.node_id);
     this.claim = input.claim;
+    this.spans = new SpanRecorder(
+      input.claim,
+      input.workerName ?? UNNAMED_WORKER,
+      input.telemetry ?? noTelemetry,
+    );
     this.clients = input.clients;
     this.credentials = input.credentials;
     this.parent = input.context;
@@ -228,6 +242,8 @@ export class ExecutionRun {
 
   dispose(): void {
     this.operationContext.cancel();
+    if (this.spans.faultCount() > NO_TELEMETRY_FAULTS)
+      this.log("telemetry faults", { faults: this.spans.faultCount() });
   }
 
   async submitEvidence(nodeId: string, body: EvidenceBody) {
@@ -246,6 +262,7 @@ export class ExecutionRun {
 
   async submitAssessment(nodeId: string, body: AssessmentBody) {
     await this.settleCredentials();
+    await this.spans.flush(TELEMETRY_FLUSH_MS);
     return this.call((options) =>
       this.clients.mission["assessment.submit"](
         {
@@ -282,6 +299,7 @@ export class ExecutionRun {
         ? null
         : { reason: ExecutionStopReason.BudgetEnd, code: budgetEnd };
     await this.settleCredentials();
+    await this.spans.flush(TELEMETRY_FLUSH_MS);
     await this.call(async (options) => {
       const result = await this.clients.scheduler.executionRelease(
         {
@@ -326,6 +344,7 @@ export class ExecutionRun {
     try {
       this.settlement ??= this.credentials.release();
       await this.settlement;
+      await this.spans.flush(TELEMETRY_FLUSH_MS);
       const params = { execution_id: this.claim.execution_id };
       const result = await this.clients.scheduler.executionRelease(
         { params, query: {}, body: { further_work: true, stop } },

@@ -80,6 +80,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     workerBindingId: createIdentity("binding"),
     nodeId: createIdentity("node"),
     pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     attempt: 1,
     projectId: createIdentity("project"),
   };
@@ -235,6 +236,7 @@ test("setup answers one entry per agent of developer@1 with its own prompt and p
     workerBindingId: createIdentity("binding"),
     nodeId: createIdentity("node"),
     pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     attempt: 1,
     projectId: createIdentity("project"),
   };

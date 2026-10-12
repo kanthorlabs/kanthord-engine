@@ -1,0 +1,256 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: tracking.span.list
+    tags:
+      - tracking
+    description: List one page of the stored spans of a trace, oldest first. The
+      page promises no complete trace.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: trace_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/tracking.span.list.Input/properties/params/properti\
+            es/trace_id"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.span.list.Input/properties/query/propertie\
+            s/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.span.list.Input/properties/query/propertie\
+            s/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.span.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.span.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            trace_id:
+              type: string
+              pattern: ^[0-9a-f]{32}$
+          required:
+            - trace_id
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            limit:
+              default: 500
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+              minLength: 1
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.span.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              trace_id:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+              span_id:
+                type: string
+                pattern: ^[0-9a-f]{16}$
+              parent_span_id:
+                anyOf:
+                  - type: string
+                    pattern: ^[0-9a-f]{16}$
+                  - type: "null"
+              producer:
+                type: string
+                minLength: 1
+              origin:
+                type: string
+                enum:
+                  - observed
+                  - asserted
+              operation:
+                type: string
+                minLength: 1
+              start_time:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              end_time:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              status:
+                type: string
+                enum:
+                  - Unset
+                  - Ok
+                  - Error
+              attributes:
+                type: object
+                propertyNames:
+                  type: string
+                additionalProperties:
+                  anyOf:
+                    - anyOf:
+                        - type: string
+                        - type: boolean
+                        - type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        - type: number
+                    - maxItems: 128
+                      type: array
+                      items:
+                        anyOf:
+                          - type: string
+                          - type: boolean
+                          - type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          - type: number
+              events:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      minLength: 1
+                    time:
+                      type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                      description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    attributes:
+                      type: object
+                      propertyNames:
+                        type: string
+                        minLength: 1
+                      additionalProperties:
+                        anyOf:
+                          - anyOf:
+                              - type: string
+                              - type: boolean
+                              - type: integer
+                                minimum: -9007199254740991
+                                maximum: 9007199254740991
+                              - type: number
+                          - maxItems: 128
+                            type: array
+                            items:
+                              anyOf:
+                                - type: string
+                                - type: boolean
+                                - type: integer
+                                  minimum: -9007199254740991
+                                  maximum: 9007199254740991
+                                - type: number
+                  required:
+                    - name
+                    - time
+                  additionalProperties: false
+              links:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    trace_id:
+                      type: string
+                      pattern: ^[0-9a-f]{32}$
+                    span_id:
+                      type: string
+                      pattern: ^[0-9a-f]{16}$
+                  required:
+                    - trace_id
+                    - span_id
+                  additionalProperties: false
+              text_ids:
+                type: array
+                items:
+                  type: string
+              created_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            required:
+              - trace_id
+              - span_id
+              - parent_span_id
+              - producer
+              - origin
+              - operation
+              - start_time
+              - end_time
+              - status
+              - attributes
+              - events
+              - links
+              - text_ids
+              - created_at
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - next_cursor
+      additionalProperties: false

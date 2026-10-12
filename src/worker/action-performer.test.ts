@@ -80,12 +80,14 @@ function actionable(t: TestContext) {
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
+  const nodeId = createIdentity("node");
   const claim = {
     executionId: createIdentity("execution"),
     projectId: createIdentity("project"),
-    nodeId: createIdentity("node"),
+    nodeId,
     attempt: FIRST_ATTEMPT,
     pinnedRevision: FIRST_ATTEMPT,
+    nodeBranch: `kanthord/${nodeId}`,
     runtimeIdentity: createIdentity("worker_instance"),
     workerBindingId: createIdentity("binding"),
   };
@@ -395,6 +397,21 @@ test("reuse forwards the matching earlier pull request through Intake perform", 
   assert.equal(
     h.performSpy.mock.calls[0]?.arguments[2],
     `${h.claim.nodeId}/${SECOND_ATTEMPT}/${h.entry.action.key}/${PR.number}/${COMMIT}`,
+  );
+});
+
+test("an open pull request of the earlier node branch is not reused after a restart from the base branch", async (t) => {
+  const h = reusable(t);
+  h.claim.nodeBranch = `kanthord/${h.claim.nodeId}-a2`;
+  h.dependencies.intakeActions.read = async () => ({
+    body: h.body,
+    next_cursor: null,
+  });
+  assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
+  assert.equal(h.performSpy.mock.callCount(), SINGLE_CALL_COUNT);
+  assert.equal(
+    h.performSpy.mock.calls[0]?.arguments[1]?.reusedEvidenceId,
+    null,
   );
 });
 
