@@ -59,6 +59,7 @@ export interface VerifiedClient {
 export const HANDOVER_TIMEOUT_MS = 30000;
 export const ACTION_REQUEST_TOOL_NAME = "repository-action-request";
 export const ACTION_REQUEST_TIMEOUT_MS = 900000;
+export const CHANGE_REQUEST_TIMEOUT_MS = 60000;
 export const ActionResultKind = {
   Submitted: "submitted",
   AwaitingPrerequisite: "awaiting-prerequisite",
@@ -89,6 +90,7 @@ export const uncertaintySchema = z.enum(Uncertainty);
 export type Uncertainty = z.infer<typeof uncertaintySchema>;
 export const ActionReadMethod = {
   PullRequestGet: "github-pull-request-get",
+  ChangeRequestGet: "github-pull-request-change-request-get",
 } as const;
 export const actionReadMethodSchema = z.enum(ActionReadMethod);
 export type ActionReadMethod = z.infer<typeof actionReadMethodSchema>;
@@ -110,6 +112,34 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
+export const changeRequestSchema = z.strictObject({
+  review_id: z.number().int().positive(),
+  reviewer: z.string(),
+  body: z.string(),
+  submitted_at: z.string().nullable(),
+  commit_id: z.string().min(1),
+  comments: z.array(
+    z.strictObject({
+      path: z.string(),
+      line: z.number().int().nullable(),
+      body: z.string(),
+    }),
+  ),
+});
+export type ChangeRequest = z.infer<typeof changeRequestSchema>;
+export const changeRequestReadSchema = z.strictObject({
+  head_commit: z.string().min(1),
+  change_requests: z.array(changeRequestSchema),
+});
+export type ChangeRequestRead = z.infer<typeof changeRequestReadSchema>;
+export const clearedChangeRequestsSchema = z.strictObject({
+  items: z.array(
+    changeRequestReadSchema.extend({
+      evidence_id: identitySchema("evidence"),
+    }),
+  ),
+});
+export type ClearedChangeRequests = z.infer<typeof clearedChangeRequestsSchema>;
 export const actionRefSchema = z.strictObject({
   key: z.string().min(1),
   binding_id: identitySchema("binding"),
@@ -744,6 +774,28 @@ export const workerOperations = {
     output: actionRequestResultSchema,
     description:
       "Call the internal action performer with the execution identity alone. Return submitted evidence, awaiting prerequisites, failed-before-effect refusals or uncertainty, with no release instruction.",
+  },
+  "execution.change_request.get": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.execution.change_request.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/execution/:execution_id/change-request",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: CHANGE_REQUEST_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: clearedChangeRequestsSchema,
+    description:
+      "Read the current change requests on each pull request that ended with other in the attempt that an unblock cleared before the claimed attempt.",
   },
   handover: {
     service: WORKER_SERVICE_NAME,

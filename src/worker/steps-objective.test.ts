@@ -25,6 +25,7 @@ import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import {
   criterionRevisionInstruction,
+  requestedChangesText,
   JUDGEMENT_MARKER,
   repairInstruction,
   taskJudgementInstruction,
@@ -858,6 +859,47 @@ test("the start check judges a task against the prior rationale and revises it w
     { kind: "complete" },
   );
   assert.ok(JSON.stringify(h.provider.calls[1]).includes(revision));
+});
+
+test("the start check judges a task against the requested changes of a change request", async (t) => {
+  const requested = requestedChangesText([
+    {
+      head_commit: "a".repeat(40),
+      change_requests: [
+        {
+          review_id: 7,
+          reviewer: "octo",
+          body: "Rename the route.",
+          submitted_at: null,
+          commit_id: "a".repeat(40),
+          comments: [{ path: "src/route.ts", line: 4, body: "Use /api." }],
+        },
+      ],
+    },
+  ]);
+  assert.ok(requested);
+  const current = task("review", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":false,"rationale":"unmet"}',
+      ),
+    ],
+  );
+  h.priorRationale = requested;
+  const checked = await startCheck(h);
+  const judgement = JSON.stringify(h.provider.calls[0]);
+  assert.ok(judgement.includes("Reviewer octo requests changes"));
+  assert.ok(judgement.includes("src/route.ts:4: Use /api."));
+  assert.deepEqual(checked.pending, [
+    {
+      task: current,
+      boundary: "run_passed",
+      instruction: criterionRevisionInstruction(SHIPPED_TEMPLATES, requested),
+    },
+  ]);
 });
 
 async function advanceBase(

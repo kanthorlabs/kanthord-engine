@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { TaskContent } from "../mission/contract.ts";
 import type { WorkPrompt } from "../agent/prompt-composer.ts";
 import type { Verification, VerificationRun } from "./verification.ts";
+import type { ChangeRequestRead } from "./contract.ts";
 import { NodeKind, type NativeAgent } from "./native-agent.ts";
 import { PromptTemplate, type PromptTemplates } from "../agent/contract.ts";
 import { renderTemplate } from "../agent/prompt-templates.ts";
@@ -11,6 +12,7 @@ export const JUDGEMENT_MARKER = "kanthord-judgement:";
 const SUCCESS_EXIT = 0;
 const NO_ITEMS = 0;
 const MIN_VERIFICATIONS = 1;
+export const REQUESTED_CHANGES_MAX_BYTES = 4096;
 const AssessmentResult = {
   Success: "success",
   CriterionNotMet: "criterion-not-met",
@@ -122,6 +124,28 @@ export function taskJudgementInstruction(
     prior_rationale: priorRationale,
     marker: JUDGEMENT_MARKER,
   });
+}
+
+export function requestedChangesText(
+  reads: readonly ChangeRequestRead[],
+): string | null {
+  const lines: string[] = [];
+  for (const read of reads) {
+    for (const request of read.change_requests) {
+      lines.push(
+        `Reviewer ${request.reviewer} requests changes at commit ${request.commit_id}: ${request.body}`,
+      );
+      for (const comment of request.comments)
+        lines.push(
+          `- ${comment.path}${comment.line === null ? "" : `:${comment.line}`}: ${comment.body}`,
+        );
+    }
+  }
+  if (lines.length === NO_ITEMS) return null;
+  const text = `The pull request reviewers request these changes:\n${lines.join("\n")}`;
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length <= REQUESTED_CHANGES_MAX_BYTES) return text;
+  return `${bytes.subarray(0, REQUESTED_CHANGES_MAX_BYTES).toString("utf8")}\n[The requested changes exceed 4 KiB and end here.]`;
 }
 
 export function failedVerificationRationale(

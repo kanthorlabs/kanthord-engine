@@ -50,6 +50,7 @@ import { AgentErrorCode, type ApprovedModelsFn } from "../agent/contract.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import { executionSetup } from "./execution-setup.ts";
+import { clearedChangeRequests } from "./change-request.ts";
 import { authorizeModelInference } from "./authorization.ts";
 import { agentChoice } from "./agent-selection.ts";
 import type { AgentChoice } from "../scheduler/contract.ts";
@@ -512,6 +513,24 @@ export class WorkerService implements Service {
         assert.ok(caller.execution);
         const answer = await this.performer.perform(
           { context: caller.context, identity },
+          caller.execution,
+        );
+        return caller.commit(() => answer);
+      },
+    );
+    registry.register(
+      workerOperations["execution.change_request.get"],
+      async (_input, caller) => {
+        const identity = caller.identity;
+        assert.ok(isMachineIdentity(identity));
+        assert.ok(caller.execution);
+        const answer = await clearedChangeRequests(
+          this.dependencies,
+          {
+            context: caller.context,
+            identity,
+            executionId: caller.execution.executionId,
+          },
           caller.execution,
         );
         return caller.commit(() => answer);

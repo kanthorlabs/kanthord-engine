@@ -45,6 +45,7 @@ const SINGLE_INSTANCE = 1;
 const NO_ROWS = 0;
 const ONE_PIN = 1;
 const FAILED_READS = 2;
+const READ_METHODS = 3;
 const BAD_GATEWAY_STATUS = 502;
 const PAGE_LIMIT = 30;
 const OUT_OF_RANGE_LIMIT = 101;
@@ -418,6 +419,10 @@ test(
       h.readAction(gated.evaluation, gated.evidenceId, {
         method: ActionReadMethod.PullRequestGet,
       });
+    const changeRequests = () =>
+      h.readAction(gated.evaluation, gated.evidenceId, {
+        method: ActionReadMethod.ChangeRequestGet,
+      });
     const comments = (page: { limit?: number; cursor?: string } = {}) =>
       h.readAction(gated.evaluation, gated.evidenceId, {
         method: ActionReadMethod.ReviewCommentList,
@@ -466,10 +471,53 @@ test(
       },
     );
 
+    await t.test(
+      "a change request get answers the current change requests of the head commit",
+      async () => {
+        const before = h.gitHub.calls.length;
+        const materials = h.materials.length;
+        const reviewId = h.gitHub.review(number, {
+          reviewer: 1,
+          state: "CHANGES_REQUESTED",
+          body: "rename the route",
+          comments: [{ path: "src/route.ts", line: 4, body: "use /api" }],
+        });
+        const answer = completed(await changeRequests());
+        assert.ok("body" in answer, JSON.stringify(answer));
+        assert.equal(answer.next_cursor, null);
+        const body = answer.body as {
+          head_commit: string;
+          change_requests: { review_id: number; comments: unknown[] }[];
+        };
+        assert.equal(body.change_requests.length, ONE_PIN);
+        assert.equal(body.change_requests[FIRST_INDEX]?.review_id, reviewId);
+        assert.deepEqual(body.change_requests[FIRST_INDEX]?.comments, [
+          { path: "src/route.ts", line: 4, body: "use /api" },
+        ]);
+        assert.deepEqual(
+          h.gitHub.calls
+            .slice(before)
+            .map((call) => new URL(call.path, "http://127.0.0.1").pathname),
+          [
+            `/repos/owner/gated/pulls/${number}`,
+            `/repos/owner/gated/pulls/${number}/reviews`,
+            `/repos/owner/gated/pulls/${number}/reviews/${reviewId}/comments`,
+          ],
+        );
+        assert.equal(h.pins(gated.evaluation).length, ONE_PIN);
+        dropped(h.materials, materials + ONE_PIN);
+      },
+    );
+
     await t.test("a GitHub failure answers its result class", async () => {
+      const materials = h.materials.length;
       h.gitHub.failPulls(BAD_GATEWAY_STATUS);
       try {
-        for (const result of [await get(), await comments()]) {
+        for (const result of [
+          await get(),
+          await comments(),
+          await changeRequests(),
+        ]) {
           const answer = completed(result);
           assert.ok("class" in answer, JSON.stringify(answer));
           assert.equal(answer.class, ResultClass.RetryableRefusal);
@@ -481,7 +529,7 @@ test(
       } finally {
         h.gitHub.failPulls(null);
       }
-      dropped(h.materials, h.gitHub.calls.length);
+      dropped(h.materials, materials + READ_METHODS);
     });
 
     await t.test("a limit outside 1 to 100 answers 400", async () => {

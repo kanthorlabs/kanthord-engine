@@ -77,6 +77,12 @@ const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
 const PULL_REQUEST_OPERATION = "github.pull_request";
 const PUSH_COUNTER = "pre-receive.count";
 const MAIN_REF = "refs/heads/main";
+const REQUESTED_CHANGE = "Rename the account route.";
+const REQUESTED_COMMENT = {
+  path: "node.md",
+  line: 1,
+  body: "Name the attempt.",
+};
 const CONTENT = {
   name: "Ship accounts",
   requirement: "Ship accounts",
@@ -327,6 +333,12 @@ async function setup(t: TestContext) {
       },
       { idempotencyKey: ulid() },
     );
+  const changeRequest = (execution: ExecutionRecord) =>
+    client["execution.change_request.get"]({
+      params: { execution_id: execution.execution_id },
+      query: {},
+      body: null,
+    });
   const context = (execution: ExecutionRecord) => ({
     execution_id: execution.execution_id,
     attempt: execution.attempt,
@@ -426,6 +438,7 @@ async function setup(t: TestContext) {
     pushed,
     pull,
     request,
+    changeRequest,
     work,
     run,
     pass,
@@ -446,6 +459,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
 
   await t.test("E06.1 steps claim selects G attempt 1", async () => {
     e1 = await h.pull(h.G, FIRST_ATTEMPT);
+    assert.deepEqual(completed(await h.changeRequest(e1)), { items: [] });
   });
   await t.test("E06.2 steps claim cannot request actions", async () => {
     refused(
@@ -568,6 +582,8 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     h.gitHub.review(pr.number, {
       reviewer: REVIEWER,
       state: ReviewState.ChangesRequested,
+      body: REQUESTED_CHANGE,
+      comments: [REQUESTED_COMMENT],
     });
     const check = await h.write<{ results: { resolution: string }[] }>(
       ["mission", "node", "check", h.G],
@@ -591,6 +607,16 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       assert.equal(unblock.node.state, NodeState.Available);
       assert.equal(unblock.attempt.attempt, SECOND_ATTEMPT);
       e3 = await h.pull(h.G, SECOND_ATTEMPT);
+      const read = completed(await h.changeRequest(e3));
+      assert.deepEqual(
+        read.items.map((item) => item.evidence_id),
+        [request1.id],
+      );
+      const [change] = read.items[FIRST_INDEX]!.change_requests;
+      assert.equal(change?.reviewer, `reviewer-${REVIEWER}`);
+      assert.equal(change?.body, REQUESTED_CHANGE);
+      assert.equal(change?.commit_id, read.items[FIRST_INDEX]!.head_commit);
+      assert.deepEqual(change?.comments, [REQUESTED_COMMENT]);
       gWork2 = (await h.work(e3, h.gated.id, h.D)).evidence;
       await h.release(e3);
     },

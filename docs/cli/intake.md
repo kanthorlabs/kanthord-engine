@@ -415,6 +415,21 @@ The API operations `intake.action.perform`, `intake.action.read`,
 and no HTTP route. They declare `direct: true`, and the action performer, the
 MCP server and the Mission Service reach them through the direct adapter.
 
+`intake.action.read` takes the query field `method` with one of these values:
+
+- `github-pull-request-get` answers the pull request body unchanged.
+- `github-pull-request-review-comment-list` answers one page of the review
+  comments and takes `limit` and `cursor`.
+- `github-pull-request-change-request-get` answers
+  `{ head_commit, change_requests }`. A change request is the latest
+  `APPROVED`, `CHANGES_REQUESTED` or `DISMISSED` review of its reviewer when it
+  is `CHANGES_REQUESTED` and its `commit_id` is the head commit. This is the
+  rule of the pull request check. Each change request holds `review_id`,
+  `reviewer`, `body`, `submitted_at`, `commit_id` and the `comments` of that
+  review, each with `path`, `line` and `body`. The read calls GitHub once for
+  the pull request, once for each page of the reviews and once for each page of
+  the comments of each change request. `next_cursor` is `null`.
+
 The callers of the outbound operations `intake.action.perform` and
 `intake.storage.delete`, the action performer and the Mission Service, track a
 request by a repeat with the same request key. A repeat

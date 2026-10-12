@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { background } from "../kernel/context.ts";
 import { OperationResultType } from "../kernel/operation.ts";
-import { NodeState } from "../mission/contract.ts";
+import { ClosingEvent, NodeState } from "../mission/contract.ts";
 import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import {
   allTerminal,
@@ -10,6 +10,7 @@ import {
   readAllPages,
   readClearedAssessment,
   readPriorRationale,
+  readRequestedChanges,
   readReworkAssessment,
   READ_PAGE_LIMIT,
 } from "./node-reads.ts";
@@ -17,6 +18,8 @@ import { NodeKind } from "./native-agent.ts";
 import type { MethodClients } from "./method-clients.ts";
 
 const SECOND_ATTEMPT = 2;
+const ONE_READ = 1;
+const CLEARED_RATIONALE = "cleared";
 
 function fixture(attempt = 1) {
   return new ExecutionRun({
@@ -144,10 +147,138 @@ test("the prior rationale is the rework rationale, else the cleared rationale, e
     t.after(() => run.dispose());
     run.clients.mission = {
       "execution.rework_assessment.get": async () => rework,
+      "execution.clearedOutcome.get": async () => notFound,
       "execution.cleared_assessment.get": async () => cleared,
     } as unknown as MethodClients["mission"];
     assert.equal(await readPriorRationale(run), expected);
   }
+});
+
+function clearedOutcome(closingEvent: string) {
+  return {
+    type: OperationResultType.Completed,
+    status: 200,
+    data: { id: "outcome", closing_event: closingEvent },
+  };
+}
+
+const NOT_FOUND = {
+  type: OperationResultType.Failure,
+  status: 404,
+  error: {
+    request_id: "request",
+    error: {
+      code: "mission.record.not_found",
+      message: "failed",
+      details: null,
+    },
+  },
+};
+
+const CHANGE_REQUESTS = {
+  items: [
+    {
+      evidence_id: "evidence",
+      head_commit: "a".repeat(40),
+      change_requests: [
+        {
+          review_id: 7,
+          reviewer: "octo",
+          body: "Rename the route.",
+          submitted_at: "2026-10-12T00:00:00Z",
+          commit_id: "a".repeat(40),
+          comments: [
+            { path: "src/route.ts", line: 4, body: "Use /api." },
+            { path: "README.md", line: null, body: "Document it." },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+test("the prior rationale of an attempt after a change request holds the requested changes", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  t.after(() => run.dispose());
+  let reads = 0;
+  run.clients.mission = {
+    "execution.rework_assessment.get": async () => NOT_FOUND,
+    "execution.clearedOutcome.get": async () =>
+      clearedOutcome(ClosingEvent.ExternalFailed),
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    "execution.change_request.get": async () => {
+      reads++;
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: CHANGE_REQUESTS,
+      };
+    },
+  } as unknown as MethodClients["worker"];
+  assert.equal(
+    await readPriorRationale(run),
+    [
+      "The pull request reviewers request these changes:",
+      `Reviewer octo requests changes at commit ${"a".repeat(40)}: Rename the route.`,
+      "- src/route.ts:4: Use /api.",
+      "- README.md: Document it.",
+    ].join("\n"),
+  );
+  assert.equal(reads, ONE_READ);
+});
+
+test("an attempt not ended by a change request reads no change request", async (t) => {
+  for (const outcome of [
+    clearedOutcome(ClosingEvent.AssessmentNotPassed),
+    clearedOutcome(ClosingEvent.HumanBlock),
+    NOT_FOUND,
+  ]) {
+    const run = fixture(SECOND_ATTEMPT);
+    t.after(() => run.dispose());
+    run.clients.mission = {
+      "execution.rework_assessment.get": async () => NOT_FOUND,
+      "execution.clearedOutcome.get": async () => outcome,
+      "execution.cleared_assessment.get": async () => ({
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { id: "assessment", rationale: CLEARED_RATIONALE },
+      }),
+    } as unknown as MethodClients["mission"];
+    run.clients.worker = {} as MethodClients["worker"];
+    assert.equal(await readRequestedChanges(run), null);
+    assert.equal(await readPriorRationale(run), CLEARED_RATIONALE);
+  }
+  const first = fixture();
+  t.after(() => first.dispose());
+  first.clients.mission = {} as MethodClients["mission"];
+  first.clients.worker = {} as MethodClients["worker"];
+  assert.equal(await readRequestedChanges(first), null);
+});
+
+test("an external failure without a current change request keeps the cleared rationale", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  t.after(() => run.dispose());
+  run.clients.mission = {
+    "execution.rework_assessment.get": async () => NOT_FOUND,
+    "execution.clearedOutcome.get": async () =>
+      clearedOutcome(ClosingEvent.ExternalFailed),
+    "execution.cleared_assessment.get": async () => ({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: { id: "assessment", rationale: CLEARED_RATIONALE },
+    }),
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    "execution.change_request.get": async () => ({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: {
+        items: [{ ...CHANGE_REQUESTS.items[0], change_requests: [] }],
+      },
+    }),
+  } as unknown as MethodClients["worker"];
+  assert.equal(await readPriorRationale(run), CLEARED_RATIONALE);
 });
 
 test("the cleared assessment read of a first attempt answers null with no call", async (t) => {

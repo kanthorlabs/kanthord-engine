@@ -5,12 +5,15 @@ import {
   type OperationResult,
 } from "../kernel/operation.ts";
 import {
+  ClosingEvent,
   MissionErrorCode,
   NodeState,
   type Revision,
   type Assessment,
   type ExecutionObjective,
+  type Outcome,
 } from "../mission/contract.ts";
+import { requestedChangesText } from "./judgement.ts";
 import { EndReason, ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
 
@@ -95,9 +98,9 @@ export async function readObjectives(run: ExecutionRun) {
   return { objectives, outcomes, evidence };
 }
 
-function nullOnRecordNotFound(
-  result: OperationResult<Assessment>,
-): OperationResult<Assessment | null> {
+function nullOnRecordNotFound<T extends Assessment | Outcome>(
+  result: OperationResult<T>,
+): OperationResult<T | null> {
   if (
     result.type === OperationResultType.Failure &&
     result.status === HttpStatus.NotFound &&
@@ -142,10 +145,44 @@ export async function readClearedAssessment(run: ExecutionRun) {
   );
 }
 
+export async function readClearedOutcome(run: ExecutionRun) {
+  if (run.claim.attempt === FIRST_ATTEMPT) return null;
+  return run.call(async (options) =>
+    nullOnRecordNotFound(
+      await run.clients.mission["execution.clearedOutcome.get"](
+        {
+          params: { execution_id: run.claim.execution_id },
+          query: {},
+          body: null,
+        },
+        options,
+      ),
+    ),
+  );
+}
+
+export async function readRequestedChanges(run: ExecutionRun) {
+  const outcome = await readClearedOutcome(run);
+  if (outcome?.closing_event !== ClosingEvent.ExternalFailed) return null;
+  const read = await run.call((options) =>
+    run.clients.worker["execution.change_request.get"](
+      {
+        params: { execution_id: run.claim.execution_id },
+        query: {},
+        body: null,
+      },
+      options,
+    ),
+  );
+  return requestedChangesText(read.items);
+}
+
 export async function readPriorRationale(run: ExecutionRun) {
-  const assessment =
-    (await readReworkAssessment(run)) ?? (await readClearedAssessment(run));
-  return assessment?.rationale ?? null;
+  const rework = await readReworkAssessment(run);
+  if (rework) return rework.rationale;
+  const requested = await readRequestedChanges(run);
+  if (requested !== null) return requested;
+  return (await readClearedAssessment(run))?.rationale ?? null;
 }
 
 export function allTerminal(

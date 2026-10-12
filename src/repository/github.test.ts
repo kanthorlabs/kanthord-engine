@@ -1234,3 +1234,102 @@ test("listReviews answers a failure for a failed page or a body that is not a li
   assert.equal(bounded.ok, false);
   assert.equal(endless.requests.length, REVIEW_PAGE_LIMIT);
 });
+
+function changeRequestServer(
+  reviews: unknown[],
+  comments: Record<string, unknown>,
+): Handler {
+  return (request, response, count) => {
+    const path = new URL(String(request.url), "http://localhost").pathname;
+    if (path === PULL_REQUEST_PATH)
+      return answer(200, PULL_REQUEST_BODY)(request, response, count);
+    if (path === REVIEWS_PATH)
+      return answer(200, reviews)(request, response, count);
+    const body = comments[path];
+    return body === undefined
+      ? answer(404, { message: "Not Found" })(request, response, count)
+      : answer(200, body)(request, response, count);
+  };
+}
+
+test("getChangeRequests answers the current change requests with their review comments", async (t) => {
+  const login = (reviewer: number) => ({
+    ...review(reviewer, ReviewState.ChangesRequested),
+    user: { id: reviewer, login: `reviewer-${reviewer}` },
+    body: `fix ${reviewer}`,
+    submitted_at: "2026-10-12T00:00:00Z",
+  });
+  const server = await platform(
+    t,
+    changeRequestServer(
+      [
+        login(1),
+        { ...login(2), commit_id: OLDER_SHA },
+        login(3),
+        { ...login(3), id: 4, state: ReviewState.Approved },
+      ],
+      {
+        [`${REVIEWS_PATH}/1/comments`]: [
+          { path: "src/a.ts", line: 3, body: "rename", id: 9 },
+          { path: "src/b.ts", line: null, body: "drop" },
+        ],
+      },
+    ),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.getChangeRequests(call(), TARGET, { number: 7 });
+  assert.deepEqual(result, {
+    ok: true,
+    value: {
+      head_commit: HEAD_SHA,
+      change_requests: [
+        {
+          review_id: 1,
+          reviewer: "reviewer-1",
+          body: "fix 1",
+          submitted_at: "2026-10-12T00:00:00Z",
+          commit_id: HEAD_SHA,
+          comments: [
+            { path: "src/a.ts", line: 3, body: "rename" },
+            { path: "src/b.ts", line: null, body: "drop" },
+          ],
+        },
+      ],
+    },
+  });
+  assert.deepEqual(
+    server.requests.map(
+      (request) => new URL(String(request.url), "http://localhost").pathname,
+    ),
+    [PULL_REQUEST_PATH, REVIEWS_PATH, `${REVIEWS_PATH}/1/comments`],
+  );
+});
+
+test("getChangeRequests answers a failure for a failed call or an unreadable body", async (t) => {
+  const failing = await platform(
+    t,
+    answer(401, { message: "Bad credentials" }),
+  );
+  const refused = await new GitHubPlatform({
+    baseUrl: failing.baseUrl,
+  }).getChangeRequests(call(), TARGET, { number: 7 });
+  assert.equal(!refused.ok && refused.class, ResultClass.FinalRefusal);
+  const changes = {
+    ...review(1, ReviewState.ChangesRequested),
+    user: { id: 1, login: "reviewer-1" },
+  };
+  for (const [reviews, comments] of [
+    [[{ ...changes, id: "one" }], {}],
+    [[changes], {}],
+    [[changes], { [`${REVIEWS_PATH}/1/comments`]: [{ path: 1 }] }],
+  ] as const) {
+    const server = await platform(
+      t,
+      changeRequestServer([...reviews], comments),
+    );
+    const unread = await new GitHubPlatform({
+      baseUrl: server.baseUrl,
+    }).getChangeRequests(call(), TARGET, { number: 7 });
+    assert.equal(unread.ok, false);
+  }
+});

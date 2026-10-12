@@ -13,6 +13,8 @@ import {
   repairInstruction,
   taskJudgementInstruction,
   taskRevisionInstruction,
+  requestedChangesText,
+  REQUESTED_CHANGES_MAX_BYTES,
 } from "./judgement.ts";
 import type { Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
@@ -277,5 +279,42 @@ test("a failed verification report names a flaky command and carries its output"
   assert.doesNotMatch(
     failedVerificationReport({ ...run, flaky: [false] }, ["npm test"]),
     /flaky/,
+  );
+});
+
+test("the requested changes text is null without a change request and stops at 4 KiB", () => {
+  const read = (body: string) => ({
+    head_commit: "a".repeat(40),
+    change_requests: [
+      {
+        review_id: 1,
+        reviewer: "octo",
+        body,
+        submitted_at: null,
+        commit_id: "a".repeat(40),
+        comments: [],
+      },
+    ],
+  });
+  assert.equal(requestedChangesText([]), null);
+  assert.equal(
+    requestedChangesText([
+      { head_commit: "a".repeat(40), change_requests: [] },
+    ]),
+    null,
+  );
+  const long = requestedChangesText([
+    read("x".repeat(REQUESTED_CHANGES_MAX_BYTES)),
+  ]);
+  assert.ok(long);
+  assert.ok(
+    long.startsWith("The pull request reviewers request these changes:"),
+  );
+  assert.ok(
+    long.endsWith("[The requested changes exceed 4 KiB and end here.]"),
+  );
+  assert.equal(
+    Buffer.byteLength(long.slice(0, long.lastIndexOf("\n")), "utf8"),
+    REQUESTED_CHANGES_MAX_BYTES,
   );
 });
