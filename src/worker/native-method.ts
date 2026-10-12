@@ -116,9 +116,9 @@ export async function runNativeExecution(
       const open = (workspace: string) =>
         openAgent(WORKING_AGENT, workspace, method !== WorkerMethod.Evaluation);
       if (method === WorkerMethod.Evaluation)
-        return runEvaluation(input, run, open);
+        return runEvaluation(input, run, budget, open);
       if (kind === NodeKind.Initiative)
-        return runStepsInitiative(input, run, revision, open);
+        return runStepsInitiative(input, run, revision, budget, open);
       const priorRationale = await readPriorRationale(run);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
         prepareStepsWorkspace(input, run),

@@ -5,7 +5,8 @@ import {
   NodeState,
   type Revision,
 } from "../mission/contract.ts";
-import { ExecutionBudget } from "./budget.ts";
+import type { ExecutionBudget } from "./budget.ts";
+import { ContextCancelled, DeadlineExceeded } from "../kernel/context.ts";
 import {
   EndReason,
   ExecutionEndKind,
@@ -132,15 +133,12 @@ async function evaluate(
   run: ExecutionRun,
   revision: Revision,
   prepared: PreparedEvaluation,
+  budget: ExecutionBudget,
   openAgent: OpenAgent,
 ) {
   assert.ok(prepared.directory);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
   const kind = nodeKindOf(revision);
-  const budget = new ExecutionBudget({
-    ...input.claim,
-    resource_budget: input.setup.resource_budget,
-  });
   const verificationRun = await runVerificationsWithOutput({
     observe: verificationObserver(
       run.spans,
@@ -172,16 +170,28 @@ async function evaluate(
   });
   const objectives =
     kind === NodeKind.Initiative ? await readObjectives(run) : null;
-  const judgement = await judge(
-    input,
-    run,
-    revision,
-    prepared.reviewBundle,
-    verificationRun,
-    prepared.directory,
-    openAgent,
-    objectives,
-  );
+  let judgement: Awaited<ReturnType<typeof judge>>;
+  try {
+    judgement = await judge(
+      input,
+      run,
+      revision,
+      prepared.reviewBundle,
+      verificationRun,
+      prepared.directory,
+      openAgent,
+      objectives,
+    );
+  } catch (error) {
+    if (
+      (error instanceof ContextCancelled ||
+        error instanceof DeadlineExceeded) &&
+      budget.exhausted() &&
+      !run.operationContext.err()
+    )
+      return run.stop(EndReason.AssessmentAbsent);
+    throw error;
+  }
   return {
     evidence_ids: [recorded.id, ...prepared.evidenceIds],
     child_outcome_ids: objectives?.outcomes.map((outcome) => outcome.id) ?? [],
@@ -192,6 +202,7 @@ async function evaluate(
 export async function runEvaluation(
   input: StepsInput,
   run: ExecutionRun,
+  budget: ExecutionBudget,
   openAgent: OpenAgent,
 ): Promise<ExecutionEnd> {
   const revision = await readPinnedRevision(run);
@@ -201,7 +212,7 @@ export async function runEvaluation(
   try {
     const assessment = await run.spans.within(
       evaluationSpan(run.spans, testedCommitOf(prepared.tested_input)),
-      () => evaluate(input, run, revision, prepared, openAgent),
+      () => evaluate(input, run, revision, prepared, budget, openAgent),
       evaluationEnd,
     );
     const answer = await run.submitAssessment(input.claim.node_id, {
