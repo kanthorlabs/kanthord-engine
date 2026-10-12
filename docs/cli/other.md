@@ -225,11 +225,14 @@ Both adapters expose the result distinction in
   were received. Print the declared domain result and exit `0`. Completion is
   the operation's completion, not proof that every downstream workflow ended.
 - **`Failure`:** a structured failure response was received, or local input
-  validation produced one. Emit a diagnostic and exit nonzero. Its meaning is
+  validation produced one. An answer with the expected status whose body fails
+  the operation output schema is the failure `gateway.client.answer_invalid`
+  with the received status. Emit a diagnostic and exit nonzero. Its meaning is
   owned by the operation; a failure in a multi-operation workflow does not undo
   a completed peer effect.
 - **`Indeterminate`:** no trustworthy result could be established, including
-  transport loss or an unparseable/unexpected response. Emit an explicit
+  transport loss, a body that cannot be read as JSON, or an error answer that
+  fails the error envelope schema. Emit an explicit
   indeterminate diagnostic and exit nonzero. Do not report either success or
   "nothing happened." A mutation may have committed before its answer was lost.
 
@@ -635,6 +638,11 @@ An execution that ends with a release or a closure leaves the instance
 registered, and the application pulls again. A release with a `stop` is a
 release. An execution that ends with no release and no closure exits `1`.
 
+A work pull answer that fails its schema ends the pull loop with
+`gateway.client.answer_invalid`. The application then deregisters nothing and
+exits `1`. A restart with the same client identity inside the heartbeat window
+resumes the same registration, and its first pull returns the same claim.
+
 `SIGINT` and `SIGTERM` stop further startup and further work pulls. A stop
 aborts the outstanding work pull. A claim that commits during that abort has no
 worker until its lease expires, and settlement then declares it lost. The
@@ -888,6 +896,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `mission.lifecycle.stopped`                      | The Mission Service cannot restart after shutdown.                                                                      | server or serve worker                                                     |
 | local           | `intake.lifecycle.stopped`                       | A stopped Intake Service cannot start again.                                                                            | serve server                                                               |
 | local           | `custody.lifecycle.stopped`                      | A stopped Custody component cannot start again.                                                                         | serve server                                                               |
+| local           | `gateway.client.answer_invalid`                  | An answer with the expected status fails the operation output schema; the result is a failure with the received status. | remote commands, serve worker                                              |
 | local           | `gateway.client.version_unavailable`             | The OpenAPI index cannot supply a valid server package version.                                                         | serve worker                                                               |
 | local           | `cli.command.required`                           | No command was supplied.                                                                                                | kanthord                                                                   |
 | local           | `cli.config.invalid`                             | The stored `cli.yaml` fails the client configuration schema.                                                            | client commands, serve worker                                              |

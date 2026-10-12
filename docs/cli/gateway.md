@@ -124,8 +124,11 @@ Failure exits `1`, produces no success JSON, and prints a diagnostic on stderr:
   `{"error":{"code":"...","message":"...","details":null},"request_id":"request_<ulid>"}`;
   `details` may instead be structured JSON. The current CLI does not print the
   envelope, its details, or request ID.
-- A transport failure, redirect refusal, deadline, invalid JSON, or response
-  schema mismatch produces `cli.gateway.verify.indeterminate` with
+- A `200` answer that fails the response schema is the failure
+  `gateway.client.answer_invalid` with
+  `gateway verify: request failed (HTTP 200).`
+- A transport failure, redirect refusal, deadline or invalid JSON produces
+  `cli.gateway.verify.indeterminate` with
   `gateway verify: result is indeterminate; the server could not be verified.`
 - Invalid local configuration and endpoint values fail before the request
   with their local diagnostic. Diagnostics do not echo the token.

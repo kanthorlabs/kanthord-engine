@@ -22,6 +22,7 @@ import { HealthStatus } from "../../kernel/service.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath, resolveClient } from "../../gateway/client.ts";
 import { Worker, runWorker } from "./index.ts";
+import { testClaim } from "./test-support.ts";
 
 const STARTED_MESSAGE = "Worker application ready";
 const REGISTRATION = {
@@ -55,6 +56,7 @@ const EXIT_SUCCESS = 0;
 const ONE_RECORD = 1;
 const SHORT_WAIT_MS = 20;
 const RUNNING_STATE = "running";
+const ANSWER_INVALID = "gateway.client.answer_invalid";
 const CHILD_SCRIPT = `
   import { runWorker } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
   const error = await runWorker(JSON.parse(process.env.WORKER_OPTIONS));
@@ -546,4 +548,30 @@ test("stop aborts an outstanding pull and deregisters", async (t) => {
   await aborted;
   assert.equal(result, null);
   assert.equal(deregistrations, ONE_RECORD);
+});
+
+test("an invalid pull answer exits with its diagnostic and keeps the registration", async (t) => {
+  let pulls = 0;
+  let deregistrations = 0;
+  const options = await fixture(t, packageVersion(), (request, response) => {
+    if (request.url === PULL_PATH) {
+      if (++pulls > ONE_RECORD) void worker.stop();
+      response.writeHead(HttpStatus.OK, { "Content-Type": "application/json" });
+      response.end(
+        JSON.stringify({
+          kind: "claimed",
+          execution: { ...testClaim(), future_field: "x" },
+        }),
+      );
+      return true;
+    }
+    if (request.url === DEREGISTER_PATH) deregistrations++;
+    return false;
+  });
+  const worker = new Worker({ ...options, log: () => {} });
+  const result = await worker.run();
+  assert.ok(result instanceof Diagnostic);
+  assert.equal(result.code, ANSWER_INVALID);
+  assert.equal(pulls, ONE_RECORD);
+  assert.equal(deregistrations, NO_REQUESTS);
 });
