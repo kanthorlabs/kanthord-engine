@@ -111,7 +111,7 @@ export async function runNativeExecution(
         return runEvaluation(input, run, budget, open);
       if (kind === NodeKind.Initiative)
         return runStepsInitiative(input, run, revision, budget, open);
-      const priorRationale = await readPriorRationale(run);
+      const prior = await readPriorRationale(run);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
         prepareStepsWorkspace(input, run),
       );
@@ -131,7 +131,8 @@ export async function runNativeExecution(
         revision,
         agent: working,
         ...workspace,
-        priorRationale,
+        priorRationale: prior.rationale,
+        rework: prior.rework,
       };
       return runStepsObjective(state);
     });

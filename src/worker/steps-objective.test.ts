@@ -66,6 +66,8 @@ const RESTART_ATTEMPT = 2;
 const RESTART_WORK = "restart work";
 const SECOND_JUDGEMENT = 2;
 const TASK_JUDGED = "task judged";
+const CHOICE_AND_TWO_JUDGEMENTS = 3;
+const THREE_JUDGEMENTS = 3;
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -188,6 +190,7 @@ async function fixture(
     revision: { tasks } as Revision,
     ...workspace,
     priorRationale: null as string | null,
+    rework: false,
     provider,
     bare,
   };
@@ -900,6 +903,132 @@ test("the start check judges a task against the requested changes of a change re
       instruction: criterionRevisionInstruction(SHIPPED_TEMPLATES, requested),
     },
   ]);
+});
+
+const NODE_FAILURE = "regression in the foundation suite";
+const MET = 'kanthord-judgement: {"criterion_met":true,"rationale":"met"}';
+
+async function reworkFixture(
+  t: TestContext,
+  script: Parameters<typeof scriptedProvider>[0],
+  nodeCommand: string,
+) {
+  const tasks = [
+    task("first", "true"),
+    task("second", "true"),
+    task("third", "true"),
+  ];
+  const h = await fixture(t, tasks, script);
+  h.revision = {
+    tasks,
+    content: { ...NODE_CONTENT, verifications: [nodeCommand] },
+  } as unknown as Revision;
+  h.rework = true;
+  return { h, tasks };
+}
+
+function loggedFields(
+  events: { mock: { calls: { arguments: unknown[] }[] } },
+  message: string,
+) {
+  return events.mock.calls
+    .filter((call) => call.arguments[0] === message)
+    .map((call) => call.arguments[1]);
+}
+
+test("the start check of a rework revises the chosen task when a node verification fails", async (t) => {
+  const { h, tasks } = await reworkFixture(
+    t,
+    [
+      fauxAssistantMessage('kanthord-judgement: {"filename":"second.md"}'),
+      fauxAssistantMessage(MET),
+      fauxAssistantMessage(MET),
+    ],
+    `echo ${NODE_FAILURE}; false`,
+  );
+  h.priorRationale = "Verification 1 `false` failed with exit code 1.";
+  const events = t.mock.method(h.run, "log");
+  const checked = await startCheck(h);
+  assert.equal(checked.budgetEnd, null);
+  assert.equal(checked.pending.length, ONE_JUDGEMENT);
+  const [pending] = checked.pending;
+  assert.equal(pending!.task, tasks[1]);
+  assert.equal(pending!.boundary, TaskBoundary.RunPassed);
+  assert.ok(pending!.instruction?.includes(NODE_FAILURE));
+  assert.ok(pending!.instruction?.includes("the last 4 KiB"));
+  const choice = JSON.stringify(h.provider.calls[0]);
+  for (const current of tasks) assert.ok(choice.includes(current.filename));
+  assert.ok(choice.includes(NODE_FAILURE));
+  assert.equal(h.provider.calls.length, CHOICE_AND_TWO_JUDGEMENTS);
+  assert.deepEqual(loggedFields(events, "task chosen"), [
+    { task_id: tasks[1]!.id, commit: h.head, fallback: false },
+  ]);
+  assert.deepEqual(
+    loggedFields(events, TASK_JUDGED).map(
+      (fields) => (fields as { task_id: string }).task_id,
+    ),
+    [tasks[0]!.id, tasks[2]!.id],
+  );
+});
+
+test("an invalid task choice of a rework falls back to the last task", async (t) => {
+  const { h, tasks } = await reworkFixture(
+    t,
+    [
+      fauxAssistantMessage('kanthord-judgement: {"filename":"missing.md"}'),
+      fauxAssistantMessage(MET),
+      fauxAssistantMessage(MET),
+    ],
+    `echo ${NODE_FAILURE}; false`,
+  );
+  const events = t.mock.method(h.run, "log");
+  const checked = await startCheck(h);
+  assert.deepEqual(
+    checked.pending.map((pending) => pending.task.id),
+    [tasks[2]!.id],
+  );
+  assert.ok(checked.pending[0]!.instruction?.includes(NODE_FAILURE));
+  assert.deepEqual(loggedFields(events, "task chosen"), [
+    { task_id: tasks[2]!.id, commit: h.head, fallback: true },
+  ]);
+});
+
+test("the start check of a rework whose node verifications pass skips every task judged met", async (t) => {
+  const { h } = await reworkFixture(
+    t,
+    [
+      fauxAssistantMessage(MET),
+      fauxAssistantMessage(MET),
+      fauxAssistantMessage(MET),
+    ],
+    "true",
+  );
+  const events = t.mock.method(h.run, "log");
+  assert.deepEqual((await startCheck(h)).pending, []);
+  assert.equal(h.provider.calls.length, THREE_JUDGEMENTS);
+  assert.deepEqual(loggedFields(events, "node verified"), [
+    { commit: h.head, passed: true, exit_codes: [0] },
+  ]);
+  assert.deepEqual(loggedFields(events, "task chosen"), []);
+});
+
+test("the start check of an execution that is not a rework runs no node verification", async (t) => {
+  const marker = join(temporary(t), "node-ran");
+  const { h } = await reworkFixture(
+    t,
+    [
+      fauxAssistantMessage(MET),
+      fauxAssistantMessage(MET),
+      fauxAssistantMessage(MET),
+    ],
+    `touch ${marker}; false`,
+  );
+  h.rework = false;
+  const events = t.mock.method(h.run, "log");
+  assert.deepEqual((await startCheck(h)).pending, []);
+  assert.equal(h.provider.calls.length, THREE_JUDGEMENTS);
+  assert.equal(existsSync(marker), false);
+  assert.deepEqual(loggedFields(events, "node verified"), []);
 });
 
 async function advanceBase(

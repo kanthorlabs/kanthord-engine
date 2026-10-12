@@ -177,12 +177,22 @@ export async function readRequestedChanges(run: ExecutionRun) {
   return requestedChangesText(read.items);
 }
 
-export async function readPriorRationale(run: ExecutionRun) {
+export interface PriorRationale {
+  rationale: string | null;
+  rework: boolean;
+}
+
+export async function readPriorRationale(
+  run: ExecutionRun,
+): Promise<PriorRationale> {
   const rework = await readReworkAssessment(run);
-  if (rework) return rework.rationale;
+  if (rework) return { rationale: rework.rationale, rework: true };
   const requested = await readRequestedChanges(run);
-  if (requested !== null) return requested;
-  return (await readClearedAssessment(run))?.rationale ?? null;
+  if (requested !== null) return { rationale: requested, rework: false };
+  return {
+    rationale: (await readClearedAssessment(run))?.rationale ?? null,
+    rework: false,
+  };
 }
 
 export function allTerminal(

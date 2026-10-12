@@ -150,7 +150,10 @@ test("the prior rationale is the rework rationale, else the cleared rationale, e
       "execution.clearedOutcome.get": async () => notFound,
       "execution.cleared_assessment.get": async () => cleared,
     } as unknown as MethodClients["mission"];
-    assert.equal(await readPriorRationale(run), expected);
+    assert.deepEqual(await readPriorRationale(run), {
+      rationale: expected,
+      rework: rework !== notFound,
+    });
   }
 });
 
@@ -217,7 +220,7 @@ test("the prior rationale of an attempt after a change request holds the request
     },
   } as unknown as MethodClients["worker"];
   assert.equal(
-    await readPriorRationale(run),
+    (await readPriorRationale(run)).rationale,
     [
       "The pull request reviewers request these changes:",
       `Reviewer octo requests changes at commit ${"a".repeat(40)}: Rename the route.`,
@@ -247,7 +250,10 @@ test("an attempt not ended by a change request reads no change request", async (
     } as unknown as MethodClients["mission"];
     run.clients.worker = {} as MethodClients["worker"];
     assert.equal(await readRequestedChanges(run), null);
-    assert.equal(await readPriorRationale(run), CLEARED_RATIONALE);
+    assert.deepEqual(await readPriorRationale(run), {
+      rationale: CLEARED_RATIONALE,
+      rework: false,
+    });
   }
   const first = fixture();
   t.after(() => first.dispose());
@@ -278,7 +284,10 @@ test("an external failure without a current change request keeps the cleared rat
       },
     }),
   } as unknown as MethodClients["worker"];
-  assert.equal(await readPriorRationale(run), CLEARED_RATIONALE);
+  assert.deepEqual(await readPriorRationale(run), {
+    rationale: CLEARED_RATIONALE,
+    rework: false,
+  });
 });
 
 test("the cleared assessment read of a first attempt answers null with no call", async (t) => {
