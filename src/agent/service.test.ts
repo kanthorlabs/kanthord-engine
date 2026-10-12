@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { COOLDOWN_DEFAULTS } from "./config.ts";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import {
   getBuiltinModels,
@@ -8,12 +9,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { temporary } from "../kernel/test-support.ts";
-import { AgentComponent, type Dependencies } from "./service.ts";
+import { AgentComponent, SelectionKind, type Dependencies } from "./service.ts";
 import {
   agentOperations,
   AgentErrorCode,
   ChainLevel,
   FALLBACK_CONFIGURATIONS_MAX,
+  AdvancingFailure,
+  type AgentSelection,
   PromptOrigin,
   PromptLayerKind,
   PromptScope,
@@ -85,7 +88,10 @@ const putBody = {
 };
 const binding = { binding_id: "binding", worker_name: WORKER, entry: null };
 const fakeCollaborations: Omit<Dependencies, "store"> = {
-  config: { prompt: { system_file: "", agent_directory: "", host_file: true } },
+  config: {
+    prompt: { system_file: "", agent_directory: "", host_file: true },
+    cooldown: COOLDOWN_DEFAULTS,
+  },
   dataDirectory: "/nonexistent/data",
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
@@ -246,6 +252,7 @@ test("agent read renders the framing and layer messages from the template files 
   const f = enablementFixture(t, {
     config: {
       prompt: { system_file: "", agent_directory: "agents", host_file: true },
+      cooldown: COOLDOWN_DEFAULTS,
     },
     dataDirectory: root,
     hostHome: root,
@@ -1348,6 +1355,8 @@ test("agentView resolves valid configurations and returns precise issues without
     defaults: null,
     effective: null,
     chain: [],
+    active_position: null,
+    cooling: null,
     valid: false,
     issues: [{ path: [], code: AgentErrorCode.Unavailable }],
   });
@@ -1367,8 +1376,11 @@ test("agentView resolves valid configurations and returns precise issues without
         ...defaults,
         provider: provider.provider,
         credential: provider.credential,
+        cooldown: null,
       },
     ],
+    active_position: 0,
+    cooling: null,
     valid: true,
     issues: [],
   });
@@ -1393,6 +1405,8 @@ test("agentView resolves valid configurations and returns precise issues without
       defaults,
       effective: null,
       chain: [],
+      active_position: null,
+      cooling: null,
       valid: false,
       issues: [{ path: [path], code }],
     });
@@ -1401,6 +1415,8 @@ test("agentView resolves valid configurations and returns precise issues without
     defaults: null,
     effective: null,
     chain: [],
+    active_position: null,
+    cooling: null,
     valid: false,
     issues: [{ path: [], code: AgentErrorCode.Unavailable }],
   });
@@ -1693,6 +1709,7 @@ function lockedFixture(t: TestContext, hostFile: boolean) {
   writeFileSync(join(root, ".agents", "AGENTS.md"), HOST_TEXT);
   const config = (host_file: boolean) => ({
     prompt: { system_file: "", agent_directory: "", host_file },
+    cooldown: COOLDOWN_DEFAULTS,
   });
   const f = enablementFixture(t, {
     config: config(hostFile),
@@ -2258,6 +2275,8 @@ test("a binding entry takes a tail alone and refuses a duplicate or an invalid t
       defaults,
       effective: null,
       chain: [],
+      active_position: null,
+      cooling: null,
       valid: false,
       issues: [
         {
@@ -2284,4 +2303,101 @@ test("a model named only by a fallback entry makes its enablement a model depend
       [],
     );
   });
+});
+
+const EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const HEAD_POSITION = 0;
+const SECOND_POSITION = 1;
+const THIRD_POSITION = 2;
+const FIRST_STRIKE = 1;
+
+test("selection skips a cooling chain entry, returns the head after expiry and answers cooling when every entry cools", (t) => {
+  let now = 1_000_000;
+  const f = enablementFixture(t, { clock: () => now });
+  f.invoke("enablement.put", chainBody);
+  const select = () =>
+    f.store.transaction((tx) => f.agent.selectAgent(tx, AGENT, null));
+  const head = select();
+  assert.equal(head.kind, SelectionKind.Selected);
+  assert.ok(head.kind === SelectionKind.Selected);
+  assert.equal(head.selection.position, HEAD_POSITION);
+  const fail = (selection: AgentSelection, code: AdvancingFailure) =>
+    f.store.transaction((tx) =>
+      f.agent.recordProviderFailure(tx, [selection], code, EXECUTION, now),
+    );
+  const [cooldown] = fail(head.selection, AdvancingFailure.RateLimited);
+  assert.equal(cooldown?.until_at, now + COOLDOWN_DEFAULTS.rate_limited_ms);
+  const next = select();
+  assert.ok(next.kind === SelectionKind.Selected);
+  assert.deepEqual(
+    [next.selection.position, next.selection.model_identifier],
+    [1, HAIKU],
+  );
+  const view = f.store.transaction((tx) => f.agent.agentView(tx, AGENT, null));
+  assert.equal(view?.active_position, SECOND_POSITION);
+  assert.equal(view?.chain[HEAD_POSITION]?.cooldown?.strikes, FIRST_STRIKE);
+  assert.equal(view?.cooling, null);
+  now += COOLDOWN_DEFAULTS.rate_limited_ms;
+  const back = select();
+  assert.ok(back.kind === SelectionKind.Selected);
+  assert.equal(back.selection.position, HEAD_POSITION);
+  fail(head.selection, AdvancingFailure.RateLimited);
+  fail(next.selection, AdvancingFailure.QuotaExhausted);
+  const last = select();
+  assert.ok(last.kind === SelectionKind.Selected);
+  assert.equal(last.selection.position, THIRD_POSITION);
+  fail(last.selection, AdvancingFailure.Unavailable);
+  assert.deepEqual(select(), {
+    kind: SelectionKind.Cooling,
+    until_at: now + COOLDOWN_DEFAULTS.unavailable_ms,
+  });
+  const cooling = f.store.transaction((tx) =>
+    f.agent.agentView(tx, AGENT, null),
+  );
+  assert.equal(cooling?.valid, true);
+  assert.equal(cooling?.active_position, null);
+  assert.deepEqual(cooling?.cooling, {
+    code: AgentErrorCode.ChainCooling,
+    until_at: now + COOLDOWN_DEFAULTS.unavailable_ms,
+  });
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.agent.recordSuccess(tx, [head.selection, head.selection]),
+    ),
+    [{ credential: provider.credential, model_identifier: MODEL }],
+  );
+  const recovered = select();
+  assert.ok(recovered.kind === SelectionKind.Selected);
+  assert.equal(recovered.selection.position, HEAD_POSITION);
+});
+
+test("a cooldown key is shared by every agent that names the credential and model, and an invalid chain selects nothing", (t) => {
+  const f = enablementFixture(t);
+  f.invoke("enablement.put", chainBody);
+  f.invoke("enablement.put", chainBody, { agent_name: OTHER_AGENT });
+  const selected = f.store.transaction((tx) =>
+    f.agent.selectAgent(tx, AGENT, null),
+  );
+  assert.ok(selected.kind === SelectionKind.Selected);
+  f.store.transaction((tx) =>
+    f.agent.recordProviderFailure(
+      tx,
+      [selected.selection],
+      AdvancingFailure.RateLimited,
+      EXECUTION,
+      Date.now(),
+    ),
+  );
+  const other = f.store.transaction((tx) =>
+    f.agent.selectAgent(tx, OTHER_AGENT, null),
+  );
+  assert.ok(other.kind === SelectionKind.Selected);
+  assert.equal(other.selection.position, SECOND_POSITION);
+  assert.equal(other.selection.agent_name, OTHER_AGENT);
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.agent.selectAgent(tx, AGENT, { model_identifier: MISSING_MODEL }),
+    ),
+    { kind: SelectionKind.Invalid },
+  );
 });

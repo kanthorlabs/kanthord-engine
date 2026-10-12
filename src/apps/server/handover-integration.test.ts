@@ -245,11 +245,7 @@ for (const adapter of ["direct", "http"] as const) {
         },
       }),
     );
-    refused(
-      await read(),
-      HttpStatus.BadRequest,
-      "agent.configuration.model_unknown",
-    );
+    assert.deepEqual(completed(await read()), before);
     completed(
       await h.call(agentOperations["enablement.disable"], {
         params: { agent_name: "swe@1" },

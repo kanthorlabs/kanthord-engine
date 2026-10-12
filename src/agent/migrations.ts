@@ -38,8 +38,25 @@ const addEnablementFallbackConfigurations: Migration = (database) => {
   );
 };
 
+const createCooldownTable: Migration = (database) => {
+  database.exec(`
+    CREATE TABLE agent_cooldown (
+      id TEXT NOT NULL PRIMARY KEY,
+      credential TEXT NOT NULL,
+      model_identifier TEXT NOT NULL,
+      code TEXT NOT NULL,
+      strikes INTEGER NOT NULL,
+      started_at INTEGER NOT NULL,
+      until_at INTEGER NOT NULL,
+      execution_id TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX agent_cooldown_credential_model_identifier ON agent_cooldown (credential, model_identifier);
+  `);
+};
+
 export const agentMigrations: readonly Migration[] = [
   createEnablementTable,
   createPromptTable,
   addEnablementFallbackConfigurations,
+  createCooldownTable,
 ];

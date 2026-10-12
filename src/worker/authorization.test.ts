@@ -49,6 +49,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
       authorizeModelInference(
         {
           workerBindingRowOf: (_tx, id) => (id === row.binding_id ? row : null),
+          schedulerClaims: { agentSelectionsOf: () => [] },
         },
         {
           declarationOf: () => getWorkerDeclaration(row.worker_name) ?? null,
@@ -64,6 +65,8 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
               issues: valid ? [] : issues,
               defaults: null,
               chain: [],
+              active_position: null,
+              cooling: null,
               effective: valid
                 ? {
                     agent_provider: entry?.agent_provider ?? "default",
@@ -161,6 +164,7 @@ test("Worker authorizes one credential per distinct credential of the agents of 
       authorizeModelInference(
         {
           workerBindingRowOf: (_tx, id) => (id === row.binding_id ? row : null),
+          schedulerClaims: { agentSelectionsOf: () => [] },
         },
         {
           declarationOf: () => getWorkerDeclaration(row.worker_name) ?? null,
@@ -169,6 +173,8 @@ test("Worker authorizes one credential per distinct credential of the agents of 
             issues: [],
             defaults: null,
             chain: [],
+            active_position: null,
+            cooling: null,
             effective: {
               agent_provider: "default",
               provider: "anthropic",

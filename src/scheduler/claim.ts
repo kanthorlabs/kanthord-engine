@@ -3,7 +3,9 @@ import type { MachineIdentity } from "../kernel/caller.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  AgentChoiceKind,
   EXECUTION_IDENTITY_PREFIX,
+  type AgentSelection,
   nodeFormatFieldSchema,
   traceIdSchema,
   spanIdSchema,
@@ -87,6 +89,7 @@ function acquire(
   pull: WorkPull,
   binding: Binding,
   declaration: Declaration,
+  selections: AgentSelection[],
   now: number,
 ): ClaimResult {
   const executionId = createIdentity(EXECUTION_IDENTITY_PREFIX);
@@ -119,6 +122,7 @@ function acquire(
     pinned_revision: selected.claim.node_revision,
     node_branch: selected.claim.node_branch,
     credentials: [],
+    agent_selections: selections,
     expired_at:
       now +
       wallTimeMs +
@@ -173,6 +177,9 @@ export function claimOnce(
     ) >= binding.instance_count
   )
     return { outcome: ClaimOutcome.None, row: null, settled };
+  const choice = dependencies.agentChains.select(tx, binding.binding_id);
+  if (choice.kind === AgentChoiceKind.Cooling)
+    return { outcome: ClaimOutcome.None, row: null, settled };
   const result = acquire(
     tx,
     dependencies,
@@ -180,6 +187,7 @@ export function claimOnce(
     pull,
     binding,
     declaration,
+    choice.selections,
     now,
   );
   return { ...result, settled: result.settled || settled };

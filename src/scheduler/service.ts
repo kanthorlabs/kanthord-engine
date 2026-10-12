@@ -41,6 +41,8 @@ import {
   type Job,
   type WorkQueue,
   type MissionTransitions,
+  type AgentChains,
+  type AgentSelection,
   type InstanceRegistrations,
   type WorkerDeclarations,
   type WorkerBindings,
@@ -127,6 +129,7 @@ export interface Dependencies {
   registrations: InstanceRegistrations;
   declarations: WorkerDeclarations;
   bindings: WorkerBindings;
+  agentChains: AgentChains;
   traceIdentity: TraceIdentity;
   telemetry: ExecutionTelemetry;
   health?: HealthRegistry;
@@ -214,6 +217,9 @@ export class SchedulerService implements Service, WorkQueue {
     now: number,
   ) {
     return settlement.requireRunning(tx, executionId, runtimeIdentity, now);
+  }
+  agentSelectionsOf(tx: Transaction, executionId: string): AgentSelection[] {
+    return readExecution(tx, executionId)?.agent_selections ?? [];
   }
 
   insert(

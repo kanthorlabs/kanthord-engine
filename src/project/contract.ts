@@ -444,7 +444,15 @@ export type WorkerAgentView = {
     credential: string;
     model_identifier: string;
     reasoning_effort: string;
+    cooldown: {
+      cooldown_id: string;
+      code: string;
+      strikes: number;
+      until_at: number;
+    } | null;
   }>;
+  active_position: number | null;
+  cooling: { code: string; until_at: number } | null;
   valid: boolean;
   issues: Array<{ path: string[]; code: string }>;
 };
@@ -527,6 +535,8 @@ const agentConfigItem = z.strictObject({
   entry: z.unknown().nullable(),
   effective: z.unknown().nullable(),
   chain: z.array(z.unknown()),
+  active_position: z.number().int().nullable(),
+  cooling: z.unknown().nullable(),
   valid: z.boolean(),
   issues: z.array(
     z.strictObject({ path: z.array(z.string()), code: z.string() }),

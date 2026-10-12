@@ -253,6 +253,15 @@ export function composeServices(options: {
       workerBindingOf: (tx, projectId, resourceIdentity) =>
         project.workerBindingOf(tx, projectId, resourceIdentity),
     },
+    agentChains: {
+      select: (tx, workerBindingId) => worker.agentChoice(tx, workerBindingId),
+      providerFailure: (...args) => {
+        agent.recordProviderFailure(...args);
+      },
+      success: (tx, selections) => {
+        agent.recordSuccess(tx, selections);
+      },
+    },
     traceIdentity: {
       mint: () => ({
         trace_id: randomBytes(16).toString("hex"),
@@ -427,6 +436,7 @@ export function composeServices(options: {
       runningExecutionOfRuntime: (...args) =>
         scheduler.runningExecutionOfRuntime(...args),
       activityOf: (...args) => scheduler.activityOf(...args),
+      agentSelectionsOf: (...args) => scheduler.agentSelectionsOf(...args),
     },
     health: options.health,
     registrations: options.registrations,
@@ -434,6 +444,7 @@ export function composeServices(options: {
       validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
       agentView: (tx, name, entry, models) =>
         agent.agentView(tx, name, entry, models),
+      selectAgent: (tx, name, entry) => agent.selectAgent(tx, name, entry),
     },
   });
   const mission: MissionService = new MissionService({

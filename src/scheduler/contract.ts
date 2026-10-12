@@ -70,6 +70,26 @@ export const ProviderFailure = {
 } as const;
 export type ProviderFailure =
   (typeof ProviderFailure)[keyof typeof ProviderFailure];
+export const AdvancingProviderFailure = {
+  RateLimited: ProviderFailure.RateLimited,
+  QuotaExhausted: ProviderFailure.QuotaExhausted,
+  Unavailable: ProviderFailure.Unavailable,
+} as const;
+export type AdvancingProviderFailure =
+  (typeof AdvancingProviderFailure)[keyof typeof AdvancingProviderFailure];
+export function isAdvancingProviderFailure(
+  code: string | null,
+): code is AdvancingProviderFailure {
+  return Object.values(AdvancingProviderFailure).some(
+    (failure) => failure === code,
+  );
+}
+export function isAdvancingStop(stop: ReleaseStop | null): boolean {
+  return (
+    stop?.reason === ExecutionStopReason.ProviderFailed &&
+    isAdvancingProviderFailure(stop.code)
+  );
+}
 export const executionStopReasonSchema = z.enum(ExecutionStopReason);
 export type ExecutionStopReason = z.infer<typeof executionStopReasonSchema>;
 
@@ -109,6 +129,21 @@ const positiveInteger = z
   .int()
   .positive()
   .max(Number.MAX_SAFE_INTEGER);
+export const ChainLevelName = {
+  Enablement: "enablement",
+  Binding: "binding",
+} as const;
+export const agentSelectionSchema = z.strictObject({
+  agent_name: z.string().min(1),
+  position: z.number().int().min(0),
+  level: z.enum(ChainLevelName),
+  agent_provider: z.string().min(1),
+  provider: z.string().min(1),
+  credential: z.string().min(1),
+  model_identifier: z.string().min(1),
+  reasoning_effort: z.string().min(1),
+});
+export type AgentSelection = z.infer<typeof agentSelectionSchema>;
 export const claimantSchema = z.strictObject({
   worker_binding_id: identitySchema("binding"),
   resource_identity: z.string().min(1),
@@ -130,6 +165,7 @@ export const executionRecordSchema = z.strictObject({
   pinned_revision: positiveInteger,
   node_branch: z.string().min(1),
   credentials: z.array(identitySchema("credential")),
+  agent_selections: z.array(agentSelectionSchema),
   claim_state: claimStateSchema,
   expired_at: timestamp,
   created_at: timestamp,
@@ -176,6 +212,7 @@ export interface ExecutionRow {
   pinned_revision: number;
   node_branch: string;
   credentials: string[];
+  agent_selections: AgentSelection[];
   expired_at: number;
   trace_id: string;
   root_span_id: string;
@@ -281,6 +318,24 @@ export interface WorkerBindings {
     resource_budget?: { wall_time_ms: number } | null;
     tombstone: boolean;
   } | null;
+}
+export const AgentChoiceKind = {
+  Selected: "selected",
+  Cooling: "cooling",
+} as const;
+export type AgentChoice =
+  | { kind: typeof AgentChoiceKind.Selected; selections: AgentSelection[] }
+  | { kind: typeof AgentChoiceKind.Cooling; until_at: number };
+export interface AgentChains {
+  select(tx: Transaction, workerBindingId: string): AgentChoice;
+  providerFailure(
+    tx: Transaction,
+    selections: readonly AgentSelection[],
+    code: AdvancingProviderFailure,
+    executionId: string,
+    now: number,
+  ): void;
+  success(tx: Transaction, selections: readonly AgentSelection[]): void;
 }
 export interface TraceIdentity {
   mint(): { trace_id: string; root_span_id: string };

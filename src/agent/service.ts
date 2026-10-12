@@ -42,6 +42,9 @@ import {
   type AgentDependentBinding,
   type AgentEnablement,
   type AgentEntry,
+  type AdvancingFailure,
+  type AgentCooldown,
+  type AgentSelection,
   type AgentProviderItem,
   type AgentView,
   type ApprovedModelsFn,
@@ -63,6 +66,13 @@ import {
   type EnablementRow,
 } from "./enablements.ts";
 import { promptSettings, savePromptSettings } from "./prompts.ts";
+import {
+  cooldownOf,
+  deleteCooldownOf,
+  startCooldown,
+  type CooldownKey,
+} from "./cooldowns.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { applyLocks, lockedSwitches, withLocks } from "./prompt-locks.ts";
 import {
   ProjectErrorCode,
@@ -312,13 +322,37 @@ export interface Dependencies {
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
+  clock?: () => number;
+}
+
+export const SelectionKind = {
+  Selected: "selected",
+  Cooling: "cooling",
+  Invalid: "invalid",
+} as const;
+
+export type AgentSelectionResult =
+  | { kind: typeof SelectionKind.Selected; selection: AgentSelection }
+  | { kind: typeof SelectionKind.Cooling; until_at: number }
+  | { kind: typeof SelectionKind.Invalid };
+
+function uniqueKeys(selections: readonly AgentSelection[]): CooldownKey[] {
+  const keys = new Map<string, CooldownKey>();
+  for (const { credential, model_identifier } of selections)
+    keys.set(canonicalJSON([credential, model_identifier]), {
+      credential,
+      model_identifier,
+    });
+  return [...keys.values()];
 }
 
 export class AgentComponent {
   private readonly dependencies: Dependencies;
+  private readonly now: () => number;
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.now = dependencies.clock ?? Date.now;
   }
 
   private validateEffectiveConfig(
@@ -677,6 +711,8 @@ export class AgentComponent {
         defaults: null,
         effective: null,
         chain: [],
+        active_position: null,
+        cooling: null,
         valid: false,
         issues: [{ path: [], code: AgentErrorCode.Unavailable }],
       };
@@ -694,7 +730,16 @@ export class AgentComponent {
       tailOf(current.fallback_configurations, entry),
     );
     if (issues.length > NO_ITEMS)
-      return { defaults, effective: null, chain: [], valid: false, issues };
+      return {
+        defaults,
+        effective: null,
+        chain: [],
+        active_position: null,
+        cooling: null,
+        valid: false,
+        issues,
+      };
+    const now = this.now();
     const chain = chainConfigurations(
       defaults,
       current.fallback_configurations,
@@ -704,16 +749,29 @@ export class AgentComponent {
         ({ name }) => name === item.agent_provider,
       );
       assert.ok(provider, "Validated configuration must resolve a provider.");
+      const cooldown = cooldownOf(tx, {
+        credential: provider.credential,
+        model_identifier: item.model_identifier,
+      });
       return {
         position,
         level,
         ...item,
         provider: provider.provider,
         credential: provider.credential,
+        cooldown: cooldown && {
+          cooldown_id: cooldown.cooldown_id,
+          code: cooldown.code,
+          strikes: cooldown.strikes,
+          until_at: cooldown.until_at,
+        },
       };
     });
     const head = chain[FIRST_POSITION];
     assert.ok(head);
+    const active = chain.find(
+      ({ cooldown }) => cooldown === null || cooldown.until_at <= now,
+    );
     return {
       defaults,
       effective: {
@@ -722,9 +780,72 @@ export class AgentComponent {
         credential: head.credential,
       },
       chain,
+      active_position: active?.position ?? null,
+      cooling: active
+        ? null
+        : {
+            code: AgentErrorCode.ChainCooling,
+            until_at: Math.min(
+              ...chain.map(({ cooldown }) => cooldown?.until_at ?? now),
+            ),
+          },
       valid: true,
       issues,
     };
+  }
+
+  selectAgent(
+    tx: Transaction,
+    agentName: string,
+    entry: AgentEntry | null,
+  ): AgentSelectionResult {
+    const view = this.agentView(tx, agentName, entry);
+    if (!view?.valid) return { kind: SelectionKind.Invalid };
+    if (view.active_position === null) {
+      assert.ok(view.cooling);
+      return { kind: SelectionKind.Cooling, until_at: view.cooling.until_at };
+    }
+    const entryOfChain = view.chain[view.active_position];
+    assert.ok(entryOfChain);
+    return {
+      kind: SelectionKind.Selected,
+      selection: {
+        agent_name: agentName,
+        position: entryOfChain.position,
+        level: entryOfChain.level,
+        agent_provider: entryOfChain.agent_provider,
+        provider: entryOfChain.provider,
+        credential: entryOfChain.credential,
+        model_identifier: entryOfChain.model_identifier,
+        reasoning_effort: entryOfChain.reasoning_effort,
+      },
+    };
+  }
+
+  recordProviderFailure(
+    tx: Transaction,
+    selections: readonly AgentSelection[],
+    code: AdvancingFailure,
+    executionId: string,
+    now: number,
+  ): AgentCooldown[] {
+    return uniqueKeys(selections).map((key) =>
+      startCooldown(
+        tx,
+        this.dependencies.config.cooldown,
+        key,
+        code,
+        executionId,
+        now,
+      ),
+    );
+  }
+
+  recordSuccess(
+    tx: Transaction,
+    selections: readonly AgentSelection[],
+  ): CooldownKey[] {
+    return uniqueKeys(selections).filter((key) => deleteCooldownOf(tx, key));
   }
 
   resourceInventory(tx: Transaction): ResourceEntry[] {

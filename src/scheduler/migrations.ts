@@ -46,9 +46,16 @@ const addExecutionNodeBranch: Migration = (database) => {
   `);
 };
 
+const addExecutionAgentSelections: Migration = (database) => {
+  database.exec(
+    `ALTER TABLE scheduler_execution ADD COLUMN agent_selections TEXT;`,
+  );
+};
+
 export const schedulerMigrations: readonly Migration[] = [
   createJobTable,
   createExecutionTable,
   addExecutionStop,
   addExecutionNodeBranch,
+  addExecutionAgentSelections,
 ];

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
-import { ClaimNodeState, NodeFormatField } from "./contract.ts";
+import {
+  AgentChoiceKind,
+  ClaimNodeState,
+  NodeFormatField,
+} from "./contract.ts";
 import { claimOnce, ClaimOutcome } from "./claim.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import {
@@ -228,4 +232,45 @@ test("runtime and node expiry settle before admission; rollback undoes all claim
     expired,
   );
   assert.equal(fresh.claim(FIXTURE_DEADLINE).outcome, ClaimOutcome.Claimed);
+});
+
+const NO_CLAIMS = 0;
+const pinnedSelection = {
+  agent_name: "swe@1",
+  position: 1,
+  level: "enablement" as const,
+  agent_provider: "qwen",
+  provider: "openai-compatible",
+  credential: "qwen-key",
+  model_identifier: "qwen3.6-plus",
+  reasoning_effort: "high",
+};
+
+test("the claim pins the selections and answers no work when a chain cools down", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.agentChains.select = () => ({
+    kind: AgentChoiceKind.Cooling,
+    until_at: FIXTURE_NOW + 1,
+  });
+  const cooling = h.claim();
+  assert.equal(cooling.outcome, ClaimOutcome.None);
+  assert.equal(
+    h.calls.filter((call) => call.method === CLAIM_METHOD).length,
+    NO_CLAIMS,
+  );
+  h.dependencies.agentChains.select = (_tx, workerBindingId) => {
+    assert.equal(workerBindingId, h.binding.binding_id);
+    return { kind: AgentChoiceKind.Selected, selections: [pinnedSelection] };
+  };
+  const claimed = h.claim();
+  assert.equal(claimed.outcome, ClaimOutcome.Claimed);
+  assert.deepEqual(claimed.row?.agent_selections, [pinnedSelection]);
+  assert.deepEqual(
+    h.store.transaction((tx) => readExecution(tx, claimed.row!.execution_id))
+      ?.agent_selections,
+    [pinnedSelection],
+  );
 });

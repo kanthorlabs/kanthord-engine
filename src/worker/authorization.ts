@@ -3,8 +3,13 @@ import type { MachineIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { AuthorizationRefusal, WorkerErrorCode } from "./contract.ts";
+import {
+  AuthorizationRefusal,
+  WorkerErrorCode,
+  type SchedulerClaims,
+} from "./contract.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
+import { entryOf, pinnedEntry } from "./agent-selection.ts";
 
 const NO_AGENTS = 0;
 
@@ -18,7 +23,9 @@ function refused(reason: AuthorizationRefusal): never {
 }
 
 export function authorizeModelInference(
-  dependencies: Pick<Dependencies, "workerBindingRowOf">,
+  dependencies: Pick<Dependencies, "workerBindingRowOf"> & {
+    schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf">;
+  },
   worker: Pick<WorkerService, "declarationOf" | "workerAgentView">,
   tx: Transaction,
   identity: MachineIdentity,
@@ -43,15 +50,13 @@ export function authorizeModelInference(
   if (row.tombstone) refused(AuthorizationRefusal.BindingRemoved);
   if (row.disabled) refused(AuthorizationRefusal.BindingDisabled);
   const agents = worker.declarationOf(row.worker_name)?.agent_names ?? [];
+  const selections = dependencies.schedulerClaims.agentSelectionsOf(
+    tx,
+    execution.execution_id,
+  );
   if (agents.length === NO_AGENTS) refused(AuthorizationRefusal.NoNativeAgent);
   const authorizations = agents.map((agent) => {
-    const selected = row.entries.find((item) => item.agent === agent);
-    const entry = selected
-      ? (({ agent: selectedAgent, ...fields }) => {
-          assert.equal(selectedAgent, agent);
-          return fields;
-        })(selected)
-      : null;
+    const entry = pinnedEntry(selections, agent, entryOf(row.entries, agent));
     const view = worker.workerAgentView(tx, row.worker_name, agent, entry);
     assert.ok(view);
     if (!view.valid) {

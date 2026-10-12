@@ -11,10 +11,12 @@ import {
   WorkerErrorCode,
   type CredentialMetadataRecord,
   type ExecutionSetup,
+  type SchedulerClaims,
 } from "./contract.ts";
 import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
 import type { ResolvedLayer } from "../agent/prompt-layers.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
+import { entryOf, pinnedEntry } from "./agent-selection.ts";
 
 const FIRST_ISSUE_INDEX = 0;
 const NO_AGENTS = 0;
@@ -29,7 +31,7 @@ export async function executionSetup(
     | "credentialMetadata"
     | "repositoryBindingIdsOf"
     | "repositoryPolicyOf"
-  >,
+  > & { schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf"> },
   worker: Pick<WorkerService, "declarationOf" | "workerAgentView">,
   caller: CallerContext,
 ): Promise<ExecutionSetup> {
@@ -54,6 +56,10 @@ export async function executionSetup(
     const declaration = worker.declarationOf(row.worker_name);
     assert.ok(declaration);
     const agentNames = declaration.agent_names ?? [];
+    const selections = dependencies.schedulerClaims.agentSelectionsOf(
+      tx,
+      claim.executionId,
+    );
     if (agentNames.length === NO_AGENTS)
       throw new OperationError(
         HttpStatus.Conflict,
@@ -84,15 +90,11 @@ export async function executionSetup(
       return approvedModels(record.platform, record.metadata);
     };
     const agents = agentNames.map((agentName) => {
-      const configuredEntry = row.entries.find(
-        ({ agent }) => agent === agentName,
+      const entry = pinnedEntry(
+        selections,
+        agentName,
+        entryOf(row.entries, agentName),
       );
-      const entry = configuredEntry
-        ? (({ agent: selectedAgent, ...fields }) => {
-            assert.equal(selectedAgent, agentName);
-            return fields;
-          })(configuredEntry)
-        : null;
       const view = worker.workerAgentView(
         tx,
         row.worker_name,

@@ -118,6 +118,7 @@ function harness(t: TestContext) {
   const dependencies: ConstructorParameters<typeof ActionPerformer>[0] = {
     store,
     schedulerClaims: {
+      agentSelectionsOf: () => [],
       requireRunning: (tx, executionId, runtimeIdentity, now) => {
         assert.ok(tx.database.isTransaction);
         assert.equal(executionId, claim.executionId);

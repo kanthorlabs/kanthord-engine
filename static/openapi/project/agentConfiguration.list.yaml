@@ -134,6 +134,16 @@ components:
               chain:
                 type: array
                 items: {}
+              active_position:
+                anyOf:
+                  - type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  - type: "null"
+              cooling:
+                anyOf:
+                  - {}
+                  - type: "null"
               valid:
                 type: boolean
               issues:
@@ -160,6 +170,8 @@ components:
               - entry
               - effective
               - chain
+              - active_position
+              - cooling
               - valid
               - issues
             additionalProperties: false

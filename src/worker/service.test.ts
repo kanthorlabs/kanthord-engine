@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
 import { test, type TestContext } from "node:test";
 import { WorkerService, type Dependencies } from "./service.ts";
 import { ActionPerformer } from "./action-performer.ts";
@@ -116,6 +117,7 @@ const fakeCollaborations = {
     tombstone: false,
   }),
   schedulerClaims: {
+    agentSelectionsOf: () => [],
     requireRunning: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
@@ -126,6 +128,9 @@ const fakeCollaborations = {
     validateEntry: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    selectAgent: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
     agentView: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
@@ -133,7 +138,10 @@ const fakeCollaborations = {
 };
 const PROVIDER_CAPABILITY = "model-list read";
 const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
-  config: { prompt: { system_file: "", agent_directory: "", host_file: true } },
+  config: {
+    prompt: { system_file: "", agent_directory: "", host_file: true },
+    cooldown: COOLDOWN_DEFAULTS,
+  },
   dataDirectory: "/nonexistent/data",
   hostHome: "/nonexistent/home",
   workbenchDirectory: (agentName) => `/nonexistent/workbench/${agentName}`,
@@ -1142,6 +1150,7 @@ function enablementFixture(
       validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
       agentView: (tx, name, entry, models) =>
         agent.agentView(tx, name, entry, models),
+      selectAgent: (tx, name, entry) => agent.selectAgent(tx, name, entry),
     },
     ...collaborations,
   });
@@ -1478,6 +1487,8 @@ test("workerAgentView answers null outside the agents of the worker and delegate
     defaults: null,
     effective: null,
     chain: [],
+    active_position: null,
+    cooling: null,
     valid: false,
     issues: [{ path: [], code: AgentErrorCode.Unavailable }],
   });

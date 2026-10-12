@@ -180,6 +180,12 @@ test("agent prompt configuration defaults the agent directory to agents and acce
     }).getProperties().agent,
     {
       prompt: { system_file: "", agent_directory: "agents", host_file: true },
+      cooldown: {
+        rate_limited_ms: 60000,
+        unavailable_ms: 60000,
+        quota_exhausted_ms: 3600000,
+        max_ms: 86400000,
+      },
     },
   );
   const prompt = {

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   ExecutionStopReason,
+  isAdvancingProviderFailure,
+  isAdvancingStop,
   type ExecutionRelease,
   type ExecutionRow,
 } from "./contract.ts";
@@ -28,6 +30,20 @@ export function release(
     const now = Date.now();
     const row = requireRunning(tx, executionId, proof.runtimeIdentity, now);
     released = row;
+    const code = body.stop?.code ?? null;
+    if (
+      body.stop?.reason === ExecutionStopReason.ProviderFailed &&
+      isAdvancingProviderFailure(code)
+    )
+      dependencies.agentChains.providerFailure(
+        tx,
+        row.agent_selections,
+        code,
+        executionId,
+        now,
+      );
+    else if (body.stop?.reason !== ExecutionStopReason.ProviderFailed)
+      dependencies.agentChains.success(tx, row.agent_selections);
     if (
       body.stop !== null &&
       body.stop.reason !== ExecutionStopReason.BudgetEnd
@@ -37,7 +53,7 @@ export function release(
       dependencies.transitions.failure(
         tx,
         row.node_id,
-        consecutiveFailures(tx, row),
+        consecutiveFailures(tx, row, !isAdvancingStop(body.stop)),
         now,
       );
       return { execution_id: executionId, ended_at: now };

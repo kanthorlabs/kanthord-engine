@@ -113,6 +113,7 @@ test("instance records distinguish native/external placement and pure Scheduler 
           {
             workerBindingOf: () => ({ ...BINDING, worker_name: workerName }),
             schedulerClaims: {
+              agentSelectionsOf: () => [],
               requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
               runningExecutionOfRuntime: () => {
                 throw new Error("read must not settle");
@@ -152,6 +153,7 @@ test("instance inventory pages live rows descending with both filters and canoni
     const dependencies = {
       workerBindingOf: () => binding,
       schedulerClaims: {
+        agentSelectionsOf: () => [],
         requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
         runningExecutionOfRuntime: () => null,
         activityOf: () => ({

@@ -41,6 +41,7 @@ const CREDENTIAL_TABLE = "credential";
 const CUSTODY_MASTER_KEY_TABLE = "custody_master_key";
 const AGENT_ENABLEMENT_TABLE = "agent_enablement";
 const AGENT_PROMPT_TABLE = "agent_prompt";
+const AGENT_COOLDOWN_TABLE = "agent_cooldown";
 const WORKER_INSTANCE_TABLE = "worker_instance";
 const ERD2_WORKER_TABLES = [WORKER_INSTANCE_TABLE];
 const PROJECT_PROJECT_TABLE = "project_project";
@@ -91,6 +92,7 @@ const SINGLE_PREFIX_MATCH = 1;
 const INDEX_SCHEMA_TYPE = "index";
 const UNIQUE_INDEX = 1;
 const ALL_TABLES = [
+  AGENT_COOLDOWN_TABLE,
   AGENT_ENABLEMENT_TABLE,
   AGENT_PROMPT_TABLE,
   CREDENTIAL_TABLE,
@@ -113,6 +115,7 @@ const ALL_TABLES = [
   WORKER_INSTANCE_TABLE,
 ];
 const ALL_INDEXES = [
+  "agent_cooldown_credential_model_identifier",
   "agent_enablement_agent_name_revision",
   "agent_prompt_scope_agent_name",
   "credential_name_revision",
@@ -168,6 +171,7 @@ test("service migrations own distinct prefixes and create only tables in their n
       CUSTODY_MASTER_KEY_TABLE,
       AGENT_ENABLEMENT_TABLE,
       AGENT_PROMPT_TABLE,
+      AGENT_COOLDOWN_TABLE,
       ...ERD2_WORKER_TABLES,
       PROJECT_PROJECT_TABLE,
       PROJECT_BINDING_TABLE,
@@ -202,6 +206,7 @@ test("each service migration set applies alone to an empty store", () => {
         assert.deepEqual(tables(store), [
           AGENT_ENABLEMENT_TABLE,
           AGENT_PROMPT_TABLE,
+          AGENT_COOLDOWN_TABLE,
         ]);
       if (service.service === WORKER_SERVICE_NAME)
         assert.deepEqual(tables(store), ERD2_WORKER_TABLES);
@@ -314,7 +319,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-two tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-three tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -475,6 +480,7 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
       ["ended_at", "INTEGER", 0, 0],
       ["stop", "TEXT", 0, 0],
       ["node_branch", "TEXT", 1, 0],
+      ["agent_selections", "TEXT", 0, 0],
     ],
   );
   const indexes = store.database
@@ -511,7 +517,7 @@ test("the start point and node branch migrations backfill the behavior of every 
   t.after(() => store.close());
   const nodeId = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
   const startPointMigration = missionMigrations.length - 1;
-  const nodeBranchMigration = schedulerMigrations.length - 1;
+  const nodeBranchMigration = schedulerMigrations.length - 2;
   store.migrate([
     {
       service: SCHEDULER_SERVICE_NAME,
@@ -549,6 +555,12 @@ test("the start point and node branch migrations backfill the behavior of every 
     store.database.prepare("SELECT node_branch FROM scheduler_execution").get()
       ?.node_branch,
     `kanthord/${nodeId}`,
+  );
+  assert.equal(
+    store.database
+      .prepare("SELECT agent_selections FROM scheduler_execution")
+      .get()?.agent_selections,
+    null,
   );
 });
 

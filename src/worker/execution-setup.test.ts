@@ -122,6 +122,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     repositoryBindingIdsOf: () => [],
     repositoryPolicyOf: () => null,
     credentialMetadata: () => null,
+    schedulerClaims: { agentSelectionsOf: () => [] },
   };
   const worker = {
     declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
@@ -139,6 +140,8 @@ test("setup answers the system and agent prompt after its single snapshot and su
       return {
         defaults: null,
         chain: [],
+        active_position: null,
+        cooling: null,
         effective: {
           ...agent.effective_configuration,
           reasoning_effort: entry.reasoning_effort,
@@ -272,12 +275,15 @@ test("setup answers one entry per agent of developer@1 with its own prompt and p
       repositoryBindingIdsOf: () => [],
       repositoryPolicyOf: () => null,
       credentialMetadata: () => null,
+      schedulerClaims: { agentSelectionsOf: () => [] },
     },
     {
       declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
       workerAgentView: (_tx, _worker, agent) => ({
         defaults: null,
         chain: [],
+        active_position: null,
+        cooling: null,
         effective: {
           ...setup.agents[0]!.effective_configuration,
           credential: credentials[agent]!,
