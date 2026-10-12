@@ -552,7 +552,7 @@ const GITHUB_NOT_MODIFIED_STATUS = 304;
 const NO_HOLD_PASS = 0;
 const HOLD_PASS_STEP = 1;
 const GITHUB_PULL_ROUTE =
-  /^\/repos\/([^/]+)\/([^/]+)\/pulls(?:\/([1-9][0-9]*)(\/comments)?)?$/;
+  /^\/repos\/([^/]+)\/([^/]+)\/pulls(?:\/([1-9][0-9]*)(\/comments|\/reviews)?)?$/;
 const GITHUB_MERGE_ROUTE =
   /^\/repos\/([^/]+)\/([^/]+)\/pulls\/([1-9][0-9]*)\/merge$/;
 const GITHUB_REPOSITORY_ROUTE = /^\/repos\/([^/]+)\/([^/]+)$/;
@@ -570,6 +570,7 @@ const GITHUB_NEXT_PULL_STEP = 1;
 const GITHUB_CREATED_STATUS = 201;
 const GITHUB_EMPTY_BODY = "";
 const GITHUB_MIN_SEGMENT_LENGTH = 1;
+const GITHUB_REVIEWS_SUFFIX = "/reviews";
 
 export const FakePullState = {
   Open: "open",
@@ -587,6 +588,14 @@ export interface FakePullRequest {
   state: FakePullState;
   merged: boolean;
   merge_commit_sha: string | null;
+  head_sha: string;
+  reviews: FakeReview[];
+}
+
+export interface FakeReview {
+  user: { id: number };
+  state: string;
+  commit_id: string;
 }
 
 export interface FakeGitHubCall {
@@ -661,6 +670,7 @@ function pullBody(pull: FakePullRequest) {
     merge_commit_sha: pull.merge_commit_sha,
     head: {
       ref: pull.head,
+      sha: pull.head_sha,
       label: `${pull.owner}:${pull.head}`,
       repo: { full_name: `${pull.owner}/${pull.repo}` },
     },
@@ -699,6 +709,10 @@ function insertPull(
     state: FakePullState.Open,
     merged: false,
     merge_commit_sha: null,
+    head_sha: createHash("sha1")
+      .update(`${owner}/${repo}#${input.head}`)
+      .digest("hex"),
+    reviews: [],
   };
   state.pulls.push(pull);
   assert.equal(state.pulls.at(-1), pull);
@@ -732,7 +746,7 @@ function routePull(
 ): FakeGitHubAnswer {
   const route = GITHUB_PULL_ROUTE.exec(url.pathname);
   if (!route) return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
-  const [, owner, repo, number, comments] = route;
+  const [, owner, repo, number, suffix] = route;
   assert.ok(owner && repo);
   if (number === undefined) {
     return method === HttpMethod.Post
@@ -745,7 +759,12 @@ function routePull(
   );
   if (!pull || method !== HttpMethod.Get)
     return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
-  return { status: HttpStatus.OK, body: comments ? [] : pullBody(pull) };
+  if (suffix === undefined)
+    return { status: HttpStatus.OK, body: pullBody(pull) };
+  return {
+    status: HttpStatus.OK,
+    body: suffix === GITHUB_REVIEWS_SUFFIX ? pull.reviews : [],
+  };
 }
 
 function eventsEtag(events: unknown[]): string {
@@ -986,12 +1005,16 @@ export async function fakeGitHub(t: TestContext) {
     close(number: number): void {
       changePull(state, number).state = FakePullState.Closed;
     },
-    reopen(number: number): void {
-      const pull = state.pulls.find((item) => item.number === number);
-      assert.ok(pull, "Unknown fake pull request");
-      assert.equal(pull.state, FakePullState.Closed);
-      assert.equal(pull.merged, false);
-      pull.state = FakePullState.Open;
+    review(
+      number: number,
+      review: { reviewer: number; state: string; commit_id?: string },
+    ): void {
+      const pull = changePull(state, number);
+      pull.reviews.push({
+        user: { id: review.reviewer },
+        state: review.state,
+        commit_id: review.commit_id ?? pull.head_sha,
+      });
     },
     refuseMerge(status: number | null): void {
       assert.ok(status === null || Number.isInteger(status));

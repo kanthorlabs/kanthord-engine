@@ -575,6 +575,11 @@ test(
               path: `/repos/owner/gated/pulls/${pr.number}`,
               token: GITHUB_KEY,
             },
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}/reviews?per_page=100&page=1`,
+              token: GITHUB_KEY,
+            },
           ],
         );
       },

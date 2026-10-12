@@ -145,21 +145,25 @@ async function inspectPullRequest(
   const token = apiKeySecretSchema.parse(material.value()).key;
   const { signal, dispose } = abortSignal(caller.context);
   try {
-    const answer = await github.getPullRequest(
-      {
-        token,
-        requester: caller.identity,
-        signal,
-        deadlineAt: request.deadlineAt,
-      },
-      {
-        kind: GitHubTargetKind.Binding,
-        address: request.facts.repository.address,
-      },
-      { number: request.number },
-    );
+    const call = {
+      token,
+      requester: caller.identity,
+      signal,
+      deadlineAt: request.deadlineAt,
+    };
+    const target = {
+      kind: GitHubTargetKind.Binding,
+      address: request.facts.repository.address,
+    } as const;
+    const answer = await github.getPullRequest(call, target, {
+      number: request.number,
+    });
     if (!answer.ok) throw platformFailure(answer);
-    return foldBody(github, answer.value, request.expected);
+    const reviews = await github.listReviews(call, target, {
+      number: request.number,
+    });
+    if (!reviews.ok) throw platformFailure(reviews);
+    return foldBody(github, answer.value, reviews.value, request.expected);
   } finally {
     dispose();
   }
@@ -168,11 +172,12 @@ async function inspectPullRequest(
 function foldBody(
   github: GitHubPlatform,
   body: unknown,
+  reviews: unknown,
   expected: ExpectedEndState,
 ): CheckFold {
   assert.equal(expected, ExpectedEndState.PullRequestMerged);
   try {
-    return github.foldPullRequest(body, expected);
+    return github.foldPullRequest(body, reviews, expected);
   } catch (error) {
     if (!(error instanceof z.ZodError)) throw error;
     throw platformFailure({
