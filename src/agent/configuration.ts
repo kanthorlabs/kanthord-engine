@@ -11,6 +11,7 @@ import {
   type ApprovedModel,
   type ApprovedModelsFn,
   type CustodySuitability,
+  ChainLevel,
   type DefaultConfiguration,
   type AgentView,
   type AgentEntry,
@@ -54,6 +55,75 @@ export function effectiveConfiguration(
     model_identifier: entry?.model_identifier ?? defaults.model_identifier,
     reasoning_effort: entry?.reasoning_effort ?? defaults.reasoning_effort,
   };
+}
+
+export type ChainConfiguration = DefaultConfiguration & { level: ChainLevel };
+
+const FALLBACK_FIELD = "fallback_configurations";
+const HEAD_FIELDS: readonly (keyof DefaultConfiguration)[] = [
+  "agent_provider",
+  "model_identifier",
+  "reasoning_effort",
+];
+
+function sameModel(
+  left: DefaultConfiguration,
+  right: DefaultConfiguration,
+): boolean {
+  return (
+    left.agent_provider === right.agent_provider &&
+    left.model_identifier === right.model_identifier
+  );
+}
+
+export function tailOf(
+  enablementTail: readonly DefaultConfiguration[],
+  entry: AgentEntry | null,
+): readonly DefaultConfiguration[] {
+  return entry?.fallback_configurations ?? enablementTail;
+}
+
+export function chainConfigurations(
+  defaults: DefaultConfiguration,
+  enablementTail: readonly DefaultConfiguration[],
+  entry: AgentEntry | null,
+): ChainConfiguration[] {
+  const headLevel = HEAD_FIELDS.some((field) => entry?.[field] !== undefined)
+    ? ChainLevel.Binding
+    : ChainLevel.Enablement;
+  const named = entry?.fallback_configurations;
+  const tailLevel =
+    named === undefined ? ChainLevel.Enablement : ChainLevel.Binding;
+  const chain: ChainConfiguration[] = [
+    { ...effectiveConfiguration(defaults, entry), level: headLevel },
+  ];
+  for (const config of tailOf(enablementTail, entry))
+    if (!chain.some((kept) => sameModel(kept, config)))
+      chain.push({ ...config, level: tailLevel });
+  return chain;
+}
+
+export function checkFallbackDuplicates(
+  agentName: string,
+  head: DefaultConfiguration,
+  tail: readonly DefaultConfiguration[],
+): void {
+  const duplicate = tail.some(
+    (config, index) =>
+      sameModel(config, head) ||
+      tail.findIndex((other) => sameModel(other, config)) !== index,
+  );
+  if (duplicate)
+    throw configurationError(agentName, AgentErrorCode.FallbackDuplicate);
+}
+
+export function namesProvider(
+  configurations: readonly DefaultConfiguration[] | undefined,
+  providerNames: ReadonlySet<string>,
+): boolean {
+  return (configurations ?? []).some(({ agent_provider }) =>
+    providerNames.has(agent_provider),
+  );
 }
 
 export function validateProvider(
@@ -136,6 +206,7 @@ export function configurationIssues(
   agentName: string,
   agentProviders: AgentProviderItem[],
   config: DefaultConfiguration,
+  prefix: readonly string[] = [],
 ): AgentView["issues"] {
   try {
     validateEffectiveConfig(
@@ -152,6 +223,25 @@ export function configurationIssues(
       !Object.hasOwn(issueFields, error.code)
     )
       throw error;
-    return [{ path: [issueFields[error.code]!], code: error.code }];
+    return [{ path: [...prefix, issueFields[error.code]!], code: error.code }];
   }
+}
+
+export function chainIssues(
+  dependencies: ConfigurationDependencies,
+  tx: Transaction,
+  agentName: string,
+  agentProviders: AgentProviderItem[],
+  head: DefaultConfiguration,
+  tail: readonly DefaultConfiguration[],
+): AgentView["issues"] {
+  return [
+    ...configurationIssues(dependencies, tx, agentName, agentProviders, head),
+    ...tail.flatMap((config, index) =>
+      configurationIssues(dependencies, tx, agentName, agentProviders, config, [
+        FALLBACK_FIELD,
+        String(index),
+      ]),
+    ),
+  ];
 }

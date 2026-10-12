@@ -194,6 +194,7 @@ function enablementFile(
       model_identifier: modelIdentifier,
       reasoning_effort: REASONING_OFF,
     },
+    fallback_configurations: [],
   });
 }
 

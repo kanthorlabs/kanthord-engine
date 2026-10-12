@@ -313,6 +313,7 @@ async function enableAgent(
   const path = file(fixture.directory, "enablement.json", {
     agent_providers: PROVIDERS,
     default_configuration: defaultConfiguration,
+    fallback_configurations: [],
   });
   const answer = success<AgentEnablement>(
     await kanthord(
@@ -609,6 +610,7 @@ test("E05.18 replacing a referenced provider is refused atomically", async (t) =
       { name: BACKUP, provider: ANTHROPIC, credential: CREDENTIAL },
     ],
     default_configuration: { ...CONFIGURATION, agent_provider: BACKUP },
+    fallback_configurations: [],
   });
   refusal(
     await kanthord(
@@ -657,6 +659,7 @@ test("E05.19 changing defaults that invalidate a tuning entry is refused atomica
     expected_revision: enablement.revision,
     agent_providers: PROVIDERS,
     default_configuration: CONFIGURATION,
+    fallback_configurations: [],
   });
   refusal(
     await kanthord(

@@ -98,6 +98,7 @@ function enablementFile(fixture: Fixture, expectedRevision?: number): string {
         model_identifier: SONNET,
         reasoning_effort: OFF,
       },
+      fallback_configurations: [],
     },
   );
   assert.ok(path.endsWith("enablement.json"));
@@ -373,6 +374,7 @@ test("E03.11 metadata removal preserves referenced model atomically", async (t) 
       model_identifier: GPT,
       reasoning_effort: OFF,
     },
+    fallback_configurations: [],
   });
   const put = success(
     await kanthord([...COMMAND, "put", OPENAI_AGENT, "--file", putFile], env),

@@ -76,6 +76,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
       { name: "default", provider: "anthropic", credential: "anthro-1" },
     ],
     default_configuration: WORKER_DEFAULTS,
+    fallback_configurations: [],
   });
   const storage = s3 && {
     endpoint: s3.endpoint,

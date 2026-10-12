@@ -241,6 +241,7 @@ for (const adapter of ["direct", "http"] as const) {
             ...CONFIGURATION,
             model_identifier: newerModel,
           },
+          fallback_configurations: [],
         },
       }),
     );
@@ -478,6 +479,7 @@ async function setup(
           { name: "default", provider: platform, credential: "anthro-1" },
         ],
         default_configuration: configuration,
+        fallback_configurations: [],
       },
     }),
   );

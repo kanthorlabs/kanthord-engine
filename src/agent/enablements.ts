@@ -32,6 +32,7 @@ export type EnablementRow = {
   state: EnablementState;
   agent_providers: AgentProviderItem[];
   default_configuration: DefaultConfiguration;
+  fallback_configurations: DefaultConfiguration[];
   created_at: number;
   removed_at: number | null;
 };
@@ -43,6 +44,7 @@ type DatabaseRow = {
   state: EnablementState;
   agent_providers: string;
   default_configuration: string;
+  fallback_configurations: string;
   created_at: number;
   removed_at: number | null;
 };
@@ -67,6 +69,9 @@ function toEnablement(row: DatabaseRow): EnablementRow {
     default_configuration: JSON.parse(
       row.default_configuration,
     ) as DefaultConfiguration,
+    fallback_configurations: JSON.parse(
+      row.fallback_configurations,
+    ) as DefaultConfiguration[],
     created_at: row.created_at,
     removed_at: row.removed_at,
   };
@@ -93,7 +98,7 @@ function liveEnablements(
 ): EnablementRow[] {
   const rows = tx.database
     .prepare(
-      `SELECT e.id, e.agent_name, e.revision, e.state, e.agent_providers, e.default_configuration, e.created_at, e.removed_at
+      `SELECT e.id, e.agent_name, e.revision, e.state, e.agent_providers, e.default_configuration, e.fallback_configurations, e.created_at, e.removed_at
        FROM agent_enablement AS e
        WHERE NOT EXISTS (
          SELECT 1 FROM agent_enablement AS newer
@@ -128,7 +133,7 @@ export function getEnablement(
 ): EnablementRow | null {
   const row = tx.database
     .prepare(
-      `SELECT id, agent_name, revision, state, agent_providers, default_configuration, created_at, removed_at
+      `SELECT id, agent_name, revision, state, agent_providers, default_configuration, fallback_configurations, created_at, removed_at
        FROM agent_enablement WHERE agent_name = ? ORDER BY revision DESC LIMIT 1`,
     )
     .get(agentName) as DatabaseRow | undefined;
@@ -153,6 +158,7 @@ export function insertEnablementRevision(
   state: EnablementState,
   agentProviders: AgentProviderItem[],
   defaultConfiguration: DefaultConfiguration,
+  fallbackConfigurations: DefaultConfiguration[],
   removedAt?: number,
 ): EnablementRow {
   const id = createIdentity(AGENT_ENABLEMENT_PREFIX);
@@ -169,14 +175,15 @@ export function insertEnablementRevision(
     state,
     agent_providers: agentProviders,
     default_configuration: defaultConfiguration,
+    fallback_configurations: fallbackConfigurations,
     created_at: createdAt,
     removed_at: removedAt ?? null,
   };
   tx.database
     .prepare(
       `INSERT INTO agent_enablement
-       (id, agent_name, revision, state, agent_providers, default_configuration, created_at, removed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, agent_name, revision, state, agent_providers, default_configuration, fallback_configurations, created_at, removed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -185,6 +192,7 @@ export function insertEnablementRevision(
       state,
       canonicalJSON(agentProviders),
       canonicalJSON(defaultConfiguration),
+      canonicalJSON(fallbackConfigurations),
       createdAt,
       row.removed_at,
     );
@@ -210,13 +218,15 @@ export function enablementsByModel(
   credentialName: string,
   modelId: string,
 ): EnablementRow[] {
-  return liveEnablements(tx).filter(
-    (row) =>
-      row.default_configuration.model_identifier === modelId &&
-      row.agent_providers.some(
-        (item) =>
-          item.name === row.default_configuration.agent_provider &&
-          item.credential === credentialName,
-      ),
+  return liveEnablements(tx).filter((row) =>
+    [row.default_configuration, ...row.fallback_configurations].some(
+      (config) =>
+        config.model_identifier === modelId &&
+        row.agent_providers.some(
+          (item) =>
+            item.name === config.agent_provider &&
+            item.credential === credentialName,
+        ),
+    ),
   );
 }

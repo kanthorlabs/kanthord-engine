@@ -197,6 +197,7 @@ async function resources(c: ReturnType<typeof cli>) {
         { name: "default", provider: PROVIDER, credential: NAME },
       ],
       default_configuration: CONFIGURATION,
+      fallback_configurations: [],
     },
   );
   assert.equal(enabled.revision, FIRST_REVISION);

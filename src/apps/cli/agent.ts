@@ -10,6 +10,7 @@ import {
   agentProviderItemSchema,
   agentProviderKindSchema,
   defaultConfigurationSchema,
+  fallbackConfigurationsSchema,
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   PROMPT_SWITCHES,
@@ -33,6 +34,7 @@ const agentEnablementPutBodySchema = z.strictObject({
   expected_revision: z.number().int().positive().optional(),
   agent_providers: z.array(agentProviderItemSchema).min(1),
   default_configuration: defaultConfigurationSchema,
+  fallback_configurations: fallbackConfigurationsSchema,
 });
 const providerAddBodySchema = z.strictObject({
   expected_revision: z.number().int().positive(),

@@ -158,6 +158,7 @@ test(
           { name: "default", provider: "anthropic", credential: "anthro-1" },
         ],
         default_configuration: DEFAULTS,
+        fallback_configurations: [],
       });
     const project = await read<{ id: string }>([
       "project",

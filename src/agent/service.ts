@@ -11,10 +11,14 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { getAgentDeclaration } from "./catalog.ts";
 import type { AgentConfig } from "./config.ts";
 import {
+  chainConfigurations,
+  chainIssues,
+  checkFallbackDuplicates,
   configurationError,
-  configurationIssues,
   effectiveConfiguration,
+  namesProvider,
   providerModels,
+  tailOf,
   validateEffectiveConfig,
   validateProvider,
 } from "./configuration.ts";
@@ -77,6 +81,7 @@ const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
 const HEALTH_PAGE_SIZE = 100;
 const ABSENT_REVISION = 0;
+const FIRST_POSITION = 0;
 
 function wireRecord(row: EnablementRow) {
   return agentEnablementSchema.parse({
@@ -84,6 +89,7 @@ function wireRecord(row: EnablementRow) {
     state: row.state,
     agent_providers: row.agent_providers,
     default_configuration: row.default_configuration,
+    fallback_configurations: row.fallback_configurations,
     revision: row.revision,
   });
 }
@@ -161,6 +167,7 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
       current.state,
       current.agent_providers,
       current.default_configuration,
+      current.fallback_configurations,
     ),
   );
 }
@@ -329,20 +336,34 @@ export class AgentComponent {
     );
   }
 
+  private validateChain(
+    tx: Transaction,
+    agentName: string,
+    agentProviders: AgentProviderItem[],
+    head: DefaultConfiguration,
+    tail: readonly DefaultConfiguration[],
+  ): void {
+    checkFallbackDuplicates(agentName, head, tail);
+    for (const config of [head, ...tail])
+      this.validateEffectiveConfig(tx, agentName, agentProviders, config);
+  }
+
   private validateBindings(
     tx: Transaction,
     agentName: string,
     agentProviders: AgentProviderItem[],
     defaults: DefaultConfiguration,
+    fallbackConfigurations: readonly DefaultConfiguration[],
     entries: AgentDependentBinding[],
   ): void {
     const bindings = entries.flatMap((binding) =>
-      configurationIssues(
+      chainIssues(
         this.dependencies,
         tx,
         agentName,
         agentProviders,
         effectiveConfiguration(defaults, binding.entry),
+        tailOf(fallbackConfigurations, binding.entry),
       ).map(({ code }) => ({ ...bindingIdentity(binding), code })),
     );
     if (bindings.length > NO_ITEMS)
@@ -362,6 +383,7 @@ export class AgentComponent {
     const {
       agent_providers: agentProviders,
       default_configuration: defaultConfiguration,
+      fallback_configurations: fallbackConfigurations,
     } = body;
     if (agentProviders.length === NO_ITEMS)
       throw configurationError(agentName, AgentErrorCode.ProviderRequired);
@@ -375,11 +397,12 @@ export class AgentComponent {
       throw conflict(agentName, AgentErrorCode.ProviderCredentialConflict);
     for (const item of agentProviders)
       validateProvider(this.dependencies, tx, agentName, item);
-    this.validateEffectiveConfig(
+    this.validateChain(
       tx,
       agentName,
       agentProviders,
       defaultConfiguration,
+      fallbackConfigurations,
     );
     if (
       current?.agent_providers.some((old) =>
@@ -398,8 +421,9 @@ export class AgentComponent {
     const bindings = entries
       .filter(
         ({ entry }) =>
-          entry?.agent_provider !== undefined &&
-          omitted.has(entry.agent_provider),
+          (entry?.agent_provider !== undefined &&
+            omitted.has(entry.agent_provider)) ||
+          namesProvider(entry?.fallback_configurations, omitted),
       )
       .map(bindingIdentity);
     if (bindings.length > NO_ITEMS)
@@ -409,6 +433,7 @@ export class AgentComponent {
       agentName,
       agentProviders,
       defaultConfiguration,
+      fallbackConfigurations,
       entries,
     );
     return wireRecord(
@@ -418,6 +443,7 @@ export class AgentComponent {
         current?.state ?? EnablementState.Enabled,
         agentProviders,
         defaultConfiguration,
+        fallbackConfigurations,
       ),
     );
   }
@@ -430,17 +456,19 @@ export class AgentComponent {
   ) {
     const current = currentRevision(tx, agentName, expectedRevision);
     if (state === EnablementState.Enabled) {
-      this.validateEffectiveConfig(
+      this.validateChain(
         tx,
         agentName,
         current.agent_providers,
         current.default_configuration,
+        current.fallback_configurations,
       );
       this.validateBindings(
         tx,
         agentName,
         current.agent_providers,
         current.default_configuration,
+        current.fallback_configurations,
         this.dependencies.entriesOfAgent(tx, agentName),
       );
     }
@@ -464,6 +492,7 @@ export class AgentComponent {
       current.state,
       current.agent_providers,
       current.default_configuration,
+      current.fallback_configurations,
       Date.now(),
     );
     return { agent_name: agentName, removed: true };
@@ -494,6 +523,7 @@ export class AgentComponent {
       agentName,
       agentProviders,
       current.default_configuration,
+      current.fallback_configurations,
       this.dependencies.entriesOfAgent(tx, agentName),
     );
     return saveRevision(tx, { ...current, agent_providers: agentProviders });
@@ -514,11 +544,18 @@ export class AgentComponent {
     const dependents: Array<
       { kind: string } | ReturnType<typeof bindingIdentity>
     > = [];
+    const removed = new Set([providerName]);
     if (current.default_configuration.agent_provider === providerName)
       dependents.push({ kind: "default_configuration" });
+    if (namesProvider(current.fallback_configurations, removed))
+      dependents.push({ kind: "fallback_configurations" });
     dependents.push(
       ...entries
-        .filter(({ entry }) => entry?.agent_provider === providerName)
+        .filter(
+          ({ entry }) =>
+            entry?.agent_provider === providerName ||
+            namesProvider(entry?.fallback_configurations, removed),
+        )
         .map(bindingIdentity),
     );
     if (dependents.length > NO_ITEMS)
@@ -531,6 +568,7 @@ export class AgentComponent {
       agentName,
       agentProviders,
       current.default_configuration,
+      current.fallback_configurations,
       entries,
     );
     return saveRevision(tx, { ...current, agent_providers: agentProviders });
@@ -545,12 +583,19 @@ export class AgentComponent {
     if (!current || current.state === EnablementState.Disabled)
       throw configurationError(agentName, AgentErrorCode.Unavailable);
     this.validateEntryForm(agentName, entry);
-    this.validateEffectiveConfig(
-      tx,
-      agentName,
-      current.agent_providers,
-      effectiveConfiguration(current.default_configuration, entry),
-    );
+    const head = effectiveConfiguration(current.default_configuration, entry);
+    if (entry?.fallback_configurations !== undefined)
+      checkFallbackDuplicates(agentName, head, entry.fallback_configurations);
+    for (const config of [
+      head,
+      ...tailOf(current.fallback_configurations, entry),
+    ])
+      this.validateEffectiveConfig(
+        tx,
+        agentName,
+        current.agent_providers,
+        config,
+      );
   }
 
   private validateEntryForm(agentName: string, entry: AgentEntry | null): void {
@@ -631,12 +676,13 @@ export class AgentComponent {
       return {
         defaults: null,
         effective: null,
+        chain: [],
         valid: false,
         issues: [{ path: [], code: AgentErrorCode.Unavailable }],
       };
     const defaults = current.default_configuration;
     const config = effectiveConfiguration(defaults, entry);
-    const issues = configurationIssues(
+    const issues = chainIssues(
       {
         custodySuitability: this.dependencies.custodySuitability,
         approvedModels,
@@ -645,20 +691,37 @@ export class AgentComponent {
       agentName,
       current.agent_providers,
       config,
+      tailOf(current.fallback_configurations, entry),
     );
     if (issues.length > NO_ITEMS)
-      return { defaults, effective: null, valid: false, issues };
-    const item = current.agent_providers.find(
-      ({ name }) => name === config.agent_provider,
-    );
-    assert.ok(item, "Validated configuration must resolve a provider.");
+      return { defaults, effective: null, chain: [], valid: false, issues };
+    const chain = chainConfigurations(
+      defaults,
+      current.fallback_configurations,
+      entry,
+    ).map(({ level, ...item }, position) => {
+      const provider = current.agent_providers.find(
+        ({ name }) => name === item.agent_provider,
+      );
+      assert.ok(provider, "Validated configuration must resolve a provider.");
+      return {
+        position,
+        level,
+        ...item,
+        provider: provider.provider,
+        credential: provider.credential,
+      };
+    });
+    const head = chain[FIRST_POSITION];
+    assert.ok(head);
     return {
       defaults,
       effective: {
         ...config,
-        provider: item.provider,
-        credential: item.credential,
+        provider: head.provider,
+        credential: head.credential,
       },
+      chain,
       valid: true,
       issues,
     };
@@ -717,17 +780,18 @@ export class AgentComponent {
           .entriesOfAgent(tx, row.agent_name)
           .some(({ entry }) => {
             if (entry === null) return false;
-            const effective = effectiveConfiguration(
+            return chainConfigurations(
               row.default_configuration,
+              row.fallback_configurations,
               entry,
-            );
-            return (
-              effective.model_identifier === modelId &&
-              row.agent_providers.some(
-                (item) =>
-                  item.name === effective.agent_provider &&
-                  item.credential === credentialName,
-              )
+            ).some(
+              (config) =>
+                config.model_identifier === modelId &&
+                row.agent_providers.some(
+                  (item) =>
+                    item.name === config.agent_provider &&
+                    item.credential === credentialName,
+                ),
             );
           });
         if (dependent) matches.set(row.agent_name, wireRecord(row));

@@ -19,6 +19,7 @@ test("static agent declarations", () => {
       "agent_provider",
       "model_identifier",
       "reasoning_effort",
+      "fallback_configurations",
     ],
   });
   assert.deepEqual(getAgentDeclaration("re@1"), {
@@ -30,6 +31,7 @@ test("static agent declarations", () => {
       "agent_provider",
       "model_identifier",
       "reasoning_effort",
+      "fallback_configurations",
     ],
   });
 });

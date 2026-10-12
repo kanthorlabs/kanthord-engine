@@ -384,6 +384,14 @@ worker, and one of the two [entry forms](https://github.com/kanthorlabs/kanthord
   required. It inherits nothing. `agent_provider` names a provider of this
   agent's enablement, not an arbitrary credential.
 
+An entry can also hold `fallback_configurations`, an array of at most 7 complete
+`{ agent_provider, model_identifier, reasoning_effort }` entries. A named field
+replaces the enablement tail whole. `[]` means no fallback. An omitted field
+inherits the enablement tail. An entry with only `fallback_configurations` keeps
+the default head. A duplicate `(agent_provider, model_identifier)` inside the
+field, or an entry equal to the head of the entry, answers
+`400 agent.configuration.fallback_duplicate`.
+
 `model_identifier` is a nonblank string. `reasoning_effort` is one of `off`,
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. An entry holds no `options`.
 The write refuses nonempty `options`; the native option schemas are empty.
@@ -559,6 +567,10 @@ one. Proposed item fields are:
 - `effective`, present only when the Worker Service resolves and validates it:
   `agent_provider`, `provider`, `credential`, `model_identifier` and `reasoning_effort`.
   An invalid result permits no fallback.
+- `chain`: the resolved fallback chain, or `[]` when the result is invalid. Each
+  item holds `position`, `level` (`enablement` or `binding`), `agent_provider`,
+  `provider`, `credential`, `model_identifier` and `reasoning_effort`. Position 0
+  is the head.
 - `revisions`: proposed object with `workerBinding`, `entry` and `enablement`
   revision values supplied by the Worker snapshot. `workerBinding` and `entry` are `BindingId` values.
   `entry` is the binding revision when an entry exists, otherwise `null`.

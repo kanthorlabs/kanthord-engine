@@ -296,6 +296,33 @@ components:
                               type: string
                             reasoning_effort:
                               type: string
+                            fallback_configurations:
+                              maxItems: 7
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  agent_provider:
+                                    type: string
+                                    minLength: 1
+                                  model_identifier:
+                                    type: string
+                                    minLength: 1
+                                  reasoning_effort:
+                                    type: string
+                                    enum:
+                                      - off
+                                      - minimal
+                                      - low
+                                      - medium
+                                      - high
+                                      - xhigh
+                                      - max
+                                required:
+                                  - agent_provider
+                                  - model_identifier
+                                  - reasoning_effort
+                                additionalProperties: false
                           required:
                             - agent
                           additionalProperties: false
@@ -532,6 +559,33 @@ components:
                                   type: string
                                 reasoning_effort:
                                   type: string
+                                fallback_configurations:
+                                  maxItems: 7
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      agent_provider:
+                                        type: string
+                                        minLength: 1
+                                      model_identifier:
+                                        type: string
+                                        minLength: 1
+                                      reasoning_effort:
+                                        type: string
+                                        enum:
+                                          - off
+                                          - minimal
+                                          - low
+                                          - medium
+                                          - high
+                                          - xhigh
+                                          - max
+                                    required:
+                                      - agent_provider
+                                      - model_identifier
+                                      - reasoning_effort
+                                    additionalProperties: false
                               required:
                                 - agent
                               additionalProperties: false

@@ -47,11 +47,10 @@ export function authorizeModelInference(
   const authorizations = agents.map((agent) => {
     const selected = row.entries.find((item) => item.agent === agent);
     const entry = selected
-      ? {
-          agent_provider: selected.agent_provider,
-          model_identifier: selected.model_identifier,
-          reasoning_effort: selected.reasoning_effort,
-        }
+      ? (({ agent: selectedAgent, ...fields }) => {
+          assert.equal(selectedAgent, agent);
+          return fields;
+        })(selected)
       : null;
     const view = worker.workerAgentView(tx, row.worker_name, agent, entry);
     assert.ok(view);

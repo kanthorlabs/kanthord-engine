@@ -138,6 +138,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       assert.ok(args[4]);
       return {
         defaults: null,
+        chain: [],
         effective: {
           ...agent.effective_configuration,
           reasoning_effort: entry.reasoning_effort,
@@ -276,6 +277,7 @@ test("setup answers one entry per agent of developer@1 with its own prompt and p
       declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
       workerAgentView: (_tx, _worker, agent) => ({
         defaults: null,
+        chain: [],
         effective: {
           ...setup.agents[0]!.effective_configuration,
           credential: credentials[agent]!,

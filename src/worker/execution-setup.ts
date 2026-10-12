@@ -88,11 +88,10 @@ export async function executionSetup(
         ({ agent }) => agent === agentName,
       );
       const entry = configuredEntry
-        ? {
-            agent_provider: configuredEntry.agent_provider,
-            model_identifier: configuredEntry.model_identifier,
-            reasoning_effort: configuredEntry.reasoning_effort,
-          }
+        ? (({ agent: selectedAgent, ...fields }) => {
+            assert.equal(selectedAgent, agentName);
+            return fields;
+          })(configuredEntry)
         : null;
       const view = worker.workerAgentView(
         tx,
