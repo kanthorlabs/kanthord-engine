@@ -575,6 +575,11 @@ test(
               path: `/repos/owner/gated/pulls/${pr.number}`,
               token: GITHUB_KEY,
             },
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}/reviews?per_page=100&page=1`,
+              token: GITHUB_KEY,
+            },
           ],
         );
       },
@@ -743,6 +748,7 @@ test("local mapped repository clones main and publishes only the node branch", a
     checkout,
     TEST_BRANCH,
     "main",
+    false,
     background,
     GIT_TIMEOUT_MS,
   );

@@ -22,6 +22,7 @@ import {
   GitHubPlatform,
   GitHubTargetKind,
   ExpectedEndState,
+  ReviewState,
   classify,
   classifyDelivery,
   decodeCursor,
@@ -444,12 +445,15 @@ test("the token reaches no failure and no log record", async (t) => {
   assert.equal(JSON.stringify(records).includes(TOKEN), false);
 });
 
+const HEAD_SHA = "89abcdef0123456789abcdef0123456789abcdef";
+const OLDER_SHA = "fedcba9876543210fedcba9876543210fedcba98";
+const NO_REVIEWS: unknown[] = [];
 const PULL_REQUEST_BODY = {
   number: 7,
   state: "open",
   merged: false,
   merge_commit_sha: null,
-  head: { ref: "kanthord/node" },
+  head: { ref: "kanthord/node", sha: HEAD_SHA },
   labels: [{ name: "kept" }],
 };
 const REVIEW_COMMENTS = [
@@ -462,6 +466,8 @@ const PREVIOUS_LINK =
   '<https://api.github.com/repositories/1/pulls/7/comments?page=1>; rel="prev"';
 const PULL_REQUESTS_PATH = "/repos/octo/widgets/pulls";
 const REVIEW_COMMENTS_PATH = "/repos/octo/widgets/pulls/7/comments";
+const REVIEWS_PATH = "/repos/octo/widgets/pulls/7/reviews";
+const REVIEW_PAGE_LIMIT = 30;
 const HEAD_BRANCH = "kanthord/node";
 const BASE_BRANCH = "main";
 const QUALIFIED_HEAD = "octo:kanthord/node";
@@ -652,6 +658,7 @@ test("foldPullRequest folds the three states of a pull request", () => {
         merged: true,
         merge_commit_sha: MERGE_COMMIT,
       },
+      NO_REVIEWS,
       merged,
     ),
     { end_state: CheckEndState.Expected, landed_commits: [MERGE_COMMIT] },
@@ -659,25 +666,33 @@ test("foldPullRequest folds the three states of a pull request", () => {
   assert.deepEqual(
     github.foldPullRequest(
       { ...PULL_REQUEST_BODY, state: "closed", merge_commit_sha: MERGE_COMMIT },
+      NO_REVIEWS,
       merged,
     ),
     { end_state: CheckEndState.Other, landed_commits: [] },
   );
-  assert.deepEqual(github.foldPullRequest(PULL_REQUEST_BODY, merged), {
-    end_state: CheckEndState.None,
-    landed_commits: [],
-  });
+  assert.deepEqual(
+    github.foldPullRequest(PULL_REQUEST_BODY, NO_REVIEWS, merged),
+    {
+      end_state: CheckEndState.None,
+      landed_commits: [],
+    },
+  );
   assert.throws(() =>
     github.foldPullRequest(
       PULL_REQUEST_BODY,
+      NO_REVIEWS,
       ExpectedEndState.BaseBranchPushed,
     ),
   );
-  assert.throws(() => github.foldPullRequest({ number: 7 }, merged));
+  assert.throws(() =>
+    github.foldPullRequest({ number: 7 }, NO_REVIEWS, merged),
+  );
   assert.throws(
     () =>
       github.foldPullRequest(
         { ...PULL_REQUEST_BODY, state: "closed", merged: true },
+        NO_REVIEWS,
         merged,
       ),
     { name: "ZodError" },
@@ -1049,10 +1064,16 @@ test("decodeGitHubEvent answers null for metadata of another shape", () => {
 
 test("an open pull request with merge conflicts folds to the conflict end state", () => {
   const github = new GitHubPlatform({ baseUrl: "http://127.0.0.1:1" });
-  const open = { state: "open", merged: false, merge_commit_sha: null };
+  const open = {
+    state: "open",
+    merged: false,
+    merge_commit_sha: null,
+    head: { sha: HEAD_SHA },
+  };
   assert.equal(
     github.foldPullRequest(
       { ...open, mergeable_state: "dirty" },
+      NO_REVIEWS,
       ExpectedEndState.PullRequestMerged,
     ).end_state,
     CheckEndState.Conflict,
@@ -1060,12 +1081,156 @@ test("an open pull request with merge conflicts folds to the conflict end state"
   assert.equal(
     github.foldPullRequest(
       { ...open, mergeable_state: "clean" },
+      NO_REVIEWS,
       ExpectedEndState.PullRequestMerged,
     ).end_state,
     CheckEndState.None,
   );
   assert.equal(
-    github.foldPullRequest(open, ExpectedEndState.PullRequestMerged).end_state,
+    github.foldPullRequest(open, NO_REVIEWS, ExpectedEndState.PullRequestMerged)
+      .end_state,
     CheckEndState.None,
   );
+});
+
+function review(reviewer: number, state: string, commit = HEAD_SHA) {
+  return { id: reviewer, user: { id: reviewer }, state, commit_id: commit };
+}
+
+function decision(reviews: unknown[], body: object = PULL_REQUEST_BODY) {
+  return new GitHubPlatform().foldPullRequest(
+    body,
+    reviews,
+    ExpectedEndState.PullRequestMerged,
+  ).end_state;
+}
+
+test("a current change request on an open pull request folds to other", () => {
+  const changes = review(1, ReviewState.ChangesRequested);
+  assert.equal(decision([changes]), CheckEndState.Other);
+  assert.equal(
+    decision([review(2, ReviewState.Approved), changes]),
+    CheckEndState.Other,
+  );
+  assert.equal(
+    decision([changes], { ...PULL_REQUEST_BODY, mergeable_state: "dirty" }),
+    CheckEndState.Other,
+  );
+});
+
+test("a change request that a later decisive review replaces folds to none", () => {
+  const changes = review(1, ReviewState.ChangesRequested);
+  assert.equal(
+    decision([changes, review(1, ReviewState.Approved)]),
+    CheckEndState.None,
+  );
+  assert.equal(
+    decision([{ ...changes, state: ReviewState.Dismissed }]),
+    CheckEndState.None,
+  );
+  assert.equal(
+    decision([changes, review(1, "COMMENTED"), review(1, "PENDING")]),
+    CheckEndState.Other,
+  );
+  assert.equal(
+    decision([review(1, "COMMENTED"), review(2, "PENDING")]),
+    CheckEndState.None,
+  );
+  assert.equal(
+    decision([review(1, ReviewState.ChangesRequested, OLDER_SHA)]),
+    CheckEndState.None,
+  );
+  assert.equal(decision([{ ...changes, user: null }]), CheckEndState.None);
+});
+
+test("a merged or closed pull request ignores the change requests", () => {
+  const changes = [review(1, ReviewState.ChangesRequested)];
+  assert.equal(
+    decision(changes, {
+      ...PULL_REQUEST_BODY,
+      state: "closed",
+      merged: true,
+      merge_commit_sha: MERGE_COMMIT,
+    }),
+    CheckEndState.Expected,
+  );
+  assert.equal(
+    decision(changes, { ...PULL_REQUEST_BODY, state: "closed" }),
+    CheckEndState.Other,
+  );
+  assert.equal(
+    decision([{ state: 1 }], { ...PULL_REQUEST_BODY, state: "closed" }),
+    CheckEndState.Other,
+  );
+});
+
+test("an open pull request without a head commit or with a malformed review list throws", () => {
+  assert.throws(
+    () =>
+      decision([], { ...PULL_REQUEST_BODY, head: { ref: "kanthord/node" } }),
+    { name: "ZodError" },
+  );
+  assert.throws(() => decision([{ state: 1 }]), { name: "ZodError" });
+  assert.throws(
+    () =>
+      new GitHubPlatform().foldPullRequest(
+        PULL_REQUEST_BODY,
+        {},
+        ExpectedEndState.PullRequestMerged,
+      ),
+    { name: "ZodError" },
+  );
+});
+
+test("listReviews reads every page of the reviews", async (t) => {
+  const server = await platform(t, (request, response, count) => {
+    const headers: Record<string, string> =
+      count === SINGLE_REQUEST ? { link: NEXT_LINK } : { link: PREVIOUS_LINK };
+    answer(200, [review(count, ReviewState.Approved)], headers)(
+      request,
+      response,
+      count,
+    );
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listReviews(call(), TARGET, { number: 7 });
+  assert.deepEqual(result, {
+    ok: true,
+    value: [
+      review(1, ReviewState.Approved),
+      review(SECOND_PAGE, ReviewState.Approved),
+    ],
+  });
+  assert.equal(server.requests.length, SECOND_PAGE);
+  for (const [index, request] of server.requests.entries()) {
+    assert.equal(request.method, HttpMethod.Get);
+    assert.equal(
+      new URL(String(request.url), "http://localhost").pathname,
+      REVIEWS_PATH,
+    );
+    assert.equal(query(request).get("per_page"), String(DEFAULT_PAGE_SIZE));
+    assert.equal(query(request).get("page"), String(index + 1));
+  }
+});
+
+test("listReviews answers a failure for a failed page or a body that is not a list", async (t) => {
+  const failing = await platform(
+    t,
+    answer(401, { message: "Bad credentials" }),
+  );
+  const refused = await new GitHubPlatform({
+    baseUrl: failing.baseUrl,
+  }).listReviews(call(), TARGET, { number: 7 });
+  assert.equal(!refused.ok && refused.class, ResultClass.FinalRefusal);
+  const unexpected = await platform(t, answer(200, { id: 1 }));
+  const unread = await new GitHubPlatform({
+    baseUrl: unexpected.baseUrl,
+  }).listReviews(call(), TARGET, { number: 7 });
+  assert.equal(unread.ok, false);
+  const endless = await platform(t, answer(200, [], { link: NEXT_LINK }));
+  const bounded = await new GitHubPlatform({
+    baseUrl: endless.baseUrl,
+  }).listReviews(call(), TARGET, { number: 7 });
+  assert.equal(bounded.ok, false);
+  assert.equal(endless.requests.length, REVIEW_PAGE_LIMIT);
 });

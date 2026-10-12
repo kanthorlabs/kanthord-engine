@@ -23,6 +23,7 @@ import {
 } from "./ssh-identity.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
+export const NODE_BRANCH_MISSING = "repository.node_branch.missing";
 const EMPTY_STRING = "";
 const EXPIRED = 0;
 const EMPTY_BYTES = 0;
@@ -250,6 +251,7 @@ export async function fetchAndCheckout(
   directory: string,
   branch: string,
   baseBranch: string,
+  pushed: boolean,
   context: Context,
   deadlineMs: number,
 ): Promise<string> {
@@ -264,14 +266,30 @@ export async function fetchAndCheckout(
       end - performance.now(),
       "fetch and checkout",
     );
+  const missing = () =>
+    new Diagnostic(
+      NODE_BRANCH_MISSING,
+      `The remote node branch ${branch} is missing.`,
+    );
   await run(["check-ref-format", "--branch", branch]);
   await run(["check-ref-format", "--branch", baseBranch]);
-  await run(["fetch", "--prune", "origin"]);
   const ref = `refs/remotes/origin/${branch}`;
-  const found = (
-    await run(["for-each-ref", "--format=%(refname)", ref])
-  ).trim();
-  const target = found.split("\n").includes(ref) ? branch : baseBranch;
+  const tracked = async () =>
+    (await run(["for-each-ref", "--format=%(refname)", ref]))
+      .trim()
+      .split("\n")
+      .includes(ref);
+  const trackedBefore = await tracked();
+  if (
+    trackedBefore &&
+    (await run(["ls-remote", "origin", `refs/heads/${branch}`])).trim() ===
+      EMPTY_STRING
+  )
+    throw missing();
+  await run(["fetch", "--prune", "origin"]);
+  const found = await tracked();
+  if (!found && (pushed || trackedBefore)) throw missing();
+  const target = found ? branch : baseBranch;
   const current = await runGitExit(
     directory,
     ["symbolic-ref", "--quiet", "--short", "HEAD"],

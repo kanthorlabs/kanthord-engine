@@ -68,6 +68,7 @@ export class WorkspaceRoot {
     input: Preparation & {
       objectiveId: string;
       nodeBranch: string;
+      pushed: boolean;
       repository: WorkspaceRepository;
     },
   ): Promise<{ directory: string; head: string; nodeBranch: string }> {
@@ -105,6 +106,7 @@ export class WorkspaceRoot {
         directory,
         input.nodeBranch,
         input.repository.strategy.base_branch,
+        input.pushed,
         input.context,
         end - performance.now(),
       );
