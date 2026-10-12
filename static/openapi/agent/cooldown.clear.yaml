@@ -1,0 +1,71 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  delete:
+    operationId: agent.cooldown.clear
+    tags:
+      - agent
+    description: Clear one cooldown so that the next claim can select its chain entry again.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: cooldown_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/agent.cooldown.clear.Input/properties/params/proper\
+            ties/cooldown_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "204":
+        description: Completed result
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    agent.cooldown.clear.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            cooldown_id:
+              type: string
+              minLength: 1
+          required:
+            - cooldown_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    agent.cooldown.clear.Output:
+      type: "null"

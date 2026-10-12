@@ -41,6 +41,8 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 | I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]`                                                             | `DELETE /api/agent/enablement/:agent_name/provider/:provider_name`    | `agent.enablement.provider.remove`     | `human` |
 | I      | `enablement provider model list <agent-name> <provider-name>`                                                                                                | `GET /api/agent/enablement/:agent_name/provider/:provider_name/model` | `agent.enablement.provider.model.list` | `human` |
 | I      | `model list --provider <provider> --credential <credential>`                                                                                                 | `GET /api/agent/model`                                                | `agent.model.list`                     | `human` |
+| I      | `cooldown list`                                                                                                                                              | `GET /api/agent/cooldown`                                             | `agent.cooldown.list`                  | `human` |
+| I      | `cooldown clear <cooldown-id> [M]`                                                                                                                           | `DELETE /api/agent/cooldown/:cooldown_id`                             | `agent.cooldown.clear`                 | `human` |
 | I      | `prompt put --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] --file <path> [M]`                                                       | `PUT /api/agent/prompt`                                               | `agent.prompt.put`                     | `human` |
 | I      | `prompt get --scope <scope> [--agent <agent-name>]`                                                                                                          | `GET /api/agent/prompt`                                               | `agent.prompt.get`                     | `human` |
 | I      | `prompt switch --scope <scope> [--agent <agent-name>] [--expected-revision <revision>] (--switch <source> (--on \| --off) \| --system-layer <override>) [M]` | `POST /api/agent/prompt/switch`                                       | `agent.prompt.switch`                  | `human` |
@@ -334,6 +336,26 @@ with the item shape and the sources of `enablement provider model list`. A
 credential that does not suit the provider kind answers `400`
 `agent.configuration.credential_unsuitable`.
 
+## Cooldown commands
+
+A cooldown belongs to one credential and one model identifier of the
+[fallback chain](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.md#fallback-chain).
+Both commands are `unary` and use `human` access.
+
+### `cooldown list`
+
+Uses no positional argument, no query and no body. HTTP `200` returns `{ items }`.
+Each item holds `cooldown_id`, `credential`, `model_identifier`, `code`,
+`strikes`, `started_at`, `until_at` and `execution_id`. The list holds live and
+expired cooldowns, ordered by credential and model identifier.
+
+### `cooldown clear <cooldown-id> [M]`
+
+`<cooldown-id>` maps to `params.cooldown_id`. The command sends no body and the
+shared replay key. HTTP `204` deletes the cooldown, and the CLI prints
+`{ idempotency_key }`. The next claim can select the chain entry again. An
+absent cooldown answers `404 agent.cooldown.not_found`.
+
 ## Agent provider healthcheck
 
 Each agent provider has a report-only [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.impl.md#agent-provider-healthcheck).
@@ -355,6 +377,11 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.agent.get.indeterminate`                             | The read result is indeterminate.                                                             | agent get                                                                                                                                                                                                  |
 | local | `cli.agent.get.invalid_view`                              | The `--view` value is not `final`.                                                            | agent get                                                                                                                                                                                                  |
 | local | `cli.agent.get.project_binding_pair_required`             | One of `--project` and `--binding-id` is present without the other.                           | agent get                                                                                                                                                                                                  |
+| local | `cli.agent.cooldown.list.token_required`                  | No option, environment variable or `cli.yaml` supplies a token.                               | agent cooldown list                                                                                                                                                                                        |
+| local | `cli.agent.cooldown.list.indeterminate`                   | The read result is indeterminate.                                                             | agent cooldown list                                                                                                                                                                                        |
+| local | `cli.agent.cooldown.clear.token_required`                 | No option, environment variable or `cli.yaml` supplies a token.                               | agent cooldown clear                                                                                                                                                                                       |
+| local | `cli.agent.cooldown.clear.indeterminate`                  | The write result is indeterminate; retry with the same key.                                   | agent cooldown clear                                                                                                                                                                                       |
+| 404   | `agent.cooldown.not_found`                                | The cooldown does not exist.                                                                  | agent cooldown clear                                                                                                                                                                                       |
 | local | `cli.agent.prompt.put.token_required`                     | No option, environment variable or `cli.yaml` supplies a token.                               | agent prompt put                                                                                                                                                                                           |
 | local | `cli.agent.prompt.put.indeterminate`                      | The write result is indeterminate; retry with the same key.                                   | agent prompt put                                                                                                                                                                                           |
 | local | `cli.agent.prompt.put.invalid_scope`                      | The `--scope` value is not `system`, `agent` or `workbench`.                                  | agent prompt put                                                                                                                                                                                           |

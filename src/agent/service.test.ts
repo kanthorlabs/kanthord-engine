@@ -2401,3 +2401,35 @@ test("a cooldown key is shared by every agent that names the credential and mode
     { kind: SelectionKind.Invalid },
   );
 });
+
+test("a human lists the cooldowns and clears one, and a clear of an absent cooldown answers not found", (t) => {
+  const f = enablementFixture(t);
+  f.invoke("enablement.put", chainBody);
+  const selected = f.store.transaction((tx) =>
+    f.agent.selectAgent(tx, AGENT, null),
+  );
+  assert.ok(selected.kind === SelectionKind.Selected);
+  const [cooldown] = f.store.transaction((tx) =>
+    f.agent.recordProviderFailure(
+      tx,
+      [selected.selection],
+      AdvancingFailure.QuotaExhausted,
+      EXECUTION,
+      Date.now(),
+    ),
+  );
+  assert.ok(cooldown);
+  assert.deepEqual(f.invoke("cooldown.list", null, {}), { items: [cooldown] });
+  assert.equal(
+    f.invoke("cooldown.clear", null, { cooldown_id: cooldown.cooldown_id }),
+    null,
+  );
+  assert.deepEqual(f.invoke("cooldown.list", null, {}), { items: [] });
+  refuses(
+    () =>
+      f.invoke("cooldown.clear", null, { cooldown_id: cooldown.cooldown_id }),
+    AgentErrorCode.CooldownNotFound,
+    HttpStatus.NotFound,
+    { cooldown_id: cooldown.cooldown_id },
+  );
+});

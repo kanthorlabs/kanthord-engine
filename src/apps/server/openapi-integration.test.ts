@@ -637,6 +637,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["agent.enablement.provider.remove", AccessPolicy.Human],
   ["agent.enablement.provider.model.list", AccessPolicy.Human],
   ["agent.model.list", AccessPolicy.Human],
+  ["agent.cooldown.list", AccessPolicy.Human],
+  ["agent.cooldown.clear", AccessPolicy.Human],
   ["agent.prompt.put", AccessPolicy.Human],
   ["agent.prompt.switch", AccessPolicy.Human],
   ["agent.prompt.get", AccessPolicy.Human],
@@ -767,8 +769,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 180;
-const ROUTED_OPERATION_COUNT = 171;
+const OPERATION_COUNT = 182;
+const ROUTED_OPERATION_COUNT = 173;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = ["intake.action.check", "mission.delivery.admit"];
@@ -1302,6 +1304,8 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     "agent.enablement.provider.remove",
     "agent.enablement.provider.model.list",
     "agent.model.list",
+    "agent.cooldown.list",
+    "agent.cooldown.clear",
     "agent.prompt.put",
     "agent.prompt.switch",
     "agent.prompt.get",
