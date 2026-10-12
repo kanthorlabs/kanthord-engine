@@ -46,6 +46,7 @@ const GATED_PRIORITY = 3;
 const FIRST_INDEX = 0;
 const SINGLE_INSTANCE = 1;
 const NO_ROWS = 0;
+const CHECK_COUNT = 3;
 const BAD_GATEWAY_STATUS = 502;
 const UNAUTHORIZED_STATUS = 401;
 const TIMEOUT = 180000;
@@ -443,15 +444,22 @@ test(
           end_state: CheckEndState.Expected,
           landed_commits: [MERGE_SHA],
         });
-        assert.ok(
-          h.gitHub.calls.every(
-            (call) =>
-              call.method === HttpMethod.Get &&
-              call.path === `/repos/owner/gated/pulls/${h.number}` &&
-              call.token === GITHUB_KEY,
-          ),
+        assert.deepEqual(
+          h.gitHub.calls.map((call) => [call.method, call.path, call.token]),
+          Array.from({ length: CHECK_COUNT }, () => [
+            [
+              HttpMethod.Get,
+              `/repos/owner/gated/pulls/${h.number}`,
+              GITHUB_KEY,
+            ],
+            [
+              HttpMethod.Get,
+              `/repos/owner/gated/pulls/${h.number}/reviews?per_page=100&page=1`,
+              GITHUB_KEY,
+            ],
+          ]).flat(),
         );
-        dropped(h.materials, h.gitHub.calls.length);
+        dropped(h.materials, CHECK_COUNT);
       },
     );
 

@@ -34,8 +34,10 @@ import {
   PlatformAddressKind,
   type PlatformAddress,
 } from "../../worker/contract.ts";
+import { ReviewState } from "../../repository/github.ts";
 import {
   FAKE_SSH_IDENTITY,
+  FakePullState,
   gatewayFixture,
   fakeGitHub,
   bareRepository,
@@ -51,6 +53,7 @@ const NO_CALLS = 0;
 const FIRST_REVISION = 1;
 const SINGLE_INSTANCE = 1;
 const FIRST_ATTEMPT = 1;
+const REVIEWER = 1;
 const SINGLE_CALL = 1;
 const SINGLE_ITEM = 1;
 const FAILURE_EXIT = 1;
@@ -551,7 +554,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       assert.equal((await h.node(h.G)).state, NodeState.ExternalRequested);
     },
   );
-  await t.test("E06.9 other end state blocks the objective", async () => {
+  await t.test("E06.9 a change request blocks the objective", async () => {
     const actions = await h.read<Page<ExternalAction>>([
       "mission",
       "external-action",
@@ -562,13 +565,17 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     ]);
     assert.equal(actions.items[0]?.resolution, Resolution.Unresolved);
     assert.equal(actions.items[0]?.request_evidence_id, request1.id);
-    h.gitHub.close(pr.number);
+    h.gitHub.review(pr.number, {
+      reviewer: REVIEWER,
+      state: ReviewState.ChangesRequested,
+    });
     const check = await h.write<{ results: { resolution: string }[] }>(
       ["mission", "node", "check", h.G],
       { expected_mission_version: h.M },
     );
     assert.equal(check.results[0]?.resolution, Resolution.OtherEnd);
     assert.equal((await h.node(h.G)).state, NodeState.Blocked);
+    assert.equal(h.gitHub.pulls[FIRST_INDEX]?.state, FakePullState.Open);
   });
   await t.test(
     "E06.10 unblock starts attempt 2 with a new snapshot",
@@ -602,7 +609,6 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
   await t.test(
     "E06.12 open earlier request is reused with the new commit",
     async () => {
-      h.gitHub.reopen(pr.number);
       const before = h.gitHub.calls.length;
       const item = completed(await h.request(e4)).items[0];
       assert.ok(item?.kind === ActionResultKind.Submitted);

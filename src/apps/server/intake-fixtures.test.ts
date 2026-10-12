@@ -9,7 +9,11 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
-import { GitHubPlatform, GitHubTargetKind } from "../../repository/github.ts";
+import {
+  GitHubPlatform,
+  GitHubTargetKind,
+  ReviewState,
+} from "../../repository/github.ts";
 import {
   fakeGitHub,
   fakeS3,
@@ -99,7 +103,7 @@ test("fake GitHub serves the pull-request routes and records each call", async (
   });
   assert.ok(merged.ok);
   assert.deepEqual(
-    platform.foldPullRequest(merged.value, "pull_request_merged"),
+    platform.foldPullRequest(merged.value, [], "pull_request_merged"),
     {
       end_state: CheckEndState.Expected,
       landed_commits: [MERGE_SHA],
@@ -156,7 +160,7 @@ test("fake GitHub closes a pull request and scripts the failures", async (t) => 
   });
   assert.ok(closed.ok);
   assert.equal(
-    platform.foldPullRequest(closed.value, "pull_request_merged").end_state,
+    platform.foldPullRequest(closed.value, [], "pull_request_merged").end_state,
     CheckEndState.Other,
   );
   gitHub.failPulls(HttpStatus.ServiceUnavailable);
@@ -183,10 +187,39 @@ test("fake GitHub opens a pull request without a recorded call", async (t) => {
   });
   assert.ok(opened.ok);
   assert.equal(
-    platform.foldPullRequest(opened.value, "pull_request_merged").end_state,
+    platform.foldPullRequest(opened.value, [], "pull_request_merged").end_state,
     CheckEndState.None,
   );
   assert.equal(gitHub.calls.length, ONE_CALL);
+});
+
+test("fake GitHub serves the reviews of a pull request at its head commit", async (t) => {
+  const gitHub = await fakeGitHub(t);
+  const platform = new GitHubPlatform({ baseUrl: gitHub.endpoint });
+  const number = gitHub.open({ owner: "owner", repo: "repo", ...branches });
+  const fold = async () => {
+    const pull = await platform.getPullRequest(gitHubCall(), target, {
+      number,
+    });
+    const reviews = await platform.listReviews(gitHubCall(), target, {
+      number,
+    });
+    assert.ok(pull.ok && reviews.ok);
+    return platform.foldPullRequest(
+      pull.value,
+      reviews.value,
+      "pull_request_merged",
+    ).end_state;
+  };
+  assert.equal(await fold(), CheckEndState.None);
+  gitHub.review(number, { reviewer: 1, state: ReviewState.ChangesRequested });
+  assert.equal(await fold(), CheckEndState.Other);
+  gitHub.review(number, { reviewer: 1, state: ReviewState.Approved });
+  assert.equal(await fold(), CheckEndState.None);
+  assert.equal(
+    gitHub.calls.at(-1)?.path,
+    `/repos/owner/repo/pulls/${number}/reviews?per_page=100&page=1`,
+  );
 });
 
 test("fake GitHub holds every answer until the release", async (t) => {
