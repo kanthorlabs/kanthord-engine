@@ -27,8 +27,12 @@ import {
   type VerificationRun,
 } from "./verification.ts";
 import {
+  failedVerificationReport,
+  parseJudgement,
   parseRepaired,
   ReplyRepair,
+  taskChoiceInstruction,
+  taskChoiceSchema,
   taskJudgementInstruction,
   taskJudgementSchema,
   taskRevisionInstruction,
@@ -46,6 +50,7 @@ import {
   verificationObserver,
 } from "./method-telemetry.ts";
 import {
+  nodeWork,
   RefreshResult,
   refreshAtClaim,
   refreshBeforeRelease,
@@ -388,6 +393,7 @@ export interface StepsState {
   head: string;
   nodeBranch: string;
   priorRationale: string | null;
+  rework: boolean;
   task?: TaskContent;
 }
 
@@ -432,14 +438,21 @@ export async function verifyTask(state: StepsState, task: TaskContent) {
   return (await verifyTaskRun(state, task)).verification;
 }
 
-async function verifyTaskRun(
+function verifyTaskRun(
   state: StepsState,
   task: TaskContent,
+): Promise<VerificationRun> {
+  return verifyCommands(state, task.content.verifications);
+}
+
+async function verifyCommands(
+  state: StepsState,
+  commands: readonly string[],
 ): Promise<VerificationRun> {
   const run = await runVerificationsWithOutput({
     observe: verificationObserver(state.run.spans, state.head),
     directory: state.directory,
-    commands: task.content.verifications,
+    commands,
     tested_input: {
       kind: "repository",
       binding_id: state.input.setup.repositories[0]!.binding_id,
@@ -494,10 +507,73 @@ export interface StartCheck {
   budgetEnd: { task: TaskContent | null; boundary: TaskBoundary } | null;
 }
 
+interface NodeCheck {
+  budgetEnd: boolean;
+  revised: { task: TaskContent; instruction: string } | null;
+}
+
+async function reworkNodeCheck(state: StepsState): Promise<NodeCheck> {
+  assert.ok(state.revision.tasks);
+  if (!state.rework || state.revision.tasks.length === NO_TASKS)
+    return { budgetEnd: false, revised: null };
+  const commands = state.revision.content.verifications;
+  const run = await verifyCommands(state, commands);
+  const passed = verificationPassed(run.verification, commands);
+  state.run.log("node verified", {
+    commit: state.head,
+    passed,
+    exit_codes: run.verification.results.map((result) => result.exit_code),
+  });
+  if (state.agent.budget.exhausted()) return { budgetEnd: true, revised: null };
+  if (passed) return { budgetEnd: false, revised: null };
+  const failure = failedVerificationReport(run, commands);
+  const task = await chooseTask(state, failure);
+  if (task === null) return { budgetEnd: true, revised: null };
+  return {
+    budgetEnd: false,
+    revised: {
+      task,
+      instruction: criterionRevisionInstruction(
+        state.input.setup.templates,
+        failure,
+      ),
+    },
+  };
+}
+
+async function chooseTask(
+  state: StepsState,
+  failure: string,
+): Promise<TaskContent | null> {
+  const tasks = state.revision.tasks;
+  assert.ok(tasks);
+  const last = tasks.at(-1);
+  assert.ok(last);
+  await state.agent.instruct(
+    nodeWork(state),
+    taskChoiceInstruction(state.input.setup.templates, tasks, failure),
+  );
+  if (state.agent.budget.exhausted()) return null;
+  const reply = parseJudgement(state.agent.lastText(), taskChoiceSchema);
+  const chosen = tasks.find((task) => task.filename === reply?.filename);
+  state.run.log("task chosen", {
+    task_id: (chosen ?? last).id,
+    commit: state.head,
+    fallback: chosen === undefined,
+  });
+  return chosen ?? last;
+}
+
 export async function startCheck(state: StepsState): Promise<StartCheck> {
   assert.ok(state.revision.tasks);
   assert.ok(state.head);
   const pending: PendingTask[] = [];
+  const node = await reworkNodeCheck(state);
+  if (node.budgetEnd)
+    return {
+      pending,
+      budgetEnd: { task: null, boundary: TaskBoundary.InProgress },
+    };
   for (const task of state.revision.tasks) {
     state.task = task;
     const verification = await verifyTask(state, task);
@@ -505,6 +581,10 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
     const boundary = passed ? TaskBoundary.RunPassed : TaskBoundary.RunFailed;
     if (state.agent.budget.exhausted())
       return { pending, budgetEnd: { task, boundary } };
+    if (task.id === node.revised?.task.id) {
+      pending.push({ task, boundary, instruction: node.revised.instruction });
+      continue;
+    }
     if (!passed) {
       pending.push({ task, boundary, instruction: null });
       continue;

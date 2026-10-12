@@ -106,6 +106,7 @@ export const PromptTemplate = {
   FramingWorker: "framing-worker",
   FramingWorkbench: "framing-workbench",
   TaskJudgement: "task-judgement",
+  TaskChoice: "task-choice",
   TaskRevision: "task-revision",
   CriterionRevision: "criterion-revision",
   Evaluation: "evaluation",

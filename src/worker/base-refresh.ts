@@ -37,7 +37,7 @@ export function conflictInstruction(
   });
 }
 
-function nodeWork(state: StepsState) {
+export function nodeWork(state: StepsState) {
   return renderWorkPrompt(state.input.setup.templates, {
     node_id: state.input.claim.node_id,
     revision: state.input.claim.pinned_revision,
