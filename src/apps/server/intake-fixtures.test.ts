@@ -46,6 +46,7 @@ const NOT_MODIFIED_STATUS = 304;
 const CREATED_STATUS = 201;
 const EVENTS_PATH = "/repos/owner/repo/events?per_page=100";
 const ONE_PULL = 1;
+const ONE_CHANGE_REQUEST = 1;
 const NO_CALLS = 0;
 const GITHUB_DEADLINE_MS = 5000;
 const GIT_DEADLINE_MS = 20000;
@@ -219,6 +220,36 @@ test("fake GitHub serves the reviews of a pull request at its head commit", asyn
   assert.equal(
     gitHub.calls.at(-1)?.path,
     `/repos/owner/repo/pulls/${number}/reviews?per_page=100&page=1`,
+  );
+});
+
+test("fake GitHub serves the comments of a review for the change request read", async (t) => {
+  const gitHub = await fakeGitHub(t);
+  const platform = new GitHubPlatform({ baseUrl: gitHub.endpoint });
+  const number = gitHub.open({ owner: "owner", repo: "repo", ...branches });
+  const comments = [{ path: "src/a.ts", line: 3, body: "rename" }];
+  const reviewId = gitHub.review(number, {
+    reviewer: 1,
+    state: ReviewState.ChangesRequested,
+    body: "fix the name",
+    comments,
+  });
+  const read = await platform.getChangeRequests(gitHubCall(), target, {
+    number,
+  });
+  assert.ok(read.ok);
+  assert.equal(read.value.change_requests.length, ONE_CHANGE_REQUEST);
+  assert.deepEqual(read.value.change_requests[0], {
+    review_id: reviewId,
+    reviewer: "reviewer-1",
+    body: "fix the name",
+    submitted_at: read.value.change_requests[0]?.submitted_at,
+    commit_id: read.value.head_commit,
+    comments,
+  });
+  assert.equal(
+    gitHub.calls.at(-1)?.path,
+    `/repos/owner/repo/pulls/${number}/reviews/${reviewId}/comments?per_page=100&page=1`,
   );
 });
 

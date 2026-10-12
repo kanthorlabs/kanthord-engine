@@ -36,6 +36,7 @@ const NOT_MODIFIED_STATUS = 304;
 const EVENT_PAGE_SIZE = 100;
 const REVIEW_PAGE_SIZE = 100;
 const REVIEW_PAGE_LIMIT = 30;
+const NO_CHANGE_REQUESTS = 0;
 const EVENT_ID_PATTERN = /^(0|[1-9][0-9]*)$/;
 const SAME_ORDER = 0;
 const BEFORE_ORDER = -1;
@@ -185,6 +186,20 @@ export interface CheckFold {
   landed_commits: string[];
 }
 
+export interface ChangeRequest {
+  review_id: number;
+  reviewer: string;
+  body: string;
+  submitted_at: string | null;
+  commit_id: string;
+  comments: { path: string; line: number | null; body: string }[];
+}
+
+export interface ChangeRequestRead {
+  head_commit: string;
+  change_requests: ChangeRequest[];
+}
+
 export interface ReviewCommentPage {
   body: unknown;
   next_cursor: string | null;
@@ -240,6 +255,23 @@ const reviewListSchema = z.array(
   }),
 );
 type Review = z.infer<typeof reviewListSchema>[number];
+const changeRequestReviewListSchema = z.array(
+  z.looseObject({
+    id: z.int(),
+    user: z.looseObject({ id: z.int(), login: z.string() }).nullable(),
+    state: z.string(),
+    commit_id: z.string().nullable().optional(),
+    body: z.string().nullable().optional(),
+    submitted_at: z.string().nullable().optional(),
+  }),
+);
+const reviewCommentListSchema = z.array(
+  z.looseObject({
+    path: z.string(),
+    line: z.int().nullable().optional(),
+    body: z.string(),
+  }),
+);
 
 export interface GitHubOptions {
   baseUrl?: string;
@@ -530,14 +562,17 @@ function canonicalEventBody(event: object): Uint8Array | null {
   }
 }
 
-function changesRequested(reviews: readonly Review[], head: string): boolean {
+function currentChangeRequests<R extends Review>(
+  reviews: readonly R[],
+  head: string,
+): R[] {
   assert.ok(head.length >= MIN_SEGMENT_LENGTH);
-  const latest = new Map<number, Review>();
+  const latest = new Map<number, R>();
   for (const review of reviews) {
     if (review.user !== null && DECISIVE_REVIEW_STATES.has(review.state))
       latest.set(review.user.id, review);
   }
-  return [...latest.values()].some(
+  return [...latest.values()].filter(
     (review) =>
       review.state === ReviewState.ChangesRequested &&
       review.commit_id === head,
@@ -708,22 +743,84 @@ export class GitHubPlatform {
   ): Promise<GitHubAnswer<unknown[]>> {
     assert.ok(Number.isInteger(pullRequest.number));
     assert.ok(pullRequest.number >= MIN_PULL_REQUEST_NUMBER);
-    const reviews: unknown[] = [];
+    return this.#listPages(
+      call,
+      target,
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+      { pull_number: pullRequest.number },
+    );
+  }
+
+  async getChangeRequests(
+    call: GitHubCall,
+    target: GitHubTarget,
+    pullRequest: { number: number },
+  ): Promise<GitHubAnswer<ChangeRequestRead>> {
+    assert.ok(Number.isInteger(pullRequest.number));
+    assert.ok(pullRequest.number >= MIN_PULL_REQUEST_NUMBER);
+    const body = await this.getPullRequest(call, target, pullRequest);
+    if (!body.ok) return body;
+    const head = pullRequestHeadSchema.safeParse(body.value);
+    if (!head.success) return unreadableBody(CallKind.Read);
+    const listed = await this.listReviews(call, target, pullRequest);
+    if (!listed.ok) return listed;
+    const reviews = changeRequestReviewListSchema.safeParse(listed.value);
+    if (!reviews.success) return unreadableBody(CallKind.Read);
+    const changeRequests: ChangeRequest[] = [];
+    for (const review of currentChangeRequests(
+      reviews.data,
+      head.data.head.sha,
+    )) {
+      const comments = await this.#listPages(
+        call,
+        target,
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments",
+        { pull_number: pullRequest.number, review_id: review.id },
+      );
+      if (!comments.ok) return comments;
+      const parsed = reviewCommentListSchema.safeParse(comments.value);
+      if (!parsed.success) return unreadableBody(CallKind.Read);
+      assert.ok(review.user !== null);
+      changeRequests.push({
+        review_id: review.id,
+        reviewer: review.user.login,
+        body: review.body ?? "",
+        submitted_at: review.submitted_at ?? null,
+        commit_id: head.data.head.sha,
+        comments: parsed.data.map((comment) => ({
+          path: comment.path,
+          line: comment.line ?? null,
+          body: comment.body,
+        })),
+      });
+    }
+    return {
+      ok: true,
+      value: {
+        head_commit: head.data.head.sha,
+        change_requests: changeRequests,
+      },
+    };
+  }
+
+  async #listPages(
+    call: GitHubCall,
+    target: GitHubTarget,
+    route: string,
+    parameters: Record<string, unknown>,
+  ): Promise<GitHubAnswer<unknown[]>> {
+    const items: unknown[] = [];
     for (let page = FIRST_PAGE; page <= REVIEW_PAGE_LIMIT; page += 1) {
       const answer = await this.#exchange(call, target, {
         kind: CallKind.Read,
-        route: "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
-        parameters: {
-          pull_number: pullRequest.number,
-          per_page: REVIEW_PAGE_SIZE,
-          page,
-        },
+        route,
+        parameters: { ...parameters, per_page: REVIEW_PAGE_SIZE, page },
       });
       if (!answer.ok) return answer;
       if (!Array.isArray(answer.value.data))
         return unreadableBody(CallKind.Read);
-      reviews.push(...(answer.value.data as unknown[]));
-      if (!hasNextLink(answer.value.link)) return { ok: true, value: reviews };
+      items.push(...(answer.value.data as unknown[]));
+      if (!hasNextLink(answer.value.link)) return { ok: true, value: items };
     }
     return unreadableBody(CallKind.Read);
   }
@@ -780,11 +877,13 @@ export class GitHubPlatform {
       return { end_state: CheckEndState.Other, landed_commits: [] };
     const { head } = pullRequestHeadSchema.parse(body);
     return {
-      end_state: changesRequested(reviewListSchema.parse(reviews), head.sha)
-        ? CheckEndState.Other
-        : pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT
-          ? CheckEndState.Conflict
-          : CheckEndState.None,
+      end_state:
+        currentChangeRequests(reviewListSchema.parse(reviews), head.sha)
+          .length > NO_CHANGE_REQUESTS
+          ? CheckEndState.Other
+          : pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT
+            ? CheckEndState.Conflict
+            : CheckEndState.None,
       landed_commits: [],
     };
   }

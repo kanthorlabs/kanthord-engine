@@ -552,7 +552,7 @@ const GITHUB_NOT_MODIFIED_STATUS = 304;
 const NO_HOLD_PASS = 0;
 const HOLD_PASS_STEP = 1;
 const GITHUB_PULL_ROUTE =
-  /^\/repos\/([^/]+)\/([^/]+)\/pulls(?:\/([1-9][0-9]*)(\/comments|\/reviews)?)?$/;
+  /^\/repos\/([^/]+)\/([^/]+)\/pulls(?:\/([1-9][0-9]*)(\/comments|\/reviews(?:\/([1-9][0-9]*)\/comments)?)?)?$/;
 const GITHUB_MERGE_ROUTE =
   /^\/repos\/([^/]+)\/([^/]+)\/pulls\/([1-9][0-9]*)\/merge$/;
 const GITHUB_REPOSITORY_ROUTE = /^\/repos\/([^/]+)\/([^/]+)$/;
@@ -593,9 +593,19 @@ export interface FakePullRequest {
 }
 
 export interface FakeReview {
-  user: { id: number };
+  id: number;
+  user: { id: number; login: string };
   state: string;
   commit_id: string;
+  body: string;
+  submitted_at: string;
+  comments: FakeReviewComment[];
+}
+
+export interface FakeReviewComment {
+  path: string;
+  line: number | null;
+  body: string;
 }
 
 export interface FakeGitHubCall {
@@ -746,7 +756,7 @@ function routePull(
 ): FakeGitHubAnswer {
   const route = GITHUB_PULL_ROUTE.exec(url.pathname);
   if (!route) return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
-  const [, owner, repo, number, suffix] = route;
+  const [, owner, repo, number, suffix, reviewId] = route;
   assert.ok(owner && repo);
   if (number === undefined) {
     return method === HttpMethod.Post
@@ -761,9 +771,21 @@ function routePull(
     return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
   if (suffix === undefined)
     return { status: HttpStatus.OK, body: pullBody(pull) };
+  if (reviewId !== undefined) {
+    const review = pull.reviews.find((item) => item.id === +reviewId);
+    return review
+      ? { status: HttpStatus.OK, body: review.comments }
+      : { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
+  }
   return {
     status: HttpStatus.OK,
-    body: suffix === GITHUB_REVIEWS_SUFFIX ? pull.reviews : [],
+    body:
+      suffix === GITHUB_REVIEWS_SUFFIX
+        ? pull.reviews.map(({ comments, ...review }) => {
+            assert.ok(Array.isArray(comments));
+            return review;
+          })
+        : [],
   };
 }
 
@@ -1007,14 +1029,28 @@ export async function fakeGitHub(t: TestContext) {
     },
     review(
       number: number,
-      review: { reviewer: number; state: string; commit_id?: string },
-    ): void {
+      review: {
+        reviewer: number;
+        state: string;
+        commit_id?: string;
+        body?: string;
+        comments?: FakeReviewComment[];
+      },
+    ): number {
       const pull = changePull(state, number);
+      const id =
+        state.pulls.reduce((count, item) => count + item.reviews.length, 0) +
+        GITHUB_NEXT_PULL_STEP;
       pull.reviews.push({
-        user: { id: review.reviewer },
+        id,
+        user: { id: review.reviewer, login: `reviewer-${review.reviewer}` },
         state: review.state,
         commit_id: review.commit_id ?? pull.head_sha,
+        body: review.body ?? "",
+        submitted_at: new Date().toISOString(),
+        comments: review.comments ?? [],
       });
+      return id;
     },
     refuseMerge(status: number | null): void {
       assert.ok(status === null || Number.isInteger(status));

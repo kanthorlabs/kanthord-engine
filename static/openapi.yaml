@@ -298,6 +298,8 @@ paths:
     $ref: ./openapi/worker/catalog.list.yaml#/pathItem
   /api/worker/credential:
     $ref: ./openapi/worker/credential.yaml#/pathItem
+  /api/worker/execution/{execution_id}/change-request:
+    $ref: ./openapi/worker/execution.change_request.get.yaml#/pathItem
   /api/worker/execution/{execution_id}/setup:
     $ref: ./openapi/worker/execution.setup.get.yaml#/pathItem
   /api/worker/handover:

@@ -14,6 +14,7 @@ export interface MethodClients {
     | "execution.objective.list"
     | "execution.objective.outcome.list"
     | "execution.objective.evidence.list"
+    | "execution.clearedOutcome.get"
     | "execution.cleared_assessment.get"
     | "execution.rework_assessment.get"
   >;
@@ -21,5 +22,8 @@ export interface MethodClients {
     ServiceClient<typeof schedulerOperations>,
     "executionRelease" | "claimGet"
   >;
-  worker: Pick<ServiceClient<typeof workerOperations>, "action.request">;
+  worker: Pick<
+    ServiceClient<typeof workerOperations>,
+    "action.request" | "execution.change_request.get"
+  >;
 }
