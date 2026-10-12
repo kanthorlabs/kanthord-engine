@@ -302,7 +302,7 @@ test("Worker run joins cancellation before and after startup", async (t) => {
 
 const AGENT = "swe@1";
 const OTHER_AGENT = "re@1";
-const WORKER = "general@1";
+const WORKER = "coder@1";
 const EXTERNAL_HARNESS = "claude-code";
 const MODEL = "claude-sonnet-4-5";
 const MISSING_MODEL = "claude-3-5-sonnet-20241022";
@@ -1291,18 +1291,15 @@ test("catalog pages released declarations once per commit and registrations add 
   const before = f.invoke("catalog.list", null, {});
   assert.deepEqual(
     before.items.map((item) => item.name),
-    ["developer@1", "reviewer@1"],
+    ["coder@1", "reviewer@1"],
   );
   assert.equal(before.next_cursor, null);
   const first = f.invoke("catalog.list", null, {}, { limit: pageSize });
   assert.deepEqual(
     first.items.map((item) => item.name),
-    ["developer@1"],
+    ["coder@1"],
   );
-  assert.equal(
-    first.next_cursor,
-    Buffer.from("developer@1").toString("base64url"),
-  );
+  assert.equal(first.next_cursor, Buffer.from("coder@1").toString("base64url"));
   const second = f.invoke(
     "catalog.list",
     null,

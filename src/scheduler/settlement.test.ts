@@ -74,7 +74,7 @@ test("execution attribution reads retained registration and tombstoned binding a
     client_id: createIdentity("client_identity"),
     name: "retired-program",
   };
-  const workerName = "general@1";
+  const workerName = "coder@1";
   h.dependencies.registrations.clientAttributionOf = (_tx, runtimeIdentity) => {
     assert.equal(runtimeIdentity, row.runtime_identity);
     return attribution;

@@ -269,7 +269,7 @@ export function fakeMachines(
           binding.capacity >= NO_INSTANCES,
       );
       const previous = registrations.get(client.client_id);
-      if (previous) return { ...previous, worker_name: "general@1" };
+      if (previous) return { ...previous, worker_name: "coder@1" };
       const count = [...registrations.values()].filter(
         (entry) =>
           entry.resource_identity === client.resource_identity &&
@@ -283,7 +283,7 @@ export function fakeMachines(
         );
       const registration = {
         ...client,
-        worker_name: "general@1",
+        worker_name: "coder@1",
         runtime_identity: createIdentity("worker_instance"),
         registered_at: now,
       };

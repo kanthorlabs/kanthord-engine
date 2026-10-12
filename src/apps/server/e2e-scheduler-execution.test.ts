@@ -201,7 +201,7 @@ async function setup(t: TestContext, short = false) {
     general: {
       kind: "worker",
       config: {
-        worker: "general@1",
+        worker: "coder@1",
         instance_count: 1,
         entries: [{ agent: "swe@1", ...CONFIGURATION }],
         ...(short ? { resource_budget: { turns: 1, wall_time_ms: 1 } } : {}),

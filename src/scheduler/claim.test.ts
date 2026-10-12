@@ -46,7 +46,7 @@ export function claimHarness(
   };
   const binding = {
     binding_id: row.worker_binding_id,
-    worker_name: "general@1",
+    worker_name: "coder@1",
     instance_count: 1,
     tombstone: false,
     resource_budget: null as { wall_time_ms: number } | null,

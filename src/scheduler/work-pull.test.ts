@@ -41,7 +41,7 @@ function harness(t: TestContext) {
   );
   h.dependencies.bindings.workerBindingOf = () => ({
     binding_id: row.worker_binding_id,
-    worker_name: "general@1",
+    worker_name: "coder@1",
     instance_count: 2,
     tombstone: false,
   });

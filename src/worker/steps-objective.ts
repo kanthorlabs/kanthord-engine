@@ -287,12 +287,10 @@ export async function runTask(
   task: TaskContent,
   initialBoundary: TaskBoundary = TaskBoundary.InProgress,
   initialInstruction: string | null = null,
-  worked = false,
 ): Promise<TaskResult> {
   const budget = state.agent.budget;
   let instruction = initialInstruction;
   let boundary = initialBoundary;
-  let workDone = worked;
   const ended = (boundary: TaskBoundary): TaskResult => ({
     kind: TaskResultKind.BudgetEnd,
     boundary,
@@ -303,9 +301,7 @@ export async function runTask(
   while (!budget.exhausted()) {
     await state.run.checkClaim();
     boundary = TaskBoundary.InProgress;
-    if (workDone) workDone = false;
-    else if (instruction === null)
-      await state.agent.prompt(taskWork(state, task));
+    if (instruction === null) await state.agent.prompt(taskWork(state, task));
     else await state.agent.instruct(taskWork(state, task), instruction);
     if (budget.exhausted()) return ended(TaskBoundary.InProgress);
     const commit = await commitWork(

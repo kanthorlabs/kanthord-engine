@@ -22,7 +22,7 @@ import { instanceRecord, listInstanceRecords } from "./instance-record.ts";
 const NOW = 1000;
 const PROJECT = createIdentity("project");
 const RESOURCE = "worker:kanthord:general";
-const NATIVE = "general@1";
+const NATIVE = "coder@1";
 const PLACEMENT = "worker";
 const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const BINDING = {
@@ -30,7 +30,7 @@ const BINDING = {
   name: "test_worker",
   project_name: "test_project",
   revision: 1,
-  worker_name: "general@1",
+  worker_name: "coder@1",
   instance_count: 3,
   resource_budget: null,
   entries: [],
@@ -106,7 +106,7 @@ test("instance records distinguish native/external placement and pure Scheduler 
     );
     const executionId = createIdentity("execution");
     const before = readAllLive(tx);
-    for (const workerName of ["general@1", "claude-code@1"])
+    for (const workerName of ["coder@1", "claude-code@1"])
       for (const activity of Object.values(InstanceActivity)) {
         const record = instanceRecord(
           tx,

@@ -35,7 +35,7 @@ test("host takes handover before setup and method, discards on every method end"
   };
   const setup: ExecutionSetup = {
     execution_id: claim.execution_id,
-    worker_name: "general@1",
+    worker_name: "coder@1",
     agents: [
       {
         agent_name: "swe@1",

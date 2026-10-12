@@ -15,7 +15,7 @@ test("registration returns server facts with a fresh key and translates refusal 
   const facts = {
     runtimeIdentity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     resourceIdentity: "worker:kanthord:test",
-    workerName: "general@1",
+    workerName: "coder@1",
   };
   const keys: string[] = [];
   t.mock.method(

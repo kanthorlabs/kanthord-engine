@@ -32,8 +32,8 @@ const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
 const FIRST_ITEM = 0;
 
 export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
-  "general@1": {
-    name: "general@1",
+  "coder@1": {
+    name: "coder@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Steps,
     agent_names: ["swe@1"],
@@ -50,15 +50,6 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     declared_node_states: ["Waiting", "External.Requested"],
     required_node_format: REQUIRED_NODE_FORMAT,
   },
-  "developer@1": {
-    name: "developer@1",
-    host: WorkerHost.Kanthord,
-    method: WorkerMethod.ReviewedSteps,
-    agent_names: ["swe@1", "re@1"],
-    resource_budget: NATIVE_RESOURCE_BUDGET,
-    declared_node_states: ["Available"],
-    required_node_format: REQUIRED_NODE_FORMAT,
-  },
   "claude-code@1": {
     name: "claude-code@1",
     host: WorkerHost.ExternalHarness,
@@ -67,18 +58,10 @@ export const WORKER_CATALOG: Readonly<Record<string, WorkerDeclaration>> = {
     declared_node_states: ["Available", "Waiting", "External.Requested"],
     required_node_format: REQUIRED_NODE_FORMAT,
   },
-  "opencode@1": {
-    name: "opencode@1",
-    host: WorkerHost.ExternalHarness,
-    harness: "opencode",
-    resource_budget: EXTERNAL_RESOURCE_BUDGET,
-    declared_node_states: ["Available", "Waiting", "External.Requested"],
-    required_node_format: REQUIRED_NODE_FORMAT,
-  },
 };
 
 export const RELEASED_WORKER_NAMES: readonly string[] = [
-  "developer@1",
+  "coder@1",
   "reviewer@1",
 ];
 

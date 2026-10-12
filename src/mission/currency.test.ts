@@ -26,7 +26,7 @@ const FIRST_ATTEMPT = 1;
 const SECOND_ATTEMPT = 2;
 const NOW = 100;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
-const WORKER = "general@1";
+const WORKER = "coder@1";
 
 function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"), {

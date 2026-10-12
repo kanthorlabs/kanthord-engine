@@ -20,7 +20,12 @@ import {
   PromptConsumer,
   systemPrompt,
 } from "../agent/prompt-render.ts";
-import { anthropicSetup, WORKING_LAYER_ALL_ON } from "./test-support.ts";
+import {
+  anthropicSetup,
+  TWO_AGENT_WORKER,
+  twoAgentDeclarationOf,
+  WORKING_LAYER_ALL_ON,
+} from "./test-support.ts";
 import { WorkerErrorCode } from "./contract.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 
@@ -106,7 +111,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     workerBindingRowOf: () => ({
       binding_id: claim.workerBindingId,
       project_id: claim.projectId,
-      resource_identity: "worker:general@1",
+      resource_identity: "worker:coder@1",
       tombstone: false,
       disabled: false,
       worker_name: setup.worker_name,
@@ -218,7 +223,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.deepEqual(pinned.repositories[0]?.working_layer, workingLayer);
 });
 
-test("setup answers one entry per agent of developer@1 with its own prompt and pinned credential", async (t) => {
+test("setup answers one entry per agent of a two-agent worker with its own prompt and pinned credential", async (t) => {
   const store = new Store(":memory:");
   t.after(() => store.close());
   const setup = anthropicSetup();
@@ -259,10 +264,10 @@ test("setup answers one entry per agent of developer@1 with its own prompt and p
       workerBindingRowOf: () => ({
         binding_id: claim.workerBindingId,
         project_id: claim.projectId,
-        resource_identity: "worker:developer@1",
+        resource_identity: `worker:${TWO_AGENT_WORKER}`,
         tombstone: false,
         disabled: false,
-        worker_name: "developer@1",
+        worker_name: TWO_AGENT_WORKER,
         entries: [],
         resource_budget: null,
       }),
@@ -278,7 +283,7 @@ test("setup answers one entry per agent of developer@1 with its own prompt and p
       schedulerClaims: { agentSelectionsOf: () => [] },
     },
     {
-      declarationOf: (name: string) => getWorkerDeclaration(name) ?? null,
+      declarationOf: twoAgentDeclarationOf,
       workerAgentView: (_tx, _worker, agent) => ({
         defaults: null,
         chain: [],

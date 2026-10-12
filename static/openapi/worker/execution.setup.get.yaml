@@ -228,10 +228,6 @@ components:
               type: string
             repair:
               type: string
-            review:
-              type: string
-            fix:
-              type: string
             conflict:
               type: string
           required:
@@ -245,8 +241,6 @@ components:
             - evaluation
             - report
             - repair
-            - review
-            - fix
             - conflict
           additionalProperties: false
         resource_budget:

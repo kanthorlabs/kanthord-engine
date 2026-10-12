@@ -85,7 +85,7 @@ and an idempotency key alone cannot reconcile an uncertain repository write.
 
 | Value                      | Type and validation                                                                                                                                                                                                                                                                                         |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WorkerName`               | Nonempty exact versioned catalog key, such as `general@1`. Required version; no implicit latest version or alias. Unknown names fail lookup. This is a natural key, not a ULID.                                                                                                                             |
+| `WorkerName`               | Nonempty exact versioned catalog key, such as `coder@1`. Required version; no implicit latest version or alias. Unknown names fail lookup. This is a natural key, not a ULID.                                                                                                                               |
 | `AgentName`                | Nonempty exact role/version key in the agent catalog, such as `swe@1`; never a worker name. Unknown names fail lookup.                                                                                                                                                                                      |
 | `ProjectId`                | Opaque `project_<ulid>` identity using the declared project prefix.                                                                                                                                                                                                                                         |
 | `RuntimeIdentity`          | `worker_instance_<ulid>` under the [Worker identity ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-identities-of-the-worker-service), validated with `identitySchema("worker_instance")` of the kernel. Consumers retain the returned value exactly.  |
@@ -247,17 +247,15 @@ The catalog describes supplied static templates. It is not a
 runtime plugin store, and registration does not add entries. The declared workers
 and their capabilities are:
 
-| Worker          | Host                           | Method / agent                   | Declared node states                         |
-| --------------- | ------------------------------ | -------------------------------- | -------------------------------------------- |
-| `general@1`     | kanthord                       | steps / `swe@1`                  | `Available`                                  |
-| `reviewer@1`    | kanthord                       | evaluation / `re@1`              | `Waiting`, `External.Requested`              |
-| `developer@1`   | kanthord                       | reviewed_steps / `swe@1`, `re@1` | `Available`                                  |
-| `claude-code@1` | external harness `claude-code` | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
-| `opencode@1`    | external harness `opencode`    | Harness-owned                    | `Available`, `Waiting`, `External.Requested` |
+| Worker          | Host                           | Method / agent      | Declared node states                         |
+| --------------- | ------------------------------ | ------------------- | -------------------------------------------- |
+| `coder@1`       | kanthord                       | steps / `swe@1`     | `Available`                                  |
+| `reviewer@1`    | kanthord                       | evaluation / `re@1` | `Waiting`, `External.Requested`              |
+| `claude-code@1` | external harness `claude-code` | Harness-owned       | `Available`, `Waiting`, `External.Requested` |
 
-All five declarations are in the current catalog; native runtime execution and
-external-harness integration remain later work. `list` returns only the released
-workers `developer@1` and `reviewer@1`. `get` and binding validation accept all five declarations. All five require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
+All three declarations are in the current catalog; external-harness integration
+remains later work. `list` returns only the released native workers `coder@1`
+and `reviewer@1`. `get` and binding validation accept all three declarations. All three require a name, a requirement, a criterion, verifications and bindings. No worker named `tdd@1`
 is promised by this specification.
 
 ### `get <worker-name>`
@@ -271,12 +269,12 @@ kanthord worker get <worker-name>
 HTTP `200` returns the summary fields plus:
 
 - `harness: string` for an external worker, naming its hosting harness.
-- `method: "steps" | "evaluation" | "reviewed_steps"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. The first agent does the work, and `re@1` of `developer@1` reviews each task commit against the task criterion, every node criterion item that the task touches, and the default standard.
+- `method: "steps" | "evaluation"` and `agent_names: AgentName[]` for a native worker, in the order of the declaration. `coder@1` judges each task itself. `reviewer@1` reviews the whole node after the release.
 - `resource_budget` for every worker, with a required positive safe integer
   `wall_time_ms` and an optional positive safe integer `turns`.
-  `general@1`, `reviewer@1` and `developer@1` default to
-  `{ turns: 200, wall_time_ms: 7200000 }`; `claude-code@1` and `opencode@1`
-  default to `{ wall_time_ms: 7200000 }`. Every worker binding may override the
+  `coder@1` and `reviewer@1` default to
+  `{ turns: 200, wall_time_ms: 7200000 }`; `claude-code@1`
+  defaults to `{ wall_time_ms: 7200000 }`. Every worker binding may override the
   default. [Stop and budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#stop-and-budget)
   defines a turn as one `turn_end` event of the pi agent loop and measures wall
   time from the execution's `created_at`. After budget end, execution code

@@ -233,7 +233,7 @@ test("worker catalog CLI lists ascending pages", async (t) => {
   const page = JSON.parse(first.stdout);
   assert.deepEqual(
     page.items.map((item: { name: string }) => item.name),
-    ["developer@1"],
+    ["coder@1"],
   );
   assert.equal(typeof page.next_cursor, STRING_TYPE);
   const second = await command(
@@ -256,7 +256,7 @@ test("worker catalog CLI gets native and external budgets and reports missing wo
     KANTHORD_ENDPOINT: fixture.endpoint,
     KANTHORD_TOKEN: fixture.token,
   };
-  const native = await command(["worker", "get", "general@1"], env);
+  const native = await command(["worker", "get", "coder@1"], env);
   assert.equal(native.code, ExitCode.Success, native.stderr);
   const declaration = JSON.parse(native.stdout);
   assert.deepEqual(declaration.resource_budget, {
@@ -291,7 +291,7 @@ test("worker catalog requires human access and preserves pagination errors", asy
   const refused = await command(["worker", "list"], env);
   assert.equal(refused.code, ExitCode.Failure);
   assert.match(refused.stderr, /^gateway\.authentication\.unauthorized:/);
-  const missing = await command(["worker", "get", "general@1"], {
+  const missing = await command(["worker", "get", "coder@1"], {
     ...env,
     KANTHORD_TOKEN: undefined,
   });

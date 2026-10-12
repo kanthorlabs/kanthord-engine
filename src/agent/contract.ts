@@ -111,8 +111,6 @@ export const PromptTemplate = {
   Evaluation: "evaluation",
   Report: "report",
   Repair: "repair",
-  Review: "review",
-  Fix: "fix",
   Conflict: "conflict",
 } as const;
 export type PromptTemplate =

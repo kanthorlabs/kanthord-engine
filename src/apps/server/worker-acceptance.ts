@@ -131,7 +131,7 @@ export async function workerAcceptance(t: TestContext, host = false) {
       general: {
         kind: "worker",
         config: {
-          worker: "general@1",
+          worker: "coder@1",
           instance_count: 1,
           entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
         },

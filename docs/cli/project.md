@@ -96,7 +96,7 @@ commands without `[L]` reject pagination options.
 - `Timestamp`: JSON safe integer of Unix milliseconds in UTC.
 - `WorkerName` and `AgentName`: nonempty exact natural-key
   strings from the relevant supported catalog, not prefixed IDs. Versioned
-  names such as `general@1` are whole keys. No alias expansion or latest-version
+  names such as `coder@1` are whole keys. No alias expansion or latest-version
   default is proposed.
 
 The local [identity helper](../../src/kernel/identity.ts) supplies the prefixed-ULID mechanism; the Project sibling declares the entity prefixes.
@@ -291,7 +291,7 @@ This example uses the proposed kind-specific fields below:
     "general-main": {
       "kind": "worker",
       "config": {
-        "worker": "general@1",
+        "worker": "coder@1",
         "instance_count": 1,
         "resource_budget": { "turns": 50, "wall_time_ms": 1800000 },
         "entries": [{ "agent": "swe@1", "reasoning_effort": "high" }]
@@ -362,7 +362,7 @@ Coverage and suitability follow [Repository configuration and policy](https://gi
 A worker binding's `config` adds:
 
 - `worker`: **required**, `WorkerName`; no default. It must name a registered
-  static template. The planned initial native templates are `general@1` and
+  static template. The native templates are `coder@1` and
   `reviewer@1`; examples involving `tdd@1` do not make that worker available.
 - `instance_count`: **required**, integer from 0 to 64; no default. The value 0 makes the binding unavailable. An invalid value refuses the write with `project.bindings.worker.instance_count_range`.
 - `resource_budget`: **optional** for a native worker, `{ turns, wall_time_ms }`.
