@@ -12,7 +12,13 @@ import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "./contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { runStepsInitiative } from "./steps-initiative.ts";
-import { DeadlineExceeded } from "../kernel/context.ts";
+import {
+  DeadlineExceeded,
+  throwIfCancelled,
+  type CancellationContext,
+} from "../kernel/context.ts";
+import { ExecutionBudget } from "./budget.ts";
+import { executionBoundary } from "./native-method.ts";
 import { setTimeout } from "node:timers/promises";
 
 const EVIDENCE_UPLOAD_COUNT = 1;
@@ -130,6 +136,10 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
           verifications: [],
         },
       } as unknown as Revision,
+      new ExecutionBudget({
+        ...claim,
+        resource_budget: setup.resource_budget,
+      }),
       open,
     );
     if (scenario.further === null) await assert.rejects(pending, ExecutionStop);
@@ -204,10 +214,90 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
         { setup, claim, workspaces, transport: {} as RepositoryTransport },
         run,
         {} as Revision,
+        new ExecutionBudget({
+          ...claim,
+          resource_budget: setup.resource_budget,
+        }),
         open,
       ),
       { kind: "released", furtherWork: true },
     );
     assert.equal(releases, EXPECTED_RELEASES);
   }
+});
+
+test("an initiative that its agent deadline cuts releases with further work and no failure stop", async (t) => {
+  const setup = anthropicSetup({ repositories: [] });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const page = async () => ({
+    type: "completed",
+    status: 200,
+    data: { items: [], next_cursor: null },
+  });
+  const releases: unknown[] = [];
+  const clients = {
+    mission: {
+      "execution.objective.list": page,
+      "execution.objective.outcome.list": page,
+      "execution.objective.evidence.list": page,
+    },
+    scheduler: {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
+        return { type: "completed", status: 200, data: {} };
+      },
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const budget = new ExecutionBudget({
+    ...claim,
+    resource_budget: setup.resource_budget,
+  });
+  let context: CancellationContext | undefined;
+  const open = async () => {
+    context = budget.agentContext(run.operationContext);
+    return {
+      budget,
+      async instruct() {
+        context!.cancel(new DeadlineExceeded());
+        throwIfCancelled(context!);
+      },
+      lastText: () => undefined,
+    } as unknown as NativeAgent;
+  };
+  const workspaces = WorkspaceRoot.open(temporary(t));
+  const end = await executionBoundary(run, () =>
+    runStepsInitiative(
+      { setup, claim, workspaces, transport: {} as RepositoryTransport },
+      run,
+      {
+        content: {
+          name: "initiative",
+          requirement: "report",
+          criterion: "report",
+          verifications: [],
+        },
+      } as unknown as Revision,
+      budget,
+      open,
+    ),
+  );
+  assert.deepEqual(end, { kind: "released", furtherWork: true });
+  assert.deepEqual(releases, [{ further_work: true, stop: null }]);
 });

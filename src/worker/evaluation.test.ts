@@ -3,7 +3,13 @@ import { test } from "node:test";
 import { existsSync } from "node:fs";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { background } from "../kernel/context.ts";
+import {
+  background,
+  DeadlineExceeded,
+  throwIfCancelled,
+  type CancellationContext,
+} from "../kernel/context.ts";
+import { ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import { anthropicSetup } from "./test-support.ts";
@@ -359,6 +365,10 @@ test("evaluation writes failed-verification assessments without inference and ga
     const pending = runEvaluation(
       { setup, claim, workspaces, transport: {} as RepositoryTransport },
       run,
+      new ExecutionBudget({
+        ...claim,
+        resource_budget: setup.resource_budget,
+      }),
       open,
     );
     if (scenario.stop) await assert.rejects(pending, { reason: scenario.stop });
@@ -390,4 +400,112 @@ test("evaluation writes failed-verification assessments without inference and ga
       false,
     );
   }
+});
+
+test("an evaluation that its agent deadline cuts ends with no assessment and no operation failure", async (t) => {
+  const setup = anthropicSetup({ repositories: [] });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const assetId = createIdentity("evidence_asset");
+  const address = { kind: "produced", sha256: "a".repeat(64) };
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  let assessments = 0;
+  const releases: unknown[] = [];
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            name: "objective",
+            requirement: "work",
+            criterion: "met",
+            verifications: ["true"],
+            bindings: [],
+          },
+          tasks: [],
+        }),
+      "execution.evidence.list": async () =>
+        complete({
+          items: [
+            {
+              id: "placed",
+              assets: [{ id: assetId, kind: "produced", address }],
+            },
+          ],
+          next_cursor: null,
+        }),
+      "execution.evidence.asset.content.get": async () =>
+        complete({
+          asset_id: assetId,
+          address,
+          data: Buffer.from("report").toString("base64"),
+          encoding: "base64",
+          media_type: "text/markdown",
+        }),
+      "evidence.submit": async () =>
+        complete({ evidence: { id: "verification" } }),
+      "assessment.submit": async () => {
+        assessments++;
+        return complete({ outcome: { id: "outcome" } });
+      },
+    },
+    scheduler: {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
+        return complete({});
+      },
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const budget = new ExecutionBudget({
+    ...claim,
+    resource_budget: setup.resource_budget,
+  });
+  let context: CancellationContext | undefined;
+  const open = async () => {
+    context = budget.agentContext(run.operationContext);
+    return {
+      budget,
+      async instruct() {
+        context!.cancel(new DeadlineExceeded());
+        throwIfCancelled(context!);
+      },
+      lastText: () => undefined,
+    } as unknown as NativeAgent;
+  };
+  const workspaces = WorkspaceRoot.open(temporary(t));
+  await executionBoundary(run, () =>
+    runEvaluation(
+      { setup, claim, workspaces, transport: {} as RepositoryTransport },
+      run,
+      budget,
+      open,
+    ),
+  );
+  assert.equal(assessments, NO_RELEASES);
+  assert.deepEqual(releases, [
+    {
+      further_work: true,
+      stop: { reason: EndReason.AssessmentAbsent, code: null },
+    },
+  ]);
 });

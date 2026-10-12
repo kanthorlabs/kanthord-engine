@@ -10,7 +10,7 @@ import { reportInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../agent/prompt-composer.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
-import { ExecutionBudget } from "./budget.ts";
+import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../kernel/context.ts";
 import { runVerifications } from "./verification.ts";
 import { reportFacts } from "./report-facts.ts";
@@ -23,12 +23,9 @@ export async function runStepsInitiative(
   input: StepsInput,
   run: ExecutionRun,
   revision: Revision,
+  budget: ExecutionBudget,
   openAgent: (directory: string) => Promise<NativeAgent>,
 ): Promise<ExecutionEnd> {
-  const budget = new ExecutionBudget({
-    ...input.claim,
-    resource_budget: input.setup.resource_budget,
-  });
   const deadline = Math.min(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
     input.claim.expired_at,
