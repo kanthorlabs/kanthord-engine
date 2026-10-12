@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import type { Revision, TaskContent } from "../mission/contract.ts";
+import {
+  AssetKind,
+  type Revision,
+  type TaskContent,
+} from "../mission/contract.ts";
 import type { ExecutionSetup, RepositoryTransport } from "./contract.ts";
 import { WorkspaceKind, type WorkspaceRoot } from "./workspace.ts";
 import type { NativeAgent } from "./native-agent.ts";
@@ -31,6 +35,7 @@ import {
   criterionRevisionInstruction,
 } from "./judgement.ts";
 import { judgedAt, recordJudged } from "./judged-tasks.ts";
+import { readAttemptEvidence } from "./node-reads.ts";
 import { Phase } from "./telemetry.ts";
 import {
   judgementEnd,
@@ -386,13 +391,24 @@ export interface StepsState {
   task?: TaskContent;
 }
 
-export function prepareStepsWorkspace(input: StepsInput, run: ExecutionRun) {
+export async function prepareStepsWorkspace(
+  input: StepsInput,
+  run: ExecutionRun,
+) {
   const repository = input.setup.repositories[0];
   assert.ok(repository);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
-  return input.workspaces.prepareObjective({
+  const pushed = (await readAttemptEvidence(run)).some((evidence) =>
+    evidence.assets.some(
+      (asset) =>
+        asset.kind === AssetKind.Repository &&
+        asset.address.binding_id === repository.binding_id,
+    ),
+  );
+  return await input.workspaces.prepareObjective({
     objectiveId: input.claim.node_id,
     nodeBranch: input.claim.node_branch,
+    pushed,
     repository,
     transport: input.transport,
     context: run.operationContext,

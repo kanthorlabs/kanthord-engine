@@ -117,6 +117,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
     ...common,
     objectiveId,
     nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
+    pushed: false,
     repository,
   });
   assert.equal(first.head, base);
@@ -136,6 +137,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
     ...common,
     objectiveId,
     nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
+    pushed: false,
     repository,
   });
   assert.equal(second.directory, first.directory);
@@ -186,6 +188,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
       ...common,
       objectiveId: failedId,
       nodeBranch: nodeBranchOf(failedId, FIRST_ATTEMPT),
+      pushed: false,
       repository: { ...repository, address: join(state, "missing") },
     }),
   );
@@ -193,6 +196,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
     ...common,
     objectiveId: failedId,
     nodeBranch: nodeBranchOf(failedId, FIRST_ATTEMPT),
+    pushed: false,
     repository,
   });
   assert.equal(retried.head, base);
@@ -235,6 +239,7 @@ test("a drifted SSH identity stops every workspace preparation before its git op
       ...common,
       objectiveId: createIdentity("node"),
       nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      pushed: false,
       repository,
     }),
     (error) => error === drift,
@@ -288,6 +293,7 @@ test("an objective workspace excludes the scratch directory from git once", asyn
     deadlineMs: 10000,
     objectiveId,
     nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
+    pushed: false,
     repository: {
       binding_id: createIdentity("binding"),
       name: "todoapp-repo",
@@ -371,13 +377,14 @@ async function restartFixture(t: test.TestContext) {
     },
     strategy: { base_branch: "main" },
   };
-  const prepare = async (startAttempt: number) => {
+  const prepare = async (startAttempt: number, pushed = false) => {
     const prepared = await workspace.prepareObjective({
       transport,
       context: background,
       deadlineMs: 10000,
       objectiveId,
       nodeBranch: nodeBranchOf(objectiveId, startAttempt),
+      pushed,
       repository,
     });
     workspace.release(
@@ -388,8 +395,60 @@ async function restartFixture(t: test.TestContext) {
   };
   const remoteHead = async (branch: string) =>
     (await simpleGit(origin).revparse([`refs/heads/${branch}`])).trim();
-  return { origin, seed, base, commit, prepare, remoteHead, git };
+  const deleteRemote = (branch: string) =>
+    simpleGit(origin).raw(["branch", "-D", branch]);
+  return { origin, seed, base, commit, prepare, remoteHead, deleteRemote, git };
 }
+
+const missing = { code: connector.NODE_BRANCH_MISSING };
+
+test("a continued attempt whose pushed node branch is gone stops and keeps its checkout", async (t) => {
+  const h = await restartFixture(t);
+  const first = await h.prepare(FIRST_ATTEMPT);
+  const pushed = await h.commit(first.directory, "work", "pushed");
+  await transport.pushNodeBranch(
+    first.directory,
+    first.nodeBranch,
+    background,
+    10000,
+  );
+  await h.deleteRemote(first.nodeBranch);
+  await assert.rejects(h.prepare(FIRST_ATTEMPT), missing);
+  await assert.rejects(h.prepare(FIRST_ATTEMPT), missing);
+  assert.equal(
+    (await simpleGit(first.directory).revparse(["HEAD"])).trim(),
+    pushed,
+  );
+  await transport.pushNodeBranch(
+    first.directory,
+    first.nodeBranch,
+    background,
+    10000,
+  );
+  assert.equal((await h.prepare(FIRST_ATTEMPT)).head, pushed);
+});
+
+test("a recorded push stops a fresh workspace whose node branch is gone and a first execution starts from the base", async (t) => {
+  const h = await restartFixture(t);
+  await assert.rejects(h.prepare(FIRST_ATTEMPT, true), missing);
+  assert.equal((await h.prepare(FIRST_ATTEMPT)).head, h.base);
+});
+
+test("a restart from the base branch starts from the base after the earlier node branch is gone", async (t) => {
+  const h = await restartFixture(t);
+  const first = await h.prepare(FIRST_ATTEMPT);
+  await h.commit(first.directory, "work", "rejected");
+  await transport.pushNodeBranch(
+    first.directory,
+    first.nodeBranch,
+    background,
+    10000,
+  );
+  await h.deleteRemote(first.nodeBranch);
+  const restart = await h.prepare(RESTART_ATTEMPT);
+  assert.equal(restart.nodeBranch, `${first.nodeBranch}-a2`);
+  assert.equal(restart.head, h.base);
+});
 
 test("a restart from the base branch checks out the base, pushes a new node branch and leaves the earlier branch", async (t) => {
   const h = await restartFixture(t);

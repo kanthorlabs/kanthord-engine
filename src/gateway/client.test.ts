@@ -1,13 +1,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Diagnostic } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import { packageVersion } from "../kernel/version.ts";
+import { schedulerOperations, WorkPullKind } from "../scheduler/contract.ts";
 import { gatewayOperations } from "./contract.ts";
 import { httpClient, readServerVersion } from "./client.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const VERSION_UNAVAILABLE = "gateway.client.version_unavailable";
+const ANSWER_INVALID = "gateway.client.answer_invalid";
+const IDEMPOTENCY_KEY = "01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const PULL_INPUT = {
+  params: {},
+  query: {},
+  body: {
+    resource_identity: "worker:kanthord:test",
+    runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  },
+};
 
 test("verification client preserves JWT business properties and rejects aliases and metadata", async () => {
   const claims = { kind: "human", sub: " ulrich ", name: " Ulrich " };
@@ -34,10 +46,53 @@ test("verification client preserves JWT business properties and rejects aliases 
       undefined,
       async () => Response.json(invalidResponses[index]),
     );
-    assert.deepEqual(await invalidClient.verify(input), {
-      type: OperationResultType.Indeterminate,
-      idempotencyKey: undefined,
-    });
+    const result = await invalidClient.verify(input);
+    assert.ok(result.type === OperationResultType.Failure);
+    assert.equal(result.status, HttpStatus.OK);
+    assert.equal(result.error.error.code, ANSWER_INVALID);
+    assert.equal(result.idempotencyKey, undefined);
+  }
+});
+
+test("an expected answer that fails the output schema is a declared failure", async () => {
+  const client = httpClient(
+    schedulerOperations,
+    "http://localhost",
+    undefined,
+    async () => Response.json({ kind: WorkPullKind.NoWork, future_field: "x" }),
+  );
+  const result = await client.workPull(PULL_INPUT, {
+    idempotencyKey: IDEMPOTENCY_KEY,
+  });
+  assert.ok(result.type === OperationResultType.Failure);
+  assert.equal(result.status, HttpStatus.OK);
+  assert.equal(result.error.error.code, ANSWER_INVALID);
+  assert.equal(result.idempotencyKey, IDEMPOTENCY_KEY);
+});
+
+test("a transport failure and a truncated answer body stay indeterminate", async () => {
+  for (const transport of [
+    async (): Promise<Response> => {
+      throw new TypeError("fetch failed");
+    },
+    async () =>
+      new Response('{"kind":"claimed","execution":{', {
+        headers: { "Content-Type": "application/json" },
+      }),
+  ]) {
+    const client = httpClient(
+      schedulerOperations,
+      "http://localhost",
+      undefined,
+      transport,
+    );
+    assert.deepEqual(
+      await client.workPull(PULL_INPUT, { idempotencyKey: IDEMPOTENCY_KEY }),
+      {
+        type: OperationResultType.Indeterminate,
+        idempotencyKey: IDEMPOTENCY_KEY,
+      },
+    );
   }
 });
 

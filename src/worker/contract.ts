@@ -595,6 +595,7 @@ export interface RepositoryTransport {
     directory: string,
     branch: string,
     baseBranch: string,
+    pushed: boolean,
     context: Context,
     deadlineMs: number,
   ): Promise<string>;

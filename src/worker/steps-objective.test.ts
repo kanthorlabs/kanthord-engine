@@ -132,7 +132,15 @@ async function fixture(
   };
   const run = new ExecutionRun({
     claim,
-    clients: {} as MethodClients,
+    clients: {
+      mission: {
+        "execution.evidence.list": async () => ({
+          type: "completed",
+          status: 200,
+          data: { items: [], next_cursor: null },
+        }),
+      },
+    } as unknown as MethodClients,
     credentials: { release: async () => {} },
     context: background,
   });
@@ -905,6 +913,56 @@ test("the claim refresh merges a moved base branch without a conflict", async (t
   assert.equal(await refreshAtClaim(h), RefreshResult.Current);
 });
 
+test("repository evidence of the attempt stops the preparation when the node branch is gone", async (t) => {
+  const h = await fixture(t, [], []);
+  h.input.workspaces.release(
+    h.input.workspaces.objectiveKey(h.input.claim.node_id),
+    WorkspaceKind.Objective,
+  );
+  const run = new ExecutionRun({
+    claim: h.input.claim,
+    clients: {
+      mission: {
+        "execution.evidence.list": async () => ({
+          type: "completed",
+          status: 200,
+          data: {
+            items: [
+              {
+                assets: [
+                  {
+                    kind: "repository",
+                    address: {
+                      kind: "repository",
+                      binding_id: h.input.setup.repositories[0]!.binding_id,
+                      commit: h.head,
+                    },
+                  },
+                ],
+              },
+            ],
+            next_cursor: null,
+          },
+        }),
+      },
+    } as unknown as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const error = await prepareStepsWorkspace(h.input, run).then(
+    () => assert.fail("The preparation must stop."),
+    (error: unknown) => error,
+  );
+  assert.deepEqual(
+    { reason: run.stopOf(error).reason, code: run.stopOf(error).code },
+    {
+      reason: EndReason.OperationFailed,
+      code: connector.NODE_BRANCH_MISSING,
+    },
+  );
+});
+
 test("an attempt that continues a restart branch checks out that branch and merges the moved base", async (t) => {
   const h = await fixture(t, [], []);
   const nodeId = h.input.claim.node_id;
@@ -926,6 +984,7 @@ test("an attempt that continues a restart branch checks out that branch and merg
   const prepared = await h.input.workspaces.prepareObjective({
     objectiveId: nodeId,
     nodeBranch: restartBranch,
+    pushed: false,
     repository: h.input.setup.repositories[0]!,
     transport: h.input.transport,
     context: background,
