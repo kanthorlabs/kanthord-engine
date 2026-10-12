@@ -22,14 +22,12 @@ const requiredNodeFormat = [
 test("static worker declarations", () => {
   assert.deepEqual(REQUIRED_NODE_FORMAT, requiredNodeFormat);
   assert.deepEqual(Object.keys(WORKER_CATALOG), [
-    "general@1",
+    "coder@1",
     "reviewer@1",
-    "developer@1",
     "claude-code@1",
-    "opencode@1",
   ]);
-  assert.deepEqual(getWorkerDeclaration("general@1"), {
-    name: "general@1",
+  assert.deepEqual(getWorkerDeclaration("coder@1"), {
+    name: "coder@1",
     host: WorkerHost.Kanthord,
     method: WorkerMethod.Steps,
     agent_names: ["swe@1"],
@@ -46,15 +44,6 @@ test("static worker declarations", () => {
     declared_node_states: ["Waiting", "External.Requested"],
     required_node_format: requiredNodeFormat,
   });
-  assert.deepEqual(getWorkerDeclaration("developer@1"), {
-    name: "developer@1",
-    host: WorkerHost.Kanthord,
-    method: WorkerMethod.ReviewedSteps,
-    agent_names: ["swe@1", "re@1"],
-    resource_budget: { turns: 200, wall_time_ms: 7200000 },
-    declared_node_states: ["Available"],
-    required_node_format: requiredNodeFormat,
-  });
   assert.deepEqual(getWorkerDeclaration("claude-code@1"), {
     name: "claude-code@1",
     host: WorkerHost.ExternalHarness,
@@ -63,26 +52,14 @@ test("static worker declarations", () => {
     declared_node_states: ["Available", "Waiting", "External.Requested"],
     required_node_format: requiredNodeFormat,
   });
-  assert.deepEqual(getWorkerDeclaration("opencode@1"), {
-    name: "opencode@1",
-    host: WorkerHost.ExternalHarness,
-    harness: "opencode",
-    resource_budget: { wall_time_ms: 7200000 },
-    declared_node_states: ["Available", "Waiting", "External.Requested"],
-    required_node_format: requiredNodeFormat,
-  });
 });
 
 test("worker agent lookup returns a fresh array", () => {
-  assert.deepEqual(agentsOfWorker("general@1"), ["swe@1"]);
+  assert.deepEqual(agentsOfWorker("coder@1"), ["swe@1"]);
   assert.deepEqual(agentsOfWorker("reviewer@1"), ["re@1"]);
   assert.deepEqual(agentsOfWorker("claude-code@1"), []);
-  assert.deepEqual(agentsOfWorker("opencode@1"), []);
   assert.deepEqual(agentsOfWorker("unknown"), []);
-  assert.notStrictEqual(
-    agentsOfWorker("general@1"),
-    agentsOfWorker("general@1"),
-  );
+  assert.notStrictEqual(agentsOfWorker("coder@1"), agentsOfWorker("coder@1"));
 });
 
 test("every native worker names an agent of the agent catalog", () => {
@@ -92,13 +69,16 @@ test("every native worker names an agent of the agent catalog", () => {
 });
 
 test("every released worker is a declaration", () => {
-  assert.deepEqual(RELEASED_WORKER_NAMES, ["developer@1", "reviewer@1"]);
+  assert.deepEqual(RELEASED_WORKER_NAMES, ["coder@1", "reviewer@1"]);
   for (const name of RELEASED_WORKER_NAMES)
     assert.equal(getWorkerDeclaration(name)?.name, name);
 });
 
 test("unknown and inherited names are not declarations", () => {
   assert.equal(getWorkerDeclaration("unknown"), undefined);
+  assert.equal(getWorkerDeclaration("general@1"), undefined);
+  assert.equal(getWorkerDeclaration("developer@1"), undefined);
+  assert.equal(getWorkerDeclaration("opencode@1"), undefined);
   assert.equal(getWorkerDeclaration("constructor"), undefined);
   assert.equal(getWorkerDeclaration("__proto__"), undefined);
 });

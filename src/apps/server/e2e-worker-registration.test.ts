@@ -34,7 +34,7 @@ const THIRD_BINDING_VERSION = 3;
 const FOURTH_BINDING_VERSION = 4;
 const FIFTH_BINDING_VERSION = 5;
 const SIXTH_BINDING_VERSION = 6;
-const NATIVE = "general@1";
+const NATIVE = "coder@1";
 const EXTERNAL = "claude-code@1";
 const AGENT = "swe@1";
 const BINDING = "general";
@@ -252,7 +252,7 @@ test(
       );
       assert.deepEqual(
         page.items.map((item) => item.name),
-        ["developer@1", "reviewer@1"],
+        ["coder@1", "reviewer@1"],
       );
       assert.equal(page.next_cursor, null);
       assert.equal(page.items[FIRST_ITEM]!.host, HOST);
@@ -273,7 +273,7 @@ test(
       );
       assert.deepEqual(
         page.items.map((item) => item.name),
-        ["developer@1"],
+        ["coder@1"],
       );
       assert.equal(typeof page.next_cursor, STRING_TYPE);
       const next = success<CatalogPage>(

@@ -627,8 +627,8 @@ failure prints its diagnostic, releases what it acquired and exits `1`.
 
 During an execution, the application logs one info record for each task start
 (`task started`), task commit (`task committed`), verification result (`task
-verified`), task judgement (`task judged`), task review (`task reviewed`) and
-node judgement (`node judged`). A record holds the execution, node, attempt and
+verified`), task judgement (`task judged`) and node judgement (`node
+judged`). A record holds the execution, node, attempt and
 task identities, commits, exit codes and results, and no agent content. The
 application appends the transcript of each agent session to
 `<state>/transcripts/<execution id>.jsonl` with mode 0600, and it keeps the

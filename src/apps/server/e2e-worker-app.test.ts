@@ -48,7 +48,7 @@ const NEWLINE_LEN = 1;
 const SINGLE_RECORD = 1;
 const WORKER_ARGS = ["serve", "worker"];
 const GENERAL_RESOURCE = "worker:kanthord:general";
-const GENERAL_WORKER = "general@1";
+const GENERAL_WORKER = "coder@1";
 
 type Exit = {
   code: number | null;

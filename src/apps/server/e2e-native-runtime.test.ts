@@ -177,7 +177,7 @@ test(
       "runtime",
     ]);
     const worker = {
-      worker: "general@1",
+      worker: "coder@1",
       instance_count: SINGLE_INSTANCE,
       entries: [{ agent: "swe@1", ...DEFAULTS }],
     };

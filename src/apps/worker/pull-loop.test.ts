@@ -11,7 +11,7 @@ import { testClaim } from "./test-support.ts";
 const REGISTRATION = {
   runtime_identity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   resource_identity: "worker:kanthord:test",
-  worker_name: "general@1",
+  worker_name: "coder@1",
 };
 const ONCE = 1;
 const ANSWER_INVALID = "gateway.client.answer_invalid";

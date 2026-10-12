@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { Transaction } from "../kernel/store.ts";
 import { AgentChoiceKind, type AgentSelection } from "../scheduler/contract.ts";
 import { agentChoice, entryOf, pinnedEntry } from "./agent-selection.ts";
-import { getWorkerDeclaration } from "./catalog.ts";
+import { TWO_AGENT_WORKER, twoAgentDeclarationOf } from "./test-support.ts";
 import type { WorkerEntry } from "./contract.ts";
 
 const SWE = "swe@1";
@@ -43,8 +43,8 @@ function choice(
     | { kind: "invalid" }
   >,
 ) {
-  const workerName = RE in results ? "developer@1" : "general@1";
-  const agents = getWorkerDeclaration(workerName)?.agent_names ?? [];
+  const workerName = RE in results ? TWO_AGENT_WORKER : "coder@1";
+  const agents = twoAgentDeclarationOf(workerName)?.agent_names ?? [];
   assert.deepEqual([...agents].sort(), Object.keys(results).sort());
   return agentChoice(
     {
@@ -64,7 +64,7 @@ function choice(
         },
       } as never,
     },
-    { declarationOf: (name) => getWorkerDeclaration(name) ?? null },
+    { declarationOf: twoAgentDeclarationOf },
     tx,
     "binding",
   );

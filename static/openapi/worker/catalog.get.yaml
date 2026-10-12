@@ -93,7 +93,6 @@ components:
               enum:
                 - steps
                 - evaluation
-                - reviewed_steps
             agent_names:
               minItems: 1
               type: array

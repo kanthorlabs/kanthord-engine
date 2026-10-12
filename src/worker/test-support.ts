@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { AgentSetup, ExecutionSetup, HostTools } from "./contract.ts";
+import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
 
 export const unusedHostTools: HostTools = {
   evidenceUpload: () =>
@@ -41,6 +42,16 @@ export function scriptedModelRuntime(
   };
 }
 
+export const TWO_AGENT_WORKER = "two-agent@1";
+export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {
+  if (name !== TWO_AGENT_WORKER) return getWorkerDeclaration(name) ?? null;
+  return {
+    ...getWorkerDeclaration("coder@1")!,
+    name: TWO_AGENT_WORKER,
+    agent_names: ["swe@1", "re@1"],
+  };
+}
+
 export const SETUP_PROMPT = "setup prompt";
 export const WORKING_LAYER_ALL_ON = {
   agents_md: true,
@@ -74,7 +85,7 @@ export function anthropicSetup(
 ): ExecutionSetup {
   const setup: ExecutionSetup = {
     execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    worker_name: "general@1",
+    worker_name: "coder@1",
     agents: [anthropicAgent()],
     templates: SHIPPED_TEMPLATES,
     resource_budget: { turns: 200, wall_time_ms: 7200000 },

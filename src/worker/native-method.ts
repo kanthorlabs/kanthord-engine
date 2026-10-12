@@ -25,7 +25,6 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { reviewedTaskRunner } from "./reviewed-steps.ts";
 import {
   nodeKindOf,
   readPriorRationale,
@@ -38,7 +37,6 @@ import { phaseSpan } from "./method-telemetry.ts";
 
 export type { ExecutionEnd } from "./execution-run.ts";
 const WORKING_AGENT = 0;
-const REVIEW_AGENT = 1;
 export interface NativeExecutionInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
@@ -83,12 +81,8 @@ export async function runNativeExecution(
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
       const kind = nodeKindOf(revision);
-      const openAgent = async (
-        agentIndex: number,
-        workspace: string,
-        workspaceAgentFiles: boolean,
-      ) => {
-        const agent = input.setup.agents[agentIndex];
+      const open = async (workspace: string) => {
+        const agent = input.setup.agents[WORKING_AGENT];
         assert.ok(agent);
         const credential = input.credentials.items.find(
           (item) => item.credential_id === agent.credential_id,
@@ -101,7 +95,7 @@ export async function runNativeExecution(
           agent,
           credential,
           budget,
-          workspaceAgentFiles,
+          workspaceAgentFiles: method !== WorkerMethod.Evaluation,
           workspace,
           hostHome: input.hostHome,
           modelRuntimeFactory: input.modelRuntimeFactory,
@@ -113,8 +107,6 @@ export async function runNativeExecution(
         opened.set(native, stopOnEnd(run, native));
         return native;
       };
-      const open = (workspace: string) =>
-        openAgent(WORKING_AGENT, workspace, method !== WorkerMethod.Evaluation);
       if (method === WorkerMethod.Evaluation)
         return runEvaluation(input, run, budget, open);
       if (kind === NodeKind.Initiative)
@@ -141,14 +133,6 @@ export async function runNativeExecution(
         ...workspace,
         priorRationale,
       };
-      if (method === WorkerMethod.ReviewedSteps)
-        return runStepsObjective(
-          state,
-          reviewedTaskRunner({
-            open: (directory) => openAgent(REVIEW_AGENT, directory, false),
-            close,
-          }),
-        );
       return runStepsObjective(state);
     });
   } finally {

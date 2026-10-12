@@ -203,7 +203,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
           general: {
             kind: "worker",
             config: {
-              worker: "general@1",
+              worker: "coder@1",
               instance_count: 2,
               entries: [{ agent: "swe@1", ...CONFIGURATION }],
             },

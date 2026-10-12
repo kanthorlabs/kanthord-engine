@@ -48,7 +48,6 @@ export type WorkerHost = (typeof WorkerHost)[keyof typeof WorkerHost];
 export const WorkerMethod = {
   Steps: "steps",
   Evaluation: "evaluation",
-  ReviewedSteps: "reviewed_steps",
 } as const;
 export type WorkerMethod = (typeof WorkerMethod)[keyof typeof WorkerMethod];
 export interface VerifiedClient {

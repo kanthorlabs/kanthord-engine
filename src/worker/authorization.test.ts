@@ -6,6 +6,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { authorizeModelInference } from "./authorization.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
+import { TWO_AGENT_WORKER, twoAgentDeclarationOf } from "./test-support.ts";
 import {
   AuthorizationRefusal,
   WorkerErrorCode,
@@ -20,7 +21,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     binding_id: createIdentity("binding"),
     project_id: createIdentity("project"),
     resource_identity: "worker:kanthord:worker",
-    worker_name: "general@1",
+    worker_name: "coder@1",
     entries: [],
     resource_budget: null,
     tombstone: false,
@@ -121,7 +122,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
     code: WorkerErrorCode.AuthorizationRefused,
     details: { reason: AuthorizationRefusal.NoNativeAgent },
   });
-  row.worker_name = "general@1";
+  row.worker_name = "coder@1";
   valid = false;
   assert.throws(authorize, {
     status: HttpStatus.BadRequest,
@@ -130,14 +131,14 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
   });
 });
 
-test("Worker authorizes one credential per distinct credential of the agents of developer@1", (t) => {
+test("Worker authorizes one credential per distinct credential of the agents of a two-agent worker", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
   t.after(() => store.close());
   const row: NonNullable<ReturnType<WorkerBindingRowOf>> = {
     binding_id: createIdentity("binding"),
     project_id: createIdentity("project"),
-    resource_identity: "worker:kanthord:developer",
-    worker_name: "developer@1",
+    resource_identity: "worker:kanthord:two-agent",
+    worker_name: TWO_AGENT_WORKER,
     entries: [],
     resource_budget: null,
     tombstone: false,
@@ -167,7 +168,7 @@ test("Worker authorizes one credential per distinct credential of the agents of 
           schedulerClaims: { agentSelectionsOf: () => [] },
         },
         {
-          declarationOf: () => getWorkerDeclaration(row.worker_name) ?? null,
+          declarationOf: () => twoAgentDeclarationOf(row.worker_name),
           workerAgentView: (_tx, _worker, agent) => ({
             valid: true,
             issues: [],

@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { background } from "../kernel/context.ts";
+import { background, DeadlineExceeded } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import * as connector from "../repository/connector.ts";
@@ -27,6 +27,7 @@ import {
   criterionRevisionInstruction,
   JUDGEMENT_MARKER,
   repairInstruction,
+  taskJudgementInstruction,
 } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
@@ -44,7 +45,7 @@ import {
   refreshBeforeRelease,
 } from "./base-refresh.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-import { ProviderFailure } from "../scheduler/contract.ts";
+import { BudgetLimit, ProviderFailure } from "../scheduler/contract.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
 
@@ -513,6 +514,25 @@ test("criterion-negative judgement revises work and a budget-ended judgement kee
     kind: "budget_end",
     boundary: "run_passed",
   });
+});
+
+test("a judgement that its agent deadline cuts ends as a budget end after the passing run", async (t) => {
+  const current = task("deadline", "true");
+  const h = await fixture(t, [current], [fauxAssistantMessage("work")]);
+  const judgement = taskJudgementInstruction(SHIPPED_TEMPLATES, current, null);
+  const instructions: string[] = [];
+  h.agent.instruct = async (_work, instruction) => {
+    instructions.push(instruction);
+    h.agent.budget
+      .agentContext(h.run.operationContext)
+      .cancel(new DeadlineExceeded());
+  };
+  assert.deepEqual(await runTask(h, current), {
+    kind: "budget_end",
+    boundary: "run_passed",
+  });
+  assert.deepEqual(instructions, [judgement]);
+  assert.equal(h.agent.budget.limit(), BudgetLimit.WallTime);
 });
 
 const STOP_REASONS = [

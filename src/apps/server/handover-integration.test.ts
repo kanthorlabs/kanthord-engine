@@ -508,7 +508,7 @@ async function setup(
           general: {
             kind: "worker",
             config: {
-              worker: setupOptions.workerName ?? "general@1",
+              worker: setupOptions.workerName ?? "coder@1",
               instance_count: setupOptions.instanceCount ?? 1,
               resource_budget: setupOptions.resourceBudget && {
                 turns: setupOptions.resourceBudget.turns,
