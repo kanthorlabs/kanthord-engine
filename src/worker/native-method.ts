@@ -8,6 +8,7 @@ import {
 } from "./execution-run.ts";
 import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import type { TranscriptSink } from "./transcript.ts";
+import { Phase, type TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../kernel/context.ts";
 import { ExecutionRun as Run, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -33,6 +34,7 @@ import {
 import { prepareStepsWorkspace, runStepsObjective } from "./steps-objective.ts";
 import { runStepsInitiative } from "./steps-initiative.ts";
 import { runEvaluation } from "./evaluation.ts";
+import { phaseSpan } from "./method-telemetry.ts";
 
 export type { ExecutionEnd } from "./execution-run.ts";
 const WORKING_AGENT = 0;
@@ -53,12 +55,13 @@ export interface NativeExecutionInput {
   hostTools: (workspace: string) => HostTools;
   context: Context;
   log?: (record: Record<string, unknown>) => void;
+  telemetry?: TelemetrySink;
 }
 
 export async function runNativeExecution(
   input: NativeExecutionInput,
 ): Promise<ExecutionEnd> {
-  const run = new Run(input);
+  const run = new Run({ ...input, workerName: input.setup.worker_name });
   const opened = new Map<NativeAgent, () => void>();
   const budget = new ExecutionBudget({
     ...input.claim,
@@ -105,6 +108,7 @@ export async function runNativeExecution(
           hostTools: input.hostTools(workspace),
           context: run.operationContext,
           turnCheck: () => run.checkClaim(),
+          spans: run.spans,
         });
         opened.set(native, stopOnEnd(run, native));
         return native;
@@ -116,7 +120,9 @@ export async function runNativeExecution(
       if (kind === NodeKind.Initiative)
         return runStepsInitiative(input, run, revision, open);
       const priorRationale = await readPriorRationale(run);
-      const workspace = await prepareStepsWorkspace(input, run);
+      const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
+        prepareStepsWorkspace(input, run),
+      );
       let working: NativeAgent;
       try {
         working = await open(workspace.directory);

@@ -16,6 +16,12 @@ import {
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  ExecutionEnd,
+  ROOT_SPAN_OPERATION,
+  SpanStatus,
+  type Span,
+} from "../../tracking/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 
 const SUCCESS = 0;
@@ -321,8 +327,18 @@ async function setup(t: TestContext, short = false) {
     expected_state: state,
     expected_attempt: FIRST_ATTEMPT,
   });
+  const rootSpan = async (traceId: string) => {
+    const page = await read<{ items: Span[] }>([
+      "tracking",
+      "span",
+      "list",
+      traceId,
+    ]);
+    return page.items.find((span) => span.parent_span_id === null);
+  };
   return {
     fixture,
+    rootSpan,
     directory,
     H,
     G,
@@ -382,6 +398,12 @@ test(
         );
         assert.match(execution.trace_id, /^[0-9a-f]{32}$/);
         assert.match(execution.root_span_id, /^[0-9a-f]{16}$/);
+        const root = await h.rootSpan(execution.trace_id);
+        assert.equal(root?.operation, ROOT_SPAN_OPERATION);
+        assert.equal(root?.parent_span_id, null);
+        assert.equal(root?.start_time, execution.created_at);
+        assert.equal(root?.end_time, null);
+        assert.equal(root?.attributes["kanthord.execution.id"], X);
         const node = await h.node();
         assert.equal(node.state, NodeState.Executing);
         assert.equal(node.attempt, FIRST_ATTEMPT);
@@ -491,6 +513,14 @@ test(
         assert.ok(Number.isSafeInteger(result.ended_at));
         assert.ok(ulidSchema.safeParse(result.idempotency_key).success);
         assert.equal((await h.claim(X)).claim_state, ClaimState.Finished);
+        const ended = await h.get(X);
+        const root = await h.rootSpan(ended.trace_id);
+        assert.equal(root?.end_time, result.ended_at);
+        assert.equal(root?.status, SpanStatus.Ok);
+        assert.equal(
+          root?.attributes["kanthord.execution.end"],
+          ExecutionEnd.Finished,
+        );
         const node = await h.node();
         assert.equal(node.state, NodeState.Available);
         assert.equal(node.attempt, FIRST_ATTEMPT);

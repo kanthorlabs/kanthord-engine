@@ -1,0 +1,304 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: tracking.telemetry.write
+    tags:
+      - tracking
+    description: Store the spans and telemetry texts that a native worker observed
+      in its live execution.
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/tracking.telemetry.write.Input/properties/params/pr\
+            operties/execution_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/tracking.telemetry.write.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.telemetry.write.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.telemetry.write.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - execution_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            records:
+              minItems: 1
+              maxItems: 1000
+              type: array
+              items:
+                oneOf:
+                  - type: object
+                    properties:
+                      record_id:
+                        type: string
+                        maxLength: 128
+                        pattern: ^[0-9a-f]{16}:[a-z][a-z0-9_.]*$
+                      trace_id:
+                        type: string
+                        pattern: ^[0-9a-f]{32}$
+                      kind:
+                        type: string
+                        const: span
+                      span_id:
+                        type: string
+                        pattern: ^[0-9a-f]{16}$
+                      operation:
+                        type: string
+                        minLength: 1
+                      parent_span_id:
+                        type: string
+                        pattern: ^[0-9a-f]{16}$
+                      start_time:
+                        type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                      end_time:
+                        type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                      status:
+                        type: string
+                        enum:
+                          - Unset
+                          - Ok
+                          - Error
+                      attributes:
+                        type: object
+                        propertyNames:
+                          type: string
+                          minLength: 1
+                        additionalProperties:
+                          anyOf:
+                            - anyOf:
+                                - type: string
+                                - type: boolean
+                                - type: integer
+                                  minimum: -9007199254740991
+                                  maximum: 9007199254740991
+                                - type: number
+                            - maxItems: 128
+                              type: array
+                              items:
+                                anyOf:
+                                  - type: string
+                                  - type: boolean
+                                  - type: integer
+                                    minimum: -9007199254740991
+                                    maximum: 9007199254740991
+                                  - type: number
+                      events:
+                        maxItems: 128
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                              minLength: 1
+                            time:
+                              type: integer
+                              minimum: 0
+                              maximum: 9007199254740991
+                              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                            attributes:
+                              type: object
+                              propertyNames:
+                                type: string
+                                minLength: 1
+                              additionalProperties:
+                                anyOf:
+                                  - anyOf:
+                                      - type: string
+                                      - type: boolean
+                                      - type: integer
+                                        minimum: -9007199254740991
+                                        maximum: 9007199254740991
+                                      - type: number
+                                  - maxItems: 128
+                                    type: array
+                                    items:
+                                      anyOf:
+                                        - type: string
+                                        - type: boolean
+                                        - type: integer
+                                          minimum: -9007199254740991
+                                          maximum: 9007199254740991
+                                        - type: number
+                          required:
+                            - name
+                            - time
+                          additionalProperties: false
+                      links:
+                        maxItems: 128
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            trace_id:
+                              type: string
+                              pattern: ^[0-9a-f]{32}$
+                            span_id:
+                              type: string
+                              pattern: ^[0-9a-f]{16}$
+                          required:
+                            - trace_id
+                            - span_id
+                          additionalProperties: false
+                      text_ids:
+                        maxItems: 128
+                        type: array
+                        items:
+                          type: string
+                          maxLength: 128
+                          pattern: ^[0-9a-f]{16}:[a-z][a-z0-9_.]*$
+                    required:
+                      - record_id
+                      - trace_id
+                      - kind
+                      - span_id
+                      - operation
+                      - parent_span_id
+                    additionalProperties: false
+                  - type: object
+                    properties:
+                      record_id:
+                        type: string
+                        maxLength: 128
+                        pattern: ^[0-9a-f]{16}:[a-z][a-z0-9_.]*$
+                      trace_id:
+                        type: string
+                        pattern: ^[0-9a-f]{32}$
+                      kind:
+                        type: string
+                        const: text
+                      text_id:
+                        type: string
+                        maxLength: 128
+                        pattern: ^[0-9a-f]{16}:[a-z][a-z0-9_.]*$
+                      text:
+                        type: string
+                    required:
+                      - record_id
+                      - trace_id
+                      - kind
+                      - text_id
+                      - text
+                    additionalProperties: false
+          required:
+            - records
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.telemetry.write.Output:
+      type: object
+      properties:
+        dispositions:
+          type: array
+          items:
+            type: object
+            properties:
+              record_id:
+                type: string
+                maxLength: 128
+                pattern: ^[0-9a-f]{16}:[a-z][a-z0-9_.]*$
+              disposition:
+                type: string
+                enum:
+                  - Stored
+                  - Refused
+              reason:
+                anyOf:
+                  - type: string
+                    enum:
+                      - trace_mismatch
+                      - execution_bound
+                      - record_too_large
+                      - self_parent
+                      - foreign_producer
+                      - value_replaced
+                      - text_exists
+                  - type: "null"
+            required:
+              - record_id
+              - disposition
+              - reason
+            additionalProperties: false
+        submitted:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        stored:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        refused:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+      required:
+        - dispositions
+        - submitted
+        - stored
+        - refused
+      additionalProperties: false

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { ExecutionEnd } from "../tracking/contract.ts";
+import { executionTrace } from "./telemetry.ts";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -52,6 +54,7 @@ function harness(t: TestContext) {
       nodeId: row.node_id,
       attempt: row.attempt,
       pinnedRevision: row.pinned_revision,
+      nodeBranch: row.node_branch,
       runtimeIdentity: row.runtime_identity,
       workerBindingId: row.worker_binding_id,
     },
@@ -226,6 +229,19 @@ test("a release with a stop stores the stop and routes the failure count", async
   });
   assert.deepEqual(h.read().stop, STOP);
   assert.equal(claimStateOf(h.read(), FIXTURE_NOW), ClaimState.Finished);
+  assert.deepEqual(h.telemetry, [
+    {
+      method: "executionEnded",
+      arguments: [
+        {
+          trace: executionTrace(h.row),
+          ended_at: FIXTURE_NOW,
+          end: ExecutionEnd.Finished,
+          stop: STOP,
+        },
+      ],
+    },
+  ]);
   assert.deepEqual(
     h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
     [["failure", h.row.node_id, FIRST_FAILURE, FIXTURE_NOW]],

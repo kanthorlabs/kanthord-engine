@@ -50,9 +50,11 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
       node_id: "node",
       attempt: 1,
       pinned_revision: 1,
+      node_branch: `kanthord/${"node"}`,
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     };
     const releases: unknown[] = [];
     const clients = {
@@ -192,9 +194,11 @@ test("evaluation writes failed-verification assessments without inference and ga
       node_id: createIdentity("node"),
       attempt: 1,
       pinned_revision: 1,
+      node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
       trace_id: "trace",
+      root_span_id: "1".repeat(16),
     };
     const assetId = createIdentity("evidence_asset");
     const address = { kind: "produced", sha256: "a".repeat(64) };

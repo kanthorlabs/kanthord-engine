@@ -19,6 +19,8 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
+import { ExecutionEnd, type ExecutionTelemetry } from "../tracking/contract.ts";
+import { executionTrace } from "./telemetry.ts";
 import * as settlement from "./settlement.ts";
 import {
   readExecution,
@@ -129,6 +131,7 @@ export interface Dependencies {
   bindings: WorkerBindings;
   agentChains: AgentChains;
   traceIdentity: TraceIdentity;
+  telemetry: ExecutionTelemetry;
   health?: HealthRegistry;
 }
 
@@ -422,14 +425,21 @@ export class SchedulerService implements Service, WorkQueue {
       readExpiredUnsettled(tx, Date.now()).map((row) => row.execution_id),
     );
     for (let index = 0; index < identities.length; index++) {
-      const projectId = this.dependencies.store.transaction((tx) => {
+      const lost = this.dependencies.store.transaction((tx) => {
         const now = Date.now();
         const row = readExecution(tx, identities[index]!);
         if (!row || row.ended_at !== null || now < row.expired_at) return null;
         settlement.declareLoss(tx, this.dependencies, row, now);
-        return row.project_id;
+        return { row, now };
       });
-      if (projectId !== null) this.wake(projectId);
+      if (lost === null) continue;
+      this.dependencies.telemetry.executionEnded({
+        trace: executionTrace(lost.row),
+        ended_at: lost.now,
+        end: ExecutionEnd.Lost,
+        stop: null,
+      });
+      this.wake(lost.row.project_id);
     }
     const projects = this.waiting.projectIds();
     for (let index = 0; index < projects.length; index++)

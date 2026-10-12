@@ -8,6 +8,12 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { AssetKind, NodeState, type Evidence } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
+import {
+  SpanStatus,
+  TextState,
+  type Span,
+  type TelemetryText,
+} from "../../tracking/contract.ts";
 import type { RepositoryTransport } from "../../worker/index.ts";
 import {
   fauxAssistantMessage,
@@ -40,6 +46,15 @@ const DECRYPTION_FAILED = "worker.handover.decryption_failed";
 const PATH_REFUSED = "worker.evidence_upload.path_refused";
 const JUDGEMENT =
   'kanthord-judgement: {"criterion_met":true,"rationale":"hello.txt holds hello"}';
+const PHASES = ["finish", "prepare", "start", "tasks"];
+const TASK_LOOP_PHASE = "tasks";
+const START_CHECK_PHASE = "start";
+const TASK_COMPLETED = "complete";
+const TURN_OPERATION = "agent.turn";
+const FAILED_EXIT = 1;
+const PASSED_EXIT = 0;
+const UPLOAD_CALLS = 2;
+const JUDGED_RATIONALE = "hello.txt holds hello";
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
   fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
 
@@ -119,6 +134,75 @@ async function fixture(t: TestContext) {
   return { ...setup, node_id: nodeId, bare, git, auth, transport };
 }
 
+async function assertSpanTree(
+  setup: Awaited<ReturnType<typeof fixture>>,
+  traceId: string,
+) {
+  const page = await setup.read<{ items: Span[] }>([
+    "tracking",
+    "span",
+    "list",
+    traceId,
+  ]);
+  const spans = page.items;
+  const byId = new Map(spans.map((span) => [span.span_id, span]));
+  const named = (operation: string) =>
+    spans.filter((span) => span.operation === operation);
+  const parentOf = (span: Span) => byId.get(span.parent_span_id ?? "");
+  assert.ok(
+    spans.every((span) => span.end_time !== null),
+    JSON.stringify(spans),
+  );
+  const phases = named("worker.phase");
+  assert.deepEqual(
+    phases.map((span) => span.attributes["kanthord.phase"]).sort(),
+    PHASES,
+  );
+  const [task] = named("worker.task");
+  assert.equal(parentOf(task!)?.attributes["kanthord.phase"], TASK_LOOP_PHASE);
+  assert.equal(task!.attributes["kanthord.task.result"], TASK_COMPLETED);
+  const verifications = named("worker.verification");
+  const failed = verifications.find(
+    (span) => span.attributes["process.exit.code"] === FAILED_EXIT,
+  );
+  assert.equal(
+    parentOf(failed!)?.attributes["kanthord.phase"],
+    START_CHECK_PHASE,
+  );
+  assert.equal(failed!.status, SpanStatus.Error);
+  assert.ok(
+    verifications.some(
+      (span) =>
+        span.attributes["process.exit.code"] === PASSED_EXIT &&
+        span.parent_span_id === task!.span_id,
+    ),
+  );
+  const [judgement] = named("worker.judgement");
+  assert.equal(judgement!.parent_span_id, task!.span_id);
+  assert.equal(judgement!.attributes["kanthord.judgement.criterion_met"], true);
+  const rationale = await setup.read<TelemetryText>([
+    "tracking",
+    "text",
+    "get",
+    traceId,
+    `${judgement!.span_id}:rationale`,
+  ]);
+  assert.equal(rationale.state, TextState.Present);
+  assert.equal(rationale.content, JUDGED_RATIONALE);
+  const turns = named(TURN_OPERATION);
+  assert.ok(turns.some((turn) => turn.parent_span_id === task!.span_id));
+  assert.ok(turns.some((turn) => turn.parent_span_id === judgement!.span_id));
+  const tools = named("agent.tool");
+  assert.ok(
+    tools.every((span) => parentOf(span)?.operation === TURN_OPERATION),
+  );
+  assert.equal(
+    tools.filter((span) => span.attributes["gen_ai.tool.name"] === UPLOAD)
+      .length,
+    UPLOAD_CALLS,
+  );
+}
+
 async function finished(setup: Awaited<ReturnType<typeof fixture>>) {
   for (let attempt = 0; attempt < POLL_LIMIT; attempt++) {
     const page = await setup.read<{ items: ExecutionRecord[] }>([
@@ -174,7 +258,8 @@ test(
           modelRuntimeFactory: scriptedModelRuntime(provider),
           repositoryTransport: executionSetup.transport,
         });
-        await finished(executionSetup);
+        const record = await finished(executionSetup);
+        await assertSpanTree(executionSetup, record.trace_id);
         assert.ok(provider.calls.length);
         assert.ok(
           provider.calls.every((call) => call.apiKey === WORKER_TEST_KEY),

@@ -868,6 +868,7 @@ function missionGrantFixture() {
     nodeId: createIdentity("node"),
     attempt: FIRST_REVISION,
     pinnedRevision: FIRST_REVISION,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     runtimeIdentity: row.runtime_identity,
     workerBindingId: row.worker_binding_id,
   };

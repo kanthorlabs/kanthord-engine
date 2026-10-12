@@ -10,6 +10,7 @@ import {
   MissionErrorCode,
   NodeKind,
   NodeState,
+  StartPoint,
   type ProposalContent,
 } from "./contract.ts";
 import { ControlError } from "./control.ts";
@@ -255,6 +256,7 @@ test("approving a proposal creates the objective with its task and unblocks the 
   assert.equal(result.objective.revisions.at(-1)?.tasks?.[0]?.id, tasks[0]!.id);
   assert.equal(result.initiative.node.id, h.node_id);
   assert.equal(result.initiative.attempt?.attempt, SECOND_ATTEMPT);
+  assert.equal(result.initiative.attempt?.start_point, StartPoint.NodeBranch);
   assert.equal(h.node().attempt, SECOND_ATTEMPT);
   assert.equal(h.node().state, NodeState.Available);
   const approved = (await h.list()).items[0]!;

@@ -42,6 +42,7 @@ import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../storage/index.ts";
 import {
   llmOperations,
+  ModelCheckResult,
   type EnablementsDependentOnModelFn,
 } from "./contract.ts";
 import {
@@ -54,9 +55,13 @@ import {
   LLM_PLATFORMS,
   Platform,
 } from "./platforms.ts";
+import type { ModelRuntimeModule } from "./model-connector.ts";
 import { ANTHROPIC_MODELS_URL, GITHUB_COPILOT_TOKEN_URL } from "./probes.ts";
 import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
 import { LlmComponent } from "./service.ts";
+import { scriptedModelRuntime } from "./test-support.ts";
+import { loadPi } from "../agent/pi.ts";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 
 const FIRST_REVISION = 1;
@@ -105,6 +110,7 @@ function fixture(
     now?: () => number;
     agentProvidersDependentOn?: AgentProvidersDependentOnFn;
     enablementsDependentOnModel?: EnablementsDependentOnModelFn;
+    loadModelRuntime?: () => Promise<ModelRuntimeModule>;
   } = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -154,6 +160,9 @@ function fixture(
     agentProvidersDependentOn,
     enablementsDependentOnModel:
       collaborations.enablementsDependentOnModel ?? (() => []),
+    loadModelRuntime:
+      collaborations.loadModelRuntime ??
+      (() => Promise.reject(new Error("UNEXPECTED_COLLABORATION"))),
   });
   const registry = new OperationRegistry();
   component.declare(registry);
@@ -239,6 +248,12 @@ function fixture(
       query: {},
       body,
     })) as typeof llmOperations.provider_check.output._output;
+  const modelCheck = async (body: unknown) =>
+    (await invoke(llmOperations.model_check, {
+      params: {},
+      query: {},
+      body,
+    })) as typeof llmOperations.model_check.output._output;
   const credentialCheck = async (body: unknown) =>
     (await invoke(llmOperations.check, {
       params: {},
@@ -266,6 +281,7 @@ function fixture(
     archive,
     platformList,
     providerCheck,
+    modelCheck,
     credentialCheck,
   };
 }
@@ -1823,6 +1839,99 @@ test("provider check refuses invalid input, an unknown or foreign credential and
     PROVIDER_CHECK_UNSUPPORTED_CODE,
   );
   assert.equal(fetch.mock.callCount(), NO_FETCH_CALLS);
+});
+
+const MODEL_CHECK_CALLS = 2;
+const MODEL_CHECK_MODEL = "scripted-model";
+const MODEL_CHECK_BODY = {
+  credential: "anthropic",
+  model_identifier: MODEL_CHECK_MODEL,
+  reasoning_effort: "low",
+};
+const MODEL_CREDENTIAL_NOT_FOUND_CODE = "llm.model.credential_not_found";
+const MODEL_UNKNOWN_CODE = "llm.model.model_unknown";
+const MODEL_REASONING_UNSUPPORTED_CODE = "llm.model.reasoning_unsupported";
+
+async function scriptedModelCheck(
+  script: Parameters<typeof scriptedModelRuntime>[1],
+) {
+  const scripted = scriptedModelRuntime(await loadPi(), script);
+  const f = fixture({ loadModelRuntime: async () => scripted.module });
+  f.create({
+    name: "anthropic",
+    platform: Platform.Anthropic,
+    secret: { key: HEALTH_SECRET },
+    metadata: null,
+  });
+  return { f, calls: scripted.calls };
+}
+
+test("model check runs one tool round trip with the key of the credential and stores nothing", async (t) => {
+  const { f, calls } = await scriptedModelCheck([
+    fauxAssistantMessage([fauxToolCall("check_tool", {})], {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("done"),
+  ]);
+  t.after(() => f.store.close());
+  const before = f.get("anthropic");
+  const answer = await f.modelCheck(MODEL_CHECK_BODY);
+  assert.deepEqual(answer, { result: "ok", message: null });
+  assert.equal(calls.length, MODEL_CHECK_CALLS);
+  assert.deepEqual(f.get("anthropic"), before);
+  assert.ok(!JSON.stringify(answer).includes(HEALTH_SECRET));
+});
+
+test("model check answers a provider failure with a redacted message", async (t) => {
+  const { f } = await scriptedModelCheck([
+    fauxAssistantMessage("", {
+      stopReason: "error",
+      errorMessage: `401 invalid x-api-key ${HEALTH_SECRET}`,
+    }),
+  ]);
+  t.after(() => f.store.close());
+  const answer = await f.modelCheck(MODEL_CHECK_BODY);
+  assert.equal(answer.result, ModelCheckResult.Unauthorized);
+  assert.ok(answer.message);
+  assert.ok(!answer.message.includes(HEALTH_SECRET));
+  assert.ok(
+    !f.logs.some((entry) => JSON.stringify(entry).includes(HEALTH_SECRET)),
+  );
+});
+
+test("model check refuses an unknown or foreign credential, an unknown model and an unsupported reasoning effort", async (t) => {
+  const { f, calls } = await scriptedModelCheck([fauxAssistantMessage("done")]);
+  t.after(() => f.store.close());
+  f.store.transaction((tx) =>
+    f.custody.create(
+      tx,
+      { platforms: REPOSITORY_PLATFORMS },
+      {
+        name: "github",
+        platform: "github",
+        secret: { key: HEALTH_SECRET },
+        metadata: null,
+      },
+      undefined,
+    ),
+  );
+  for (const credential of ["missing", "github"])
+    await failsAsync(
+      () => f.modelCheck({ ...MODEL_CHECK_BODY, credential }),
+      HttpStatus.NotFound,
+      MODEL_CREDENTIAL_NOT_FOUND_CODE,
+    );
+  await failsAsync(
+    () => f.modelCheck({ ...MODEL_CHECK_BODY, model_identifier: "missing" }),
+    HttpStatus.BadRequest,
+    MODEL_UNKNOWN_CODE,
+  );
+  await failsAsync(
+    () => f.modelCheck({ ...MODEL_CHECK_BODY, reasoning_effort: "unknown" }),
+    HttpStatus.BadRequest,
+    MODEL_REASONING_UNSUPPORTED_CODE,
+  );
+  assert.equal(calls.length, NO_FETCH_CALLS);
 });
 
 test("approved models answer the openai-compatible metadata models with defaults and nothing for another credential", (t) => {

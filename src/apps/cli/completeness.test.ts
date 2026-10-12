@@ -13,6 +13,7 @@ import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { intakeOperations } from "../../intake/contract.ts";
+import { trackingOperations } from "../../tracking/contract.ts";
 
 const PAGE_INVENTORIES = {
   llm: "## Command inventory",
@@ -26,6 +27,7 @@ const PAGE_INVENTORIES = {
   worker: "## Command inventory",
   gateway: "## Complete command table",
   other: "## Command inventory",
+  tracking: "## Command inventory and operation mapping",
 };
 const SYNOPSIS_PREFIX = /Synopsis after `kanthord ([^`]+)`/;
 const EXEMPT_LEAVES = new Map([
@@ -38,7 +40,7 @@ const EXEMPT_LEAVES = new Map([
     "Documented future read with no ERD2 implementation plan",
   ],
 ]);
-const LATER_GROUPS = { tracking: "ERD 4" };
+const LATER_GROUPS = {};
 const API_ONLY_OPERATIONS = [
   "gateway.liveness",
   "gateway.healthcheck",
@@ -59,6 +61,7 @@ const API_ONLY_OPERATIONS = [
   "intake.execution.storage.get",
   "intake.storage.delete",
   "intake.inbound.event.receive",
+  "tracking.telemetry.write",
 ];
 const TOP_LEVEL_NAMES = new Set([
   "config",
@@ -79,12 +82,12 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 164;
+const DOCUMENTED_COUNT = 168;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 159;
-const OPERATION_COUNT = 169;
+const IMPLEMENTED_COUNT = 163;
+const OPERATION_COUNT = 174;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -101,7 +104,7 @@ const INTAKE_LEAVES = [
   "intake outbound list",
 ];
 const PAGE_COUNTS = {
-  llm: 14,
+  llm: 15,
   repository: 11,
   storage: 10,
   agent: 17,
@@ -112,6 +115,7 @@ const PAGE_COUNTS = {
   worker: 9,
   gateway: 2,
   other: 8,
+  tracking: 3,
 };
 type Documented = { path: string; operations: string[] };
 
@@ -146,7 +150,7 @@ function inventory(group: string, heading: string): Documented[] {
       {
         path: group === OTHER_PAGE ? leaf : `${prefix} ${leaf}`,
         operations: spans.filter((span) =>
-          /^(gateway|llm|repository|storage|agent|worker|scheduler|project|mission|intake)\.[A-Za-z_.]+$/.test(
+          /^(gateway|llm|repository|storage|agent|worker|scheduler|project|mission|intake|tracking)\.[A-Za-z_.]+$/.test(
             span,
           ),
         ),
@@ -221,10 +225,8 @@ test("documented ERD 2 and ERD 3 CLI leaves and API-only operations exactly cove
   assert.ok(
     program.commands.some((command) => command.name() === INTAKE_GROUP),
   );
-  assert.deepEqual(
-    program.commands.find((command) => command.name() === TRACKING_GROUP)
-      ?.commands,
-    [],
+  assert.ok(
+    program.commands.some((command) => command.name() === TRACKING_GROUP),
   );
   assert.ok(
     program.commands.every((command) => TOP_LEVEL_NAMES.has(command.name())),
@@ -246,6 +248,7 @@ test("documented ERD 2 and ERD 3 CLI leaves and API-only operations exactly cove
     projectOperations,
     missionOperations,
     intakeOperations,
+    trackingOperations,
   ]
     .flatMap((operations) => Object.values(operations).map(({ id }) => id))
     .sort();

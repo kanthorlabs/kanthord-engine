@@ -25,7 +25,9 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
-import { providerFailureOf } from "./provider-failure.ts";
+import { providerFailureOf } from "../llm/provider-failure.ts";
+import { traceAgent } from "./agent-telemetry.ts";
+import type { SpanRecorder } from "./telemetry.ts";
 
 export const NodeKind = {
   Objective: "objective",
@@ -51,6 +53,7 @@ export interface NativeAgentInput {
   hostTools: HostTools;
   context: Context;
   turnCheck?: () => Promise<void>;
+  spans?: SpanRecorder;
 }
 export interface NativeAgent {
   prompt(work: WorkPrompt): Promise<void>;
@@ -87,6 +90,7 @@ function nativeAgent(
   context: CancellationContext,
   disposeSignal: () => void,
   turnCheck: () => Promise<void>,
+  unsubscribeTrace: () => void,
 ): NativeAgent {
   let session: AgentSession | null = opened;
   const finishTurn = opened.agent.finishTurn;
@@ -141,6 +145,7 @@ function nativeAgent(
       return [...session.messages];
     },
     dispose() {
+      unsubscribeTrace();
       unsubscribeTurns?.();
       unsubscribeCancellation?.();
       unsubscribeTurns = null;
@@ -209,6 +214,9 @@ export async function openNativeAgent(
       context,
     });
     pins.pinInference(session, input.agent.prompt.final);
+    const unsubscribeTrace = input.spans
+      ? traceAgent(session, input.spans, input.agent.agent_name)
+      : () => {};
     return nativeAgent(
       session,
       pins,
@@ -217,6 +225,7 @@ export async function openNativeAgent(
       context,
       bridge.dispose,
       input.turnCheck ?? (async () => {}),
+      unsubscribeTrace,
     );
   } catch (error) {
     session?.dispose();

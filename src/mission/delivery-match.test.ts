@@ -13,12 +13,13 @@ import {
   MISSION_SERVICE_NAME,
   NodeKind,
   PlatformAddressKind,
+  StartPoint,
   type PlatformAddress,
 } from "./contract.ts";
 import { MatchKind, matchRequests } from "./delivery-match.ts";
 import { missionMigrations } from "./migrations.ts";
 import { closeAttempt, insertEvidence, openAttempt } from "./record-store.ts";
-import { insertMission, insertNode } from "./store.ts";
+import { insertMission, insertNode, readNode } from "./store.ts";
 
 const NOW = 100;
 const FIRST_REVISION = 1;
@@ -98,7 +99,34 @@ function fixture(t: TestContext) {
     store.transaction((tx) => closeAttempt(tx, nodeId, FIRST_ATTEMPT, NOW));
   const match = (address: PlatformAddress, project = projectId) =>
     store.transaction((tx) => matchRequests(tx, project, address));
-  return { projectId, otherProjectId, node, request, close, match };
+  const restart = (nodeId: string) =>
+    store.transaction((tx) =>
+      openAttempt(
+        tx,
+        nodeId,
+        FIRST_REVISION,
+        ACTOR,
+        NOW,
+        StartPoint.BaseBranch,
+      ),
+    );
+  const snapshot = (nodeId: string) =>
+    store.transaction((tx) => ({
+      node: readNode(tx, nodeId),
+      attempts: tx.database
+        .prepare("SELECT * FROM mission_attempt WHERE node_id = ?")
+        .all(nodeId),
+    }));
+  return {
+    projectId,
+    otherProjectId,
+    node,
+    request,
+    close,
+    match,
+    restart,
+    snapshot,
+  };
 }
 
 const unmatched = {
@@ -184,4 +212,23 @@ test("a reordered JSON member still matches", (t) => {
     kind: MatchKind.Request,
     evidence_id: evidenceId,
   });
+});
+
+test("after a restart from the base branch, an event for the earlier pull request changes no state", (t) => {
+  const h = fixture(t);
+  const open = h.node(h.projectId);
+  h.request(open, ADDRESS);
+  h.close(open);
+  assert.equal(h.restart(open).start_point, StartPoint.BaseBranch);
+  const resolved = h.node(h.projectId);
+  h.request(resolved, OTHER_ADDRESS, EndState.Other);
+  h.close(resolved);
+  h.restart(resolved);
+  const before = [h.snapshot(open), h.snapshot(resolved)];
+  assert.deepEqual(h.match(ADDRESS), unmatched);
+  assert.deepEqual(h.match(OTHER_ADDRESS), {
+    kind: MatchKind.Answer,
+    answer: { disposition: Disposition.Duplicate, reason: null },
+  });
+  assert.deepEqual([h.snapshot(open), h.snapshot(resolved)], before);
 });

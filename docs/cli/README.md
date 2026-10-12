@@ -26,7 +26,7 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `agent`                         | [Agent](agent.md)                                 | Agent catalog, agent enablement and agent providers.                                                    |
 | `worker`                        | [Worker Service](worker.md)                       | Workers, instance registration, and execution hosting.                                                  |
 | `workbench`                     | [Workbench Service](workbench.md)                 | Human-driven agent sessions; API only.                                                                  |
-| `tracking`                      | [Tracking Service](tracking.md)                   | Telemetry ingestion and trace inspection.                                                               |
+| `tracking`                      | [Tracking Service](tracking.md)                   | Trace, span and telemetry text reads; worker telemetry writes.                                          |
 | `gateway`                       | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `auth`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
@@ -53,7 +53,7 @@ The pages distinguish three kinds of information:
 
 Each group page states the status of its commands. The source registers every
 group in the table above except `intake` and `workbench`. The `tracking` group
-provides help only. `serve worker` registers the worker instance, sends
+reads traces, spans and telemetry texts. `serve worker` registers the worker instance, sends
 heartbeats, pulls work, executes claims and deregisters on shutdown. A CLI
 parser and an operation declaration alone do not establish a working journey.
 

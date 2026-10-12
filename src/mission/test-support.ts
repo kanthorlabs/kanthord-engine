@@ -62,6 +62,7 @@ export function executionHarness(t: TestContext, identity: CallerIdentity) {
     nodeId: h.node_id,
     attempt: FIRST_REVISION,
     pinnedRevision: FIRST_REVISION,
+    nodeBranch: `kanthord/${h.node_id}`,
     runtimeIdentity: createIdentity("worker_instance"),
     workerBindingId: createIdentity("binding"),
   };
