@@ -16,7 +16,10 @@ import {
   resolveModel as connectorModel,
 } from "./model-connector.ts";
 import { loadPi } from "../agent/pi.ts";
-import { Platform } from "./platforms.ts";
+import { piProviderId, Platform, ReasoningLevel } from "./platforms.ts";
+import { ANTHROPIC_SUBSCRIPTION_CHECK_MODEL } from "./probes.ts";
+
+const SUBSCRIPTION_LIFETIME_MS = 3600000;
 
 async function createModelRuntime(input: {
   setup: AgentSetup;
@@ -127,6 +130,54 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
       handoverItem: { ...handoverItem, credential_id: "foreign" },
     }),
     { details: { reason: SetupRefusal.CredentialRevisionMismatch } },
+  );
+});
+
+test("an anthropic-subscription credential resolves its model under the anthropic pi provider", async (t) => {
+  t.mock.method(globalThis, "fetch", () => {
+    throw new Error("Unexpected network call");
+  });
+  const subscription: AgentSetup = {
+    ...setup,
+    effective_configuration: {
+      ...setup.effective_configuration,
+      provider: Platform.AnthropicSubscription,
+      model_identifier: ANTHROPIC_SUBSCRIPTION_CHECK_MODEL,
+      reasoning_effort: ReasoningLevel.Low,
+    },
+  };
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify(
+    piProviderId(Platform.AnthropicSubscription),
+    async () => ({
+      type: "oauth",
+      refresh: "test_refresh-secret",
+      access: "test_access-secret",
+      expires: Date.now() + SUBSCRIPTION_LIFETIME_MS,
+    }),
+  );
+  const input = {
+    setup: subscription,
+    handoverItem: {
+      credential_id: subscription.credential_id,
+      provider_id: piProviderId(Platform.AnthropicSubscription),
+    },
+    credentials,
+    signal: new AbortController().signal,
+  };
+  const runtime = await createModelRuntime(input);
+  const model = resolveModel(runtime, subscription);
+  assert.equal(model.id, ANTHROPIC_SUBSCRIPTION_CHECK_MODEL);
+  assert.equal(model.provider, piProviderId(Platform.AnthropicSubscription));
+  await assert.rejects(
+    createModelRuntime({
+      ...input,
+      handoverItem: {
+        ...input.handoverItem,
+        provider_id: Platform.AnthropicSubscription,
+      },
+    }),
+    { details: { reason: SetupRefusal.CredentialAbsent } },
   );
 });
 

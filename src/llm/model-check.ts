@@ -32,7 +32,12 @@ import {
   type ModelRuntimeModule,
 } from "./model-connector.ts";
 import { MODEL_CALL_FAILURES } from "./probes.ts";
-import { LLM_PLATFORMS, ReasoningLevel, type Platform } from "./platforms.ts";
+import {
+  LLM_PLATFORMS,
+  piProviderId,
+  ReasoningLevel,
+  type Platform,
+} from "./platforms.ts";
 import { providerFailureOf } from "./provider-failure.ts";
 
 export const MODEL_CHECK_PROMPT =
@@ -119,11 +124,12 @@ async function connectedModel(
   signal: AbortSignal,
 ): Promise<ConnectedModel> {
   const { platform, model_identifier: modelIdentifier } = input;
+  const providerId = piProviderId(platform);
   const credentials = new InMemoryCredentialStore();
-  await credentials.modify(platform, async () => credential);
+  await credentials.modify(providerId, async () => credential);
   const runtime = await createModelRuntime(pi, {
     credentials,
-    handoverItem: { credential_id: input.credential, provider_id: platform },
+    handoverItem: { credential_id: input.credential, provider_id: providerId },
     credentialId: input.credential,
     configuration: {
       agent_provider: input.credential,
@@ -134,7 +140,7 @@ async function connectedModel(
     metadata: input.metadata,
     signal,
   });
-  const model = runtime.getModel(platform, modelIdentifier);
+  const model = runtime.getModel(providerId, modelIdentifier);
   if (!model)
     throw modelError(
       LlmErrorCode.ModelUnknown,

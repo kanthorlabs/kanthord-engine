@@ -17,6 +17,7 @@ import {
   type ModelCheckInput,
 } from "./model-check.ts";
 import { Platform } from "./platforms.ts";
+import { ANTHROPIC_SUBSCRIPTION_CHECK_MODEL } from "./probes.ts";
 import { scriptedModelRuntime } from "./test-support.ts";
 
 const LOW_EFFORT = "low";
@@ -32,6 +33,8 @@ const SECOND_CALL = 1;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const NO_CALLS = 0;
+const SUBSCRIPTION_LIFETIME_MS = 3600000;
+const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 
 function input(overrides: Partial<ModelCheckInput> = {}): ModelCheckInput {
   return {
@@ -207,6 +210,33 @@ test("an expired OAuth access token answers unauthorized without a call", async 
     message: MODEL_CHECK_TOKEN_EXPIRED,
   });
   assert.equal(scripted.calls.length, NO_CALLS);
+});
+
+test("an anthropic-subscription credential resolves its model under the anthropic pi provider and sends the call to Anthropic", async (t) => {
+  const urls: string[] = [];
+  t.mock.method(globalThis, "fetch", async (url: unknown) => {
+    urls.push(String(url));
+    return Response.json(
+      { type: "error" },
+      { status: HttpStatus.Unauthorized },
+    );
+  });
+  const answer = await checkModel(
+    input({
+      platform: Platform.AnthropicSubscription,
+      secret: {
+        refresh: "refresh-secret",
+        access: "access-secret",
+        expires: Date.now() + SUBSCRIPTION_LIFETIME_MS,
+      },
+      model_identifier: ANTHROPIC_SUBSCRIPTION_CHECK_MODEL,
+    }),
+    await loadPi(),
+    background,
+  );
+  assert.equal(answer.result, ModelCheckResult.Unauthorized);
+  assert.equal(urls.length, ONE_CALL);
+  assert.ok(urls[FIRST_CALL]!.startsWith(ANTHROPIC_MESSAGES_URL));
 });
 
 test("a cancelled context answers unavailable", async () => {

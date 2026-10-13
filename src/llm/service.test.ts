@@ -45,19 +45,21 @@ import {
   ModelCheckResult,
   type EnablementsDependentOnModelFn,
 } from "./contract.ts";
-import {
-  COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER,
-  OAUTH_PROVIDER_IDS,
-} from "./login.ts";
+import { COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER } from "./login.ts";
 import {
   CAPABILITY_MODEL_LIST_READ,
   CAPABILITY_NONE,
   LLM_PLATFORMS,
+  piProviderId,
   Platform,
 } from "./platforms.ts";
 import type { ModelRuntimeModule } from "./model-connector.ts";
 import { ANTHROPIC_MODELS_URL, GITHUB_COPILOT_TOKEN_URL } from "./probes.ts";
-import { LoginSessionState, SESSION_EXPIRY_MS } from "./sessions.ts";
+import {
+  LoginSessionMode,
+  LoginSessionState,
+  SESSION_EXPIRY_MS,
+} from "./sessions.ts";
 import { LlmComponent } from "./service.ts";
 import { scriptedModelRuntime } from "./test-support.ts";
 import { loadPi } from "../agent/pi.ts";
@@ -711,6 +713,13 @@ const UNSUPPORTED_ENTRY_CODE = "credential.entry.unsupported";
 const UNSUPPORTED_PLATFORM_CODE = "credential.platform.unsupported";
 const EMPTY_DOMAIN = "";
 const DEVICE_OPTION = "device_code";
+const COPY_CODE_OPTION = "copy_code";
+const ANTHROPIC_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
+const COPY_CODE_AUTHORIZATION = "authorization-code";
+const CODE_LOGIN_LIFETIME_SECONDS = 3600;
+const TOKEN_EXCHANGES = 1;
+const AUTHORIZATION_URL = "https://claude.ai/oauth/authorize?state=abc";
+const COPY_CODE_VALUE = "authorization-code#state-value";
 const MANUAL_VALUE = "manual-answer";
 const LAST_MESSAGE = "Waiting for authorization";
 const NO_CREDENTIALS = 0;
@@ -826,7 +835,7 @@ test("Copilot built-in OAuth prompt matches the enterprise placeholder", async (
   const models = createModels();
   models.setProvider(githubCopilotProvider());
   await assert.rejects(
-    models.login(OAUTH_PROVIDER_IDS[Platform.GitHubCopilot]!, "oauth", {
+    models.login(piProviderId(Platform.GitHubCopilot), "oauth", {
       signal: controller.signal,
       prompt: async (prompt) => {
         firstPrompt ??= prompt;
@@ -988,6 +997,153 @@ test("openai-codex login offers both modes and stores only refresh, access and e
     HttpStatus.BadRequest,
     UNSUPPORTED_ENTRY_CODE,
   );
+});
+
+test("anthropic-subscription login runs in copy_code mode, completes through login_code and stores only refresh, access and expires", async (t) => {
+  let selected: string | undefined;
+  let submitted: string | undefined;
+  const sent = Promise.withResolvers<void>();
+  const provider = fakeProvider(async (interaction) => {
+    selected = await interaction.prompt({
+      type: "select",
+      message: "Mode",
+      options: [
+        { id: "browser", label: "Browser" },
+        { id: COPY_CODE_OPTION, label: "Copy code" },
+      ],
+    });
+    interaction.notify({ type: "auth_url", url: AUTHORIZATION_URL });
+    sent.resolve();
+    submitted = await interaction.prompt({
+      type: "manual_code",
+      message: "Paste the code",
+      placeholder: "code#state",
+    });
+    return { ...oauthCredential, accountId: "account-extra" };
+  }, piProviderId(Platform.AnthropicSubscription));
+  const f = fixture({
+    oauthProviders: () => [provider],
+    now: () => CLOCK_START,
+  });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login({
+    platform: Platform.AnthropicSubscription,
+    name: "claude",
+    mode: LoginSessionMode.CopyCode,
+  });
+  await sent.promise;
+  assert.equal(answer.address, AUTHORIZATION_URL);
+  assert.equal(answer.code, null);
+  assert.equal(selected, COPY_CODE_OPTION);
+  assert.equal(credentialCount(f), NO_CREDENTIALS);
+  f.loginCode(answer.session_id, COPY_CODE_VALUE);
+  const status = await terminalStatus(f, answer.session_id);
+  assert.equal(status.state, LoginSessionState.Completed);
+  assert.equal(submitted, COPY_CODE_VALUE);
+  const row = f.store.database.prepare("SELECT * FROM credential").get() as {
+    id: string;
+    platform: string;
+    metadata: null;
+    nonce: Buffer;
+    ciphertext: Buffer;
+  };
+  assert.equal(row.platform, Platform.AnthropicSubscription);
+  assert.equal(row.metadata, null);
+  assert.deepEqual(
+    decrypt(key, row.id, row.platform, row.nonce, row.ciphertext),
+    {
+      refresh: oauthCredential.refresh,
+      access: oauthCredential.access,
+      expires: oauthCredential.expires,
+    },
+  );
+  noOAuthSecret([answer, status, f.logs]);
+});
+
+test("anthropic-subscription login ignores a requested browser mode and refuses a direct secret", async (t) => {
+  let selected: string | undefined;
+  const provider = fakeProvider(async (interaction) => {
+    selected = await interaction.prompt({
+      type: "select",
+      message: "Mode",
+      options: [
+        { id: "browser", label: "Browser" },
+        { id: COPY_CODE_OPTION, label: "Copy code" },
+      ],
+    });
+    interaction.notify({ type: "auth_url", url: AUTHORIZATION_URL });
+    return oauthCredential;
+  }, piProviderId(Platform.AnthropicSubscription));
+  const f = fixture({
+    oauthProviders: () => [provider],
+    now: () => CLOCK_START,
+  });
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login({
+    platform: Platform.AnthropicSubscription,
+    name: "claude",
+    mode: LoginSessionMode.Browser,
+  });
+  const status = await terminalStatus(f, answer.session_id);
+  assert.equal(status.state, LoginSessionState.Completed);
+  assert.equal(selected, COPY_CODE_OPTION);
+  fails(
+    () =>
+      f.create({
+        name: "claude-direct",
+        platform: Platform.AnthropicSubscription,
+        secret: apiSecret,
+        metadata: null,
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_ENTRY_CODE,
+  );
+});
+
+test("the built-in anthropic provider completes a copy_code login from the code#state value", async (t) => {
+  const tokenResponse = {
+    refresh_token: oauthCredential.refresh,
+    access_token: oauthCredential.access,
+    expires_in: CODE_LOGIN_LIFETIME_SECONDS,
+  };
+  const exchanged: unknown[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (_url: unknown, init?: RequestInit) => {
+      exchanged.push(JSON.parse(String(init?.body)));
+      return Response.json(tokenResponse);
+    },
+  );
+  const f = fixture();
+  t.after(async () => {
+    await f.component.stop();
+    f.store.close();
+  });
+  const answer = await f.login({
+    platform: Platform.AnthropicSubscription,
+    name: "claude",
+  });
+  assert.ok(answer.address?.startsWith(ANTHROPIC_AUTHORIZE_URL));
+  assert.equal(answer.code, null);
+  const state = new URL(answer.address!).searchParams.get("state");
+  assert.ok(state);
+  f.loginCode(answer.session_id, `${COPY_CODE_AUTHORIZATION}#${state}`);
+  const status = await terminalStatus(f, answer.session_id);
+  assert.equal(status.state, LoginSessionState.Completed);
+  assert.equal(exchanged.length, TOKEN_EXCHANGES);
+  assert.equal(
+    (exchanged[0] as { code: string }).code,
+    COPY_CODE_AUTHORIZATION,
+  );
+  assert.equal(credentialCount(f), FIRST_REVISION);
+  noOAuthSecret([answer, status, f.logs]);
 });
 
 test("OAuth validates entry, name, mode and start-time name conflict before starting a provider", async (t) => {
@@ -1419,6 +1575,13 @@ test("platform list answers the LLM platform table", (t) => {
     platform: Platform.OpenAICodex,
     secret_shape: SecretShape.OAuth,
     login_modes: ["browser", "device"],
+    metadata_fields: [],
+    verifiable: true,
+  });
+  assert.deepEqual(byPlatform.get(Platform.AnthropicSubscription), {
+    platform: Platform.AnthropicSubscription,
+    secret_shape: SecretShape.OAuth,
+    login_modes: ["copy_code"],
     metadata_fields: [],
     verifiable: true,
   });

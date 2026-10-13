@@ -61,6 +61,7 @@ const AGENT = "swe@1";
 const OTHER_AGENT = "re@1";
 const WORKER = "coder@1";
 const MODEL = "claude-sonnet-4-5";
+const SUBSCRIPTION_MODEL = "claude-haiku-5-5";
 const MISSING_MODEL = "claude-3-5-sonnet-20241022";
 const UNKNOWN = "unknown";
 const ABSENT_REVISION = 0;
@@ -1067,10 +1068,14 @@ test("groq uses the built-in catalog and refuses an unknown model", (t) => {
   );
 });
 
-test("the agent provider set holds openai-compatible and every pi-ai built-in provider", () => {
+test("the agent provider set holds openai-compatible, anthropic-subscription and every pi-ai built-in provider", () => {
   assert.deepEqual(
     agentProviderKindSchema.options.toSorted(),
-    [AgentProviderKind.OpenaiCompatible, ...getBuiltinProviders()].toSorted(),
+    [
+      AgentProviderKind.OpenaiCompatible,
+      AgentProviderKind.AnthropicSubscription,
+      ...getBuiltinProviders(),
+    ].toSorted(),
   );
   assert.equal(agentProviderKindSchema.safeParse("github").success, false);
   assert.equal(agentProviderKindSchema.safeParse("s3").success, false);
@@ -1449,6 +1454,33 @@ test("model list answers the built-in catalog of the provider with its supported
     getSupportedThinkingLevels(catalog.find(({ id }) => id === MODEL)!),
   );
   assert.equal(f.commits(), SECOND_REVISION);
+});
+
+test("model list of anthropic-subscription answers the built-in catalog of the anthropic pi provider", (t) => {
+  const f = enablementFixture(t, {
+    approvedModels: () => {
+      throw new Error("Built-in catalog must not read metadata.");
+    },
+  });
+  f.invoke("enablement.put", {
+    ...putBody,
+    agent_providers: [
+      { ...provider, provider: AgentProviderKind.AnthropicSubscription },
+    ],
+  });
+  const { items } = f.invoke(MODEL_LIST, null, {
+    agent_name: AGENT,
+    provider_name: provider.name,
+  });
+  assert.deepEqual(
+    items.map(({ model_identifier }) => model_identifier),
+    getBuiltinModels(AgentProviderKind.Anthropic).map(({ id }) => id),
+  );
+  assert.ok(
+    items.some(
+      ({ model_identifier }) => model_identifier === SUBSCRIPTION_MODEL,
+    ),
+  );
 });
 
 test("model list answers the approved models and reasoning levels of an openai-compatible credential", (t) => {
