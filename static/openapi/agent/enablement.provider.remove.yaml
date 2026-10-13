@@ -121,6 +121,7 @@ components:
                   - amazon-bedrock
                   - ant-ling
                   - anthropic
+                  - anthropic-subscription
                   - azure
                   - baseten
                   - cerebras

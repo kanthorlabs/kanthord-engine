@@ -30,6 +30,7 @@ const NAME_OPTION = "--name";
 const MODE_OPTION = "--mode";
 const LOGIN_MODE_BROWSER = "browser";
 const LOGIN_MODE_DEVICE = "device";
+const LOGIN_MODE_COPY_CODE = "copy_code";
 const PROVIDER = "provider";
 const CHECK = "check";
 const MODEL = "model";
@@ -65,11 +66,12 @@ async function login(platform: string, command: Command): Promise<void> {
   if (
     mode !== undefined &&
     mode !== LOGIN_MODE_BROWSER &&
-    mode !== LOGIN_MODE_DEVICE
+    mode !== LOGIN_MODE_DEVICE &&
+    mode !== LOGIN_MODE_COPY_CODE
   )
     throw new Diagnostic(
       credentialCode(LLM_GROUP, LOGIN, INVALID_MODE),
-      "mode must be browser or device",
+      "mode must be browser, device or copy_code",
     );
   const { endpoint, token } = resolveClient(options);
   requireToken(token, credentialCode(LLM_GROUP, LOGIN, TOKEN_REQUIRED));
@@ -214,7 +216,11 @@ export function addLlmCommand(program: Command): void {
     .description("Start a credential login session")
     .argument("<platform>", "OAuth platform")
     .requiredOption("--name <name>", "Credential name", singleUse(NAME_OPTION))
-    .option("--mode <mode>", "Browser or device", singleUse(MODE_OPTION))
+    .option(
+      "--mode <mode>",
+      "Browser, device or copy_code",
+      singleUse(MODE_OPTION),
+    )
     .option(
       "--idempotency-key <key>",
       "Mutation key",

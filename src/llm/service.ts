@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 import type { Provider } from "@earendil-works/pi-ai";
 import { registerBunOAuthFlows as registerOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
+import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import {
@@ -124,7 +125,11 @@ export class LlmComponent implements Service {
     this.logger = dependencies.logger;
     this.oauthProviders =
       dependencies.oauthProviders ??
-      (() => [githubCopilotProvider(), openaiCodexProvider()]);
+      (() => [
+        githubCopilotProvider(),
+        openaiCodexProvider(),
+        anthropicProvider(),
+      ]);
     this.now = dependencies.now ?? Date.now;
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;

@@ -2,6 +2,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AgentErrorCode,
@@ -153,7 +154,7 @@ export function providerModels(
   const provider = agentProviderKindSchema
     .exclude([AgentProviderKind.OpenaiCompatible])
     .parse(item.provider);
-  return getBuiltinModels(provider).map((model) => ({
+  return getBuiltinModels(piProviderId(provider)).map((model) => ({
     id: model.id,
     reasoning_levels: getSupportedThinkingLevels(model),
   }));

@@ -43,6 +43,7 @@ engine/
 │   │   ├── files.ts            # Private filesystem validation and publication
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
 │   │   ├── probe.ts            # Remote HTTP probe and failure-reason redaction
+│   │   ├── pi-provider.ts      # Platform to pi provider id map
 │   │   ├── assets.ts           # Shipped assets from the single binary or static/
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
 │   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, server-side git write and landing read, and repository credentials

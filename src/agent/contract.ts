@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { KnownProvider } from "@earendil-works/pi-ai";
+import { ANTHROPIC_SUBSCRIPTION_PLATFORM } from "../kernel/pi-provider.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import type { ResourceCheck } from "../kernel/health.ts";
 import {
@@ -286,11 +287,14 @@ export type ToolDeclarationsFn = (
 
 export const OPENAI_COMPATIBLE_PROVIDER = "openai-compatible";
 export type AgentProviderKind =
-  KnownProvider | typeof OPENAI_COMPATIBLE_PROVIDER;
+  | KnownProvider
+  | typeof OPENAI_COMPATIBLE_PROVIDER
+  | typeof ANTHROPIC_SUBSCRIPTION_PLATFORM;
 const BUILTIN_PROVIDERS = [
   "amazon-bedrock",
   "ant-ling",
   "anthropic",
+  ANTHROPIC_SUBSCRIPTION_PLATFORM,
   "azure",
   "baseten",
   "cerebras",
@@ -330,7 +334,10 @@ const BUILTIN_PROVIDERS = [
   "xiaomi-token-plan-sgp",
   "zai",
   "zai-coding-cn",
-] as const satisfies readonly KnownProvider[];
+] as const satisfies readonly Exclude<
+  AgentProviderKind,
+  typeof OPENAI_COMPATIBLE_PROVIDER
+>[];
 export const agentProviderKindSchema = z.enum([
   OPENAI_COMPATIBLE_PROVIDER,
   ...BUILTIN_PROVIDERS,

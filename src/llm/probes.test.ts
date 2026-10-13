@@ -14,13 +14,17 @@ import {
   LLM_PLATFORMS,
   LLM_PROVIDERS,
   Platform,
+  piProviderId,
 } from "./platforms.ts";
 import {
   ANTHROPIC_API_KEY_HEADER,
   ANTHROPIC_MODELS_URL,
+  ANTHROPIC_SUBSCRIPTION_CHECK_MAX_TOKENS,
+  ANTHROPIC_SUBSCRIPTION_CHECK_MODEL,
   ANTHROPIC_VERSION,
   ANTHROPIC_VERSION_HEADER,
   checkAnthropic,
+  checkAnthropicSubscription,
   checkGitHubCopilot,
   checkOpenAI,
   checkOpenAICodex,
@@ -46,6 +50,9 @@ import { HEALTH_OF_CONNECTION } from "./provider.ts";
 const SECRET = "test_private-resource-health-secret";
 const BASE_URL = "https://models.example/v1";
 const FUTURE_MS = 60000;
+const LONG_FUTURE_MS = 3600000;
+const ANTHROPIC_OAUTH_ACCESS = "sk-ant-oat01-test-private-access";
+const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const NO_CALLS = 0;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
@@ -127,6 +134,7 @@ const httpChecks: {
 test("LLM_PROVIDERS holds exactly the platforms with a check and each declares its capability", async (t) => {
   assert.deepEqual(Object.keys(LLM_PROVIDERS).toSorted(), [
     Platform.Anthropic,
+    Platform.AnthropicSubscription,
     Platform.GitHubCopilot,
     Platform.OpenAI,
     Platform.OpenAICodex,
@@ -154,6 +162,10 @@ test("LLM_PROVIDERS holds exactly the platforms with a check and each declares i
   );
   assert.equal(
     LLM_PLATFORMS[Platform.OpenAICodex].capability,
+    CAPABILITY_MODEL_CALL,
+  );
+  assert.equal(
+    LLM_PLATFORMS[Platform.AnthropicSubscription].capability,
     CAPABILITY_MODEL_CALL,
   );
   assert.equal(
@@ -447,6 +459,158 @@ test("openai-codex check answers unreachable without a call for an expired token
   );
   assert.equal(calls, NO_CALLS);
   assert.equal(fetch.mock.callCount(), NO_CALLS);
+});
+
+test("anthropic-subscription check sends one model call to its constant model under the anthropic pi provider and maps the reply", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("unexpected request");
+  });
+  const piId = piProviderId(Platform.AnthropicSubscription);
+  const seen: unknown[] = [];
+  const recording: ModelCall = async (model, modelContext, options, store) => {
+    seen.push([
+      model.id,
+      model.provider,
+      modelContext.messages,
+      options,
+      await store.read(piId),
+      await store.list(),
+    ]);
+    return reply("stop")(model, modelContext, options, store);
+  };
+  const future = Date.now() + FUTURE_MS;
+  assert.deepEqual(
+    await checkAnthropicSubscription(
+      credentialOf(future),
+      background,
+      recording,
+    ),
+    { connection: Connection.Ok, models: null },
+  );
+  assert.equal(seen.length, ONE_CALL);
+  const [id, provider, messages, options, stored, listed] = seen[0] as [
+    string,
+    string,
+    { role: string; content: string }[],
+    Record<string, unknown>,
+    unknown,
+    unknown,
+  ];
+  assert.equal(id, ANTHROPIC_SUBSCRIPTION_CHECK_MODEL);
+  assert.equal(provider, piId);
+  assert.equal(options.maxTokens, ANTHROPIC_SUBSCRIPTION_CHECK_MAX_TOKENS);
+  assert.equal(Object.hasOwn(options, "apiKey"), false);
+  assert.deepEqual(stored, {
+    type: "oauth",
+    refresh: REFRESH,
+    access: SECRET,
+    expires: future,
+  });
+  assert.deepEqual(listed, [{ providerId: piId, type: "oauth" }]);
+  assert.equal(messages.length, ONE_CALL);
+  assert.equal(messages[0]!.role, USER_ROLE);
+  assert.equal(messages[0]!.content, MODEL_CALL_CHECK_PROMPT);
+  for (const [errorMessage, expected] of refusals)
+    assert.equal(
+      (
+        await checkAnthropicSubscription(
+          credentialOf(future),
+          background,
+          reply("error", errorMessage),
+        )
+      ).connection,
+      expected,
+      errorMessage,
+    );
+  assert.deepEqual(
+    await checkAnthropicSubscription(
+      credentialOf(future),
+      background,
+      async () => {
+        throw new Error(SECRET);
+      },
+    ),
+    UNREACHABLE,
+  );
+  assert.equal(fetch.mock.callCount(), NO_CALLS);
+});
+
+test("anthropic-subscription check answers unreachable without a call for an expired token or a cancelled context", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("unexpected request");
+  });
+  let calls = NO_CALLS;
+  const counting: ModelCall = async (model, modelContext, options, store) => {
+    calls += ONE_CALL;
+    return reply("stop")(model, modelContext, options, store);
+  };
+  assert.deepEqual(
+    await checkAnthropicSubscription(
+      credentialOf(Date.now() - FUTURE_MS),
+      background,
+      counting,
+    ),
+    UNREACHABLE,
+  );
+  const cancelled = new CancellationContext();
+  cancelled.cancel();
+  assert.deepEqual(
+    await checkAnthropicSubscription(
+      credentialOf(Date.now() + FUTURE_MS),
+      cancelled,
+      counting,
+    ),
+    UNREACHABLE,
+  );
+  assert.equal(calls, NO_CALLS);
+  assert.equal(fetch.mock.callCount(), NO_CALLS);
+});
+
+test("the anthropic-subscription provider check routes the stored OAuth credential", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async () => {
+    throw new TypeError("fetch failed");
+  });
+  assert.deepEqual(
+    await LLM_PROVIDERS[Platform.AnthropicSubscription]!.check(
+      credentialOf(Date.now() - FUTURE_MS),
+      null,
+      background,
+    ),
+    UNREACHABLE,
+  );
+  assert.equal(fetch.mock.callCount(), NO_CALLS);
+});
+
+test("the anthropic-subscription check sends the stored access token as a bearer token through pi and maps 401 to unauthorized", async (t) => {
+  const requests: { url: string; authorization: string | null }[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: unknown, init?: RequestInit) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get(AUTHORIZATION_HEADER),
+      });
+      return Response.json(
+        { type: "error" },
+        { status: HttpStatus.Unauthorized },
+      );
+    },
+  );
+  assert.deepEqual(
+    await LLM_PLATFORMS[Platform.AnthropicSubscription].probe?.(
+      {
+        ...credentialOf(Date.now() + LONG_FUTURE_MS),
+        access: ANTHROPIC_OAUTH_ACCESS,
+      },
+      null,
+      background,
+    ),
+    ResourceStatus.Unhealthy,
+  );
+  assert.equal(requests.length, ONE_CALL);
+  assert.equal(requests[0]!.url.startsWith(ANTHROPIC_MESSAGES_URL), true);
+  assert.equal(requests[0]!.authorization, `Bearer ${ANTHROPIC_OAUTH_ACCESS}`);
 });
 
 test("opencode-go check sends one model call to its constant model with a session id and the smallest token limit", async (t) => {

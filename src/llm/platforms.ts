@@ -1,6 +1,10 @@
 import type { KnownProvider } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import {
+  ANTHROPIC_SUBSCRIPTION_PLATFORM,
+  piProviderId,
+} from "../kernel/pi-provider.ts";
+import {
   apiKeySecretSchema,
   isNonblank,
   LoginSessionMode,
@@ -11,6 +15,7 @@ import {
 } from "../custody/contract.ts";
 import {
   checkAnthropic,
+  checkAnthropicSubscription,
   checkGitHubCopilot,
   checkOpenAI,
   checkOpenAICodex,
@@ -20,11 +25,14 @@ import {
 } from "./probes.ts";
 import { HEALTH_OF_CONNECTION, type LlmProvider } from "./provider.ts";
 
-export type Platform = KnownProvider | "openai-compatible";
+export type Platform =
+  KnownProvider | "openai-compatible" | typeof ANTHROPIC_SUBSCRIPTION_PLATFORM;
+export { piProviderId };
 export const Platform = {
   GitHubCopilot: "github-copilot",
   OpenAICodex: "openai-codex",
   Anthropic: "anthropic",
+  AnthropicSubscription: ANTHROPIC_SUBSCRIPTION_PLATFORM,
   OpenAICompatible: "openai-compatible",
   OpenRouter: "openrouter",
   OpenAI: "openai",
@@ -139,6 +147,15 @@ export const LLM_PROVIDERS: Readonly<Partial<Record<Platform, LlmProvider>>> = {
         observe,
       ),
   },
+  [Platform.AnthropicSubscription]: {
+    check: (secret, _metadata, context, observe) =>
+      checkAnthropicSubscription(
+        oauthSecretSchema.parse(secret),
+        context,
+        undefined,
+        observe,
+      ),
+  },
   [Platform.Anthropic]: {
     check: (secret, _metadata, context, observe) =>
       checkAnthropic(apiKeySecretSchema.parse(secret).key, context, observe),
@@ -217,6 +234,11 @@ export const LLM_PLATFORMS: Readonly<Record<Platform, CredentialPlatform>> = {
   [Platform.OpenAICodex]: oauth(
     Platform.OpenAICodex,
     [LoginSessionMode.Browser, LoginSessionMode.Device],
+    CAPABILITY_MODEL_CALL,
+  ),
+  [Platform.AnthropicSubscription]: oauth(
+    Platform.AnthropicSubscription,
+    [LoginSessionMode.CopyCode],
     CAPABILITY_MODEL_CALL,
   ),
   [Platform.Anthropic]: apiKey(

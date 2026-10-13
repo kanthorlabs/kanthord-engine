@@ -14,6 +14,7 @@ import {
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { piProviderId } from "../kernel/pi-provider.ts";
 import type { HumanIdentity } from "../kernel/caller.ts";
 import { isHumanIdentity } from "../kernel/caller.ts";
 import type {
@@ -330,7 +331,7 @@ export class WorkbenchService implements Service {
           credentials,
           handoverItem: {
             credential_id: resolved.credentialId,
-            provider_id: resolved.provider,
+            provider_id: piProviderId(resolved.provider),
           },
           credentialId: resolved.credentialId,
           configuration: {
@@ -693,7 +694,7 @@ export class WorkbenchService implements Service {
     this.sessions.set(id, session);
     try {
       await this.openAgent(session, resolved, caller.context);
-      this.syncEntries(session, resolved.provider);
+      this.syncEntries(session, piProviderId(resolved.provider));
     } catch (error) {
       this.closeAgent(session);
       this.sessions.delete(id);
@@ -728,7 +729,7 @@ export class WorkbenchService implements Service {
         session.configuration = previous;
         throw error;
       }
-      this.syncEntries(session, resolved.provider);
+      this.syncEntries(session, piProviderId(resolved.provider));
       return { ...session.configuration };
     });
   }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { MachineIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AuthorizationRefusal,
@@ -73,7 +74,7 @@ export function authorizeModelInference(
     return {
       credential: view.effective.credential,
       platform: view.effective.provider,
-      provider_id: view.effective.provider,
+      provider_id: piProviderId(view.effective.provider),
       agent_provider: view.effective.agent_provider,
     };
   });

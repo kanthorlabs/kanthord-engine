@@ -25,6 +25,7 @@ import {
   MODEL_DEFAULT_MAX_TOKENS,
   MODEL_DEFAULT_REASONING_LEVELS,
   openaiCompatibleMetadataSchema,
+  piProviderId,
   Platform,
   ReasoningLevel,
 } from "./platforms.ts";
@@ -75,11 +76,17 @@ const PI_KNOWN_PROVIDERS = [
   "xiaomi-token-plan-ams",
   "xiaomi-token-plan-sgp",
 ] as const satisfies readonly KnownProvider[];
-const PLATFORM_COUNT = 43;
+const PLATFORM_COUNT = 44;
+const OAUTH_PLATFORMS: Platform[] = [
+  Platform.GitHubCopilot,
+  Platform.OpenAICodex,
+  Platform.AnthropicSubscription,
+];
 const VERIFIABLE_PLATFORMS: Platform[] = [
   Platform.GitHubCopilot,
   Platform.OpenAICodex,
   Platform.Anthropic,
+  Platform.AnthropicSubscription,
   Platform.OpenAICompatible,
   Platform.OpenRouter,
   Platform.OpenAI,
@@ -94,12 +101,16 @@ const METADATA_FIELDS: Partial<Record<Platform, string[]>> = {
   [Platform.CloudflareAIGateway]: ["account_id", "gateway_id"],
 };
 
-test("the platform table holds openai-compatible and every pi-ai known provider", () => {
+test("the platform table holds openai-compatible, anthropic-subscription and every pi-ai known provider", () => {
   const platforms = Object.keys(LLM_PLATFORMS);
   assert.equal(platforms.length, PLATFORM_COUNT);
   assert.deepEqual(
     platforms.toSorted(),
-    [Platform.OpenAICompatible, ...PI_KNOWN_PROVIDERS].toSorted(),
+    [
+      Platform.OpenAICompatible,
+      Platform.AnthropicSubscription,
+      ...PI_KNOWN_PROVIDERS,
+    ].toSorted(),
   );
   assert.equal(isLlmPlatform("groq"), true);
   assert.equal(isLlmPlatform("github"), false);
@@ -115,7 +126,7 @@ test("the platform list fixes secret shape, login modes, metadata fields and ver
     const platform = item.platform as Platform;
     assert.equal(
       item.secret_shape,
-      platform === Platform.GitHubCopilot || platform === Platform.OpenAICodex
+      OAUTH_PLATFORMS.includes(platform)
         ? SecretShape.OAuth
         : SecretShape.ApiKey,
       platform,
@@ -126,7 +137,9 @@ test("the platform list fixes secret shape, login modes, metadata fields and ver
         ? [LoginSessionMode.Device]
         : platform === Platform.OpenAICodex
           ? [LoginSessionMode.Browser, LoginSessionMode.Device]
-          : [],
+          : platform === Platform.AnthropicSubscription
+            ? [LoginSessionMode.CopyCode]
+            : [],
       platform,
     );
     assert.deepEqual(
@@ -156,11 +169,21 @@ test("the platform list fixes secret shape, login modes, metadata fields and ver
   );
 });
 
+test("piProviderId maps anthropic-subscription to the anthropic pi provider and every other platform to itself", () => {
+  assert.equal(
+    piProviderId(Platform.AnthropicSubscription),
+    Platform.Anthropic,
+  );
+  for (const platform of Object.keys(LLM_PLATFORMS))
+    if (platform !== Platform.AnthropicSubscription)
+      assert.equal(piProviderId(platform), platform);
+});
+
 test("secret schema is selected for every platform", () => {
   for (const [platform, entry] of Object.entries(LLM_PLATFORMS))
     assert.equal(
       secretSchemas[entry.secret_shape],
-      platform === Platform.GitHubCopilot || platform === Platform.OpenAICodex
+      OAUTH_PLATFORMS.includes(platform as Platform)
         ? oauthSecretSchema
         : apiKeySecretSchema,
       platform,
