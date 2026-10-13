@@ -104,26 +104,27 @@ A `create` with a platform of another component answers `400 credential.platform
 A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
 A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `created_at: Timestamp`
 and `ended_at: Timestamp | null`. No answer holds `secret`.
-`platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators): `openai-compatible` and every `KnownProvider` of pi-ai 1.1.0. [`platforms`](#platforms) answers the set.
+`platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators): `openai-compatible`, `anthropic-subscription` and every `KnownProvider` of pi-ai 1.1.0. [`platforms`](#platforms) answers the set.
 Each platform holds exactly one secret shape from `api_key | oauth`.
 The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) bounds `api_key` and `oauth` to 48,914 UTF-8 bytes of normalized canonical pi-ai credential JSON, including type, structure and escaping. Creation and rotation reject an oversized value with HTTP 400 `credential.input.invalid` before writing. Oversized OAuth login material follows the sanitized failed-session path and stores nothing.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators)
 fix the secret shape and the metadata of each platform:
 
-| Platform                | Secret shape | Metadata                               |
-| ----------------------- | ------------ | -------------------------------------- |
-| `github-copilot`        | `oauth`      | None; wire value `null`.               |
-| `openai-codex`          | `oauth`      | None; wire value `null`.               |
-| `anthropic`             | `api_key`    | None; wire value `null`.               |
-| `openai-compatible`     | `api_key`    | Required `{ base_url, models }`.       |
-| `openrouter`            | `api_key`    | None; wire value `null`.               |
-| `openai`                | `api_key`    | None; wire value `null`.               |
-| `amazon-bedrock`        | `api_key`    | Required `{ region }`.                 |
-| `google-vertex`         | `api_key`    | Required `{ project, location }`.      |
-| `azure`                 | `api_key`    | Required `{ resource_name }`.          |
-| `cloudflare-workers-ai` | `api_key`    | Required `{ account_id }`.             |
-| `cloudflare-ai-gateway` | `api_key`    | Required `{ account_id, gateway_id }`. |
-| Every other platform    | `api_key`    | None; wire value `null`.               |
+| Platform                 | Secret shape | Metadata                               |
+| ------------------------ | ------------ | -------------------------------------- |
+| `github-copilot`         | `oauth`      | None; wire value `null`.               |
+| `openai-codex`           | `oauth`      | None; wire value `null`.               |
+| `anthropic-subscription` | `oauth`      | None; wire value `null`.               |
+| `anthropic`              | `api_key`    | None; wire value `null`.               |
+| `openai-compatible`      | `api_key`    | Required `{ base_url, models }`.       |
+| `openrouter`             | `api_key`    | None; wire value `null`.               |
+| `openai`                 | `api_key`    | None; wire value `null`.               |
+| `amazon-bedrock`         | `api_key`    | Required `{ region }`.                 |
+| `google-vertex`          | `api_key`    | Required `{ project, location }`.      |
+| `azure`                  | `api_key`    | Required `{ resource_name }`.          |
+| `cloudflare-workers-ai`  | `api_key`    | Required `{ account_id }`.             |
+| `cloudflare-ai-gateway`  | `api_key`    | Required `{ account_id, gateway_id }`. |
+| Every other platform     | `api_key`    | None; wire value `null`.               |
 
 `get` adds `agent_providers` to the credential answer: the list of `{ agent, name }` of every agent provider that names the credential. The Worker Service answers that read.
 
@@ -154,7 +155,7 @@ fields have no default:
 
 - `name`: `CredentialName`.
 - `platform`: an LLM platform whose secret shape is not `oauth`;
-  `github-copilot` and `openai-codex` require `login`.
+  `github-copilot`, `openai-codex` and `anthropic-subscription` require `login`.
 - `metadata`: the platform schema above, with explicit `null` for no metadata.
 - `secret`: a closed object of the secret shape of the platform. For `api_key`, `{ key }`, with a required nonempty
   string whose exact value is preserved.
@@ -285,14 +286,19 @@ at its next use of the credential. A revoke of the newest live revision answers
 
 The [OAuth login contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-oauth-login)
 requires a platform that accepts `oauth`; the implemented platform set permits
-`github-copilot` and `openai-codex`. The positional platform is required with no default.
+`github-copilot`, `openai-codex` and `anthropic-subscription`. The positional platform is required with no default.
 `--name` is required `CredentialName` with no default.
 
 The body is `{ platform, mode?, name }`, with empty
-params and query. Optional `--mode` is `browser` or `device`, without a CLI
+params and query. Optional `--mode` is `browser`, `device` or `copy_code`, without a CLI
 default; absence leaves selection to the platform's supported flow. Custody
 maps `device` to pi-ai interaction value `device_code`. A platform with one
 mode ignores the requested mode. No terminal prompt is permitted.
+
+`anthropic-subscription` offers only `copy_code` mode. The address is an
+authorization URL and the code is `null`. The human opens the address, signs in
+and copies the `code#state` value that `platform.claude.com` shows. The human
+submits that value with `login-code`. Copy-code mode needs no listener.
 
 Browser mode needs a browser on the server host, because the provider returns
 the browser to a fixed `localhost` callback. The server reads the `Host` header
@@ -319,8 +325,8 @@ validation call.
 ## `login-code <session> <value>`
 
 Both positional values are required, with no default. `session` is a
-`LoginSessionId` and maps to `params.session_id`. `value` is a nonempty code or
-redirect URL, not a record secret. The body is `{ value }`; query is empty.
+`LoginSessionId` and maps to `params.session_id`. `value` is a nonempty code,
+`code#state` value or redirect URL, not a record secret. The body is `{ value }`; query is empty.
 The unary mutation supplies the value awaited by the session. A remote browser
 can use this command when its loopback callback fails. The operation answers
 409 when no value is awaited. HTTP `200` returns `{ session_id }`;
@@ -348,7 +354,7 @@ It has no project or binding.
 The body is exactly `{ credential }`; params and query are empty.
 No raw key or base URL reaches this operation. No mutation key is accepted.
 
-The operation accepts a credential of every platform with an LLM provider: `github-copilot`, `openai-codex`, `anthropic`, `openai-compatible`, `openrouter`, `openai` and `opencode-go`.
+The operation accepts a credential of every platform with an LLM provider: `github-copilot`, `openai-codex`, `anthropic-subscription`, `anthropic`, `openai-compatible`, `openrouter`, `openai` and `opencode-go`.
 A credential of another LLM platform answers 400 `llm.provider.check_unsupported`.
 The component calls the check with the material that custody releases, caches nothing and drops the material after the call.
 Each call has a 10 s deadline.
@@ -363,7 +369,7 @@ HTTP `200` answers `{ connection, models }`:
 
 The answer supplies model ids, not limits or reasoning levels, and no key.
 The human saves approved models through a credential metadata revision.
-The `openai-codex` check and the `opencode-go` check make a model call; the `opencode-go` check calls `deepseek-v4-flash`.
+The `openai-codex` check, the `anthropic-subscription` check and the `opencode-go` check make a model call. The `anthropic-subscription` check calls `claude-haiku-5-5`. The `opencode-go` check calls `deepseek-v4-flash`.
 
 ## `model check`
 
@@ -410,7 +416,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `credential.login.browser_unavailable`       | Browser mode is requested through a `Host` that is not a loopback name.                         | login                                                                  |
 | 503   | `credential.login.failed`                    | The login flow fails before it answers an address.                                              | login                                                                  |
 | 404   | `credential.credential.not_found`            | The credential does not exist, or its platform is not an LLM platform.                          | get, rotate, update-metadata, revoke, archive, verify, worker handover |
-| local | `cli.llm.credential.login.invalid_mode`      | The `--mode` value is neither `browser` nor `device`.                                           | login                                                                  |
+| local | `cli.llm.credential.login.invalid_mode`      | The `--mode` value is not `browser`, `device` or `copy_code`.                                   | login                                                                  |
 | local | `cli.llm.credential.revoke.invalid_revision` | The `<revision>` argument is not a positive safe integer.                                       | revoke                                                                 |
 | 400   | `credential.entry.unsupported`               | The platform does not support this entry method.                                                | create, login                                                          |
 | 400   | `credential.input.invalid`                   | Secret or metadata validation fails, including the byte budget, or the name is reserved.        | create, rotate, update-metadata, login, login-code, check              |
@@ -443,6 +449,7 @@ Errors contain no secret. Dependency refusals list dependents in `error.details`
 The [resource healthcheck](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-resource-healthcheck)
 validates a record on demand through the health report. Create and rotate make
 no remote call. The platforms with an LLM provider are exactly the `verifiable` platforms.
+The `anthropic-subscription` check makes one model call to `claude-haiku-5-5`.
 The `opencode-go` check makes one model call to `deepseek-v4-flash`.
 No check refreshes OAuth; expired access reports `unknown`.
 
