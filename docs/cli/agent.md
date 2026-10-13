@@ -104,7 +104,7 @@ schema. Its root is an object with `additionalProperties: false` and five requir
 
 No property carries a `default`; the schema holds no `options`.
 Its `description` requires model membership in `getBuiltinModels(provider)` of
-pi-ai 1.0.3 or the `models` metadata of the `openai-compatible` credential.
+pi-ai 1.1.0 or the `models` metadata of the `openai-compatible` credential.
 It also requires effort membership in that model's supported reasoning levels.
 JSON Schema validates neither lookup. The Agent component enforces them at the
 enablement write, at the worker binding write through `validateEntry`, and at
