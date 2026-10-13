@@ -21,6 +21,7 @@ export const AgentProviderKind = {
   GithubCopilot: "github-copilot",
   OpenaiCodex: "openai-codex",
   Anthropic: "anthropic",
+  AnthropicSubscription: "anthropic-subscription",
   OpenaiCompatible: "openai-compatible",
   Openrouter: "openrouter",
 } as const satisfies Record<string, AgentProviderKindValue>;

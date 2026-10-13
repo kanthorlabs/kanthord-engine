@@ -20,6 +20,7 @@ import {
   MODEL_DEFAULT_REASONING_LEVELS,
   openaiCompatibleMetadataSchema,
   Platform,
+  piProviderId,
   ReasoningLevel,
 } from "./platforms.ts";
 
@@ -153,7 +154,7 @@ export async function createModelRuntime(
   const { credentials, handoverItem, configuration, signal } = input;
   assert.ok(credentials);
   assert.ok(signal);
-  if (handoverItem.provider_id !== configuration.provider)
+  if (handoverItem.provider_id !== piProviderId(configuration.provider))
     refuse(SetupRefusal.CredentialAbsent);
   if (handoverItem.credential_id !== input.credentialId)
     refuse(SetupRefusal.CredentialRevisionMismatch);
@@ -179,7 +180,7 @@ export function resolveModel(
   assert.ok(runtime);
   assert.ok(configuration.model_identifier);
   const model = runtime.getModel(
-    configuration.provider,
+    piProviderId(configuration.provider),
     configuration.model_identifier,
   );
   if (!model) refuse(SetupRefusal.ModelUnknown);

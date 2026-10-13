@@ -10,6 +10,7 @@ import {
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
+import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   refreshReportSchema,
@@ -53,7 +54,7 @@ export function sealMaterial(
         assert(material.credential_id.length);
         return {
           credential_id: material.credential_id,
-          provider_id: material.platform,
+          provider_id: piProviderId(material.platform),
           credential: credentialOfSecret(shape, material.value()),
         };
       }),

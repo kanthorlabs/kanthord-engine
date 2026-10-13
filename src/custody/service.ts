@@ -21,6 +21,7 @@ import {
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON, digest } from "../kernel/json.ts";
+import { piProviderId } from "../kernel/pi-provider.ts";
 import {
   HealthStatus,
   type Healthcheck,
@@ -599,7 +600,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       });
     };
     return workbenchCredentialStore({
-      providerId: input.platform,
+      providerId: piProviderId(input.platform),
       type: shape,
       release: () =>
         this.store.transaction((tx) => {

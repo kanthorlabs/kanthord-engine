@@ -13,12 +13,17 @@ import {
   type Provider,
 } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
+import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import { z } from "zod";
 import { abortSignal, type Context } from "../kernel/context.ts";
 import type { ResourceObserver } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import {
+  ANTHROPIC_SUBSCRIPTION_PLATFORM,
+  piProviderId,
+} from "../kernel/pi-provider.ts";
 import {
   AUTHORIZATION_HEADER,
   headerSecrets,
@@ -38,6 +43,8 @@ export const OPENAI_CODEX_CHECK_REASONING = "low";
 export const OPENCODE_GO_PROVIDER_ID = "opencode-go";
 export const OPENCODE_GO_CHECK_MODEL = "deepseek-v4-flash";
 export const OPENCODE_GO_CHECK_MAX_TOKENS = 1;
+export const ANTHROPIC_SUBSCRIPTION_CHECK_MODEL = "claude-haiku-5-5";
+export const ANTHROPIC_SUBSCRIPTION_CHECK_MAX_TOKENS = 1;
 export const MODEL_CALL_CHECK_PROMPT = "What time is it?";
 export const MODEL_CALL_FAILURES: readonly string[] = ["error", "aborted"];
 const ERROR_MESSAGE_STATUS = /^([1-5]\d{2})[:\s]/;
@@ -243,6 +250,7 @@ function providerModelCall(provider: () => Provider): ModelCall {
 }
 
 const codexModelCall = providerModelCall(openaiCodexProvider);
+const anthropicSubscriptionModelCall = providerModelCall(anthropicProvider);
 const opencodeGoModelCall = providerModelCall(opencodeGoProvider);
 
 function failureReason(
@@ -334,6 +342,31 @@ export async function checkOpenAICodex(
       modelId: OPENAI_CODEX_CHECK_MODEL,
       credential: { type: "oauth", refresh, access, expires },
       options: { reasoning: OPENAI_CODEX_CHECK_REASONING },
+      secrets: [refresh, access],
+      call,
+    },
+    context,
+    observe,
+  );
+}
+
+export async function checkAnthropicSubscription(
+  credential: CodexCredential,
+  context: Context,
+  call: ModelCall = anthropicSubscriptionModelCall,
+  observe?: ResourceObserver,
+): Promise<ProviderCheckAnswer> {
+  const { refresh, access, expires } = credential;
+  if (expires <= Date.now()) {
+    observe?.("access token expired");
+    return UNREACHABLE;
+  }
+  return modelCallCheck(
+    {
+      providerId: piProviderId(ANTHROPIC_SUBSCRIPTION_PLATFORM),
+      modelId: ANTHROPIC_SUBSCRIPTION_CHECK_MODEL,
+      credential: { type: "oauth", refresh, access, expires },
+      options: { maxTokens: ANTHROPIC_SUBSCRIPTION_CHECK_MAX_TOKENS },
       secrets: [refresh, access],
       call,
     },

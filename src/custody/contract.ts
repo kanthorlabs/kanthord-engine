@@ -29,6 +29,7 @@ export type SecretShape = (typeof SecretShape)[keyof typeof SecretShape];
 export const LoginSessionMode = {
   Browser: "browser",
   Device: "device",
+  CopyCode: "copy_code",
 } as const;
 export type LoginSessionMode =
   (typeof LoginSessionMode)[keyof typeof LoginSessionMode];

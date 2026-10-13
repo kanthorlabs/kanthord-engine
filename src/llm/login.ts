@@ -9,7 +9,7 @@ import {
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { oauthSecretSchema } from "../custody/contract.ts";
-import { LLM_PLATFORMS, Platform } from "./platforms.ts";
+import { LLM_PLATFORMS, piProviderId, Platform } from "./platforms.ts";
 import {
   LoginSessionMode,
   LoginSessionState,
@@ -18,13 +18,10 @@ import {
 } from "./sessions.ts";
 
 export const COPILOT_ENTERPRISE_DOMAIN_PLACEHOLDER = "company.ghe.com";
-export const OAUTH_PROVIDER_IDS: Partial<Record<Platform, string>> = {
-  [Platform.GitHubCopilot]: "github-copilot",
-  [Platform.OpenAICodex]: "openai-codex",
-};
 const PI_LOGIN_MODES = {
   [LoginSessionMode.Browser]: "browser",
   [LoginSessionMode.Device]: "device_code",
+  [LoginSessionMode.CopyCode]: "copy_code",
 } as const;
 const PromptType = {
   Select: "select",
@@ -231,8 +228,7 @@ export class OAuthLogin {
       modify: async (providerId, fn, options) => {
         const credential = await fn(undefined);
         if (
-          providerId !==
-            OAUTH_PROVIDER_IDS[this.session.platform as Platform] ||
+          providerId !== piProviderId(this.session.platform) ||
           credential?.type !== OAUTH_TYPE
         )
           throw new Error(LOGIN_FAILED);
@@ -265,15 +261,11 @@ export class OAuthLogin {
       this.requirePending();
       const models = createModels({ credentials: this.credentials(persist) });
       for (const provider of providers()) models.setProvider(provider);
-      await models.login(
-        OAUTH_PROVIDER_IDS[this.session.platform as Platform]!,
-        OAUTH_TYPE,
-        {
-          signal: this.controller.signal,
-          prompt: (prompt) => this.prompt(prompt),
-          notify: (event) => this.notify(event),
-        },
-      );
+      await models.login(piProviderId(this.session.platform), OAUTH_TYPE, {
+        signal: this.controller.signal,
+        prompt: (prompt) => this.prompt(prompt),
+        notify: (event) => this.notify(event),
+      });
     } catch (error) {
       const cause = error instanceof ModelsError ? error.cause : error;
       if (this.session.expires_at <= this.now()) this.expire();
