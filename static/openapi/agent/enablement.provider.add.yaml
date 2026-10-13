@@ -87,6 +87,7 @@ components:
                 - amazon-bedrock
                 - ant-ling
                 - anthropic
+                - anthropic-subscription
                 - azure
                 - baseten
                 - cerebras
@@ -165,6 +166,7 @@ components:
                   - amazon-bedrock
                   - ant-ling
                   - anthropic
+                  - anthropic-subscription
                   - azure
                   - baseten
                   - cerebras
