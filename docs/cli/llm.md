@@ -104,26 +104,26 @@ A `create` with a platform of another component answers `400 credential.platform
 A credential answer holds `name: CredentialName`, `platform` and `revisions`, an array of revision answers, newest first.
 A revision answer holds `id: CredentialId`, `revision: Revision`, `metadata`, `created_at: Timestamp`
 and `ended_at: Timestamp | null`. No answer holds `secret`.
-`platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators): `openai-compatible` and every `KnownProvider` of pi-ai 0.86.0. [`platforms`](#platforms) answers the set.
+`platform` is the closed enum of the [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators): `openai-compatible` and every `KnownProvider` of pi-ai 1.0.3. [`platforms`](#platforms) answers the set.
 Each platform holds exactly one secret shape from `api_key | oauth`.
 The [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) bounds `api_key` and `oauth` to 48,914 UTF-8 bytes of normalized canonical pi-ai credential JSON, including type, structure and escaping. Creation and rotation reject an oversized value with HTTP 400 `credential.input.invalid` before writing. Oversized OAuth login material follows the sanitized failed-session path and stores nothing.
 The [platform validators](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#platform-validators)
 fix the secret shape and the metadata of each platform:
 
-| Platform                 | Secret shape | Metadata                               |
-| ------------------------ | ------------ | -------------------------------------- |
-| `github-copilot`         | `oauth`      | None; wire value `null`.               |
-| `openai-codex`           | `oauth`      | None; wire value `null`.               |
-| `anthropic`              | `api_key`    | None; wire value `null`.               |
-| `openai-compatible`      | `api_key`    | Required `{ base_url, models }`.       |
-| `openrouter`             | `api_key`    | None; wire value `null`.               |
-| `openai`                 | `api_key`    | None; wire value `null`.               |
-| `amazon-bedrock`         | `api_key`    | Required `{ region }`.                 |
-| `google-vertex`          | `api_key`    | Required `{ project, location }`.      |
-| `azure-openai-responses` | `api_key`    | Required `{ resource_name }`.          |
-| `cloudflare-workers-ai`  | `api_key`    | Required `{ account_id }`.             |
-| `cloudflare-ai-gateway`  | `api_key`    | Required `{ account_id, gateway_id }`. |
-| Every other platform     | `api_key`    | None; wire value `null`.               |
+| Platform                | Secret shape | Metadata                               |
+| ----------------------- | ------------ | -------------------------------------- |
+| `github-copilot`        | `oauth`      | None; wire value `null`.               |
+| `openai-codex`          | `oauth`      | None; wire value `null`.               |
+| `anthropic`             | `api_key`    | None; wire value `null`.               |
+| `openai-compatible`     | `api_key`    | Required `{ base_url, models }`.       |
+| `openrouter`            | `api_key`    | None; wire value `null`.               |
+| `openai`                | `api_key`    | None; wire value `null`.               |
+| `amazon-bedrock`        | `api_key`    | Required `{ region }`.                 |
+| `google-vertex`         | `api_key`    | Required `{ project, location }`.      |
+| `azure`                 | `api_key`    | Required `{ resource_name }`.          |
+| `cloudflare-workers-ai` | `api_key`    | Required `{ account_id }`.             |
+| `cloudflare-ai-gateway` | `api_key`    | Required `{ account_id, gateway_id }`. |
+| Every other platform    | `api_key`    | None; wire value `null`.               |
 
 `get` adds `agent_providers` to the credential answer: the list of `{ agent, name }` of every agent provider that names the credential. The Worker Service answers that read.
 
@@ -134,7 +134,7 @@ For `openai-compatible`:
 - `models` is required and starts as `[]` at creation. A human adds approved
   models through a metadata revision after `llm provider check`.
 - Each model has a required `id` and optional `context_window`, `max_tokens` and
-  `reasoning_levels`. `id` is a nonblank string, unique inside `models`. An omitted value takes the pi 0.86.0
+  `reasoning_levels`. `id` is a nonblank string, unique inside `models`. An omitted value takes the pi 1.0.3
   default: `context_window` `128000`, `max_tokens` `16384`, `reasoning_levels` `["off"]`.
   Both limits are positive integers, and `max_tokens` is at most `context_window`.
 - `reasoning_levels` is an array of established levels from `off`, `minimal`,
