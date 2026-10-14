@@ -120,6 +120,26 @@ test("outside a single executable the pi tool loader reads the target directory"
   );
 });
 
+test("outside a single executable the pi tool loader reads a directory whose path has a space", (t) => {
+  const root = join(temporary(t), "pi tools");
+  mkdirSync(join(root, "darwin-arm64", "bin"), { recursive: true });
+  writeFileSync(join(root, "darwin-arm64", "bin", "fd"), EMBEDDED_CONTENT);
+  const source = {
+    isSea: () => false,
+    getAssetKeys: () => assert.fail("asset keys requested"),
+    getAsset: () => assert.fail("embedded asset requested"),
+  };
+  assert.equal(
+    piToolAsset(
+      "darwin-arm64",
+      "bin/fd",
+      source,
+      pathToFileURL(`${root}/`),
+    )?.toString(),
+    EMBEDDED_CONTENT,
+  );
+});
+
 test("inside a single executable the pi tool loader answers the prefixed asset", () => {
   const bytes = new TextEncoder().encode(EMBEDDED_CONTENT).buffer;
   const requested: string[] = [];

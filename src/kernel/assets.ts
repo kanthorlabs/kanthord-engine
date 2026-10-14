@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { getAsset, getAssetKeys, isSea } from "node:sea";
 import { FILE_NOT_FOUND } from "./files.ts";
 
@@ -69,7 +68,7 @@ export function piToolAsset(
       : undefined;
   }
   try {
-    return readFileSync(join(directory.pathname, target, path));
+    return readFileSync(new URL(`${target}/${path}`, directory));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === FILE_NOT_FOUND)
       return undefined;

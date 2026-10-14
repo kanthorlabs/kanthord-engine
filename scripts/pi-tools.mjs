@@ -12,11 +12,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 
 const ENGINE = new URL("../", import.meta.url);
 const MANIFEST_FILE = new URL("static/pi-tools.json", ENGINE);
+const WORKSPACE_FILE = new URL("pnpm-workspace.yaml", ENGINE);
 const OUTPUT_DIRECTORY = new URL(".pi-tools/", ENGINE);
-const MINIMUM_RELEASE_AGE_MINUTES = 4320;
 const MILLISECONDS_PER_MINUTE = 60000;
 const BINARY_MODE = 0o755;
 const LICENSE_MODE = 0o644;
@@ -35,6 +37,15 @@ class PiToolsError extends Error {}
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function minimumReleaseAgeMinutes() {
+  const value = parse(readFileSync(WORKSPACE_FILE, "utf8"))?.minimumReleaseAge;
+  if (!Number.isInteger(value) || value <= 0)
+    throw new PiToolsError(
+      "pnpm-workspace.yaml: minimumReleaseAge is absent or not a positive integer",
+    );
+  return value;
 }
 
 function readManifest() {
@@ -113,7 +124,7 @@ function hostTarget() {
 }
 
 async function fetchTool(tool, entry, target) {
-  const root = new URL(`${target}/`, OUTPUT_DIRECTORY).pathname;
+  const root = fileURLToPath(new URL(`${target}/`, OUTPUT_DIRECTORY));
   const binary = join(root, "bin", tool);
   const licenses = entry.license_paths.map((path) =>
     join(root, "licenses", tool, basename(path)),
@@ -170,11 +181,12 @@ async function release(repository, version) {
 }
 
 function refuseYoungRelease(repository, published) {
+  const minimum = minimumReleaseAgeMinutes();
   const minutes =
     (Date.now() - Date.parse(published)) / MILLISECONDS_PER_MINUTE;
-  if (!(minutes >= MINIMUM_RELEASE_AGE_MINUTES))
+  if (!(minutes >= minimum))
     throw new PiToolsError(
-      `${repository}: release published ${published} is younger than ${MINIMUM_RELEASE_AGE_MINUTES} minutes`,
+      `${repository}: release published ${published} is younger than ${minimum} minutes`,
     );
 }
 

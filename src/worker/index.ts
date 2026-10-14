@@ -11,7 +11,8 @@ export { runVerifications, verificationPassed } from "./verification.ts";
 export { discardChanges, headCommit } from "./local-git.ts";
 export { ExecutionBudget } from "./budget.ts";
 export { renderWorkPrompt } from "../agent/prompt-composer.ts";
-export { installPiTools, toolDeclarations } from "./tool-table.ts";
+export { installPiTools } from "../agent/pi-tools.ts";
+export { toolDeclarations } from "./tool-table.ts";
 export {
   defaultModelRuntimeFactory,
   type ModelRuntimeFactory,

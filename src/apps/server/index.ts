@@ -87,6 +87,7 @@ import {
   WorkerService,
   workerMigrations,
   toolDeclarations,
+  installPiTools,
 } from "../../worker/index.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
@@ -776,6 +777,7 @@ export class Server implements Service {
       ensureDirectory(paths.config);
       ensureDirectory(paths.data);
       ensureDirectory(paths.state);
+      installPiTools();
       // Validate all files owned by this implementation, including inactive logs.
       audit(join(paths.state, "kanthord.log"), "file", true);
       this.log = new OperationalLog(config.log, paths.state);

@@ -465,6 +465,19 @@ test("E09.4 tools that cannot be installed refuse before any network request", a
   }
 });
 
+test("E09.4 the tool install runs before the client configuration check", async (t) => {
+  const env = workerEnvironment(t);
+  const binDirectory = join(directories(env).state, "pi", "bin");
+  mkdirSync(dirname(binDirectory), { recursive: true });
+  writeFileSync(binDirectory, "");
+  const proc = spawnWorker(WORKER_ARGS, env);
+  try {
+    await failure(proc, "worker.start.tool_missing");
+  } finally {
+    await stopWorker(proc);
+  }
+});
+
 test(
   "E09.6–10 real registration, idle signals, slot refusal and reregistration",
   { timeout: 180000 },

@@ -13,7 +13,6 @@ import {
 export { ToolSource } from "../agent/contract.ts";
 import { childEnvironment } from "../agent/environment.ts";
 export { childEnvironment } from "../agent/environment.ts";
-export { installPiTools } from "../agent/pi-tools.ts";
 
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
