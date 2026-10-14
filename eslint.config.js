@@ -132,7 +132,7 @@ export default tseslint.config(
                 { to: applicationEntry("apps-worker") },
                 {
                   to: element("apps-worker", {
-                    fileInternalPath: "transport.ts",
+                    fileInternalPath: "{transport,thread-data}.ts",
                   }),
                 },
                 {

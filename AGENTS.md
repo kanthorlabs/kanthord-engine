@@ -242,7 +242,9 @@ engine/
 │   ├── gateway/                # HTTP transport, authentication, and invocation infrastructure
 │   │   ├── contract.ts         # Gateway operation declarations
 │   │   ├── index.ts            # Service composition, invocation factory, adapters, and schema
-│   │   ├── client.ts           # HTTP client, client configuration, and server version discovery
+│   │   ├── client.ts           # HTTP client, port caller, client configuration, and server version discovery
+│   │   ├── port.ts             # servePort: the message-port route into the invocation chain
+│   │   ├── body-limit.ts       # Request body limit of an operation, shared by the HTTP route and the port
 │   │   ├── auth/               # Authentication: configuration, JWT issuance and verification
 │   │   │   ├── config.ts       # Authentication version and JWT lifetime configuration fragment
 │   │   │   ├── jwt.ts          # Signing key, client secret, local JWT issuance, and claim validation
@@ -272,7 +274,9 @@ engine/
 │       │   └── worker.ts       # Worker command group
 │       └── worker/             # Worker application: the placement wrapper and the worker unit
 │           ├── api.ts          # Bounded backoff and indeterminate retry
-│           ├── transport.ts    # Worker transport interface and the HTTP transport
+│           ├── transport.ts    # Worker transport interface, the HTTP transport and the port transport
+│           ├── thread.ts       # Worker thread entry: parses workerData and runs the worker unit
+│           ├── thread-data.ts  # Schema of the workerData of the worker thread
 │           ├── unit.ts         # Worker unit: registration, heartbeat, work pulls and drain
 │           └── index.ts        # The worker wrapper: client resolution, signals, watchdog and exit
 ├── static/                     # Packaged generated OpenAPI assets

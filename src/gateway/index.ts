@@ -11,6 +11,7 @@ export { gatewayMigrations } from "./migrations.ts";
 export { collectInventories, resourceHealthReport } from "./health-report.ts";
 export { gatewayConfigSchema, type GatewayConfig } from "./config.ts";
 export { directClient } from "./direct-client.ts";
+export { servePort } from "./port.ts";
 export { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 export function createInvocation(options: {
   registry: OperationRegistry;

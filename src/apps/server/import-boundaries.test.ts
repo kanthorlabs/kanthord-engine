@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { test } from "node:test";
+import { build } from "esbuild";
 import { ESLint } from "eslint";
 
 const ENGINE_ROOT = resolve(import.meta.dirname, "../../..");
@@ -77,6 +78,7 @@ test("an import of a service, the invocation chain or the configuration from a w
       "worker/service.ts",
       "project/service.ts",
       "gateway/invocation.ts",
+      "gateway/port.ts",
       "gateway/auth/jwt.ts",
       "config/index.ts",
     ])
@@ -174,4 +176,44 @@ test("a refused property of process is a lint error in a worker element except t
         `${file} ${property}`,
       );
   }
+});
+
+const SERVICE_FILE = /^src\/(?!kernel\/)[^/]+\/service\.ts$/;
+const REFUSED_CLOSURE_FILES = [
+  "src/kernel/store.ts",
+  "src/gateway/invocation.ts",
+];
+const REFUSED_CLOSURE_DIRECTORIES = ["src/config/", "src/gateway/auth/"];
+const REFUSED_CLOSURE_MODULE = "node:sqlite";
+
+test("the module closure of the worker thread holds no service, store, configuration, invocation chain or database", async () => {
+  const { metafile } = await build({
+    entryPoints: [resolve(ENGINE_ROOT, THREAD_ENTRY)],
+    absWorkingDir: ENGINE_ROOT,
+    bundle: true,
+    write: false,
+    metafile: true,
+    platform: "node",
+    format: "esm",
+    packages: "external",
+    logLevel: "silent",
+  });
+  const files = Object.keys(metafile.inputs);
+  assert.ok(files.includes(THREAD_ENTRY));
+  assert.ok(files.includes("src/apps/worker/unit.ts"));
+  assert.deepEqual(
+    files.filter(
+      (file) =>
+        SERVICE_FILE.test(file) ||
+        REFUSED_CLOSURE_FILES.includes(file) ||
+        REFUSED_CLOSURE_DIRECTORIES.some((directory) =>
+          file.startsWith(directory),
+        ),
+    ),
+    [],
+  );
+  const modules = Object.values(metafile.inputs).flatMap((input) =>
+    input.imports.map((entry) => entry.path),
+  );
+  assert.ok(!modules.includes(REFUSED_CLOSURE_MODULE));
 });

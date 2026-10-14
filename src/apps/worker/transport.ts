@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { httpClient } from "../../gateway/client.ts";
+import type { MessagePort } from "node:worker_threads";
+import { httpClient, portCaller } from "../../gateway/client.ts";
+import { createClient } from "../../gateway/client-result.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
-import type { ServiceClient } from "../../kernel/operation.ts";
+import type { Operation, ServiceClient } from "../../kernel/operation.ts";
 
 export interface WorkerTransport {
   gateway: ServiceClient<typeof gatewayOperations>;
@@ -29,4 +31,17 @@ export function httpTransport(
   };
   assert.ok(transport.worker.register);
   return transport;
+}
+
+export function portTransport(port: MessagePort): WorkerTransport {
+  const call = portCaller(port);
+  const client = <T extends Record<string, Operation>>(operations: T) =>
+    createClient(operations, call);
+  return {
+    gateway: client(gatewayOperations),
+    worker: client(workerOperations),
+    scheduler: client(schedulerOperations),
+    mission: client(missionOperations),
+    tracking: client(trackingOperations),
+  };
 }

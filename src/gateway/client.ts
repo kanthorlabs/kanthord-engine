@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import type { MessagePort } from "node:worker_threads";
+import { ulid } from "ulid";
 import { HttpStatus } from "../kernel/http.ts";
 import { directories } from "../kernel/xdg.ts";
 import { parseMapping } from "../kernel/yaml.ts";
@@ -19,6 +21,7 @@ import {
   CancellationContext,
 } from "../kernel/context.ts";
 import { createClient, inputValidationFailure } from "./client-result.ts";
+import type { RecordedResponse } from "./idempotency.ts";
 const endpoint = z.url().refine((value) => {
   const url = URL.parse(value);
   return (
@@ -205,4 +208,124 @@ function retainResponse(response: Response, dispose: () => void): Response {
     status: response.status,
     headers: response.headers,
   });
+}
+
+const queryValue = z.union([z.string(), z.array(z.string())]);
+export const portCallSchema = z.strictObject({
+  call_id: z.string().min(1),
+  operation_id: z.string().min(1),
+  params: z.record(z.string(), z.string()),
+  query: z.record(z.string(), queryValue),
+  body: z.string().nullable(),
+  idempotency_key: z.string().optional(),
+  traceparent: z.string().optional(),
+  tracestate: z.string().optional(),
+});
+export type PortCall = z.infer<typeof portCallSchema>;
+export const portCancelSchema = z.strictObject({
+  call_id: z.string().min(1),
+  cancel: z.literal(true),
+});
+export const portAnswerSchema = z.strictObject({
+  call_id: z.string().min(1),
+  status: z.number().int(),
+  body: z.unknown(),
+});
+export type PortAnswer = z.infer<typeof portAnswerSchema>;
+
+const SINGLE_QUERY_VALUE_COUNT = 1;
+const PORT_CLOSED = "The port is closed.";
+
+function wireQuery(query: Record<string, unknown>): PortCall["query"] {
+  const wire: PortCall["query"] = {};
+  for (const [key, value] of Object.entries(query)) {
+    const entries = (Array.isArray(value) ? value : [value])
+      .filter((entry) => entry !== undefined)
+      .map(String);
+    if (!entries.length) continue;
+    Object.defineProperty(wire, key, {
+      value:
+        entries.length === SINGLE_QUERY_VALUE_COUNT ? entries[0]! : entries,
+      enumerable: true,
+    });
+  }
+  return wire;
+}
+
+export function portCaller(port: MessagePort) {
+  const pending = new Map<
+    string,
+    { resolve(answer: RecordedResponse): void; reject(error: Error): void }
+  >();
+  port.on("message", (message: unknown) => {
+    const answer = portAnswerSchema.safeParse(message);
+    if (!answer.success) return;
+    const waiting = pending.get(answer.data.call_id);
+    pending.delete(answer.data.call_id);
+    waiting?.resolve({ status: answer.data.status, body: answer.data.body });
+  });
+  port.on("close", () => {
+    for (const waiting of pending.values())
+      waiting.reject(new Error(PORT_CLOSED));
+    pending.clear();
+  });
+  return (
+    operation: Operation,
+    raw: unknown,
+    options: ClientOptions,
+  ): Promise<RecordedResponse> => {
+    const parsed = operation.input.safeParse(raw);
+    if (!parsed.success)
+      return Promise.resolve(inputValidationFailure(parsed.error));
+    const input = parsed.data as {
+      params: Record<string, unknown>;
+      query: Record<string, unknown>;
+      body: unknown;
+    };
+    const callId = ulid();
+    const params = Object.fromEntries(
+      [...operation.path.matchAll(/:([^/]+)/g)].map(([, key]) => [
+        key!,
+        String(input.params[key!]),
+      ]),
+    );
+    const context = new CancellationContext(
+      options.context ?? background,
+      Date.now() + operation.timeoutMs + 1000,
+    );
+    if (context.err()) return Promise.reject(context.err());
+    return new Promise<RecordedResponse>((resolve, reject) => {
+      const settle = () => {
+        pending.delete(callId);
+        unsubscribe();
+        context.cancel();
+      };
+      const unsubscribe = context.onCancel(() => {
+        if (!pending.has(callId)) return;
+        pending.delete(callId);
+        port.postMessage({ call_id: callId, cancel: true });
+        reject(context.err());
+      });
+      pending.set(callId, {
+        resolve: (answer) => {
+          settle();
+          resolve(answer);
+        },
+        reject: (error) => {
+          settle();
+          reject(error);
+        },
+      });
+      port.postMessage({
+        call_id: callId,
+        operation_id: operation.id,
+        params,
+        query: wireQuery(input.query),
+        body: operation.body ? (JSON.stringify(input.body) ?? null) : null,
+        idempotency_key: options.idempotencyKey,
+        traceparent: options.traceparent,
+        tracestate: options.tracestate,
+      } satisfies PortCall);
+    });
+  };
 }

@@ -34,14 +34,11 @@ import type { Authentication } from "./auth/authentication.ts";
 import { GatewayError, respondError } from "./errors.ts";
 import type { Idempotency } from "./idempotency.ts";
 import type { Invocation } from "./invocation.ts";
+import { bodyLimitOf } from "./body-limit.ts";
 import { parseJSON } from "./json.ts";
 import { gatewayOperations, type InventoryCollector } from "./contract.ts";
 import { registerGatewayOperations } from "./declarations.ts";
-import {
-  AccessPolicy,
-  hasHttpRoute,
-  OperationLifetime,
-} from "../kernel/operation.ts";
+import { hasHttpRoute, OperationLifetime } from "../kernel/operation.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { isString } from "../kernel/values.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
@@ -440,13 +437,7 @@ export class GatewayService implements Service {
       .sort((left, right) =>
         compareRouteSpecificity(left.operation.path, right.operation.path),
       )) {
-      const maxSize =
-        operation.maxBodyBytes ??
-        (operation.path.startsWith("/api/auth/")
-          ? 40 * 1024
-          : operation.access === AccessPolicy.Delivery
-            ? 50 * 1024 * 1024
-            : 10 * 1024 * 1024);
+      const maxSize = bodyLimitOf(operation);
       this.app.on(
         operation.method,
         operation.path,
