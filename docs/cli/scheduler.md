@@ -252,17 +252,17 @@ one `EligibilityReport` under [the eligibility report](https://github.com/kantho
 The report answers only the admission checks that need no claimant. It writes
 nothing, moves no job and predicts no claim.
 
-| Field                   | Type and meaning                                                                                                |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `project_id`, `node_id` | The path references.                                                                                            |
-| `state`                 | The Mission `State` of the node at the read.                                                                    |
-| `claimable`             | `true` exactly when no check holds `failed`.                                                                    |
-| `checks`                | Four `EligibilityCheck` objects in this order: `node-state`, `mission-condition`, `queue-job`, `no-live-claim`. |
+| Field                   | Type and meaning                                                                                                                 |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `project_id`, `node_id` | The path references.                                                                                                             |
+| `state`                 | The Mission `State` of the node at the read.                                                                                     |
+| `claimable`             | `true` exactly when no check holds `failed`.                                                                                     |
+| `checks`                | Five `EligibilityCheck` objects in this order: `project-pause`, `node-state`, `mission-condition`, `queue-job`, `no-live-claim`. |
 
 `EligibilityCheck` holds `name`, `result` (`passed`, `failed` or
 `not-applicable`) and `condition` (`initiative-steps`, `readiness`,
 `continuation` or `null`). Only `mission-condition` holds a non-null
-`condition`. `node-state` passes for a node that is not retired in
+`condition`. `project-pause` passes when the project is not paused; an absent project still answers `404 scheduler.eligibility.node_not_found`. `node-state` passes for a node that is not retired in
 `Available`, `Waiting` or `External.Requested`. `mission-condition` reads the
 initiative steps condition for an initiative in `Available`, the readiness
 condition for `Waiting` and the continuation condition for
@@ -314,23 +314,25 @@ it cannot acquire a chosen node or authorize its own claim.
    declared node state and required node format, using the pinned revision
    of an open attempt or the current revision before the first claim.
 3. Selection and claim are one atomic acquisition. They recheck Mission
-   state, the Mission condition, binding availability and
+   state, the Mission condition, the project pause, binding availability and
    count, compatibility and one-claim-per-node exclusion. A node must be
    `Available` for a steps claim (with terminal objectives on an initiative)
    or eligible `Waiting`/`External.Requested`
    for an evaluation claim. A `Blocked`, `Paused`, `Pending`, terminal or
-   incompatible node cannot be forced through this path.
+   incompatible node cannot be forced through this path. A paused project
+   answers `no-work` and claims no node until a human resumes it.
 4. An accepted claim mints the execution identity and counts one execution
    against the claimant binding. One runtime holds at most one execution;
    the binding admits fewer live executions than its configured count.
    Scheduler adds no project-wide cap or retry budget. Mission performs the
    transition, attempt opening when needed, and revision pin atomically.
 
-A claim serializes with block, pause, graph/import and binding changes. The
+A claim serializes with block, node pause, graph/import, binding and project pause changes. The
 worker's declared capability for both kinds gives it no preference to review
 its own steps. The Worker design requires hosted reviewers to pull independently.
 All admission conditions
-are rechecked after waiting, including a binding disabled during the wait.
+are rechecked after waiting, including a binding disabled or a project paused during the wait.
+A project resume wakes the waiting pulls of the project.
 
 **Result:** exactly one of these closed objects:
 

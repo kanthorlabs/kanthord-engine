@@ -74,11 +74,15 @@ test("action follows accepts assessment and refuses action dependencies before r
 import { projectMigrations } from "./migrations.ts";
 import {
   deriveResourceIdentity,
+  insertProject,
   kindOf,
   listBindings,
   listRevisions,
+  pauseProject,
   readBindingRevision,
   readCurrentBindingSet,
+  requireProject,
+  resumeProject,
   writeBindingSet,
 } from "./store.ts";
 
@@ -157,7 +161,9 @@ function fixture(t: TestContext) {
   const projectId = createIdentity(PROJECT_ID_PREFIX);
   store.transaction(({ database }) =>
     database
-      .prepare("INSERT INTO project_project VALUES (?, ?, ?)")
+      .prepare(
+        "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
+      )
       .run(projectId, PROJECT_NAME, Date.now()),
   );
   const write = (version: number, entries: Map<string, Entry>) =>
@@ -865,6 +871,55 @@ test("revision lists paginate descending within the pinned row's group, includin
   });
 });
 
+test("the pause migration keeps every earlier project active", () => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    const [create, addPausedAt] = projectMigrations;
+    create!(store.database);
+    store.database
+      .prepare(
+        "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
+      )
+      .run(createIdentity(PROJECT_ID_PREFIX), PROJECT_NAME, Date.now());
+    addPausedAt!(store.database);
+    assert.equal(
+      store.database.prepare("SELECT paused_at FROM project_project").get()!
+        .paused_at,
+      null,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("a new project is active, and pause and resume move paused_at", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const created = insertProject(tx, OTHER_PROJECT_NAME);
+    assert.equal(created.paused_at, null);
+    const paused = pauseProject(tx, created.id);
+    assert.ok(Number.isSafeInteger(paused.paused_at));
+    assert.deepEqual(requireProject(tx, created.id), paused);
+    assert.deepEqual(pauseProject(tx, created.id), paused);
+    assert.equal(requireProject(tx, f.projectId).paused_at, null);
+    const resumed = resumeProject(tx, created.id);
+    assert.equal(resumed.paused_at, null);
+    assert.deepEqual(requireProject(tx, created.id), resumed);
+    assert.deepEqual(resumeProject(tx, created.id), resumed);
+  });
+});
+
+test("pause and resume refuse an absent project", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    for (const change of [pauseProject, resumeProject])
+      assert.throws(
+        () => change(tx, createIdentity(PROJECT_ID_PREFIX)),
+        errorIs(HttpStatus.NotFound, ProjectErrorCode.ProjectNotFound),
+      );
+  });
+});
+
 test("project boundaries isolate current sets, allocation, and both lists", (t) => {
   const f = fixture(t);
   f.write(INITIAL_BINDING_VERSION, submission([MAIN, repository()]));
@@ -872,7 +927,9 @@ test("project boundaries isolate current sets, allocation, and both lists", (t) 
   f.store.transaction((tx) => {
     const projectId = createIdentity(PROJECT_ID_PREFIX);
     tx.database
-      .prepare("INSERT INTO project_project VALUES (?, ?, ?)")
+      .prepare(
+        "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
+      )
       .run(projectId, OTHER_PROJECT_NAME, Date.now());
     const result = writeBindingSet(
       tx,

@@ -96,6 +96,8 @@ const CORE_OPERATIONS = [
   "project.list",
   "project.get",
   "project.rename",
+  "project.pause",
+  "project.resume",
   "project.bindingSet.write",
   "project.bindingSet.get",
   "project.binding.list",
@@ -602,6 +604,75 @@ test("rename preserves fields, accepts its current name, and rejects another hol
   assert.deepEqual(f.invoke("rename", { name: RENAMED_NAME }, params), renamed);
   assert.deepEqual(f.invoke("get", null, params), renamed);
   assert.equal(f.invoke("create", { name: PROJECT_NAME }).name, PROJECT_NAME);
+});
+
+test("a created project is active", (t) => {
+  const f = fixture(t, { createMission: allowMission });
+  const project = f.invoke("create", { name: PROJECT_NAME });
+  assert.equal(project.paused_at, null);
+  assert.deepEqual(f.invoke("get", null, { project_id: project.id }), project);
+});
+
+test("pause and resume change paused_at, and a repeated call writes nothing", (t) => {
+  const f = fixture(t, { createMission: allowMission });
+  const project = f.invoke("create", { name: PROJECT_NAME });
+  const params = { project_id: project.id };
+  assert.deepEqual(f.invoke("resume", null, params), project);
+  const paused = f.invoke("pause", null, params);
+  assert.ok(Number.isSafeInteger(paused.paused_at));
+  assert.deepEqual(paused, { ...project, paused_at: paused.paused_at });
+  assert.deepEqual(f.invoke("get", null, params), paused);
+  assert.deepEqual(f.invoke("pause", null, params), paused);
+  assert.deepEqual(
+    f.invoke("list", null, {}).items.find((item) => item.id === project.id),
+    paused,
+  );
+  assert.deepEqual(f.invoke("resume", null, params), project);
+  assert.deepEqual(f.invoke("get", null, params), project);
+  assert.deepEqual(f.invoke("resume", null, params), project);
+});
+
+test("pause and resume reject an absent project", (t) => {
+  const f = fixture(t);
+  const params = { project_id: createIdentity(PROJECT_ID_PREFIX) };
+  for (const key of ["pause", "resume"] as const)
+    refuses(
+      () => f.invoke(key, null, params),
+      HttpStatus.NotFound,
+      ProjectErrorCode.ProjectNotFound,
+    );
+  assert.deepEqual(f.wakes, []);
+});
+
+test("resume wakes Scheduler once after commit and pause wakes nothing", (t) => {
+  const f = fixture(t, { createMission: allowMission });
+  const project = f.invoke("create", { name: PROJECT_NAME });
+  const params = { project_id: project.id };
+  f.invoke("pause", null, params);
+  assert.deepEqual(f.wakes, []);
+  f.invoke("resume", null, params);
+  assert.deepEqual(f.wakes, [project.id]);
+});
+
+test("projectPaused answers the pause and throws for an absent project", (t) => {
+  const f = fixture(t, { createMission: allowMission });
+  const project = f.invoke("create", { name: PROJECT_NAME });
+  const params = { project_id: project.id };
+  const paused = () =>
+    f.store.transaction((tx) => f.project.projectPaused(tx, project.id));
+  assert.equal(paused(), false);
+  f.invoke("pause", null, params);
+  assert.equal(paused(), true);
+  f.invoke("resume", null, params);
+  assert.equal(paused(), false);
+  refuses(
+    () =>
+      f.store.transaction((tx) =>
+        f.project.projectPaused(tx, createIdentity(PROJECT_ID_PREFIX)),
+      ),
+    HttpStatus.NotFound,
+    ProjectErrorCode.ProjectNotFound,
+  );
 });
 
 function bindingFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {

@@ -273,6 +273,13 @@ async function liveEnvironment(
   t: TestContext,
 ): Promise<{ env: NodeJS.ProcessEnv; token: string }> {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
+  fixture.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
+      )
+      .run(TEST_PROJECT_ID, "worker-app", Date.now()),
+  );
   const token = await fixture.machineToken(
     TEST_PROJECT_ID,
     TEST_WORKER_BINDING,

@@ -141,6 +141,12 @@ components:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
+        paused_at:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: "null"
         workspace_directory:
           type: string
       required:
@@ -148,6 +154,7 @@ components:
         - name
         - binding_set_version
         - created_at
+        - paused_at
         - workspace_directory
       additionalProperties: false
     project.list.Input:
@@ -197,6 +204,12 @@ components:
                 type: integer
                 minimum: -9007199254740991
                 maximum: 9007199254740991
+              paused_at:
+                anyOf:
+                  - type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  - type: "null"
               workspace_directory:
                 type: string
             required:
@@ -204,6 +217,7 @@ components:
               - name
               - binding_set_version
               - created_at
+              - paused_at
               - workspace_directory
             additionalProperties: false
         next_cursor:

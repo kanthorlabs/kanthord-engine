@@ -274,3 +274,41 @@ test("the claim pins the selections and answers no work when a chain cools down"
     [pinnedSelection],
   );
 });
+
+test("a paused project answers no work before the healthcheck, and keeps the job and the executions", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  const countRows = (table: string) =>
+    Number(
+      h.store.database.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()!.n,
+    );
+  let paused = true;
+  h.dependencies.projects.projectPaused = (_tx, projectId) => {
+    assert.equal(projectId, h.row.project_id);
+    return paused;
+  };
+  h.dependencies.registrations.instanceHealthcheck = () => false;
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.None);
+  assert.equal(result.row, null);
+  assert.equal(countRows("scheduler_execution"), NO_CLAIMS);
+  assert.equal(countRows("scheduler_job"), ONE_CALL);
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === CLAIM_METHOD),
+    [],
+  );
+  h.dependencies.registrations.instanceHealthcheck = () => true;
+  paused = false;
+  assert.equal(h.claim().outcome, ClaimOutcome.Claimed);
+});
+
+test("a paused project still answers the running execution of the runtime", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) => insertExecution(tx, h.row));
+  h.dependencies.projects.projectPaused = () => true;
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.Running);
+  assert.deepEqual(result.row, h.row);
+});

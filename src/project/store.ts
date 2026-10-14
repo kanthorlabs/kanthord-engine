@@ -28,7 +28,7 @@ const NO_REVISION = 0;
 const REVISION_INCREMENT = 1;
 const BINDING_SET_VERSION = `(SELECT COUNT(*) FROM project_binding counted
     WHERE counted.project_id = project_project.id) + ${BINDING_SET_INITIAL_VERSION}`;
-const PROJECT_COLUMNS = `id, name, created_at, ${BINDING_SET_VERSION} AS binding_set_version`;
+const PROJECT_COLUMNS = `id, name, created_at, paused_at, ${BINDING_SET_VERSION} AS binding_set_version`;
 const MINIMUM_LIMIT = 1;
 const EXTRA_ROW = 1;
 const FIRST_ROW = 0;
@@ -58,12 +58,14 @@ type ProjectRow = {
   name: string;
   binding_set_version: number;
   created_at: number;
+  paused_at: number | null;
 };
 export type StoredProject = {
   id: string;
   name: string;
   binding_set_version: number;
   created_at: number;
+  paused_at: number | null;
 };
 
 function toProject(row: ProjectRow): StoredProject {
@@ -74,6 +76,7 @@ function toProject(row: ProjectRow): StoredProject {
     name: row.name,
     binding_set_version: row.binding_set_version,
     created_at: row.created_at,
+    paused_at: row.paused_at,
   };
 }
 
@@ -101,12 +104,13 @@ export function insertProject(tx: Transaction, name: string): StoredProject {
     name,
     binding_set_version: BINDING_SET_INITIAL_VERSION,
     created_at: Date.now(),
+    paused_at: null,
   };
   tx.database
     .prepare(
-      "INSERT INTO project_project (id, name, created_at) VALUES (?, ?, ?)",
+      "INSERT INTO project_project (id, name, created_at, paused_at) VALUES (?, ?, ?, ?)",
     )
-    .run(row.id, row.name, row.created_at);
+    .run(row.id, row.name, row.created_at, row.paused_at);
   return toProject(row);
 }
 
@@ -134,6 +138,25 @@ export function renameProject(
     .prepare("UPDATE project_project SET name = ? WHERE id = ?")
     .run(name, id);
   return { ...project, name };
+}
+
+export function pauseProject(tx: Transaction, id: string): StoredProject {
+  const project = requireProject(tx, id);
+  if (project.paused_at !== null) return project;
+  const pausedAt = Date.now();
+  tx.database
+    .prepare("UPDATE project_project SET paused_at = ? WHERE id = ?")
+    .run(pausedAt, id);
+  return { ...project, paused_at: pausedAt };
+}
+
+export function resumeProject(tx: Transaction, id: string): StoredProject {
+  const project = requireProject(tx, id);
+  if (project.paused_at === null) return project;
+  tx.database
+    .prepare("UPDATE project_project SET paused_at = NULL WHERE id = ?")
+    .run(id);
+  return { ...project, paused_at: null };
 }
 
 export function listProjects(

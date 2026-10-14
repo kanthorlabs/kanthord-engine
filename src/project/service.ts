@@ -97,6 +97,8 @@ import {
   listProjects,
   requireProject,
   renameProject,
+  pauseProject,
+  resumeProject,
   readBindingRevision,
   readLatestBinding,
   readLatestTombstone,
@@ -394,6 +396,18 @@ export class ProjectService implements Service, ProjectBindings {
         this.projectRecord(renameProject(tx, params.project_id, body.name)),
       ),
     );
+    registry.register(projectOperations.pause, ({ params }, caller) =>
+      caller.commit((tx) =>
+        this.projectRecord(pauseProject(tx, params.project_id)),
+      ),
+    );
+    registry.register(projectOperations.resume, ({ params }, caller) => {
+      const record = caller.commit((tx) =>
+        this.projectRecord(resumeProject(tx, params.project_id)),
+      );
+      this.wakeup.wake(record.id);
+      return record;
+    });
     registry.register(
       projectOperations["bindingSet.write"],
       ({ params, body }, caller) =>
@@ -1141,6 +1155,10 @@ export class ProjectService implements Service, ProjectBindings {
     const project = requireProject(tx, projectId);
     assert.equal(project.id, projectId);
     return project.name;
+  }
+  projectPaused(tx: Transaction, projectId: string): boolean {
+    assert.ok(tx.database.isTransaction);
+    return requireProject(tx, projectId).paused_at !== null;
   }
   workerBindingOf(
     tx: Transaction,

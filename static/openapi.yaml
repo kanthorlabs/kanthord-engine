@@ -216,6 +216,10 @@ paths:
     $ref: ./openapi/project/create.yaml#/pathItem
   /api/project/{project_id}:
     $ref: ./openapi/project/get.yaml#/pathItem
+  /api/project/{project_id}/pause:
+    $ref: ./openapi/project/pause.yaml#/pathItem
+  /api/project/{project_id}/resume:
+    $ref: ./openapi/project/resume.yaml#/pathItem
   /api/repository/credential/{credential_name}/archive:
     $ref: ./openapi/repository/credential.archive.yaml#/pathItem
   /api/repository/credential/check:
