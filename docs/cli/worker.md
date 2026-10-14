@@ -32,7 +32,7 @@ are implemented and wired to Project authorization and Scheduler execution pins.
 The `handover` CLI leaf is implemented with its published validation code.
 
 The [Worker configuration fragment](../../src/worker/config.ts) declares
-`heartbeat_window`. The catalog, report-only instance
+`heartbeat_window` and `server_slot_limit`. The catalog, report-only instance
 healthcheck collaboration and registration heartbeat lifecycle are implemented.
 Native agent loops, prompt consumption, repository actions and MCP remain
 later runtime work. The server starts one worker thread for each slot of a
@@ -400,7 +400,7 @@ Authentication still checks the credential and binding. A retry with the same
 within the TTL and one process. The operation declares no replay guard.
 Every target that is no live registration of the caller answers `404`
 `worker.instance.not_found`, including an ended registration, another client's
-instance, a server-placement instance and a newer registration of the same
+instance and a newer registration of the same
 client identity, which stays intact. A retry after a restart runs the handler
 again: it ends a registration that is still live and answers `404` for one that
 already ended. The caller reads that `404` after its own call as the end of its
@@ -577,7 +577,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `worker.action_performer.snapshot_absent`                 | The current passing assessment names no repository snapshot of the binding of the action.                                                                                                                                         | worker.action.request (API only)                                                                                              |
 | 400   | `worker.instance.binding_unknown`                         | `resource_identity` names no current worker binding of `project_id`.                                                                                                                                                              | instance list                                                                                                                 |
 | 404   | `worker.catalog.not_found`                                | The worker name is absent from the catalog.                                                                                                                                                                                       | get                                                                                                                           |
-| 404   | `worker.instance.not_found`                               | The runtime identity is unknown, ended, not owned or at the server placement.                                                                                                                                                     | instance get, instance deregister, instance resume                                                                            |
+| 404   | `worker.instance.not_found`                               | The runtime identity is unknown, ended or not owned.                                                                                                                                                                              | instance get, instance deregister, instance resume                                                                            |
 | 409   | `worker.instance.no_live_execution`                       | The registration is the claimant of no live execution.                                                                                                                                                                            | instance resume                                                                                                               |
 | 409   | `worker.instance.client_live`                             | The client identity holds another live registration.                                                                                                                                                                              | instance resume                                                                                                               |
 | 409   | `worker.instance.placement_mismatch`                      | The binding is at the `server` placement and the client identity is not a pool slot of that binding.                                                                                                                              | register                                                                                                                      |
