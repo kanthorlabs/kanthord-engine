@@ -1135,7 +1135,7 @@ const FIRST_SEEDED_ATTEMPT = 1;
 export function seedUnresolvedRequest(
   store: Store,
   input: { project_id: string; resource_identity: string; number: number },
-): { close(): void } {
+): void {
   const nodeId = createIdentity("node");
   const evidenceId = createIdentity("evidence");
   const now = Date.now();
@@ -1189,14 +1189,6 @@ export function seedUnresolvedRequest(
         }),
       );
   });
-  return {
-    close: () =>
-      store.transaction((tx) =>
-        tx.database
-          .prepare("UPDATE mission_attempt SET closed_at = ? WHERE node_id = ?")
-          .run(Date.now(), nodeId),
-      ),
-  };
 }
 
 const MAIN_REF = "refs/heads/main";
