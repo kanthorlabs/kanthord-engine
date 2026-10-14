@@ -184,6 +184,7 @@ test("a write sends one request for a 429", async (t) => {
     code: "repository.platform.github.retryable_refusal",
     status: 429,
     message: "slow down",
+    rate_limit: { wait_ms: null },
   });
 });
 
@@ -263,12 +264,14 @@ test("each status answers its class", async (t) => {
     status: number;
     headers: Record<string, string>;
     class: ResultClassValue;
+    rateLimited?: boolean;
   }[] = [
     { status: 408, headers: {}, class: ResultClass.RetryableRefusal },
     {
       status: 403,
       headers: { "x-ratelimit-remaining": "0" },
       class: ResultClass.RetryableRefusal,
+      rateLimited: true,
     },
     {
       status: 403,
@@ -293,8 +296,184 @@ test("each status answers its class", async (t) => {
       code: `repository.platform.github.${expected.class}`,
       status: expected.status,
       message: "refused",
+      ...(expected.rateLimited ? { rate_limit: { wait_ms: null } } : {}),
     });
   }
+});
+
+const RESET_NOW_MS = 1_700_000_000_000;
+const POLL_INTERVAL_MS = 90_000;
+const MS_PER_SECOND = 1000;
+const SECONDARY_LIMIT_MESSAGE =
+  "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.";
+
+function rateLimitOf(result: { ok: boolean }) {
+  assert.ok(!result.ok);
+  return (result as { rate_limit?: { wait_ms: number | null } }).rate_limit;
+}
+
+test("a 403 with no remaining requests names the wait until x-ratelimit-reset", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: RESET_NOW_MS });
+  const resetSeconds = RESET_NOW_MS / 1000 + 90;
+  const server = await platform(
+    t,
+    answer(
+      403,
+      { message: "API rate limit exceeded" },
+      {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(resetSeconds),
+      },
+    ),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: null,
+  });
+  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+  assert.deepEqual(rateLimitOf(result), { wait_ms: 90_000 });
+});
+
+test("x-ratelimit-reset in the past names a wait of zero", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: RESET_NOW_MS });
+  const server = await platform(
+    t,
+    answer(
+      403,
+      { message: "API rate limit exceeded" },
+      {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(RESET_NOW_MS / 1000 - 5),
+      },
+    ),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: null,
+  });
+  assert.deepEqual(rateLimitOf(result), { wait_ms: 0 });
+});
+
+test("a remaining count above zero ignores x-ratelimit-reset", async (t) => {
+  const server = await platform(
+    t,
+    answer(
+      403,
+      { message: "Forbidden" },
+      { "x-ratelimit-remaining": "12", "x-ratelimit-reset": "4102444800" },
+    ),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: null,
+  });
+  assert.equal(!result.ok && result.class, ResultClass.FinalRefusal);
+  assert.equal(rateLimitOf(result), undefined);
+});
+
+test("a 429 names the wait of Retry-After in milliseconds and it wins over x-ratelimit-reset", async (t) => {
+  const server = await platform(
+    t,
+    answer(
+      429,
+      { message: "slow down" },
+      {
+        "retry-after": "7",
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": "4102444800",
+      },
+    ),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listEvents(call(), {
+    ...EVENTS_QUERY,
+    etag: null,
+  });
+  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+  assert.deepEqual(rateLimitOf(result), { wait_ms: 7000 });
+});
+
+test("a 403 that names a secondary rate limit is a retryable_refusal with a named wait only from Retry-After", async (t) => {
+  const bare = await platform(
+    t,
+    answer(403, { message: SECONDARY_LIMIT_MESSAGE }),
+  );
+  const bareResult = await new GitHubPlatform({
+    baseUrl: bare.baseUrl,
+  }).listEvents(call(), { ...EVENTS_QUERY, etag: null });
+  assert.equal(
+    !bareResult.ok && bareResult.class,
+    ResultClass.RetryableRefusal,
+  );
+  assert.deepEqual(rateLimitOf(bareResult), { wait_ms: null });
+  const waiting = await platform(
+    t,
+    answer(403, { message: SECONDARY_LIMIT_MESSAGE }, { "retry-after": "60" }),
+  );
+  const waitingResult = await new GitHubPlatform({
+    baseUrl: waiting.baseUrl,
+  }).listEvents(call(), { ...EVENTS_QUERY, etag: null });
+  assert.deepEqual(rateLimitOf(waitingResult), { wait_ms: 60_000 });
+});
+
+test("a refusal that is no rate limit names no rate limit even with Retry-After", async (t) => {
+  const server = await platform(
+    t,
+    answer(
+      SERVICE_UNAVAILABLE,
+      { message: "unavailable" },
+      { "retry-after": "30" },
+    ),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).listEvents(call(), { ...EVENTS_QUERY, etag: null });
+  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+  assert.equal(rateLimitOf(result), undefined);
+});
+
+test("listEvents answers the wait of X-Poll-Interval in milliseconds for a 200 and a 304", async (t) => {
+  const modified = await platform(
+    t,
+    answer(200, [PUSH_EVENT], {
+      etag: FIRST_ETAG,
+      "x-poll-interval": String(POLL_INTERVAL_MS / MS_PER_SECOND),
+    }),
+  );
+  const first = await new GitHubPlatform({
+    baseUrl: modified.baseUrl,
+  }).listEvents(call(), { ...EVENTS_QUERY, etag: null });
+  assert.ok(first.ok && !first.value.notModified);
+  assert.equal(first.value.poll_interval_ms, POLL_INTERVAL_MS);
+  const unchanged = await platform(t, (_request, response) => {
+    response.writeHead(NOT_MODIFIED, {
+      etag: FIRST_ETAG,
+      "x-poll-interval": "75",
+    });
+    response.end();
+  });
+  const second = await new GitHubPlatform({
+    baseUrl: unchanged.baseUrl,
+  }).listEvents(call(), { ...EVENTS_QUERY, etag: FIRST_ETAG });
+  assert.deepEqual(second, {
+    ok: true,
+    value: { notModified: true, poll_interval_ms: 75_000 },
+  });
+});
+
+test("a malformed X-Poll-Interval names no wait", async (t) => {
+  const server = await platform(
+    t,
+    answer(200, [PUSH_EVENT], { etag: FIRST_ETAG, "x-poll-interval": "soon" }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).listEvents(call(), { ...EVENTS_QUERY, etag: null });
+  assert.ok(result.ok && !result.value.notModified);
+  assert.equal(result.value.poll_interval_ms, undefined);
 });
 
 test("a write refused before dispatch answers confirmed_failure", async () => {

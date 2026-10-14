@@ -32,7 +32,13 @@ const MIN_PULL_REQUEST_NUMBER = 1;
 const NEXT_LINK_PATTERN = /<[^>]*>\s*;\s*rel="next"/;
 const API_VERSION_HEADER = "x-github-api-version";
 const RATE_LIMIT_REMAINING_HEADER = "x-ratelimit-remaining";
+const RATE_LIMIT_RESET_HEADER = "x-ratelimit-reset";
+const RETRY_AFTER_HEADER = "retry-after";
+const POLL_INTERVAL_HEADER = "x-poll-interval";
 const RATE_LIMIT_EXHAUSTED = "0";
+const SECONDARY_RATE_LIMIT_PATTERN = /secondary rate limit/i;
+const SECONDS_PATTERN = /^(0|[1-9][0-9]*)$/;
+const MS_PER_SECOND = 1000;
 const IF_NONE_MATCH_HEADER = "if-none-match";
 const NOT_MODIFIED_STATUS = 304;
 const EVENT_PAGE_SIZE = 100;
@@ -113,12 +119,17 @@ export interface GitHubRepository {
   repo: string;
 }
 
+export interface GitHubRateLimit {
+  wait_ms: number | null;
+}
+
 export interface GitHubFailure {
   ok: false;
   class: ResultClassValue;
   code: string;
   status: number | null;
   message: string;
+  rate_limit?: GitHubRateLimit;
 }
 
 export type GitHubAnswer<T> = { ok: true; value: T } | GitHubFailure;
@@ -143,8 +154,13 @@ export interface GitHubEvent {
 }
 
 export type GitHubEventsAnswer =
-  | { notModified: true }
-  | { notModified: false; etag: string | null; events: GitHubEvent[] };
+  | { notModified: true; poll_interval_ms?: number }
+  | {
+      notModified: false;
+      etag: string | null;
+      events: GitHubEvent[];
+      poll_interval_ms?: number;
+    };
 
 export interface GitHubEventsQuery {
   owner: string;
@@ -290,6 +306,7 @@ interface Exchange {
   data: unknown;
   link: string | null;
   etag: string | null;
+  pollIntervalMs: number | null;
   notModified: boolean;
 }
 
@@ -322,13 +339,42 @@ export function classify(
   if (!(error instanceof RequestError) || error.response === undefined) {
     return failure(transportClass(phase, kind), null, message);
   }
-  const rateLimitRemaining =
-    error.response.headers[RATE_LIMIT_REMAINING_HEADER];
+  const rateLimit = rateLimitOf(error.status, error.response.headers, message);
   return failure(
-    statusClass(error.status, rateLimitRemaining, kind),
+    statusClass(error.status, rateLimit !== undefined, kind),
     error.status,
     message,
+    rateLimit,
   );
+}
+
+function secondsOf(value: unknown): number | null {
+  if (!isString(value) || !SECONDS_PATTERN.test(value)) return null;
+  const seconds = Number(value);
+  return Number.isSafeInteger(seconds) ? seconds : null;
+}
+
+function rateLimitOf(
+  status: number,
+  headers: Record<string, unknown>,
+  message: string,
+): GitHubRateLimit | undefined {
+  assert.ok(Number.isInteger(status));
+  const exhausted =
+    String(headers[RATE_LIMIT_REMAINING_HEADER]) === RATE_LIMIT_EXHAUSTED;
+  const limited =
+    status === HttpStatus.TooManyRequests ||
+    (status === HttpStatus.Forbidden &&
+      (exhausted || SECONDARY_RATE_LIMIT_PATTERN.test(message)));
+  if (!limited) return undefined;
+  const retryAfter = secondsOf(headers[RETRY_AFTER_HEADER]);
+  if (retryAfter !== null) return { wait_ms: retryAfter * MS_PER_SECOND };
+  const reset = secondsOf(headers[RATE_LIMIT_RESET_HEADER]);
+  if (exhausted && reset !== null)
+    return {
+      wait_ms: Math.max(NO_TIME_LEFT_MS, reset * MS_PER_SECOND - Date.now()),
+    };
+  return { wait_ms: null };
 }
 
 function singleHeaderValue(headers: Headers, name: string): string | null {
@@ -366,7 +412,7 @@ function transportClass(phase: DispatchPhase, kind: CallKind) {
 
 function statusClass(
   status: number,
-  rateLimitRemaining: unknown,
+  rateLimited: boolean,
   kind: CallKind,
 ): ResultClassValue {
   assert.ok(Number.isInteger(status));
@@ -375,14 +421,7 @@ function statusClass(
       ? ResultClass.RetryableRefusal
       : ResultClass.UnknownOutcome;
   }
-  const exhausted =
-    status === HttpStatus.Forbidden &&
-    String(rateLimitRemaining) === RATE_LIMIT_EXHAUSTED;
-  if (
-    status === HttpStatus.TooManyRequests ||
-    status === REQUEST_TIMEOUT_STATUS ||
-    exhausted
-  ) {
+  if (rateLimited || status === REQUEST_TIMEOUT_STATUS) {
     return ResultClass.RetryableRefusal;
   }
   return ResultClass.FinalRefusal;
@@ -392,6 +431,7 @@ function failure(
   resultClass: ResultClassValue,
   status: number | null,
   message: string,
+  rateLimit?: GitHubRateLimit,
 ): GitHubFailure {
   assert.ok(Object.values(ResultClass).includes(resultClass));
   assert.ok(status === null || Number.isInteger(status));
@@ -401,6 +441,7 @@ function failure(
     code: GITHUB_RESULT_CODE_PREFIX + resultClass,
     status,
     message,
+    ...(rateLimit === undefined ? {} : { rate_limit: rateLimit }),
   };
 }
 
@@ -444,10 +485,12 @@ function exchangeOf(
 ): Exchange {
   assert.ok(typeof notModified === ValueType.Boolean);
   const { link, etag } = response.headers;
+  const pollSeconds = secondsOf(response.headers[POLL_INTERVAL_HEADER]);
   const exchange = {
     data: notModified ? null : response.data,
     link: isString(link) ? link : null,
     etag: isString(etag) ? etag : null,
+    pollIntervalMs: pollSeconds === null ? null : pollSeconds * MS_PER_SECOND,
     notModified,
   };
   assert.ok(!exchange.notModified || exchange.data === null);
@@ -888,15 +931,24 @@ export class GitHubPlatform {
     if (!answer.ok) {
       return answer;
     }
+    const poll =
+      answer.value.pollIntervalMs === null
+        ? {}
+        : { poll_interval_ms: answer.value.pollIntervalMs };
     if (answer.value.notModified) {
-      return { ok: true, value: { notModified: true } };
+      return { ok: true, value: { notModified: true, ...poll } };
     }
     const events = eventsOf(answer.value.data);
     return events === null
       ? unreadableBody(CallKind.Read)
       : {
           ok: true,
-          value: { notModified: false, etag: answer.value.etag, events },
+          value: {
+            notModified: false,
+            etag: answer.value.etag,
+            events,
+            ...poll,
+          },
         };
   }
 

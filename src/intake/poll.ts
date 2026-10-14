@@ -23,6 +23,7 @@ import {
   repositoryOf,
   type GitHubAnswer,
   type GitHubCheckpoint,
+  type GitHubFailure,
   type GitHubEvent,
   type GitHubEventsAnswer,
   type GitHubPlatform,
@@ -33,6 +34,8 @@ import {
   InboundKind,
   InboundPlatform,
   PLATFORM_CALL_DEADLINE_MS,
+  POLL_BACKOFF_MAX_MS,
+  POLL_WAIT_MAX_MS,
 } from "./contract.ts";
 import { findEvent, insertEvent, pendingCount } from "./event-store.ts";
 import {
@@ -48,6 +51,10 @@ const EXHAUSTED_ROOM = 0;
 const POLL_INTERVAL_FLOOR_MS = 0;
 const IMMEDIATE_OFFSET_MS = 0;
 const ROOM_PER_EVENT = 1;
+const NO_REFUSALS = 0;
+const REFUSAL_STEP = 1;
+const REFUSAL_COUNT_LIMIT = 32;
+const BACKOFF_FACTOR = 2;
 const UNKNOWN_CODE = "system.operation.unknown";
 const EMPTY_CHECKPOINT: GitHubCheckpoint = {
   etag: null,
@@ -72,10 +79,29 @@ export interface PollDependencies extends PollCycleDependencies {
 export const CycleOutcome = { Continue: "continue", Gone: "gone" } as const;
 export type CycleOutcome = (typeof CycleOutcome)[keyof typeof CycleOutcome];
 
+export const CycleAnswer = {
+  Skipped: "skipped",
+  Answered: "answered",
+  SecondaryRefusal: "secondary_refusal",
+} as const;
+export type CycleAnswer = (typeof CycleAnswer)[keyof typeof CycleAnswer];
+
+export interface CycleResult {
+  outcome: CycleOutcome;
+  answer: CycleAnswer;
+  waitMs: number | null;
+}
+
+export interface PollWait {
+  waitMs: number;
+  secondaryRefusals: number;
+}
+
 interface Loop {
   timer: NodeJS.Timeout | null;
   context: CancellationContext;
   cycle: Promise<void> | null;
+  secondaryRefusals: number;
 }
 
 export interface PollTarget {
@@ -198,6 +224,70 @@ export async function requestPollEvents(
   }
 }
 
+const SKIPPED_CYCLE: CycleResult = {
+  outcome: CycleOutcome.Continue,
+  answer: CycleAnswer.Skipped,
+  waitMs: null,
+};
+const GONE_CYCLE: CycleResult = {
+  outcome: CycleOutcome.Gone,
+  answer: CycleAnswer.Skipped,
+  waitMs: null,
+};
+
+function answeredCycle(waitMs: number | null): CycleResult {
+  return {
+    outcome: CycleOutcome.Continue,
+    answer: CycleAnswer.Answered,
+    waitMs,
+  };
+}
+
+function failedCycle(answer: GitHubFailure): CycleResult {
+  if (answer.rate_limit === undefined) return answeredCycle(null);
+  if (answer.rate_limit.wait_ms === null)
+    return {
+      outcome: CycleOutcome.Continue,
+      answer: CycleAnswer.SecondaryRefusal,
+      waitMs: null,
+    };
+  return answeredCycle(answer.rate_limit.wait_ms);
+}
+
+export function nextWait(
+  intervalMs: number,
+  secondaryRefusals: number,
+  result: CycleResult,
+): PollWait {
+  assert.ok(Number.isSafeInteger(intervalMs) && intervalMs > NO_REFUSALS);
+  assert.ok(Number.isSafeInteger(secondaryRefusals));
+  assert.ok(secondaryRefusals >= NO_REFUSALS);
+  if (result.answer === CycleAnswer.Skipped)
+    return { waitMs: intervalMs, secondaryRefusals };
+  if (result.answer === CycleAnswer.Answered)
+    return {
+      waitMs: Math.min(
+        Math.max(intervalMs, result.waitMs ?? NO_REFUSALS),
+        POLL_WAIT_MAX_MS,
+      ),
+      secondaryRefusals: NO_REFUSALS,
+    };
+  const refusals = Math.min(
+    secondaryRefusals + REFUSAL_STEP,
+    REFUSAL_COUNT_LIMIT,
+  );
+  return {
+    waitMs: Math.min(
+      Math.max(
+        intervalMs,
+        Math.min(intervalMs * BACKOFF_FACTOR ** refusals, POLL_BACKOFF_MAX_MS),
+      ),
+      POLL_WAIT_MAX_MS,
+    ),
+    secondaryRefusals: refusals,
+  };
+}
+
 function prepareCycle(
   dependencies: PollCycleDependencies,
   tx: Transaction,
@@ -278,13 +368,16 @@ export async function pollCycle(
   dependencies: PollCycleDependencies,
   inboundId: string,
   context: Context,
-): Promise<CycleOutcome> {
+): Promise<CycleResult> {
   const hold: Hold = { material: null };
   try {
     const preparation = dependencies.store.transaction((tx) =>
       prepareCycle(dependencies, tx, inboundId, hold),
     );
-    if (!preparation.ready) return preparation.outcome;
+    if (!preparation.ready)
+      return preparation.outcome === CycleOutcome.Gone
+        ? GONE_CYCLE
+        : SKIPPED_CYCLE;
     assert.ok(hold.material, "A committed release holds the material.");
     const { target } = preparation;
     const answer = await requestPollEvents(dependencies.github, {
@@ -295,19 +388,20 @@ export async function pollCycle(
       repo: target.repo,
       etag: target.checkpoint.etag,
     });
-    if (context.err()) return CycleOutcome.Continue;
+    if (context.err()) return SKIPPED_CYCLE;
     if (!answer.ok) {
       logFailure(dependencies.logger, inboundId, answer.code);
-      return CycleOutcome.Continue;
+      return failedCycle(answer);
     }
-    if (answer.value.notModified) return CycleOutcome.Continue;
+    const waitMs = answer.value.poll_interval_ms ?? null;
+    if (answer.value.notModified) return answeredCycle(waitMs);
     const batch = answer.value;
     const stored = dependencies.store.transaction((tx) =>
       storeBatch(tx, dependencies.pendingEventLimit, inboundId, batch),
     );
-    if (!stored) return CycleOutcome.Gone;
+    if (!stored) return GONE_CYCLE;
     dependencies.wake();
-    return CycleOutcome.Continue;
+    return answeredCycle(waitMs);
   } finally {
     hold.material?.drop();
   }
@@ -384,33 +478,41 @@ export class PollLoops {
       timer: null,
       context: new CancellationContext(this.#dependencies.context),
       cycle: null,
+      secondaryRefusals: NO_REFUSALS,
     };
     this.#loops.set(inboundId, loop);
-    this.#arm(inboundId, loop, startOffsetMs);
+    this.#arm(
+      inboundId,
+      loop,
+      this.#dependencies.pollIntervalMs + startOffsetMs,
+    );
   }
 
-  #arm(
-    inboundId: string,
-    loop: Loop,
-    startOffsetMs = IMMEDIATE_OFFSET_MS,
-  ): void {
+  #arm(inboundId: string, loop: Loop, delayMs: number): void {
     if (this.#loops.get(inboundId) !== loop) return;
     assert.equal(loop.timer, null, "A loop holds one timer.");
     assert.equal(loop.cycle, null, "A loop arms after its cycle ends.");
-    loop.timer = setTimeout(
-      () => this.#tick(inboundId, loop),
-      this.#dependencies.pollIntervalMs + startOffsetMs,
-    );
+    assert.ok(Number.isSafeInteger(delayMs) && delayMs > IMMEDIATE_OFFSET_MS);
+    loop.timer = setTimeout(() => this.#tick(inboundId, loop), delayMs);
   }
 
   #tick(inboundId: string, loop: Loop): void {
     assert.notEqual(loop.timer, null, "A tick follows an armed timer.");
     loop.timer = null;
-    const cycle = this.#cycle(inboundId, loop.context).then((outcome) => {
+    const cycle = this.#cycle(inboundId, loop.context).then((result) => {
       this.#cycles.delete(cycle);
       loop.cycle = null;
-      if (outcome === CycleOutcome.Gone) this.#forget(inboundId, loop);
-      else this.#arm(inboundId, loop);
+      if (result.outcome === CycleOutcome.Gone) {
+        this.#forget(inboundId, loop);
+        return;
+      }
+      const wait = nextWait(
+        this.#dependencies.pollIntervalMs,
+        loop.secondaryRefusals,
+        result,
+      );
+      loop.secondaryRefusals = wait.secondaryRefusals;
+      this.#arm(inboundId, loop, wait.waitMs);
     });
     this.#cycles.add(cycle);
     loop.cycle = cycle;
@@ -422,7 +524,7 @@ export class PollLoops {
     assert.ok(!this.#loops.has(inboundId), "A gone inbound holds no loop.");
   }
 
-  async #cycle(inboundId: string, context: Context): Promise<CycleOutcome> {
+  async #cycle(inboundId: string, context: Context): Promise<CycleResult> {
     try {
       return await pollCycle(this.#dependencies, inboundId, context);
     } catch (error) {
@@ -431,7 +533,7 @@ export class PollLoops {
         inboundId,
         error instanceof CodedError ? error.code : UNKNOWN_CODE,
       );
-      return CycleOutcome.Continue;
+      return SKIPPED_CYCLE;
     }
   }
 }

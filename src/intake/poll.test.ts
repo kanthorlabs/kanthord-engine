@@ -59,6 +59,10 @@ const LARGE_LIMIT = 100;
 const TOKEN = "ghp_poll-token";
 const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const SERVER_ERROR_STATUS = 500;
+const RATE_LIMIT_STATUS = 403;
+const BACKOFF_INTERVAL_MS = 300000;
+const BACKOFF_MAX_MS = 900000;
+const WAIT_MAX_MS = 3600000;
 const WAKES_WITHOUT_EVENTS = 0;
 const UNSENT_REQUEST_COUNT = 0;
 const WAKES_PER_BATCH = 1;
@@ -83,6 +87,7 @@ type EventsAnswer = GitHubAnswer<GitHubEventsAnswer>;
 interface HarnessOptions {
   limit?: number;
   checkpoint?: GitHubCheckpoint | null;
+  intervalMs?: number;
 }
 
 function ev(id: string, type: string): GitHubEvent {
@@ -336,7 +341,7 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
 test("a cycle releases one poll grant, requests the events under a deadline, stores the batch and wakes", async (t) => {
   const h = cycleHarness(t);
   h.answers.next = async () => modified(ETAG_FIRST, [ev("101", "PushEvent")]);
-  assert.equal(await h.cycle(), CycleOutcome.Continue);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
   assert.deepEqual(h.eventIds(), ["101"]);
   assert.deepEqual(h.checkpoint(), {
     etag: ETAG_FIRST,
@@ -370,7 +375,7 @@ test("a 304 answer commits nothing and the request carries the stored ETag", asy
   const stored = { etag: ETAG_STORED, newest_event_id: "100" };
   const h = cycleHarness(t, { checkpoint: stored });
   h.answers.next = async () => ({ ok: true, value: { notModified: true } });
-  assert.equal(await h.cycle(), CycleOutcome.Continue);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
   assert.equal(h.calls[0]?.query.etag, ETAG_STORED);
   assert.deepEqual(h.checkpoint(), stored);
   assert.deepEqual(h.eventIds(), []);
@@ -381,7 +386,7 @@ test("a 304 answer commits nothing and the request carries the stored ETag", asy
 test("a cycle at the bound sends no request and releases nothing, and it resumes below the bound", async (t) => {
   const h = cycleHarness(t, { limit: TIGHT_LIMIT });
   h.addEvent("50");
-  assert.equal(await h.cycle(), CycleOutcome.Continue);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   assert.deepEqual(h.grants, []);
   h.settleAll();
@@ -432,10 +437,10 @@ test("a delete of the inbound before the commit stores no event and answers gone
     h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
     return modified(ETAG_FIRST, [ev("101", "PushEvent")]);
   };
-  assert.equal(await h.cycle(), CycleOutcome.Gone);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Gone);
   assert.deepEqual(h.eventIds(), []);
   assert.equal(h.wakes.count, WAKES_WITHOUT_EVENTS);
-  assert.equal(await h.cycle(), CycleOutcome.Gone);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Gone);
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });
 
@@ -464,7 +469,7 @@ test("a result class leaves the checkpoint unchanged, logs the inbound and the c
     status: SERVER_ERROR_STATUS,
     message: "Server Error",
   });
-  assert.equal(await h.cycle(), CycleOutcome.Continue);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
   assert.deepEqual(h.checkpoint(), stored);
   assert.deepEqual(h.drops, [CREDENTIAL]);
   assert.equal(h.warn.mock.callCount(), WARNINGS_PER_FAILURE);
@@ -492,7 +497,7 @@ test("a cancelled context aborts the request and commits nothing after the answe
     context.cancel();
     return modified(ETAG_FIRST, [ev("101", "PushEvent")]);
   };
-  assert.equal(await h.cycle(context), CycleOutcome.Continue);
+  assert.equal((await h.cycle(context)).outcome, CycleOutcome.Continue);
   assert.equal(h.calls[0]?.call.signal.aborted, true);
   assert.deepEqual(h.eventIds(), []);
   assert.equal(h.checkpoint(), null);
@@ -508,17 +513,46 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = cycleHarness(t, options);
   const shutdown = new CancellationContext();
+  const intervalMs = options.intervalMs ?? INTERVAL_MS;
   const loops = new PollLoops({
     ...h.dependencies,
     context: shutdown,
-    pollIntervalMs: INTERVAL_MS,
+    pollIntervalMs: intervalMs,
   });
   t.after(() => loops.stopAll());
-  const interval = async () => {
-    t.mock.timers.tick(INTERVAL_MS);
+  const elapse = async (ms: number) => {
+    t.mock.timers.tick(ms);
     await settle();
   };
-  return { ...h, loops, interval };
+  const interval = () => elapse(intervalMs);
+  const script = (answers: EventsAnswer[]) => {
+    h.answers.next = async () =>
+      answers.shift() ?? { ok: true, value: { notModified: true } };
+  };
+  return { ...h, loops, interval, elapse, script };
+}
+
+function limited(waitMs: number | null): EventsAnswer {
+  return {
+    ok: false,
+    class: ResultClass.RetryableRefusal,
+    code: RETRYABLE_CODE,
+    status: RATE_LIMIT_STATUS,
+    message: "rate limited",
+    rate_limit: { wait_ms: waitMs },
+  };
+}
+
+function unchanged(pollIntervalMs?: number): EventsAnswer {
+  return {
+    ok: true,
+    value: {
+      notModified: true,
+      ...(pollIntervalMs === undefined
+        ? {}
+        : { poll_interval_ms: pollIntervalMs }),
+    },
+  };
 }
 
 test("a loop waits one interval before each cycle and re-arms after the cycle ends", async (t) => {
@@ -642,4 +676,112 @@ test("stopAll cancels the running request, awaits its cycle and commits nothing"
   assert.deepEqual(h.drops, [CREDENTIAL]);
   await h.interval();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+});
+
+test("a refusal that names a wait delays the next request until that wait", async (t) => {
+  const h = loopHarness(t);
+  h.script([limited(5 * INTERVAL_MS)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(5 * INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+});
+
+test("a refusal that names a wait below the interval waits one interval", async (t) => {
+  const h = loopHarness(t);
+  h.script([limited(0)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+});
+
+test("an X-Poll-Interval above the interval delays the next request, and one below it changes nothing", async (t) => {
+  const h = loopHarness(t);
+  h.script([unchanged(3 * INTERVAL_MS), unchanged(INTERVAL_MS / 2)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(3 * INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await h.elapse(INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE);
+});
+
+test("secondary rate limit refusals double the wait up to the bound, and the next answer returns to the interval", async (t) => {
+  const h = loopHarness(t, { intervalMs: BACKOFF_INTERVAL_MS });
+  h.script([limited(null), limited(null), limited(null), unchanged()]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  let requests = REQUESTS_PER_CYCLE;
+  assert.equal(h.calls.length, requests);
+  for (const waitMs of [
+    2 * BACKOFF_INTERVAL_MS,
+    BACKOFF_MAX_MS,
+    BACKOFF_MAX_MS,
+    BACKOFF_INTERVAL_MS,
+  ]) {
+    await h.elapse(waitMs - TICK_MS);
+    assert.equal(h.calls.length, requests);
+    await h.elapse(TICK_MS);
+    requests += REQUESTS_PER_CYCLE;
+    assert.equal(h.calls.length, requests);
+  }
+  await h.elapse(BACKOFF_INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, requests);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, requests + REQUESTS_PER_CYCLE);
+});
+
+test("any answer ends the count of secondary rate limit refusals", async (t) => {
+  const h = loopHarness(t);
+  h.script([limited(null), limited(null), unchanged(), limited(null)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(2 * INTERVAL_MS);
+  await h.elapse(4 * INTERVAL_MS);
+  await h.elapse(INTERVAL_MS);
+  assert.equal(h.calls.length, 4 * REQUESTS_PER_CYCLE);
+  await h.elapse(2 * INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, 4 * REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, 5 * REQUESTS_PER_CYCLE);
+});
+
+test("a refusal that is no rate limit keeps the interval and ends the count", async (t) => {
+  const h = loopHarness(t);
+  h.script([
+    limited(null),
+    {
+      ok: false,
+      class: ResultClass.RetryableRefusal,
+      code: RETRYABLE_CODE,
+      status: SERVER_ERROR_STATUS,
+      message: "Server Error",
+    },
+  ]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(2 * INTERVAL_MS);
+  await h.elapse(INTERVAL_MS);
+  assert.equal(h.calls.length, 3 * REQUESTS_PER_CYCLE);
+});
+
+test("the wait bound caps a named wait", async (t) => {
+  const h = loopHarness(t);
+  h.script([limited(10 * WAIT_MAX_MS)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(WAIT_MAX_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
 });
