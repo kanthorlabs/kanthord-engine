@@ -1,46 +1,19 @@
 import assert from "node:assert/strict";
-import type { AgentSetup, ExecutionSetup, HostTools } from "./contract.ts";
+import type {
+  AgentSetup,
+  ExecutionSetup,
+  HostTools,
+  PoolHost,
+  PoolSlot,
+} from "./contract.ts";
 import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
 
 export const unusedHostTools: HostTools = {
   evidenceUpload: () =>
     Promise.reject(new Error("Unexpected evidence upload in fixture")),
 };
-import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
-import {
-  modelConnectorInput,
-  type ModelRuntimeFactory,
-} from "./model-runtime.ts";
-import { loadPi } from "../agent/pi.ts";
-import type { ScriptedProvider } from "../agent/test-support.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-export {
-  scriptedProvider,
-  type ScriptedProvider,
-} from "../agent/test-support.ts";
-export {
-  fauxAssistantMessage,
-  fauxToolCall,
-  fauxText,
-} from "@earendil-works/pi-ai";
-
-export function scriptedModelRuntime(
-  provider: ScriptedProvider,
-): ModelRuntimeFactory {
-  assert.ok(provider.provider);
-  assert.ok(provider.calls);
-  return async (input) => {
-    const runtime = await createModelRuntime(
-      await loadPi(),
-      modelConnectorInput(input),
-    );
-    runtime.registerNativeProvider(provider.provider);
-    return {
-      runtime,
-      model: resolveModel(runtime, input.agent.effective_configuration),
-    };
-  };
-}
 
 export const TWO_AGENT_WORKER = "two-agent@1";
 export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {
@@ -95,4 +68,41 @@ export function anthropicSetup(
   assert.ok(setup.agents.length);
   assert.ok(setup.execution_id);
   return setup;
+}
+
+export class FakePoolHost implements PoolHost {
+  readonly started: PoolSlot[] = [];
+  readonly drained: PoolSlot[] = [];
+  private listener: (clientId: string) => void = () => {};
+  clientIdentity(
+    projectId: string,
+    resourceIdentity: string,
+    generation: number,
+    slot: number,
+  ): string {
+    const key = [projectId, resourceIdentity, generation, slot].join("/");
+    let identity = this.identities.get(key);
+    if (!identity) {
+      identity = createIdentity("client_identity");
+      this.identities.set(key, identity);
+    }
+    return identity;
+  }
+  start(slot: PoolSlot): void {
+    this.started.push({ ...slot });
+  }
+  drain(slot: PoolSlot): void {
+    this.drained.push({ ...slot });
+  }
+  stopped = false;
+  private readonly identities = new Map<string, string>();
+  async stop(): Promise<void> {
+    this.stopped = true;
+  }
+  onEnded(listener: (clientId: string) => void): void {
+    this.listener = listener;
+  }
+  end(clientId: string): void {
+    this.listener(clientId);
+  }
 }

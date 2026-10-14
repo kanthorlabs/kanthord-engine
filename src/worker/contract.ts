@@ -360,10 +360,22 @@ export type WorkerBindingOf = (
   revision: number;
   worker_name: string;
   instance_count: number;
+  placement: InstancePlacement;
+  generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: Array<WorkerEntry & { agent: string }>;
   tombstone: boolean;
 } | null;
+
+export type WorkerBindingsOf = (
+  tx: Transaction,
+  projectId: string | null,
+) => Array<
+  NonNullable<ReturnType<WorkerBindingOf>> & {
+    project_id: string;
+    resource_identity: string;
+  }
+>;
 
 export const AuthorizationRefusal = {
   BindingMismatch: "binding_mismatch",
@@ -418,6 +430,8 @@ export const InstancePlacement = {
   Server: "server",
   Worker: "worker",
 } as const;
+export type InstancePlacement =
+  (typeof InstancePlacement)[keyof typeof InstancePlacement];
 export const workerResourceIdentitySchema = z
   .string()
   .regex(/^worker:kanthord:[a-z][a-z0-9-]{0,62}$/);
@@ -567,6 +581,28 @@ export interface WorkerRegistrations {
   heartbeat(runtimeIdentity: string): void;
 }
 
+export const POOL_SLOT_COUNT = 64;
+export interface PoolSlot {
+  project_id: string;
+  resource_identity: string;
+  generation: number;
+  slot: number;
+  client_id: string;
+  draining: boolean;
+}
+export interface PoolHost {
+  clientIdentity(
+    projectId: string,
+    resourceIdentity: string,
+    generation: number,
+    slot: number,
+  ): string;
+  start(slot: PoolSlot): void;
+  drain(slot: PoolSlot): void;
+  stop(): Promise<void>;
+  onEnded(listener: (clientId: string) => void): void;
+}
+
 export const WORKER_SERVICE_NAME = "worker";
 export const HUMAN_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
@@ -586,6 +622,7 @@ export const WorkerErrorCode = {
   ClientLive: "worker.instance.client_live",
   BindingUnknown: "worker.instance.binding_unknown",
   SlotUnavailable: "worker.instance.slot_unavailable",
+  PlacementMismatch: "worker.instance.placement_mismatch",
   CatalogNotFound: "worker.catalog.not_found",
 } as const;
 

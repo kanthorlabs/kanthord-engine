@@ -267,6 +267,11 @@ components:
                         type: integer
                         minimum: -9007199254740991
                         maximum: 9007199254740991
+                      placement:
+                        type: string
+                        enum:
+                          - server
+                          - worker
                       resource_budget:
                         type: object
                         properties:
@@ -530,6 +535,11 @@ components:
                             type: integer
                             minimum: -9007199254740991
                             maximum: 9007199254740991
+                          placement:
+                            type: string
+                            enum:
+                              - server
+                              - worker
                           resource_budget:
                             type: object
                             properties:

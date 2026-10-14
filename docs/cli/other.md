@@ -390,6 +390,9 @@ The implemented fields are:
 
 - `worker.heartbeat_window`: optional positive safe integer in seconds, default
   `300`. A 30-second sweep ends expired registrations.
+- `worker.server_slot_limit`: optional positive safe integer, default `16`. It
+  caps the pool slots that the server starts at the `server` placement. A slot
+  above the cap stays unstarted and the server logs `worker.pool.slot_limit`.
 
 - `scheduler.release_reserve`: optional positive safe integer in seconds, default
   `600`. A claim adds this reserve after its effective worker wall time.

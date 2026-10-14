@@ -17,7 +17,7 @@ import { createHash } from "node:crypto";
 import { background } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import { workerApi } from "./api.ts";
+import { httpTransport } from "./transport.ts";
 import {
   uploadEvidence,
   openEvidence,
@@ -71,7 +71,7 @@ test("oversized sparse evidence refuses before allocating or submitting metadata
   const path = join(workspace, "large");
   await writeFile(path, "");
   await truncate(path, OBJECT_SIZE_MAX + 1);
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const submit = t.mock.method(api.mission, "evidence.submit", () =>
     assert.fail("Oversized object submitted"),
   );
@@ -142,7 +142,7 @@ test("upload submits metadata then transfers bytes then completes without exposi
   const address = listener.address();
   assert.ok(address && !isString(address));
   const putUrl = `http://127.0.0.1:${address.port}/test_private_grant`;
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const result = {
     evidence_id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     asset_id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",

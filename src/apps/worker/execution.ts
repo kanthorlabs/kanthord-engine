@@ -14,20 +14,22 @@ import {
   type WorkspaceRoot,
   type RepositoryTransport,
   type ModelRuntimeFactory,
-} from "../../worker/index.ts";
+} from "../../worker/unit/index.ts";
 import { completed, HandoverRefused, takeHandover } from "./handover.ts";
-import { retryIndeterminate, type WorkerApi } from "./api.ts";
+import { retryIndeterminate } from "./api.ts";
+import type { WorkerTransport } from "./transport.ts";
 import { uploadEvidence } from "./evidence-upload.ts";
 import { HttpTelemetrySink } from "./telemetry-sink.ts";
 
 export interface HostExecutionInput {
   claim: ExecutionRecord;
-  api: WorkerApi;
+  api: WorkerTransport;
   clientSecret: string;
   workspaces: WorkspaceRoot;
   transport: RepositoryTransport;
   modelRuntimeFactory: ModelRuntimeFactory;
   hostHome: string;
+  env: NodeJS.ProcessEnv;
   context: Context;
   transcript: TranscriptSink;
   log(record: Record<string, unknown>): void;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { workerApi } from "./api.ts";
+import { httpTransport } from "./transport.ts";
 import {
   register,
   deregister,
@@ -11,7 +11,7 @@ import {
 } from "./registration.ts";
 
 test("registration returns server facts with a fresh key and translates refusal and uncertainty", async (t) => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const facts = {
     runtimeIdentity: "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     resourceIdentity: "worker:kanthord:test",
@@ -54,7 +54,7 @@ test("registration returns server facts with a fresh key and translates refusal 
 });
 
 test("deregistration accepts only success or owned not-found and never retries", async (t) => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const runtimeIdentity = "worker_instance_01ARZ3NDEKTSV4RRFFQ69G5FAA";
   const cases = [
     { status: 404, code: "worker.instance.not_found", expected: null },
@@ -90,7 +90,7 @@ test("deregistration accepts only success or owned not-found and never retries",
 
 test("heartbeat warns once per failed tick and stop cancels the timer", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const records: unknown[] = [];
   let calls = 0;
   const expectedCalls = 2;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { WorkspaceRoot } from "../../worker/index.ts";
+import { WorkspaceRoot } from "../../worker/unit/index.ts";
 import { test, type TestContext } from "node:test";
 import {
   createServer,
@@ -14,7 +14,7 @@ import { stringify } from "yaml";
 import { CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { packageVersion } from "../../kernel/version.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { HealthStatus } from "../../kernel/service.ts";
@@ -354,7 +354,7 @@ test("default worker log is one JSON line on stderr without the token", async (t
     process.execPath,
     ["--input-type=module", "-e", CHILD_SCRIPT],
     {
-      env: { ...process.env, WORKER_OPTIONS: JSON.stringify(options) },
+      env: { ...hostEnvironment(), WORKER_OPTIONS: JSON.stringify(options) },
       stdio: ["ignore", "ignore", "pipe"],
     },
   );

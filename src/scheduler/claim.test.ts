@@ -312,3 +312,12 @@ test("a paused project still answers the running execution of the runtime", (t) 
   assert.equal(result.outcome, ClaimOutcome.Running);
   assert.deepEqual(result.row, h.row);
 });
+
+test("a refused healthcheck still answers the running execution of the runtime", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) => insertExecution(tx, h.row));
+  h.dependencies.registrations.instanceHealthcheck = () => false;
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.Running);
+  assert.deepEqual(result.row, h.row);
+});

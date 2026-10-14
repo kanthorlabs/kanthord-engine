@@ -31,7 +31,7 @@ import {
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
-} from "../../worker/test-support.ts";
+} from "../../worker/unit/test-support.ts";
 import {
   AssetKind,
   NodeState,

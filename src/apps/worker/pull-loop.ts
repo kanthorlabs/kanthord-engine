@@ -7,13 +7,14 @@ import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
-import { Backoff, sleep, type WorkerApi } from "./api.ts";
+import { Backoff, sleep } from "./api.ts";
+import type { WorkerTransport } from "./transport.ts";
 import type { Registration } from "./registration.ts";
 
 const SERVER_ERROR = 500;
 const REGISTRATION_REQUIRED = "gateway.registration.required";
 export interface PullLoopInput {
-  api: WorkerApi;
+  api: WorkerTransport;
   registration: Registration;
   backoff: Backoff;
   shutdown: Context;

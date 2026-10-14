@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { constants } from "node:fs";
 import { open, realpath, lstat, type FileHandle } from "node:fs/promises";
+import { platform } from "node:os";
 import { isAbsolute, relative, resolve, dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { ulid } from "ulid";
@@ -14,7 +15,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { OBJECT_SIZE_MAX } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import type { UploadResult } from "../../worker/contract.ts";
-import type { WorkerApi } from "./api.ts";
+import type { WorkerTransport } from "./transport.ts";
 import { completed } from "./handover.ts";
 
 export const WorkerErrorCode = {
@@ -39,12 +40,12 @@ const evidenceFiles = { open, realpath, lstat };
 async function openContained(root: string, path: string, io = evidenceFiles) {
   const flags =
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-  if (process.platform === DARWIN)
+  if (platform() === DARWIN)
     return io.open(
       resolve(root, path),
       (flags & ~constants.O_NOFOLLOW) | DARWIN_NOFOLLOW_ANY,
     );
-  if (process.platform !== LINUX) refuse(PathRefusal.NotRegular);
+  if (platform() !== LINUX) refuse(PathRefusal.NotRegular);
   const parts = relative(root, resolve(root, path)).split(sep);
   const held: FileHandle[] = [];
   try {
@@ -213,7 +214,7 @@ export async function uploadEvidence(input: {
   workspace: string;
   path: string;
   claim: ExecutionRecord;
-  api: WorkerApi;
+  api: WorkerTransport;
   context: Context;
 }): Promise<UploadResult> {
   const { claim, api } = input;

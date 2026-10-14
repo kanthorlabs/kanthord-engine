@@ -18,9 +18,15 @@ export const WORKER_DEFAULTS = {
   reasoning_effort: "off",
 };
 
-export async function workerAcceptance(t: TestContext, host = false) {
+export async function workerAcceptance(
+  t: TestContext,
+  host = false,
+  options: { stateDirectory?: string; slotLimit?: number } = {},
+) {
   const s3 = host ? await fakeS3(t) : undefined;
   const fixture = await gatewayFixture(t, {
+    stateDirectory: options.stateDirectory,
+    serverSlotLimit: options.slotLimit,
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => ({

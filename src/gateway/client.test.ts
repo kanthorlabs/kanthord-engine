@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { MessageChannel } from "node:worker_threads";
 import { test } from "node:test";
 import { Diagnostic } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -6,7 +8,8 @@ import { OperationResultType } from "../kernel/operation.ts";
 import { packageVersion } from "../kernel/version.ts";
 import { schedulerOperations, WorkPullKind } from "../scheduler/contract.ts";
 import { gatewayOperations } from "./contract.ts";
-import { httpClient, readServerVersion } from "./client.ts";
+import { createClient } from "./client-result.ts";
+import { httpClient, portCaller, readServerVersion } from "./client.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const VERSION_UNAVAILABLE = "gateway.client.version_unavailable";
@@ -94,6 +97,21 @@ test("a transport failure and a truncated answer body stay indeterminate", async
       },
     );
   }
+});
+
+test("a closed port answers a new call as indeterminate at once", async () => {
+  const { port1, port2 } = new MessageChannel();
+  const client = createClient(schedulerOperations, portCaller(port1));
+  const closed = once(port1, "close");
+  port2.close();
+  await closed;
+  assert.deepEqual(
+    await client.workPull(PULL_INPUT, { idempotencyKey: IDEMPOTENCY_KEY }),
+    {
+      type: OperationResultType.Indeterminate,
+      idempotencyKey: IDEMPOTENCY_KEY,
+    },
+  );
 });
 
 test("server version is the package version served through the OpenAPI operation", async (t) => {

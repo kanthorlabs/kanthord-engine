@@ -20,6 +20,7 @@ import {
   repositoryConfigSchema,
   STORAGE_PLATFORM,
   workerResourceIdentity,
+  WorkerPlacement,
   type BindingChange,
 } from "./contract.ts";
 
@@ -433,13 +434,22 @@ function classify(
       insertion: { name, resourceIdentity, config },
     };
   if (kindOf(previous.resource_identity) === BindingKind.Worker) {
-    const stored = previous.config as { worker: string };
-    const submitted = entry.config as { worker: string };
+    const stored = previous.config as { worker: string; placement?: string };
+    const submitted = entry.config as { worker: string; placement?: string };
     if (stored.worker !== submitted.worker)
       throw new OperationError(
         HttpStatus.Conflict,
         ProjectErrorCode.WorkerResourceChanged,
         "A binding cannot change its worker.",
+      );
+    if (
+      (stored.placement ?? WorkerPlacement.Worker) !==
+      (submitted.placement ?? WorkerPlacement.Worker)
+    )
+      throw new OperationError(
+        HttpStatus.Conflict,
+        ProjectErrorCode.WorkerPlacementChanged,
+        "A binding cannot change its placement.",
       );
   }
   if (previous.resource_identity !== resourceIdentity)
@@ -635,6 +645,22 @@ export function readLatestBinding(
   assert.equal(row.project_id, projectId);
   assert.equal(row.resource_identity, resourceIdentity);
   return toBinding(row);
+}
+
+export function readGeneration(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+): number | null {
+  assert.ok(tx.database.isTransaction);
+  const tombstone = readLatestTombstone(tx, projectId, resourceIdentity);
+  const row = tx.database
+    .prepare(
+      "SELECT revision FROM project_binding WHERE project_id = ? AND resource_identity = ? AND revision > ? ORDER BY revision ASC LIMIT 1",
+    )
+    .get(projectId, resourceIdentity, tombstone?.revision ?? NO_REVISION) as
+    { revision: number } | undefined;
+  return row?.revision ?? null;
 }
 
 export function readLatestTombstone(

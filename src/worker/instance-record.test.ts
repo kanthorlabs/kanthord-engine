@@ -6,6 +6,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
   InstanceActivity,
+  InstancePlacement,
   instanceRecordSchema,
   WorkerHost,
   WorkerErrorCode,
@@ -32,6 +33,8 @@ const BINDING = {
   revision: 1,
   worker_name: "coder@1",
   instance_count: 3,
+  placement: InstancePlacement.Worker,
+  generation: 1,
   resource_budget: null,
   entries: [],
   tombstone: false,

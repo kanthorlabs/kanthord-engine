@@ -129,7 +129,7 @@ function installTool(
   }
   const run = spawnSync(path, ["--version"], {
     timeout: VERSION_TIMEOUT_MS,
-    env: childEnvironment(process.env),
+    env: childEnvironment(options.env ?? process.env),
   });
   if (run.error || run.status !== SUCCESS)
     throw toolMissing(

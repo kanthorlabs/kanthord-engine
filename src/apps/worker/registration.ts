@@ -7,7 +7,7 @@ import {
 } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import type { WorkerApi } from "./api.ts";
+import type { WorkerTransport } from "./transport.ts";
 import { WorkerErrorCode } from "../../worker/contract.ts";
 
 export interface Registration {
@@ -18,7 +18,7 @@ export interface Registration {
 
 export const HEARTBEAT_INTERVAL_MS = 60000;
 export function startHeartbeat(
-  api: WorkerApi,
+  api: WorkerTransport,
   log: (record: { code: string; msg: string }) => void,
 ): { stop(): void } {
   assert.ok(api.worker.heartbeat);
@@ -59,7 +59,7 @@ export function startHeartbeat(
 }
 
 export async function register(
-  api: WorkerApi,
+  api: WorkerTransport,
   context: Context = background,
 ): Promise<Registration> {
   assert.ok(api.worker.register);
@@ -78,7 +78,7 @@ export async function register(
 }
 
 export async function deregister(
-  api: WorkerApi,
+  api: WorkerTransport,
   runtimeIdentity: string,
 ): Promise<Diagnostic | null> {
   assert.ok(runtimeIdentity);

@@ -14,13 +14,13 @@ import {
   type Span,
   type TelemetryText,
 } from "../../tracking/contract.ts";
-import type { RepositoryTransport } from "../../worker/index.ts";
+import type { RepositoryTransport } from "../../worker/contract.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
-} from "../../worker/test-support.ts";
+} from "../../worker/unit/test-support.ts";
 import { inProcessWorker } from "./test-support.ts";
 import { workerAcceptance, WORKER_TEST_KEY } from "./worker-acceptance.ts";
 

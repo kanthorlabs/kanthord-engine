@@ -17,6 +17,7 @@ const TEXT_ENCODING = "utf8";
 export const PACKAGE_MANIFEST = "package.json";
 export const DASHBOARD_ASSET_PREFIX = "dashboard/";
 export const PI_TOOLS_ASSET_PREFIX = "pi-tools/";
+export const WORKER_THREAD_ASSET = "worker-thread.cjs";
 const PI_TOOLS_DIRECTORY = new URL("../../.pi-tools/", import.meta.url);
 const nodeAssetSource: AssetSource = { isSea, getAsset };
 const nodeBinaryAssetSource: BinaryAssetSource = {
@@ -42,6 +43,14 @@ export function packageManifest(source: AssetSource = nodeAssetSource): string {
     new URL(`../../${PACKAGE_MANIFEST}`, import.meta.url),
     TEXT_ENCODING,
   );
+}
+
+export function workerThreadAsset(
+  source: AssetSource = nodeAssetSource,
+): string | undefined {
+  return source.isSea()
+    ? source.getAsset(WORKER_THREAD_ASSET, TEXT_ENCODING)
+    : undefined;
 }
 
 export function dashboardAsset(

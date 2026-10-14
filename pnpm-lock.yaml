@@ -68,6 +68,9 @@ importers:
       "@types/supertest":
         specifier: 7.2.1
         version: 7.2.1
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       eslint:
         specifier: 10.7.0
         version: 10.7.0(jiti@2.7.0)(supports-color@7.2.0)

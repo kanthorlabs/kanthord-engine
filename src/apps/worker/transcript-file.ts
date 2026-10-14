@@ -8,7 +8,7 @@ import {
 import { join } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
-import type { TranscriptSink } from "../../worker/index.ts";
+import type { TranscriptSink } from "../../worker/unit/index.ts";
 
 export const TRANSCRIPT_RETENTION = 50;
 const TRANSCRIPT_DIRECTORY = "transcripts";

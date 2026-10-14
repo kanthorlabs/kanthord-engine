@@ -6,7 +6,17 @@ import { stringify } from "yaml";
 import { Worker, type WorkerOptions } from "../worker/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { clientConfigPath } from "../../gateway/client.ts";
+import { clientConfigPath, httpClient } from "../../gateway/client.ts";
+import { repositoryOperations } from "../../repository/contract.ts";
+import { projectOperations } from "../../project/contract.ts";
+import { llmOperations } from "../../llm/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
+import { missionOperations, NodeKind } from "../../mission/contract.ts";
+import {
+  OperationResultType,
+  type Operation,
+  type OperationResult,
+} from "../../kernel/operation.ts";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
   createServer,
@@ -44,7 +54,10 @@ import { environment, kanthord } from "./cli-support.ts";
 import { composeServices, trackingDatabaseMigrations } from "./index.ts";
 import { RepositoryComponent, type GitWriter } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
-import type { RepositoryTransport } from "../../worker/index.ts";
+import {
+  InstancePlacement,
+  type RepositoryTransport,
+} from "../../worker/contract.ts";
 import {
   AccessPolicy,
   emptyInput,
@@ -319,6 +332,7 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["workbenchModelRuntimeFactory"];
     stateDirectory?: string;
+    serverSlotLimit?: number;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
   } = {},
 ) {
@@ -328,6 +342,10 @@ export async function gatewayFixture(
     master_key: randomBytes(32).toString("base64"),
     gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
+    worker:
+      options.serverSlotLimit === undefined
+        ? {}
+        : { server_slot_limit: options.serverSlotLimit },
   }).getProperties();
   const store = new Store(options.path ?? ":memory:");
   store.migrate([
@@ -355,6 +373,7 @@ export async function gatewayFixture(
     mission,
     workbench,
     invocation,
+    workerPool,
     repoConnector,
     github,
     gitWriter,
@@ -388,6 +407,7 @@ export async function gatewayFixture(
   t.after(async () => {
     const failures: Error[] = [];
     try {
+      await worker.stopPool();
       const quiescence = await Promise.all(
         [
           scheduler,
@@ -458,6 +478,7 @@ export async function gatewayFixture(
     workbench,
     gateway,
     invocation,
+    workerPool,
     store,
     tracking,
     trackingStore,
@@ -1635,4 +1656,235 @@ export async function storageProject(t: TestContext) {
     human: () =>
       fixture.invocation.authentication.authenticate(`Bearer ${fixture.token}`),
   };
+}
+
+const WORKER_PROJECT_REPOSITORY_CREDENTIAL = "github";
+const WORKER_PROJECT_SSH_CREDENTIAL = "github-ssh";
+const SECRET_FIELD = "secret";
+const WORKER_PROJECT_NODE = {
+  name: "Work",
+  requirement: "Do work",
+  criterion: "Done",
+  verifications: ["true"],
+};
+const FIRST_BINDING_SET_VERSION = 1;
+const FIRST_MISSION_VERSION = 1;
+const SECOND_MISSION_VERSION = 2;
+const FIRST_NODE_REVISION = 1;
+
+export function humanCaller(
+  fixture: Pick<
+    Awaited<ReturnType<typeof gatewayFixture>>,
+    "endpoint" | "token"
+  >,
+) {
+  return async <T extends Operation>(
+    operation: T,
+    input: z.input<T["input"]>,
+  ) => {
+    const result = (await httpClient(
+      { operation },
+      fixture.endpoint,
+      fixture.token,
+    ).operation(input)) as OperationResult<z.output<T["output"]>>;
+    assert.equal(
+      result.type,
+      OperationResultType.Completed,
+      JSON.stringify(result),
+    );
+    return (result as { data: z.output<T["output"]> }).data;
+  };
+}
+
+export async function provisionRepositoryCredentials(
+  fixture: Parameters<typeof humanCaller>[0],
+) {
+  const call = humanCaller(fixture);
+  const empty = { params: {}, query: {} };
+  await call(repositoryOperations.create, {
+    ...empty,
+    body: {
+      name: WORKER_PROJECT_REPOSITORY_CREDENTIAL,
+      platform: "github",
+      metadata: null,
+      [SECRET_FIELD]: { key: "worker-project-token" },
+    },
+  });
+  await call(repositoryOperations.create, {
+    ...empty,
+    body: {
+      name: WORKER_PROJECT_SSH_CREDENTIAL,
+      platform: "ssh",
+      metadata: FAKE_SSH_CREDENTIAL_BODY.metadata,
+      [SECRET_FIELD]: {},
+    },
+  });
+}
+
+function workerProjectBindings(
+  workers: Readonly<Record<string, number>>,
+): Record<string, unknown> {
+  return {
+    repo: {
+      kind: "repository",
+      config: {
+        available: true,
+        platform: "github",
+        address: "git@github.com:owner/repo.git",
+        ssh_credential: WORKER_PROJECT_SSH_CREDENTIAL,
+        strategy: { base_branch: "main" },
+        credential: WORKER_PROJECT_REPOSITORY_CREDENTIAL,
+        project_prompt: "Follow repository conventions.",
+      },
+    },
+    ...Object.fromEntries(
+      Object.entries(workers).map(([name, count]) => [
+        name,
+        {
+          kind: "worker",
+          config: { worker: "claude-code@1", instance_count: count },
+        },
+      ]),
+    ),
+  };
+}
+
+export async function provisionWorkerProject(
+  fixture: Parameters<typeof humanCaller>[0],
+  name: string,
+  workers: Readonly<Record<string, number>>,
+) {
+  const call = humanCaller(fixture);
+  const empty = { params: {}, query: {} };
+  const project = await call(projectOperations.create, {
+    ...empty,
+    body: { name },
+  });
+  const written = (version: number, next: Readonly<Record<string, number>>) =>
+    call(projectOperations["bindingSet.write"], {
+      params: { project_id: project.id },
+      query: {},
+      body: { version, bindings: workerProjectBindings(next) as never },
+    });
+  const bindingSet = await written(FIRST_BINDING_SET_VERSION, workers);
+  const mission = await call(missionOperations.get, {
+    params: { project_id: project.id },
+    query: {},
+    body: null,
+  });
+  const initiative = await call(missionOperations["node.create"], {
+    params: { mission_id: mission.id },
+    query: {},
+    body: {
+      filename: "initiative-1.md",
+      kind: NodeKind.Initiative,
+      content: { ...WORKER_PROJECT_NODE, bindings: [] },
+      reason: "plan",
+      expected_mission_version: FIRST_MISSION_VERSION,
+    },
+  });
+  await call(missionOperations["node.create"], {
+    params: { mission_id: mission.id },
+    query: {},
+    body: {
+      filename: "objective-1.md",
+      kind: NodeKind.Objective,
+      content: {
+        ...WORKER_PROJECT_NODE,
+        bindings: [bindingSet.bindings.repo!.id],
+      },
+      reason: "plan",
+      expected_mission_version: SECOND_MISSION_VERSION,
+      parent_id: initiative.revisions[0]!.node_id,
+      expected_parent_revision: FIRST_NODE_REVISION,
+    },
+  });
+  return {
+    id: project.id,
+    bindingSetVersion: bindingSet.binding_set_version,
+    rewrite: async (next: Readonly<Record<string, number>>) => {
+      const current = await call(projectOperations["bindingSet.get"], {
+        params: { project_id: project.id },
+        query: {},
+        body: null,
+      });
+      return written(current.version, next);
+    },
+    pause: () =>
+      call(projectOperations.pause, {
+        params: { project_id: project.id },
+        query: {},
+        body: null,
+      }),
+  };
+}
+
+const NATIVE_DEFAULTS = {
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
+} as const;
+
+export async function provisionNativeAgent(
+  fixture: Parameters<typeof humanCaller>[0],
+) {
+  const call = humanCaller(fixture);
+  const empty = { params: {}, query: {} };
+  await call(llmOperations.create, {
+    ...empty,
+    body: {
+      name: "native-credential",
+      platform: "anthropic",
+      metadata: null,
+      [SECRET_FIELD]: { key: "native-provider-key" },
+    },
+  });
+  await call(agentOperations["enablement.put"], {
+    params: { agent_name: "swe@1" },
+    query: {},
+    body: {
+      agent_providers: [
+        {
+          name: "default",
+          provider: "anthropic",
+          credential: "native-credential",
+        },
+      ],
+      default_configuration: NATIVE_DEFAULTS,
+      fallback_configurations: [],
+    },
+  });
+}
+
+export async function provisionNativeServerProject(
+  fixture: Parameters<typeof humanCaller>[0],
+  name: string,
+  binding: string,
+) {
+  const call = humanCaller(fixture);
+  const empty = { params: {}, query: {} };
+  const project = await call(projectOperations.create, {
+    ...empty,
+    body: { name },
+  });
+  await call(projectOperations["bindingSet.write"], {
+    params: { project_id: project.id },
+    query: {},
+    body: {
+      version: FIRST_BINDING_SET_VERSION,
+      bindings: {
+        ...(workerProjectBindings({}) as Record<string, never>),
+        [binding]: {
+          kind: "worker",
+          config: {
+            worker: "coder@1",
+            instance_count: 1,
+            placement: InstancePlacement.Server,
+            entries: [{ agent: "swe@1", ...NATIVE_DEFAULTS }],
+          },
+        },
+      } as never,
+    },
+  });
+  return { id: project.id };
 }

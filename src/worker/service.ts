@@ -19,6 +19,7 @@ import {
 } from "../kernel/health.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import assert from "node:assert/strict";
+import type { Logger } from "pino";
 import { isMachineIdentity } from "../kernel/caller.ts";
 import { AccessPolicy } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -29,9 +30,13 @@ import {
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
   WorkerHost,
+  InstanceActivity,
+  InstancePlacement,
   type WorkerRegistrations,
   type WorkerBindingOf,
+  type WorkerBindingsOf,
   type WorkerBindingRowOf,
+  type PoolHost,
   type RepositoryPolicyOf,
   type RepositoryBindingIdsOf,
   type PinnedCredentialMetadataFn,
@@ -61,6 +66,7 @@ import {
   type WorkerDeclaration,
 } from "./catalog.ts";
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
+import { Pool } from "./pool.ts";
 import { instanceRecord, listInstanceRecords } from "./instance-record.ts";
 import type { ResolvedLayer } from "../agent/prompt-layers.ts";
 import type { PromptTemplates } from "../agent/contract.ts";
@@ -110,6 +116,11 @@ export interface Dependencies {
   agentConfiguration: AgentConfiguration;
   health?: HealthRegistry;
   registrations?: WorkerRegistrations;
+  pool?: {
+    host: PoolHost;
+    workerBindingsOf: WorkerBindingsOf;
+    logger: Logger;
+  };
 }
 export class WorkerService implements Service {
   authorizeModelInference(
@@ -135,8 +146,11 @@ export class WorkerService implements Service {
   private runError: Error | null = null;
   private readonly dependencies: Dependencies;
   private readonly performer: ActionPerformer;
+  private readonly pool?: Pool;
+  private poolStarted = false;
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
     this.performer = new ActionPerformer(dependencies);
     this.heartbeatClock = new HeartbeatClock(dependencies.monotonicNow);
     this.registrations =
@@ -215,6 +229,69 @@ export class WorkerService implements Service {
     };
   }
 
+  startPool(): void {
+    if (!this.pool || this.poolStarted) return;
+    this.poolStarted = true;
+    this.reconcile(null, true);
+  }
+
+  async stopPool(): Promise<void> {
+    this.poolStarted = false;
+    await this.dependencies.pool?.host.stop();
+  }
+
+  bindingsChanged(projectId: string): void {
+    if (!this.poolStarted) return;
+    setImmediate(() => {
+      if (!this.poolStarted) return;
+      try {
+        this.reconcile(projectId, false);
+      } catch (error) {
+        this.dependencies.pool?.logger.error(
+          { err: asError(error), project_id: projectId },
+          "worker.pool.reconcile_failed",
+        );
+      }
+    });
+  }
+
+  private reconcile(projectId: string | null, restore: boolean): void {
+    const pool = this.pool!;
+    const effects = this.dependencies.store.transaction((tx) => {
+      const now = Date.now();
+      const targets = this.dependencies
+        .pool!.workerBindingsOf(tx, projectId)
+        .filter(({ placement }) => placement === InstancePlacement.Server)
+        .map((binding) => ({
+          project_id: binding.project_id,
+          resource_identity: binding.resource_identity,
+          generation: binding.generation,
+          count: binding.instance_count,
+        }));
+      return pool.reconcile(
+        projectId,
+        targets,
+        {
+          busy: (clientId) => {
+            const registration = this.registrations.findByClient(clientId);
+            return (
+              registration !== undefined &&
+              this.dependencies.schedulerClaims.activityOf(
+                tx,
+                registration.runtime_identity,
+                now,
+              ).activity === InstanceActivity.Executing
+            );
+          },
+          live: (clientId) =>
+            this.registrations.findByClient(clientId) !== undefined,
+        },
+        restore,
+      );
+    });
+    pool.execute(effects);
+  }
+
   sweepRegistrations(): void {
     const expired = this.heartbeatClock.expired(
       this.dependencies.config.heartbeat_window,
@@ -251,7 +328,8 @@ export class WorkerService implements Service {
       tx,
       runtimeIdentity,
     );
-    if (!registration) return false;
+    if (!registration || this.pool?.draining(registration.client_id))
+      return false;
     const binding = this.dependencies.workerBindingOf(
       tx,
       registration.project_id,
@@ -376,6 +454,41 @@ export class WorkerService implements Service {
     return declaration;
   }
 
+  private recordDependencies() {
+    return {
+      ...this.dependencies,
+      draining: (clientId: string) => this.pool?.draining(clientId) ?? false,
+    };
+  }
+
+  private requirePoolSlot(
+    tx: Transaction,
+    identity: { clientId: string; projectId: string; resourceIdentity: string },
+  ): void {
+    const binding = this.dependencies.workerBindingOf(
+      tx,
+      identity.projectId,
+      identity.resourceIdentity,
+    );
+    if (
+      !binding ||
+      binding.tombstone ||
+      binding.placement !== InstancePlacement.Server ||
+      this.pool?.isSlot(
+        identity.projectId,
+        identity.resourceIdentity,
+        binding.generation,
+        identity.clientId,
+      )
+    )
+      return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.PlacementMismatch,
+      "Worker binding accepts a registration only from a pool slot.",
+    );
+  }
+
   private declareCatalog(registry: OperationRegistry): void {
     assert.equal(workerOperations["catalog.list"].access, AccessPolicy.Human);
     assert.equal(workerOperations["catalog.get"].mutation, false);
@@ -447,7 +560,7 @@ export class WorkerService implements Service {
     assert.equal(workerOperations["instance.get"].access, AccessPolicy.Human);
     registry.register(workerOperations["instance.list"], ({ query }, caller) =>
       caller.commit((tx) =>
-        listInstanceRecords(tx, this.dependencies, query, Date.now()),
+        listInstanceRecords(tx, this.recordDependencies(), query, Date.now()),
       ),
     );
     registry.register(workerOperations["instance.get"], ({ params }, caller) =>
@@ -462,7 +575,7 @@ export class WorkerService implements Service {
             WorkerErrorCode.InstanceNotFound,
             "Instance not found.",
           );
-        return instanceRecord(tx, this.dependencies, row, Date.now());
+        return instanceRecord(tx, this.recordDependencies(), row, Date.now());
       }),
     );
   }
@@ -590,6 +703,7 @@ export class WorkerService implements Service {
             "Authentication required.",
           );
         const result = caller.commit((transaction) => {
+          this.requirePoolSlot(transaction, identity);
           const registration = worker.register(
             transaction,
             {

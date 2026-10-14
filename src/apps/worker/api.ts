@@ -1,30 +1,11 @@
 import assert from "node:assert/strict";
 import { ulid } from "ulid";
-import { httpClient } from "../../gateway/client.ts";
-import { gatewayOperations } from "../../gateway/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
-import { schedulerOperations } from "../../scheduler/contract.ts";
-import { missionOperations } from "../../mission/contract.ts";
-import { trackingOperations } from "../../tracking/contract.ts";
 import type { Context } from "../../kernel/context.ts";
 import {
   OperationResultType,
   type OperationResult,
 } from "../../kernel/operation.ts";
 
-export function workerApi(endpoint: string, token?: string) {
-  assert.ok(endpoint);
-  const api = {
-    gateway: httpClient(gatewayOperations, endpoint, token),
-    worker: httpClient(workerOperations, endpoint, token),
-    scheduler: httpClient(schedulerOperations, endpoint, token),
-    mission: httpClient(missionOperations, endpoint, token),
-    tracking: httpClient(trackingOperations, endpoint, token),
-  };
-  assert.ok(api.worker.register);
-  return api;
-}
-export type WorkerApi = ReturnType<typeof workerApi>;
 export const BACKOFF_INITIAL_MS = 1000;
 export const BACKOFF_MAX_MS = 30000;
 const BACKOFF_FACTOR = 2;

@@ -39,6 +39,7 @@
     "@apidevtools/swagger-parser": "12.1.0",
     "@types/node": "26.6.2",
     "@types/supertest": "7.2.1",
+    "esbuild": "0.28.2",
     "eslint": "10.7.0",
     "eslint-plugin-boundaries": "7.0.2",
     "husky": "9.1.7",

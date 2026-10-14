@@ -110,6 +110,7 @@ export const ProjectErrorCode = {
   WorkerFieldForbidden: "project.bindings.worker.field_forbidden",
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
+  WorkerPlacementChanged: "project.bindings.worker.placement_changed",
 } as const;
 
 export const projectNameSchema = z
@@ -194,9 +195,13 @@ export const repositoryConfigSchema = z.strictObject({
   project_prompt: z.string().optional(),
   working_layer: workingLayerSchema,
 });
+export const WorkerPlacement = { Server: "server", Worker: "worker" } as const;
+export type WorkerPlacement =
+  (typeof WorkerPlacement)[keyof typeof WorkerPlacement];
 export const workerConfigSchema = z.strictObject({
   worker: z.string().min(1),
   instance_count: z.number().int(),
+  placement: z.enum(WorkerPlacement).optional(),
   resource_budget: z
     .strictObject({
       turns: z.number().int().positive(),
@@ -240,6 +245,7 @@ export const bindingEditSchema = z.discriminatedUnion("kind", [
 export const WorkerField = {
   Entries: "entries",
   ResourceBudget: "resource_budget",
+  Placement: "placement",
 } as const;
 const CUSTOM_ISSUE = "custom";
 type BindingEdits = Record<string, z.infer<typeof bindingEditSchema>>;
@@ -800,6 +806,8 @@ export interface ProjectBindings {
   ): Promise<{ project_id: string; resource_identity: string } | null>;
 }
 
+export type BindingsChanged = (projectId: string) => void;
+
 export type EndRegistrations = (
   tx: Transaction,
   projectId: string,
@@ -825,6 +833,8 @@ export interface WorkerBindingRow {
   revision: number;
   worker_name: string;
   instance_count: number;
+  placement: WorkerPlacement;
+  generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;
   tombstone: boolean;

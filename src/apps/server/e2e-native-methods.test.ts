@@ -22,7 +22,7 @@ import {
   OperationResultType,
   type OperationResult,
 } from "../../kernel/operation.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { missionOperations, type Evidence } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
@@ -38,13 +38,13 @@ import {
   WorkspaceRoot,
   runNativeExecution,
   noTranscript,
-} from "../../worker/index.ts";
+} from "../../worker/unit/index.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
-} from "../../worker/test-support.ts";
+} from "../../worker/unit/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
   FAKE_SSH_IDENTITY,
@@ -455,6 +455,7 @@ test(
           transport,
           workspaces,
           hostHome: temporary(t),
+          env: hostEnvironment(),
           modelRuntimeFactory: scriptedModelRuntime(provider),
           transcript: noTranscript,
           hostTools: () => unusedHostTools,
