@@ -472,14 +472,14 @@ test("E09.4 tools that cannot be installed refuse before any network request", a
   }
 });
 
-test("E09.4 the tool install runs before the client configuration check", async (t) => {
+test("E09.4 the client configuration check runs before the tool install", async (t) => {
   const env = workerEnvironment(t);
   const binDirectory = join(directories(env).state, "pi", "bin");
   mkdirSync(dirname(binDirectory), { recursive: true });
   writeFileSync(binDirectory, "");
   const proc = spawnWorker(WORKER_ARGS, env);
   try {
-    await failure(proc, "worker.start.tool_missing");
+    await failure(proc, "worker.start.client_secret_absent");
   } finally {
     await stopWorker(proc);
   }

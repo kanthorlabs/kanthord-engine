@@ -9,6 +9,59 @@ const serviceEntry = (fileInternalPath) =>
 const applicationEntry = (type) =>
   element(type, { fileInternalPath: "index.ts" });
 
+const workerFiles = ["src/worker/unit/**/*.ts", "src/apps/worker/**/*.ts"];
+const workerTestFiles = [
+  "src/worker/unit/**/*.test.ts",
+  "src/apps/worker/**/*.test.ts",
+  "src/worker/unit/**/test-support.ts",
+  "src/apps/worker/**/test-support.ts",
+  "src/apps/worker/**/*-test-support.ts",
+];
+const workerWrapperEntry = "src/apps/worker/index.ts";
+const workerThreadEntry = "src/apps/worker/thread.ts";
+const workerPaths = (threads) => [
+  { name: "node:sqlite", message: "A worker unit reaches no database." },
+  ...(threads
+    ? ["node:worker_threads", "worker_threads"].map((name) => ({
+        name,
+        allowTypeImports: true,
+        message: "Only src/apps/worker/thread.ts uses worker threads.",
+      }))
+    : []),
+  ...["node:process", "process"].map((name) => ({
+    name,
+    message: "A worker unit reads no process state and signals no process.",
+  })),
+  ...["node:module", "module"].map((name) => ({
+    name,
+    message: "A worker unit loads no module by name.",
+  })),
+];
+const workerPatterns = (production) => [
+  {
+    group: ["**/kernel/store.ts"],
+    allowTypeImports: true,
+    message: "A worker unit reaches no store.",
+  },
+  {
+    group: ["**/repository/index.ts"],
+    allowImportNames: ["RepositoryComponent"],
+    message: "A worker unit uses only RepositoryComponent of the repository.",
+  },
+  ...(production
+    ? [
+        {
+          group: ["**/test-support.ts", "**/*-test-support.ts"],
+          message: "Only test files may import a test support file.",
+        },
+      ]
+    : []),
+];
+const workerImportRule = ({ threads, production }) => [
+  "error",
+  { paths: workerPaths(threads), patterns: workerPatterns(production) },
+];
+
 const comparisonLiteral =
   ':matches(Literal[value=type(string)], Literal[value=type(number)], TemplateLiteral[expressions.length=0], UnaryExpression[operator="-"][argument.type="Literal"][argument.value=type(number)])';
 const valueNamePattern =
@@ -17,6 +70,25 @@ const valueNameMessage =
   "Name a constant for its domain role, not for the English word of its value.";
 const comparisonMessage =
   "Use a meaningfully named enum member or constant instead of a string or numeric literal in a comparison.";
+
+const syntaxRules = [
+  {
+    selector: `BinaryExpression[operator=/^(===|!==|==|!=|<|<=|>|>=)$/] > ${comparisonLiteral}`,
+    message: comparisonMessage,
+  },
+  {
+    selector: `SwitchCase > ${comparisonLiteral}.test`,
+    message: comparisonMessage,
+  },
+  ...[1, 2].map((position) => ({
+    selector: `CallExpression[callee.object.name="assert"][callee.property.name=/^(equal|notEqual|strictEqual|notStrictEqual|deepEqual|notDeepEqual|deepStrictEqual|notDeepStrictEqual)$/] > ${comparisonLiteral}.arguments:nth-child(${position})`,
+    message: comparisonMessage,
+  })),
+  {
+    selector: `VariableDeclarator[id.name=${valueNamePattern}][init.type="Literal"]`,
+    message: valueNameMessage,
+  },
+];
 
 export default tseslint.config(
   { ignores: ["node_modules/**", "dist/**", ".data/**"] },
@@ -235,7 +307,11 @@ export default tseslint.config(
             },
             {
               from: element("apps-worker"),
-              allow: [{ to: element("worker-unit") }],
+              allow: [
+                {
+                  to: element("worker-unit", { fileInternalPath: "index.ts" }),
+                },
+              ],
             },
             {
               from: element(
@@ -243,6 +319,11 @@ export default tseslint.config(
                 { fileInternalPath: "{test-support.ts,*.test.ts}" },
               ),
               allow: [
+                {
+                  to: element("worker-unit", {
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
                 {
                   to: element("component", {
                     captured: { name: "agent" },
@@ -369,25 +450,7 @@ export default tseslint.config(
           ],
         },
       ],
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector: `BinaryExpression[operator=/^(===|!==|==|!=|<|<=|>|>=)$/] > ${comparisonLiteral}`,
-          message: comparisonMessage,
-        },
-        {
-          selector: `SwitchCase > ${comparisonLiteral}.test`,
-          message: comparisonMessage,
-        },
-        ...[1, 2].map((position) => ({
-          selector: `CallExpression[callee.object.name="assert"][callee.property.name=/^(equal|notEqual|strictEqual|notStrictEqual|deepEqual|notDeepEqual|deepStrictEqual|notDeepStrictEqual)$/] > ${comparisonLiteral}.arguments:nth-child(${position})`,
-          message: comparisonMessage,
-        })),
-        {
-          selector: `VariableDeclarator[id.name=${valueNamePattern}][init.type="Literal"]`,
-          message: valueNameMessage,
-        },
-      ],
+      "no-restricted-syntax": ["error", ...syntaxRules],
     },
     languageOptions: { ecmaVersion: "latest", sourceType: "module" },
   },
@@ -437,65 +500,79 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/worker/unit/**/*.ts", "src/apps/worker/**/*.ts"],
+    files: workerFiles,
+    ignores: [workerThreadEntry, ...workerTestFiles],
     rules: {
-      "@typescript-eslint/no-restricted-imports": [
+      "@typescript-eslint/no-restricted-imports": workerImportRule({
+        threads: true,
+        production: true,
+      }),
+    },
+  },
+  {
+    files: [workerThreadEntry],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": workerImportRule({
+        threads: false,
+        production: true,
+      }),
+    },
+  },
+  {
+    files: workerTestFiles,
+    rules: {
+      "@typescript-eslint/no-restricted-imports": workerImportRule({
+        threads: true,
+        production: false,
+      }),
+    },
+  },
+  {
+    files: workerFiles,
+    rules: {
+      "no-restricted-syntax": [
         "error",
+        ...syntaxRules,
         {
-          paths: [
-            {
-              name: "node:sqlite",
-              message: "A worker unit reaches no database.",
-            },
-            {
-              name: "node:worker_threads",
-              allowTypeImports: true,
-              message: "Only src/apps/worker/thread.ts uses worker threads.",
-            },
-          ],
-          patterns: [
-            {
-              group: ["**/kernel/store.ts"],
-              allowTypeImports: true,
-              message: "A worker unit reaches no store.",
-            },
-          ],
+          selector: "ImportExpression",
+          message: "A worker unit imports its modules statically.",
         },
       ],
     },
   },
   {
-    files: ["src/apps/worker/thread.ts"],
-    rules: {
-      "@typescript-eslint/no-restricted-imports": [
-        "error",
-        {
-          paths: [
-            {
-              name: "node:sqlite",
-              message: "A worker unit reaches no database.",
-            },
-          ],
-          patterns: [
-            {
-              group: ["**/kernel/store.ts"],
-              allowTypeImports: true,
-              message: "A worker unit reaches no store.",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    files: ["src/worker/unit/**/*.ts", "src/apps/worker/**/*.ts"],
-    ignores: ["src/apps/worker/index.ts", "src/apps/worker/thread.ts"],
+    files: workerFiles,
+    ignores: [workerWrapperEntry, workerThreadEntry],
     rules: {
       "no-restricted-properties": [
         "error",
-        ...["env", "exit", "on", "kill", "abort", "dlopen"].map((property) => ({
+        ...[
+          "env",
+          "exit",
+          "exitCode",
+          "on",
+          "once",
+          "addListener",
+          "kill",
+          "abort",
+          "dlopen",
+        ].map((property) => ({
           object: "process",
           property,
+          message:
+            "A worker unit reads no process state and signals no process.",
+        })),
+      ],
+    },
+  },
+  {
+    files: workerFiles,
+    ignores: [workerWrapperEntry, workerThreadEntry, ...workerTestFiles],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        ...["process", "globalThis", "global"].map((name) => ({
+          name,
           message:
             "A worker unit reads no process state and signals no process.",
         })),

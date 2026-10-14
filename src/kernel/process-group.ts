@@ -5,5 +5,6 @@ const FIRST_USER_PID = 1;
 
 export function killProcessGroup(leader: number): void {
   assert.ok(Number.isSafeInteger(leader) && leader > FIRST_USER_PID);
+  assert.ok(leader !== process.pid && leader !== process.ppid);
   process.kill(-leader, SIGNAL_KILL);
 }

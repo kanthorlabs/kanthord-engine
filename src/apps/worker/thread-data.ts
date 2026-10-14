@@ -8,6 +8,6 @@ export const threadDataSchema = z.strictObject({
     (value) => isObject(value) && "postMessage" in value && "on" in value,
   ),
   client_secret: z.string().min(1),
-  log: z.enum(LogDestination),
+  log: z.literal(LogDestination.File),
 });
 export type ThreadData = z.infer<typeof threadDataSchema>;

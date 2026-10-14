@@ -257,6 +257,7 @@ export function portCaller(port: MessagePort) {
     string,
     { resolve(answer: RecordedResponse): void; reject(error: Error): void }
   >();
+  let closed = false;
   port.on("message", (message: unknown) => {
     const answer = portAnswerSchema.safeParse(message);
     if (!answer.success) return;
@@ -265,6 +266,7 @@ export function portCaller(port: MessagePort) {
     waiting?.resolve({ status: answer.data.status, body: answer.data.body });
   });
   port.on("close", () => {
+    closed = true;
     for (const waiting of pending.values())
       waiting.reject(new Error(PORT_CLOSED));
     pending.clear();
@@ -274,6 +276,7 @@ export function portCaller(port: MessagePort) {
     raw: unknown,
     options: ClientOptions,
   ): Promise<RecordedResponse> => {
+    if (closed) return Promise.reject(new Error(PORT_CLOSED));
     const parsed = operation.input.safeParse(raw);
     if (!parsed.success)
       return Promise.resolve(inputValidationFailure(parsed.error));

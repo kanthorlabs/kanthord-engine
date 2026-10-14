@@ -144,6 +144,14 @@ export function servePort(
       } satisfies PortAnswer);
     }
   };
+  const abandon = (callId: string, error: unknown) => {
+    logger.error({ err: error, call_id: callId }, "Request abandoned");
+    try {
+      answer(callId, failure(error, resolveRequestId()));
+    } catch (answerError) {
+      logger.error({ err: answerError, call_id: callId }, "Answer failed");
+    }
+  };
   const serve = async (call: PortCall) => {
     const requestId = resolveRequestId();
     const operation = routedOperation(call.operation_id);
@@ -188,7 +196,8 @@ export function servePort(
     }
     const call = portCallSchema.safeParse(message);
     if (call.success) {
-      void serve(call.data);
+      const callId = call.data.call_id;
+      serve(call.data).catch((error: unknown) => abandon(callId, error));
       return;
     }
     const callId = (message as { call_id?: unknown } | null)?.call_id;

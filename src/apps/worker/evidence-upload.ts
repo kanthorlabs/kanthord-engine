@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { constants } from "node:fs";
 import { open, realpath, lstat, type FileHandle } from "node:fs/promises";
+import { platform } from "node:os";
 import { isAbsolute, relative, resolve, dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { ulid } from "ulid";
@@ -39,12 +40,12 @@ const evidenceFiles = { open, realpath, lstat };
 async function openContained(root: string, path: string, io = evidenceFiles) {
   const flags =
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-  if (process.platform === DARWIN)
+  if (platform() === DARWIN)
     return io.open(
       resolve(root, path),
       (flags & ~constants.O_NOFOLLOW) | DARWIN_NOFOLLOW_ANY,
     );
-  if (process.platform !== LINUX) refuse(PathRefusal.NotRegular);
+  if (platform() !== LINUX) refuse(PathRefusal.NotRegular);
   const parts = relative(root, resolve(root, path)).split(sep);
   const held: FileHandle[] = [];
   try {

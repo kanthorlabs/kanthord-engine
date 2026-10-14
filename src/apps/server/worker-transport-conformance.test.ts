@@ -7,9 +7,12 @@ import { intakeOperations } from "../../intake/contract.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import type { ClientOptions, Operation } from "../../kernel/operation.ts";
 import { isObject, isString } from "../../kernel/values.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import { missionOperations } from "../../mission/contract.ts";
+import { schedulerOperations } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { httpTransport, type WorkerTransport } from "../worker/transport.ts";
+import { until } from "./cli-support.ts";
 import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
@@ -40,6 +43,7 @@ interface Side {
     deadlineMs?: number,
   ): Promise<unknown>;
   raw(actor: string, operation: Operation, wire: Wire): Promise<unknown>;
+  logs(): Record<string, unknown>[];
 }
 
 interface Scenario {
@@ -136,7 +140,9 @@ function pathOf(operation: Operation, wire: Wire): string {
 }
 
 async function httpSide(fixture: Fixture, tokens: Scenario["tokens"]) {
+  const mark = fixture.logs.length;
   return {
+    logs: () => fixture.logs.slice(mark).map((line) => JSON.parse(line)),
     typed: async (
       actor: string,
       service: ServiceName,
@@ -230,6 +236,7 @@ async function portSide(
     return port2;
   };
   return {
+    logs: () => records,
     typed: (
       actor: string,
       service: ServiceName,
@@ -376,6 +383,15 @@ async function run(side: Side, scenario: Scenario) {
       },
       PARKED_PULL_DEADLINE_MS,
     ),
+  );
+  await until(
+    () => requestRecords(side.logs()),
+    (records) =>
+      records.some(
+        (entry) =>
+          entry.route === schedulerOperations.workPull.path &&
+          entry.status === HttpStatus.ServiceUnavailable,
+      ),
   );
   for (const [name, claim] of [
     ["execution of another project", claimCrossProject],

@@ -12,10 +12,9 @@ import {
   type Healthcheck,
   type Service,
 } from "../../kernel/service.ts";
-import {
-  installPiTools,
-  type ModelRuntimeFactory,
-  type RepositoryTransport,
+import type {
+  ModelRuntimeFactory,
+  RepositoryTransport,
 } from "../../worker/unit/index.ts";
 import {
   resolveClient,
@@ -70,7 +69,6 @@ export class Worker implements Service {
       );
     this.startTask ??= lifecycle(async () => {
       const env = this.options.env ?? process.env;
-      installPiTools({ env });
       throwIfCancelled(this.shutdown);
       const config = resolveClient(this.options, env);
       if (config.client_secret === undefined)
