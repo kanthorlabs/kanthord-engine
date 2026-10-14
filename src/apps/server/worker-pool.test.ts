@@ -13,7 +13,7 @@ import {
 } from "../../worker/contract.ts";
 import { until } from "./cli-support.ts";
 import { humanCaller } from "./test-support.ts";
-import { threadEnvironment } from "./worker-pool.ts";
+import { POOL_BACKOFF_INITIAL_MS, threadEnvironment } from "./worker-pool.ts";
 import { workerAcceptance, WORKER_DEFAULTS } from "./worker-acceptance.ts";
 
 const BINDING = "general";
@@ -36,6 +36,7 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
   const setup = await workerAcceptance(t, true, { stateDirectory, slotLimit });
   const call = humanCaller(setup.fixture);
   const params = { project_id: setup.project_id };
+  const started = t.mock.method(setup.fixture.workerPool, "start");
   const rewrite = async (
     change: (bindings: Record<string, unknown>) => Record<string, unknown>,
   ) => {
@@ -62,11 +63,13 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
       entries: [{ agent: "swe@1", ...WORKER_DEFAULTS }],
     },
   });
-  await rewrite((bindings) =>
-    Object.fromEntries(
-      Object.entries(bindings).filter(([name]) => name !== BINDING),
-    ),
-  );
+  const remove = () =>
+    rewrite((bindings) =>
+      Object.fromEntries(
+        Object.entries(bindings).filter(([name]) => name !== BINDING),
+      ),
+    );
+  await remove();
   await rewrite((bindings) => ({ ...bindings, [BINDING]: worker(count) }));
   await delay(TOMBSTONE_SETTLE_MS);
   const instances = () =>
@@ -79,7 +82,33 @@ async function serverPool(t: TestContext, count: number, slotLimit?: number) {
     rewrite((bindings) => ({ ...bindings, [BINDING]: worker(instanceCount) }));
   const waitFor = (size: number) =>
     until(instances, (items) => items.length === size);
-  return { ...setup, stateDirectory, instances, setCount, waitFor };
+  const slots = () => started.mock.calls.map((call) => call.arguments[0]);
+  const settled = async (ended = slots()) => {
+    for (const slot of ended)
+      await until(
+        () => setup.fixture.workerPool.threadOf(slot.client_id),
+        (thread) => thread === undefined,
+      );
+    await delay(POOL_BACKOFF_INITIAL_MS);
+    for (const slot of ended)
+      assert.equal(
+        setup.fixture.workerPool.threadOf(slot.client_id),
+        undefined,
+      );
+    assert.ok(
+      !setup.fixture.logs.some((line) => line.includes(FAILED_MESSAGE)),
+    );
+  };
+  return {
+    ...setup,
+    stateDirectory,
+    instances,
+    setCount,
+    remove,
+    slots,
+    settled,
+    waitFor,
+  };
 }
 
 test(
@@ -150,6 +179,35 @@ test(
     assert.equal(shrunk[0]!.runtime_identity, first[0]!.runtime_identity);
     await f.setCount(0);
     await f.waitFor(0);
+    await f.settled();
+  },
+);
+
+test(
+  "a removed binding ends its threads without a restart",
+  { timeout: POOL_TEST_TIMEOUT },
+  async (t) => {
+    const f = await serverPool(t, TWO_INSTANCES);
+    f.fixture.worker.startPool();
+    await f.waitFor(TWO_INSTANCES);
+    await f.remove();
+    await f.waitFor(0);
+    await f.settled();
+  },
+);
+
+test(
+  "a slot that drains before it registers ends without a restart",
+  { timeout: POOL_TEST_TIMEOUT },
+  async (t) => {
+    const f = await serverPool(t, ONE_INSTANCE);
+    f.fixture.worker.startPool();
+    await f.waitFor(ONE_INSTANCE);
+    await f.setCount(THREE_INSTANCES);
+    await f.setCount(ONE_INSTANCE);
+    await f.waitFor(ONE_INSTANCE);
+    assert.equal(f.slots().length, THREE_INSTANCES);
+    await f.settled(f.slots().slice(ONE_INSTANCE));
   },
 );
 
@@ -208,6 +266,27 @@ test(
     assert.equal(warning?.project_id, f.project_id);
     assert.equal(warning?.slot, ONE_INSTANCE);
     assert.equal((await f.instances()).length, ONE_INSTANCE);
+  },
+);
+
+test(
+  "a slot above the server slot limit starts when a started slot leaves",
+  { timeout: POOL_TEST_TIMEOUT },
+  async (t) => {
+    const f = await serverPool(t, TWO_INSTANCES, ONE_INSTANCE);
+    f.fixture.worker.startPool();
+    await f.waitFor(ONE_INSTANCE);
+    const [first, second] = f.slots();
+    assert.ok(first && second);
+    assert.equal(f.fixture.workerPool.threadOf(second.client_id), undefined);
+    f.fixture.workerPool.drain({ ...first, draining: true });
+    const [next] = await until(
+      () => f.instances(),
+      (items) =>
+        items.length === ONE_INSTANCE &&
+        items[0]!.client_id === second.client_id,
+    );
+    assert.equal(next!.draining, false);
   },
 );
 

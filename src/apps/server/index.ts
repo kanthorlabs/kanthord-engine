@@ -459,6 +459,7 @@ export function composeServices(options: {
       host: workerPool,
       workerBindingsOf: (tx, projectId) =>
         project.workerBindingsOf(tx, projectId),
+      logger: options.logger,
     },
     agentConfiguration: {
       validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),

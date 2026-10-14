@@ -188,6 +188,9 @@ test("the release bundle of the worker thread starts as an eval worker", async (
   t.after(() => thread.terminate());
   port1.close();
   const [error] = await once(thread, "error");
-  assert.match(String(error.message), /package\.json|package version/);
+  assert.match(
+    String(error.message),
+    /^ENOENT: no such file or directory, open '.*package\.json'$/,
+  );
   await once(thread, "exit");
 });

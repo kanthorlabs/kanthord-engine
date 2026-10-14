@@ -656,11 +656,11 @@ export function readGeneration(
   const tombstone = readLatestTombstone(tx, projectId, resourceIdentity);
   const row = tx.database
     .prepare(
-      "SELECT created_at FROM project_binding WHERE project_id = ? AND resource_identity = ? AND revision > ? ORDER BY revision ASC LIMIT 1",
+      "SELECT revision FROM project_binding WHERE project_id = ? AND resource_identity = ? AND revision > ? ORDER BY revision ASC LIMIT 1",
     )
     .get(projectId, resourceIdentity, tombstone?.revision ?? NO_REVISION) as
-    { created_at: number } | undefined;
-  return row?.created_at ?? null;
+    { revision: number } | undefined;
+  return row?.revision ?? null;
 }
 
 export function readLatestTombstone(

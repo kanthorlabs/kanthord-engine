@@ -19,6 +19,7 @@ import {
 } from "../kernel/health.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import assert from "node:assert/strict";
+import type { Logger } from "pino";
 import { isMachineIdentity } from "../kernel/caller.ts";
 import { AccessPolicy } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -115,7 +116,11 @@ export interface Dependencies {
   agentConfiguration: AgentConfiguration;
   health?: HealthRegistry;
   registrations?: WorkerRegistrations;
-  pool?: { host: PoolHost; workerBindingsOf: WorkerBindingsOf };
+  pool?: {
+    host: PoolHost;
+    workerBindingsOf: WorkerBindingsOf;
+    logger: Logger;
+  };
 }
 export class WorkerService implements Service {
   authorizeModelInference(
@@ -236,7 +241,18 @@ export class WorkerService implements Service {
   }
 
   bindingsChanged(projectId: string): void {
-    if (this.poolStarted) this.reconcile(projectId, false);
+    if (!this.poolStarted) return;
+    setImmediate(() => {
+      if (!this.poolStarted) return;
+      try {
+        this.reconcile(projectId, false);
+      } catch (error) {
+        this.dependencies.pool?.logger.error(
+          { err: asError(error), project_id: projectId },
+          "worker.pool.reconcile_failed",
+        );
+      }
+    });
   }
 
   private reconcile(projectId: string | null, restore: boolean): void {
@@ -312,7 +328,8 @@ export class WorkerService implements Service {
       tx,
       runtimeIdentity,
     );
-    if (!registration) return false;
+    if (!registration || this.pool?.draining(registration.client_id))
+      return false;
     const binding = this.dependencies.workerBindingOf(
       tx,
       registration.project_id,
@@ -460,6 +477,7 @@ export class WorkerService implements Service {
       this.pool?.isSlot(
         identity.projectId,
         identity.resourceIdentity,
+        binding.generation,
         identity.clientId,
       )
     )

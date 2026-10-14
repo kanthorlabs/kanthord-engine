@@ -948,6 +948,58 @@ test("server quiesces concurrently, drains Intake with direct calls available, j
   assert.equal(result.status, ExitCode.Success, result.stderr);
 });
 
+test("server starts the worker pool after the Gateway is ready and stops it before it quiesces", (t) => {
+  const paths = layout(temporary(t));
+  paths.config.log.destination = "file";
+  writePrivate(paths.env.KANTHORD_CONFIG!, stringify(paths.config), true);
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import assert from 'node:assert/strict';
+    import { Server } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
+    import { SchedulerService } from ${JSON.stringify(new URL("../../scheduler/index.ts", import.meta.url).href)};
+    import { WorkerService } from ${JSON.stringify(new URL("../../worker/index.ts", import.meta.url).href)};
+    import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
+    const events = [];
+    const gatewayStart = GatewayService.prototype.start;
+    GatewayService.prototype.start = async function() {
+      const error = await gatewayStart.call(this);
+      if (!events.includes('gateway-ready')) events.push('gateway-ready');
+      return error;
+    };
+    const startPool = WorkerService.prototype.startPool;
+    WorkerService.prototype.startPool = function() {
+      events.push('startPool');
+      return startPool.call(this);
+    };
+    const stopPool = WorkerService.prototype.stopPool;
+    WorkerService.prototype.stopPool = async function() {
+      events.push('stopPool');
+      await stopPool.call(this);
+      events.push('stopPool-done');
+    };
+    const quiesce = SchedulerService.prototype.quiesce;
+    SchedulerService.prototype.quiesce = function() {
+      if (!events.includes('quiesce')) events.push('quiesce');
+      return quiesce.call(this);
+    };
+    const server = new Server();
+    assert.equal(await server.start(), null);
+    assert.deepEqual(events, ['gateway-ready', 'startPool']);
+    assert.equal(await server.stop(), null);
+    assert.deepEqual(events, ['gateway-ready', 'startPool', 'stopPool', 'stopPool-done', 'quiesce']);
+    process.stdout.write('verified\\n');
+  `,
+    ],
+    { env: paths.env, encoding: "utf8", timeout: SHUTDOWN_DEADLINE_MS },
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
+});
+
 test("server startup failure releases Mission in reverse construction order and stop is idempotent", (t) => {
   const paths = layout(temporary(t));
   const result = spawnSync(

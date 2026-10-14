@@ -100,9 +100,14 @@ test("a reconciliation starts one slot for each unit of the count and records th
       [2, false],
     ],
   );
-  assert.ok(f.pool.isSlot(PROJECT_ID, RESOURCE, f.slotId(1)));
-  assert.ok(!f.pool.isSlot(OTHER_PROJECT_ID, RESOURCE, f.slotId(1)));
-  assert.ok(!f.pool.isSlot(PROJECT_ID, RESOURCE, "client_identity_other"));
+  assert.ok(f.pool.isSlot(PROJECT_ID, RESOURCE, GENERATION, f.slotId(1)));
+  assert.ok(
+    !f.pool.isSlot(OTHER_PROJECT_ID, RESOURCE, GENERATION, f.slotId(1)),
+  );
+  assert.ok(!f.pool.isSlot(PROJECT_ID, RESOURCE, NEXT_GENERATION, f.slotId(1)));
+  assert.ok(
+    !f.pool.isSlot(PROJECT_ID, RESOURCE, GENERATION, "client_identity_other"),
+  );
   f.run(null, [target(THREE_SLOTS)]);
   assert.equal(f.host.started.length, THREE_SLOTS);
 });
@@ -118,9 +123,9 @@ test("a lowered count drains the excess slots and keeps them as pool slots that 
   assert.ok(f.pool.draining(f.slotId(1)));
   assert.ok(f.pool.draining(f.slotId(0)));
   assert.ok(!f.pool.draining(f.slotId(2)));
-  assert.ok(f.pool.isSlot(PROJECT_ID, RESOURCE, f.slotId(0)));
+  assert.ok(f.pool.isSlot(PROJECT_ID, RESOURCE, GENERATION, f.slotId(0)));
   f.host.end(f.slotId(1));
-  assert.ok(!f.pool.isSlot(PROJECT_ID, RESOURCE, f.slotId(1)));
+  assert.ok(!f.pool.isSlot(PROJECT_ID, RESOURCE, GENERATION, f.slotId(1)));
 });
 
 test("a raise during a drain starts the draining slot again instead of a new slot", () => {

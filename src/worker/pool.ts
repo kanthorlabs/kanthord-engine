@@ -94,12 +94,14 @@ export class Pool {
   isSlot(
     projectId: string,
     resourceIdentity: string,
+    generation: number,
     clientId: string,
   ): boolean {
     const slot = this.slotOf(clientId);
     return (
       slot?.project_id === projectId &&
-      slot.resource_identity === resourceIdentity
+      slot.resource_identity === resourceIdentity &&
+      slot.generation === generation
     );
   }
 

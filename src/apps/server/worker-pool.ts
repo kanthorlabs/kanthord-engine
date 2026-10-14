@@ -1,4 +1,4 @@
-import { constants, createWriteStream } from "node:fs";
+import { constants, createWriteStream, type WriteStream } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MessageChannel, Worker, type MessagePort } from "node:worker_threads";
@@ -13,7 +13,7 @@ import { slotClientIdentity } from "./slot-identity.ts";
 
 export const POOL_BACKOFF_INITIAL_MS = 1000;
 export const POOL_BACKOFF_MAX_MS = 30000;
-export const POOL_STOP_DEADLINE_MS = 10000;
+export const POOL_STOP_DEADLINE_MS = 5000;
 const BACKOFF_FACTOR = 2;
 const WORKERS_DIRECTORY = "workers";
 const STDERR_LOG = "stderr.log";
@@ -57,8 +57,10 @@ export interface WorkerPoolOptions {
 
 interface Entry {
   slot: PoolSlot;
+  pending: boolean;
   worker?: Worker;
   port?: MessagePort;
+  log?: WriteStream;
   requested: (typeof ThreadMessage)[keyof typeof ThreadMessage] | null;
   resume: boolean;
   failure: Error | null;
@@ -129,7 +131,8 @@ export class WorkerPool implements PoolHost {
         existing.resume = true;
       return;
     }
-    if (this.entries.size >= this.options.slotLimit) {
+    const pending = this.started() >= this.options.slotLimit;
+    if (pending)
       this.options.logger.warn(
         {
           project_id: slot.project_id,
@@ -138,10 +141,9 @@ export class WorkerPool implements PoolHost {
         },
         "worker.pool.slot_limit",
       );
-      return;
-    }
     const entry: Entry = {
       slot,
+      pending,
       requested: null,
       resume: false,
       failure: null,
@@ -150,7 +152,7 @@ export class WorkerPool implements PoolHost {
       exit: Promise.withResolvers<void>(),
     };
     this.entries.set(slot.client_id, entry);
-    this.launch(entry);
+    if (!pending) this.launch(entry);
   }
 
   drain(slot: PoolSlot): void {
@@ -161,6 +163,14 @@ export class WorkerPool implements PoolHost {
     }
     entry.slot = slot;
     entry.resume = false;
+    if (
+      entry.pending &&
+      this.options.runtimeIdentity(slot.client_id) === undefined
+    ) {
+      this.entries.delete(slot.client_id);
+      this.ended(slot.client_id);
+      return;
+    }
     if (entry.worker && entry.requested !== ThreadMessage.Drain) {
       entry.requested = ThreadMessage.Drain;
       entry.worker.postMessage({ kind: ThreadMessage.Drain });
@@ -172,6 +182,23 @@ export class WorkerPool implements PoolHost {
     await Promise.all(
       Array.from(this.entries.values(), (entry) => this.halt(entry)),
     );
+  }
+
+  private started(): number {
+    let count = 0;
+    for (const entry of this.entries.values()) if (!entry.pending) count++;
+    return count;
+  }
+
+  private promote(): void {
+    if (this.stopping || this.started() >= this.options.slotLimit) return;
+    let next: Entry | undefined;
+    for (const candidate of this.entries.values())
+      if (candidate.pending && (!next || candidate.slot.slot < next.slot.slot))
+        next = candidate;
+    if (!next) return;
+    next.pending = false;
+    this.launch(next);
   }
 
   private async halt(entry: Entry): Promise<void> {
@@ -220,7 +247,9 @@ export class WorkerPool implements PoolHost {
           constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND,
         ),
       });
+      entry.log = log;
       const { port1, port2 } = new MessageChannel();
+      entry.port = port1;
       servePort(
         port1,
         this.options.invocation,
@@ -251,7 +280,6 @@ export class WorkerPool implements PoolHost {
       worker.stdout.pipe(log, { end: false });
       worker.stderr.pipe(log, { end: false });
       entry.worker = worker;
-      entry.port = port1;
       entry.failure = null;
       entry.requested = null;
       entry.startedAt = Date.now();
@@ -260,10 +288,7 @@ export class WorkerPool implements PoolHost {
         entry.failure =
           error instanceof Error ? error : new Error(String(error));
       });
-      worker.once("exit", (code) => {
-        log.end();
-        this.exited(entry, code);
-      });
+      worker.once("exit", (code) => this.exited(entry, code));
       if (slot.draining) {
         entry.requested = ThreadMessage.Drain;
         worker.postMessage({ kind: ThreadMessage.Drain });
@@ -277,6 +302,8 @@ export class WorkerPool implements PoolHost {
   private exited(entry: Entry, code: number): void {
     entry.port?.close();
     entry.port = undefined;
+    entry.log?.end();
+    entry.log = undefined;
     entry.worker = undefined;
     const requested = entry.requested;
     entry.requested = null;
@@ -291,9 +318,15 @@ export class WorkerPool implements PoolHost {
       this.launch(entry);
       return;
     }
-    if (requested === ThreadMessage.Drain && !entry.failure && !code) {
+    const drained =
+      requested === ThreadMessage.Drain && !entry.failure && !code;
+    const unregistered =
+      entry.slot.draining &&
+      this.options.runtimeIdentity(entry.slot.client_id) === undefined;
+    if (drained || unregistered) {
       this.entries.delete(entry.slot.client_id);
       this.ended(entry.slot.client_id);
+      this.promote();
       return;
     }
     this.fail(entry, code);

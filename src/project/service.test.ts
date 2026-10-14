@@ -87,7 +87,6 @@ const ONE_CALL = 1;
 const NO_ITEMS = 0;
 const WORKER_GROUP = "worker:kanthord:worker";
 const NO_GENERATION = 0;
-const GENERATION_GAP_MS = 5000;
 const MISSING_GROUP = "worker:kanthord:absent";
 const GROUP_ISSUED_AT = 1000;
 const TOMBSTONE_AT = 2000;
@@ -691,11 +690,11 @@ function storedPlacement(result: {
     .placement;
 }
 
-function createdAtOf(f: ReturnType<typeof fixture>, bindingId: string) {
+function revisionOf(f: ReturnType<typeof fixture>, bindingId: string) {
   const row = f.store.database
-    .prepare("SELECT created_at FROM project_binding WHERE id = ?")
-    .get(bindingId) as { created_at: number };
-  return row.created_at;
+    .prepare("SELECT revision FROM project_binding WHERE id = ?")
+    .get(bindingId) as { revision: number };
+  return row.revision;
 }
 
 function bindingFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
@@ -833,7 +832,7 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
     worker_name: GROUP_WORKER_NAME,
     instance_count: SINGLE_INSTANCE,
     placement: WorkerPlacement.Worker,
-    generation: createdAtOf(f, first),
+    generation: revisionOf(f, first),
     resource_budget: null,
     entries: [],
     tombstone: false,
@@ -864,17 +863,15 @@ test("workerBindingOf reads the placement and the generation of a binding group"
     );
   const first = f.write(SINGLE_INSTANCE, WorkerPlacement.Server);
   assert.equal(read()?.placement, WorkerPlacement.Server);
-  assert.equal(read()?.generation, createdAtOf(f, first));
+  assert.equal(read()?.generation, revisionOf(f, first));
   f.write(TWO_INSTANCES, WorkerPlacement.Server);
-  assert.equal(read()?.generation, createdAtOf(f, first));
+  assert.equal(read()?.generation, revisionOf(f, first));
   f.write(null);
   assert.equal(read()?.generation, NO_GENERATION);
-  const regenerated = Date.now() + GENERATION_GAP_MS;
-  t.mock.method(Date, "now", () => regenerated);
   const second = f.write(SINGLE_INSTANCE, WorkerPlacement.Worker);
   assert.equal(read()?.placement, WorkerPlacement.Worker);
-  assert.equal(read()?.generation, createdAtOf(f, second));
-  assert.notEqual(read()?.generation, createdAtOf(f, first));
+  assert.equal(read()?.generation, revisionOf(f, second));
+  assert.notEqual(read()?.generation, revisionOf(f, first));
 });
 
 test("workerBindingsOf lists the current worker bindings of one project or of every project", (t) => {
