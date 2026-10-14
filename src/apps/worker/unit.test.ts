@@ -139,3 +139,64 @@ test("a busy unit ends its execution before it deregisters at a drain", async (t
   assert.equal(pulls, FIRST_PULL);
   assert.deepEqual(deregistrations, [REGISTRATION.runtime_identity]);
 });
+
+test("a unit that drains before its first pull resumes its running execution and then ends", async (t) => {
+  const handover = Promise.withResolvers<unknown>();
+  let pulls = 0;
+  const { transport, deregistrations } = scripted({
+    pull: async () => {
+      pulls++;
+      return completed({ kind: WorkPullKind.Claimed, execution: testClaim() });
+    },
+    handover: () => handover.promise,
+  });
+  const unit = unitOf(t, transport);
+  const running = unit.run();
+  const draining = unit.drain();
+  while (!pulls) await delay(1);
+  assert.equal(await state(running), PENDING);
+  assert.deepEqual(deregistrations, []);
+  handover.resolve(PROOF_FAILED);
+  assert.equal(await running, null);
+  assert.equal(await draining, null);
+  assert.equal(pulls, FIRST_PULL);
+  assert.deepEqual(deregistrations, [REGISTRATION.runtime_identity]);
+});
+
+test("a unit that drains before its first pull ends after one pull that finds no execution", async (t) => {
+  let pulls = 0;
+  const { transport, deregistrations } = scripted({
+    pull: async () => {
+      pulls++;
+      return completed({ kind: WorkPullKind.NoWork });
+    },
+  });
+  const unit = unitOf(t, transport);
+  const running = unit.run();
+  void unit.drain();
+  assert.equal(await running, null);
+  assert.equal(pulls, FIRST_PULL);
+  assert.deepEqual(deregistrations, [REGISTRATION.runtime_identity]);
+});
+
+test("a unit that drains before its first pull cancels a pull that waits for work", async (t) => {
+  let pulls = 0;
+  const { transport, deregistrations } = scripted({
+    pull: (context) => {
+      pulls++;
+      return cancelled(context);
+    },
+  });
+  const unit = new WorkerUnit({
+    transport,
+    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+    env: { XDG_CONFIG_HOME: temporary(t), XDG_STATE_HOME: temporary(t) },
+    log: () => {},
+    resume_pull_wait_ms: SETTLE_WAIT_MS,
+  });
+  const running = unit.run();
+  void unit.drain();
+  assert.equal(await running, null);
+  assert.equal(pulls, FIRST_PULL);
+  assert.deepEqual(deregistrations, [REGISTRATION.runtime_identity]);
+});

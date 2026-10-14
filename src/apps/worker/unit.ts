@@ -40,6 +40,7 @@ import { fileTranscript } from "./transcript-file.ts";
 const KEEPALIVE_INTERVAL_MS = 60000;
 const READY_MESSAGE = "Worker application ready";
 const ANSWER_INVALID = "gateway.client.answer_invalid";
+const RESUME_PULL_WAIT_MS = 5000;
 
 export interface WorkerUnitOptions {
   transport: WorkerTransport;
@@ -49,6 +50,7 @@ export interface WorkerUnitOptions {
   model_runtime_factory?: ModelRuntimeFactory;
   repository_transport?: RepositoryTransport;
   watchdog?: () => () => void;
+  resume_pull_wait_ms?: number;
 }
 
 export class WorkerUnit {
@@ -75,6 +77,8 @@ export class WorkerUnit {
   };
   private executionLive = false;
   private registrationKept = false;
+  private draining = false;
+  private pullStarted = false;
 
   constructor(options: WorkerUnitOptions) {
     this.options = options;
@@ -175,7 +179,8 @@ export class WorkerUnit {
   }
 
   drain(): Promise<Error | null> {
-    this.pulls.cancel();
+    this.draining = true;
+    if (this.pullStarted) this.pulls.cancel();
     return this.runTask ?? this.stop();
   }
 
@@ -200,13 +205,26 @@ export class WorkerUnit {
           );
           this.workspaces!.startSweeping();
         }
+        const resume = this.draining
+          ? new CancellationContext(
+              this.pulls,
+              Date.now() +
+                (this.options.resume_pull_wait_ms ?? RESUME_PULL_WAIT_MS),
+            )
+          : undefined;
         const failure = await pullLoop({
           api: this.options.transport,
           registration: this.registration!,
           backoff: new Backoff(),
-          shutdown: this.pulls,
+          shutdown: resume ?? this.pulls,
           pulling: (task) => {
             this.pulling = task;
+            this.pullStarted = true;
+            if (resume)
+              void task.then(
+                () => resume.cancel(),
+                () => resume.cancel(),
+              );
           },
           claimed: (claim) => this.beginExecution(claim),
           host: async () => this.execution!.task,
