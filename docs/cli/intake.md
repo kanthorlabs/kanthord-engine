@@ -407,7 +407,11 @@ capacity bound of pending events. No CLI command calls the receipt route or
 simulates a platform signature with a human JWT.
 
 A poll has no receipt route because the Intake Service initiates it. A poll
-pauses beyond the capacity bound.
+pauses beyond the capacity bound. A poll requests GitHub only while its project
+holds an unresolved request evidence on its resource. It waits at least 60
+seconds between two requests, and longer when GitHub names a wait through
+`X-Poll-Interval`, `Retry-After` or `x-ratelimit-reset`. The create and the
+delete of a poll inbound are the only switch of its poll.
 
 The API operations `intake.action.perform`, `intake.action.read`,
 `intake.storage.put`, `intake.storage.check`, `intake.storage.get`,
