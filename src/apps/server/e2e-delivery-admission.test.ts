@@ -64,6 +64,9 @@ const GATED_KEY = "gated.pull_request";
 const GATED_RESOURCE = "repository:github:owner/gated";
 const RESOURCE = "owner/gated";
 const MERGED_COMMIT = "e".repeat(40);
+const PUSHED_COMMIT = "a".repeat(40);
+const BASE_BRANCH = "main";
+const PENDING_THEN_DIRTY_READS = 2;
 const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
 const CONTENT = {
@@ -101,6 +104,17 @@ function closed(number: number, merged: boolean): Webhook {
   };
 }
 
+function pushed(branch: string): Webhook {
+  return {
+    event: "push",
+    payload: {
+      ref: `refs/heads/${branch}`,
+      after: PUSHED_COMMIT,
+      repository: { full_name: RESOURCE },
+    },
+  };
+}
+
 async function cli(t: TestContext) {
   const gitHub = await fakeGitHub(t);
   const gatedBare = await bareRepository(t, GATED);
@@ -109,7 +123,7 @@ async function cli(t: TestContext) {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
     },
-    github: { baseUrl: gitHub.endpoint },
+    github: { baseUrl: gitHub.endpoint, mergeabilityRetryDelayMs: 1 },
     repositoryTransport: mappedTransport({
       [`git@github.com:owner/${GATED}.git`]: gatedBare.bare,
     }),
@@ -409,3 +423,37 @@ test("E08 delivery admission journey", { timeout: TIMEOUT }, async (t) => {
     });
   });
 });
+
+test(
+  "E08.8 a base push rereads a null mergeable and returns the conflicting node to rework",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const I = await h.create("initiative-1.md");
+    const P = await h.objective("objective-p.md", I);
+    const action = await h.actionRequest(P.x2);
+    assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+    await h.release(P.x2.execution_id);
+    assert.equal((await h.node(P.nodeId)).state, NodeState.ExternalRequested);
+    h.gitHub.mergeability(FIRST_PULL_REQUEST, [
+      { mergeable: null, mergeable_state: "unknown" },
+      { mergeable: false, mergeable_state: "dirty" },
+    ]);
+    const before = h.gitHub.calls.length;
+    const answer = completed(
+      await h.admit(pushed(BASE_BRANCH), createIdentity("inbound_event")),
+    );
+    assert.deepEqual(answer, {
+      disposition: Disposition.AcceptedObservation,
+      reason: null,
+    });
+    const reads = h.gitHub.calls
+      .slice(before)
+      .filter(
+        (call) =>
+          call.path === `/repos/owner/gated/pulls/${FIRST_PULL_REQUEST}`,
+      );
+    assert.equal(reads.length, PENDING_THEN_DIRTY_READS);
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Available);
+  },
+);

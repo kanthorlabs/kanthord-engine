@@ -1093,6 +1093,106 @@ test("an open pull request with merge conflicts folds to the conflict end state"
   );
 });
 
+const PENDING_MERGEABILITY = {
+  ...PULL_REQUEST_BODY,
+  mergeable: null,
+  mergeable_state: "unknown",
+};
+const CONFLICTING_MERGEABILITY = {
+  ...PULL_REQUEST_BODY,
+  mergeable: false,
+  mergeable_state: "dirty",
+};
+const MERGEABILITY_DELAY_MS = 5;
+const MERGEABILITY_READ_COUNT = 3;
+const SECOND_READ = 2;
+
+function bodiesInOrder(bodies: unknown[]): Handler {
+  return (request, response, count) =>
+    answer(200, bodies[Math.min(count, bodies.length) - 1])(
+      request,
+      response,
+      count,
+    );
+}
+
+function settled(github: GitHubPlatform, deadlineAt?: number) {
+  return github.getSettledPullRequest(
+    call(deadlineAt === undefined ? {} : { deadlineAt }),
+    TARGET,
+    { number: 7 },
+  );
+}
+
+test("a pull request whose first read holds a null mergeable and whose second read holds dirty folds to conflict", async (t) => {
+  const server = await platform(
+    t,
+    bodiesInOrder([PENDING_MERGEABILITY, CONFLICTING_MERGEABILITY]),
+  );
+  const github = new GitHubPlatform({
+    baseUrl: server.baseUrl,
+    mergeabilityRetryDelayMs: MERGEABILITY_DELAY_MS,
+  });
+  const result = await settled(github);
+  assert.ok(result.ok);
+  assert.equal(server.requests.length, SECOND_READ);
+  assert.equal(
+    github.foldPullRequest(
+      result.value,
+      NO_REVIEWS,
+      ExpectedEndState.PullRequestMerged,
+    ).end_state,
+    CheckEndState.Conflict,
+  );
+});
+
+test("a null mergeable after the third read folds to none", async (t) => {
+  const server = await platform(t, answer(200, PENDING_MERGEABILITY));
+  const github = new GitHubPlatform({
+    baseUrl: server.baseUrl,
+    mergeabilityRetryDelayMs: MERGEABILITY_DELAY_MS,
+  });
+  const result = await settled(github);
+  assert.ok(result.ok);
+  assert.equal(server.requests.length, MERGEABILITY_READ_COUNT);
+  assert.equal(
+    github.foldPullRequest(
+      result.value,
+      NO_REVIEWS,
+      ExpectedEndState.PullRequestMerged,
+    ).end_state,
+    CheckEndState.None,
+  );
+});
+
+test("a known mergeable, a closed pull request and a failed read end the reads at once", async (t) => {
+  for (const [status, body] of [
+    [200, { ...PULL_REQUEST_BODY, mergeable: true }],
+    [200, { ...PENDING_MERGEABILITY, state: "closed", merged: false }],
+    [200, PULL_REQUEST_BODY],
+    [SERVICE_UNAVAILABLE, { message: "unavailable" }],
+  ] as const) {
+    const server = await platform(t, answer(status, body));
+    const github = new GitHubPlatform({
+      baseUrl: server.baseUrl,
+      mergeabilityRetryDelayMs: MERGEABILITY_DELAY_MS,
+    });
+    await settled(github);
+    assert.equal(server.requests.length, SINGLE_REQUEST);
+  }
+});
+
+test("a deadline that leaves less time than the delay ends the reads", async (t) => {
+  const server = await platform(t, answer(200, PENDING_MERGEABILITY));
+  const github = new GitHubPlatform({
+    baseUrl: server.baseUrl,
+    mergeabilityRetryDelayMs: SHORT_DEADLINE_MS,
+  });
+  const result = await settled(github, Date.now() + SHORT_DEADLINE_MS);
+  assert.ok(result.ok);
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+});
+
 function review(reviewer: number, state: string, commit = HEAD_SHA) {
   return { id: reviewer, user: { id: reviewer }, state, commit_id: commit };
 }

@@ -14,6 +14,8 @@ export const GITHUB_API_VERSION = "2022-11-28";
 export const GITHUB_RESULT_CODE_PREFIX = "repository.platform.github.";
 export const READ_RETRY_DELAY_MS = 250;
 export const READ_ATTEMPT_LIMIT = 240;
+export const MERGEABILITY_READ_LIMIT = 3;
+export const MERGEABILITY_RETRY_DELAY_MS = 2000;
 export const REVIEW_COMMENT_LIMIT_DEFAULT = 100;
 export const REVIEW_COMMENT_LIMIT_MIN = 1;
 export const REVIEW_COMMENT_LIMIT_MAX = 100;
@@ -244,6 +246,12 @@ const pullRequestStateSchema = z
       });
   });
 
+const mergeabilityStateSchema = z.looseObject({
+  state: z.string(),
+  merged: z.boolean().optional(),
+  mergeable: z.boolean().nullable().optional(),
+});
+
 const pullRequestHeadSchema = z.looseObject({
   head: z.looseObject({ sha: z.string().min(MIN_SEGMENT_LENGTH) }),
 });
@@ -275,6 +283,7 @@ const reviewCommentListSchema = z.array(
 
 export interface GitHubOptions {
   baseUrl?: string;
+  mergeabilityRetryDelayMs?: number;
 }
 
 interface Exchange {
@@ -587,12 +596,27 @@ export function hasNextLink(link: string | null): boolean {
   );
 }
 
+function mergeabilityPending(body: unknown): boolean {
+  const parsed = mergeabilityStateSchema.safeParse(body);
+  return (
+    parsed.success &&
+    parsed.data.state === PULL_REQUEST_STATE_OPEN &&
+    parsed.data.merged !== true &&
+    parsed.data.mergeable === null
+  );
+}
+
 export class GitHubPlatform {
   readonly #baseUrl: string;
+  readonly #mergeabilityRetryDelayMs: number;
 
   constructor(options: GitHubOptions = {}) {
     this.#baseUrl = options.baseUrl ?? GITHUB_API_BASE_URL;
     assert.ok(URL.canParse(this.#baseUrl));
+    this.#mergeabilityRetryDelayMs =
+      options.mergeabilityRetryDelayMs ?? MERGEABILITY_RETRY_DELAY_MS;
+    assert.ok(Number.isSafeInteger(this.#mergeabilityRetryDelayMs));
+    assert.ok(this.#mergeabilityRetryDelayMs >= NO_TIME_LEFT_MS);
   }
 
   async send(
@@ -709,6 +733,23 @@ export class GitHubPlatform {
       route: "GET /repos/{owner}/{repo}/pulls/{pull_number}",
       parameters: { pull_number: pullRequest.number },
     });
+  }
+
+  async getSettledPullRequest(
+    call: GitHubCall,
+    target: GitHubTarget,
+    pullRequest: { number: number },
+  ): Promise<GitHubAnswer<unknown>> {
+    let answer = await this.getPullRequest(call, target, pullRequest);
+    for (let read = 1; read < MERGEABILITY_READ_LIMIT; read += 1) {
+      if (!answer.ok || !mergeabilityPending(answer.value)) break;
+      const remaining = call.deadlineAt - Date.now();
+      if (call.signal.aborted || remaining <= this.#mergeabilityRetryDelayMs)
+        break;
+      await sleep(this.#mergeabilityRetryDelayMs);
+      answer = await this.getPullRequest(call, target, pullRequest);
+    }
+    return answer;
   }
 
   async listReviewComments(

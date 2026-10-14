@@ -572,6 +572,8 @@ const GITHUB_MERGE_SHA = /^[a-f0-9]{40}$/;
 const GITHUB_NOT_FOUND = { message: "Not Found" };
 const GITHUB_SCRIPTED_FAILURE = { message: "scripted failure" };
 const GITHUB_FIRST_PULL_NUMBER = 1;
+const GITHUB_FIRST_MERGEABILITY = 0;
+const GITHUB_LAST_MERGEABILITY = 1;
 const GITHUB_NEXT_PULL_STEP = 1;
 const GITHUB_CREATED_STATUS = 201;
 const GITHUB_EMPTY_BODY = "";
@@ -596,6 +598,12 @@ export interface FakePullRequest {
   merge_commit_sha: string | null;
   head_sha: string;
   reviews: FakeReview[];
+  mergeability: FakeMergeability[];
+}
+
+export interface FakeMergeability {
+  mergeable: boolean | null;
+  mergeable_state: string;
 }
 
 export interface FakeReview {
@@ -684,6 +692,7 @@ function pullBody(pull: FakePullRequest) {
     state: pull.state,
     merged: pull.merged,
     merge_commit_sha: pull.merge_commit_sha,
+    ...pull.mergeability[GITHUB_FIRST_MERGEABILITY],
     head: {
       ref: pull.head,
       sha: pull.head_sha,
@@ -729,6 +738,7 @@ function insertPull(
       .update(`${owner}/${repo}#${input.head}`)
       .digest("hex"),
     reviews: [],
+    mergeability: [],
   };
   state.pulls.push(pull);
   assert.equal(state.pulls.at(-1), pull);
@@ -775,8 +785,12 @@ function routePull(
   );
   if (!pull || method !== HttpMethod.Get)
     return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
-  if (suffix === undefined)
-    return { status: HttpStatus.OK, body: pullBody(pull) };
+  if (suffix === undefined) {
+    const body = pullBody(pull);
+    if (pull.mergeability.length > GITHUB_LAST_MERGEABILITY)
+      pull.mergeability.shift();
+    return { status: HttpStatus.OK, body };
+  }
   if (reviewId !== undefined) {
     const review = pull.reviews.find((item) => item.id === +reviewId);
     return review
@@ -1057,6 +1071,10 @@ export async function fakeGitHub(t: TestContext) {
         comments: review.comments ?? [],
       });
       return id;
+    },
+    mergeability(number: number, answers: FakeMergeability[]): void {
+      assert.ok(answers.length >= GITHUB_LAST_MERGEABILITY);
+      changePull(state, number).mergeability = [...answers];
     },
     refuseMerge(status: number | null): void {
       assert.ok(status === null || Number.isInteger(status));

@@ -173,7 +173,7 @@ export function composeServices(options: {
   logger: Logger;
   health: HealthRegistry;
   repositoryConnector?: RepositoryConnector;
-  github?: { baseUrl: string };
+  github?: { baseUrl: string; mergeabilityRetryDelayMs?: number };
   repositoryTransport?: GitWriter;
   oauthProviders?: ConstructorParameters<
     typeof LlmComponent
