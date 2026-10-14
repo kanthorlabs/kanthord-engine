@@ -309,7 +309,7 @@ pnpm run verify
 ```
 
 Run `pnpm run verify` before handing off code. It checks formatting, types,
-tests, lint, and the build. Report failures and checks not run.
+lint, and the build, then runs the tests. Report failures and checks not run.
 
 Run a focused test with:
 

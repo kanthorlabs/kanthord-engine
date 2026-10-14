@@ -27,7 +27,7 @@
     "format": "prettier --write src bin eslint.config.js scripts/pi-tools.mjs scripts/test-reporter.mjs scripts/test-reporter.test.mjs",
     "lint": "eslint src bin eslint.config.js scripts/pi-tools.mjs scripts/test-reporter.mjs scripts/test-reporter.test.mjs",
     "start": "node bin/kanthord.mjs",
-    "verify": "prettier --check src bin eslint.config.js scripts/pi-tools.mjs scripts/test-reporter.mjs scripts/test-reporter.test.mjs --log-level warn && pnpm --silent run typecheck && pnpm --silent test && pnpm --silent run lint && pnpm --silent run build",
+    "verify": "prettier --check src bin eslint.config.js scripts/pi-tools.mjs scripts/test-reporter.mjs scripts/test-reporter.test.mjs --log-level warn && pnpm --silent run typecheck && pnpm --silent run lint && pnpm --silent run build && pnpm --silent test",
     "verify:guards": "node -e \"process.exit(0)\"",
     "prepare": "husky"
   },
