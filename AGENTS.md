@@ -44,7 +44,7 @@ engine/
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
 │   │   ├── probe.ts            # Remote HTTP probe and failure-reason redaction
 │   │   ├── pi-provider.ts      # Platform to pi provider id map
-│   │   ├── assets.ts           # Shipped assets from the single binary or static/
+│   │   ├── assets.ts           # Shipped assets and pi tool binaries from the single binary, static/ or .pi-tools/
 │   │   └── test-support.ts     # Isolated temporary filesystem fixtures
 │   ├── repository/             # Repository component: startup gate, SSH reachability, checkout, snapshot, node-branch transport, server-side git write and landing read, and repository credentials
 │   │   ├── contract.ts         # Repository credential route group
@@ -72,6 +72,7 @@ engine/
 │   │   ├── catalog.ts          # Static agent declarations
 │   │   ├── prompt-assets.ts    # Byte-exact packaged base, agent, workbench and template prompts
 │   │   ├── pi.ts               # Cached offline SDK loader and isolated agent directory
+│   │   ├── pi-tools.ts         # Pinned rg and fd install into the pi bin directory and the version check
 │   │   ├── agent-session.ts    # Isolated sessions and setup deadlines
 │   │   ├── prompt-source.ts    # Bounded UTF-8 prompt source reader
 │   │   ├── prompt-composer.ts  # Layer selection, attribution, digests and work prompts
@@ -197,7 +198,7 @@ engine/
 │   │   ├── action-reuse.ts     # Open pull-request repository and branch checks
 │   │   ├── action-classify.ts  # No-effect, unknown-effect and recording outcomes
 │   │   ├── node-branch.ts      # Shared deterministic node branch name
-│   │   ├── tool-table.ts       # Declared tools, host checks and bounded hygienic bash
+│   │   ├── tool-table.ts       # Declared tools and bounded hygienic bash
 │   │   ├── model-runtime.ts    # Execution model runtime factory over the LLM model connector
 │   │   ├── test-support.ts     # Runtime fixtures over the scripted offline provider
 │   │   ├── budget.ts           # Monotonic wall budget, turns and cleanup deadline
@@ -269,6 +270,7 @@ engine/
 │           ├── api.ts          # Server operation clients and bounded backoff
 │           └── index.ts        # Client resolution, version check, and cancellable lifetime
 ├── static/                     # Packaged generated OpenAPI assets
+│   ├── pi-tools.json           # Pinned rg and fd releases, archive and binary digests per target
 │   ├── prompt/                 # Byte-exact base, swe@1, re@1 and workbench prompt assets
 │   │   └── template/           # Shipped Handlebars templates of agent-facing texts
 │   ├── openapi.yaml             # Root contract index and package version
@@ -282,6 +284,8 @@ engine/
 │       ├── workbench/          # Workbench operation documents
 │       └── shared/             # Common OpenAPI components
 ├── scripts/                    # Development and acceptance utilities
+│   └── pi-tools.mjs            # pi-tools:fetch downloads the host target, pi-tools:update pins a release
+├── .pi-tools/                  # Fetched pi tool binaries and licenses per target, ignored by git
 ├── docs/                       # Internal implementation notes
 │   ├── README.md               # Audience policy and project map
 │   └── testing.md              # JWT acceptance procedure
@@ -297,6 +301,7 @@ Use Node.js `>=24.15.0 <25` and the pnpm version pinned in `package.json`.
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm run pi-tools:fetch
 pnpm run build
 pnpm start --help
 pnpm test
@@ -378,7 +383,8 @@ The worker requires `client_secret` in `cli.yaml` as canonical 32-byte base64.
 It has no option or environment variable. `auth jwt generate --project <project id> --binding <binding name>`
 prints the `token` and `client_secret` fragment for this file. A `master_key`
 field fails with `cli.config.invalid`.
-It checks the host tools and the server package version, opens the state-directory
+It installs and checks the pinned pi tool binaries `rg` and `fd` into `pi/bin/` of the state directory
+before it resolves the client configuration. It then checks the server package version, opens the state-directory
 workspace root and registers its instance. It logs `Worker application ready`
 with `runtime_identity`, `resource_identity` and `worker_name`.
 It opens no database and reads no server configuration.

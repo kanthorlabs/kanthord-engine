@@ -636,6 +636,7 @@ test("agent get and prompt commands expose help and refuse invalid options befor
 test("serve worker rejects server configuration and requires a client_secret before contacting an unavailable server", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
+  env.XDG_STATE_HOME = temporary(t);
   const config = invocation(
     ["serve", "worker", "--config", "private.yaml"],
     env,
@@ -653,12 +654,7 @@ test("serve worker rejects server configuration and requires a client_secret bef
 test("serve worker with a client_secret reports an unavailable server without changing cli.yaml", (t) => {
   const directory = temporary(t);
   const env = environment(directory);
-  const tools = temporary(t);
-  for (const name of ["rg", "fd"])
-    writeFileSync(join(tools, name), "#!/bin/sh\necho test_tool\n", {
-      mode: 0o700,
-    });
-  env.PATH = `${tools}:${process.env.PATH ?? ""}`;
+  env.XDG_STATE_HOME = temporary(t);
   const path = clientConfigPath(env);
   const content = stringify({
     client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),

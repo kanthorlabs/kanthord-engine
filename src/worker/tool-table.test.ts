@@ -1,14 +1,11 @@
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
 import { test } from "node:test";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { BashToolOptions } from "@earendil-works/pi-coding-agent";
 import { temporary } from "../kernel/test-support.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { loadPi } from "../agent/pi.ts";
 import {
-  checkAgentTools,
   childEnvironment,
   sessionTools,
   toolDeclarations,
@@ -128,20 +125,4 @@ test("child environment removes provider keys and bash timeout stays below the b
     { env, onData: () => {} },
   );
   assert.deepEqual(output, { exitCode: 0 });
-});
-
-test("host tools require working rg and prefer fd over fdfind", (t) => {
-  const path = temporary(t);
-  const previous = process.env.PATH;
-  process.env.PATH = path;
-  t.after(() => {
-    if (previous === undefined) delete process.env.PATH;
-    else process.env.PATH = previous;
-  });
-  assert.throws(checkAgentTools, { code: "worker.start.tool_missing" });
-  for (const name of ["rg", "fdfind"])
-    writeFileSync(join(path, name), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
-  assert.doesNotThrow(checkAgentTools);
-  writeFileSync(join(path, "fd"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
-  assert.throws(checkAgentTools, { code: "worker.start.tool_missing" });
 });

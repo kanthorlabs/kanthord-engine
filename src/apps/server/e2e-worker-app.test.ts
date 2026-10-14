@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { parse, stringify } from "yaml";
@@ -21,7 +22,6 @@ import {
   gatewayFixture,
   TEST_WORKER_BINDING,
   TEST_PROJECT_ID,
-  toolStubs,
 } from "./test-support.ts";
 
 const SPAWN_LINE_TIMEOUT_MS = 15000;
@@ -67,10 +67,8 @@ type WorkerProcess = {
 
 function workerEnvironment(t: TestContext): NodeJS.ProcessEnv {
   const root = temporary(t);
-  const tools = toolStubs(t);
   const env = {
     ...environment(root),
-    PATH: `${tools}:${process.env.PATH ?? ""}`,
     XDG_CONFIG_HOME: join(root, "config"),
     XDG_DATA_HOME: join(root, "data"),
     XDG_STATE_HOME: join(root, "state"),
@@ -440,7 +438,7 @@ test("worker SIGHUP leaves the worker alive until SIGTERM", async (t) => {
   }
 });
 
-test("E09.4 missing host tools refuses before any network request", async (t) => {
+test("E09.4 tools that cannot be installed refuse before any network request", async (t) => {
   let requests = 0;
   const server = createServer((_request, response) => {
     requests++;
@@ -453,7 +451,9 @@ test("E09.4 missing host tools refuses before any network request", async (t) =>
   const address = server.address();
   assert.ok(address && address instanceof Object);
   const env = workerEnvironment(t);
-  env.PATH = temporary(t);
+  const binDirectory = join(directories(env).state, "pi", "bin");
+  mkdirSync(dirname(binDirectory), { recursive: true });
+  writeFileSync(binDirectory, "");
   env.KANTHORD_ENDPOINT = `http://${LOOPBACK}:${address.port}`;
   clientFile(env, randomBytes(KEY_BYTES).toString("base64"));
   const proc = spawnWorker(WORKER_ARGS, env);

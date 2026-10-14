@@ -23,7 +23,7 @@ import {
   type Registration,
 } from "./registration.ts";
 import {
-  checkAgentTools,
+  installPiTools,
   defaultModelRuntimeFactory,
   WorkspaceRoot,
   type ModelRuntimeFactory,
@@ -96,6 +96,8 @@ export class Worker implements Service {
         ),
       );
     this.startTask ??= lifecycle(async () => {
+      installPiTools({ env: this.options.env });
+      throwIfCancelled(this.shutdown);
       const config = resolveClient(this.options, this.options.env);
       if (config.client_secret === undefined)
         throw new Diagnostic(
@@ -112,8 +114,6 @@ export class Worker implements Service {
           "worker: client_secret must be a base64 encoding of exactly 32 bytes.",
         );
       this.clientSecret = secret;
-      throwIfCancelled(this.shutdown);
-      checkAgentTools();
       throwIfCancelled(this.shutdown);
       this.transport =
         this.options.repositoryTransport ?? new RepositoryComponent();
