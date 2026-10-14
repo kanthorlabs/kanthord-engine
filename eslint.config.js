@@ -27,6 +27,7 @@ export default tseslint.config(
     settings: {
       "boundaries/elements": [
         { type: "kernel", pattern: "src/kernel" },
+        { type: "worker-unit", pattern: "src/worker/unit" },
         {
           type: "component",
           pattern: "src/(repository|llm|storage|agent)",
@@ -130,6 +131,16 @@ export default tseslint.config(
               allow: [
                 { to: applicationEntry("apps-worker") },
                 {
+                  to: element("apps-worker", {
+                    fileInternalPath: "transport.ts",
+                  }),
+                },
+                {
+                  to: element("worker-unit", {
+                    fileInternalPath: "{index,test-support}.ts",
+                  }),
+                },
+                {
                   to: element("service", {
                     captured: { name: "{worker,mission}" },
                     fileInternalPath: "test-support.ts",
@@ -157,17 +168,51 @@ export default tseslint.config(
               ],
             },
             {
-              from: element("apps-worker"),
+              from: element({ anyOf: ["worker-unit", "apps-worker"] }),
               allow: [
                 ...allow("kernel"),
-                { to: element("component") },
+                { to: serviceEntry("contract.ts") },
                 {
-                  to: element("service", {
-                    captured: { name: "worker" },
+                  to: element("component", { fileInternalPath: "contract.ts" }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "agent" },
+                    fileInternalPath: `{${[
+                      "pi",
+                      "pi-tools",
+                      "agent-session",
+                      "environment",
+                      "catalog",
+                      "prompt-composer",
+                      "prompt-layers",
+                      "prompt-render",
+                      "prompt-templates",
+                      "prompt-source",
+                      "prompt-assets",
+                      "pinned-layers",
+                    ].join(",")}}.ts`,
+                  }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "agent" },
+                    fileInternalPath: "hooks/**",
+                  }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "llm" },
+                    fileInternalPath:
+                      "{model-connector,platforms,provider-failure}.ts",
+                  }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "repository" },
                     fileInternalPath: "index.ts",
                   }),
                 },
-                { to: serviceEntry("contract.ts") },
                 {
                   to: element("service", {
                     captured: { name: "custody" },
@@ -177,7 +222,53 @@ export default tseslint.config(
                 {
                   to: element("service", {
                     captured: { name: "gateway" },
-                    fileInternalPath: "client.ts",
+                    fileInternalPath: "{client,client-result}.ts",
+                  }),
+                },
+                {
+                  to: element("service", {
+                    captured: { name: "worker" },
+                    fileInternalPath: "catalog.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("apps-worker"),
+              allow: [{ to: element("worker-unit") }],
+            },
+            {
+              from: element(
+                { anyOf: ["worker-unit", "apps-worker"] },
+                { fileInternalPath: "{test-support.ts,*.test.ts}" },
+              ),
+              allow: [
+                {
+                  to: element("component", {
+                    captured: { name: "agent" },
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "repository" },
+                    fileInternalPath: "{connector,node-branch}.ts",
+                  }),
+                },
+                {
+                  to: element("service", {
+                    captured: { name: "worker" },
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element({ anyOf: ["worker-unit", "apps-worker"] }),
+              disallow: [
+                {
+                  to: element("kernel", {
+                    fileInternalPath: "{test-identity,fatal}.ts",
                   }),
                 },
               ],
@@ -195,7 +286,12 @@ export default tseslint.config(
               disallow: [
                 {
                   from: element({
-                    anyOf: ["apps-server", "apps-cli", "apps-worker"],
+                    anyOf: [
+                      "apps-server",
+                      "apps-cli",
+                      "apps-worker",
+                      "worker-unit",
+                    ],
                   }),
                 },
                 {
@@ -223,6 +319,7 @@ export default tseslint.config(
                       "service",
                       "apps-cli",
                       "apps-worker",
+                      "worker-unit",
                     ],
                   }),
                 },
@@ -336,6 +433,72 @@ export default tseslint.config(
             },
           ],
         },
+      ],
+    },
+  },
+  {
+    files: ["src/worker/unit/**/*.ts", "src/apps/worker/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "node:sqlite",
+              message: "A worker unit reaches no database.",
+            },
+            {
+              name: "node:worker_threads",
+              allowTypeImports: true,
+              message: "Only src/apps/worker/thread.ts uses worker threads.",
+            },
+          ],
+          patterns: [
+            {
+              group: ["**/kernel/store.ts"],
+              allowTypeImports: true,
+              message: "A worker unit reaches no store.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/apps/worker/thread.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "node:sqlite",
+              message: "A worker unit reaches no database.",
+            },
+          ],
+          patterns: [
+            {
+              group: ["**/kernel/store.ts"],
+              allowTypeImports: true,
+              message: "A worker unit reaches no store.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/worker/unit/**/*.ts", "src/apps/worker/**/*.ts"],
+    ignores: ["src/apps/worker/index.ts", "src/apps/worker/thread.ts"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        ...["env", "exit", "on", "kill", "abort", "dlopen"].map((property) => ({
+          object: "process",
+          property,
+          message:
+            "A worker unit reads no process state and signals no process.",
+        })),
       ],
     },
   },

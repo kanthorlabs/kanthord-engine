@@ -18,7 +18,8 @@ import {
 } from "../../custody/contract.ts";
 import { executionCredentialStore } from "../../custody/client.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
-import { retryIndeterminate, type WorkerApi } from "./api.ts";
+import { retryIndeterminate } from "./api.ts";
+import type { WorkerTransport } from "./transport.ts";
 
 export class HandoverRefused extends Diagnostic {
   readonly status: number;
@@ -52,7 +53,7 @@ export function completed<T>(result: OperationResult<T>): T {
 }
 
 export async function takeHandover(input: {
-  api: WorkerApi;
+  api: WorkerTransport;
   claim: ExecutionRecord;
   clientSecret: string;
   context: Context;

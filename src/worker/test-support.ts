@@ -6,41 +6,7 @@ export const unusedHostTools: HostTools = {
   evidenceUpload: () =>
     Promise.reject(new Error("Unexpected evidence upload in fixture")),
 };
-import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
-import {
-  modelConnectorInput,
-  type ModelRuntimeFactory,
-} from "./model-runtime.ts";
-import { loadPi } from "../agent/pi.ts";
-import type { ScriptedProvider } from "../agent/test-support.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-export {
-  scriptedProvider,
-  type ScriptedProvider,
-} from "../agent/test-support.ts";
-export {
-  fauxAssistantMessage,
-  fauxToolCall,
-  fauxText,
-} from "@earendil-works/pi-ai";
-
-export function scriptedModelRuntime(
-  provider: ScriptedProvider,
-): ModelRuntimeFactory {
-  assert.ok(provider.provider);
-  assert.ok(provider.calls);
-  return async (input) => {
-    const runtime = await createModelRuntime(
-      await loadPi(),
-      modelConnectorInput(input),
-    );
-    runtime.registerNativeProvider(provider.provider);
-    return {
-      runtime,
-      model: resolveModel(runtime, input.agent.effective_configuration),
-    };
-  };
-}
 
 export const TWO_AGENT_WORKER = "two-agent@1";
 export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {

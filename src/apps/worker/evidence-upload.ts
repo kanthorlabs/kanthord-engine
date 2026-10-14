@@ -14,7 +14,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { OBJECT_SIZE_MAX } from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import type { UploadResult } from "../../worker/contract.ts";
-import type { WorkerApi } from "./api.ts";
+import type { WorkerTransport } from "./transport.ts";
 import { completed } from "./handover.ts";
 
 export const WorkerErrorCode = {
@@ -213,7 +213,7 @@ export async function uploadEvidence(input: {
   workspace: string;
   path: string;
   claim: ExecutionRecord;
-  api: WorkerApi;
+  api: WorkerTransport;
   context: Context;
 }): Promise<UploadResult> {
   const { claim, api } = input;

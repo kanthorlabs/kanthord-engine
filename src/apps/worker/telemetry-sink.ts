@@ -12,7 +12,7 @@ import type {
   TelemetryRecord,
   trackingOperations,
 } from "../../tracking/contract.ts";
-import type { TelemetrySink } from "../../worker/index.ts";
+import type { TelemetrySink } from "../../worker/unit/index.ts";
 import { sleep } from "./api.ts";
 
 export type TelemetryWrite = ServiceClient<

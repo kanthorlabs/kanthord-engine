@@ -198,28 +198,32 @@ engine/
 │   │   ├── action-reuse.ts     # Open pull-request repository and branch checks
 │   │   ├── action-classify.ts  # No-effect, unknown-effect and recording outcomes
 │   │   ├── node-branch.ts      # Shared deterministic node branch name
-│   │   ├── tool-table.ts       # Declared tools and bounded hygienic bash
-│   │   ├── model-runtime.ts    # Execution model runtime factory over the LLM model connector
 │   │   ├── test-support.ts     # Runtime fixtures over the scripted offline provider
-│   │   ├── budget.ts           # Monotonic wall budget, turns and cleanup deadline
-│   │   ├── verification.ts     # Sequential deadline-bounded verification commands
-│   │   ├── local-git.ts        # Workspace head and verification cleanup
-│   │   ├── workspace.ts        # Private workspace keys, preparation, holds and retention
 │   │   ├── execution-setup.ts  # Proven execution setup from pinned configuration
-│   │   ├── native-agent.ts     # Composed execution-scoped agent lifetime
-│   │   ├── method-clients.ts   # Injected execution-scoped operation clients
-│   │   ├── execution-run.ts    # Refusal boundary, submissions and release reconciliation
-│   │   ├── judgement.ts        # Strict handoff parsing and method instructions
-│   │   ├── node-reads.ts       # Bounded pinned-context and objective reads
-│   │   ├── steps-objective.ts # Start checks, task revisions and objective publication
-│   │   ├── steps-initiative.ts # Current objective report and initiative release
-│   │   ├── evaluation-input.ts # Isolated snapshots and evidence placement
-│   │   ├── evaluation.ts       # Verification evidence, assessment and action requests
-│   │   ├── transcript.ts       # Execution transcript sink and no-op implementation
-│   │   ├── native-method.ts    # Injected native method dispatch and resource lifetime
-│   │   ├── telemetry.ts        # Span recorder, span identities and the telemetry sink seam
-│   │   ├── agent-telemetry.ts  # pi session events as turn and tool spans
-│   │   ├── method-telemetry.ts # Phase, task, verification, judgement and evaluation spans
+│   │   ├── tool-declarations.ts # Declared tools of an agent for the server
+│   │   ├── unit/               # Worker unit: the run-side modules that both placements host
+│   │   │   ├── index.ts        # The one entry of the worker unit
+│   │   │   ├── test-support.ts # Scripted model runtime over the shared runtime fixtures
+│   │   │   ├── tool-table.ts       # Declared tools and bounded hygienic bash
+│   │   │   ├── model-runtime.ts    # Execution model runtime factory over the LLM model connector
+│   │   │   ├── budget.ts           # Monotonic wall budget, turns and cleanup deadline
+│   │   │   ├── verification.ts     # Sequential deadline-bounded verification commands
+│   │   │   ├── local-git.ts        # Workspace head and verification cleanup
+│   │   │   ├── workspace.ts        # Private workspace keys, preparation, holds and retention
+│   │   │   ├── native-agent.ts     # Composed execution-scoped agent lifetime
+│   │   │   ├── method-clients.ts   # Injected execution-scoped operation clients
+│   │   │   ├── execution-run.ts    # Refusal boundary, submissions and release reconciliation
+│   │   │   ├── judgement.ts        # Strict handoff parsing and method instructions
+│   │   │   ├── node-reads.ts       # Bounded pinned-context and objective reads
+│   │   │   ├── steps-objective.ts  # Start checks, task revisions and objective publication
+│   │   │   ├── steps-initiative.ts # Current objective report and initiative release
+│   │   │   ├── evaluation-input.ts # Isolated snapshots and evidence placement
+│   │   │   ├── evaluation.ts       # Verification evidence, assessment and action requests
+│   │   │   ├── transcript.ts       # Execution transcript sink and no-op implementation
+│   │   │   ├── native-method.ts    # Injected native method dispatch and resource lifetime
+│   │   │   ├── telemetry.ts        # Span recorder, span identities and the telemetry sink seam
+│   │   │   ├── agent-telemetry.ts  # pi session events as turn and tool spans
+│   │   │   └── method-telemetry.ts # Phase, task, verification, judgement and evaluation spans
 │   │   └── service.ts          # Registration lifecycle, instance healthchecks, report-only registration checks, and entry validation
 │   ├── workbench/              # Workbench Service: human-driven agent sessions
 │   │   ├── contract.ts         # Workbench operations, schemas, and error codes
@@ -266,9 +270,11 @@ engine/
 │       │   ├── intake-event.ts # Intake inbound event commands
 │       │   ├── tracking.ts     # Tracking command group
 │       │   └── worker.ts       # Worker command group
-│       └── worker/             # Remote worker application skeleton
-│           ├── api.ts          # Server operation clients and bounded backoff
-│           └── index.ts        # Client resolution, version check, and cancellable lifetime
+│       └── worker/             # Worker application: the placement wrapper and the worker unit
+│           ├── api.ts          # Bounded backoff and indeterminate retry
+│           ├── transport.ts    # Worker transport interface and the HTTP transport
+│           ├── unit.ts         # Worker unit: registration, heartbeat, work pulls and drain
+│           └── index.ts        # The worker wrapper: client resolution, signals, watchdog and exit
 ├── static/                     # Packaged generated OpenAPI assets
 │   ├── pi-tools.json           # Pinned rg and fd releases, archive and binary digests per target
 │   ├── prompt/                 # Byte-exact base, swe@1, re@1 and workbench prompt assets

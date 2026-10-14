@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { background } from "../../kernel/context.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import {
   deriveHandoverKeys,
   handoverAad,
@@ -15,17 +15,17 @@ import {
   WorkspaceRoot,
   noTranscript,
   type NativeExecutionInput,
-} from "../../worker/index.ts";
+} from "../../worker/unit/index.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import type { ExecutionSetup } from "../../worker/contract.ts";
-import { workerApi } from "./api.ts";
+import { httpTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
 import { hostExecution } from "./execution.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
 test("host takes handover before setup and method, discards on every method end", async (t) => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
   const events: string[] = [];
   const credential = {
@@ -82,6 +82,7 @@ test("host takes handover before setup and method, discards on every method end"
       throw new Error("Unexpected inference");
     },
     hostHome: temporary(t),
+    env: hostEnvironment(),
     transcript: noTranscript,
     log: () => {},
   };

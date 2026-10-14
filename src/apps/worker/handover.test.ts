@@ -8,7 +8,7 @@ import {
   sealEnvelope,
   openEnvelope,
 } from "../../kernel/handover.ts";
-import { workerApi } from "./api.ts";
+import { httpTransport } from "./transport.ts";
 import { takeHandover } from "./handover.ts";
 import { testClaim } from "./test-support.ts";
 
@@ -22,7 +22,7 @@ const ITEM = {
 const ONCE = 1;
 test("handover retries a lost answer with a fresh key and reports refresh and release", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
   const keys = deriveHandoverKeys(SECRET);
   const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
@@ -91,7 +91,7 @@ test("handover retries a lost answer with a fresh key and reports refresh and re
 });
 
 test("another client secret refuses handover without exposing material", async (t) => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
   t.mock.method(api.worker, "handover", async () => ({
     type: OperationResultType.Completed,
@@ -117,7 +117,7 @@ test("another client secret refuses handover without exposing material", async (
 });
 
 test("handover builds one store per item and reports a refresh of the second item", async (t) => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
   const keys = deriveHandoverKeys(SECRET);
   const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);

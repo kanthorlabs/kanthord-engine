@@ -5,49 +5,38 @@ import {
   type Context,
 } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { LogDestination, OperationalLog } from "../../kernel/log.ts";
-import { directories } from "../../kernel/xdg.ts";
+import { LogDestination } from "../../kernel/log.ts";
 import {
   HealthStatus,
   lifecycle,
   type Healthcheck,
   type Service,
 } from "../../kernel/service.ts";
-import { packageVersion } from "../../kernel/version.ts";
-import { RepositoryComponent } from "../../repository/index.ts";
-import { workerApi, type WorkerApi } from "./api.ts";
-import {
-  register,
-  deregister,
-  startHeartbeat,
-  type Registration,
-} from "./registration.ts";
 import {
   installPiTools,
-  defaultModelRuntimeFactory,
-  WorkspaceRoot,
   type ModelRuntimeFactory,
   type RepositoryTransport,
-} from "../../worker/index.ts";
-import { hostExecution } from "./execution.ts";
+} from "../../worker/unit/index.ts";
 import {
-  readServerVersion,
   resolveClient,
   type ClientConfiguration,
 } from "../../gateway/client.ts";
-import { homedir } from "node:os";
-import { Backoff } from "./api.ts";
-import { pullLoop } from "./pull-loop.ts";
-import type { ExecutionRecord } from "../../scheduler/contract.ts";
-import { fileTranscript } from "./transcript-file.ts";
+import { WorkerUnit } from "./unit.ts";
+import { httpTransport } from "./transport.ts";
 
-const KEEPALIVE_INTERVAL_MS = 60000;
 const CLIENT_SECRET_BYTES = 32;
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const WORKER_STOP_EXIT_FAILURE = 1;
-const ANSWER_INVALID = "gateway.client.answer_invalid";
 
 function ignoreHangup(): void {}
+
+function armWatchdog(): () => void {
+  const timer = setTimeout(
+    () => process.exit(WORKER_STOP_EXIT_FAILURE),
+    WORKER_STOP_WATCHDOG_MS,
+  );
+  return () => clearTimeout(timer);
+}
 
 export interface WorkerOptions extends Partial<
   Omit<ClientConfiguration, "client_secret">
@@ -62,26 +51,10 @@ export interface WorkerOptions extends Partial<
 export class Worker implements Service {
   private readonly options: WorkerOptions;
   private readonly shutdown = new CancellationContext();
+  private unit?: WorkerUnit;
   private startTask?: Promise<Error | null>;
   private quiesceTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
-  private started = false;
-  private keepalive?: NodeJS.Timeout;
-  private operationalLog?: OperationalLog;
-  private clientSecret?: Buffer;
-  private api?: WorkerApi;
-  private transport?: RepositoryTransport;
-  private workspaces?: WorkspaceRoot;
-  private registration?: Registration;
-  private heartbeat?: { stop(): void };
-  private pulling?: Promise<unknown>;
-  private registering?: Promise<Registration>;
-  private execution?: {
-    context: CancellationContext;
-    task: Promise<Diagnostic | null>;
-  };
-  private executionLive = false;
-  private registrationKept = false;
 
   constructor(options: WorkerOptions = {}) {
     this.options = options;
@@ -96,9 +69,10 @@ export class Worker implements Service {
         ),
       );
     this.startTask ??= lifecycle(async () => {
-      installPiTools({ env: this.options.env });
+      const env = this.options.env ?? process.env;
+      installPiTools({ env });
       throwIfCancelled(this.shutdown);
-      const config = resolveClient(this.options, this.options.env);
+      const config = resolveClient(this.options, env);
       if (config.client_secret === undefined)
         throw new Diagnostic(
           "worker.start.client_secret_absent",
@@ -113,50 +87,17 @@ export class Worker implements Service {
           "worker.start.client_secret_invalid",
           "worker: client_secret must be a base64 encoding of exactly 32 bytes.",
         );
-      this.clientSecret = secret;
-      throwIfCancelled(this.shutdown);
-      this.transport =
-        this.options.repositoryTransport ?? new RepositoryComponent();
-      throwIfCancelled(this.shutdown);
-      this.api = workerApi(config.endpoint, config.token);
-      const version = await readServerVersion(this.api.gateway, {
-        context: this.shutdown,
+      this.unit = new WorkerUnit({
+        transport: httpTransport(config.endpoint, config.token),
+        client_secret: config.client_secret,
+        env,
+        log: this.options.log ?? LogDestination.StandardError,
+        model_runtime_factory: this.options.modelRuntimeFactory,
+        repository_transport: this.options.repositoryTransport,
+        watchdog: armWatchdog,
       });
-      throwIfCancelled(this.shutdown);
-      if (version instanceof Diagnostic)
-        throw new Diagnostic(
-          "worker.version.unavailable",
-          "worker: cannot read the server package version.",
-        );
-      const local = packageVersion();
-      if (version !== local)
-        throw new Diagnostic(
-          "worker.version.mismatch",
-          `worker: package version ${local} differs from server version ${version}.`,
-        );
-      this.workspaces = WorkspaceRoot.open(directories(this.options.env).state);
-      throwIfCancelled(this.shutdown);
-      this.registration = await register(this.api);
-      if (this.shutdown.err()) return;
-      if (this.options.log) {
-        this.options.log(
-          JSON.stringify({
-            msg: "Worker application ready",
-            ...this.registration,
-          }),
-        );
-      } else {
-        this.operationalLog = new OperationalLog(
-          { level: "info", destination: LogDestination.StandardError },
-          directories(this.options.env).state,
-        );
-        this.operationalLog.logger.info(
-          this.registration,
-          "Worker application ready",
-        );
-      }
-      this.started = true;
-      this.keepalive = setInterval(() => {}, KEEPALIVE_INTERVAL_MS);
+      const error = await this.unit.start();
+      if (error) throw error;
     });
     return this.startTask;
   }
@@ -164,52 +105,19 @@ export class Worker implements Service {
   quiesce(): Promise<Error | null> {
     this.quiesceTask ??= lifecycle(async () => {
       this.shutdown.cancel();
-      this.heartbeat?.stop();
-      this.workspaces?.stopSweeping();
+      const error = await this.unit?.quiesce();
+      if (error) throw error;
     });
     return this.quiesceTask;
   }
 
   stop(): Promise<Error | null> {
     this.stopTask ??= lifecycle(async () => {
-      let watchdog: NodeJS.Timeout | undefined;
-      try {
-        const error = await this.quiesce();
-        await this.startTask;
-        await this.pulling;
-        await this.registering;
-        if (error) throw error;
-        if (this.executionLive) {
-          this.execution?.context.cancel();
-          await this.execution?.task;
-          throw new Diagnostic(
-            "worker.stop.execution_live",
-            "worker: stop during a live execution.",
-          );
-        }
-        watchdog = setTimeout(
-          () => process.exit(WORKER_STOP_EXIT_FAILURE),
-          WORKER_STOP_WATCHDOG_MS,
-        );
-        if (this.registration && !this.registrationKept) {
-          const failure = await deregister(
-            this.api!,
-            this.registration.runtime_identity,
-          );
-          if (failure) throw failure;
-          this.registration = undefined;
-        }
-      } finally {
-        this.started = false;
-        this.clientSecret?.fill(0);
-        this.clientSecret = undefined;
-        clearInterval(this.keepalive);
-        try {
-          await this.operationalLog?.close();
-        } finally {
-          clearTimeout(watchdog);
-        }
-      }
+      const error = await this.quiesce();
+      await this.startTask;
+      const stopped = await this.unit?.stop();
+      if (error) throw error;
+      if (stopped) throw stopped;
     });
     return this.stopTask;
   }
@@ -228,45 +136,7 @@ export class Worker implements Service {
       if (context.err()) return (await this.stop()) ?? context.err();
       const error = await this.start();
       if (error) return (await this.stop()) ?? context.err() ?? error;
-      const loopError = await lifecycle(async () => {
-        if (!this.shutdown.err()) {
-          this.heartbeat = startHeartbeat(this.api!, (record) => {
-            if (this.options.log) this.options.log(JSON.stringify(record));
-            else this.operationalLog!.logger.warn(record, record.msg);
-          });
-          this.workspaces!.startSweeping();
-        }
-        const failure = await pullLoop({
-          api: this.api!,
-          registration: this.registration!,
-          backoff: new Backoff(),
-          shutdown: this.shutdown,
-          pulling: (task) => {
-            this.pulling = task;
-          },
-          claimed: (claim) => this.beginExecution(claim),
-          host: async () => this.execution!.task,
-          register: async () => {
-            this.registering = register(this.api!).then((registration) => {
-              this.registration = registration;
-              this.logRecord({
-                msg: "Worker application ready",
-                ...registration,
-              });
-              return registration;
-            });
-            return this.registering;
-          },
-        });
-        if (failure?.code === ANSWER_INVALID) this.registrationKept = true;
-        if (failure) throw failure;
-      });
-      const wasStopping = this.shutdown.err() !== null;
-      const stopError = await this.stop();
-      return (
-        (wasStopping ? (stopError ?? loopError) : (loopError ?? stopError)) ??
-        context.err()
-      );
+      return await this.unit!.run(context);
     } finally {
       unsubscribe();
       process.off("SIGINT", stop);
@@ -276,49 +146,11 @@ export class Worker implements Service {
   }
 
   async healthcheck(): Promise<Healthcheck> {
-    return {
-      client:
-        this.started && !this.shutdown.err()
-          ? HealthStatus.Healthy
-          : HealthStatus.Unavailable,
-    };
-  }
-
-  private logRecord(record: Record<string, unknown>): void {
-    if (this.options.log) this.options.log(JSON.stringify(record));
-    else this.operationalLog!.logger.info(record, String(record.msg));
-  }
-
-  private beginExecution(claim: ExecutionRecord): void {
-    this.executionLive = true;
-    const context = new CancellationContext(background, claim.expired_at);
-    if (this.shutdown.err()) context.cancel();
-    const task = this.execute(claim, context)
-      .then((result) => {
-        if (result === null) this.executionLive = false;
-        return result;
-      })
-      .finally(() => context.cancel());
-    this.execution = { context, task };
-  }
-
-  private async execute(
-    claim: ExecutionRecord,
-    context: Context,
-  ): Promise<Diagnostic | null> {
-    return hostExecution({
-      claim,
-      api: this.api!,
-      clientSecret: this.clientSecret!.toString("base64"),
-      workspaces: this.workspaces!,
-      transport: this.transport!,
-      modelRuntimeFactory:
-        this.options.modelRuntimeFactory ?? defaultModelRuntimeFactory,
-      hostHome: this.options.env?.HOME ?? homedir(),
-      context,
-      transcript: fileTranscript(directories(this.options.env).state),
-      log: (record) => this.logRecord(record),
-    });
+    return (
+      (await this.unit?.healthcheck()) ?? {
+        client: HealthStatus.Unavailable,
+      }
+    );
   }
 }
 

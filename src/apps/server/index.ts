@@ -87,8 +87,8 @@ import {
   WorkerService,
   workerMigrations,
   toolDeclarations,
-  installPiTools,
 } from "../../worker/index.ts";
+import { installPiTools } from "../../agent/pi-tools.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
   WorkbenchService,

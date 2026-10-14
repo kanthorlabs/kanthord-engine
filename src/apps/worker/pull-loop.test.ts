@@ -4,7 +4,8 @@ import { CancellationContext } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
-import { Backoff, workerApi } from "./api.ts";
+import { Backoff } from "./api.ts";
+import { httpTransport } from "./transport.ts";
 import { pullLoop } from "./pull-loop.ts";
 import { testClaim } from "./test-support.ts";
 
@@ -16,7 +17,7 @@ const REGISTRATION = {
 const ONCE = 1;
 const ANSWER_INVALID = "gateway.client.answer_invalid";
 test("claim admission precedes hosting even when shutdown races the pull", async (t) => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
   const execution = testClaim();
   const events: string[] = [];
@@ -46,7 +47,7 @@ test("claim admission precedes hosting even when shutdown races the pull", async
   assert.deepEqual(events, ["pull", "claimed", "host"]);
 });
 test("shutdown aborts the outstanding pull and ends the loop", async (t) => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
   let pulls = 0;
   t.mock.method(
@@ -80,7 +81,7 @@ test("shutdown aborts the outstanding pull and ends the loop", async (t) => {
 });
 test("pull loop backs off no work and uncertainty with fresh keys and stops sleep on cancellation", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
   const keys: string[] = [];
   t.mock.method(
@@ -129,7 +130,7 @@ test("pull loop backs off no work and uncertainty with fresh keys and stops slee
 });
 
 test("expired registration registers again while authentication refusal ends the loop", async (t) => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
   let registrations = 0;
   let pulls = 0;
@@ -164,7 +165,7 @@ test("expired registration registers again while authentication refusal ends the
 });
 
 test("a claim answer that fails its schema ends the loop after one pull", async () => {
-  const api = workerApi("http://127.0.0.1:1");
+  const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
   let pulls = 0;
   api.scheduler = httpClient(

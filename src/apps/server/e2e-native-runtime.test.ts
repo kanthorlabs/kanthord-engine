@@ -28,7 +28,7 @@ import {
   OperationResultType,
   type OperationResult,
 } from "../../kernel/operation.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
@@ -53,13 +53,13 @@ import {
   verificationPassed,
   discardChanges,
   headCommit,
-} from "../../worker/index.ts";
+} from "../../worker/unit/index.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
-} from "../../worker/test-support.ts";
+} from "../../worker/unit/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
   FAKE_SSH_CREDENTIAL_BODY,
@@ -501,6 +501,7 @@ test(
       workspaceAgentFiles: true,
       workspace: prepared.directory,
       hostHome,
+      env: hostEnvironment(),
       modelRuntimeFactory: scriptedModelRuntime(provider),
       context: background,
     });
@@ -575,7 +576,12 @@ test(
     await local.addConfig("user.email", "runtime@example.invalid");
     await local.add("hello.txt");
     await local.commit("write hello");
-    const head = await headCommit(prepared.directory, background, 10000);
+    const head = await headCommit(
+      hostEnvironment(),
+      prepared.directory,
+      background,
+      10000,
+    );
     await t.test("E07.6 ordered verification and cleanup", async () => {
       const commands = ["test -f hello.txt", "false", "true"];
       const verification = await runVerifications({
@@ -588,6 +594,7 @@ test(
         },
         deadline: agent.budget.wallDeadline(),
         context: background,
+        env: hostEnvironment(),
       });
       assert.deepEqual(verification.results, [
         {
@@ -605,10 +612,20 @@ test(
       ]);
       assert.equal(verificationPassed(verification, commands), false);
       writeFileSync(join(prepared.directory, "verification-junk"), "discard");
-      await discardChanges(prepared.directory, background, 10000);
+      await discardChanges(
+        hostEnvironment(),
+        prepared.directory,
+        background,
+        10000,
+      );
       assert.equal((await local.status()).isClean(), true);
       assert.equal(
-        await headCommit(prepared.directory, background, 10000),
+        await headCommit(
+          hostEnvironment(),
+          prepared.directory,
+          background,
+          10000,
+        ),
         head,
       );
     });
@@ -667,6 +684,7 @@ test(
         workspaceAgentFiles: true,
         workspace: lab.directory,
         hostHome,
+        env: hostEnvironment(),
         modelRuntimeFactory: scriptedModelRuntime(fake),
         context: background,
       });

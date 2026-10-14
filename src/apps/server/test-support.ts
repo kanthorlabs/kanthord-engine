@@ -44,7 +44,7 @@ import { environment, kanthord } from "./cli-support.ts";
 import { composeServices, trackingDatabaseMigrations } from "./index.ts";
 import { RepositoryComponent, type GitWriter } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
-import type { RepositoryTransport } from "../../worker/index.ts";
+import type { RepositoryTransport } from "../../worker/contract.ts";
 import {
   AccessPolicy,
   emptyInput,

@@ -1,3 +1,4 @@
+import { Type } from "@earendil-works/pi-ai";
 import { HostTool } from "../worker/contract.ts";
 import { RE_AGENT_PROMPT, SWE_AGENT_PROMPT } from "./prompt-assets.ts";
 
@@ -8,6 +9,11 @@ export interface AgentDeclaration {
   tools: readonly BuiltinTool[];
   host_tools: readonly HostTool[];
 }
+
+export const EVIDENCE_UPLOAD_PARAMETERS = Type.Object(
+  { path: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
 
 export const BuiltinTool = {
   Read: "read",
