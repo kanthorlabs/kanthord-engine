@@ -189,7 +189,8 @@ engine/
 │   │   ├── instances.ts        # Transaction-owned registration rows, retained attribution, and live reads
 │   │   ├── registrations.ts    # Capacity admission, live-registration lookup, and client attribution
 │   │   ├── heartbeat.ts        # Monotonic readings, renewal, and expiry selection
-│   │   ├── instance-record.ts  # Live runtime projection, activity, filters, and pagination
+│   │   ├── instance-record.ts  # Live runtime projection, activity, placement, draining, filters, and pagination
+│   │   ├── pool.ts             # Pool plan and pool state of the slots of a binding at the server placement
 │   │   ├── config.ts           # Heartbeat window configuration fragment
 │   │   ├── catalog.ts          # Static worker declarations
 │   │   ├── action-performer.ts # Claim admission, dispatch, reuse and request evidence
@@ -247,7 +248,7 @@ engine/
 │   │   ├── body-limit.ts       # Request body limit of an operation, shared by the HTTP route and the port
 │   │   ├── auth/               # Authentication: configuration, JWT issuance and verification
 │   │   │   ├── config.ts       # Authentication version and JWT lifetime configuration fragment
-│   │   │   ├── jwt.ts          # Signing key, client secret, local JWT issuance, and claim validation
+│   │   │   ├── jwt.ts          # Signing key, client secret, local JWT issuance, slot JWT issuance, and claim validation
 │   │   │   └── authentication.ts # Bearer JWT verification and machine identity resolution
 │   │   ├── local.ts            # OpenAPI generation without a server
 │   │   ├── base-path.ts        # Base path format, prefix stripping, and base href
@@ -255,6 +256,8 @@ engine/
 │   │   └── service.ts          # Private listener lifecycle and HTTP wiring
 │   └── apps/                   # Application entries and composition roots
 │       ├── server/             # Service construction, startup, shutdown, and integration tests
+│       │   ├── worker-pool.ts  # Pool host: one worker thread for each slot, slot root, backoff and stop
+│       │   ├── slot-identity.ts # Deterministic client identity of a pool slot
 │       │   └── index.ts        # Compose configuration, log, store, registry, and services
 │       ├── cli/                # Non-interactive commands and client configuration
 │       │   ├── index.ts        # Commander dispatch and local configuration and Gateway commands
@@ -276,7 +279,7 @@ engine/
 │           ├── api.ts          # Bounded backoff and indeterminate retry
 │           ├── transport.ts    # Worker transport interface, the HTTP transport and the port transport
 │           ├── thread.ts       # Worker thread entry: parses workerData and runs the worker unit
-│           ├── thread-data.ts  # Schema of the workerData of the worker thread
+│           ├── thread-data.ts  # Schema of the workerData and of the control messages of the worker thread
 │           ├── unit.ts         # Worker unit: registration, heartbeat, work pulls and drain
 │           └── index.ts        # The worker wrapper: client resolution, signals, watchdog and exit
 ├── static/                     # Packaged generated OpenAPI assets
@@ -399,6 +402,18 @@ workspace root and registers its instance. It logs `Worker application ready`
 with `runtime_identity`, `resource_identity` and `worker_name`.
 It opens no database and reads no server configuration.
 `--config` is not supported. `kanthord serve` still starts the server.
+
+## Server placement of a worker
+
+A native worker binding with `placement: server` runs inside the server process.
+The pool starts one worker thread for each slot and calls the Gateway through
+a message port. Each slot has a root `workers/<client_id>/` in the state directory
+with its own `state/kanthord/kanthord.log` and `stderr.log`. The server log holds
+no record of a worker unit. Only `src/apps/server/**` may import `generateSlotJWT`.
+`server_slot_limit` in the `worker` fragment caps the started slots.
+A change of the instance count reconciles the pool. A removed slot drains
+through `deregister` after its execution. A crashed thread restarts with
+a backoff from 1 s to 30 s. The server stops the pool before it quiesces.
 
 ## Add a migration
 

@@ -38,6 +38,7 @@ const DEFAULT_REWORK_LIMIT = 2;
 const REWORK_OFF = 0;
 const DEFAULT_TEXT_MAX_BYTES = 32768;
 const DEFAULT_HEARTBEAT_WINDOW = 300;
+const DEFAULT_SERVER_SLOT_LIMIT = 16;
 const DEFAULT_RELEASE_RESERVE = 600;
 const ROOT_BASE_PATH = "/";
 const INVALID_FIELD_CODE = "system.config.invalid_field";
@@ -58,13 +59,17 @@ test("service fragments preserve the existing YAML field set", () => {
     "version",
     "worker",
   ]);
-  assert.deepEqual(Object.keys(config.worker), ["heartbeat_window"]);
+  assert.deepEqual(Object.keys(config.worker), [
+    "heartbeat_window",
+    "server_slot_limit",
+  ]);
   assert.deepEqual(Object.keys(config.scheduler), ["release_reserve"]);
   assert.deepEqual(initial.scheduler, {
     release_reserve: DEFAULT_RELEASE_RESERVE,
   });
   assert.deepEqual(initial.worker, {
     heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
+    server_slot_limit: DEFAULT_SERVER_SLOT_LIMIT,
   });
   assert.deepEqual(Object.keys(config.mission).sort(), [
     "consecutive_failure_limit",
@@ -145,6 +150,7 @@ test("worker configuration defaults and strict validation", () => {
     }).getProperties().worker,
     {
       heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
+      server_slot_limit: DEFAULT_SERVER_SLOT_LIMIT,
     },
   );
   for (const worker of [
@@ -152,6 +158,10 @@ test("worker configuration defaults and strict validation", () => {
     { heartbeat_window: -1 },
     { heartbeat_window: 1.5 },
     { heartbeat_window: Number.MAX_SAFE_INTEGER + 1 },
+    { server_slot_limit: 0 },
+    { server_slot_limit: -1 },
+    { server_slot_limit: 1.5 },
+    { server_slot_limit: Number.MAX_SAFE_INTEGER + 1 },
     { globalPrompt: "prompts/global.md" },
     { unknown: true },
   ]) {
@@ -242,6 +252,7 @@ test("config init emits Worker and Scheduler fields", (t) => {
   assert.equal(result.status, ExitCode.Success);
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).worker, {
     heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
+    server_slot_limit: DEFAULT_SERVER_SLOT_LIMIT,
   });
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).scheduler, {
     release_reserve: DEFAULT_RELEASE_RESERVE,

@@ -9,6 +9,8 @@ import { writePrivate } from "../../kernel/files.ts";
 import { clientConfigPath, httpClient } from "../../gateway/client.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
+import { llmOperations } from "../../llm/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
 import { missionOperations, NodeKind } from "../../mission/contract.ts";
 import {
   OperationResultType,
@@ -52,7 +54,10 @@ import { environment, kanthord } from "./cli-support.ts";
 import { composeServices, trackingDatabaseMigrations } from "./index.ts";
 import { RepositoryComponent, type GitWriter } from "../../repository/index.ts";
 import { GITHUB_API_VERSION } from "../../repository/github.ts";
-import type { RepositoryTransport } from "../../worker/contract.ts";
+import {
+  InstancePlacement,
+  type RepositoryTransport,
+} from "../../worker/contract.ts";
 import {
   AccessPolicy,
   emptyInput,
@@ -327,6 +332,7 @@ export async function gatewayFixture(
       typeof composeServices
     >[0]["workbenchModelRuntimeFactory"];
     stateDirectory?: string;
+    serverSlotLimit?: number;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
   } = {},
 ) {
@@ -336,6 +342,10 @@ export async function gatewayFixture(
     master_key: randomBytes(32).toString("base64"),
     gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
+    worker:
+      options.serverSlotLimit === undefined
+        ? {}
+        : { server_slot_limit: options.serverSlotLimit },
   }).getProperties();
   const store = new Store(options.path ?? ":memory:");
   store.migrate([
@@ -363,6 +373,7 @@ export async function gatewayFixture(
     mission,
     workbench,
     invocation,
+    workerPool,
     repoConnector,
     github,
     gitWriter,
@@ -396,6 +407,7 @@ export async function gatewayFixture(
   t.after(async () => {
     const failures: Error[] = [];
     try {
+      await worker.stopPool();
       const quiescence = await Promise.all(
         [
           scheduler,
@@ -466,6 +478,7 @@ export async function gatewayFixture(
     workbench,
     gateway,
     invocation,
+    workerPool,
     store,
     tracking,
     trackingStore,
@@ -1804,4 +1817,74 @@ export async function provisionWorkerProject(
         body: null,
       }),
   };
+}
+
+const NATIVE_DEFAULTS = {
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
+} as const;
+
+export async function provisionNativeAgent(
+  fixture: Parameters<typeof humanCaller>[0],
+) {
+  const call = humanCaller(fixture);
+  const empty = { params: {}, query: {} };
+  await call(llmOperations.create, {
+    ...empty,
+    body: {
+      name: "native-credential",
+      platform: "anthropic",
+      metadata: null,
+      [SECRET_FIELD]: { key: "native-provider-key" },
+    },
+  });
+  await call(agentOperations["enablement.put"], {
+    params: { agent_name: "swe@1" },
+    query: {},
+    body: {
+      agent_providers: [
+        {
+          name: "default",
+          provider: "anthropic",
+          credential: "native-credential",
+        },
+      ],
+      default_configuration: NATIVE_DEFAULTS,
+      fallback_configurations: [],
+    },
+  });
+}
+
+export async function provisionNativeServerProject(
+  fixture: Parameters<typeof humanCaller>[0],
+  name: string,
+  binding: string,
+) {
+  const call = humanCaller(fixture);
+  const empty = { params: {}, query: {} };
+  const project = await call(projectOperations.create, {
+    ...empty,
+    body: { name },
+  });
+  await call(projectOperations["bindingSet.write"], {
+    params: { project_id: project.id },
+    query: {},
+    body: {
+      version: FIRST_BINDING_SET_VERSION,
+      bindings: {
+        ...(workerProjectBindings({}) as Record<string, never>),
+        [binding]: {
+          kind: "worker",
+          config: {
+            worker: "coder@1",
+            instance_count: 1,
+            placement: InstancePlacement.Server,
+            entries: [{ agent: "swe@1", ...NATIVE_DEFAULTS }],
+          },
+        },
+      } as never,
+    },
+  });
+  return { id: project.id };
 }

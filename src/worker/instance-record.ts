@@ -6,7 +6,6 @@ import type { Transaction } from "../kernel/store.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import {
   InstanceActivity,
-  InstancePlacement,
   WorkerHost,
   WorkerErrorCode,
   instanceRecordSchema,
@@ -20,6 +19,7 @@ import { listLive, WORKER_INSTANCE_PREFIX } from "./instances.ts";
 interface Dependencies {
   workerBindingOf: WorkerBindingOf;
   schedulerClaims: SchedulerClaims;
+  draining?: (clientId: string) => boolean;
 }
 
 export function instanceRecord(
@@ -52,7 +52,7 @@ export function instanceRecord(
     worker_name: binding.worker_name,
     host: declaration.host,
     ...(declaration.host === WorkerHost.Kanthord
-      ? { placement: InstancePlacement.Worker }
+      ? { placement: binding.placement }
       : {}),
     client_id: registration.client_id,
     name: registration.name,
@@ -60,7 +60,7 @@ export function instanceRecord(
     ...(activity.activity === InstanceActivity.Executing
       ? { execution_id: activity.execution_id }
       : {}),
-    draining: false,
+    draining: dependencies.draining?.(registration.client_id) ?? false,
     registered: true,
   });
 }

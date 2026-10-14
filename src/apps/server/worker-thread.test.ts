@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { once } from "node:events";
 import { MessageChannel, Worker } from "node:worker_threads";
 import { test } from "node:test";
+import { build } from "esbuild";
 import pino from "pino";
 import { servePort } from "../../gateway/index.ts";
 import { LogDestination } from "../../kernel/log.ts";
@@ -160,5 +161,33 @@ test("a worker thread exits by itself after its run ends", async (t) => {
   port1.close();
   const [error] = await once(thread, "error");
   assert.match(String(error.message), /cannot read the server package version/);
+  await once(thread, "exit");
+});
+
+test("the release bundle of the worker thread starts as an eval worker", async (t) => {
+  const bundle = await build({
+    entryPoints: [new URL("../worker/thread.ts", import.meta.url).pathname],
+    bundle: true,
+    platform: "node",
+    target: "node24",
+    format: "cjs",
+    write: false,
+    logLevel: "silent",
+    banner: {
+      js: "const __kanthord_import_meta_url=require('node:url').pathToFileURL(__filename).href;",
+    },
+    define: { "import.meta.url": "__kanthord_import_meta_url" },
+  });
+  const { port1, port2 } = new MessageChannel();
+  const thread = new Worker(bundle.outputFiles[0]!.text, {
+    eval: true,
+    workerData: threadData(port2),
+    transferList: [port2],
+    env: threadEnvironment(temporary(t)),
+  });
+  t.after(() => thread.terminate());
+  port1.close();
+  const [error] = await once(thread, "error");
+  assert.match(String(error.message), /package\.json|package version/);
   await once(thread, "exit");
 });

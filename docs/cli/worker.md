@@ -34,8 +34,9 @@ The `handover` CLI leaf is implemented with its published validation code.
 The [Worker configuration fragment](../../src/worker/config.ts) declares
 `heartbeat_window`. The catalog, report-only instance
 healthcheck collaboration and registration heartbeat lifecycle are implemented.
-Native agent loops, server-placement pools, prompt consumption, repository
-actions and MCP remain later runtime work. The service probe reports
+Native agent loops, prompt consumption, repository actions and MCP remain
+later runtime work. The server starts one worker thread for each slot of a
+binding at the `server` placement. The service probe reports
 registration-component availability separately from instance healthchecks.
 
 ## Shared input and output contract
@@ -321,7 +322,8 @@ harnesses host their own instances and have no kanthord placement. Starting a
 remote application belongs to `serve worker` in [other commands](./other.md).
 
 The registration-backed list, get, deregister and resume leaves below are
-implemented. Server-placement pools remain later work. Inspection and ended
+implemented. The server pool starts, drains and restarts the slot threads of a
+binding at the `server` placement. Inspection and ended
 resume use the Scheduler collaboration, supplied by the D6/D9 stand-ins in
 tests until Plan 03 wires its implementation.
 
@@ -578,6 +580,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 404   | `worker.instance.not_found`                               | The runtime identity is unknown, ended, not owned or at the server placement.                                                                                                                                                     | instance get, instance deregister, instance resume                                                                            |
 | 409   | `worker.instance.no_live_execution`                       | The registration is the claimant of no live execution.                                                                                                                                                                            | instance resume                                                                                                               |
 | 409   | `worker.instance.client_live`                             | The client identity holds another live registration.                                                                                                                                                                              | instance resume                                                                                                               |
+| 409   | `worker.instance.placement_mismatch`                      | The binding is at the `server` placement and the client identity is not a pool slot of that binding.                                                                                                                              | register                                                                                                                      |
 | 409   | `worker.instance.slot_unavailable`                        | The binding has no free slot or is unavailable.                                                                                                                                                                                   | register, instance resume                                                                                                     |
 
 `error.details` lists affected bindings or other dependents when applicable. No error holds secret material.

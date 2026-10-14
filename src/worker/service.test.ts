@@ -11,6 +11,7 @@ import {
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
   InstanceActivity,
+  InstancePlacement,
   WorkerHost,
   WorkerMethod,
   type WorkerEntry,
@@ -48,6 +49,7 @@ import {
   reopenRegistration,
 } from "./instances.ts";
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
+import { FakePoolHost } from "./test-support.ts";
 
 const fakeCollaborations = {
   agentPrompt: {
@@ -112,6 +114,8 @@ const fakeCollaborations = {
     revision: 1,
     worker_name: "claude-code@1",
     instance_count: 1,
+    placement: InstancePlacement.Worker,
+    generation: 1,
     resource_budget: null,
     entries: [],
     tombstone: false,
@@ -153,7 +157,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => [],
 };
-const WORKER_CONFIG = { heartbeat_window: 300 };
+const WORKER_CONFIG = { heartbeat_window: 300, server_slot_limit: 16 };
 
 test("action handler forwards only the proved claim and caller before its commit", async (t) => {
   const f = enablementFixture(t);
@@ -1496,4 +1500,165 @@ test("workerAgentView answers null outside the agents of the worker and delegate
     f.store.transaction((tx) => f.agent.agentView(tx, AGENT, entry)),
   );
   assert.equal(view()?.valid, true);
+});
+
+const POOL_PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const POOL_RESOURCE = "worker:kanthord:binding";
+const POOL_GENERATION = 11;
+const POOL_ONE_START = 1;
+const POOL_TWO_STARTS = 2;
+
+function poolFixture(t: TestContext, initialCount: number) {
+  const host = new FakePoolHost();
+  const state: { count: number; placement: InstancePlacement } = {
+    count: initialCount,
+    placement: InstancePlacement.Server,
+  };
+  const binding = () => ({
+    ...fakeCollaborations.workerBindingOf(),
+    worker_name: WORKER,
+    instance_count: state.count,
+    placement: state.placement,
+    generation: POOL_GENERATION,
+  });
+  const f = enablementFixture(t, {
+    workerBindingOf: () => binding(),
+    pool: {
+      host,
+      workerBindingsOf: () => [
+        {
+          ...binding(),
+          project_id: POOL_PROJECT,
+          resource_identity: POOL_RESOURCE,
+        },
+      ],
+    },
+  });
+  const slotId = (slot: number) =>
+    host.clientIdentity(POOL_PROJECT, POOL_RESOURCE, POOL_GENERATION, slot);
+  function register(clientId: string) {
+    f.caller.identity = testMachineIdentity(
+      {
+        clientId,
+        name: "server slot",
+        resourceIdentity: POOL_RESOURCE,
+        projectId: POOL_PROJECT,
+        issuedAt: Date.now(),
+      },
+      "session",
+    );
+    return f.registry
+      .get(workerOperations.register.id)
+      .handler({ params: {}, query: {}, body: null }, f.caller);
+  }
+  return { ...f, host, state, slotId, register };
+}
+
+test("the pool starts at startPool and a change notice before it does nothing", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.bindingsChanged(POOL_PROJECT);
+  assert.deepEqual(f.host.started, []);
+  f.worker.startPool();
+  assert.deepEqual(
+    f.host.started.map(({ slot }) => slot),
+    [0, 1],
+  );
+  f.worker.startPool();
+  assert.equal(f.host.started.length, POOL_TWO_STARTS);
+});
+
+test("a change notice reconciles the pool with the instance count of the binding", (t) => {
+  const f = poolFixture(t, 1);
+  f.worker.startPool();
+  f.state.count = 3;
+  f.worker.bindingsChanged(POOL_PROJECT);
+  assert.deepEqual(
+    f.host.started.map(({ slot }) => slot),
+    [0, 1, 2],
+  );
+  f.state.count = 1;
+  f.worker.bindingsChanged(POOL_PROJECT);
+  assert.deepEqual(
+    f.host.drained.map(({ slot }) => slot),
+    [2, 1],
+  );
+});
+
+test("a binding at the worker placement gets no pool slot", (t) => {
+  const f = poolFixture(t, 2);
+  f.state.placement = InstancePlacement.Worker;
+  f.worker.startPool();
+  assert.deepEqual(f.host.started, []);
+});
+
+test("a binding at the server placement accepts a registration only from a current pool slot", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  const registered = f.register(f.slotId(1));
+  assert.equal(
+    workerOperations.register.output.parse(registered).resource_identity,
+    POOL_RESOURCE,
+  );
+  refuses(
+    () => f.register(createIdentity("client_identity")),
+    WorkerErrorCode.PlacementMismatch,
+    HttpStatus.Conflict,
+  );
+  f.state.count = 1;
+  f.worker.bindingsChanged(POOL_PROJECT);
+  assert.ok(f.worker.registrations.findByClient(f.slotId(1)));
+  f.host.end(f.slotId(1));
+  refuses(
+    () => f.register(f.slotId(1)),
+    WorkerErrorCode.PlacementMismatch,
+    HttpStatus.Conflict,
+  );
+});
+
+test("a binding at the worker placement accepts any client identity", (t) => {
+  const f = poolFixture(t, 2);
+  f.state.placement = InstancePlacement.Worker;
+  f.worker.startPool();
+  workerOperations.register.output.parse(
+    f.register(createIdentity("client_identity")),
+  );
+});
+
+test("the start of the pool starts a slot above the target with a live registration in drain mode", (t) => {
+  const f = poolFixture(t, 1);
+  f.state.placement = InstancePlacement.Worker;
+  f.register(f.slotId(2));
+  f.state.placement = InstancePlacement.Server;
+  f.worker.startPool();
+  assert.deepEqual(
+    f.host.started.map(({ slot, draining }) => [slot, draining]),
+    [
+      [0, false],
+      [2, true],
+    ],
+  );
+});
+
+test("an instance record shows the placement and the drain flag of its slot", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  f.register(f.slotId(0));
+  f.register(f.slotId(1));
+  f.state.count = 1;
+  f.worker.bindingsChanged(POOL_PROJECT);
+  const items = f.invoke("instance.list", null, {}).items;
+  const byClient = new Map(items.map((item) => [item.client_id, item]));
+  assert.equal(byClient.get(f.slotId(0))?.placement, InstancePlacement.Server);
+  assert.equal(byClient.get(f.slotId(0))?.draining, false);
+  assert.equal(byClient.get(f.slotId(1))?.draining, true);
+});
+
+test("stopPool stops the host and ignores later change notices", async (t) => {
+  const f = poolFixture(t, 1);
+  f.worker.startPool();
+  await f.worker.stopPool();
+  assert.ok(f.host.stopped);
+  f.state.count = 2;
+  f.worker.bindingsChanged(POOL_PROJECT);
+  assert.equal(f.host.started.length, POOL_ONE_START);
 });

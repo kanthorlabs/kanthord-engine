@@ -66,7 +66,7 @@ function queryOf(wire: PortCall["query"]): Record<string, string | string[]> {
 
 async function invokeCall(
   invocation: Invocation,
-  credential: () => string,
+  credential: () => string | Promise<string>,
   operation: Operation,
   call: PortCall,
   requestId: string,
@@ -103,7 +103,7 @@ async function invokeCall(
     operation.id,
     { params: call.params, query: queryOf(call.query), body },
     {
-      authorization: `Bearer ${credential()}`,
+      authorization: `Bearer ${await credential()}`,
       idempotencyKey: call.idempotency_key,
       requestId,
       context,
@@ -122,7 +122,7 @@ async function invokeCall(
 export function servePort(
   port: MessagePort,
   invocation: Invocation,
-  credential: () => string,
+  credential: () => string | Promise<string>,
   logger: Logger,
 ): void {
   const contexts = new Map<string, CancellationContext>();

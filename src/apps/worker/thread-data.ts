@@ -11,3 +11,10 @@ export const threadDataSchema = z.strictObject({
   log: z.literal(LogDestination.File),
 });
 export type ThreadData = z.infer<typeof threadDataSchema>;
+
+export const ThreadControl = { Drain: "drain", Stop: "stop" } as const;
+export const threadControlSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal(ThreadControl.Drain) }),
+  z.strictObject({ kind: z.literal(ThreadControl.Stop) }),
+]);
+export type ThreadControl = z.infer<typeof threadControlSchema>;

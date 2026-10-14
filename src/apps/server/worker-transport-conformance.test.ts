@@ -16,6 +16,8 @@ import { until } from "./cli-support.ts";
 import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
+  provisionNativeAgent,
+  provisionNativeServerProject,
   provisionRepositoryCredentials,
   provisionWorkerProject,
 } from "./test-support.ts";
@@ -47,12 +49,18 @@ interface Side {
 }
 
 interface Scenario {
-  projects: { general: Provision; other: Provision; paused: Provision };
+  projects: {
+    general: Provision;
+    other: Provision;
+    paused: Provision;
+    placed: { id: string };
+  };
   tokens: Record<string, string>;
 }
 
 const GENERAL = "general";
 const OTHER = "other";
+const PLACED = "placed";
 const SINGLE_INSTANCE = 1;
 const LIST_LIMIT = 2;
 const PARKED_PULL_DEADLINE_MS = 500;
@@ -64,6 +72,11 @@ const VOLATILE_SUFFIX = /(_at|_span_id|^trace_id)$/;
 const VOLATILE_KEYS = new Set(["request_id", "idempotencyKey"]);
 const EXPECTED_FAILURES = [
   ["registration above the count", 409, "worker.instance.slot_unavailable"],
+  [
+    "registration of a client that is no pool slot",
+    409,
+    "worker.instance.placement_mismatch",
+  ],
   [
     "execution of another project",
     403,
@@ -301,15 +314,21 @@ async function scenarioOf(fixture: Fixture, suffix: string): Promise<Scenario> {
     [GENERAL]: SINGLE_INSTANCE,
   });
   await paused.pause();
+  const placed = await provisionNativeServerProject(
+    fixture,
+    `placed-${suffix}`,
+    PLACED,
+  );
   const tokens = {
     a: await fixture.machineToken(general.id, GENERAL, "a"),
     b: await fixture.machineToken(general.id, GENERAL, "b"),
     o: await fixture.machineToken(general.id, OTHER, "o"),
     c: await fixture.machineToken(other.id, GENERAL, "c"),
     p: await fixture.machineToken(paused.id, GENERAL, "p"),
+    s: await fixture.machineToken(placed.id, PLACED, "s"),
     h: fixture.token,
   };
-  return { projects: { general, other, paused }, tokens };
+  return { projects: { general, other, paused, placed }, tokens };
 }
 
 async function run(side: Side, scenario: Scenario) {
@@ -331,6 +350,10 @@ async function run(side: Side, scenario: Scenario) {
   await record(
     "registration above the count",
     side.typed("b", "worker", "register", empty),
+  );
+  await record(
+    "registration of a client that is no pool slot",
+    side.typed("s", "worker", "register", empty),
   );
   await record("heartbeat", side.typed("a", "worker", "heartbeat", empty));
   const registeredOther = await record(
@@ -493,6 +516,7 @@ test("the port transport and the HTTP transport answer the same through the Gate
     },
   });
   await provisionRepositoryCredentials(fixture);
+  await provisionNativeAgent(fixture);
   const httpScenario = await scenarioOf(fixture, "http");
   const portScenario = await scenarioOf(fixture, "port");
   const httpMark = fixture.logs.length;

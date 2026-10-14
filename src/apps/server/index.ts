@@ -89,6 +89,7 @@ import {
   toolDeclarations,
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
+import { WorkerPool } from "./worker-pool.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
   WorkbenchService,
@@ -227,6 +228,16 @@ export function composeServices(options: {
           worker.registrations.heartbeat(runtimeIdentity),
       },
     },
+  });
+  const workerPool = new WorkerPool({
+    invocation,
+    masterKey: options.config.master_key,
+    authVersion: options.config.gateway.auth.version,
+    slotLimit: options.config.worker.server_slot_limit,
+    stateDirectory: options.stateDirectory,
+    logger: options.logger,
+    runtimeIdentity: (clientId) =>
+      worker.registrations.findByClient(clientId)?.runtime_identity,
   });
   const missionClient = directClient(missionOperations, invocation);
   const intakeClient = directClient(intakeOperations, invocation);
@@ -444,6 +455,11 @@ export function composeServices(options: {
     },
     health: options.health,
     registrations: options.registrations,
+    pool: {
+      host: workerPool,
+      workerBindingsOf: (tx, projectId) =>
+        project.workerBindingsOf(tx, projectId),
+    },
     agentConfiguration: {
       validateEntry: (tx, name, entry) => agent.validateEntry(tx, name, entry),
       agentView: (tx, name, entry, models) =>
@@ -557,6 +573,7 @@ export function composeServices(options: {
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     endRegistrations: (tx, projectId, resourceIdentity, now) =>
       worker.endRegistrations(tx, projectId, resourceIdentity, now),
+    bindingsChanged: (projectId) => worker.bindingsChanged(projectId),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
     validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
@@ -690,6 +707,7 @@ export function composeServices(options: {
     gateway,
     invocation,
     registry,
+    workerPool,
     repoConnector,
     github,
     gitWriter,
@@ -738,6 +756,7 @@ export class Server implements Service {
   private log?: OperationalLog;
   private store?: Store;
   private gateway?: GatewayService;
+  private worker?: WorkerService;
   private readonly shutdown = new CancellationContext();
   private readonly serviceContext = new CancellationContext();
   private services: Service[] = [];
@@ -815,6 +834,7 @@ export class Server implements Service {
         health: this.health,
       });
       this.gateway = gateway;
+      this.worker = worker;
       this.invocation = invocation;
       this.releases.push(() => invocation.stop());
       const services = [
@@ -845,6 +865,8 @@ export class Server implements Service {
           return error;
         }),
       );
+      throwIfCancelled(this.shutdown);
+      worker.startPool();
     } catch (error) {
       const cleanup = await this.release();
       if (cleanup)
@@ -889,6 +911,7 @@ export class Server implements Service {
     this.stopTask = lifecycle(async () => {
       const watchdog = setTimeout(() => process.exit(1), 10000);
       try {
+        await this.worker?.stopPool();
         const quiesceError = await this.quiesce();
         await this.startTask;
         const drainError = await lifecycle(async () => {

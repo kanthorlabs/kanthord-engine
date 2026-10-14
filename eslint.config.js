@@ -62,6 +62,24 @@ const workerImportRule = ({ threads, production }) => [
   { paths: workerPaths(threads), patterns: workerPatterns(production) },
 ];
 
+const productionImportPatterns = [
+  {
+    group: ["**/test-identity.ts"],
+    message: "Only test files may import test-identity.ts.",
+  },
+  {
+    group: ["**/caller.ts"],
+    importNames: ["callerProvenance"],
+    message:
+      "Only caller-mint.ts and service-mint.ts may access caller provenance.",
+  },
+];
+const slotTokenPattern = {
+  group: ["**/auth/jwt.ts"],
+  importNames: ["generateSlotJWT"],
+  message: "Only src/apps/server/ mints a slot token.",
+};
+
 const comparisonLiteral =
   ':matches(Literal[value=type(string)], Literal[value=type(number)], TemplateLiteral[expressions.length=0], UnaryExpression[operator="-"][argument.type="Literal"][argument.value=type(number)])';
 const valueNamePattern =
@@ -478,24 +496,22 @@ export default tseslint.config(
       "src/**/*.test.ts",
       "src/kernel/caller-mint.ts",
       "src/kernel/service-mint.ts",
+      "src/apps/server/**/*.ts",
     ],
     rules: {
       "no-restricted-imports": [
         "error",
-        {
-          patterns: [
-            {
-              group: ["**/test-identity.ts"],
-              message: "Only test files may import test-identity.ts.",
-            },
-            {
-              group: ["**/caller.ts"],
-              importNames: ["callerProvenance"],
-              message:
-                "Only caller-mint.ts and service-mint.ts may access caller provenance.",
-            },
-          ],
-        },
+        { patterns: [...productionImportPatterns, slotTokenPattern] },
+      ],
+    },
+  },
+  {
+    files: ["src/apps/server/**/*.ts"],
+    ignores: ["src/**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: productionImportPatterns },
       ],
     },
   },

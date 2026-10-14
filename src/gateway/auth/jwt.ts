@@ -20,6 +20,7 @@ const MIN_TOKEN_LIFETIME = 0;
 const CLIENT_SECRET_LABEL_PREFIX = "worker/client-secret/v";
 const SIGNING_KEY_LABEL_PREFIX = "gateway/jwt-hs256/v";
 const NO_AUTH_VERSION = 0;
+export const SLOT_TOKEN_LIFETIME = 60;
 export interface TokenResponse {
   token: string;
   expiresAt: number;
@@ -162,6 +163,27 @@ export async function generateMachineJWT(
     project_id: parseProjectId(group.projectId),
     resource_identity: workerResourceIdentity(
       parseBindingName(group.bindingName),
+    ),
+  });
+}
+
+export async function generateSlotJWT(
+  masterKey: string,
+  authVersion: number,
+  slot: {
+    clientId: string;
+    projectId: string;
+    bindingName: string;
+    slot: number;
+  },
+): Promise<TokenResponse> {
+  return generateJWT(masterKey, authVersion, SLOT_TOKEN_LIFETIME, {
+    sub: identitySchema(CLIENT_IDENTITY_PREFIX).parse(slot.clientId),
+    name: parseDisplayName(`server slot ${slot.slot}`),
+    kind: IdentityKind.Client,
+    project_id: parseProjectId(slot.projectId),
+    resource_identity: workerResourceIdentity(
+      parseBindingName(slot.bindingName),
     ),
   });
 }

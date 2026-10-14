@@ -54,6 +54,7 @@ import {
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
   WorkerField,
+  WorkerPlacement,
   bindingSetWriteInputSchema,
   type BindingCheckEntry,
   type WorkerEntry,
@@ -85,6 +86,8 @@ const NO_CALLS = 0;
 const ONE_CALL = 1;
 const NO_ITEMS = 0;
 const WORKER_GROUP = "worker:kanthord:worker";
+const NO_GENERATION = 0;
+const GENERATION_GAP_MS = 5000;
 const MISSING_GROUP = "worker:kanthord:absent";
 const GROUP_ISSUED_AT = 1000;
 const TOMBSTONE_AT = 2000;
@@ -134,6 +137,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     resource_identity: string;
     now: number;
   }> = [];
+  const bindingChanges: string[] = [];
   const project = new ProjectService({
     config: {},
     operationalStore: store,
@@ -169,6 +173,10 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
         resource_identity: resourceIdentity,
         now,
       });
+    },
+    bindingsChanged: (projectId) => {
+      assert.equal(store.database.isTransaction, false);
+      bindingChanges.push(projectId);
     },
     ...overrides,
   });
@@ -219,6 +227,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     invokeAsync,
     commits: () => commits,
     registrationEnds,
+    bindingChanges,
     wakes,
   };
 }
@@ -675,16 +684,34 @@ test("projectPaused answers the pause and throws for an absent project", (t) => 
   );
 });
 
+function storedPlacement(result: {
+  bindings: Record<string, { config: unknown }>;
+}) {
+  return (result.bindings[WORKER_NAME]!.config as { placement?: string })
+    .placement;
+}
+
+function createdAtOf(f: ReturnType<typeof fixture>, bindingId: string) {
+  const row = f.store.database
+    .prepare("SELECT created_at FROM project_binding WHERE id = ?")
+    .get(bindingId) as { created_at: number };
+  return row.created_at;
+}
+
 function bindingFixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   const f = fixture(t, { createMission: allowMission, ...overrides });
   const project = f.invoke("create", { name: PROJECT_NAME });
   let version = BINDING_SET_INITIAL_VERSION;
-  function write(instanceCount: number | null) {
+  function write(instanceCount: number | null, placement?: WorkerPlacement) {
     const submission = new Map();
     if (instanceCount !== null)
       submission.set("worker", {
         kind: BindingKind.Worker,
-        config: { worker: "developer", instance_count: instanceCount },
+        config: {
+          worker: "developer",
+          instance_count: instanceCount,
+          ...(placement === undefined ? {} : { placement }),
+        },
       });
     const result = f.store.transaction((tx) =>
       writeBindingSet(tx, project.id, version, submission),
@@ -805,6 +832,8 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
     revision: REVISION_ONE,
     worker_name: GROUP_WORKER_NAME,
     instance_count: SINGLE_INSTANCE,
+    placement: WorkerPlacement.Worker,
+    generation: createdAtOf(f, first),
     resource_budget: null,
     entries: [],
     tombstone: false,
@@ -825,6 +854,52 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
   assert.equal(read()?.name, GROUP_BINDING_NAME);
   f.invoke("rename", { name: RENAMED_NAME }, { project_id: f.project_id });
   assert.equal(read()?.project_name, RENAMED_NAME);
+});
+
+test("workerBindingOf reads the placement and the generation of a binding group", (t) => {
+  const f = bindingFixture(t);
+  const read = () =>
+    f.store.transaction((tx) =>
+      f.project.workerBindingOf(tx, f.project_id, WORKER_GROUP),
+    );
+  const first = f.write(SINGLE_INSTANCE, WorkerPlacement.Server);
+  assert.equal(read()?.placement, WorkerPlacement.Server);
+  assert.equal(read()?.generation, createdAtOf(f, first));
+  f.write(TWO_INSTANCES, WorkerPlacement.Server);
+  assert.equal(read()?.generation, createdAtOf(f, first));
+  f.write(null);
+  assert.equal(read()?.generation, NO_GENERATION);
+  const regenerated = Date.now() + GENERATION_GAP_MS;
+  t.mock.method(Date, "now", () => regenerated);
+  const second = f.write(SINGLE_INSTANCE, WorkerPlacement.Worker);
+  assert.equal(read()?.placement, WorkerPlacement.Worker);
+  assert.equal(read()?.generation, createdAtOf(f, second));
+  assert.notEqual(read()?.generation, createdAtOf(f, first));
+});
+
+test("workerBindingsOf lists the current worker bindings of one project or of every project", (t) => {
+  const f = bindingFixture(t);
+  f.write(SINGLE_INSTANCE, WorkerPlacement.Server);
+  const list = (projectId: string | null) =>
+    f.store.transaction((tx) => f.project.workerBindingsOf(tx, projectId));
+  assert.deepEqual(
+    list(f.project_id).map(({ project_id, resource_identity, placement }) => ({
+      project_id,
+      resource_identity,
+      placement,
+    })),
+    [
+      {
+        project_id: f.project_id,
+        resource_identity: WORKER_GROUP,
+        placement: WorkerPlacement.Server,
+      },
+    ],
+  );
+  assert.equal(list(null).length, SINGLE_INSTANCE);
+  assert.deepEqual(list(createIdentity(PROJECT_ID_PREFIX)), []);
+  f.write(null);
+  assert.deepEqual(list(null), []);
 });
 
 test("worker group reads reject a repository group and preserve cancellation", async (t) => {
@@ -1338,6 +1413,100 @@ test("stale versions and changed worker names refuse the entire edit", async (t)
     ProjectErrorCode.WorkerResourceChanged,
   );
   assert.deepEqual(f.snapshot(), before);
+});
+
+test("a worker binding holds each placement and reads an absent placement as the worker placement", async (t) => {
+  const f = writeFixture(t);
+  const read = () =>
+    f.store.transaction((tx) =>
+      f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
+    );
+  const bare = workerBinding();
+  const first = await f.write({ [WORKER_NAME]: bare });
+  assert.equal(read()?.placement, WorkerPlacement.Worker);
+  assert.equal(storedPlacement(first), undefined);
+  const unchanged = await f.write(
+    { [WORKER_NAME]: bare },
+    first.binding_set_version,
+  );
+  assert.equal(unchanged.binding_set_version, first.binding_set_version);
+  const explicit = {
+    kind: BindingKind.Worker,
+    config: { ...bare.config, placement: WorkerPlacement.Worker },
+  };
+  const second = await f.write(
+    { [WORKER_NAME]: explicit },
+    first.binding_set_version,
+  );
+  assert.equal(read()?.placement, WorkerPlacement.Worker);
+  await f.write({}, second.binding_set_version);
+  const server = {
+    kind: BindingKind.Worker,
+    config: { ...bare.config, placement: WorkerPlacement.Server },
+  };
+  const third = await f.write({ [WORKER_NAME]: server }, 4);
+  assert.equal(read()?.placement, WorkerPlacement.Server);
+  assert.equal(storedPlacement(third), WorkerPlacement.Server);
+});
+
+test("a placement change of a worker binding refuses the entire edit and a removal frees the name", async (t) => {
+  const f = writeFixture(t);
+  const server = {
+    kind: BindingKind.Worker,
+    config: { ...workerBinding().config, placement: WorkerPlacement.Server },
+  };
+  const first = await f.write({ [WORKER_NAME]: server });
+  const before = f.snapshot();
+  const changes = f.bindingChanges.length;
+  for (const config of [
+    { ...workerBinding().config, placement: WorkerPlacement.Worker },
+    workerBinding().config,
+  ])
+    await rejectsWrite(
+      f.write(
+        { [WORKER_NAME]: { kind: BindingKind.Worker, config } },
+        first.binding_set_version,
+      ),
+      HttpStatus.Conflict,
+      ProjectErrorCode.WorkerPlacementChanged,
+    );
+  assert.deepEqual(f.snapshot(), before);
+  assert.equal(f.bindingChanges.length, changes);
+  const removed = await f.write({}, first.binding_set_version);
+  const again = await f.write(
+    { [WORKER_NAME]: workerBinding() },
+    removed.binding_set_version,
+  );
+  assert.equal(storedPlacement(again), undefined);
+});
+
+test("an external worker refuses the placement field", async (t) => {
+  const f = writeFixture(t);
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({
+      [WORKER_NAME]: {
+        kind: BindingKind.Worker,
+        config: {
+          ...workerBinding(EXTERNAL_WORKER).config,
+          placement: WorkerPlacement.Server,
+        },
+      },
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.WorkerFieldForbidden,
+    { binding: WORKER_NAME, field: WorkerField.Placement },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a committed binding-set write notifies the bindings change once after the commit and a refused write notifies nothing", async (t) => {
+  const f = writeFixture(t);
+  assert.deepEqual(f.bindingChanges, []);
+  await f.write({ [WORKER_NAME]: workerBinding() });
+  assert.deepEqual(f.bindingChanges, [f.params.project_id]);
+  await assert.rejects(f.write({}));
+  assert.deepEqual(f.bindingChanges, [f.params.project_id]);
 });
 
 test("concurrent writes probe before committing and only one expected version wins", async (t) => {

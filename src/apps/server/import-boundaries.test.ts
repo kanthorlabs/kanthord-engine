@@ -454,3 +454,35 @@ test("the module closure of the worker thread holds only the targets that the wo
     [],
   );
 });
+
+const SLOT_TOKEN_RULE = "no-restricted-imports";
+const SLOT_TOKEN_SOURCE = `import { generateSlotJWT } from "SPECIFIER";\nexport const probe = generateSlotJWT;\n`;
+
+test("an import of generateSlotJWT is a lint error outside src/apps/server/", async () => {
+  for (const [filePath, specifier] of [
+    ["src/apps/cli/probe.ts", "../../gateway/auth/jwt.ts"],
+    ["src/gateway/probe.ts", "./auth/jwt.ts"],
+    ["src/worker/probe.ts", "../gateway/auth/jwt.ts"],
+    ["src/kernel/probe.ts", "../gateway/auth/jwt.ts"],
+  ] as const)
+    assert.equal(
+      await ruleErrors(
+        SLOT_TOKEN_RULE,
+        filePath,
+        SLOT_TOKEN_SOURCE.replace("SPECIFIER", specifier),
+      ),
+      EXPECTED_REFUSALS,
+      filePath,
+    );
+});
+
+test("an import of generateSlotJWT from src/apps/server/ is admitted", async () => {
+  assert.equal(
+    await ruleErrors(
+      SLOT_TOKEN_RULE,
+      ADMITTED_PROBE,
+      SLOT_TOKEN_SOURCE.replace("SPECIFIER", "../../gateway/auth/jwt.ts"),
+    ),
+    NO_REFUSALS,
+  );
+});

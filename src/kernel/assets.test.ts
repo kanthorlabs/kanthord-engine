@@ -11,6 +11,8 @@ import {
   packageManifest,
   piToolAsset,
   shippedAsset,
+  workerThreadAsset,
+  WORKER_THREAD_ASSET,
 } from "./assets.ts";
 import { temporary } from "./test-support.ts";
 
@@ -157,4 +159,27 @@ test("inside a single executable the pi tool loader answers the prefixed asset",
   );
   assert.equal(piToolAsset("darwin-arm64", "bin/rg", source), undefined);
   assert.deepEqual(requested, [`${PI_TOOLS_ASSET_PREFIX}bin/fd`]);
+});
+
+test("the worker thread loader answers no source outside a single executable", () => {
+  assert.equal(
+    workerThreadAsset({
+      isSea: () => false,
+      getAsset: () => assert.fail("embedded asset requested"),
+    }),
+    undefined,
+  );
+});
+
+test("inside a single executable the worker thread loader answers the embedded bundle", () => {
+  const requested: string[][] = [];
+  const source = workerThreadAsset({
+    isSea: () => true,
+    getAsset: (name, encoding) => {
+      requested.push([name, encoding]);
+      return EMBEDDED_CONTENT;
+    },
+  });
+  assert.equal(source, EMBEDDED_CONTENT);
+  assert.deepEqual(requested, [[WORKER_THREAD_ASSET, TEXT_ENCODING]]);
 });

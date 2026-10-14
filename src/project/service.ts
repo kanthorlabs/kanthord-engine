@@ -64,6 +64,7 @@ import {
   RESOURCE_TARGET_KIND_REPOSITORY,
   STORAGE_PLATFORM,
   WorkerField,
+  WorkerPlacement,
   bindingEditSchema,
   bindingSetWriteInputSchema,
   projectOperations,
@@ -87,6 +88,7 @@ import {
   type WorkerAgentViewFn,
   type WorkerEntry,
   type WorkerBindingRow,
+  type BindingsChanged,
   type EndRegistrations,
   type BindingChange,
   type SchedulerWakeup,
@@ -102,6 +104,7 @@ import {
   readBindingRevision,
   readLatestBinding,
   readLatestTombstone,
+  readGeneration,
   kindOf,
   deriveResourceIdentity,
   parseRepositoryAddress,
@@ -120,6 +123,7 @@ import {
 
 const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
+const NO_GENERATION = 0;
 
 function refuseSshHost(address: string, pin: SshPin): void {
   const parsed = parseRepositoryAddress(address);
@@ -306,6 +310,7 @@ export interface Dependencies {
   workerAgentsOf: WorkerAgentsOfFn;
   workerAgentView: WorkerAgentViewFn;
   endRegistrations: EndRegistrations;
+  bindingsChanged: BindingsChanged;
   wakeup: SchedulerWakeup;
   health?: HealthRegistry;
   bindings?: ProjectBindings;
@@ -330,6 +335,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly workerAgentsOf: WorkerAgentsOfFn;
   private readonly workerAgentView: WorkerAgentViewFn;
   private readonly endRegistrations: EndRegistrations;
+  private readonly bindingsChanged: BindingsChanged;
   private readonly wakeup: SchedulerWakeup;
   constructor(dependencies: Dependencies) {
     this.bindings = dependencies.bindings;
@@ -347,6 +353,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.workerAgentsOf = dependencies.workerAgentsOf;
     this.workerAgentView = dependencies.workerAgentView;
     this.endRegistrations = dependencies.endRegistrations;
+    this.bindingsChanged = dependencies.bindingsChanged;
     this.wakeup = dependencies.wakeup;
     dependencies.health?.register("project", () => this.healthcheck());
   }
@@ -781,6 +788,7 @@ export class ProjectService implements Service, ProjectBindings {
         changes: result.changes,
       };
     });
+    this.bindingsChanged(projectId);
     this.wakeup.wake(projectId);
     return answer;
   }
@@ -960,7 +968,11 @@ export class ProjectService implements Service, ProjectBindings {
     const agents = this.workerAgentsOf(config.worker);
     if (agents.length === EMPTY_LENGTH) {
       this.validateEntry(tx, config.worker, null);
-      for (const field of [WorkerField.Entries, WorkerField.ResourceBudget]) {
+      for (const field of [
+        WorkerField.Entries,
+        WorkerField.ResourceBudget,
+        WorkerField.Placement,
+      ]) {
         if (config[field] === undefined) continue;
         throw new OperationError(
           HttpStatus.BadRequest,
@@ -1178,10 +1190,38 @@ export class ProjectService implements Service, ProjectBindings {
       revision: row.revision,
       worker_name: config.worker,
       instance_count: config.instance_count,
+      placement: config.placement ?? WorkerPlacement.Worker,
+      generation:
+        readGeneration(tx, projectId, resourceIdentity) ?? NO_GENERATION,
       resource_budget: config.resource_budget ?? null,
       entries: config.entries ?? [],
       tombstone: row.removed_at !== null,
     };
+  }
+  workerBindingsOf(
+    tx: Transaction,
+    projectId: string | null,
+  ): Array<
+    WorkerBindingRow & { project_id: string; resource_identity: string }
+  > {
+    assert.ok(tx.database.isTransaction);
+    return readCurrentBindings(tx).flatMap((row) => {
+      if (kindOf(row.resource_identity) !== BindingKind.Worker) return [];
+      if (projectId !== null && row.project_id !== projectId) return [];
+      const binding = this.workerBindingOf(
+        tx,
+        row.project_id,
+        row.resource_identity,
+      );
+      assert.ok(binding);
+      return [
+        {
+          ...binding,
+          project_id: row.project_id,
+          resource_identity: row.resource_identity,
+        },
+      ];
+    });
   }
   async resolveWorkerGroup(
     projectId: string,
