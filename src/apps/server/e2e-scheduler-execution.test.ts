@@ -762,3 +762,80 @@ test(
     );
   },
 );
+
+test(
+  "Scheduler project pause CLI journey E03.20–E03.23",
+  { timeout: JOURNEY_TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    let X = UNSET_EXECUTION_ID;
+    const project = (action: string) =>
+      h.read<{ paused_at: number | null }>(["project", action, h.project_id]);
+    await t.test(
+      "E03.20 a pause keeps the live execution running",
+      async () => {
+        const result = await h.pull();
+        assert.equal(result.kind, WorkPullKind.Claimed);
+        X = result.execution.execution_id;
+        assert.ok(Number.isSafeInteger((await project("pause")).paused_at));
+        assert.equal((await h.claim(X)).claim_state, ClaimState.Running);
+        assert.equal((await h.node()).state, NodeState.Executing);
+      },
+    );
+    await t.test(
+      "E03.21 a release under the pause requeues the node",
+      async () => {
+        await h.read(
+          [
+            "scheduler",
+            "execution",
+            "release",
+            X,
+            "--file",
+            h.file({ further_work: true }),
+          ],
+          h.G,
+        );
+        assert.equal((await h.get(X)).claim_state, ClaimState.Finished);
+        assert.equal((await h.node()).state, NodeState.Available);
+        assert.equal(
+          (await h.queue()).items.some((job) => job.node_id === h.objectiveId),
+          true,
+        );
+      },
+    );
+    await t.test("E03.22 a pull claims nothing until the resume", async () => {
+      const pending = h.pull();
+      for (
+        let poll = 0;
+        poll < MAX_WAIT_POLLS && !h.fixture.scheduler.pulling(h.general);
+        poll++
+      )
+        await delay(POLL_MS);
+      assert.equal(h.fixture.scheduler.pulling(h.general), true);
+      const executions = await h.read<Page<ExecutionRecord>>([
+        "scheduler",
+        "execution",
+        "list",
+        h.project_id,
+      ]);
+      assert.equal(executions.items.length, SINGLE_EXECUTION);
+      assert.equal((await h.node()).state, NodeState.Available);
+      assert.equal((await project("resume")).paused_at, null);
+      const result = await pending;
+      assert.equal(result.kind, WorkPullKind.Claimed);
+      assert.notEqual(result.execution.execution_id, X);
+      assert.equal(result.execution.node_id, h.objectiveId);
+    });
+    await t.test(
+      "E03.23 the pause and the resume repeat as no-ops",
+      async () => {
+        const first = await project("pause");
+        assert.ok(Number.isSafeInteger(first.paused_at));
+        assert.equal((await project("pause")).paused_at, first.paused_at);
+        assert.equal((await project("resume")).paused_at, null);
+        assert.equal((await project("resume")).paused_at, null);
+      },
+    );
+  },
+);

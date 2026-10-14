@@ -254,6 +254,9 @@ export function composeServices(options: {
       workerBindingOf: (tx, projectId, resourceIdentity) =>
         project.workerBindingOf(tx, projectId, resourceIdentity),
     },
+    projects: {
+      projectPaused: (tx, projectId) => project.projectPaused(tx, projectId),
+    },
     agentChains: {
       select: (tx, workerBindingId) => worker.agentChoice(tx, workerBindingId),
       providerFailure: (...args) => {

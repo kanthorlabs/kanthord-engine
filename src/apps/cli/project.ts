@@ -29,6 +29,8 @@ const CREATE = "create";
 const LIST = "list";
 const GET = "get";
 const RENAME = "rename";
+const PAUSE = "pause";
+const RESUME = "resume";
 const BINDING = "binding";
 const AGENT = "agent";
 const EXPORT = "export";
@@ -204,6 +206,27 @@ async function rename(projectId: string, command: Command): Promise<void> {
     { idempotencyKey: key },
   );
   const data = handleMutationResult(result, RENAME_INDETERMINATE, key);
+  process.stdout.write(
+    `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
+  );
+}
+
+async function changePause(
+  name: typeof PAUSE | typeof RESUME,
+  projectId: string,
+  command: Command,
+): Promise<void> {
+  const code = (suffix: string) => `cli.project.${name}.${suffix}`;
+  validateProjectId(projectId, code("invalid_project_id"));
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, code("token_required"));
+  const key = resolveKey(options);
+  const result = await httpClient(projectOperations, endpoint, token)[name](
+    { params: { project_id: projectId }, query: {}, body: null },
+    { idempotencyKey: key },
+  );
+  const data = handleMutationResult(result, code("indeterminate"), key);
   process.stdout.write(
     `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
   );
@@ -495,6 +518,22 @@ export function addProjectCommand(program: Command): void {
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
     .action((projectId: string, _options, command: Command) =>
       rename(projectId, command),
+    );
+  project
+    .command(PAUSE)
+    .description("Pause a project as JSON")
+    .argument("<project-id>", "Project ID")
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action((projectId: string, _options, command: Command) =>
+      changePause(PAUSE, projectId, command),
+    );
+  project
+    .command(RESUME)
+    .description("Resume a project as JSON")
+    .argument("<project-id>", "Project ID")
+    .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION))
+    .action((projectId: string, _options, command: Command) =>
+      changePause(RESUME, projectId, command),
     );
   addBindingCommands(project);
   addAgentCommands(project);

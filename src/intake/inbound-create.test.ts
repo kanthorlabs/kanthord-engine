@@ -130,6 +130,7 @@ function harness(
             name: "inbounds",
             binding_set_version: 1,
             created_at: 1,
+            paused_at: null,
             workspace_directory: "/workspace",
           },
         };

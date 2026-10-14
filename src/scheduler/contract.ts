@@ -299,6 +299,9 @@ export interface InstanceRegistrations {
   ): { client_id: string; name: string } | null;
   instanceHealthcheck(tx: Transaction, runtimeIdentity: string): boolean;
 }
+export interface ProjectPauses {
+  projectPaused(tx: Transaction, projectId: string): boolean;
+}
 export interface WorkerDeclarations {
   declarationOf(workerName: string): {
     declared_node_states: readonly string[];

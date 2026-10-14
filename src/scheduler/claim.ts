@@ -148,6 +148,8 @@ export function claimOnce(
   const settled = settleRuntime(tx, dependencies, pull.runtime_identity, now);
   const row = readUnendedOfRuntime(tx, pull.runtime_identity);
   if (row) return { outcome: ClaimOutcome.Running, row, settled };
+  if (dependencies.projects.projectPaused(tx, identity.projectId))
+    return { outcome: ClaimOutcome.None, row: null, settled };
   if (
     !dependencies.registrations.instanceHealthcheck(tx, pull.runtime_identity)
   )

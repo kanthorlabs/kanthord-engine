@@ -513,6 +513,7 @@ const projectRecord = z.strictObject({
   name: z.string(),
   binding_set_version: z.number().int().positive(),
   created_at: z.number().int(),
+  paused_at: z.number().int().nullable(),
   workspace_directory: z.string(),
 });
 const bindingRecord = z.strictObject({
@@ -611,6 +612,28 @@ export const projectOperations = {
     }),
     output: projectRecord,
     description: "Rename a project.",
+  },
+  pause: {
+    ...baseOperation,
+    mutation: true,
+    body: false,
+    id: "project.pause",
+    method: HttpMethod.Post,
+    path: "/api/project/:project_id/pause",
+    input: readInput(projectParams, emptyFields),
+    output: projectRecord,
+    description: "Pause a project so that it admits no claim.",
+  },
+  resume: {
+    ...baseOperation,
+    mutation: true,
+    body: false,
+    id: "project.resume",
+    method: HttpMethod.Post,
+    path: "/api/project/:project_id/resume",
+    input: readInput(projectParams, emptyFields),
+    output: projectRecord,
+    description: "Resume a paused project so that it admits claims.",
   },
   "binding.list": {
     ...readOperation,

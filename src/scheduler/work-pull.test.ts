@@ -285,3 +285,47 @@ test("the deciding probe and commit share one clock reading", async (t) => {
     [],
   );
 });
+
+test("a pull that waits under a project pause claims after the resume inside its window", async (t) => {
+  const h = harness(t);
+  let paused = true;
+  h.dependencies.projects.projectPaused = () => paused;
+  h.enqueue();
+  const waiting = h.pull();
+  assert.equal(h.service.pulling(h.row.runtime_identity), true);
+  h.service.wake(h.row.project_id);
+  await turn();
+  assert.equal(h.commits(), NO_COMMITS);
+  assert.equal(h.service.pulling(h.row.runtime_identity), true);
+  paused = false;
+  h.service.wake(h.row.project_id);
+  const result = await waiting;
+  assert.equal(result.kind, WorkPullKind.Claimed);
+  assert.equal(h.commits(), ONE_COMMIT);
+});
+
+test("a pull under a project pause answers no work at the end of its window and claims nothing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let monotonic = 0;
+  t.mock.method(performance, "now", () => monotonic);
+  const h = harness(t);
+  h.dependencies.projects.projectPaused = () => true;
+  h.enqueue();
+  const waiting = h.pull();
+  monotonic = WORK_PULL_WAIT_MS;
+  t.mock.timers.tick(WORK_PULL_WAIT_MS);
+  assert.deepEqual(await waiting, { kind: WorkPullKind.NoWork });
+  assert.equal(h.commits(), ONE_COMMIT);
+  assert.deepEqual(
+    h.store.database.prepare("SELECT * FROM scheduler_execution").all(),
+    [],
+  );
+  assert.equal(
+    Number(
+      h.store.database
+        .prepare("SELECT count(*) AS count FROM scheduler_job")
+        .get()!.count,
+    ),
+    ONE_COMMIT,
+  );
+});

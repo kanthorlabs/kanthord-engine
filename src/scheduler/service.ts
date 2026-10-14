@@ -45,6 +45,7 @@ import {
   type AgentSelection,
   type InstanceRegistrations,
   type WorkerDeclarations,
+  type ProjectPauses,
   type WorkerBindings,
   type TraceIdentity,
 } from "./contract.ts";
@@ -129,6 +130,7 @@ export interface Dependencies {
   registrations: InstanceRegistrations;
   declarations: WorkerDeclarations;
   bindings: WorkerBindings;
+  projects: ProjectPauses;
   agentChains: AgentChains;
   traceIdentity: TraceIdentity;
   telemetry: ExecutionTelemetry;

@@ -22,4 +22,11 @@ const createProjectTables: Migration = (database) => {
   `);
 };
 
-export const projectMigrations: readonly Migration[] = [createProjectTables];
+const addProjectPausedAt: Migration = (database) => {
+  database.exec(`ALTER TABLE project_project ADD COLUMN paused_at INTEGER;`);
+};
+
+export const projectMigrations: readonly Migration[] = [
+  createProjectTables,
+  addProjectPausedAt,
+];

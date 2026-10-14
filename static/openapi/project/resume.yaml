@@ -1,0 +1,104 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: project.resume
+    tags:
+      - project
+    description: Resume a paused project so that it admits claims.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/project.resume.Input/properties/params/properties/p\
+            roject_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.resume.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.resume.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 1
+          required:
+            - project_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.resume.Output:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        binding_set_version:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        created_at:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        paused_at:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: "null"
+        workspace_directory:
+          type: string
+      required:
+        - id
+        - name
+        - binding_set_version
+        - created_at
+        - paused_at
+        - workspace_directory
+      additionalProperties: false

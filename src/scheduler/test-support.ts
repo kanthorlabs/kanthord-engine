@@ -100,6 +100,12 @@ export function schedulerHarness(
         return null;
       },
     },
+    projects: {
+      projectPaused: (...args) => {
+        record("projectPaused", args);
+        return false;
+      },
+    },
     traceIdentity: {
       mint: () => {
         record("mint", []);
