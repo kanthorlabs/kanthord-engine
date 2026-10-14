@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { getAsset, getAssetKeys, isSea } from "node:sea";
+import { FILE_NOT_FOUND } from "./files.ts";
 
 export interface AssetSource {
   isSea(): boolean;
@@ -15,6 +16,8 @@ export interface BinaryAssetSource {
 const TEXT_ENCODING = "utf8";
 export const PACKAGE_MANIFEST = "package.json";
 export const DASHBOARD_ASSET_PREFIX = "dashboard/";
+export const PI_TOOLS_ASSET_PREFIX = "pi-tools/";
+const PI_TOOLS_DIRECTORY = new URL("../../.pi-tools/", import.meta.url);
 const nodeAssetSource: AssetSource = { isSea, getAsset };
 const nodeBinaryAssetSource: BinaryAssetSource = {
   isSea,
@@ -50,4 +53,25 @@ export function dashboardAsset(
   return source.getAssetKeys().includes(name)
     ? source.getAsset(name)
     : undefined;
+}
+
+export function piToolAsset(
+  target: string,
+  path: string,
+  source: BinaryAssetSource = nodeBinaryAssetSource,
+  directory: URL = PI_TOOLS_DIRECTORY,
+): Buffer | undefined {
+  if (source.isSea()) {
+    const name = `${PI_TOOLS_ASSET_PREFIX}${path}`;
+    return source.getAssetKeys().includes(name)
+      ? Buffer.from(source.getAsset(name))
+      : undefined;
+  }
+  try {
+    return readFileSync(new URL(`${target}/${path}`, directory));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === FILE_NOT_FOUND)
+      return undefined;
+    throw error;
+  }
 }

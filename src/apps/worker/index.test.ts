@@ -8,8 +8,7 @@ import {
 } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { stringify } from "yaml";
 import { CancellationContext } from "../../kernel/context.ts";
@@ -85,17 +84,6 @@ async function fixture(
   version: string,
   intercept?: (request: IncomingMessage, response: ServerResponse) => boolean,
 ) {
-  const tools = temporary(t);
-  for (const name of ["rg", "fd"])
-    writeFileSync(join(tools, name), "#!/bin/sh\necho test_tool\n", {
-      mode: 0o700,
-    });
-  const previousPath = process.env.PATH;
-  process.env.PATH = `${tools}:${previousPath ?? ""}`;
-  t.after(() => {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-  });
   let requests = 0;
   const listener = createServer((request, response) => {
     assert.equal(request.headers.authorization, AUTHORIZATION);

@@ -670,6 +670,63 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
   reopened.close();
 });
 
+test("serve installs the pinned pi tools into the state directory before the gateway starts", async (t) => {
+  const paths = layout(temporary(t));
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
+    ],
+    { env: paths.env, stdio: "pipe" },
+  );
+  t.after(() => {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  });
+  let stderr = "";
+  await new Promise<void>((resolve, reject) => {
+    child.on("error", reject);
+    child.once("exit", () =>
+      reject(new Error("server exited before readiness")),
+    );
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+      if (stderr.includes(GATEWAY_STARTED_MESSAGE)) resolve();
+    });
+  });
+  const exit = new Promise<number | null>((resolve) =>
+    child.once("exit", resolve),
+  );
+  child.kill("SIGTERM");
+  assert.equal(await exit, ExitCode.Success);
+  const binDirectory = join(paths.env.XDG_STATE_HOME!, "kanthord", "pi", "bin");
+  for (const tool of ["fd", "rg"])
+    assert.equal(
+      spawnSync(join(binDirectory, tool), ["--version"]).status,
+      ExitCode.Success,
+    );
+});
+
+test("serve refuses to start when the pi tool directory cannot be installed", (t) => {
+  const paths = layout(temporary(t));
+  const piDirectory = join(paths.env.XDG_STATE_HOME!, "kanthord", "pi");
+  mkdirSync(piDirectory, { mode: 0o700 });
+  writeFileSync(join(piDirectory, "bin"), EMPTY_OUTPUT);
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
+    ],
+    { env: paths.env, encoding: "utf8", timeout: SHUTDOWN_DEADLINE_MS },
+  );
+  assert.equal(result.status, ExitCode.Failure);
+  assert.match(result.stderr, /^worker\.start\.tool_missing:/m);
+  assert.equal(result.stdout, EMPTY_OUTPUT);
+});
+
 test("unsafe SIGHUP replacement initiates shutdown and receives no log record", async (t) => {
   const paths = layout(temporary(t));
   paths.config.log.destination = "file";

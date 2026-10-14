@@ -9,8 +9,12 @@ export type PiCodingAgent = typeof import("@earendil-works/pi-coding-agent");
 let directory: string | undefined;
 let modulePromise: Promise<PiCodingAgent> | undefined;
 
+export function piDirectory(env: NodeJS.ProcessEnv): string {
+  return join(directories(env).state, PI_DIRECTORY_NAME);
+}
+
 export function piAgentDirectory(): string {
-  directory ??= join(directories(process.env).state, PI_DIRECTORY_NAME);
+  directory ??= piDirectory(process.env);
   assert.ok(isAbsolute(directory));
   assert.ok(directory.endsWith(PI_DIRECTORY_NAME));
   return directory;

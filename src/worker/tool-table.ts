@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Diagnostic } from "../kernel/errors.ts";
 import { COMMAND_LIMIT_MS, type ExecutionBudget } from "./budget.ts";
 import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
 import { loadPi, piAgentDirectory, type PiCodingAgent } from "../agent/pi.ts";
 
 import { ToolSource } from "../agent/contract.ts";
-import { WorkerErrorCode, type HostTools } from "./contract.ts";
+import type { HostTools } from "./contract.ts";
 import {
   evidenceUploadTool,
   EVIDENCE_UPLOAD_PARAMETERS,
@@ -16,10 +14,8 @@ export { ToolSource } from "../agent/contract.ts";
 import { childEnvironment } from "../agent/environment.ts";
 export { childEnvironment } from "../agent/environment.ts";
 
-const SUCCESS = 0;
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
-const COMMAND_ABSENT = "ENOENT";
 export function sessionTools(
   pi: PiCodingAgent,
   agentName: string,
@@ -63,22 +59,6 @@ export function sessionTools(
     allowlist,
     customTools: [bash as unknown as ToolDefinition, ...customTools],
   };
-}
-
-export function checkAgentTools(): void {
-  const options = { timeout: 10000, env: childEnvironment(process.env) };
-  const rg = spawnSync("rg", ["--version"], options);
-  const fd = spawnSync("fd", ["--version"], options);
-  const selected =
-    fd.error && "code" in fd.error && fd.error.code === COMMAND_ABSENT
-      ? spawnSync("fdfind", ["--version"], options)
-      : fd;
-  if (rg.error || rg.status !== SUCCESS)
-    throw new Diagnostic(WorkerErrorCode.StartToolMissing, "rg: not found");
-  if (selected.error || selected.status !== SUCCESS)
-    throw new Diagnostic(WorkerErrorCode.StartToolMissing, "fd: not found");
-  assert.equal(rg.status, SUCCESS);
-  assert.equal(selected.status, SUCCESS);
 }
 
 export async function toolDeclarations(agentName: string): Promise<

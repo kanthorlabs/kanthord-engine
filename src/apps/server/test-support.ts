@@ -103,15 +103,6 @@ export const domainHealth = {
   tracking: { store: 200 },
 };
 
-export function toolStubs(t: TestContext): string {
-  const directory = temporary(t);
-  for (const name of ["rg", "fd"])
-    writeFileSync(join(directory, name), "#!/bin/sh\necho test_tool\n", {
-      mode: 0o700,
-    });
-  return directory;
-}
-
 export async function inProcessWorker(
   t: TestContext,
   input: Pick<
@@ -120,12 +111,6 @@ export async function inProcessWorker(
   > & { client_secret: string },
 ) {
   const root = temporary(t);
-  const previous = process.env.PATH;
-  process.env.PATH = `${toolStubs(t)}:${previous ?? ""}`;
-  t.after(() => {
-    if (previous === undefined) delete process.env.PATH;
-    else process.env.PATH = previous;
-  });
   const env = {
     ...process.env,
     HOME: root,
