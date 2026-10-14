@@ -57,7 +57,11 @@ import { evidencePage, getEvidence } from "./evidence-read.ts";
 import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
 import { checkNode } from "./node-check.ts";
-import { AdmissionQueue, admitDelivery } from "./delivery-admit.ts";
+import {
+  AdmissionQueue,
+  admitDelivery,
+  countUnresolvedRequests,
+} from "./delivery-admit.ts";
 import { deleteEvidenceAsset, removeEvidence } from "./evidence-delete.ts";
 import {
   executionRevision,
@@ -306,6 +310,10 @@ export class MissionService
     );
     registry.register(missionOperations["delivery.admit"], ({ body }, caller) =>
       admitDelivery(this.admissions, this.dependencies, caller, body),
+    );
+    registry.register(
+      missionOperations["delivery.unresolved_request.count"],
+      ({ body }, caller) => countUnresolvedRequests(caller, body),
     );
     registry.register(
       missionOperations["assessment.submit"],

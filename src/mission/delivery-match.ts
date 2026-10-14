@@ -71,13 +71,11 @@ export function matchRequests(
   return refused(AdmissionRefusal.Unmatched);
 }
 
-export function unresolvedPullRequests(
+function unresolvedRequestAddresses(
   tx: Transaction,
   projectId: string,
-  resourceIdentity: string,
-): string[] {
+): { id: string; address: PlatformAddress }[] {
   assert.ok(projectIdSchema.safeParse(projectId).success);
-  assert.ok(resourceIdentity.length);
   const rows = tx.database
     .prepare(
       "SELECT e.id, a.content FROM mission_evidence e JOIN mission_node n ON n.id = e.node_id JOIN mission_mission m ON m.id = n.mission_id JOIN mission_attempt t ON t.node_id = e.node_id AND t.attempt = e.attempt JOIN mission_evidence_asset a ON a.evidence_id = e.id WHERE m.project_id = ? AND e.requirement_key IS NOT NULL AND e.end_state IS NULL AND t.closed_at IS NULL AND a.kind = ? ORDER BY e.id",
@@ -86,15 +84,36 @@ export function unresolvedPullRequests(
     id: string;
     content: string;
   }[];
-  return rows
-    .filter((row) => {
-      const address = platformAddressSchema.parse(JSON.parse(row.content));
-      return (
+  return rows.map((row) => ({
+    id: row.id,
+    address: platformAddressSchema.parse(JSON.parse(row.content)),
+  }));
+}
+
+export function unresolvedPullRequests(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+): string[] {
+  assert.ok(resourceIdentity.length);
+  return unresolvedRequestAddresses(tx, projectId)
+    .filter(
+      ({ address }) =>
         address.kind === PlatformAddressKind.PullRequest &&
-        address.resource_identity === resourceIdentity
-      );
-    })
-    .map((row) => row.id);
+        address.resource_identity === resourceIdentity,
+    )
+    .map(({ id }) => id);
+}
+
+export function unresolvedRequestCount(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+): number {
+  assert.ok(resourceIdentity.length);
+  return unresolvedRequestAddresses(tx, projectId).filter(
+    ({ address }) => address.resource_identity === resourceIdentity,
+  ).length;
 }
 
 function refused(reason: AdmissionRefusal): RequestMatch {

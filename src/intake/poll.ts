@@ -14,6 +14,7 @@ import {
   type Context,
 } from "../kernel/context.ts";
 import { CodedError } from "../kernel/errors.ts";
+import { OperationResultType } from "../kernel/operation.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import {
@@ -29,13 +30,14 @@ import {
   type GitHubPlatform,
 } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
-import { configurationSchemaOf } from "./configuration.ts";
+import { configurationSchemaOf, resourceIdentityOf } from "./configuration.ts";
 import {
   InboundKind,
   InboundPlatform,
   PLATFORM_CALL_DEADLINE_MS,
   POLL_BACKOFF_MAX_MS,
   POLL_WAIT_MAX_MS,
+  type UnresolvedRequestCounter,
 } from "./contract.ts";
 import { findEvent, insertEvent, pendingCount } from "./event-store.ts";
 import {
@@ -56,6 +58,11 @@ const REFUSAL_STEP = 1;
 const REFUSAL_COUNT_LIMIT = 32;
 const BACKOFF_FACTOR = 2;
 const UNKNOWN_CODE = "system.operation.unknown";
+const INDETERMINATE_CODE = "indeterminate";
+const NO_UNRESOLVED_REQUESTS = 0;
+const REQUEST_FAILURE_MESSAGE = "intake: a poll request of an inbound failed.";
+const DEMAND_FAILURE_MESSAGE =
+  "intake: the demand check of a poll inbound failed.";
 const EMPTY_CHECKPOINT: GitHubCheckpoint = {
   etag: null,
   newest_event_id: null,
@@ -67,6 +74,7 @@ export interface PollCycleDependencies {
   identity: ServiceIdentity;
   custody: Pick<IntakeCustody, "authorizeOperation" | "release">;
   github: Pick<GitHubPlatform, "listEvents">;
+  unresolvedRequests: UnresolvedRequestCounter;
   pendingEventLimit: number;
   wake(): void;
 }
@@ -288,13 +296,11 @@ export function nextWait(
   };
 }
 
-function prepareCycle(
+function inspectCycle(
   dependencies: PollCycleDependencies,
   tx: Transaction,
   inboundId: string,
-  hold: Hold,
 ): Preparation {
-  assert.equal(hold.material, null, "A cycle releases once.");
   const row = readInbound(tx, inboundId);
   if (row === null) return { ready: false, outcome: CycleOutcome.Gone };
   assert.equal(row.kind, InboundKind.Poll, "A poll loop reads a poll inbound.");
@@ -302,8 +308,46 @@ function prepareCycle(
     return { ready: false, outcome: CycleOutcome.Continue };
   const target = pollTargetOf(row);
   assert.equal(target.facts.inboundId, inboundId);
-  hold.material = releasePollGrant(dependencies, tx, target.facts);
   return { ready: true, target };
+}
+
+function releaseCycle(
+  dependencies: PollCycleDependencies,
+  tx: Transaction,
+  target: PollTarget,
+  hold: Hold,
+): boolean {
+  assert.equal(hold.material, null, "A cycle releases once.");
+  if (readInbound(tx, target.facts.inboundId) === null) return false;
+  hold.material = releasePollGrant(dependencies, tx, target.facts);
+  return true;
+}
+
+async function hasDemand(
+  dependencies: PollCycleDependencies,
+  target: PollTarget,
+  context: Context,
+): Promise<boolean> {
+  const result = await dependencies.unresolvedRequests(
+    {
+      project_id: target.facts.projectId,
+      resource_identity: resourceIdentityOf(InboundPlatform.GitHub, {
+        resource: target.facts.resource,
+      }),
+    },
+    { identity: dependencies.identity, context },
+  );
+  if (result.type === OperationResultType.Completed)
+    return result.data.count > NO_UNRESOLVED_REQUESTS;
+  logFailure(
+    dependencies.logger,
+    target.facts.inboundId,
+    result.type === OperationResultType.Failure
+      ? result.error.error.code
+      : INDETERMINATE_CODE,
+    DEMAND_FAILURE_MESSAGE,
+  );
+  return false;
 }
 
 export function storeBatch(
@@ -352,16 +396,18 @@ export function storeBatch(
   return true;
 }
 
-function logFailure(logger: Logger, inboundId: string, code: string): void {
+function logFailure(
+  logger: Logger,
+  inboundId: string,
+  code: string,
+  message = REQUEST_FAILURE_MESSAGE,
+): void {
   assert.ok(
     inboundId.length > EMPTY_TEXT_LENGTH,
     "An inbound identity is required.",
   );
   assert.ok(code.length > EMPTY_TEXT_LENGTH, "A failure names a code.");
-  logger.warn(
-    { inbound_id: inboundId, code },
-    "intake: a poll request of an inbound failed.",
-  );
+  logger.warn({ inbound_id: inboundId, code }, message);
 }
 
 export async function pollCycle(
@@ -372,14 +418,19 @@ export async function pollCycle(
   const hold: Hold = { material: null };
   try {
     const preparation = dependencies.store.transaction((tx) =>
-      prepareCycle(dependencies, tx, inboundId, hold),
+      inspectCycle(dependencies, tx, inboundId),
     );
     if (!preparation.ready)
       return preparation.outcome === CycleOutcome.Gone
         ? GONE_CYCLE
         : SKIPPED_CYCLE;
-    assert.ok(hold.material, "A committed release holds the material.");
     const { target } = preparation;
+    if (!(await hasDemand(dependencies, target, context))) return SKIPPED_CYCLE;
+    const present = dependencies.store.transaction((tx) =>
+      releaseCycle(dependencies, tx, target, hold),
+    );
+    if (!present) return GONE_CYCLE;
+    assert.ok(hold.material, "A committed release holds the material.");
     const answer = await requestPollEvents(dependencies.github, {
       requester: dependencies.identity,
       context,

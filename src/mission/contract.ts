@@ -1242,6 +1242,10 @@ export const deliveryAdmitSchema = z.strictObject({
   event: canonicalBase64Schema,
   metadata: z.record(z.string(), z.unknown()),
 });
+export const unresolvedRequestCountSchema = z.strictObject({
+  project_id: identitySchema("project"),
+  resource_identity: z.string().min(1),
+});
 export const admissionAnswerSchema = z.union([
   z.strictObject({
     disposition: z.literal(Disposition.Refused),
@@ -1533,6 +1537,22 @@ export const missionOperations = {
     output: admissionAnswerSchema,
     description:
       "Admit an inbound platform event as the end state of one request evidence for the Intake Service.",
+  },
+  "delivery.unresolved_request.count": {
+    ...writeOperation,
+    access: AccessPolicy.Service,
+    mutation: false,
+    id: "mission.delivery.unresolved_request.count",
+    method: HttpMethod.Post,
+    path: "/api/mission/delivery/unresolved-request/count",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: unresolvedRequestCountSchema,
+    }),
+    output: z.strictObject({ count: z.number().int().nonnegative() }),
+    description:
+      "Count the unresolved request evidences of a resource for the Intake Service.",
   },
   "assessment.submit": {
     ...writeOperation,

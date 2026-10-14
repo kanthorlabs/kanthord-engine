@@ -315,6 +315,11 @@ export type IntakeConsumers = Record<
   ) => Promise<OperationResult<unknown>>
 >;
 
+export type UnresolvedRequestCounter = (
+  input: { project_id: string; resource_identity: string },
+  options: ClientOptions,
+) => Promise<OperationResult<{ count: number }>>;
+
 export type IntakeInventoryEntry = Omit<ResourceEntry, "project" | "scope"> & {
   project_id: string;
 };

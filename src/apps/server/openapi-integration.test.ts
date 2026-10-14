@@ -709,6 +709,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.node.discard", AccessPolicy.Human],
   ["mission.node.check", AccessPolicy.Human],
   ["mission.delivery.admit", AccessPolicy.Service],
+  ["mission.delivery.unresolved_request.count", AccessPolicy.Service],
   ["mission.attempt.list", AccessPolicy.Human],
   ["mission.attempt.get", AccessPolicy.Human],
   ["mission.evidence.list", AccessPolicy.Human],
@@ -772,11 +773,15 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 185;
+const OPERATION_COUNT = 186;
 const ROUTED_OPERATION_COUNT = 176;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
-const SERVICE_OPERATION_IDS = ["intake.action.check", "mission.delivery.admit"];
+const SERVICE_OPERATION_IDS = [
+  "intake.action.check",
+  "mission.delivery.admit",
+  "mission.delivery.unresolved_request.count",
+];
 const DIRECT_OPERATION_IDS = [
   "intake.action.perform",
   "intake.action.read",

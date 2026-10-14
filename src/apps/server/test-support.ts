@@ -44,7 +44,13 @@ import { projectMigrations } from "../../project/index.ts";
 import { missionMigrations } from "../../mission/index.ts";
 import { intakeMigrations } from "../../intake/index.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
-import { MISSION_SERVICE_NAME, type Revision } from "../../mission/contract.ts";
+import {
+  AssetKind,
+  MISSION_SERVICE_NAME,
+  PlatformAddressKind,
+  type Revision,
+} from "../../mission/contract.ts";
+import { canonicalJSON } from "../../kernel/json.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { agentMigrations } from "../../agent/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
@@ -1121,6 +1127,75 @@ export async function fakeGitHub(t: TestContext) {
       };
       return releaseGate;
     },
+  };
+}
+
+const FIRST_SEEDED_ATTEMPT = 1;
+
+export function seedUnresolvedRequest(
+  store: Store,
+  input: { project_id: string; resource_identity: string; number: number },
+): { close(): void } {
+  const nodeId = createIdentity("node");
+  const evidenceId = createIdentity("evidence");
+  const now = Date.now();
+  store.transaction((tx) => {
+    const mission = tx.database
+      .prepare("SELECT id FROM mission_mission WHERE project_id = ?")
+      .get(input.project_id) as { id: string } | undefined;
+    assert.ok(mission, "The project holds a mission.");
+    tx.database
+      .prepare(
+        "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, ?)",
+      )
+      .run(
+        nodeId,
+        mission.id,
+        NodeKind.Objective,
+        `${nodeId}.md`,
+        FIRST_SEEDED_ATTEMPT,
+        now,
+      );
+    tx.database
+      .prepare(
+        "INSERT INTO mission_attempt (node_id, attempt, node_revision, opened_by, opened_at, closed_at) VALUES (?, ?, ?, ?, ?, NULL)",
+      )
+      .run(nodeId, FIRST_SEEDED_ATTEMPT, FIRST_SEEDED_ATTEMPT, "{}", now);
+    tx.database
+      .prepare(
+        "INSERT INTO mission_evidence (id, node_id, attempt, subject, requirement_key, end_state, verification, provenance, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
+      )
+      .run(
+        evidenceId,
+        nodeId,
+        FIRST_SEEDED_ATTEMPT,
+        "pull request",
+        "seeded.pull_request",
+        "{}",
+        now,
+      );
+    tx.database
+      .prepare(
+        "INSERT INTO mission_evidence_asset (id, evidence_id, kind, content, published_at, expired_at) VALUES (?, ?, ?, ?, NULL, NULL)",
+      )
+      .run(
+        createIdentity("evidence_asset"),
+        evidenceId,
+        AssetKind.Platform,
+        canonicalJSON({
+          kind: PlatformAddressKind.PullRequest,
+          resource_identity: input.resource_identity,
+          number: input.number,
+        }),
+      );
+  });
+  return {
+    close: () =>
+      store.transaction((tx) =>
+        tx.database
+          .prepare("UPDATE mission_attempt SET closed_at = ? WHERE node_id = ?")
+          .run(Date.now(), nodeId),
+      ),
   };
 }
 

@@ -615,6 +615,11 @@ export function composeServices(options: {
           consumerOptions,
         ),
     },
+    unresolvedRequests: (input, counterOptions) =>
+      missionClient["delivery.unresolved_request.count"](
+        { params: {}, query: {}, body: input },
+        counterOptions,
+      ),
     pendingEventLimit: options.intake?.pendingEventLimit,
     pollIntervalMs: options.intake?.pollIntervalMs,
   });

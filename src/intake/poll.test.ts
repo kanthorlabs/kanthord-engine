@@ -9,9 +9,15 @@ import {
   type Material,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import {
+  OperationResultType,
+  type ClientOptions,
+  type OperationResult,
+} from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import type {
   GitHubAnswer,
@@ -40,6 +46,7 @@ import {
 } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 import {
+  CycleAnswer,
   CycleOutcome,
   pollCycle,
   storeBatch,
@@ -59,6 +66,11 @@ const LARGE_LIMIT = 100;
 const TOKEN = "ghp_poll-token";
 const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const SERVER_ERROR_STATUS = 500;
+const UNRESOLVED_REQUESTS = 2;
+const NO_REQUESTS = 0;
+const SKIPPED_CYCLES = 2;
+const RESOURCE_IDENTITY = "repository:github:owner/repo";
+const DEMAND_FAILURE_CODE = "mission.authorization.refused";
 const RATE_LIMIT_STATUS = 403;
 const BACKOFF_INTERVAL_MS = 300000;
 const BACKOFF_MAX_MS = 900000;
@@ -259,6 +271,14 @@ function modified(etag: string | null, events: GitHubEvent[]): EventsAnswer {
   return { ok: true, value: { notModified: false, etag, events } };
 }
 
+function counted(count: number): OperationResult<{ count: number }> {
+  return {
+    type: OperationResultType.Completed,
+    status: HttpStatus.OK,
+    data: { count },
+  };
+}
+
 function fakeCustody() {
   const grants: GrantRequest[] = [];
   const drops: string[] = [];
@@ -304,6 +324,15 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
   const answers: { next: () => Promise<EventsAnswer> } = {
     next: async () => modified(ETAG_FIRST, []),
   };
+  const demands: {
+    inputs: { project_id: string; resource_identity: string }[];
+    options: ClientOptions[];
+    next: () => Promise<OperationResult<{ count: number }>>;
+  } = {
+    inputs: [],
+    options: [],
+    next: async () => counted(UNRESOLVED_REQUESTS),
+  };
   const logger = pino({ enabled: false });
   const warn = t.mock.method(logger, "warn");
   const wakes = { count: 0 };
@@ -318,6 +347,11 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
         return answers.next();
       },
     },
+    unresolvedRequests: async (input, options) => {
+      demands.inputs.push(input);
+      demands.options.push(options);
+      return demands.next();
+    },
     pendingEventLimit: h.limit,
     wake: () => {
       wakes.count += 1;
@@ -331,6 +365,7 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
     drops,
     calls,
     answers,
+    demands,
     warn,
     wakes,
     dependencies,
@@ -784,4 +819,94 @@ test("the wait bound caps a named wait", async (t) => {
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   await h.elapse(TICK_MS);
   assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+});
+
+test("a cycle asks for the unresolved request count of the project and the resource identity before the release", async (t) => {
+  const h = cycleHarness(t);
+  assert.equal((await h.cycle()).answer, CycleAnswer.Answered);
+  assert.deepEqual(h.demands.inputs, [
+    { project_id: PROJECT_ID, resource_identity: RESOURCE_IDENTITY },
+  ]);
+  assert.equal(h.demands.options[0]?.identity, SERVICE_IDENTITY);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+});
+
+test("a count of zero sends no request, releases nothing and keeps the checkpoint", async (t) => {
+  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const h = cycleHarness(t, { checkpoint: stored });
+  h.demands.next = async () => counted(NO_REQUESTS);
+  const result = await h.cycle();
+  assert.equal(result.outcome, CycleOutcome.Continue);
+  assert.equal(result.answer, CycleAnswer.Skipped);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.deepEqual(h.grants, []);
+  assert.deepEqual(h.drops, []);
+  assert.deepEqual(h.checkpoint(), stored);
+  assert.equal(h.warn.mock.callCount(), NO_REQUESTS);
+});
+
+test("a failed count call skips the request and logs the reason", async (t) => {
+  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const h = cycleHarness(t, { checkpoint: stored });
+  h.demands.next = async () => ({
+    type: OperationResultType.Failure,
+    status: HttpStatus.Forbidden,
+    error: {
+      error: {
+        code: DEMAND_FAILURE_CODE,
+        message: "refused",
+        details: null,
+      },
+      request_id: createIdentity("request"),
+    },
+  });
+  assert.equal((await h.cycle()).answer, CycleAnswer.Skipped);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.deepEqual(h.grants, []);
+  assert.deepEqual(h.checkpoint(), stored);
+  assert.equal(h.warn.mock.callCount(), WARNINGS_PER_FAILURE);
+  const [fields] = h.warn.mock.calls[0]?.arguments ?? [];
+  assert.deepEqual(fields, {
+    inbound_id: h.inboundId,
+    code: DEMAND_FAILURE_CODE,
+  });
+  h.demands.next = async () => ({ type: OperationResultType.Indeterminate });
+  assert.equal((await h.cycle()).answer, CycleAnswer.Skipped);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.equal(h.warn.mock.callCount(), SKIPPED_CYCLES * WARNINGS_PER_FAILURE);
+});
+
+test("a cycle at the capacity bound or for a gone inbound asks no count", async (t) => {
+  const bounded = cycleHarness(t, { limit: TIGHT_LIMIT });
+  bounded.addEvent("50");
+  await bounded.cycle();
+  assert.deepEqual(bounded.demands.inputs, []);
+  const gone = cycleHarness(t);
+  gone.store.transaction((tx) => deleteInbound(tx, gone.inboundId));
+  assert.equal((await gone.cycle()).outcome, CycleOutcome.Gone);
+  assert.deepEqual(gone.demands.inputs, []);
+});
+
+test("an inbound deleted between the count and the release ends the cycle with no request", async (t) => {
+  const h = cycleHarness(t);
+  h.demands.next = async () => {
+    h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
+    return counted(UNRESOLVED_REQUESTS);
+  };
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Gone);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.deepEqual(h.grants, []);
+});
+
+test("a loop skips the request while the count is zero, keeps the interval and requests again when the count rises", async (t) => {
+  const h = loopHarness(t);
+  h.demands.next = async () => counted(NO_REQUESTS);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.interval();
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.equal(h.demands.inputs.length, SKIPPED_CYCLES);
+  h.demands.next = async () => counted(UNRESOLVED_REQUESTS);
+  await h.interval();
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });

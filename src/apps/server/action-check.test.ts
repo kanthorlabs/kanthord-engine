@@ -54,6 +54,12 @@ const GITHUB_KEY = "test-secret";
 const GATED_ADDRESS = "git@github.com:owner/gated.git";
 const PUSHED_ADDRESS = "git@github.com:owner/pushed.git";
 const MERGE_SHA = "e".repeat(40);
+const GATED_RESOURCE = "repository:github:owner/gated";
+const PUSHED_RESOURCE = "repository:github:owner/pushed";
+const OTHER_RESOURCE = "repository:github:owner/other";
+const OTHER_PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const ONE_REQUEST = 1;
+const AUTHORIZATION_REFUSED_STATUS = 403;
 const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const FINAL_CODE = "repository.platform.github.final_refusal";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
@@ -395,6 +401,7 @@ async function setup(t: TestContext) {
     });
   const nodes = { gated: gatedNode, pushed: pushedNode };
   return {
+    projectId: project.id,
     fixture,
     gitHub,
     pushed,
@@ -582,6 +589,90 @@ test(
             .get() as { count: number },
       );
       assert.equal(count, NO_ROWS);
+    });
+  },
+);
+
+test(
+  "mission.delivery.unresolved_request.count counts the unresolved requests of every address kind",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const mission = directClient(missionOperations, h.fixture.invocation);
+    const count = async (
+      resourceIdentity: string,
+      projectId = h.projectId,
+      service = INTAKE_SERVICE_NAME,
+    ) =>
+      mission["delivery.unresolved_request.count"](
+        {
+          params: {},
+          query: {},
+          body: { project_id: projectId, resource_identity: resourceIdentity },
+        },
+        { identity: mintServiceIdentity(service) },
+      );
+
+    await t.test("a pull request and a branch push count", async () => {
+      assert.deepEqual(completed(await count(GATED_RESOURCE)), {
+        count: ONE_REQUEST,
+      });
+      assert.deepEqual(completed(await count(PUSHED_RESOURCE)), {
+        count: ONE_REQUEST,
+      });
+    });
+
+    await t.test(
+      "another resource and another project count nothing",
+      async () => {
+        assert.deepEqual(completed(await count(OTHER_RESOURCE)), {
+          count: NO_ROWS,
+        });
+        assert.deepEqual(
+          completed(await count(GATED_RESOURCE, OTHER_PROJECT)),
+          { count: NO_ROWS },
+        );
+      },
+    );
+
+    await t.test("a request with an end state counts no more", async () => {
+      h.gitHub.merge(h.number, MERGE_SHA);
+      const answer = await h.nodeCheck(h.nodes.gated);
+      assert.equal(answer.results.length, ONE_REQUEST);
+      assert.deepEqual(completed(await count(GATED_RESOURCE)), {
+        count: NO_ROWS,
+      });
+      assert.deepEqual(completed(await count(PUSHED_RESOURCE)), {
+        count: ONE_REQUEST,
+      });
+    });
+
+    await t.test("a service other than intake is refused", async () => {
+      failed(
+        await count(GATED_RESOURCE, h.projectId, MISSION_SERVICE_NAME),
+        AUTHORIZATION_REFUSED_STATUS,
+        MissionErrorCode.AuthorizationRefused,
+        { reason: "service_mismatch" },
+      );
+    });
+
+    await t.test("the HTTP adapter answers 404 for the path", async () => {
+      const response = await h.fixture.request(
+        "/api/mission/delivery/unresolved-request/count",
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${h.fixture.token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            project_id: h.projectId,
+            resource_identity: GATED_RESOURCE,
+          }),
+        },
+      );
+      assert.equal(response.status, HttpStatus.NotFound);
+      await response.body?.cancel();
     });
   },
 );
