@@ -50,7 +50,9 @@ pathItem:
     operationId: workbench.session.list
     tags:
       - workbench
-    description: List the workbench sessions of every agent, or of one agent.
+    description: List the workbench sessions of every agent, or of one agent. Each
+      item also answers `run_active` and `pending_approval` of the in-memory
+      run.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -259,6 +261,21 @@ components:
                 maximum: 9007199254740991
               first_message:
                 type: string
+              run_active:
+                type: boolean
+              pending_approval:
+                anyOf:
+                  - type: object
+                    properties:
+                      tool_call_id:
+                        type: string
+                      operation_id:
+                        type: string
+                    required:
+                      - tool_call_id
+                      - operation_id
+                    additionalProperties: false
+                  - type: "null"
             required:
               - id
               - agent_name
@@ -267,6 +284,8 @@ components:
               - modified
               - message_count
               - first_message
+              - run_active
+              - pending_approval
             additionalProperties: false
       required:
         - items

@@ -50,6 +50,11 @@ export const sessionEntrySchema = z.looseObject({
 });
 export type SessionEntry = z.infer<typeof sessionEntrySchema>;
 
+export const pendingApprovalSummarySchema = z.strictObject({
+  tool_call_id: z.string(),
+  operation_id: z.string(),
+});
+
 export const sessionListItemSchema = z.strictObject({
   id: z.string(),
   agent_name: z.string(),
@@ -58,6 +63,8 @@ export const sessionListItemSchema = z.strictObject({
   modified: timestampSchema,
   message_count: z.number().int().nonnegative(),
   first_message: z.string(),
+  run_active: z.boolean(),
+  pending_approval: pendingApprovalSummarySchema.nullable(),
 });
 
 export const workbenchSessionSchema = z.strictObject({
@@ -72,9 +79,7 @@ export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
 
 export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
 
-export const pendingApprovalSchema = z.strictObject({
-  tool_call_id: z.string(),
-  operation_id: z.string(),
+export const pendingApprovalSchema = pendingApprovalSummarySchema.extend({
   input: z.record(z.string(), z.unknown()),
 });
 export type PendingApproval = z.infer<typeof pendingApprovalSchema>;
@@ -128,7 +133,8 @@ export const workbenchOperations = {
       body: z.null(),
     }),
     output: z.strictObject({ items: z.array(sessionListItemSchema) }),
-    description: "List the workbench sessions of every agent, or of one agent.",
+    description:
+      "List the workbench sessions of every agent, or of one agent. Each item also answers `run_active` and `pending_approval` of the in-memory run.",
   },
   "session.create": {
     ...workbenchMutation,
