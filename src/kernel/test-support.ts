@@ -15,6 +15,17 @@ export function hostEnvironment(): NodeJS.ProcessEnv {
   return { ...process.env };
 }
 
+export const UNSET_GIT_ENVIRONMENT = {
+  GIT_AUTHOR_NAME: undefined,
+  GIT_AUTHOR_EMAIL: undefined,
+  GIT_COMMITTER_NAME: undefined,
+  GIT_COMMITTER_EMAIL: undefined,
+  GIT_CONFIG_GLOBAL: undefined,
+  GIT_CONFIG_NOSYSTEM: undefined,
+  GIT_CONFIG_COUNT: undefined,
+  GIT_ATTR_NOSYSTEM: undefined,
+} as const;
+
 export function overrideEnvironment(
   t: TestContext,
   values: Record<string, string | undefined>,

@@ -21,9 +21,12 @@ test("isolatedGitEnvironment replaces the global and system configuration and ke
       GIT_COMMITTER_EMAIL: "kanthord@localhost",
       GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_CONFIG_NOSYSTEM: "1",
-      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_COUNT: "2",
       GIT_CONFIG_KEY_0: "core.excludesFile",
       GIT_CONFIG_VALUE_0: "/dev/null",
+      GIT_CONFIG_KEY_1: "core.attributesFile",
+      GIT_CONFIG_VALUE_1: "/dev/null",
+      GIT_ATTR_NOSYSTEM: "1",
     },
   );
 });
@@ -57,4 +60,19 @@ test("isolatedGitEnvironment removes the interactive helpers", () => {
     [],
   );
   assert.deepEqual(output.PATH, PATH_VALUE);
+});
+
+test("isolatedGitEnvironment removes the helpers that the simple-git unsafe check rejects", () => {
+  const output = isolatedGitEnvironment({
+    GIT_TEMPLATE_DIR: "/tmp/template",
+    GIT_EXTERNAL_DIFF: "diff",
+    GIT_PROXY_COMMAND: "proxy",
+    PATH: PATH_VALUE,
+  });
+  assert.deepEqual(
+    Object.keys(output).filter((name) =>
+      /TEMPLATE_DIR|EXTERNAL_DIFF|PROXY_COMMAND/.test(name),
+    ),
+    [],
+  );
 });

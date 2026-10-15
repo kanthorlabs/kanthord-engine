@@ -8,6 +8,7 @@ import {
   hostEnvironment,
   overrideEnvironment,
   temporary,
+  UNSET_GIT_ENVIRONMENT,
 } from "../../kernel/test-support.ts";
 import {
   addedFiles,
@@ -20,6 +21,7 @@ import {
 
 const env = hostEnvironment();
 const DEFAULT_IDENTITY = "kanthord <kanthord@localhost>";
+const CRLF_CONTENT = "a\r\nb\r\n";
 
 test("verification cleanup discards tracked and untracked edits but keeps ignored files", async (t) => {
   const original = "original";
@@ -152,7 +154,11 @@ test("work commits ignore the global git configuration of the host", async (t) =
     join(home, ".gitconfig"),
     `[core]\n\texcludesFile = ${join(home, ".gitignore_global")}\n[user]\n\tname = Host\n\temail = host@example.invalid\n`,
   );
-  overrideEnvironment(t, { HOME: home, XDG_CONFIG_HOME: undefined });
+  overrideEnvironment(t, {
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: home,
+    XDG_CONFIG_HOME: undefined,
+  });
   const directory = temporary(t);
   const git = simpleGit(directory);
   await git.init();
@@ -182,7 +188,11 @@ test("work commits ignore the default global ignore file of the host", async (t)
   const config = temporary(t);
   mkdirSync(join(config, "git"));
   writeFileSync(join(config, "git", "ignore"), "**/*.env.*\n");
-  overrideEnvironment(t, { HOME: temporary(t), XDG_CONFIG_HOME: config });
+  overrideEnvironment(t, {
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: temporary(t),
+    XDG_CONFIG_HOME: config,
+  });
   const directory = temporary(t);
   const git = simpleGit(directory);
   await git.init();
@@ -197,4 +207,30 @@ test("work commits ignore the default global ignore file of the host", async (t)
   assert.deepEqual((await git.raw(["ls-files"])).trim().split("\n"), [
     ".env.example",
   ]);
+});
+
+test("work commits ignore the default global attributes file of the host", async (t) => {
+  const config = temporary(t);
+  mkdirSync(join(config, "git"));
+  writeFileSync(join(config, "git", "attributes"), "* text\n");
+  overrideEnvironment(t, {
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: temporary(t),
+    XDG_CONFIG_HOME: config,
+  });
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  writeFileSync(join(directory, "crlf.txt"), CRLF_CONTENT);
+  await commitWork(
+    hostEnvironment(),
+    directory,
+    "checkpoint",
+    background,
+    10000,
+  );
+  assert.equal(
+    await git.raw(["cat-file", "blob", "HEAD:crlf.txt"]),
+    CRLF_CONTENT,
+  );
 });

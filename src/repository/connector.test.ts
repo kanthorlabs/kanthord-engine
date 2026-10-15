@@ -34,7 +34,11 @@ import {
 } from "./connector.ts";
 import { CheckEndState, ExpectedEndState } from "./github.ts";
 import { isString } from "../kernel/values.ts";
-import { overrideEnvironment, temporary } from "../kernel/test-support.ts";
+import {
+  overrideEnvironment,
+  temporary,
+  UNSET_GIT_ENVIRONMENT,
+} from "../kernel/test-support.ts";
 
 const DEADLINE_MS = 5000;
 const EXPIRED_DEADLINE_MS = 1;
@@ -298,7 +302,11 @@ test("every git caller ignores the global git configuration of the host", async 
     join(home, ".gitconfig"),
     `[url "file:///nonexistent_kanthord_rewrite/"]\n\tinsteadOf = ${dirname(origin)}/\n`,
   );
-  overrideEnvironment(t, { HOME: home, XDG_CONFIG_HOME: undefined });
+  overrideEnvironment(t, {
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: home,
+    XDG_CONFIG_HOME: undefined,
+  });
   const directory = temporary(t);
   assert.equal(
     await cloneSnapshot(origin, snapshot, directory, background, DEADLINE_MS),

@@ -70,12 +70,6 @@ const EXIT_SUCCESS = 0;
 const EXIT_NOT_ANCESTOR = 1;
 const EXIT_DETACHED_HEAD = 1;
 const NO_EXIT = -1;
-const MERGE_IDENTITY = {
-  GIT_AUTHOR_NAME: "kanthord",
-  GIT_AUTHOR_EMAIL: "kanthord@localhost",
-  GIT_COMMITTER_NAME: "kanthord",
-  GIT_COMMITTER_EMAIL: "kanthord@localhost",
-} as const;
 
 export const GitStage = {
   BeforePush: "before_push",
@@ -494,7 +488,6 @@ export async function mergePushFresh(
       await git(["merge", "--no-ff", "--no-edit", input.commit], {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
-        ...MERGE_IDENTITY,
       });
     });
     return atStage(GitStage.Push, async () => {
