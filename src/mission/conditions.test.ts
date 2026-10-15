@@ -120,7 +120,7 @@ test("claimability covers all twelve states, attempt zero and retirement", (t) =
   });
 });
 
-test("open-attempt unresolved actions prevent readiness and requested actions stop continuation", (t) => {
+test("open-attempt unresolved actions do not block readiness but stop continuation", (t) => {
   const h = fixture(t);
   const nodeId = h.node();
   const bindingId = createIdentity("binding");
@@ -177,7 +177,7 @@ test("open-attempt unresolved actions prevent readiness and requested actions st
       [],
     );
     assert.deepEqual(readinessOf(tx, node), {
-      holds: false,
+      holds: true,
       objectives_not_terminal: [],
       unresolved_actions: [REQUEST_KEY],
     });

@@ -17,7 +17,7 @@ import {
   type ExternalAction,
 } from "../../mission/contract.ts";
 import { ActionResultKind } from "../../worker/contract.ts";
-import { completed } from "./cli-support.ts";
+import { completed, pushNextNodeBranchCommit } from "./cli-support.ts";
 import {
   FIRST_INDEX,
   GATED_KEY,
@@ -399,6 +399,59 @@ test(
     await h.actionRequest(P.x2);
     h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
     await h.release(P.x2.execution_id);
+    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
+      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
+    }
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+  },
+);
+
+test(
+  "E08.13 kanthord landing: performer merges after release; deferred check completes the node",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, { landing: "kanthord" });
+    const I = await h.create("initiative-1.md");
+    const P = await h.objective("objective-p.md", I);
+    const action = await h.actionRequest(P.x2);
+    assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+    await h.release(P.x2.execution_id);
+    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
+      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
+    }
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+  },
+);
+
+test(
+  "E08.14 kanthord landing: conflict fold returns to Available; rework merge completes via the deferred check",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, { landing: "kanthord" });
+    const I = await h.create("initiative-1.md");
+    const P = await h.objective("objective-p.md", I);
+    h.gitHub.refuseMerge(HttpStatus.Conflict);
+    const action = await h.actionRequest(P.x2);
+    assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+    h.gitHub.refuseMerge(null);
+    h.gitHub.mergeability(FIRST_PULL_REQUEST, [DIRTY]);
+    await h.release(P.x2.execution_id);
+    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
+      if ((await h.node(P.nodeId)).state === NodeState.Available) break;
+    }
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Available);
+    const head2 = await pushNextNodeBranchCommit(
+      t,
+      h.gatedBare.bare,
+      P.nodeId,
+      "rework\n",
+    );
+    const x3 = await h.rework(P.nodeId, head2);
+    await h.actionRequest(x3);
+    await h.release(x3.execution_id);
     for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
       await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
       if ((await h.node(P.nodeId)).state === NodeState.Completed) break;

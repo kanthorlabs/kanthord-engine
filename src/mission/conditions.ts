@@ -60,9 +60,7 @@ export function readinessOf(
           .filter((row) => row.end_state === null)
           .map((row) => row.requirement_key!);
   return {
-    holds:
-      objectivesNotTerminal.length === NO_PENDING_ITEMS &&
-      unresolvedActions.length === NO_PENDING_ITEMS,
+    holds: objectivesNotTerminal.length === NO_PENDING_ITEMS,
     objectives_not_terminal: objectivesNotTerminal,
     unresolved_actions: unresolvedActions,
   };
