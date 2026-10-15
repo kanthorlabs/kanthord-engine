@@ -33,6 +33,7 @@ const NEXT_VERSION_STEP = 1;
 
 const HUMAN_USERNAME = "ulrich";
 const SINGLE_EXECUTION_COUNT = 1;
+const DISCONNECT_WAIT_MS = 2000;
 const HANDSHAKE_SEGMENT = "handshake";
 const HANDSHAKE_HEADER = "x-test-kind";
 const EMPTY_RESPONSE_BODY = "";
@@ -546,7 +547,7 @@ test("a delivery under /hooks forwards exact bytes and headers, refuses a body a
   assert.equal(delivered, SINGLE_EXECUTION_COUNT);
   const oversized = await fixture.request("/hooks/test", {
     method: "POST",
-    headers: { "x-signature": DELIVERY_SIGNATURE },
+    headers: { "x-signature": DELIVERY_SIGNATURE, connection: "keep-alive" },
     body: Buffer.alloc(DELIVERY_BODY_LIMIT_BYTES + 1),
   });
   assert.equal(oversized.status, HttpStatus.PayloadTooLarge);
@@ -640,7 +641,7 @@ test("client disconnect reaches waiting handlers", async (t) => {
   abort.abort();
   await Promise.race([
     cancelled.promise,
-    delay(2000).then(() => {
+    delay(DISCONNECT_WAIT_MS, undefined, { ref: false }).then(() => {
       throw new Error("disconnect was not forwarded");
     }),
   ]);
