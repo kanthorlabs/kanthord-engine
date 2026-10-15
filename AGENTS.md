@@ -50,7 +50,7 @@ engine/
 │   │   ├── contract.ts         # Repository credential route group
 │   │   ├── credential-platform.ts # github platform validator and GitHub probe
 │   │   ├── credential.ts       # Repository credential routes over custody records and binding dependents
-│   │   └── github.ts           # GitHub platform implementation: per-call octokit client, result classes, the delivery classification and the event decoder
+│   │   └── github.ts           # GitHub platform implementation: per-call octokit client, result classes, the events read, the closed pull request read, the delivery classification and the event decoder
 │   ├── llm/                    # LLM component: LLM platforms, credential routes, OAuth login sessions, and the model connector
 │   │   ├── contract.ts         # LLM credential route group, login, provider check and model check operations, and error codes
 │   │   ├── index.ts            # Component and platform table exports
@@ -121,7 +121,7 @@ engine/
 │   │   ├── event-read.ts       # Inbound event list with a cursor and get by identity
 │   │   ├── event-write.ts      # Inbound event retry, discard and delete, with the in-flight refusal of a discard
 │   │   ├── dispatcher.ts       # Event handoff: oldest pending selection, reservation in the in-flight set, consumer call, and conditional state write
-│   │   ├── poll.ts             # Poll loops: one loop per inbound, the cycle with its capacity pause and release, and the batch with its checkpoint
+│   │   ├── poll.ts             # Poll loops: one loop per inbound, the cycle with its capacity pause, its two reads with a release each, and the batch with its checkpoint field
 │   │   ├── health.ts           # Inbound resource inventory: one entry per inbound, the poll check with its release and request, and the webhook check
 │   │   ├── receipt.ts          # Webhook receipt: inbound lookup, signature check, handshake, capacity bound, and insert
 │   │   ├── outbound-store.ts   # Outbound request rows, conditional state writes, and the record projection

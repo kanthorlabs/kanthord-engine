@@ -1,18 +1,21 @@
 import assert from "node:assert/strict";
 import type { ServiceIdentity } from "../kernel/caller.ts";
-import { throwIfCancelled } from "../kernel/context.ts";
+import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { ResourceStatus, type ResourceCheck } from "../kernel/health.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import type { GitHubPlatform } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import { InboundKind, type IntakeInventoryEntry } from "./contract.ts";
 import { allInbounds, type InboundRow } from "./inbound-store.ts";
 import {
+  etagOf,
+  POLL_READS,
   pollTargetOf,
   releasePollGrant,
-  requestPollEvents,
+  requestPollRead,
   type Hold,
+  type PollGitHub,
+  type PollRead,
   type PollTarget,
 } from "./poll.ts";
 
@@ -30,7 +33,7 @@ export interface InboundHealthDependencies {
   store: Store;
   identity: ServiceIdentity;
   custody: Pick<IntakeCustody, "authorizeOperation" | "release">;
-  github: Pick<GitHubPlatform, "listEvents">;
+  github: PollGitHub;
 }
 
 const webhookCheck: ResourceCheck = async () => ResourceStatus.Unknown;
@@ -50,6 +53,32 @@ function releaseRefusal(
   } catch (error) {
     if (!(error instanceof OperationError)) throw error;
     return error.code;
+  }
+}
+
+async function readFailure(
+  dependencies: InboundHealthDependencies,
+  target: PollTarget,
+  read: PollRead,
+  context: Context,
+): Promise<string | null> {
+  const hold: Hold = { material: null };
+  try {
+    const refusal = releaseRefusal(dependencies, target, hold);
+    if (refusal !== null) return refusal;
+    assert.ok(hold.material, "A committed release holds the material.");
+    const answer = await requestPollRead(dependencies.github, read, {
+      requester: dependencies.identity,
+      context,
+      material: hold.material,
+      owner: target.owner,
+      repo: target.repo,
+      etag: etagOf(target.checkpoint, read),
+    });
+    throwIfCancelled(context);
+    return answer.ok ? null : answer.code;
+  } finally {
+    hold.material?.drop();
   }
 }
 
@@ -77,29 +106,13 @@ function pollCheck(
       target.repo.length > EMPTY_IDENTIFIER_LENGTH,
       "A target names a repository.",
     );
-    const hold: Hold = { material: null };
-    try {
-      const refusal = releaseRefusal(dependencies, target, hold);
-      if (refusal !== null) {
-        observe?.(refusal);
-        return ResourceStatus.Unhealthy;
-      }
-      assert.ok(hold.material, "A committed release holds the material.");
-      const answer = await requestPollEvents(dependencies.github, {
-        requester: dependencies.identity,
-        context,
-        material: hold.material,
-        owner: target.owner,
-        repo: target.repo,
-        etag: target.checkpoint.etag,
-      });
-      throwIfCancelled(context);
-      if (answer.ok) return ResourceStatus.Healthy;
-      observe?.(answer.code);
+    for (const read of POLL_READS) {
+      const failure = await readFailure(dependencies, target, read, context);
+      if (failure === null) continue;
+      observe?.(failure);
       return ResourceStatus.Unhealthy;
-    } finally {
-      hold.material?.drop();
     }
+    return ResourceStatus.Healthy;
   };
 }
 

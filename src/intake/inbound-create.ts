@@ -15,7 +15,6 @@ import {
   GitHubTargetKind,
   repositoryOf,
   type GitHubFailure,
-  type GitHubPlatform,
 } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {
@@ -34,7 +33,13 @@ import {
   insertInbound,
   readInbound,
 } from "./inbound-store.ts";
-import { releasePollGrant, requestPollEvents } from "./poll.ts";
+import {
+  POLL_READS,
+  releasePollGrant,
+  requestPollRead,
+  type PollGitHub,
+  type PollRead,
+} from "./poll.ts";
 
 const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 const OPERATION_UNKNOWN_CODE = "system.operation.unknown";
@@ -66,7 +71,7 @@ export interface InboundCreateDependencies {
     IntakeCustody,
     "custodySuitability" | "authorizeOperation" | "release"
   >;
-  github: Pick<GitHubPlatform, "listEvents">;
+  github: PollGitHub;
   projects: InboundProjects;
   pollLoops: InboundPollLoops;
 }
@@ -208,10 +213,11 @@ function platformRefused(failure: GitHubFailure): OperationError {
   );
 }
 
-async function validatePoll(
+async function validateRead(
   dependencies: InboundCreateDependencies,
   caller: CallerContext,
   inbound: { id: string; input: InboundCreate; resource: string },
+  read: PollRead,
 ): Promise<void> {
   const { input } = inbound;
   assert.equal(input.kind, InboundKind.Poll);
@@ -238,7 +244,7 @@ async function validatePoll(
       kind: GitHubTargetKind.Inbound,
       resource: inbound.resource,
     });
-    const answer = await requestPollEvents(dependencies.github, {
+    const answer = await requestPollRead(dependencies.github, read, {
       requester: caller.identity,
       context: caller.context,
       material: hold.material,
@@ -250,6 +256,15 @@ async function validatePoll(
   } finally {
     hold.material?.drop();
   }
+}
+
+async function validatePoll(
+  dependencies: InboundCreateDependencies,
+  caller: CallerContext,
+  inbound: { id: string; input: InboundCreate; resource: string },
+): Promise<void> {
+  for (const read of POLL_READS)
+    await validateRead(dependencies, caller, inbound, read);
 }
 
 export async function createInbound(

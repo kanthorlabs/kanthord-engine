@@ -42,6 +42,8 @@ const MS_PER_SECOND = 1000;
 const IF_NONE_MATCH_HEADER = "if-none-match";
 const NOT_MODIFIED_STATUS = 304;
 const EVENT_PAGE_SIZE = 100;
+const CLOSED_PULL_REQUEST_PAGE_SIZE = 100;
+const CLOSED_PULL_REQUEST_EVENT_TYPE = "pull_request_closed";
 const REVIEW_PAGE_SIZE = 100;
 const REVIEW_PAGE_LIMIT = 30;
 const NO_CHANGE_REQUESTS = 0;
@@ -140,6 +142,7 @@ export interface GitHubRequest {
 
 export const githubCheckpointSchema = z.object({
   etag: z.string().nullable(),
+  pulls_etag: z.string().nullable().default(null),
 });
 export type GitHubCheckpoint = z.infer<typeof githubCheckpointSchema>;
 
@@ -233,6 +236,13 @@ type Cursor = z.infer<typeof cursorSchema>;
 
 const eventListSchema = z.array(
   z.looseObject({ id: z.string().regex(EVENT_ID_PATTERN), type: z.string() }),
+);
+
+const closedPullRequestListSchema = z.array(
+  z.looseObject({
+    number: z.int().min(MIN_PULL_REQUEST_NUMBER),
+    closed_at: z.string().min(MIN_JSON_LENGTH),
+  }),
 );
 
 const createdPullRequestSchema = z.looseObject({ number: z.int() });
@@ -571,6 +581,47 @@ function eventsOf(data: unknown): GitHubEvent[] | null {
   return events;
 }
 
+function closedPullRequestsOf(data: unknown): GitHubEvent[] | null {
+  const listed = closedPullRequestListSchema.safeParse(data);
+  if (!listed.success) {
+    return null;
+  }
+  const events: GitHubEvent[] = [];
+  for (const item of listed.data) {
+    const body = canonicalEventBody(item);
+    if (body === null) {
+      return null;
+    }
+    events.push({
+      id: `pull_request:${item.number}:${item.closed_at}`,
+      type: CLOSED_PULL_REQUEST_EVENT_TYPE,
+      body,
+    });
+  }
+  assert.equal(events.length, listed.data.length);
+  return events;
+}
+
+function batchAnswerOf(
+  exchange: Exchange,
+  itemsOf: (data: unknown) => GitHubEvent[] | null,
+): GitHubAnswer<GitHubEventsAnswer> {
+  const poll =
+    exchange.pollIntervalMs === null
+      ? {}
+      : { poll_interval_ms: exchange.pollIntervalMs };
+  if (exchange.notModified) {
+    return { ok: true, value: { notModified: true, ...poll } };
+  }
+  const events = itemsOf(exchange.data);
+  return events === null
+    ? unreadableBody(CallKind.Read)
+    : {
+        ok: true,
+        value: { notModified: false, etag: exchange.etag, events, ...poll },
+      };
+}
+
 function canonicalEventBody(event: object): Uint8Array | null {
   assert.ok(typeof event === ValueType.Object && event !== null);
   try {
@@ -899,28 +950,36 @@ export class GitHubPlatform {
           query.etag === null ? {} : { [IF_NONE_MATCH_HEADER]: query.etag },
       },
     );
-    if (!answer.ok) {
-      return answer;
-    }
-    const poll =
-      answer.value.pollIntervalMs === null
-        ? {}
-        : { poll_interval_ms: answer.value.pollIntervalMs };
-    if (answer.value.notModified) {
-      return { ok: true, value: { notModified: true, ...poll } };
-    }
-    const events = eventsOf(answer.value.data);
-    return events === null
-      ? unreadableBody(CallKind.Read)
-      : {
-          ok: true,
-          value: {
-            notModified: false,
-            etag: answer.value.etag,
-            events,
-            ...poll,
-          },
-        };
+    return answer.ok ? batchAnswerOf(answer.value, eventsOf) : answer;
+  }
+
+  async listClosedPullRequests(
+    call: GitHubCall,
+    query: GitHubEventsQuery,
+  ): Promise<GitHubAnswer<GitHubEventsAnswer>> {
+    assert.ok(call.token.length >= MIN_TOKEN_LENGTH);
+    assert.ok(query.owner.length >= MIN_SEGMENT_LENGTH);
+    assert.ok(query.repo.length >= MIN_SEGMENT_LENGTH);
+    assert.ok(Number.isFinite(call.deadlineAt));
+    const answer = await this.#read(
+      call,
+      { owner: query.owner, repo: query.repo },
+      {
+        kind: CallKind.Read,
+        route: "GET /repos/{owner}/{repo}/pulls",
+        parameters: {
+          state: "closed",
+          sort: "updated",
+          direction: "desc",
+          per_page: CLOSED_PULL_REQUEST_PAGE_SIZE,
+        },
+        headers:
+          query.etag === null ? {} : { [IF_NONE_MATCH_HEADER]: query.etag },
+      },
+    );
+    return answer.ok
+      ? batchAnswerOf(answer.value, closedPullRequestsOf)
+      : answer;
   }
 
   foldPullRequest(
@@ -1073,6 +1132,7 @@ const GitHubEventType = {
   Push: "push",
   PolledPullRequest: "PullRequestEvent",
   PolledPush: "PushEvent",
+  ClosedPullRequest: CLOSED_PULL_REQUEST_EVENT_TYPE,
 } as const;
 
 const RESOURCE_IDENTITY_PREFIX = "repository:github:";
@@ -1110,6 +1170,16 @@ const pushPolledSchema = z.looseObject({
   payload: z.looseObject({ ref: eventBranchSchema, head: eventCommitSchema }),
 });
 
+const closedPullRequestSchema = z.looseObject({
+  number: eventNumberSchema,
+  merged_at: z.string().nullable().optional(),
+  merge_commit_sha: z.string().nullable().optional(),
+  base: z.looseObject({
+    ref: z.string().min(MIN_SEGMENT_LENGTH),
+    repo: webhookRepositorySchema,
+  }),
+});
+
 type EventAddressDecoder = (
   resource: string,
   body: unknown,
@@ -1121,6 +1191,7 @@ const EVENT_ADDRESS_DECODERS: ReadonlyMap<string, EventAddressDecoder> =
     [GitHubEventType.Push, pushWebhookAddress],
     [GitHubEventType.PolledPullRequest, pullRequestPolledAddress],
     [GitHubEventType.PolledPush, pushPolledAddress],
+    [GitHubEventType.ClosedPullRequest, closedPullRequestAddress],
   ]);
 
 export function decodeGitHubEvent(
@@ -1207,6 +1278,25 @@ function pushPolledAddress(
   }
   const { ref, head } = parsed.data.payload;
   return branchPushAddress(resource, ref, head);
+}
+
+function closedPullRequestAddress(
+  resource: string,
+  body: unknown,
+): DecodedAddress | null {
+  assert.ok(isString(resource));
+  const parsed = closedPullRequestSchema.safeParse(body);
+  if (!parsed.success || parsed.data.base.repo.full_name !== resource) {
+    return null;
+  }
+  const { number, merged_at, merge_commit_sha, base } = parsed.data;
+  if (!isString(merged_at)) {
+    return pullRequestAddress(resource, number);
+  }
+  const commit = eventCommitSchema.safeParse(merge_commit_sha);
+  return commit.success
+    ? branchPushAddress(resource, base.ref, commit.data)
+    : null;
 }
 
 function pullRequestAddress(resource: string, number: number): DecodedAddress {

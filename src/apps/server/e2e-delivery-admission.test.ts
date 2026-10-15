@@ -1,13 +1,8 @@
 import assert from "node:assert/strict";
-import { test, type TestContext } from "node:test";
-import { ulid } from "ulid";
-import { directClient } from "../../gateway/index.ts";
-import { httpClient } from "../../gateway/client.ts";
-import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
-import { createIdentity } from "../../kernel/identity.ts";
+import { test } from "node:test";
 import { HttpStatus } from "../../kernel/http.ts";
+import { createIdentity } from "../../kernel/identity.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   ActorKind,
   ActorService,
@@ -18,38 +13,21 @@ import {
   MissionErrorCode,
   NodeState,
   Resolution,
-  missionOperations,
   type Evidence,
   type ExternalAction,
-  type Revision,
 } from "../../mission/contract.ts";
-import { type ExecutionRecord } from "../../scheduler/contract.ts";
+import { ActionResultKind } from "../../worker/contract.ts";
+import { completed } from "./cli-support.ts";
 import {
-  ActionResultKind,
-  PlatformAddressKind,
-  workerOperations,
-} from "../../worker/contract.ts";
-import {
-  FAKE_SSH_IDENTITY,
-  bareRepository,
-  fakeGitHub,
-  gatewayFixture,
-  mappedTransport,
-} from "./test-support.ts";
-import {
-  cliMachine,
-  cliSession,
-  completed,
-  createCredentials,
-  executionContext,
-  passingEvaluation,
-  pushNodeBranch,
-  repositoryBinding,
-} from "./cli-support.ts";
+  FIRST_INDEX,
+  GATED_KEY,
+  MERGE_KEY,
+  RESOURCE,
+  setup,
+  type Page,
+  type Webhook,
+} from "./delivery-support.ts";
 
-const FIRST_INDEX = 0;
-const FIRST_REVISION = 1;
-const WORKER_INSTANCE_COUNT = 1;
 const FIRST_ATTEMPT = 1;
 const LANDED_EVIDENCE_COUNT = 1;
 const FIRST_PULL_REQUEST = 1;
@@ -58,28 +36,14 @@ const SHARED_PULL_REQUEST = 7;
 const ISSUE_NUMBER = 3;
 const BAD_GATEWAY_STATUS = 502;
 const TIMEOUT = 300000;
-const SECRET = "test-secret";
-const GATED = "gated";
-const GATED_KEY = "gated.pull_request";
-const GATED_RESOURCE = "repository:github:owner/gated";
-const RESOURCE = "owner/gated";
 const MERGED_COMMIT = "e".repeat(40);
 const PUSHED_COMMIT = "a".repeat(40);
 const BASE_BRANCH = "main";
+const SECOND_PULL_REQUEST = 2;
+const CLOSED_AT = "2026-10-15T03:57:51Z";
 const PENDING_THEN_DIRTY_READS = 2;
 const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
-const CONTENT = {
-  name: "Ship accounts",
-  requirement: "Ship accounts",
-  criterion: "Accounts ship",
-  verifications: ["true"],
-  bindings: [],
-};
-type Page<T> = { items: T[] };
-type Binding = { id: string; name: string; resource_identity: string };
-type Check = { results: { resolution: string }[]; failures: unknown[] };
-type Webhook = { event: string; payload: unknown };
 
 function issue(): Webhook {
   return {
@@ -104,6 +68,20 @@ function closed(number: number, merged: boolean): Webhook {
   };
 }
 
+function mergedItem(number: number, commit: string): Webhook {
+  return {
+    event: "pull_request_closed",
+    payload: {
+      number,
+      state: "closed",
+      closed_at: CLOSED_AT,
+      merged_at: CLOSED_AT,
+      merge_commit_sha: commit,
+      base: { ref: BASE_BRANCH, repo: { full_name: RESOURCE } },
+    },
+  };
+}
+
 function pushed(branch: string): Webhook {
   return {
     event: "push",
@@ -112,173 +90,6 @@ function pushed(branch: string): Webhook {
       after: PUSHED_COMMIT,
       repository: { full_name: RESOURCE },
     },
-  };
-}
-
-async function cli(t: TestContext) {
-  const gitHub = await fakeGitHub(t);
-  const gatedBare = await bareRepository(t, GATED);
-  const fixture = await gatewayFixture(t, {
-    repositoryConnector: {
-      gitLsRemote: async () => {},
-      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
-    },
-    github: { baseUrl: gitHub.endpoint, mergeabilityRetryDelayMs: 1 },
-    repositoryTransport: mappedTransport({
-      [`git@github.com:owner/${GATED}.git`]: gatedBare.bare,
-    }),
-  });
-  const session = cliSession(t, fixture.endpoint, fixture.token, SECRET);
-  return { t, gitHub, gatedBare, fixture, session, ...session };
-}
-
-type Cli = Awaited<ReturnType<typeof cli>>;
-
-async function project(c: Cli) {
-  await createCredentials(c.session, SECRET);
-  const created = await c.read<{ id: string }>([
-    "project",
-    "create",
-    "--name",
-    "admission",
-  ]);
-  const mission = await c.read<{ id: string }>(["mission", "get", created.id]);
-  await c.write(["project", "binding", "apply", created.id], {
-    version: FIRST_REVISION,
-    bindings: {
-      gated: repositoryBinding(GATED, "pull_request"),
-      harness: {
-        kind: "worker",
-        config: {
-          worker: "claude-code@1",
-          instance_count: WORKER_INSTANCE_COUNT,
-        },
-      },
-    },
-  });
-  const bindings = await c.read<Page<Binding>>([
-    "project",
-    "binding",
-    "list",
-    created.id,
-  ]);
-  const binding = (name: string) =>
-    bindings.items.find((item) => item.name === name)!;
-  assert.equal(binding(GATED).resource_identity, GATED_RESOURCE);
-  return { projectId: created.id, missionId: mission.id, binding };
-}
-
-async function setup(t: TestContext) {
-  const c = await cli(t);
-  const { projectId, missionId, binding } = await project(c);
-  const missionVersion = async () =>
-    (await c.read<{ version: number }>(["mission", "get", projectId])).version;
-  const create = async (filename: string, parentId?: string) => {
-    const result = await c.write<{ revisions: Revision[] }>(
-      ["mission", "node", "create", missionId],
-      {
-        filename,
-        kind: parentId ? "objective" : "initiative",
-        content: {
-          ...CONTENT,
-          bindings: parentId ? [binding(GATED).id] : [],
-        },
-        reason: "plan",
-        expected_mission_version: await missionVersion(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
-      },
-    );
-    return result.revisions[FIRST_INDEX]!.node_id;
-  };
-  const machine = await cliMachine(c.session, {
-    masterKey: c.fixture.config.master_key,
-    projectId,
-    resourceIdentity: binding("harness").resource_identity,
-  });
-  const { token, node, release } = machine;
-  const objective = async (filename: string, parentId: string) => {
-    const nodeId = await create(filename, parentId);
-    const head = await pushNodeBranch(
-      c.t,
-      c.gatedBare.bare,
-      nodeId,
-      `${filename}\n`,
-    );
-    const x2 = await passingEvaluation(c.session, machine, {
-      nodeId,
-      bindingId: binding(GATED).id,
-      commit: head,
-    });
-    return { nodeId, x2 };
-  };
-  const worker = httpClient(missionOperations, c.fixture.endpoint, token);
-  const requestPullRequest = async (x: ExecutionRecord, number: number) =>
-    completed(
-      await worker["evidence.request"](
-        {
-          params: { node_id: x.node_id },
-          query: {},
-          body: {
-            ...executionContext(x),
-            requirement_key: GATED_KEY,
-            subject: GATED_KEY,
-            address: {
-              kind: PlatformAddressKind.PullRequest,
-              resource_identity: GATED_RESOURCE,
-              number,
-            },
-          },
-        },
-        { idempotencyKey: ulid() },
-      ),
-    );
-  const performer = httpClient(workerOperations, c.fixture.endpoint, token);
-  const actionRequest = async (x: ExecutionRecord) =>
-    completed(
-      await performer["action.request"](
-        { params: { execution_id: x.execution_id }, query: {}, body: null },
-        { idempotencyKey: ulid() },
-      ),
-    );
-  const check = async (nodeId: string) =>
-    c.write<Check>(["mission", "node", "check", nodeId], {
-      expected_mission_version: await missionVersion(),
-    });
-  const mission = directClient(missionOperations, c.fixture.invocation);
-  const admit = (
-    webhook: Webhook,
-    inboundEventId: string,
-    service = INTAKE_SERVICE_NAME,
-  ) =>
-    mission["delivery.admit"](
-      {
-        params: {},
-        query: {},
-        body: {
-          inbound_event_id: inboundEventId,
-          project_id: projectId,
-          platform: "github",
-          resource: RESOURCE,
-          event: Buffer.from(JSON.stringify(webhook.payload)).toString(
-            "base64",
-          ),
-          metadata: { event: webhook.event },
-        },
-      },
-      { identity: mintServiceIdentity(service), idempotencyKey: ulid() },
-    );
-  return {
-    ...c,
-    create,
-    objective,
-    node,
-    release,
-    requestPullRequest,
-    actionRequest,
-    check,
-    admit,
   };
 }
 
@@ -455,5 +266,101 @@ test(
       );
     assert.equal(reads.length, PENDING_THEN_DIRTY_READS);
     assert.equal((await h.node(P.nodeId)).state, NodeState.Available);
+  },
+);
+
+const DIRTY = { mergeable: false, mergeable_state: "dirty" };
+
+type Journey = Awaited<ReturnType<typeof setup>>;
+
+async function requested(h: Journey, initiativeId: string, filename: string) {
+  const objective = await h.objective(filename, initiativeId);
+  const action = await h.actionRequest(objective.x2);
+  assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+  await h.release(objective.x2.execution_id);
+  assert.equal(
+    (await h.node(objective.nodeId)).state,
+    NodeState.ExternalRequested,
+  );
+  return objective;
+}
+
+test(
+  "E08.9 a merged closed pull request item completes its node and returns the conflicting node to rework",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const I = await h.create("initiative-1.md");
+    const P = await requested(h, I, "objective-p.md");
+    const Q = await requested(h, I, "objective-q.md");
+    assert.deepEqual(
+      h.gitHub.pulls.map((pull) => pull.number),
+      [FIRST_PULL_REQUEST, SECOND_PULL_REQUEST],
+    );
+    h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
+    h.gitHub.mergeability(SECOND_PULL_REQUEST, [DIRTY]);
+    const answer = completed(
+      await h.admit(
+        mergedItem(FIRST_PULL_REQUEST, MERGED_COMMIT),
+        createIdentity("inbound_event"),
+      ),
+    );
+    assert.deepEqual(answer, {
+      disposition: Disposition.AcceptedObservation,
+      reason: null,
+    });
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+    assert.equal((await h.node(Q.nodeId)).state, NodeState.Available);
+  },
+);
+
+test(
+  "E08.10 a merged item that also matches a merge push request exactly resolves both requests and the sibling conflict",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, { action: "merge_push" });
+    const I = await h.create("initiative-1.md");
+    const A = await h.objective("objective-a.md", I);
+    const landed = h.gatedBare.head;
+    const request = await h.requestMergePush(A.x2, landed);
+    assert.equal(request.requirement_key, MERGE_KEY);
+    await h.release(A.x2.execution_id);
+    assert.equal((await h.node(A.nodeId)).state, NodeState.ExternalRequested);
+    await h.rebind("pull_request");
+    const P = await requested(h, I, "objective-p.md");
+    const Q = await requested(h, I, "objective-q.md");
+    h.gitHub.merge(FIRST_PULL_REQUEST, landed);
+    h.gitHub.mergeability(SECOND_PULL_REQUEST, [DIRTY]);
+    const inboundEventId = createIdentity("inbound_event");
+    const answer = completed(
+      await h.admit(mergedItem(FIRST_PULL_REQUEST, landed), inboundEventId),
+    );
+    assert.deepEqual(answer, {
+      disposition: Disposition.AcceptedObservation,
+      reason: null,
+    });
+    assert.equal((await h.node(A.nodeId)).state, NodeState.Completed);
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+    assert.equal((await h.node(Q.nodeId)).state, NodeState.Available);
+    for (const objective of [A, P]) {
+      const evidence = await h.read<Page<Evidence>>([
+        "mission",
+        "evidence",
+        "list",
+        objective.nodeId,
+        "--attempt",
+        String(FIRST_ATTEMPT),
+      ]);
+      const provenance = evidence.items
+        .filter((item) => item.provenance.kind === ActorKind.Service)
+        .map((item) => item.provenance);
+      assert.deepEqual(provenance, [
+        {
+          kind: ActorKind.Service,
+          service: ActorService.Mission,
+          inbound_event_id: inboundEventId,
+        },
+      ]);
+    }
   },
 );

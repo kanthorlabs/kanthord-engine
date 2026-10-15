@@ -47,13 +47,19 @@ const RESOURCE = "owner/repo";
 const TOKEN = "ghp_health-token";
 const ETAG_STORED = '"etag-0"';
 const ETAG_ANSWERED = '"etag-1"';
+const PULLS_ETAG_STORED = '"pulls-0"';
+const PULLS_ETAG_ANSWERED = '"pulls-1"';
 const CHECKPOINT: GitHubCheckpoint = {
   etag: ETAG_STORED,
+  pulls_etag: PULLS_ETAG_STORED,
 };
+const POLL_READS_PER_CHECK = 2;
+const REQUESTS_PER_READ = 1;
 const REFUSAL_CODE = "credential.credential.archived";
 const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
 const UNKNOWN_OUTCOME_CODE = "repository.platform.github.unknown_outcome";
 const UNAUTHORIZED_STATUS = 401;
+const FORBIDDEN_STATUS = 403;
 const CHECK_DEADLINE_MS = 20;
 const CHECK_BUDGET_MS = 5000;
 const CREATED_AT = 1;
@@ -135,10 +141,17 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
   ]);
   const { custody, grants, drops } = fakeCustody(options);
   const calls: { call: GitHubCall; query: GitHubEventsQuery }[] = [];
+  const pullCalls: { call: GitHubCall; query: GitHubEventsQuery }[] = [];
   const answers: { next: EventsCall } = {
     next: async () => ({
       ok: true,
       value: { notModified: false, etag: ETAG_ANSWERED, events: [] },
+    }),
+  };
+  const pullAnswers: { next: EventsCall } = {
+    next: async () => ({
+      ok: true,
+      value: { notModified: false, etag: PULLS_ETAG_ANSWERED, events: [] },
     }),
   };
   const dependencies: InboundHealthDependencies = {
@@ -149,6 +162,10 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
       listEvents: async (call, query) => {
         calls.push({ call, query });
         return answers.next(call);
+      },
+      listClosedPullRequests: async (call, query) => {
+        pullCalls.push({ call, query });
+        return pullAnswers.next(call);
       },
     },
   };
@@ -196,7 +213,9 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
     grants,
     drops,
     calls,
+    pullCalls,
     answers,
+    pullAnswers,
     insert,
     corrupt,
     inventory,
@@ -251,26 +270,25 @@ test("a webhook check answers unknown with no call", async (t) => {
   assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
 });
 
-test("a poll check releases one poll grant, sends the stored ETag and answers healthy for a 200", async (t) => {
+test("a poll check releases one poll grant for each read, sends the stored ETag of each read and answers healthy for a 200", async (t) => {
   const h = harness(t);
   const id = h.insert(InboundKind.Poll);
   const entry = h.entryOf(id);
   const before = h.stored();
   assert.equal(await entry.check(checkContext(t)), ResourceStatus.Healthy);
-  assert.deepEqual(h.grants, [
-    {
-      kind: GrantKind.Inbound,
-      identity: SERVICE_IDENTITY,
-      inbound: {
-        inboundId: id,
-        projectId: PROJECT_ID,
-        credential: CREDENTIAL,
-        platform: InboundPlatform.GitHub,
-        resource: RESOURCE,
-      },
-      operation: InboundOperation.Poll,
+  const grant = {
+    kind: GrantKind.Inbound,
+    identity: SERVICE_IDENTITY,
+    inbound: {
+      inboundId: id,
+      projectId: PROJECT_ID,
+      credential: CREDENTIAL,
+      platform: InboundPlatform.GitHub,
+      resource: RESOURCE,
     },
-  ]);
+    operation: InboundOperation.Poll,
+  };
+  assert.deepEqual(h.grants, [grant, grant]);
   assert.deepEqual(
     h.calls.map(({ call, query }) => ({ token: call.token, query })),
     [
@@ -280,7 +298,16 @@ test("a poll check releases one poll grant, sends the stored ETag and answers he
       },
     ],
   );
-  assert.deepEqual(h.drops, [CREDENTIAL]);
+  assert.deepEqual(
+    h.pullCalls.map(({ call, query }) => ({ token: call.token, query })),
+    [
+      {
+        token: TOKEN,
+        query: { owner: "owner", repo: "repo", etag: PULLS_ETAG_STORED },
+      },
+    ],
+  );
+  assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
   assert.deepEqual(h.stored(), before);
 });
 
@@ -288,13 +315,14 @@ test("a poll check answers healthy for a 304 and changes no inbound", async (t) 
   const h = harness(t);
   const entry = h.entryOf(h.insert(InboundKind.Poll));
   h.answers.next = async () => ({ ok: true, value: { notModified: true } });
+  h.pullAnswers.next = async () => ({ ok: true, value: { notModified: true } });
   const before = h.stored();
   assert.equal(await entry.check(checkContext(t)), ResourceStatus.Healthy);
-  assert.deepEqual(h.drops, [CREDENTIAL]);
+  assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
   assert.deepEqual(h.stored(), before);
 });
 
-test("a poll check answers unhealthy for a platform result class and observes its code", async (t) => {
+test("a poll check answers unhealthy for a failed events read, observes its code and makes no closed pull request read", async (t) => {
   const h = harness(t);
   const entry = h.entryOf(h.insert(InboundKind.Poll));
   h.answers.next = async () => ({
@@ -312,6 +340,31 @@ test("a poll check answers unhealthy for a platform result class and observes it
   );
   assert.deepEqual(reasons, [FINAL_REFUSAL_CODE]);
   assert.deepEqual(h.drops, [CREDENTIAL]);
+  assert.equal(h.pullCalls.length, UNCALLED_PLATFORM_COUNT);
+  assert.deepEqual(h.stored(), before);
+});
+
+test("a poll check answers unhealthy for a failed closed pull request read and observes its code", async (t) => {
+  const h = harness(t);
+  const entry = h.entryOf(h.insert(InboundKind.Poll));
+  h.pullAnswers.next = async () => ({
+    ok: false,
+    class: ResultClass.FinalRefusal,
+    code: FINAL_REFUSAL_CODE,
+    status: FORBIDDEN_STATUS,
+    message: "Resource not accessible by personal access token",
+  });
+  const reasons: string[] = [];
+  const before = h.stored();
+  assert.equal(
+    await entry.check(checkContext(t), (reason) => reasons.push(reason)),
+    ResourceStatus.Unhealthy,
+  );
+  assert.deepEqual(reasons, [FINAL_REFUSAL_CODE]);
+  assert.equal(h.calls.length, REQUESTS_PER_READ);
+  assert.equal(h.pullCalls.length, REQUESTS_PER_READ);
+  assert.equal(h.grants.length, POLL_READS_PER_CHECK);
+  assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
   assert.deepEqual(h.stored(), before);
 });
 
@@ -397,5 +450,5 @@ test("a malformed poll row answers its entry and only its check rejects", async 
   assert.deepEqual(h.grants, []);
   assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
   assert.equal(await good.check(checkContext(t)), ResourceStatus.Healthy);
-  assert.deepEqual(h.drops, [CREDENTIAL]);
+  assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
 });

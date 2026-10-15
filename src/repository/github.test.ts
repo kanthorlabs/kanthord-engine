@@ -1020,18 +1020,216 @@ test("listEvents refuses a malformed body as a lost read", async (t) => {
   assert.equal(server.requests.length, bodies.length);
 });
 
-test("githubCheckpointSchema admits the ETag and drops a stored newest_event_id", () => {
+const CLOSED_PULLS_PATH = "/repos/octo/widgets/pulls";
+const CLOSED_AT = "2026-10-15T03:57:51Z";
+const MERGED_PULL = {
+  number: 41,
+  state: "closed",
+  closed_at: CLOSED_AT,
+  merged_at: CLOSED_AT,
+  merge_commit_sha: "c".repeat(40),
+  base: { ref: "main", repo: { full_name: "octo/widgets" } },
+};
+const UNMERGED_PULL = {
+  number: 40,
+  state: "closed",
+  closed_at: "2026-10-15T03:50:00Z",
+  merged_at: null,
+  merge_commit_sha: null,
+  base: { ref: "main", repo: { full_name: "octo/widgets" } },
+};
+const MERGED_PULL_BODY =
+  '{"base":{"ref":"main","repo":{"full_name":"octo/widgets"}},"closed_at":"2026-10-15T03:57:51Z","merge_commit_sha":"cccccccccccccccccccccccccccccccccccccccc","merged_at":"2026-10-15T03:57:51Z","number":41,"state":"closed"}';
+
+test("listClosedPullRequests reads one page of the closed pull requests by update time and follows no next link", async (t) => {
+  const server = await platform(
+    t,
+    answer(200, [MERGED_PULL, UNMERGED_PULL], {
+      etag: FIRST_ETAG,
+      link: '<http://127.0.0.1/repos/octo/widgets/pulls?page=2>; rel="next"',
+    }),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listClosedPullRequests(call(), {
+    ...EVENTS_QUERY,
+    etag: null,
+  });
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  const url = new URL(server.requests[0]?.url ?? "", "http://127.0.0.1");
+  assert.equal(url.pathname, CLOSED_PULLS_PATH);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    state: "closed",
+    sort: "updated",
+    direction: "desc",
+    per_page: "100",
+  });
+  assert.equal(server.requests[0]?.headers["if-none-match"], undefined);
+  assert.equal(server.requests[0]?.headers.authorization, `token ${TOKEN}`);
+  assert.ok(result.ok && !result.value.notModified);
+  assert.equal(result.value.etag, FIRST_ETAG);
+  assert.deepEqual(
+    result.value.events.map((event) => [event.id, event.type]),
+    [
+      [`pull_request:41:${CLOSED_AT}`, "pull_request_closed"],
+      ["pull_request:40:2026-10-15T03:50:00Z", "pull_request_closed"],
+    ],
+  );
+  assert.equal(
+    bodyText(result.value.events[0]?.body ?? new Uint8Array()),
+    MERGED_PULL_BODY,
+  );
+});
+
+test("listClosedPullRequests sends the ETag and answers notModified for a 304", async (t) => {
+  const server = await platform(t, (_request, response) => {
+    response.writeHead(NOT_MODIFIED, { etag: FIRST_ETAG });
+    response.end();
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listClosedPullRequests(call(), {
+    ...EVENTS_QUERY,
+    etag: FIRST_ETAG,
+  });
+  assert.deepEqual(result, { ok: true, value: { notModified: true } });
+  assert.equal(server.requests[0]?.headers["if-none-match"], FIRST_ETAG);
+});
+
+test("listClosedPullRequests answers the wait of X-Poll-Interval for a 200 and a 304", async (t) => {
+  const modified = await platform(
+    t,
+    answer(200, [MERGED_PULL], {
+      etag: FIRST_ETAG,
+      "x-poll-interval": String(POLL_INTERVAL_MS / MS_PER_SECOND),
+    }),
+  );
+  const first = await new GitHubPlatform({
+    baseUrl: modified.baseUrl,
+  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
+  assert.ok(first.ok && !first.value.notModified);
+  assert.equal(first.value.poll_interval_ms, POLL_INTERVAL_MS);
+  const unchanged = await platform(t, (_request, response) => {
+    response.writeHead(NOT_MODIFIED, {
+      etag: FIRST_ETAG,
+      "x-poll-interval": "75",
+    });
+    response.end();
+  });
+  const second = await new GitHubPlatform({
+    baseUrl: unchanged.baseUrl,
+  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: FIRST_ETAG });
+  assert.deepEqual(second, {
+    ok: true,
+    value: { notModified: true, poll_interval_ms: 75_000 },
+  });
+});
+
+test("listClosedPullRequests answers the rate limit refusals of the events read", async (t) => {
+  const named = await platform(
+    t,
+    answer(429, { message: "slow down" }, { "retry-after": "7" }),
+  );
+  const namedResult = await new GitHubPlatform({
+    baseUrl: named.baseUrl,
+  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
+  assert.equal(
+    !namedResult.ok && namedResult.class,
+    ResultClass.RetryableRefusal,
+  );
+  assert.deepEqual(rateLimitOf(namedResult), { wait_ms: 7000 });
+  const secondary = await platform(
+    t,
+    answer(403, { message: SECONDARY_LIMIT_MESSAGE }),
+  );
+  const secondaryResult = await new GitHubPlatform({
+    baseUrl: secondary.baseUrl,
+  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
+  assert.deepEqual(rateLimitOf(secondaryResult), { wait_ms: null });
+  t.mock.timers.enable({ apis: ["Date"], now: RESET_NOW_MS });
+  const exhausted = await platform(
+    t,
+    answer(
+      403,
+      { message: "API rate limit exceeded" },
+      {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(RESET_NOW_MS / 1000 + 90),
+      },
+    ),
+  );
+  const exhaustedResult = await new GitHubPlatform({
+    baseUrl: exhausted.baseUrl,
+  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
+  assert.deepEqual(rateLimitOf(exhaustedResult), { wait_ms: 90_000 });
+});
+
+test("listClosedPullRequests answers retryable_refusal for a 500 after one request", async (t) => {
+  const server = await platform(
+    t,
+    answer(INTERNAL_SERVER_ERROR, { message: "broken" }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+  assert.equal(!result.ok && result.status, INTERNAL_SERVER_ERROR);
+});
+
+test("listClosedPullRequests refuses an item without a number or a closed_at as a lost read", async (t) => {
+  const bodies: unknown[] = [
+    [{ ...MERGED_PULL, closed_at: null }],
+    [{ number: 41, state: "closed" }],
+    [{ ...MERGED_PULL, number: 0 }],
+    [{ ...MERGED_PULL, number: "41" }],
+    { number: 41 },
+    [MERGED_PULL, { ...UNMERGED_PULL, closed_at: "" }],
+  ];
+  const server = await platform(t, (request, response, count) => {
+    answer(200, bodies[count - SINGLE_REQUEST])(request, response, count);
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  for (let index = 0; index < bodies.length; index += 1) {
+    const result = await github.listClosedPullRequests(call(), {
+      ...EVENTS_QUERY,
+      etag: null,
+    });
+    assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+    assert.equal(!result.ok && result.status, null);
+  }
+  assert.equal(server.requests.length, bodies.length);
+});
+
+test("listClosedPullRequests answers an empty page with no event", async (t) => {
+  const server = await platform(t, answer(200, [], { etag: FIRST_ETAG }));
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
+  assert.ok(result.ok && !result.value.notModified);
+  assert.deepEqual(result.value.events, []);
+  assert.equal(result.value.etag, FIRST_ETAG);
+});
+
+test("githubCheckpointSchema admits both ETags, loads a missing pulls_etag as null and drops a stored newest_event_id", () => {
   assert.deepEqual(githubCheckpointSchema.parse({ etag: null }), {
     etag: null,
+    pulls_etag: null,
   });
   assert.deepEqual(githubCheckpointSchema.parse({ etag: FIRST_ETAG }), {
     etag: FIRST_ETAG,
+    pulls_etag: null,
   });
   assert.deepEqual(
+    githubCheckpointSchema.parse({ etag: null, pulls_etag: SECOND_ETAG }),
+    { etag: null, pulls_etag: SECOND_ETAG },
+  );
+  assert.deepEqual(
     githubCheckpointSchema.parse({ etag: FIRST_ETAG, newest_event_id: "41" }),
-    { etag: FIRST_ETAG },
+    { etag: FIRST_ETAG, pulls_etag: null },
   );
   assert.ok(!githubCheckpointSchema.safeParse({}).success);
+  assert.ok(
+    !githubCheckpointSchema.safeParse({ etag: null, pulls_etag: 1 }).success,
+  );
 });
 
 const EVENT_RESOURCE = "owner/gated";
@@ -1157,6 +1355,116 @@ test("decodeGitHubEvent answers the address of the two polled types", () => {
       branch: "feature/x",
       commit: EVENT_COMMIT,
     },
+  );
+});
+
+const closedPullRequestItem = (merged: boolean, overrides = {}) => ({
+  number: 7,
+  state: "closed",
+  closed_at: "2026-10-15T03:57:51Z",
+  merged_at: merged ? "2026-10-15T03:57:51Z" : null,
+  merge_commit_sha: merged ? EVENT_COMMIT : null,
+  base: { ref: "main", repo: { full_name: EVENT_RESOURCE } },
+  ...overrides,
+});
+
+test("decodeGitHubEvent answers the branch push of a merged closed pull request item and the pull request of an unmerged item", () => {
+  assert.deepEqual(
+    decoded("pull_request_closed", closedPullRequestItem(true)),
+    {
+      kind: "branch_push",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      branch: "main",
+      commit: EVENT_COMMIT,
+    },
+  );
+  assert.deepEqual(
+    decoded("pull_request_closed", closedPullRequestItem(false)),
+    {
+      kind: "pull_request",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      number: 7,
+    },
+  );
+});
+
+test("decodeGitHubEvent takes the branch of a merged item from base.ref and ignores the commit of an unmerged item", () => {
+  assert.deepEqual(
+    decoded(
+      "pull_request_closed",
+      closedPullRequestItem(true, {
+        base: { ref: "release/1.x", repo: { full_name: EVENT_RESOURCE } },
+      }),
+    ),
+    {
+      kind: "branch_push",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      branch: "release/1.x",
+      commit: EVENT_COMMIT,
+    },
+  );
+  assert.deepEqual(
+    decoded(
+      "pull_request_closed",
+      closedPullRequestItem(false, { merge_commit_sha: "not a commit" }),
+    ),
+    {
+      kind: "pull_request",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      number: 7,
+    },
+  );
+});
+
+test("decodeGitHubEvent answers null for a merged item without a valid merge commit", () => {
+  for (const merge_commit_sha of [
+    null,
+    undefined,
+    "",
+    "E".repeat(40),
+    "e".repeat(39),
+    "0".repeat(40),
+    7,
+  ]) {
+    assert.equal(
+      decoded(
+        "pull_request_closed",
+        closedPullRequestItem(true, { merge_commit_sha }),
+      ),
+      null,
+    );
+  }
+});
+
+test("decodeGitHubEvent answers null for a closed pull request item of another repository or of a bad shape", () => {
+  const other = { ref: "main", repo: { full_name: "owner/other" } };
+  assert.equal(
+    decoded(
+      "pull_request_closed",
+      closedPullRequestItem(true, { base: other }),
+    ),
+    null,
+  );
+  assert.equal(
+    decoded("pull_request_closed", closedPullRequestItem(true, { number: 0 })),
+    null,
+  );
+  assert.equal(
+    decoded("pull_request_closed", closedPullRequestItem(true, { base: {} })),
+    null,
+  );
+  assert.equal(
+    decoded(
+      "pull_request_closed",
+      closedPullRequestItem(true, {
+        base: { ref: "", repo: { full_name: EVENT_RESOURCE } },
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    decoded("pull_request_closed", [closedPullRequestItem(true)]),
+    null,
   );
 });
 

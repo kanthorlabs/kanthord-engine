@@ -62,14 +62,43 @@ const NO_UNRESOLVED_REQUESTS = 0;
 const REQUEST_FAILURE_MESSAGE = "intake: a poll request of an inbound failed.";
 const DEMAND_FAILURE_MESSAGE =
   "intake: the demand check of a poll inbound failed.";
-const EMPTY_CHECKPOINT: GitHubCheckpoint = { etag: null };
+const EMPTY_CHECKPOINT: GitHubCheckpoint = { etag: null, pulls_etag: null };
+const NO_WAIT_MS = 0;
+
+export type PollGitHub = Pick<
+  GitHubPlatform,
+  "listEvents" | "listClosedPullRequests"
+>;
+
+export const PollRead = {
+  Events: "events",
+  ClosedPullRequests: "closed_pull_requests",
+} as const;
+export type PollRead = (typeof PollRead)[keyof typeof PollRead];
+
+export const POLL_READS: readonly PollRead[] = [
+  PollRead.Events,
+  PollRead.ClosedPullRequests,
+];
+
+const CHECKPOINT_FIELD = {
+  [PollRead.Events]: "etag",
+  [PollRead.ClosedPullRequests]: "pulls_etag",
+} as const satisfies Record<PollRead, keyof GitHubCheckpoint>;
+
+export function etagOf(
+  checkpoint: GitHubCheckpoint,
+  read: PollRead,
+): string | null {
+  return checkpoint[CHECKPOINT_FIELD[read]];
+}
 
 export interface PollCycleDependencies {
   store: Store;
   logger: Logger;
   identity: ServiceIdentity;
   custody: Pick<IntakeCustody, "authorizeOperation" | "release">;
-  github: Pick<GitHubPlatform, "listEvents">;
+  github: PollGitHub;
   unresolvedRequests: UnresolvedRequestCounter;
   pendingEventLimit: number;
   wake(): void;
@@ -161,7 +190,7 @@ export interface PollReleaseDependencies {
   custody: Pick<IntakeCustody, "authorizeOperation" | "release">;
 }
 
-export interface PollEventsRequest {
+export interface PollReadRequest {
   requester: CallerIdentity;
   context: Context;
   material: Material;
@@ -198,9 +227,10 @@ export function releasePollGrant(
   return dependencies.custody.release(tx, grant, now);
 }
 
-export async function requestPollEvents(
-  github: Pick<GitHubPlatform, "listEvents">,
-  request: PollEventsRequest,
+export async function requestPollRead(
+  github: PollGitHub,
+  read: PollRead,
+  request: PollReadRequest,
 ): Promise<GitHubAnswer<GitHubEventsAnswer>> {
   assert.ok(request.owner.length > EMPTY_TEXT_LENGTH, "A poll names an owner.");
   assert.ok(
@@ -214,15 +244,20 @@ export async function requestPollEvents(
   );
   const { signal, dispose } = abortSignal(request.context);
   try {
-    return await github.listEvents(
-      {
-        token,
-        requester: request.requester,
-        signal,
-        deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
-      },
-      { owner: request.owner, repo: request.repo, etag: request.etag },
-    );
+    const call = {
+      token,
+      requester: request.requester,
+      signal,
+      deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
+    };
+    const query = {
+      owner: request.owner,
+      repo: request.repo,
+      etag: request.etag,
+    };
+    return read === PollRead.Events
+      ? await github.listEvents(call, query)
+      : await github.listClosedPullRequests(call, query);
   } finally {
     dispose();
   }
@@ -285,6 +320,7 @@ export function nextWait(
       Math.max(
         intervalMs,
         Math.min(intervalMs * BACKOFF_FACTOR ** refusals, POLL_BACKOFF_MAX_MS),
+        result.waitMs ?? NO_WAIT_MS,
       ),
       POLL_WAIT_MAX_MS,
     ),
@@ -350,6 +386,7 @@ export function storeBatch(
   tx: Transaction,
   pendingEventLimit: number,
   inboundId: string,
+  read: PollRead,
   answer: { etag: string | null; events: GitHubEvent[] },
 ): boolean {
   assert.ok(Number.isSafeInteger(pendingEventLimit));
@@ -381,7 +418,8 @@ export function storeBatch(
     inboundId,
     canonicalJSON(
       githubCheckpointSchema.parse({
-        etag: unstored ? null : answer.etag,
+        ...checkpointOf(row.checkpoint),
+        [CHECKPOINT_FIELD[read]]: unstored ? null : answer.etag,
       }),
     ),
   );
@@ -402,52 +440,103 @@ function logFailure(
   logger.warn({ inbound_id: inboundId, code }, message);
 }
 
-export async function pollCycle(
+interface ReadResult {
+  cycle: CycleResult;
+  endsCycle: boolean;
+}
+
+async function pollRead(
   dependencies: PollCycleDependencies,
-  inboundId: string,
+  target: PollTarget,
+  read: PollRead,
   context: Context,
-): Promise<CycleResult> {
+): Promise<ReadResult> {
   const hold: Hold = { material: null };
   try {
-    const preparation = dependencies.store.transaction((tx) =>
-      inspectCycle(dependencies, tx, inboundId),
-    );
-    if (!preparation.ready)
-      return preparation.outcome === CycleOutcome.Gone
-        ? GONE_CYCLE
-        : SKIPPED_CYCLE;
-    const { target } = preparation;
-    if (!(await hasDemand(dependencies, target, context))) return SKIPPED_CYCLE;
     const present = dependencies.store.transaction((tx) =>
       releaseCycle(dependencies, tx, target, hold),
     );
-    if (!present) return GONE_CYCLE;
+    if (!present) return { cycle: GONE_CYCLE, endsCycle: true };
     assert.ok(hold.material, "A committed release holds the material.");
-    const answer = await requestPollEvents(dependencies.github, {
+    const answer = await requestPollRead(dependencies.github, read, {
       requester: dependencies.identity,
       context,
       material: hold.material,
       owner: target.owner,
       repo: target.repo,
-      etag: target.checkpoint.etag,
+      etag: etagOf(target.checkpoint, read),
     });
-    if (context.err()) return SKIPPED_CYCLE;
+    if (context.err()) return { cycle: SKIPPED_CYCLE, endsCycle: true };
     if (!answer.ok) {
-      logFailure(dependencies.logger, inboundId, answer.code);
-      return failedCycle(answer);
+      logFailure(dependencies.logger, target.facts.inboundId, answer.code);
+      return {
+        cycle: failedCycle(answer),
+        endsCycle: read === PollRead.Events && answer.rate_limit !== undefined,
+      };
     }
     const waitMs = answer.value.poll_interval_ms ?? null;
-    if (answer.value.notModified) return answeredCycle(waitMs);
+    if (answer.value.notModified)
+      return { cycle: answeredCycle(waitMs), endsCycle: false };
     const batch = answer.value;
     const stored = dependencies.store.transaction((tx) =>
-      storeBatch(tx, dependencies.pendingEventLimit, inboundId, batch),
+      storeBatch(
+        tx,
+        dependencies.pendingEventLimit,
+        target.facts.inboundId,
+        read,
+        batch,
+      ),
     );
-    if (!stored) return GONE_CYCLE;
+    if (!stored) return { cycle: GONE_CYCLE, endsCycle: true };
     dependencies.wake();
-    return answeredCycle(waitMs);
+    return { cycle: answeredCycle(waitMs), endsCycle: false };
   } finally {
     hold.material?.drop();
   }
+}
+
+function longestWait(first: number | null, second: number | null) {
+  if (first === null || second === null) return first ?? second;
+  return Math.max(first, second);
+}
+
+function joinCycles(first: CycleResult, second: CycleResult): CycleResult {
+  if (second.outcome === CycleOutcome.Gone) return second;
+  if (second.answer === CycleAnswer.Skipped) return second;
+  return {
+    outcome: CycleOutcome.Continue,
+    answer:
+      first.answer === CycleAnswer.SecondaryRefusal ||
+      second.answer === CycleAnswer.SecondaryRefusal
+        ? CycleAnswer.SecondaryRefusal
+        : CycleAnswer.Answered,
+    waitMs: longestWait(first.waitMs, second.waitMs),
+  };
+}
+
+export async function pollCycle(
+  dependencies: PollCycleDependencies,
+  inboundId: string,
+  context: Context,
+): Promise<CycleResult> {
+  const preparation = dependencies.store.transaction((tx) =>
+    inspectCycle(dependencies, tx, inboundId),
+  );
+  if (!preparation.ready)
+    return preparation.outcome === CycleOutcome.Gone
+      ? GONE_CYCLE
+      : SKIPPED_CYCLE;
+  const { target } = preparation;
+  if (!(await hasDemand(dependencies, target, context))) return SKIPPED_CYCLE;
+  const events = await pollRead(dependencies, target, PollRead.Events, context);
+  if (events.endsCycle) return events.cycle;
+  const pulls = await pollRead(
+    dependencies,
+    target,
+    PollRead.ClosedPullRequests,
+    context,
+  );
+  return joinCycles(events.cycle, pulls.cycle);
 }
 
 export class PollLoops {

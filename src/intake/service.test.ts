@@ -74,6 +74,7 @@ const POLL_TOKEN = "ghp_poll-token";
 const DEMANDED_REQUESTS = 1;
 const RESOURCE = "acme/app";
 const ETAG_STORED = '"etag-0"';
+const PULLS_ETAG_STORED = '"pulls-0"';
 const ETAG_FIRST = '"etag-1"';
 const CLOSED_LOCAL_PORT = "http://127.0.0.1:9";
 
@@ -320,6 +321,14 @@ function pollService(t: TestContext, store: Store) {
     next: async () => modified(ETAG_FIRST, []),
   };
   const listEvents = t.mock.method(github, "listEvents", () => answers.next());
+  const listPulls = t.mock.method(
+    github,
+    "listClosedPullRequests",
+    async (): Promise<EventsAnswer> => ({
+      ok: true,
+      value: { notModified: true },
+    }),
+  );
   const intake = new IntakeService({
     store,
     logger: pino({ enabled: false }),
@@ -384,16 +393,20 @@ function pollService(t: TestContext, store: Store) {
     await settle();
   };
   const queries = () => listEvents.mock.calls.map((call) => call.arguments[1]);
+  const pullQueries = () =>
+    listPulls.mock.calls.map((call) => call.arguments[1]);
   const signals = () =>
     listEvents.mock.calls.map((call) => call.arguments[0]?.signal);
   return {
     intake,
     answers,
     listEvents,
+    listPulls,
     create,
     remove,
     interval,
     queries,
+    pullQueries,
     signals,
   };
 }
@@ -538,6 +551,7 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
   const store = pollStore(t);
   insertNaming(store, InboundKind.Poll, CREDENTIAL, {
     etag: ETAG_STORED,
+    pulls_etag: PULLS_ETAG_STORED,
   });
   const first = pollService(t, store);
   first.answers.next = async () => modified(ETAG_FIRST, [ev("101")]);
@@ -547,6 +561,9 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
   assert.deepEqual(first.queries(), [
     { owner: "acme", repo: "app", etag: ETAG_STORED },
   ]);
+  assert.deepEqual(first.pullQueries(), [
+    { owner: "acme", repo: "app", etag: PULLS_ETAG_STORED },
+  ]);
   await shutDown(first.intake, firstRun);
   const second = pollService(t, store);
   const secondRun = second.intake.run();
@@ -554,6 +571,9 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
   await second.interval();
   assert.deepEqual(second.queries(), [
     { owner: "acme", repo: "app", etag: ETAG_FIRST },
+  ]);
+  assert.deepEqual(second.pullQueries(), [
+    { owner: "acme", repo: "app", etag: PULLS_ETAG_STORED },
   ]);
   await shutDown(second.intake, secondRun);
 });

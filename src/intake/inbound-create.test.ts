@@ -60,9 +60,11 @@ const CREDENTIAL_INVALID_STATUS = 422;
 const PROJECT_CALLS_AFTER_REFUSAL = 0;
 const REQUESTS_AFTER_REFUSAL = 0;
 const DRAINS_AFTER_REFUSAL = 0;
+const FORBIDDEN_STATUS = 403;
 const UNSTARTED_LOOP_COUNT = 0;
 const ROWS_AFTER_REFUSAL = 0;
-const DRAINS_PER_POLL_CREATE = 1;
+const DRAINS_PER_POLL_CREATE = 2;
+const DRAINS_OF_FAILED_FIRST_READ = 1;
 const ROWS_PER_CREATE = 1;
 const ROWS_AFTER_EQUAL_CREATES = 2;
 const PROJECT_CALLS_PER_CREATE = 1;
@@ -420,6 +422,10 @@ function fakeCustody(credentials: Map<string, string>) {
 function pollHarness(
   t: TestContext,
   answer: (call: GitHubCall, query: GitHubEventsQuery) => Promise<EventsAnswer>,
+  pullsAnswer: (
+    call: GitHubCall,
+    query: GitHubEventsQuery,
+  ) => Promise<EventsAnswer> = async () => modified,
 ) {
   const credentials = new Map([
     [POLL_CREDENTIAL, InboundPlatform.GitHub],
@@ -428,6 +434,11 @@ function pollHarness(
   const { custody, drops } = fakeCustody(credentials);
   const github = new GitHubPlatform({ baseUrl: CLOSED_LOCAL_PORT });
   const listEvents = t.mock.method(github, "listEvents", answer);
+  const listPulls = t.mock.method(
+    github,
+    "listClosedPullRequests",
+    pullsAnswer,
+  );
   const h = harness(t, { custody, github });
   h.store.transaction((tx) =>
     tx.database.exec("CREATE TABLE test_drain (credential TEXT NOT NULL)"),
@@ -438,7 +449,7 @@ function pollHarness(
       (tx) =>
         tx.database.prepare("SELECT credential FROM test_drain").all().length,
     );
-  return { ...h, credentials, drops, listEvents, start, drained };
+  return { ...h, credentials, drops, listEvents, listPulls, start, drained };
 }
 
 const modified: EventsAnswer = {
@@ -446,7 +457,7 @@ const modified: EventsAnswer = {
   value: { notModified: false, etag: ETAG, events: [] },
 };
 
-test("a poll create performs one request with the credential and inserts one row", async (t) => {
+test("a poll create performs the events read and the closed pull request read with the credential and inserts one row", async (t) => {
   const h = pollHarness(t, async () => modified);
   const inbound = await h.create(POLL);
   assert.equal(inbound.kind, InboundKind.Poll);
@@ -461,7 +472,12 @@ test("a poll create performs one request with the credential and inserts one row
   assert.equal(call?.token, POLL_TOKEN);
   assert.equal(call?.requester, h.identity);
   assert.deepEqual(query, { owner: "owner", repo: "repo", etag: null });
-  assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
+  assert.equal(h.listPulls.mock.callCount(), REQUESTS_PER_POLL_CREATE);
+  const [pullCall, pullQuery] = h.listPulls.mock.calls[0]?.arguments ?? [];
+  assert.equal(pullCall?.token, POLL_TOKEN);
+  assert.equal(pullCall?.requester, h.identity);
+  assert.deepEqual(pullQuery, { owner: "owner", repo: "repo", etag: null });
+  assert.deepEqual(h.drops, [POLL_CREDENTIAL, POLL_CREDENTIAL]);
   assert.equal(h.drained(), DRAINS_PER_POLL_CREATE);
 });
 
@@ -474,7 +490,7 @@ test("a poll create starts one loop after the insert and a webhook starts none",
   assert.deepEqual(h.start.mock.calls[0]?.arguments, [inbound.id]);
 });
 
-test("a failed first request answers 422 platform_refused, inserts no row and starts no loop", async (t) => {
+test("a failed events read answers 422 platform_refused, makes no closed pull request read, inserts no row and starts no loop", async (t) => {
   const h = pollHarness(t, async () => ({
     ok: false,
     class: ResultClass.FinalRefusal,
@@ -489,9 +505,36 @@ test("a failed first request answers 422 platform_refused, inserts no row and st
   );
   assert.deepEqual(error.details, { status: UNAUTHORIZED_STATUS });
   assert.equal(h.listEvents.mock.callCount(), REQUESTS_PER_POLL_CREATE);
+  assert.equal(h.listPulls.mock.callCount(), REQUESTS_AFTER_REFUSAL);
+  assert.equal(h.drained(), DRAINS_OF_FAILED_FIRST_READ);
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
   assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
+});
+
+test("a failed closed pull request read answers 422 platform_refused, inserts no row and starts no loop", async (t) => {
+  const h = pollHarness(
+    t,
+    async () => modified,
+    async () => ({
+      ok: false,
+      class: ResultClass.FinalRefusal,
+      code: "repository.platform.github.final_refusal",
+      status: FORBIDDEN_STATUS,
+      message: "Resource not accessible by personal access token",
+    }),
+  );
+  const error = await refusesWith(
+    h.create(POLL),
+    CREDENTIAL_INVALID_STATUS,
+    PLATFORM_REFUSED,
+  );
+  assert.deepEqual(error.details, { status: FORBIDDEN_STATUS });
+  assert.equal(h.listEvents.mock.callCount(), REQUESTS_PER_POLL_CREATE);
+  assert.equal(h.listPulls.mock.callCount(), REQUESTS_PER_POLL_CREATE);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+  assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
+  assert.deepEqual(h.drops, [POLL_CREDENTIAL, POLL_CREDENTIAL]);
 });
 
 test("an unknown credential and a credential of another platform answer 422 with no platform call", async (t) => {
@@ -508,12 +551,16 @@ test("an unknown credential and a credential of another platform answer 422 with
   assert.deepEqual(h.drops, []);
 });
 
-test("a credential archive between the first request and the insert refuses the insert and leaves no row", async (t) => {
+test("a credential archive between the last request and the insert refuses the insert and leaves no row", async (t) => {
   const credentials: { map?: Map<string, string> } = {};
-  const h = pollHarness(t, async () => {
-    credentials.map?.delete(POLL_CREDENTIAL);
-    return modified;
-  });
+  const h = pollHarness(
+    t,
+    async () => modified,
+    async () => {
+      credentials.map?.delete(POLL_CREDENTIAL);
+      return modified;
+    },
+  );
   credentials.map = h.credentials;
   await refusesWith(
     h.create(POLL),
@@ -521,9 +568,10 @@ test("a credential archive between the first request and the insert refuses the 
     CREDENTIAL_INVALID,
   );
   assert.equal(h.listEvents.mock.callCount(), REQUESTS_PER_POLL_CREATE);
+  assert.equal(h.listPulls.mock.callCount(), REQUESTS_PER_POLL_CREATE);
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
   assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
-  assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
+  assert.deepEqual(h.drops, [POLL_CREDENTIAL, POLL_CREDENTIAL]);
 });
 
 test("a failure after the release keeps the committed drain and drops the material", async (t) => {
@@ -532,7 +580,7 @@ test("a failure after the release keeps the committed drain and drops the materi
     throw failure;
   });
   await assert.rejects(h.create(POLL), failure);
-  assert.equal(h.drained(), DRAINS_PER_POLL_CREATE);
+  assert.equal(h.drained(), DRAINS_OF_FAILED_FIRST_READ);
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
 });

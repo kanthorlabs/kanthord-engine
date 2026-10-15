@@ -42,6 +42,7 @@ const call = {
 const GITHUB_TOKEN = "test-secret";
 const VALIDATION_FAILED_STATUS = 422;
 const NO_PULLS = 0;
+const COMMIT_LENGTH = 40;
 const NOT_MODIFIED_STATUS = 304;
 const CREATED_STATUS = 201;
 const EVENTS_PATH = "/repos/owner/repo/events?per_page=100";
@@ -315,6 +316,47 @@ test("fake GitHub changes the ETag with the list and answers 304 for a match", a
     ],
   );
   assert.equal(gitHub.calls[0]?.path, EVENTS_PATH);
+});
+
+test("fake GitHub lists the closed pull requests by close time with an ETag that changes at a close", async (t) => {
+  const gitHub = await fakeGitHub(t);
+  const platform = new GitHubPlatform({ baseUrl: gitHub.endpoint });
+  const first = gitHub.open({
+    owner: "owner",
+    repo: "repo",
+    head: "node-1",
+    base: "main",
+  });
+  const second = gitHub.open({
+    owner: "owner",
+    repo: "repo",
+    head: "node-2",
+    base: "main",
+  });
+  const empty = await platform.listClosedPullRequests(
+    gitHubCall(),
+    eventsQuery(null),
+  );
+  assert.ok(empty.ok && !empty.value.notModified);
+  assert.deepEqual(empty.value.events, []);
+  assert.ok(empty.value.etag);
+  gitHub.merge(first, "e".repeat(COMMIT_LENGTH));
+  gitHub.close(second);
+  const relisted = await platform.listClosedPullRequests(
+    gitHubCall(),
+    eventsQuery(empty.value.etag),
+  );
+  assert.ok(relisted.ok && !relisted.value.notModified);
+  assert.deepEqual(
+    relisted.value.events.map((event) => event.id.split(":")[1]),
+    [String(second), String(first)],
+  );
+  assert.notEqual(relisted.value.etag, empty.value.etag);
+  const again = await platform.listClosedPullRequests(
+    gitHubCall(),
+    eventsQuery(relisted.value.etag),
+  );
+  assert.deepEqual(again, { ok: true, value: { notModified: true } });
 });
 
 test("fake GitHub scripts the events failures and holds the later events calls", async (t) => {
