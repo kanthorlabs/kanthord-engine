@@ -151,7 +151,14 @@ export class WorkerService implements Service {
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
-    this.performer = new ActionPerformer(dependencies);
+    this.performer = new ActionPerformer({
+      store: dependencies.store,
+      schedulerClaims: dependencies.schedulerClaims,
+      missionActions: dependencies.missionActions,
+      intakeActions: dependencies.intakeActions,
+      evidenceRequests: dependencies.evidenceRequests,
+      logger: dependencies.pool?.logger ?? null,
+    });
     this.heartbeatClock = new HeartbeatClock(dependencies.monotonicNow);
     this.registrations =
       dependencies.registrations ??
