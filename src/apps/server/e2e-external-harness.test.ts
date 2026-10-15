@@ -123,8 +123,8 @@ test(
         bindingName: "harness",
         name,
       });
-    const auth = issue("test_harness_a");
-    const other = issue("test_harness_b");
+    const auth = await issue("test_harness_a");
+    const other = await issue("test_harness_b");
     cli.secrets.push(
       auth.token,
       other.token,

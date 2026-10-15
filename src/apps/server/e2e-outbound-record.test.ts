@@ -111,7 +111,7 @@ test("E02.6 a malformed identity and an unknown state refuse", async (t) => {
 
 test("E02.7 a machine token lists no outbound request", async (t) => {
   const { fixture, env, run } = await setup(t);
-  const machine = generateMachineToken({
+  const machine = await generateMachineToken({
     env,
     masterKey: fixture.config.master_key,
     projectId: SYNTHETIC_PROJECT_ID,

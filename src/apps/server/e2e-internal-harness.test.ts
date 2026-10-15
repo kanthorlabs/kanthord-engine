@@ -264,8 +264,8 @@ async function setupInternal(t: TestContext) {
       bindingName,
       name: `test_${bindingName}`,
     });
-  const generalAuth = issue("general");
-  const reviewAuth = issue("review");
+  const generalAuth = await issue("general");
+  const reviewAuth = await issue("review");
   cli.secrets.push(
     generalAuth.token,
     generalAuth.client_secret,

@@ -24,8 +24,8 @@ test("machine issuance helper preserves group claims and independently derives p
     bindingName: "test-harness",
     name: "test_client",
   };
-  const first = generateMachineToken(input);
-  const second = generateMachineToken(input);
+  const first = await generateMachineToken(input);
+  const second = await generateMachineToken(input);
   assert.equal(Buffer.from(first.client_secret, "base64").length, KEY_BYTES);
   assert.equal(Buffer.from(second.client_secret, "base64").length, KEY_BYTES);
   assert.ok(first.client_secret !== second.client_secret);
