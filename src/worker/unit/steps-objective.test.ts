@@ -2,12 +2,23 @@ import { ExecutionBudget } from "./budget.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
 import { test, type TestContext } from "node:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, DeadlineExceeded } from "../../kernel/context.ts";
-import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
+import {
+  fixtureTemplate,
+  temporary,
+  hostEnvironment,
+} from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import * as connector from "../../repository/connector.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
@@ -68,6 +79,25 @@ const SECOND_JUDGEMENT = 2;
 const TASK_JUDGED = "task judged";
 const CHOICE_AND_TWO_JUDGEMENTS = 3;
 const THREE_JUDGEMENTS = 3;
+const IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
+const USER_CONFIG = "[user]\n\tname = Test\n\temail = test@example.invalid\n";
+const BARE_NAME = "origin.git";
+const bareTemplate = fixtureTemplate(async (root) => {
+  const origin = join(root, "origin");
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.raw(["init", "-b", "main"]);
+  writeFileSync(join(origin, "file"), "base");
+  await git.add("file");
+  await git.raw([...IDENTITY, "commit", "-m", "base"]);
+  await git.clone(origin, join(root, BARE_NAME), ["--bare"]);
+  rmSync(origin, { recursive: true });
+});
 const task = (name: string, command: string): TaskContent => ({
   id: createIdentity("node"),
   filename: `${name}.md`,
@@ -87,17 +117,7 @@ async function fixture(
   turns?: number,
 ) {
   const state = temporary(t);
-  const origin = temporary(t);
-  const git = simpleGit(origin);
-  await git.init();
-  await git.raw(["checkout", "-b", "main"]);
-  await git.addConfig("user.name", "Test");
-  await git.addConfig("user.email", "test@example.invalid");
-  writeFileSync(join(origin, "file"), "base");
-  await git.add("file");
-  await git.commit("base");
-  const bare = join(state, "origin.git");
-  await git.clone(origin, bare, ["--bare"]);
+  const bare = join((await bareTemplate(t)).root, BARE_NAME);
   const setup = anthropicSetup();
   if (turns) setup.resource_budget.turns = turns;
   setup.repositories = [
@@ -150,11 +170,7 @@ async function fixture(
   });
   t.after(() => run.dispose());
   const workspace = await prepareStepsWorkspace(input, run);
-  await simpleGit(workspace.directory).addConfig("user.name", "Test");
-  await simpleGit(workspace.directory).addConfig(
-    "user.email",
-    "test@example.invalid",
-  );
+  appendFileSync(join(workspace.directory, ".git", "config"), USER_CONFIG);
   const provider = scriptedProvider(script);
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("anthropic", async () => ({
@@ -1042,11 +1058,9 @@ async function advanceBase(
   const clone = temporary(t);
   const git = simpleGit(clone);
   await git.clone(h.bare, clone, ["--branch", "main"]);
-  await git.addConfig("user.name", "Test");
-  await git.addConfig("user.email", "test@example.invalid");
   writeFileSync(join(clone, path), content);
   await git.add(path);
-  await git.commit(`base change of ${path}`);
+  await git.raw([...IDENTITY, "commit", "-m", `base change of ${path}`]);
   await git.push("origin", "main");
 }
 
