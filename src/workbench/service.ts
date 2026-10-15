@@ -521,7 +521,7 @@ export class WorkbenchService implements Service {
 
   private runState(sessionId: string) {
     const session = this.sessions.get(sessionId);
-    const pending = session?.approvals.values().next().value?.approval;
+    const pending = session ? this.pendingApprovalOf(session) : null;
     return {
       run_active: session !== undefined && this.runActive(session),
       pending_approval: pending
@@ -531,6 +531,10 @@ export class WorkbenchService implements Service {
           }
         : null,
     };
+  }
+
+  private pendingApprovalOf(session: OpenSession): PendingApproval | null {
+    return session.approvals.values().next().value?.approval ?? null;
   }
 
   private runActive(session: OpenSession): boolean {
@@ -559,8 +563,7 @@ export class WorkbenchService implements Service {
       streaming_message:
         streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
       pending_tool_calls: state ? [...state.pendingToolCalls] : [],
-      pending_approval:
-        session.approvals.values().next().value?.approval ?? null,
+      pending_approval: this.pendingApprovalOf(session),
       run_active: this.runActive(session),
       error_message: session.runError ?? state?.errorMessage ?? null,
     };
