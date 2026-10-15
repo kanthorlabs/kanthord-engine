@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { ulid } from "ulid";
 import type { MachineIdentity } from "../kernel/caller.ts";
+import { Landing } from "../project/contract.ts";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -241,6 +242,16 @@ export class ActionPerformer {
       const recorded = await this.record(caller, claim, pending, answer);
       settlement =
         recorded.kind === ActionResultKind.Uncertain ? recorded : null;
+      if (
+        recorded.kind === ActionResultKind.Submitted &&
+        pending.entry.action.action === RepositoryAction.PullRequest &&
+        pending.entry.action.configuration.landing === Landing.KanthorD
+      ) {
+        const evidenceId = recorded.evidence.id as string;
+        await this.requestMerge(call, claim, pending, evidenceId).catch(
+          () => {},
+        );
+      }
       return recorded;
     } finally {
       this.reservations.settle(
@@ -333,5 +344,24 @@ export class ActionPerformer {
       result = { type: OperationResultType.Indeterminate };
     }
     return recordedItem(pending.key.action, address, result);
+  }
+
+  private async requestMerge(
+    call: IntakeActionCall,
+    claim: ExecutionClaim,
+    pending: Pending,
+    evidenceId: string,
+  ): Promise<void> {
+    const mergeRequestKey = `${pending.key.nodeId}/${pending.key.attempt}/${pending.entry.action.key}/merge/${pending.operands.commit}`;
+    await this.dependencies.intakeActions.perform(
+      call,
+      {
+        key: pending.entry.action.key,
+        commit: pending.operands.commit,
+        reusedEvidenceId: null,
+        mergeEvidenceId: evidenceId,
+      },
+      mergeRequestKey,
+    );
   }
 }

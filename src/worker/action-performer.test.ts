@@ -723,3 +723,81 @@ test("mixed GitHub display capitalization reuses the earlier request without cha
   assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, PR);
   assert.equal(h.performSpy.mock.callCount(), SINGLE_CALL_COUNT);
 });
+
+test("kanthord landing requests create, evidence, and merge in order", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  const order: string[] = [];
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => {
+      order.push("perform");
+      return PR;
+    },
+  );
+  h.dependencies.evidenceRequests.request = async () => {
+    order.push("evidence");
+    return {
+      type: OperationResultType.Completed,
+      status: HttpStatus.OK,
+      data: h.evidence,
+    };
+  };
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.deepEqual(order, ["perform", "evidence", "perform"]);
+  assert.deepEqual(perform.mock.calls[0]!.arguments[1], {
+    key: h.entry.action.key,
+    commit: COMMIT,
+    reusedEvidenceId: null,
+  });
+  assert.equal(
+    perform.mock.calls[0]!.arguments[2],
+    `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}`,
+  );
+  assert.deepEqual(perform.mock.calls[1]!.arguments[1], {
+    key: h.entry.action.key,
+    commit: COMMIT,
+    reusedEvidenceId: null,
+    mergeEvidenceId: h.evidence.id,
+  });
+  assert.equal(
+    perform.mock.calls[1]!.arguments[2],
+    `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}/merge/${COMMIT}`,
+  );
+});
+
+test("human landing makes no merge call", async (t) => {
+  const h = actionable(t);
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+});
+
+test("a failed merge does not change the return item", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  let callCount = 0;
+  h.dependencies.intakeActions.perform = async () => {
+    callCount += 1;
+    if (callCount === DUAL_CALL_COUNT)
+      throw new OperationError(
+        HttpStatus.Forbidden,
+        "merge.refused",
+        "refused",
+      );
+    return PR;
+  };
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(callCount, DUAL_CALL_COUNT);
+});

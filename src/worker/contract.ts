@@ -291,6 +291,7 @@ export type ActionPerformInput = {
   key: string;
   commit: string;
   reusedEvidenceId: string | null;
+  mergeEvidenceId?: string | null;
 };
 export type ActionReadPage = { limit?: number; cursor?: string };
 export type ResultClassAnswer = {
