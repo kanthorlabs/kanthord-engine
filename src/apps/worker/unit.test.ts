@@ -10,6 +10,7 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
+import { installPiTools } from "../../agent/pi-tools.ts";
 import { WorkerUnit } from "./unit.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
@@ -81,11 +82,23 @@ function scripted(options: {
   return { transport, deregistrations };
 }
 
+function environmentOf(t: TestContext): NodeJS.ProcessEnv {
+  const env = { XDG_CONFIG_HOME: temporary(t), XDG_STATE_HOME: temporary(t) };
+  try {
+    installPiTools({ env });
+  } catch (error) {
+    assert.fail(
+      `${(error as Error).message} Run pnpm run pi-tools:fetch before this test.`,
+    );
+  }
+  return env;
+}
+
 function unitOf(t: TestContext, transport: WorkerTransport) {
   return new WorkerUnit({
     transport,
     client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
-    env: { XDG_CONFIG_HOME: temporary(t), XDG_STATE_HOME: temporary(t) },
+    env: environmentOf(t),
     log: () => {},
   });
 }
@@ -190,7 +203,7 @@ test("a unit that drains before its first pull cancels a pull that waits for wor
   const unit = new WorkerUnit({
     transport,
     client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
-    env: { XDG_CONFIG_HOME: temporary(t), XDG_STATE_HOME: temporary(t) },
+    env: environmentOf(t),
     log: () => {},
     resume_pull_wait_ms: SETTLE_WAIT_MS,
   });

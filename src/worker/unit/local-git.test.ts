@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  overrideEnvironment,
+  temporary,
+  UNSET_GIT_ENVIRONMENT,
+} from "../../kernel/test-support.ts";
 import {
   addedFiles,
   checkpointCommitMessage,
@@ -15,6 +20,8 @@ import {
 } from "./local-git.ts";
 
 const env = hostEnvironment();
+const DEFAULT_IDENTITY = "kanthord <kanthord@localhost>";
+const CRLF_CONTENT = "a\r\nb\r\n";
 
 test("verification cleanup discards tracked and untracked edits but keeps ignored files", async (t) => {
   const original = "original";
@@ -137,5 +144,93 @@ test("added files list only the files that the branch adds against its base", as
   assert.deepEqual(
     await addedFiles(env, directory, "main", background, 10000),
     ["debug.mjs"],
+  );
+});
+
+test("work commits ignore the global git configuration of the host", async (t) => {
+  const home = temporary(t);
+  writeFileSync(join(home, ".gitignore_global"), "**/*.env.*\n");
+  writeFileSync(
+    join(home, ".gitconfig"),
+    `[core]\n\texcludesFile = ${join(home, ".gitignore_global")}\n[user]\n\tname = Host\n\temail = host@example.invalid\n`,
+  );
+  overrideEnvironment(t, {
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: home,
+    XDG_CONFIG_HOME: undefined,
+  });
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  writeFileSync(join(directory, ".env.example"), "KEY=value");
+  writeFileSync(join(directory, "app.env.local"), "KEY=value");
+  assert.notEqual(
+    await commitWork(
+      hostEnvironment(),
+      directory,
+      "checkpoint",
+      background,
+      10000,
+    ),
+    null,
+  );
+  assert.deepEqual((await git.raw(["ls-files"])).trim().split("\n"), [
+    ".env.example",
+    "app.env.local",
+  ]);
+  assert.deepEqual(
+    (await git.raw(["log", "-1", "--format=%an <%ae>"])).trim(),
+    DEFAULT_IDENTITY,
+  );
+});
+
+test("work commits ignore the default global ignore file of the host", async (t) => {
+  const config = temporary(t);
+  mkdirSync(join(config, "git"));
+  writeFileSync(join(config, "git", "ignore"), "**/*.env.*\n");
+  overrideEnvironment(t, {
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: temporary(t),
+    XDG_CONFIG_HOME: config,
+  });
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  writeFileSync(join(directory, ".env.example"), "KEY=value");
+  await commitWork(
+    hostEnvironment(),
+    directory,
+    "checkpoint",
+    background,
+    10000,
+  );
+  assert.deepEqual((await git.raw(["ls-files"])).trim().split("\n"), [
+    ".env.example",
+  ]);
+});
+
+test("work commits ignore the default global attributes file of the host", async (t) => {
+  const config = temporary(t);
+  mkdirSync(join(config, "git"));
+  writeFileSync(join(config, "git", "attributes"), "* text\n");
+  overrideEnvironment(t, {
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: temporary(t),
+    XDG_CONFIG_HOME: config,
+  });
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  writeFileSync(join(directory, "crlf.txt"), CRLF_CONTENT);
+  await commitWork(
+    hostEnvironment(),
+    directory,
+    "checkpoint",
+    background,
+    10000,
+  );
+  assert.equal(
+    await git.raw(["cat-file", "blob", "HEAD:crlf.txt"]),
+    CRLF_CONTENT,
   );
 });

@@ -10,6 +10,10 @@ import { promisify } from "node:util";
 import { throwIfCancelled, type Context } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import {
+  GIT_UNSAFE_OPTIONS,
+  isolatedGitEnvironment,
+} from "../kernel/git-environment.ts";
+import {
   RepositoryFileState,
   SSH_RESOLVE_FAILED_STATUS,
   type RepositoryFile,
@@ -66,12 +70,6 @@ const EXIT_SUCCESS = 0;
 const EXIT_NOT_ANCESTOR = 1;
 const EXIT_DETACHED_HEAD = 1;
 const NO_EXIT = -1;
-const MERGE_IDENTITY = {
-  GIT_AUTHOR_NAME: "kanthord",
-  GIT_AUTHOR_EMAIL: "kanthord@localhost",
-  GIT_COMMITTER_NAME: "kanthord",
-  GIT_COMMITTER_EMAIL: "kanthord@localhost",
-} as const;
 
 export const GitStage = {
   BeforePush: "before_push",
@@ -117,6 +115,10 @@ const failNonzeroExit: SimpleGitOptions["errors"] = (error, result) =>
     ? error
     : (error ?? new Error(`git exited with ${result.exitCode}`));
 
+function gitEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return isolatedGitEnvironment(environment ?? process.env);
+}
+
 async function runGit(
   directory: string | undefined,
   args: string[],
@@ -159,9 +161,10 @@ async function runGitTask<T>(
       errors: options.errors ?? failNonzeroExit,
       abort: controller.signal,
       timeout: { block: deadlineMs },
+      unsafe: GIT_UNSAFE_OPTIONS,
     });
     const output = await task(
-      options.environment === undefined ? git : git.env(options.environment),
+      git.env(gitEnvironment(options.environment)),
       controller.signal,
     );
     if (controller.signal.aborted) throw new Error("Git aborted");
@@ -485,7 +488,6 @@ export async function mergePushFresh(
       await git(["merge", "--no-ff", "--no-edit", input.commit], {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
-        ...MERGE_IDENTITY,
       });
     });
     return atStage(GitStage.Push, async () => {
@@ -982,6 +984,7 @@ export async function readFilesAtCommit(
       async (_git, signal) => {
         const child = execFileAsync("git", args, {
           cwd: directory,
+          env: gitEnvironment(),
           signal,
           encoding: "buffer",
           maxBuffer: maxBytes,

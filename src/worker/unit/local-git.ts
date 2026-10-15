@@ -5,20 +5,15 @@ import {
   throwIfCancelled,
   type Context,
 } from "../../kernel/context.ts";
+import {
+  GIT_UNSAFE_OPTIONS,
+  isolatedGitEnvironment,
+} from "../../kernel/git-environment.ts";
 import { childEnvironment } from "./tool-table.ts";
 const EXPIRED = 0;
 const CLEAN_STATUS = "";
 const FIRST_ATTEMPT = 1;
 const NO_CONFLICTS = 0;
-const INTERACTIVE_HELPERS = [
-  "PAGER",
-  "GIT_PAGER",
-  "EDITOR",
-  "GIT_EDITOR",
-  "GIT_SEQUENCE_EDITOR",
-  "GIT_ASKPASS",
-  "SSH_ASKPASS",
-];
 
 export function taskCommitMessage(taskId: string, attempt: number): string {
   assert.ok(taskId);
@@ -85,6 +80,7 @@ async function run(
       baseDir: directory,
       abort: bridge.signal,
       timeout: { block: deadlineMs },
+      unsafe: GIT_UNSAFE_OPTIONS,
     })
       .env(gitEnvironment(env))
       .raw(args);
@@ -94,9 +90,7 @@ async function run(
 }
 
 function gitEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const output = childEnvironment(env);
-  for (const name of INTERACTIVE_HELPERS) delete output[name];
-  return output;
+  return isolatedGitEnvironment(childEnvironment(env));
 }
 
 export async function discardChanges(
