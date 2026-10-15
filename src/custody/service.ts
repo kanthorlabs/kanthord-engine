@@ -419,11 +419,12 @@ export class CustodyComponent implements Service, CredentialRecords {
     switch (request.kind) {
       case GrantKind.FrozenAction: {
         const { key, commit, reusedEvidenceId } = request;
+        const mergeEvidenceId = request.mergeEvidenceId ?? null;
         const authorized = mission.frozenAction(
           tx,
           request.identity,
           request.claim,
-          { key, commit, reusedEvidenceId },
+          { key, commit, reusedEvidenceId, mergeEvidenceId },
         );
         return mintGrant({ kind: request.kind, execution, ...authorized });
       }

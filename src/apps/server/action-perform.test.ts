@@ -409,12 +409,17 @@ async function setup(t: TestContext, landing = "human") {
     execution: ExecutionRecord,
     body: { key: string; commit: string; request_key: string },
     reusedEvidenceId: string | null = null,
+    mergeEvidenceId: string | null = null,
   ) =>
     intake["action.perform"](
       {
         params: { execution_id: execution.execution_id },
         query: {},
-        body: { ...body, reused_evidence_id: reusedEvidenceId },
+        body: {
+          ...body,
+          reused_evidence_id: reusedEvidenceId,
+          merge_evidence_id: mergeEvidenceId,
+        },
       },
       { identity, idempotencyKey: ulid() },
     ) as Promise<OperationResult<Answer>>;
@@ -1085,7 +1090,7 @@ test(
 );
 
 test(
-  "intake.action.perform merges the pull request at the tested commit for a kanthord landing",
+  "intake.action.perform creates a pull request for a kanthord landing without merging",
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t, KANTHORD_LANDING);
@@ -1100,27 +1105,18 @@ test(
       h.gitHub.calls.filter((call) => call.method === HttpMethod.Put);
     let created: PlatformAddress | null = null;
 
-    await t.test(
-      "a refused merge leaves the created pull request open and answers its address",
-      async () => {
-        h.gitHub.refuseMerge(MERGE_REFUSED_STATUS);
-        let answer: Answer;
-        try {
-          answer = completed(await h.perform(execution, body("create")));
-        } finally {
-          h.gitHub.refuseMerge(null);
-        }
-        assert.ok("kind" in answer, JSON.stringify(answer));
-        assert.equal(answer.kind, PlatformAddressKind.PullRequest);
-        created = answer;
-        assert.equal(h.row("create")?.state, OutboundRequestState.Succeeded);
-        assert.equal(merges().length, ONE_CREATE);
-        assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
-      },
-    );
+    await t.test("a kanthord create sends no PUT", async () => {
+      const answer = completed(await h.perform(execution, body("create")));
+      assert.ok("kind" in answer, JSON.stringify(answer));
+      assert.equal(answer.kind, PlatformAddressKind.PullRequest);
+      created = answer;
+      assert.equal(h.row("create")?.state, OutboundRequestState.Succeeded);
+      assert.equal(merges().length, NO_ROWS);
+      assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
+    });
 
     await t.test(
-      "a reuse pushes the snapshot and merges the reused pull request with its released credential",
+      "a reuse pushes the snapshot with a released credential and sends no PUT",
       async () => {
         assert.ok(created?.kind === PlatformAddressKind.PullRequest);
         const evidence = await h.request(
@@ -1129,20 +1125,118 @@ test(
           "gated.pull_request",
           created,
         );
+        const mergesBefore = merges().length;
         const answer = completed(
           await h.perform(execution, body("reuse"), evidence),
         );
         assert.deepEqual(answer, created);
         assert.equal(h.row("reuse")?.credential, GITHUB_CREDENTIAL);
-        const merge = merges().at(-1);
-        assert.equal(merge?.token, GITHUB_KEY);
-        assert.deepEqual(merge?.body, {
-          sha: h.gated.head,
-          merge_method: "merge",
-        });
-        assert.equal(h.gitHub.pulls.at(-1)?.merged, true);
+        assert.equal(merges().length, mergesBefore);
+        assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
         dropped(h.materials);
       },
     );
+  },
+);
+
+test(
+  "intake.action.perform merges the pull request for a kanthord landing",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, KANTHORD_LANDING);
+    const G = h.nodes.gated;
+    const execution = await h.evaluated(G, "gated", h.gated.head);
+    const mergeBody = (requestKey: string) => ({
+      key: "gated.pull_request",
+      commit: h.gated.head,
+      request_key: requestKey,
+    });
+    const merges = () =>
+      h.gitHub.calls.filter((call) => call.method === HttpMethod.Put);
+    let evidenceId!: string;
+
+    await t.test("setup: create and record evidence", async () => {
+      const answer = completed(await h.perform(execution, mergeBody("create")));
+      assert.ok("kind" in answer, JSON.stringify(answer));
+      assert.equal(answer.kind, PlatformAddressKind.PullRequest);
+      evidenceId = await h.request(G, execution, "gated.pull_request", answer);
+    });
+
+    await t.test("a mismatched evidence is refused", async () => {
+      failed(
+        await h.perform(
+          execution,
+          mergeBody("mismatch"),
+          null,
+          `evidence_${ulid()}`,
+        ),
+        HttpStatus.Forbidden,
+        MissionErrorCode.AuthorizationRefused,
+      );
+    });
+
+    await t.test("a 405 sets failed", async () => {
+      h.gitHub.refuseMerge(MERGE_REFUSED_STATUS);
+      let answer: Answer;
+      try {
+        answer = completed(
+          await h.perform(execution, mergeBody("refused"), null, evidenceId),
+        );
+      } finally {
+        h.gitHub.refuseMerge(null);
+      }
+      assert.ok("class" in answer, JSON.stringify(answer));
+      assert.equal(answer.class, ResultClass.FinalRefusal);
+      assert.equal(h.row("refused")?.state, OutboundRequestState.Failed);
+      dropped(h.materials);
+    });
+
+    await t.test(
+      "a pending merge whose pull request merged at the tested head sets succeeded with one PUT",
+      async () => {
+        const mergesBefore = merges().length;
+        const realMerge = h.fixture.github.mergePullRequest.bind(
+          h.fixture.github,
+        );
+        h.fixture.github.mergePullRequest = async (...args) => {
+          const result = await realMerge(...args);
+          if (!result.ok) throw new Error("dropped merge");
+          return result;
+        };
+        h.gitHub.dropNextAfterApply();
+        try {
+          failed(
+            await h.perform(execution, mergeBody("pending"), null, evidenceId),
+            HttpStatus.InternalServerError,
+            UNKNOWN_CODE,
+          );
+        } finally {
+          h.fixture.github.mergePullRequest = realMerge;
+        }
+        assert.equal(h.row("pending")?.state, OutboundRequestState.Pending);
+        const lastMerge = merges().at(-1);
+        assert.deepEqual(lastMerge?.body, {
+          sha: h.gated.head,
+          merge_method: "merge",
+        });
+        assert.equal(merges().length, mergesBefore + ONE_CREATE);
+        const answer = completed(
+          await h.perform(execution, mergeBody("pending"), null, evidenceId),
+        );
+        assert.ok("kind" in answer, JSON.stringify(answer));
+        assert.equal(h.row("pending")?.state, OutboundRequestState.Succeeded);
+        assert.equal(merges().length, mergesBefore + ONE_CREATE);
+        dropped(h.materials);
+      },
+    );
+
+    await t.test("a repeat of succeeded makes no call", async () => {
+      const callsBefore = h.gitHub.calls.length;
+      const answer = completed(
+        await h.perform(execution, mergeBody("pending"), null, evidenceId),
+      );
+      assert.ok("kind" in answer, JSON.stringify(answer));
+      assert.equal(h.gitHub.calls.length, callsBefore);
+    });
   },
 );

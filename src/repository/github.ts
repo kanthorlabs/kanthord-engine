@@ -800,6 +800,33 @@ export class GitHubPlatform {
     });
   }
 
+  async pullRequestMergedAt(
+    call: GitHubCall,
+    target: GitHubTarget,
+    input: { number: number; sha: string },
+  ): Promise<GitHubAnswer<boolean>> {
+    assert.ok(Number.isInteger(input.number));
+    assert.ok(input.number >= MIN_PULL_REQUEST_NUMBER);
+    assert.ok(input.sha.length >= MIN_SEGMENT_LENGTH);
+    const answer = await this.send(call, target, {
+      kind: CallKind.Read,
+      route: "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+      parameters: { pull_number: input.number },
+    });
+    if (!answer.ok) return answer;
+    const parsed = z
+      .looseObject({
+        merged: z.boolean(),
+        head: z.looseObject({ sha: z.string().min(MIN_SEGMENT_LENGTH) }),
+      })
+      .safeParse(answer.value);
+    if (!parsed.success) return unreadableBody(CallKind.Read);
+    return {
+      ok: true,
+      value: parsed.data.merged && parsed.data.head.sha === input.sha,
+    };
+  }
+
   async getSettledPullRequest(
     call: GitHubCall,
     target: GitHubTarget,

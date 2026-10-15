@@ -16,7 +16,6 @@ import {
   type GitHubTarget,
 } from "../repository/github.ts";
 import { GitStage, GitWriteError } from "../repository/index.ts";
-import { Landing } from "../project/contract.ts";
 import type { ActionCheckDependencies, IntakeCustody } from "./action-check.ts";
 import { addressCodec, decodeAddress } from "./address-codec.ts";
 import {
@@ -54,6 +53,7 @@ export type PerformBody = {
   key: string;
   commit: string;
   reused_evidence_id: string | null;
+  merge_evidence_id: string | null;
   request_key: string;
 };
 export type PerformAnswer = PlatformAddress | ResultClassAnswer;
@@ -129,14 +129,15 @@ function authorizePerform(
       key: body.key,
       commit: body.commit,
       reusedEvidenceId: body.reused_evidence_id,
+      mergeEvidenceId: body.merge_evidence_id,
     },
     now,
   );
   const granted = custody.grantFacts(grant);
-  const operation = operationOf(
-    granted.facts.frozen_action.action,
-    grant.platform,
-  );
+  const operation =
+    body.merge_evidence_id !== null
+      ? OutboundOperation.GitHubPullRequestMerge
+      : operationOf(granted.facts.frozen_action.action, grant.platform);
   held.operation = operation;
   held.facts = granted.facts;
   const material =
@@ -179,53 +180,63 @@ async function callAction(
   material: Material | null,
   scope: OutboundScope,
 ): Promise<CallAnswer> {
+  if (action.operation === OutboundOperation.GitHubPullRequestMerge)
+    return callMergePullRequest(dependencies, performer, action.facts, {
+      material,
+      scope,
+    });
   if (reusesPullRequest(action))
-    return landed(
-      dependencies,
-      performer,
-      action.facts,
-      { material, scope },
-      await pushSnapshot(dependencies, performer, action.facts, scope),
-    );
+    return pushSnapshot(dependencies, performer, action.facts, scope);
   if (action.operation === OutboundOperation.GitHubPullRequest)
-    return landed(
-      dependencies,
-      performer,
-      action.facts,
-      { material, scope },
-      await createPullRequest(dependencies, performer, action.facts, {
-        material,
-        scope,
-      }),
-    );
+    return createPullRequest(dependencies, performer, action.facts, {
+      material,
+      scope,
+    });
   assert.equal(action.operation, OutboundOperation.GitMergePush);
   assert.equal(material, null, "A merge push holds no material.");
   return mergePush(dependencies, action.facts, scope);
 }
 
-async function landed(
+async function callMergePullRequest(
   dependencies: ActionCheckDependencies,
   performer: Performer,
   facts: Readonly<ActionFacts>,
   held: { material: Material | null; scope: OutboundScope },
-  answer: CallAnswer,
 ): Promise<CallAnswer> {
-  if (
-    !answer.ok ||
-    facts.frozen_action.configuration.landing !== Landing.KanthorD
-  )
-    return answer;
-  const address = decodeAddress(answer.result);
-  assert.equal(address.kind, AddressKind.PullRequest);
+  assert.ok(facts.merge_address !== null, "A merge call names its address.");
   const call = gitHubCall(performer, held.material, held.scope);
   const method = await dependencies.github.mergeMethodOf(call, targetOf(facts));
-  if (!method.ok || method.value === null) return answer;
-  await dependencies.github.mergePullRequest(call, targetOf(facts), {
-    number: address.number,
-    sha: facts.snapshot_commit,
-    merge_method: method.value,
-  });
-  return answer;
+  if (!method.ok)
+    return {
+      ok: false,
+      class: method.class,
+      code: method.code,
+      message: method.message,
+    };
+  if (method.value === null)
+    return {
+      ok: false,
+      class: ResultClass.FinalRefusal,
+      code: GITHUB_RESULT_CODE_PREFIX + ResultClass.FinalRefusal,
+      message: "The repository allows no merge method.",
+    };
+  const answer = await dependencies.github.mergePullRequest(
+    call,
+    targetOf(facts),
+    {
+      number: facts.merge_address.number,
+      sha: facts.snapshot_commit,
+      merge_method: method.value,
+    },
+  );
+  if (!answer.ok)
+    return {
+      ok: false,
+      class: answer.class,
+      code: answer.code,
+      message: answer.message,
+    };
+  return { ok: true, result: facts.merge_address };
 }
 
 async function createPullRequest(
@@ -320,6 +331,11 @@ function readBackAction(
   material: Material | null,
   scope: OutboundScope,
 ): Promise<ReadBack> {
+  if (action.operation === OutboundOperation.GitHubPullRequestMerge)
+    return readBackMergePullRequest(dependencies, performer, action.facts, {
+      material,
+      scope,
+    });
   if (reusesPullRequest(action))
     return landedSnapshot(dependencies, performer, action.facts, scope);
   if (action.operation === OutboundOperation.GitHubPullRequest)
@@ -330,6 +346,26 @@ function readBackAction(
   assert.equal(action.operation, OutboundOperation.GitMergePush);
   assert.equal(material, null, "A merge push holds no material.");
   return landedMerge(dependencies, action.facts, scope);
+}
+
+async function readBackMergePullRequest(
+  dependencies: ActionCheckDependencies,
+  performer: Performer,
+  facts: Readonly<ActionFacts>,
+  held: { material: Material | null; scope: OutboundScope },
+): Promise<ReadBack> {
+  assert.ok(
+    facts.merge_address !== null,
+    "A merge read-back names its address.",
+  );
+  const call = gitHubCall(performer, held.material, held.scope);
+  const answer = await dependencies.github.pullRequestMergedAt(
+    call,
+    targetOf(facts),
+    { number: facts.merge_address.number, sha: facts.snapshot_commit },
+  );
+  if (!answer.ok || !answer.value) return { match: false };
+  return { match: true, result: facts.merge_address };
 }
 
 async function openPullRequest(
@@ -419,6 +455,8 @@ function finalizePerform(
 
 function resultCodeOf(action: Bound, resultClass: ResultClassValue): string {
   assert.ok(Object.values(ResultClass).includes(resultClass));
+  if (action.operation === OutboundOperation.GitHubPullRequestMerge)
+    return GITHUB_RESULT_CODE_PREFIX + resultClass;
   if (reusesPullRequest(action)) return GIT_FAILED_CODE;
   if (action.operation === OutboundOperation.GitHubPullRequest)
     return GITHUB_RESULT_CODE_PREFIX + resultClass;

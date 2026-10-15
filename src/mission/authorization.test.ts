@@ -148,6 +148,7 @@ function actionHarness(t: TestContext) {
         key: PULL_REQUEST_KEY,
         commit: ASSESSED_COMMIT,
         reusedEvidenceId: null,
+        mergeEvidenceId: null,
         ...input,
       }),
     );

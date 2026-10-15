@@ -982,6 +982,7 @@ function mergePull(
     .digest("hex");
   closePull(state, pull);
   pull.merged = true;
+  pull.head_sha = sha;
   pull.merge_commit_sha = mergeCommit;
   return { status: HttpStatus.OK, body: { sha: mergeCommit, merged: true } };
 }

@@ -98,6 +98,7 @@ components:
               type: string
               enum:
                 - github.pull_request
+                - github.pull_request_merge
                 - git.merge_push
                 - s3.delete_object
             limit:
@@ -140,6 +141,7 @@ components:
                 type: string
                 enum:
                   - github.pull_request
+                  - github.pull_request_merge
                   - git.merge_push
                   - s3.delete_object
               request_key:

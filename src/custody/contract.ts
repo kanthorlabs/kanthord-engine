@@ -177,6 +177,7 @@ export type ActionFacts = {
   repository: RepositoryFacts;
   snapshot_commit: string;
   reused_address: PullRequestAddressFacts | null;
+  merge_address: PullRequestAddressFacts | null;
 };
 export type RequestFacts = {
   frozen_action: FrozenActionFacts;
@@ -221,7 +222,12 @@ export interface MissionAuthorization {
     tx: Transaction,
     identity: MachineIdentity,
     claim: ExecutionClaim,
-    input: { key: string; commit: string; reusedEvidenceId: string | null },
+    input: {
+      key: string;
+      commit: string;
+      reusedEvidenceId: string | null;
+      mergeEvidenceId: string | null;
+    },
   ): Authorized<ActionFacts>;
   requestEvidence(
     tx: Transaction,
@@ -275,6 +281,7 @@ export type GrantRequest =
       key: string;
       commit: string;
       reusedEvidenceId: string | null;
+      mergeEvidenceId?: string | null;
     }
   | {
       kind: typeof GrantKind.RequestEvidence;

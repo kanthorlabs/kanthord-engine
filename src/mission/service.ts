@@ -912,7 +912,12 @@ export class MissionService
     tx: Transaction,
     identity: MachineIdentity,
     claim: ExecutionClaim,
-    input: { key: string; commit: string; reusedEvidenceId: string | null },
+    input: {
+      key: string;
+      commit: string;
+      reusedEvidenceId: string | null;
+      mergeEvidenceId: string | null;
+    },
   ) {
     return authorizeFrozenAction(tx, this.dependencies, identity, claim, input);
   }
