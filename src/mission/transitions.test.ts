@@ -10,6 +10,7 @@ import {
   ClaimKind,
   AssetKind,
   AssessmentResult,
+  CheckEndState,
   EndState,
   ReleaseObligation,
   RepositoryAction,
@@ -17,6 +18,7 @@ import {
   missionOperations,
   type AssetKind as AssetType,
 } from "./contract.ts";
+import type { Dependencies } from "./service.ts";
 import {
   insertEvidence,
   insertAssessment,
@@ -38,8 +40,12 @@ const NOW = 100;
 const NO_ATTEMPT = 0;
 const INSERT = "workQueue.insert";
 const UNMET = "mission.release.obligation_unmet";
-function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
-  const h = controlHarness(t, IDENTITY);
+function fixture(
+  t: TestContext,
+  kind: NodeKind = NodeKind.Objective,
+  overrides: Partial<Dependencies> = {},
+) {
+  const h = controlHarness(t, IDENTITY, overrides);
   const bindingId = createIdentity("binding");
   const executionId = createIdentity("execution");
   const opener = {
@@ -553,4 +559,173 @@ test("an unblock from the base branch starts a new node branch that later attemp
   assert.equal(evaluation?.kind, ClaimKind.Evaluation);
   assert.equal(evaluation?.attempt, THIRD_ATTEMPT);
   assert.equal(evaluation?.node_branch, restartBranch);
+});
+
+const PULL_REQUEST_NUMBER = 1;
+const LANDED_COMMIT = "a".repeat(40);
+const GATED_RESOURCE = "repository:github:owner/repo";
+
+function deferredFixture(
+  t: TestContext,
+  check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
+) {
+  const h = fixture(t, NodeKind.Objective, {
+    intakeCheck: { check: async () => check },
+  });
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) => {
+    const id = createIdentity("evidence");
+    insertEvidence(
+      tx,
+      {
+        id,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: id,
+          kind: AssetKind.Platform,
+          content: JSON.stringify({
+            kind: "pull_request",
+            resource_identity: GATED_RESOURCE,
+            number: PULL_REQUEST_NUMBER,
+          }),
+          published_at: NOW,
+          expired_at: null,
+        },
+      ],
+    );
+  });
+  return h;
+}
+
+test("deferred check applies expected end state and completes the node", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.Expected,
+    landed_commits: [LANDED_COMMIT],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("deferred check applies other end state and blocks the node", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.Other,
+    landed_commits: [],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.Blocked);
+});
+
+test("deferred check applies conflict and returns the node to Available", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.Conflict,
+    landed_commits: [],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.Available);
+});
+
+test("deferred check with none leaves the node in ExternalRequested", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.None,
+    landed_commits: [],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("a failing deferred check leaves the node unchanged", async (t) => {
+  const h = fixture(t, NodeKind.Objective, {
+    intakeCheck: {
+      check: async () => {
+        throw new Error("check failed");
+      },
+    },
+  });
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) => {
+    const id = createIdentity("evidence");
+    insertEvidence(
+      tx,
+      {
+        id,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: id,
+          kind: AssetKind.Platform,
+          content: JSON.stringify({
+            kind: "pull_request",
+            resource_identity: GATED_RESOURCE,
+            number: PULL_REQUEST_NUMBER,
+          }),
+          published_at: NOW,
+          expired_at: null,
+        },
+      ],
+    );
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.ExternalRequested);
 });

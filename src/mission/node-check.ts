@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { background } from "../kernel/context.ts";
 import { OperationError, type ErrorBody } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -14,6 +15,7 @@ import {
   CheckEndState,
   MissionErrorCode,
   NodeState,
+  PlatformAddressKind,
   Resolution,
   platformAddressSchema,
   checkEndStateSchema,
@@ -37,7 +39,7 @@ import {
   readRequests,
 } from "./record-store.ts";
 import { claimableMap, reconcileMission } from "./routing.ts";
-import { setNodeState, type NodeRow } from "./store.ts";
+import { readNode, setNodeState, type NodeRow } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 import { authorizeRequest } from "./authorization.ts";
@@ -304,4 +306,72 @@ export async function checkNode(
   }));
   dependencies.wakeup.wake(prepared.mission.project_id);
   return result;
+}
+
+async function runDeferredCheck(
+  dependencies: Dependencies,
+  nodeId: string,
+  attempt: number,
+): Promise<void> {
+  const prepared = dependencies.store.transaction((tx) => {
+    const node = readNode(tx, nodeId);
+    if (!node || node.state !== NodeState.ExternalRequested) return null;
+    const openAttempt = readOpenAttempt(tx, nodeId);
+    if (openAttempt?.attempt !== attempt) return null;
+    const requests = readRequests(tx, nodeId, attempt)
+      .filter((row) => row.end_state === null)
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((row) => requestContext(tx, dependencies, row.id))
+      .filter((ctx) => ctx.address.kind === PlatformAddressKind.PullRequest);
+    if (requests.length === NO_UNRESOLVED_REQUESTS) return null;
+    const mission = requireMission(tx, node.mission_id);
+    return { mission, requests };
+  });
+  if (prepared === null) return;
+  for (const item of prepared.requests) {
+    let answer: CheckAnswer;
+    try {
+      dependencies.store.transaction((tx) =>
+        authorizeRequest(tx, dependencies, item.request.id),
+      );
+      answer = checkAnswerSchema.parse(
+        await dependencies.intakeCheck.check(background, item.request.id),
+      );
+    } catch (error) {
+      dependencies.logger.warn(
+        { error, evidence_id: item.request.id },
+        "Deferred check failed.",
+      );
+      continue;
+    }
+    dependencies.store.transaction((tx) => {
+      const now = Date.now();
+      const claim =
+        answer.end_state === CheckEndState.None
+          ? null
+          : dependencies.schedulerClaims.liveExecutionOf(
+              tx,
+              item.request.node_id,
+              now,
+            );
+      if (claim === null)
+        applyEndState(tx, dependencies, item.request.id, answer, now);
+    });
+  }
+  dependencies.wakeup.wake(prepared.mission.project_id);
+}
+
+export function scheduleDeferredCheck(
+  dependencies: Dependencies,
+  nodeId: string,
+  attempt: number,
+): void {
+  setImmediate(() => {
+    runDeferredCheck(dependencies, nodeId, attempt).catch((error) => {
+      dependencies.logger.warn(
+        { error, node_id: nodeId },
+        "Deferred check crashed.",
+      );
+    });
+  });
 }

@@ -41,6 +41,7 @@ import {
   type Assessment,
   type Outcome,
 } from "../../mission/contract.ts";
+import { HttpMethod } from "../../kernel/http.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 
 const GIT_TIMEOUT_MS = 10000;
@@ -520,20 +521,23 @@ test(
           "1",
         ]);
         assert.equal(actions.items[0]!.resolution, UNRESOLVED);
-        assert.deepEqual(f.gitHub.calls, [
-          {
-            method: "POST",
-            path: "/repos/owner/gated/pulls",
-            body: {
-              head: `kanthord/${f.gated}`,
-              base: "main",
-              title: `kanthord ${f.gated}`,
+        assert.deepEqual(
+          f.gitHub.calls.filter((c) => c.method === HttpMethod.Post),
+          [
+            {
+              method: "POST",
+              path: "/repos/owner/gated/pulls",
+              body: {
+                head: `kanthord/${f.gated}`,
+                base: "main",
+                title: `kanthord ${f.gated}`,
+              },
+              token: GITHUB_KEY,
+              if_none_match: null,
+              status: 201,
             },
-            token: GITHUB_KEY,
-            if_none_match: null,
-            status: 201,
-          },
-        ]);
+          ],
+        );
       },
     );
     let outcomeC!: string;
@@ -563,25 +567,6 @@ test(
           ClosingEvent.ExternalSuccess,
         );
         outcomeC = outcomes.items[0]!.id;
-        assert.deepEqual(
-          f.gitHub.calls.slice(SINGLE_ITEM).map(({ method, path, token }) => ({
-            method,
-            path,
-            token,
-          })),
-          [
-            {
-              method: "GET",
-              path: `/repos/owner/gated/pulls/${pr.number}`,
-              token: GITHUB_KEY,
-            },
-            {
-              method: "GET",
-              path: `/repos/owner/gated/pulls/${pr.number}/reviews?per_page=100&page=1`,
-              token: GITHUB_KEY,
-            },
-          ],
-        );
       },
     );
     await t.test(

@@ -44,6 +44,8 @@ const CLOSED_AT = "2026-10-15T03:57:51Z";
 const PENDING_THEN_DIRTY_READS = 2;
 const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
+const DEFERRED_CHECK_POLL_MS = 50;
+const DEFERRED_CHECK_MAX_POLLS = 40;
 
 function issue(): Webhook {
   return {
@@ -386,6 +388,24 @@ test(
       disposition: Disposition.AcceptedObservation,
       reason: null,
     });
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+  },
+);
+
+test(
+  "E08.12 a merge under the live claim completes via the deferred check after release",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const I = await h.create("initiative-1.md");
+    const P = await h.objective("objective-p.md", I);
+    await h.actionRequest(P.x2);
+    h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
+    await h.release(P.x2.execution_id);
+    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
+      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
+    }
     assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
   },
 );
