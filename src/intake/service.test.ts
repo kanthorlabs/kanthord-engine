@@ -71,6 +71,7 @@ const INTERVAL_MS = 1000;
 const SECOND_LOOP_OFFSET_MS = 500;
 const SETTLE_TURNS = 20;
 const POLL_TOKEN = "ghp_poll-token";
+const DEMANDED_REQUESTS = 1;
 const RESOURCE = "acme/app";
 const ETAG_STORED = '"etag-0"';
 const ETAG_FIRST = '"etag-1"';
@@ -327,6 +328,11 @@ function pollService(t: TestContext, store: Store) {
     ...unusedActionDependencies(),
     custody: pollCustody(),
     github,
+    unresolvedRequests: async () => ({
+      type: OperationResultType.Completed,
+      status: HttpStatus.OK,
+      data: { count: DEMANDED_REQUESTS },
+    }),
     projects: {
       get: async () => ({
         type: OperationResultType.Completed,
@@ -532,7 +538,6 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
   const store = pollStore(t);
   insertNaming(store, InboundKind.Poll, CREDENTIAL, {
     etag: ETAG_STORED,
-    newest_event_id: "100",
   });
   const first = pollService(t, store);
   first.answers.next = async () => modified(ETAG_FIRST, [ev("101")]);

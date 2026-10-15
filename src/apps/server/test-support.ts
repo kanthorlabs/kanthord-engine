@@ -44,7 +44,13 @@ import { projectMigrations } from "../../project/index.ts";
 import { missionMigrations } from "../../mission/index.ts";
 import { intakeMigrations } from "../../intake/index.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
-import { MISSION_SERVICE_NAME, type Revision } from "../../mission/contract.ts";
+import {
+  AssetKind,
+  MISSION_SERVICE_NAME,
+  PlatformAddressKind,
+  type Revision,
+} from "../../mission/contract.ts";
+import { canonicalJSON } from "../../kernel/json.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { agentMigrations } from "../../agent/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
@@ -572,6 +578,8 @@ const GITHUB_MERGE_SHA = /^[a-f0-9]{40}$/;
 const GITHUB_NOT_FOUND = { message: "Not Found" };
 const GITHUB_SCRIPTED_FAILURE = { message: "scripted failure" };
 const GITHUB_FIRST_PULL_NUMBER = 1;
+const GITHUB_FIRST_MERGEABILITY = 0;
+const GITHUB_LAST_MERGEABILITY = 1;
 const GITHUB_NEXT_PULL_STEP = 1;
 const GITHUB_CREATED_STATUS = 201;
 const GITHUB_EMPTY_BODY = "";
@@ -596,6 +604,12 @@ export interface FakePullRequest {
   merge_commit_sha: string | null;
   head_sha: string;
   reviews: FakeReview[];
+  mergeability: FakeMergeability[];
+}
+
+export interface FakeMergeability {
+  mergeable: boolean | null;
+  mergeable_state: string;
 }
 
 export interface FakeReview {
@@ -684,6 +698,7 @@ function pullBody(pull: FakePullRequest) {
     state: pull.state,
     merged: pull.merged,
     merge_commit_sha: pull.merge_commit_sha,
+    ...pull.mergeability[GITHUB_FIRST_MERGEABILITY],
     head: {
       ref: pull.head,
       sha: pull.head_sha,
@@ -729,6 +744,7 @@ function insertPull(
       .update(`${owner}/${repo}#${input.head}`)
       .digest("hex"),
     reviews: [],
+    mergeability: [],
   };
   state.pulls.push(pull);
   assert.equal(state.pulls.at(-1), pull);
@@ -775,8 +791,12 @@ function routePull(
   );
   if (!pull || method !== HttpMethod.Get)
     return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
-  if (suffix === undefined)
-    return { status: HttpStatus.OK, body: pullBody(pull) };
+  if (suffix === undefined) {
+    const body = pullBody(pull);
+    if (pull.mergeability.length > GITHUB_LAST_MERGEABILITY)
+      pull.mergeability.shift();
+    return { status: HttpStatus.OK, body };
+  }
   if (reviewId !== undefined) {
     const review = pull.reviews.find((item) => item.id === +reviewId);
     return review
@@ -1058,6 +1078,10 @@ export async function fakeGitHub(t: TestContext) {
       });
       return id;
     },
+    mergeability(number: number, answers: FakeMergeability[]): void {
+      assert.ok(answers.length >= GITHUB_LAST_MERGEABILITY);
+      changePull(state, number).mergeability = [...answers];
+    },
     refuseMerge(status: number | null): void {
       assert.ok(status === null || Number.isInteger(status));
       state.refuseMerge = status;
@@ -1104,6 +1128,67 @@ export async function fakeGitHub(t: TestContext) {
       return releaseGate;
     },
   };
+}
+
+const FIRST_SEEDED_ATTEMPT = 1;
+
+export function seedUnresolvedRequest(
+  store: Store,
+  input: { project_id: string; resource_identity: string; number: number },
+): void {
+  const nodeId = createIdentity("node");
+  const evidenceId = createIdentity("evidence");
+  const now = Date.now();
+  store.transaction((tx) => {
+    const mission = tx.database
+      .prepare("SELECT id FROM mission_mission WHERE project_id = ?")
+      .get(input.project_id) as { id: string } | undefined;
+    assert.ok(mission, "The project holds a mission.");
+    tx.database
+      .prepare(
+        "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, ?)",
+      )
+      .run(
+        nodeId,
+        mission.id,
+        NodeKind.Objective,
+        `${nodeId}.md`,
+        FIRST_SEEDED_ATTEMPT,
+        now,
+      );
+    tx.database
+      .prepare(
+        "INSERT INTO mission_attempt (node_id, attempt, node_revision, opened_by, opened_at, closed_at) VALUES (?, ?, ?, ?, ?, NULL)",
+      )
+      .run(nodeId, FIRST_SEEDED_ATTEMPT, FIRST_SEEDED_ATTEMPT, "{}", now);
+    tx.database
+      .prepare(
+        "INSERT INTO mission_evidence (id, node_id, attempt, subject, requirement_key, end_state, verification, provenance, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
+      )
+      .run(
+        evidenceId,
+        nodeId,
+        FIRST_SEEDED_ATTEMPT,
+        "pull request",
+        "seeded.pull_request",
+        "{}",
+        now,
+      );
+    tx.database
+      .prepare(
+        "INSERT INTO mission_evidence_asset (id, evidence_id, kind, content, published_at, expired_at) VALUES (?, ?, ?, ?, NULL, NULL)",
+      )
+      .run(
+        createIdentity("evidence_asset"),
+        evidenceId,
+        AssetKind.Platform,
+        canonicalJSON({
+          kind: PlatformAddressKind.PullRequest,
+          resource_identity: input.resource_identity,
+          number: input.number,
+        }),
+      );
+  });
 }
 
 const MAIN_REF = "refs/heads/main";

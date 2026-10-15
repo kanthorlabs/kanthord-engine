@@ -31,6 +31,7 @@ import {
   POLL_INTERVAL_MS,
   type IntakeCollaborations,
   type IntakeConsumers,
+  type UnresolvedRequestCounter,
   type IntakeInventoryEntry,
 } from "./contract.ts";
 import { Dispatcher } from "./dispatcher.ts";
@@ -75,6 +76,7 @@ export interface Dependencies {
   masterKey: string;
   projects: InboundProjects;
   consumers: IntakeConsumers;
+  unresolvedRequests: UnresolvedRequestCounter;
   pendingEventLimit?: number;
   pollIntervalMs?: number;
 }
@@ -105,6 +107,7 @@ export class IntakeService implements Service, IntakeCollaborations {
       identity: dependencies.identity,
       custody: dependencies.custody,
       github: dependencies.github,
+      unresolvedRequests: dependencies.unresolvedRequests,
       context: this.shutdown,
       pendingEventLimit: dependencies.pendingEventLimit ?? PENDING_EVENT_LIMIT,
       pollIntervalMs: dependencies.pollIntervalMs ?? POLL_INTERVAL_MS,

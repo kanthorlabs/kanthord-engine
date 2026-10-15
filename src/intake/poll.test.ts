@@ -9,9 +9,15 @@ import {
   type Material,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import {
+  OperationResultType,
+  type ClientOptions,
+  type OperationResult,
+} from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import type {
   GitHubAnswer,
@@ -40,6 +46,7 @@ import {
 } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 import {
+  CycleAnswer,
   CycleOutcome,
   pollCycle,
   storeBatch,
@@ -50,6 +57,8 @@ import {
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREDENTIAL = "github-poll";
 const RESOURCE = "owner/repo";
+const CREATE_EVENT_ID = "23984532267";
+const PULL_REQUEST_EVENT_ID = "17268923405";
 const ETAG_STORED = '"etag-0"';
 const ETAG_FIRST = '"etag-1"';
 const ETAG_SECOND = '"etag-2"';
@@ -59,6 +68,15 @@ const LARGE_LIMIT = 100;
 const TOKEN = "ghp_poll-token";
 const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const SERVER_ERROR_STATUS = 500;
+const UNRESOLVED_REQUESTS = 2;
+const NO_REQUESTS = 0;
+const SKIPPED_CYCLES = 2;
+const RESOURCE_IDENTITY = "repository:github:owner/repo";
+const DEMAND_FAILURE_CODE = "mission.authorization.refused";
+const RATE_LIMIT_STATUS = 403;
+const BACKOFF_INTERVAL_MS = 300000;
+const BACKOFF_MAX_MS = 900000;
+const WAIT_MAX_MS = 3600000;
 const WAKES_WITHOUT_EVENTS = 0;
 const UNSENT_REQUEST_COUNT = 0;
 const WAKES_PER_BATCH = 1;
@@ -83,6 +101,7 @@ type EventsAnswer = GitHubAnswer<GitHubEventsAnswer>;
 interface HarnessOptions {
   limit?: number;
   checkpoint?: GitHubCheckpoint | null;
+  intervalMs?: number;
 }
 
 function ev(id: string, type: string): GitHubEvent {
@@ -140,6 +159,14 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
       })),
     );
   const eventIds = () => events().map((row) => row.event_id);
+  const insertOrder = () =>
+    store.transaction((tx) =>
+      (
+        tx.database
+          .prepare("SELECT event_id FROM intake_inbound_event ORDER BY rowid")
+          .all() as { event_id: string }[]
+      ).map((row) => row.event_id),
+    );
   const addEvent = (eventId: string) =>
     store.transaction((tx) =>
       insertEvent(tx, {
@@ -164,12 +191,13 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
     checkpoint,
     events,
     eventIds,
+    insertOrder,
     addEvent,
     settleAll,
   };
 }
 
-test("a batch inserts the newer events in ascending order and writes the checkpoint", (t) => {
+test("a batch inserts every event of the page, oldest of the page first, and writes the checkpoint", (t) => {
   const h = harness(t);
   assert.equal(
     h.batch(ETAG_FIRST, [
@@ -190,27 +218,68 @@ test("a batch inserts the newer events in ascending order and writes the checkpo
       event: JSON.stringify({ id: "102", type: "PushEvent" }),
     },
   ]);
-  assert.deepEqual(h.checkpoint(), {
-    etag: ETAG_FIRST,
-    newest_event_id: "102",
-  });
+  assert.deepEqual(h.insertOrder(), ["101", "102"]);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_FIRST });
 });
 
-test("an empty answer and an answer of known events keep newest_event_id and store the ETag", (t) => {
+test("an event with an id below an earlier event id is stored", (t) => {
+  const h = harness(t);
+  h.batch(ETAG_FIRST, [ev(CREATE_EVENT_ID, "CreateEvent")]);
+  assert.deepEqual(h.eventIds(), [CREATE_EVENT_ID]);
+  h.batch(ETAG_SECOND, [
+    ev(PULL_REQUEST_EVENT_ID, "PullRequestEvent"),
+    ev(CREATE_EVENT_ID, "CreateEvent"),
+  ]);
+  assert.deepEqual(h.eventIds().sort(), [
+    PULL_REQUEST_EVENT_ID,
+    CREATE_EVENT_ID,
+  ]);
+  assert.deepEqual(h.insertOrder(), [CREATE_EVENT_ID, PULL_REQUEST_EVENT_ID]);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_SECOND });
+});
+
+test("a second answer with the same events stores nothing new", (t) => {
+  const h = harness(t);
+  const page = [
+    ev(PULL_REQUEST_EVENT_ID, "PullRequestEvent"),
+    ev(CREATE_EVENT_ID, "CreateEvent"),
+  ];
+  h.batch(ETAG_FIRST, page);
+  const stored = h.insertOrder();
+  h.batch(ETAG_SECOND, page);
+  assert.deepEqual(h.insertOrder(), stored);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_SECOND });
+});
+
+test("a stored checkpoint that holds newest_event_id loads, and the next write drops it", (t) => {
   const h = harness(t, {
-    checkpoint: { etag: ETAG_STORED, newest_event_id: "101" },
+    checkpoint: {
+      etag: ETAG_STORED,
+      newest_event_id: CREATE_EVENT_ID,
+    } as GitHubCheckpoint,
+  });
+  h.batch(ETAG_FIRST, [
+    ev(PULL_REQUEST_EVENT_ID, "PullRequestEvent"),
+    ev(CREATE_EVENT_ID, "CreateEvent"),
+  ]);
+  assert.deepEqual(h.eventIds().sort(), [
+    PULL_REQUEST_EVENT_ID,
+    CREATE_EVENT_ID,
+  ]);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_FIRST });
+});
+
+test("an empty answer and an answer of known events store the ETag", (t) => {
+  const h = harness(t, {
+    checkpoint: { etag: ETAG_STORED },
   });
   h.batch(ETAG_FIRST, []);
-  assert.deepEqual(h.checkpoint(), {
-    etag: ETAG_FIRST,
-    newest_event_id: "101",
-  });
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_FIRST });
+  h.addEvent("101");
+  h.addEvent("100");
   h.batch(ETAG_SECOND, [ev("101", "PushEvent"), ev("100", "PushEvent")]);
-  assert.deepEqual(h.checkpoint(), {
-    etag: ETAG_SECOND,
-    newest_event_id: "101",
-  });
-  assert.deepEqual(h.eventIds(), []);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_SECOND });
+  assert.deepEqual(h.eventIds(), ["100", "101"]);
 });
 
 test("a repeated event identity inserts no row", (t) => {
@@ -220,7 +289,6 @@ test("a repeated event identity inserts no row", (t) => {
   assert.deepEqual(h.eventIds(), ["101", "102"]);
   assert.deepEqual(h.checkpoint(), {
     etag: ETAG_FIRST,
-    newest_event_id: "102",
   });
 });
 
@@ -233,13 +301,12 @@ test("a batch at the bound stores the events that fit with a null ETag, and the 
   ];
   h.batch(ETAG_FIRST, list);
   assert.deepEqual(h.eventIds(), ["100", "101"]);
-  assert.deepEqual(h.checkpoint(), { etag: null, newest_event_id: "101" });
+  assert.deepEqual(h.checkpoint(), { etag: null });
   h.settleAll();
   h.batch(ETAG_FIRST, list);
   assert.deepEqual(h.eventIds(), ["100", "101", "102"]);
   assert.deepEqual(h.checkpoint(), {
     etag: ETAG_FIRST,
-    newest_event_id: "102",
   });
 });
 
@@ -252,6 +319,14 @@ test("a batch of a deleted inbound stores nothing and answers false", (t) => {
 
 function modified(etag: string | null, events: GitHubEvent[]): EventsAnswer {
   return { ok: true, value: { notModified: false, etag, events } };
+}
+
+function counted(count: number): OperationResult<{ count: number }> {
+  return {
+    type: OperationResultType.Completed,
+    status: HttpStatus.OK,
+    data: { count },
+  };
 }
 
 function fakeCustody() {
@@ -299,6 +374,15 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
   const answers: { next: () => Promise<EventsAnswer> } = {
     next: async () => modified(ETAG_FIRST, []),
   };
+  const demands: {
+    inputs: { project_id: string; resource_identity: string }[];
+    options: ClientOptions[];
+    next: () => Promise<OperationResult<{ count: number }>>;
+  } = {
+    inputs: [],
+    options: [],
+    next: async () => counted(UNRESOLVED_REQUESTS),
+  };
   const logger = pino({ enabled: false });
   const warn = t.mock.method(logger, "warn");
   const wakes = { count: 0 };
@@ -313,6 +397,11 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
         return answers.next();
       },
     },
+    unresolvedRequests: async (input, options) => {
+      demands.inputs.push(input);
+      demands.options.push(options);
+      return demands.next();
+    },
     pendingEventLimit: h.limit,
     wake: () => {
       wakes.count += 1;
@@ -326,6 +415,7 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
     drops,
     calls,
     answers,
+    demands,
     warn,
     wakes,
     dependencies,
@@ -336,11 +426,10 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
 test("a cycle releases one poll grant, requests the events under a deadline, stores the batch and wakes", async (t) => {
   const h = cycleHarness(t);
   h.answers.next = async () => modified(ETAG_FIRST, [ev("101", "PushEvent")]);
-  assert.equal(await h.cycle(), CycleOutcome.Continue);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
   assert.deepEqual(h.eventIds(), ["101"]);
   assert.deepEqual(h.checkpoint(), {
     etag: ETAG_FIRST,
-    newest_event_id: "101",
   });
   assert.equal(h.wakes.count, WAKES_PER_BATCH);
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
@@ -367,10 +456,10 @@ test("a cycle releases one poll grant, requests the events under a deadline, sto
 });
 
 test("a 304 answer commits nothing and the request carries the stored ETag", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   h.answers.next = async () => ({ ok: true, value: { notModified: true } });
-  assert.equal(await h.cycle(), CycleOutcome.Continue);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
   assert.equal(h.calls[0]?.query.etag, ETAG_STORED);
   assert.deepEqual(h.checkpoint(), stored);
   assert.deepEqual(h.eventIds(), []);
@@ -381,7 +470,7 @@ test("a 304 answer commits nothing and the request carries the stored ETag", asy
 test("a cycle at the bound sends no request and releases nothing, and it resumes below the bound", async (t) => {
   const h = cycleHarness(t, { limit: TIGHT_LIMIT });
   h.addEvent("50");
-  assert.equal(await h.cycle(), CycleOutcome.Continue);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   assert.deepEqual(h.grants, []);
   h.settleAll();
@@ -399,7 +488,7 @@ test("the capacity bound pauses the poll, and a pending event refuses the delete
     ]);
   await h.cycle();
   assert.deepEqual(h.eventIds(), ["100", "101"]);
-  assert.deepEqual(h.checkpoint(), { etag: null, newest_event_id: "101" });
+  assert.deepEqual(h.checkpoint(), { etag: null });
   await h.cycle();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   assert.throws(
@@ -415,7 +504,7 @@ test("the capacity bound pauses the poll, and a pending event refuses the delete
 test("a bound reached between the request and the commit leaves the new events unstored and writes a null ETag", async (t) => {
   const h = cycleHarness(t, {
     limit: TIGHT_LIMIT,
-    checkpoint: { etag: ETAG_STORED, newest_event_id: "100" },
+    checkpoint: { etag: ETAG_STORED },
   });
   h.answers.next = async () => {
     h.addEvent("50");
@@ -423,7 +512,7 @@ test("a bound reached between the request and the commit leaves the new events u
   };
   await h.cycle();
   assert.deepEqual(h.eventIds(), ["50"]);
-  assert.deepEqual(h.checkpoint(), { etag: null, newest_event_id: "100" });
+  assert.deepEqual(h.checkpoint(), { etag: null });
 });
 
 test("a delete of the inbound before the commit stores no event and answers gone", async (t) => {
@@ -432,15 +521,15 @@ test("a delete of the inbound before the commit stores no event and answers gone
     h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
     return modified(ETAG_FIRST, [ev("101", "PushEvent")]);
   };
-  assert.equal(await h.cycle(), CycleOutcome.Gone);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Gone);
   assert.deepEqual(h.eventIds(), []);
   assert.equal(h.wakes.count, WAKES_WITHOUT_EVENTS);
-  assert.equal(await h.cycle(), CycleOutcome.Gone);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Gone);
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });
 
 test("a store failure leaves the checkpoint unchanged and drops the material", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   h.store.transaction((tx) =>
     tx.database.exec(
@@ -455,7 +544,7 @@ test("a store failure leaves the checkpoint unchanged and drops the material", a
 });
 
 test("a result class leaves the checkpoint unchanged, logs the inbound and the code, and drops the material", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   h.answers.next = async () => ({
     ok: false,
@@ -464,7 +553,7 @@ test("a result class leaves the checkpoint unchanged, logs the inbound and the c
     status: SERVER_ERROR_STATUS,
     message: "Server Error",
   });
-  assert.equal(await h.cycle(), CycleOutcome.Continue);
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
   assert.deepEqual(h.checkpoint(), stored);
   assert.deepEqual(h.drops, [CREDENTIAL]);
   assert.equal(h.warn.mock.callCount(), WARNINGS_PER_FAILURE);
@@ -474,7 +563,7 @@ test("a result class leaves the checkpoint unchanged, logs the inbound and the c
 });
 
 test("a thrown request drops the material and leaves the checkpoint unchanged", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   const failure = new Error("transport closed");
   h.answers.next = async () => {
@@ -492,7 +581,7 @@ test("a cancelled context aborts the request and commits nothing after the answe
     context.cancel();
     return modified(ETAG_FIRST, [ev("101", "PushEvent")]);
   };
-  assert.equal(await h.cycle(context), CycleOutcome.Continue);
+  assert.equal((await h.cycle(context)).outcome, CycleOutcome.Continue);
   assert.equal(h.calls[0]?.call.signal.aborted, true);
   assert.deepEqual(h.eventIds(), []);
   assert.equal(h.checkpoint(), null);
@@ -508,17 +597,46 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = cycleHarness(t, options);
   const shutdown = new CancellationContext();
+  const intervalMs = options.intervalMs ?? INTERVAL_MS;
   const loops = new PollLoops({
     ...h.dependencies,
     context: shutdown,
-    pollIntervalMs: INTERVAL_MS,
+    pollIntervalMs: intervalMs,
   });
   t.after(() => loops.stopAll());
-  const interval = async () => {
-    t.mock.timers.tick(INTERVAL_MS);
+  const elapse = async (ms: number) => {
+    t.mock.timers.tick(ms);
     await settle();
   };
-  return { ...h, loops, interval };
+  const interval = () => elapse(intervalMs);
+  const script = (answers: EventsAnswer[]) => {
+    h.answers.next = async () =>
+      answers.shift() ?? { ok: true, value: { notModified: true } };
+  };
+  return { ...h, loops, interval, elapse, script };
+}
+
+function limited(waitMs: number | null): EventsAnswer {
+  return {
+    ok: false,
+    class: ResultClass.RetryableRefusal,
+    code: RETRYABLE_CODE,
+    status: RATE_LIMIT_STATUS,
+    message: "rate limited",
+    rate_limit: { wait_ms: waitMs },
+  };
+}
+
+function unchanged(pollIntervalMs?: number): EventsAnswer {
+  return {
+    ok: true,
+    value: {
+      notModified: true,
+      ...(pollIntervalMs === undefined
+        ? {}
+        : { poll_interval_ms: pollIntervalMs }),
+    },
+  };
 }
 
 test("a loop waits one interval before each cycle and re-arms after the cycle ends", async (t) => {
@@ -640,6 +758,204 @@ test("stopAll cancels the running request, awaits its cycle and commits nothing"
   assert.deepEqual(h.eventIds(), []);
   assert.equal(h.checkpoint(), null);
   assert.deepEqual(h.drops, [CREDENTIAL]);
+  await h.interval();
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+});
+
+test("a refusal that names a wait delays the next request until that wait", async (t) => {
+  const h = loopHarness(t);
+  h.script([limited(5 * INTERVAL_MS)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(5 * INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+});
+
+test("a refusal that names a wait below the interval waits one interval", async (t) => {
+  const h = loopHarness(t);
+  h.script([limited(0)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+});
+
+test("an X-Poll-Interval above the interval delays the next request, and one below it changes nothing", async (t) => {
+  const h = loopHarness(t);
+  h.script([unchanged(3 * INTERVAL_MS), unchanged(INTERVAL_MS / 2)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(3 * INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await h.elapse(INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM + REQUESTS_PER_CYCLE);
+});
+
+test("secondary rate limit refusals double the wait up to the bound, and the next answer returns to the interval", async (t) => {
+  const h = loopHarness(t, { intervalMs: BACKOFF_INTERVAL_MS });
+  h.script([limited(null), limited(null), limited(null), unchanged()]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  let requests = REQUESTS_PER_CYCLE;
+  assert.equal(h.calls.length, requests);
+  for (const waitMs of [
+    2 * BACKOFF_INTERVAL_MS,
+    BACKOFF_MAX_MS,
+    BACKOFF_MAX_MS,
+    BACKOFF_INTERVAL_MS,
+  ]) {
+    await h.elapse(waitMs - TICK_MS);
+    assert.equal(h.calls.length, requests);
+    await h.elapse(TICK_MS);
+    requests += REQUESTS_PER_CYCLE;
+    assert.equal(h.calls.length, requests);
+  }
+  await h.elapse(BACKOFF_INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, requests);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, requests + REQUESTS_PER_CYCLE);
+});
+
+test("any answer ends the count of secondary rate limit refusals", async (t) => {
+  const h = loopHarness(t);
+  h.script([limited(null), limited(null), unchanged(), limited(null)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(2 * INTERVAL_MS);
+  await h.elapse(4 * INTERVAL_MS);
+  await h.elapse(INTERVAL_MS);
+  assert.equal(h.calls.length, 4 * REQUESTS_PER_CYCLE);
+  await h.elapse(2 * INTERVAL_MS - TICK_MS);
+  assert.equal(h.calls.length, 4 * REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, 5 * REQUESTS_PER_CYCLE);
+});
+
+test("a refusal that is no rate limit keeps the interval and ends the count", async (t) => {
+  const h = loopHarness(t);
+  h.script([
+    limited(null),
+    {
+      ok: false,
+      class: ResultClass.RetryableRefusal,
+      code: RETRYABLE_CODE,
+      status: SERVER_ERROR_STATUS,
+      message: "Server Error",
+    },
+  ]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(2 * INTERVAL_MS);
+  await h.elapse(INTERVAL_MS);
+  assert.equal(h.calls.length, 3 * REQUESTS_PER_CYCLE);
+});
+
+test("the wait bound caps a named wait", async (t) => {
+  const h = loopHarness(t);
+  h.script([limited(10 * WAIT_MAX_MS)]);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.elapse(WAIT_MAX_MS - TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  await h.elapse(TICK_MS);
+  assert.equal(h.calls.length, REQUESTS_AFTER_REARM);
+});
+
+test("a cycle asks for the unresolved request count of the project and the resource identity before the release", async (t) => {
+  const h = cycleHarness(t);
+  assert.equal((await h.cycle()).answer, CycleAnswer.Answered);
+  assert.deepEqual(h.demands.inputs, [
+    { project_id: PROJECT_ID, resource_identity: RESOURCE_IDENTITY },
+  ]);
+  assert.equal(h.demands.options[0]?.identity, SERVICE_IDENTITY);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+});
+
+test("a count of zero sends no request, releases nothing and keeps the checkpoint", async (t) => {
+  const stored = { etag: ETAG_STORED };
+  const h = cycleHarness(t, { checkpoint: stored });
+  h.demands.next = async () => counted(NO_REQUESTS);
+  const result = await h.cycle();
+  assert.equal(result.outcome, CycleOutcome.Continue);
+  assert.equal(result.answer, CycleAnswer.Skipped);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.deepEqual(h.grants, []);
+  assert.deepEqual(h.drops, []);
+  assert.deepEqual(h.checkpoint(), stored);
+  assert.equal(h.warn.mock.callCount(), NO_REQUESTS);
+});
+
+test("a failed count call skips the request and logs the reason", async (t) => {
+  const stored = { etag: ETAG_STORED };
+  const h = cycleHarness(t, { checkpoint: stored });
+  h.demands.next = async () => ({
+    type: OperationResultType.Failure,
+    status: HttpStatus.Forbidden,
+    error: {
+      error: {
+        code: DEMAND_FAILURE_CODE,
+        message: "refused",
+        details: null,
+      },
+      request_id: createIdentity("request"),
+    },
+  });
+  assert.equal((await h.cycle()).answer, CycleAnswer.Skipped);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.deepEqual(h.grants, []);
+  assert.deepEqual(h.checkpoint(), stored);
+  assert.equal(h.warn.mock.callCount(), WARNINGS_PER_FAILURE);
+  const [fields] = h.warn.mock.calls[0]?.arguments ?? [];
+  assert.deepEqual(fields, {
+    inbound_id: h.inboundId,
+    code: DEMAND_FAILURE_CODE,
+  });
+  h.demands.next = async () => ({ type: OperationResultType.Indeterminate });
+  assert.equal((await h.cycle()).answer, CycleAnswer.Skipped);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.equal(h.warn.mock.callCount(), SKIPPED_CYCLES * WARNINGS_PER_FAILURE);
+});
+
+test("a cycle at the capacity bound or for a gone inbound asks no count", async (t) => {
+  const bounded = cycleHarness(t, { limit: TIGHT_LIMIT });
+  bounded.addEvent("50");
+  await bounded.cycle();
+  assert.deepEqual(bounded.demands.inputs, []);
+  const gone = cycleHarness(t);
+  gone.store.transaction((tx) => deleteInbound(tx, gone.inboundId));
+  assert.equal((await gone.cycle()).outcome, CycleOutcome.Gone);
+  assert.deepEqual(gone.demands.inputs, []);
+});
+
+test("an inbound deleted between the count and the release ends the cycle with no request", async (t) => {
+  const h = cycleHarness(t);
+  h.demands.next = async () => {
+    h.store.transaction((tx) => deleteInbound(tx, h.inboundId));
+    return counted(UNRESOLVED_REQUESTS);
+  };
+  assert.equal((await h.cycle()).outcome, CycleOutcome.Gone);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.deepEqual(h.grants, []);
+});
+
+test("a loop skips the request while the count is zero, keeps the interval and requests again when the count rises", async (t) => {
+  const h = loopHarness(t);
+  h.demands.next = async () => counted(NO_REQUESTS);
+  h.loops.start(h.inboundId);
+  await h.interval();
+  await h.interval();
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.equal(h.demands.inputs.length, SKIPPED_CYCLES);
+  h.demands.next = async () => counted(UNRESOLVED_REQUESTS);
   await h.interval();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
 });

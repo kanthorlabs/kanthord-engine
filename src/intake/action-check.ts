@@ -155,7 +155,7 @@ async function inspectPullRequest(
       kind: GitHubTargetKind.Binding,
       address: request.facts.repository.address,
     } as const;
-    const answer = await github.getPullRequest(call, target, {
+    const answer = await github.getSettledPullRequest(call, target, {
       number: request.number,
     });
     if (!answer.ok) throw platformFailure(answer);

@@ -21,17 +21,20 @@ import {
   type deliveryAdmitSchema,
   type IntakeCheck,
   type PlatformAddress,
+  type unresolvedRequestCountSchema,
 } from "./contract.ts";
 import {
   MatchKind,
   matchRequests,
   unresolvedPullRequests,
+  unresolvedRequestCount,
 } from "./delivery-match.ts";
 import { applyEndState, requestContext } from "./node-check.ts";
 import { readEvidence } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 
 type AdmissionInput = z.output<typeof deliveryAdmitSchema>;
+type CountInput = z.output<typeof unresolvedRequestCountSchema>;
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
 type Checked = {
   evidenceId: string;
@@ -228,6 +231,20 @@ export function admitDelivery(
 ): Promise<AdmissionAnswer> {
   assert.ok(queue instanceof AdmissionQueue);
   return queue.run(() => admitOne(dependencies, caller, input));
+}
+
+export function countUnresolvedRequests(
+  caller: CallerContext,
+  input: CountInput,
+): { count: number } {
+  authorizeAdmission(caller);
+  return caller.commit((tx) => ({
+    count: unresolvedRequestCount(
+      tx,
+      input.project_id,
+      input.resource_identity,
+    ),
+  }));
 }
 
 async function admitOne(

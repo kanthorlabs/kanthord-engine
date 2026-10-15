@@ -173,7 +173,7 @@ export function composeServices(options: {
   logger: Logger;
   health: HealthRegistry;
   repositoryConnector?: RepositoryConnector;
-  github?: { baseUrl: string };
+  github?: { baseUrl: string; mergeabilityRetryDelayMs?: number };
   repositoryTransport?: GitWriter;
   oauthProviders?: ConstructorParameters<
     typeof LlmComponent
@@ -615,6 +615,11 @@ export function composeServices(options: {
           consumerOptions,
         ),
     },
+    unresolvedRequests: (input, counterOptions) =>
+      missionClient["delivery.unresolved_request.count"](
+        { params: {}, query: {}, body: input },
+        counterOptions,
+      ),
     pendingEventLimit: options.intake?.pendingEventLimit,
     pollIntervalMs: options.intake?.pollIntervalMs,
   });

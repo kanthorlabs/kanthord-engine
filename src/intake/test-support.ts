@@ -68,6 +68,7 @@ export function unusedActionDependencies(): Pick<
   | "masterKey"
   | "projects"
   | "consumers"
+  | "unresolvedRequests"
 > {
   return {
     custody: {
@@ -87,5 +88,6 @@ export function unusedActionDependencies(): Pick<
     masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
     projects: { get: unexpectedCollaboration },
     consumers: recordingConsumers().consumers,
+    unresolvedRequests: unexpectedCollaboration,
   };
 }

@@ -22,6 +22,8 @@ export const OUTBOUND_LIST_LIMIT_DEFAULT = 100;
 export const OUTBOUND_LIST_LIMIT_MIN = 1;
 export const OUTBOUND_LIST_LIMIT_MAX = 1000;
 export const POLL_INTERVAL_MS = 60000;
+export const POLL_BACKOFF_MAX_MS = 900000;
+export const POLL_WAIT_MAX_MS = 3600000;
 export const PRESIGN_LIFETIME_S = 3600;
 export const PENDING_EVENT_LIMIT = 10000;
 export const ERROR_ARRAY_MAX_BYTES = 16384;
@@ -312,6 +314,11 @@ export type IntakeConsumers = Record<
     options: ClientOptions,
   ) => Promise<OperationResult<unknown>>
 >;
+
+export type UnresolvedRequestCounter = (
+  input: { project_id: string; resource_identity: string },
+  options: ClientOptions,
+) => Promise<OperationResult<{ count: number }>>;
 
 export type IntakeInventoryEntry = Omit<ResourceEntry, "project" | "scope"> & {
   project_id: string;

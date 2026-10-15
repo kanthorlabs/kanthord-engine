@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   Consumer,
   InboundEventState,
@@ -13,21 +14,32 @@ import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord, until } from "./cli-support.ts";
-import { fakeGitHub, gatewayFixture } from "./test-support.ts";
+import {
+  fakeGitHub,
+  gatewayFixture,
+  seedUnresolvedRequest,
+} from "./test-support.ts";
 
 const ExitCode = { Success: 0, Failure: 1 } as const;
 const EMPTY_OUTPUT = "";
 const TIMEOUT = 180000;
 const POLL_INTERVAL_MS = 50;
 const VALIDATION_CALLS = 1;
-const VALIDATION_AND_HELD = 2;
+const HELD_CALLS = 1;
 const ANSWERED_CALLS = 2;
 const FIRST_BATCH = 2;
+const SECOND_BATCH = 3;
+const HIGH_EVENT_ID = 23984532267;
+const LOW_EVENT_ID = 17268923404;
+const LOWER_EVENT_ID = 17268923405;
 const NOT_MODIFIED = 304;
 const SERVER_ERROR = 500;
 const OWNER = "owner";
 const REPO = "repo";
 const RESOURCE = `${OWNER}/${REPO}`;
+const RESOURCE_IDENTITY = `repository:github:${RESOURCE}`;
+const IDLE_INTERVALS = 6;
+const SEEDED_NUMBER = 1;
 const CREDENTIAL = "github";
 const GITHUB_KEY = "e2e_poll_github_key";
 const PUSH_EVENT = "PushEvent";
@@ -35,7 +47,7 @@ const PULL_REQUEST_EVENT = "PullRequestEvent";
 const EVENTS_PATH = /^\/repos\/owner\/repo\/events(\?|$)/;
 const PLATFORM_REFUSED = `${IntakeErrorCode.InboundPlatformRefused}:`;
 type Result = { code: number; stdout: string; stderr: string };
-type Checkpoint = { etag: string | null; newest_event_id: string | null };
+type Checkpoint = { etag: string | null };
 type Inbound = { id: string; kind: string; checkpoint: Checkpoint | null };
 type Event = {
   event_id: string;
@@ -100,7 +112,10 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
   const project = succeeded<{ id: string }>(
     await kanthord(["project", "create", "--name", "polls"], H),
   );
-  const first = [ev(101, PUSH_EVENT), ev(100, PULL_REQUEST_EVENT)];
+  const first = [
+    ev(HIGH_EVENT_ID, PUSH_EVENT),
+    ev(LOW_EVENT_ID, PULL_REQUEST_EVENT),
+  ];
   gitHub.events(OWNER, REPO, first);
   const poll = file("poll.json", {
     project_id: project.id,
@@ -132,31 +147,50 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
     assert.deepEqual(page.items, []);
   });
 
+  await t.test(
+    "E07.2 a poll create with no unresolved request sends only its validation request",
+    async () => {
+      const before = eventsCalls().length;
+      const created = succeeded<Inbound>(
+        await inbound(["create", "--file", poll]),
+      );
+      assert.equal(created.kind, InboundKind.Poll);
+      assert.equal(created.checkpoint, null);
+      P = created.id;
+      const [validation] = eventsCalls().slice(before);
+      assert.ok(validation);
+      assert.equal(validation.status, HttpStatus.OK);
+      assert.equal(validation.if_none_match, null);
+      await delay(IDLE_INTERVALS * POLL_INTERVAL_MS);
+      assert.equal(eventsCalls().slice(before).length, VALIDATION_CALLS);
+      assert.equal((await inboundOf()).checkpoint, null);
+      assert.deepEqual(await events(), []);
+    },
+  );
+
   let release = () => {};
 
-  await t.test("E07.2 a poll create starts a held loop", async () => {
-    const before = eventsCalls().length;
-    release = gitHub.holdEvents({ pass: 1 });
-    t.after(() => release());
-    const created = succeeded<Inbound>(
-      await inbound(["create", "--file", poll]),
-    );
-    assert.equal(created.kind, InboundKind.Poll);
-    assert.equal(created.checkpoint, null);
-    P = created.id;
-    const [validation] = eventsCalls().slice(before);
-    assert.ok(validation);
-    assert.equal(validation.status, HttpStatus.OK);
-    assert.equal(validation.if_none_match, null);
-    const later = await until(
-      () => eventsCalls().slice(before),
-      (calls) => calls.length > VALIDATION_CALLS,
-    );
-    assert.equal(later.length, VALIDATION_AND_HELD);
-    assert.equal(later[1]?.status, null);
-  });
+  await t.test(
+    "E07.3 an unresolved request starts the held requests of the loop",
+    async () => {
+      const before = eventsCalls().length;
+      release = gitHub.holdEvents({ pass: 0 });
+      t.after(() => release());
+      seedUnresolvedRequest(fixture.store, {
+        project_id: project.id,
+        resource_identity: RESOURCE_IDENTITY,
+        number: SEEDED_NUMBER,
+      });
+      const later = await until(
+        () => eventsCalls().slice(before),
+        (calls) => calls.length >= HELD_CALLS,
+      );
+      assert.equal(later.length, HELD_CALLS);
+      assert.equal(later[0]?.status, null);
+    },
+  );
 
-  await t.test("E07.3 a failed request stores nothing", async () => {
+  await t.test("E07.4 a failed request stores nothing", async () => {
     gitHub.failEvents(SERVER_ERROR);
     release();
     await until(eventsCalls, (calls) =>
@@ -168,7 +202,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
   });
 
   await t.test(
-    "E07.4 a cycle stores the batch and its checkpoint, and the handoff settles each event",
+    "E07.5 a cycle stores the batch and its checkpoint, and the handoff settles each event",
     async () => {
       const items = await until(
         events,
@@ -179,18 +213,25 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
       assert.deepEqual(
         items.map((item) => [item.event_id, item.metadata, item.state]),
         [
-          ["100", { event: PULL_REQUEST_EVENT }, InboundEventState.Succeeded],
-          ["101", { event: PUSH_EVENT }, InboundEventState.Succeeded],
+          [
+            String(LOW_EVENT_ID),
+            { event: PULL_REQUEST_EVENT },
+            InboundEventState.Succeeded,
+          ],
+          [
+            String(HIGH_EVENT_ID),
+            { event: PUSH_EVENT },
+            InboundEventState.Succeeded,
+          ],
         ],
       );
       assert.deepEqual((await inboundOf()).checkpoint, {
         etag: etagOf(first),
-        newest_event_id: "101",
       });
     },
   );
 
-  await t.test("E07.5 an unchanged list answers 304", async () => {
+  await t.test("E07.6 an unchanged list answers 304", async () => {
     const before = eventsCalls().length;
     const later = await until(
       () => eventsCalls().slice(before),
@@ -203,4 +244,25 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
     }
     assert.equal((await events()).length, FIRST_BATCH);
   });
+
+  await t.test(
+    "E07.7 a new event with an id below an earlier event id is stored",
+    async () => {
+      const second = [ev(LOWER_EVENT_ID, PULL_REQUEST_EVENT), ...first];
+      gitHub.events(OWNER, REPO, second);
+      const items = await until(
+        events,
+        (list) =>
+          list.length === SECOND_BATCH &&
+          list.every((item) => item.state === InboundEventState.Succeeded),
+      );
+      assert.deepEqual(
+        items.map((item) => item.event_id),
+        [LOW_EVENT_ID, LOWER_EVENT_ID, HIGH_EVENT_ID].map(String),
+      );
+      assert.deepEqual((await inboundOf()).checkpoint, {
+        etag: etagOf(second),
+      });
+    },
+  );
 });
