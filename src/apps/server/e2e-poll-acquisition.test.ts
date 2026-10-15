@@ -319,7 +319,7 @@ test(
   "E07.8 the closed pull request list detects a merge that the events never list",
   { timeout: TIMEOUT },
   async (t) => {
-    const h = await setup(t, POLL_INTERVAL_MS);
+    const h = await setup(t, { pollIntervalMs: POLL_INTERVAL_MS });
     const I = await h.create("initiative-1.md");
     const P = await h.objective("objective-p.md", I);
     const action = await h.actionRequest(P.x2);

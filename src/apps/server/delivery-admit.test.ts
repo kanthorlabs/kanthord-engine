@@ -47,6 +47,19 @@ function closed(number: number, merged: boolean): string {
   ).toString("base64");
 }
 
+function closedItem(number: number, merged: boolean): string {
+  return Buffer.from(
+    JSON.stringify({
+      number,
+      state: "closed",
+      closed_at: "2026-10-15T03:57:51Z",
+      merged_at: merged ? "2026-10-15T03:57:51Z" : null,
+      merge_commit_sha: merged ? MERGE_COMMIT : null,
+      base: { ref: "main", repo: { full_name: RESOURCE } },
+    }),
+  ).toString("base64");
+}
+
 function pushed(branch: string): string {
   return Buffer.from(
     JSON.stringify({
@@ -482,4 +495,76 @@ test("a push to another branch selects no pull request and answers unmatched", a
   });
   assert.equal(h.checks.length, NO_CALLS);
   assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("a merged closed pull request item rechecks the pull request on its base branch and completes the node", async (t) => {
+  const h = await fixture(t);
+  h.answer(CheckEndState.Expected, [MERGE_COMMIT]);
+  const inboundEventId = createIdentity("inbound_event");
+  assert.deepEqual(
+    await h.admit(
+      inboundEventId,
+      closedItem(REQUEST_NUMBER, true),
+      "pull_request_closed",
+    ),
+    { disposition: Disposition.AcceptedObservation, reason: null },
+  );
+  assert.deepEqual(h.checks, [h.request.id]);
+  assert.equal((await requestOf(h))?.end_state, EndState.Expected);
+  const landed = await landedOf(h);
+  assert.deepEqual(
+    landed.map((item) => item.provenance),
+    [
+      {
+        kind: ActorKind.Service,
+        service: ActorService.Mission,
+        inbound_event_id: inboundEventId,
+      },
+    ],
+  );
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("a merged closed pull request item of an unknown pull request still rechecks the pull request of its base branch", async (t) => {
+  const h = await fixture(t);
+  h.answer(CheckEndState.Conflict);
+  assert.deepEqual(
+    await h.admit(
+      undefined,
+      closedItem(OTHER_NUMBER, true),
+      "pull_request_closed",
+    ),
+    { disposition: Disposition.AcceptedObservation, reason: null },
+  );
+  assert.deepEqual(h.checks, [h.request.id]);
+  assert.equal(h.node().state, NodeState.Available);
+});
+
+test("an unmerged closed pull request item sets other and blocks the node", async (t) => {
+  const h = await fixture(t);
+  h.answer(CheckEndState.Other);
+  assert.deepEqual(
+    await h.admit(
+      undefined,
+      closedItem(REQUEST_NUMBER, false),
+      "pull_request_closed",
+    ),
+    { disposition: Disposition.AcceptedObservation, reason: null },
+  );
+  assert.equal((await requestOf(h))?.end_state, EndState.Other);
+  assert.equal(h.node().state, NodeState.Blocked);
+});
+
+test("an unmerged closed pull request item of an unknown pull request is unmatched", async (t) => {
+  const h = await fixture(t);
+  h.answer(CheckEndState.Other);
+  assert.deepEqual(
+    await h.admit(
+      undefined,
+      closedItem(OTHER_NUMBER, false),
+      "pull_request_closed",
+    ),
+    { disposition: Disposition.Refused, reason: AdmissionRefusal.Unmatched },
+  );
+  assert.equal(h.checks.length, NO_CALLS);
 });

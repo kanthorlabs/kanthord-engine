@@ -21,6 +21,7 @@ import { completed } from "./cli-support.ts";
 import {
   FIRST_INDEX,
   GATED_KEY,
+  MERGE_KEY,
   RESOURCE,
   setup,
   type Page,
@@ -38,6 +39,8 @@ const TIMEOUT = 300000;
 const MERGED_COMMIT = "e".repeat(40);
 const PUSHED_COMMIT = "a".repeat(40);
 const BASE_BRANCH = "main";
+const SECOND_PULL_REQUEST = 2;
+const CLOSED_AT = "2026-10-15T03:57:51Z";
 const PENDING_THEN_DIRTY_READS = 2;
 const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
@@ -61,6 +64,20 @@ function closed(number: number, merged: boolean): Webhook {
       number,
       pull_request: { merged },
       repository: { full_name: RESOURCE },
+    },
+  };
+}
+
+function mergedItem(number: number, commit: string): Webhook {
+  return {
+    event: "pull_request_closed",
+    payload: {
+      number,
+      state: "closed",
+      closed_at: CLOSED_AT,
+      merged_at: CLOSED_AT,
+      merge_commit_sha: commit,
+      base: { ref: BASE_BRANCH, repo: { full_name: RESOURCE } },
     },
   };
 }
@@ -249,5 +266,101 @@ test(
       );
     assert.equal(reads.length, PENDING_THEN_DIRTY_READS);
     assert.equal((await h.node(P.nodeId)).state, NodeState.Available);
+  },
+);
+
+const DIRTY = { mergeable: false, mergeable_state: "dirty" };
+
+type Journey = Awaited<ReturnType<typeof setup>>;
+
+async function requested(h: Journey, initiativeId: string, filename: string) {
+  const objective = await h.objective(filename, initiativeId);
+  const action = await h.actionRequest(objective.x2);
+  assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+  await h.release(objective.x2.execution_id);
+  assert.equal(
+    (await h.node(objective.nodeId)).state,
+    NodeState.ExternalRequested,
+  );
+  return objective;
+}
+
+test(
+  "E08.9 a merged closed pull request item completes its node and returns the conflicting node to rework",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const I = await h.create("initiative-1.md");
+    const P = await requested(h, I, "objective-p.md");
+    const Q = await requested(h, I, "objective-q.md");
+    assert.deepEqual(
+      h.gitHub.pulls.map((pull) => pull.number),
+      [FIRST_PULL_REQUEST, SECOND_PULL_REQUEST],
+    );
+    h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
+    h.gitHub.mergeability(SECOND_PULL_REQUEST, [DIRTY]);
+    const answer = completed(
+      await h.admit(
+        mergedItem(FIRST_PULL_REQUEST, MERGED_COMMIT),
+        createIdentity("inbound_event"),
+      ),
+    );
+    assert.deepEqual(answer, {
+      disposition: Disposition.AcceptedObservation,
+      reason: null,
+    });
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+    assert.equal((await h.node(Q.nodeId)).state, NodeState.Available);
+  },
+);
+
+test(
+  "E08.10 a merged item that also matches a merge push request exactly resolves both requests and the sibling conflict",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, { action: "merge_push" });
+    const I = await h.create("initiative-1.md");
+    const A = await h.objective("objective-a.md", I);
+    const landed = h.gatedBare.head;
+    const request = await h.requestMergePush(A.x2, landed);
+    assert.equal(request.requirement_key, MERGE_KEY);
+    await h.release(A.x2.execution_id);
+    assert.equal((await h.node(A.nodeId)).state, NodeState.ExternalRequested);
+    await h.rebind("pull_request");
+    const P = await requested(h, I, "objective-p.md");
+    const Q = await requested(h, I, "objective-q.md");
+    h.gitHub.merge(FIRST_PULL_REQUEST, landed);
+    h.gitHub.mergeability(SECOND_PULL_REQUEST, [DIRTY]);
+    const inboundEventId = createIdentity("inbound_event");
+    const answer = completed(
+      await h.admit(mergedItem(FIRST_PULL_REQUEST, landed), inboundEventId),
+    );
+    assert.deepEqual(answer, {
+      disposition: Disposition.AcceptedObservation,
+      reason: null,
+    });
+    assert.equal((await h.node(A.nodeId)).state, NodeState.Completed);
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+    assert.equal((await h.node(Q.nodeId)).state, NodeState.Available);
+    for (const objective of [A, P]) {
+      const evidence = await h.read<Page<Evidence>>([
+        "mission",
+        "evidence",
+        "list",
+        objective.nodeId,
+        "--attempt",
+        String(FIRST_ATTEMPT),
+      ]);
+      const provenance = evidence.items
+        .filter((item) => item.provenance.kind === ActorKind.Service)
+        .map((item) => item.provenance);
+      assert.deepEqual(provenance, [
+        {
+          kind: ActorKind.Service,
+          service: ActorService.Mission,
+          inbound_event_id: inboundEventId,
+        },
+      ]);
+    }
   },
 );

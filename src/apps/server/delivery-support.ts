@@ -34,9 +34,19 @@ const FIRST_REVISION = 1;
 const WORKER_INSTANCE_COUNT = 1;
 const SECRET = "test-secret";
 const GATED = "gated";
+export const MERGE_KEY = "gated.merge_push";
+const BASE_BRANCH = "main";
+const PULL_REQUEST_ACTION = "pull_request";
 export const GATED_KEY = "gated.pull_request";
 const GATED_RESOURCE = "repository:github:owner/gated";
 export const RESOURCE = "owner/gated";
+const HARNESS_BINDING = {
+  kind: "worker",
+  config: {
+    worker: "claude-code@1",
+    instance_count: WORKER_INSTANCE_COUNT,
+  },
+};
 const CONTENT = {
   name: "Ship accounts",
   requirement: "Ship accounts",
@@ -45,6 +55,7 @@ const CONTENT = {
   bindings: [],
 };
 export type Page<T> = { items: T[] };
+type BindingSetApplied = { binding_set_version: number };
 type Binding = { id: string; name: string; resource_identity: string };
 type Check = { results: { resolution: string }[]; failures: unknown[] };
 export type Webhook = { event: string; payload: unknown };
@@ -69,7 +80,7 @@ async function cli(t: TestContext, pollIntervalMs?: number) {
 
 type Cli = Awaited<ReturnType<typeof cli>>;
 
-async function project(c: Cli) {
+async function project(c: Cli, action: string) {
   await createCredentials(c.session, SECRET);
   const created = await c.read<{ id: string }>([
     "project",
@@ -78,34 +89,68 @@ async function project(c: Cli) {
     "admission",
   ]);
   const mission = await c.read<{ id: string }>(["mission", "get", created.id]);
-  await c.write(["project", "binding", "apply", created.id], {
-    version: FIRST_REVISION,
-    bindings: {
-      gated: repositoryBinding(GATED, "pull_request"),
-      harness: {
-        kind: "worker",
-        config: {
-          worker: "claude-code@1",
-          instance_count: WORKER_INSTANCE_COUNT,
-        },
+  const applied = await c.write<BindingSetApplied>(
+    ["project", "binding", "apply", created.id],
+    {
+      version: FIRST_REVISION,
+      bindings: {
+        gated: repositoryBinding(GATED, action),
+        harness: HARNESS_BINDING,
       },
     },
-  });
+  );
   const bindings = await c.read<Page<Binding>>([
     "project",
     "binding",
     "list",
     created.id,
   ]);
-  const binding = (name: string) =>
-    bindings.items.find((item) => item.name === name)!;
-  assert.equal(binding(GATED).resource_identity, GATED_RESOURCE);
-  return { projectId: created.id, missionId: mission.id, binding };
+  assert.equal(
+    bindings.items.find((item) => item.name === GATED)?.resource_identity,
+    GATED_RESOURCE,
+  );
+  return {
+    projectId: created.id,
+    missionId: mission.id,
+    bindings,
+    bindingSetVersion: applied.binding_set_version,
+  };
 }
 
-export async function setup(t: TestContext, pollIntervalMs?: number) {
-  const c = await cli(t, pollIntervalMs);
-  const { projectId, missionId, binding } = await project(c);
+export interface SetupOptions {
+  pollIntervalMs?: number;
+  action?: string;
+}
+
+export async function setup(t: TestContext, options: SetupOptions = {}) {
+  const c = await cli(t, options.pollIntervalMs);
+  const { projectId, missionId, ...applied } = await project(
+    c,
+    options.action ?? PULL_REQUEST_ACTION,
+  );
+  let bindingSetVersion = applied.bindingSetVersion;
+  let page = applied.bindings;
+  const binding = (name: string) =>
+    page.items.find((item) => item.name === name)!;
+  const rebind = async (action: string) => {
+    const next = await c.write<BindingSetApplied>(
+      ["project", "binding", "apply", projectId],
+      {
+        version: bindingSetVersion,
+        bindings: {
+          gated: repositoryBinding(GATED, action),
+          harness: HARNESS_BINDING,
+        },
+      },
+    );
+    bindingSetVersion = next.binding_set_version;
+    page = await c.read<Page<Binding>>([
+      "project",
+      "binding",
+      "list",
+      projectId,
+    ]);
+  };
   const missionVersion = async () =>
     (await c.read<{ version: number }>(["mission", "get", projectId])).version;
   const create = async (filename: string, parentId?: string) => {
@@ -169,6 +214,27 @@ export async function setup(t: TestContext, pollIntervalMs?: number) {
         { idempotencyKey: ulid() },
       ),
     );
+  const requestMergePush = async (x: ExecutionRecord, commit: string) =>
+    completed(
+      await worker["evidence.request"](
+        {
+          params: { node_id: x.node_id },
+          query: {},
+          body: {
+            ...executionContext(x),
+            requirement_key: MERGE_KEY,
+            subject: MERGE_KEY,
+            address: {
+              kind: PlatformAddressKind.BranchPush,
+              resource_identity: GATED_RESOURCE,
+              branch: BASE_BRANCH,
+              commit,
+            },
+          },
+        },
+        { idempotencyKey: ulid() },
+      ),
+    );
   const performer = httpClient(workerOperations, c.fixture.endpoint, token);
   const actionRequest = async (x: ExecutionRecord) =>
     completed(
@@ -207,11 +273,13 @@ export async function setup(t: TestContext, pollIntervalMs?: number) {
   return {
     ...c,
     projectId,
+    rebind,
     create,
     objective,
     node,
     release,
     requestPullRequest,
+    requestMergePush,
     actionRequest,
     check,
     admit,

@@ -36,14 +36,17 @@ import type { Dependencies } from "./service.ts";
 type AdmissionInput = z.output<typeof deliveryAdmitSchema>;
 type CountInput = z.output<typeof unresolvedRequestCountSchema>;
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
-type Checked = {
+type BaseCheck = { evidenceId: string; check: CheckAnswer };
+type BaseChecked = { base: BaseCheck[] };
+type Checked = BaseChecked & {
   evidenceId: string;
   address: PlatformAddress;
   check: CheckAnswer;
 };
-type BaseChecked = {
-  base: { evidenceId: string; check: CheckAnswer }[];
-};
+type BranchPushAddress = Extract<
+  PlatformAddress,
+  { kind: typeof PlatformAddressKind.BranchPush }
+>;
 
 const ACCEPTED: AdmissionAnswer = {
   disposition: Disposition.AcceptedObservation,
@@ -89,19 +92,19 @@ async function prepareAdmission(
     caller.context,
     match.evidence_id,
   );
-  return { evidenceId: match.evidence_id, address, check };
+  const base =
+    address.kind === PlatformAddressKind.BranchPush
+      ? await checkBase(dependencies, caller, input, address)
+      : [];
+  return { evidenceId: match.evidence_id, address, check, base };
 }
 
-async function checkBaseRequests(
+async function checkBase(
   dependencies: Dependencies,
   caller: CallerContext,
   input: AdmissionInput,
-  address: Extract<
-    PlatformAddress,
-    { kind: typeof PlatformAddressKind.BranchPush }
-  >,
-  unmatched: AdmissionAnswer,
-): Promise<AdmissionAnswer | BaseChecked> {
+  address: BranchPushAddress,
+): Promise<BaseCheck[]> {
   const selected = dependencies.store.transaction((tx) =>
     unresolvedPullRequests(
       tx,
@@ -113,14 +116,24 @@ async function checkBaseRequests(
           .base_branch === address.branch,
     ),
   );
-  if (selected.length === NO_SELECTED_REQUESTS) return unmatched;
-  const base: BaseChecked["base"] = [];
+  const base: BaseCheck[] = [];
   for (const evidenceId of selected)
     base.push({
       evidenceId,
       check: await dependencies.intakeCheck.check(caller.context, evidenceId),
     });
-  return { base };
+  return base;
+}
+
+async function checkBaseRequests(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  input: AdmissionInput,
+  address: BranchPushAddress,
+  unmatched: AdmissionAnswer,
+): Promise<AdmissionAnswer | BaseChecked> {
+  const base = await checkBase(dependencies, caller, input, address);
+  return base.length === NO_SELECTED_REQUESTS ? unmatched : { base };
 }
 
 function commitBaseAdmission(
@@ -147,7 +160,7 @@ function commitBaseAdmission(
   return ACCEPTED;
 }
 
-function commitAdmission(
+function commitExact(
   tx: Transaction,
   dependencies: Dependencies,
   input: AdmissionInput,
@@ -182,6 +195,18 @@ function commitAdmission(
     inboundEventId: input.inbound_event_id,
   });
   return ACCEPTED;
+}
+
+function commitAdmission(
+  tx: Transaction,
+  dependencies: Dependencies,
+  input: AdmissionInput,
+  checked: Checked,
+): AdmissionAnswer {
+  const answer = commitExact(tx, dependencies, input, checked);
+  if (answer.disposition === Disposition.Refused) return answer;
+  commitBaseAdmission(tx, dependencies, input, { base: checked.base });
+  return answer;
 }
 
 const NO_RUNNING_ADMISSIONS = 0;
@@ -257,9 +282,9 @@ async function admitOne(
   const answer = caller.commit((tx) =>
     "disposition" in prepared
       ? prepared
-      : "base" in prepared
-        ? commitBaseAdmission(tx, dependencies, input, prepared)
-        : commitAdmission(tx, dependencies, input, prepared),
+      : "evidenceId" in prepared
+        ? commitAdmission(tx, dependencies, input, prepared)
+        : commitBaseAdmission(tx, dependencies, input, prepared),
   );
   dependencies.wakeup.wake(input.project_id);
   return answer;

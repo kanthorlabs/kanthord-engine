@@ -1368,20 +1368,72 @@ const closedPullRequestItem = (merged: boolean, overrides = {}) => ({
   ...overrides,
 });
 
-test("decodeGitHubEvent answers the pull request of a merged and an unmerged closed pull request item", () => {
-  const address = {
-    kind: "pull_request",
-    resource_identity: EVENT_RESOURCE_IDENTITY,
-    number: 7,
-  };
+test("decodeGitHubEvent answers the branch push of a merged closed pull request item and the pull request of an unmerged item", () => {
   assert.deepEqual(
     decoded("pull_request_closed", closedPullRequestItem(true)),
-    address,
+    {
+      kind: "branch_push",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      branch: "main",
+      commit: EVENT_COMMIT,
+    },
   );
   assert.deepEqual(
     decoded("pull_request_closed", closedPullRequestItem(false)),
-    address,
+    {
+      kind: "pull_request",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      number: 7,
+    },
   );
+});
+
+test("decodeGitHubEvent takes the branch of a merged item from base.ref and ignores the commit of an unmerged item", () => {
+  assert.deepEqual(
+    decoded(
+      "pull_request_closed",
+      closedPullRequestItem(true, {
+        base: { ref: "release/1.x", repo: { full_name: EVENT_RESOURCE } },
+      }),
+    ),
+    {
+      kind: "branch_push",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      branch: "release/1.x",
+      commit: EVENT_COMMIT,
+    },
+  );
+  assert.deepEqual(
+    decoded(
+      "pull_request_closed",
+      closedPullRequestItem(false, { merge_commit_sha: "not a commit" }),
+    ),
+    {
+      kind: "pull_request",
+      resource_identity: EVENT_RESOURCE_IDENTITY,
+      number: 7,
+    },
+  );
+});
+
+test("decodeGitHubEvent answers null for a merged item without a valid merge commit", () => {
+  for (const merge_commit_sha of [
+    null,
+    undefined,
+    "",
+    "E".repeat(40),
+    "e".repeat(39),
+    "0".repeat(40),
+    7,
+  ]) {
+    assert.equal(
+      decoded(
+        "pull_request_closed",
+        closedPullRequestItem(true, { merge_commit_sha }),
+      ),
+      null,
+    );
+  }
 });
 
 test("decodeGitHubEvent answers null for a closed pull request item of another repository or of a bad shape", () => {
@@ -1399,6 +1451,15 @@ test("decodeGitHubEvent answers null for a closed pull request item of another r
   );
   assert.equal(
     decoded("pull_request_closed", closedPullRequestItem(true, { base: {} })),
+    null,
+  );
+  assert.equal(
+    decoded(
+      "pull_request_closed",
+      closedPullRequestItem(true, {
+        base: { ref: "", repo: { full_name: EVENT_RESOURCE } },
+      }),
+    ),
     null,
   );
   assert.equal(

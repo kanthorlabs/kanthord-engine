@@ -1172,7 +1172,12 @@ const pushPolledSchema = z.looseObject({
 
 const closedPullRequestSchema = z.looseObject({
   number: eventNumberSchema,
-  base: z.looseObject({ repo: webhookRepositorySchema }),
+  merged_at: z.string().nullable().optional(),
+  merge_commit_sha: z.string().nullable().optional(),
+  base: z.looseObject({
+    ref: z.string().min(MIN_SEGMENT_LENGTH),
+    repo: webhookRepositorySchema,
+  }),
 });
 
 type EventAddressDecoder = (
@@ -1284,7 +1289,14 @@ function closedPullRequestAddress(
   if (!parsed.success || parsed.data.base.repo.full_name !== resource) {
     return null;
   }
-  return pullRequestAddress(resource, parsed.data.number);
+  const { number, merged_at, merge_commit_sha, base } = parsed.data;
+  if (!isString(merged_at)) {
+    return pullRequestAddress(resource, number);
+  }
+  const commit = eventCommitSchema.safeParse(merge_commit_sha);
+  return commit.success
+    ? branchPushAddress(resource, base.ref, commit.data)
+    : null;
 }
 
 function pullRequestAddress(resource: string, number: number): DecodedAddress {
