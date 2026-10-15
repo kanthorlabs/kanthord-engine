@@ -14,7 +14,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { directClient } from "./direct-client.ts";
 import { httpClient } from "./client.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { closingFetch, gatewayFixture } from "./test-support.ts";
 
 const base = {
   id: "test.lifetime",
@@ -64,9 +64,12 @@ test("stream clients return an open body through direct and HTTP adapters and jo
     { operation },
     fixture.gateway.invocation,
   ).operation(input, { context: directContext });
-  const http = await httpClient({ operation }, fixture.endpoint).operation(
-    input,
-  );
+  const http = await httpClient(
+    { operation },
+    fixture.endpoint,
+    undefined,
+    closingFetch,
+  ).operation(input);
   assert.ok(direct.type === OperationResultType.Completed);
   assert.ok(http.type === OperationResultType.Completed);
   const readers = [direct.data.body!.getReader(), http.data.body!.getReader()];

@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import * as connector from "../../repository/connector.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { fixtureTemplate, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import {
@@ -25,6 +25,8 @@ import {
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
 const FIRST_ATTEMPT = 1;
+const ORIGIN_NAME = "origin";
+const SEED_NAME = "seed";
 
 test("workspace root audits private mode and keys refuse foreign identities", (t) => {
   const expectedBranch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -335,34 +337,40 @@ test("an objective workspace excludes the scratch directory from git once", asyn
 
 const RESTART_ATTEMPT = 2;
 
-async function restartFixture(t: test.TestContext) {
-  const state = temporary(t);
-  const origin = join(state, "origin");
-  const seed = join(state, "seed");
+async function commit(directory: string, file: string, value: string) {
+  writeFileSync(join(directory, file), value);
+  await simpleGit(directory).add(file);
+  await simpleGit(directory).raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    value,
+  ]);
+  return (await simpleGit(directory).revparse(["HEAD"])).trim();
+}
+
+const restartTemplate = fixtureTemplate(async (root) => {
+  const origin = join(root, ORIGIN_NAME);
+  const seed = join(root, SEED_NAME);
   mkdirSync(origin);
   mkdirSync(seed);
   await simpleGit(origin).init(true);
   const git = simpleGit(seed);
-  await git.init();
-  await git.raw(["checkout", "-b", "main"]);
-  const commit = async (directory: string, file: string, value: string) => {
-    writeFileSync(join(directory, file), value);
-    await simpleGit(directory).add(file);
-    await simpleGit(directory).raw([
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.invalid",
-      "commit",
-      "-m",
-      value,
-    ]);
-    return (await simpleGit(directory).revparse(["HEAD"])).trim();
-  };
-  await commit(seed, ".gitignore", "ignored.txt\n");
-  const base = (await git.revparse(["HEAD"])).trim();
-  await git.addRemote("origin", origin);
+  await git.raw(["init", "-b", "main"]);
+  const base = await commit(seed, ".gitignore", "ignored.txt\n");
+  await git.addRemote("origin", `../${ORIGIN_NAME}`);
   await git.push("origin", "main");
+  return base;
+});
+
+async function restartFixture(t: test.TestContext) {
+  const { root: state, built: base } = await restartTemplate(t);
+  const origin = join(state, ORIGIN_NAME);
+  const seed = join(state, SEED_NAME);
+  const git = simpleGit(seed);
   const workspace = WorkspaceRoot.open(state);
   const objectiveId = createIdentity("node");
   const repository = {
