@@ -519,6 +519,20 @@ export class WorkbenchService implements Service {
     };
   }
 
+  private runState(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    const pending = session?.approvals.values().next().value?.approval;
+    return {
+      run_active: session !== undefined && this.runActive(session),
+      pending_approval: pending
+        ? {
+            tool_call_id: pending.tool_call_id,
+            operation_id: pending.operation_id,
+          }
+        : null,
+    };
+  }
+
   private runActive(session: OpenSession): boolean {
     return session.run !== null && !session.run.ended;
   }
@@ -657,12 +671,11 @@ export class WorkbenchService implements Service {
       agentName === undefined ? Object.keys(AGENT_DECLARATIONS) : [agentName];
     const items = [];
     for (const name of agentNames)
-      items.push(
-        ...(await listSessions(
-          sessionPlace(this.dependencies.stateDirectory, name),
-          name,
-        )),
-      );
+      for (const stored of await listSessions(
+        sessionPlace(this.dependencies.stateDirectory, name),
+        name,
+      ))
+        items.push({ ...stored, ...this.runState(stored.id) });
     return { items };
   }
 

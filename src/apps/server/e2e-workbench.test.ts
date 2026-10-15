@@ -445,6 +445,8 @@ test("a stored session resumes from the last entry of each kind and lists throug
   );
   assert.deepEqual(everyAgent.items, listed.items);
   assert.equal(listed.items[0]!.first_message, FIRST_MESSAGE);
+  assert.equal(listed.items[0]!.run_active, false);
+  assert.equal(listed.items[0]!.pending_approval, null);
   assert.ok(Number.isSafeInteger(listed.items[0]!.created));
   const read = completed(
     await fixture.workbench["session.get"](
@@ -997,6 +999,47 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
     [false],
   );
   assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP, SPARE]);
+});
+
+async function listedSession(fixture: Fixture, sessionId: string) {
+  const listed = completed(
+    await fixture.workbench["session.list"](
+      { params: {}, query: { agent_name: AGENT }, body: null },
+      fixture.options,
+    ),
+  );
+  return listed.items.find(({ id }) => id === sessionId);
+}
+
+test("the session list names the run and the pending approval of an open session without the input", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    toolCall(toolName(PROVIDER_ADD), addSpare),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const pending = await untilApproval(fixture, sessionId);
+  const waiting = await listedSession(fixture, sessionId);
+  assert.equal(waiting?.run_active, true);
+  assert.deepEqual(waiting?.pending_approval, {
+    tool_call_id: pending.tool_call_id,
+    operation_id: PROVIDER_ADD,
+  });
+  completed(
+    await fixture.workbench["session.approve"](
+      {
+        params: { session_id: sessionId },
+        query: {},
+        body: { tool_call_id: pending.tool_call_id, approved: true },
+      },
+      fixture.options,
+    ),
+  );
+  await untilIdle(fixture, sessionId);
+  const idle = await listedSession(fixture, sessionId);
+  assert.equal(idle?.run_active, false);
+  assert.equal(idle?.pending_approval, null);
 });
 
 test("a rejected call reaches the agent as a blocked call", async (t) => {
