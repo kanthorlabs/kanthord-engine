@@ -65,6 +65,13 @@ export async function spawnKanthord(
   return (await cliTestSupport()).spawnKanthord(args, env);
 }
 
+export async function kanthordTerminal(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<CliResult> {
+  return (await cliTestSupport()).runInProcess(args, env, true);
+}
+
 export async function generateMachineToken(input: {
   env: NodeJS.ProcessEnv;
   masterKey: string;
@@ -85,9 +92,7 @@ export async function generateMachineToken(input: {
     ),
     true,
   );
-  const generated = await (
-    await cliTestSupport()
-  ).runInProcess(
+  const generated = await kanthordTerminal(
     [
       "auth",
       "jwt",
@@ -102,7 +107,6 @@ export async function generateMachineToken(input: {
       path,
     ],
     input.env,
-    true,
   );
   assert.equal(generated.code, SUCCESS_EXIT_CODE);
   assert.equal(generated.stderr, EMPTY_OUTPUT);

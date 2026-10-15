@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { unusedHostTools } from "../../worker/test-support.ts";
-import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -45,7 +44,7 @@ import {
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import {
   FAKE_SSH_IDENTITY,
   fakeGitHub,
@@ -296,7 +295,7 @@ test(
         }).getProperties(),
       ),
     );
-    function machine(binding: string) {
+    async function machine(binding: string) {
       const args = [
         "auth",
         "jwt",
@@ -310,21 +309,12 @@ test(
         "--config",
         join(directory, "server.yaml"),
       ];
-      const entry = new URL("../../main.ts", import.meta.url).href;
-      const result = spawnSync(
-        process.execPath,
-        [
-          "--input-type=module",
-          "-e",
-          `process.stdout.isTTY=true;process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
-        ],
-        { env: human, encoding: "utf8", timeout: 10000 },
-      );
-      assert.equal(result.status, SUCCESSFUL_EXIT, result.stderr);
+      const result = await kanthordTerminal(args, human);
+      assert.equal(result.code, SUCCESSFUL_EXIT, result.stderr);
       return parse(result.stdout) as { token: string; client_secret: string };
     }
     async function register(binding: string) {
-      const auth = machine(binding);
+      const auth = await machine(binding);
       const env = { ...human, KANTHORD_TOKEN: auth.token };
       const registration = await read<{ runtime_identity: string }>(
         ["worker", "register"],

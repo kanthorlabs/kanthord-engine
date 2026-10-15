@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -15,7 +15,7 @@ import {
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import { workerAcceptance } from "./worker-acceptance.ts";
 import {
   fakeMachines,
@@ -310,7 +310,6 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
       }).getProperties(),
     ),
   );
-  const entry = new URL("../../main.ts", import.meta.url).href;
   const args = [
     "auth",
     "jwt",
@@ -322,16 +321,8 @@ test("worker starts from the machine JWT fragment pasted below endpoint without 
     "--config",
     configPath,
   ];
-  const generated = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `process.stdout.isTTY=true;process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
-    ],
-    { env, encoding: "utf8", timeout: SPAWN_LINE_TIMEOUT_MS },
-  );
-  assert.equal(generated.status, EXIT_SUCCESS, generated.stderr);
+  const generated = await kanthordTerminal(args, env);
+  assert.equal(generated.code, EXIT_SUCCESS, generated.stderr);
   assert.equal(generated.stderr, NO_OUTPUT);
   writePrivate(
     join(directories(env).config, "cli.yaml"),
@@ -490,7 +481,7 @@ test(
   { timeout: 180000 },
   async (t) => {
     const setup = await workerAcceptance(t);
-    const auth = setup.machine("general-a");
+    const auth = await setup.machine("general-a");
     const env = {
       ...workerEnvironment(t),
       KANTHORD_ENDPOINT: setup.fixture.endpoint,
@@ -547,7 +538,7 @@ test(
       second.kill("SIGHUP");
       await delay(SIGHUP_WAIT_MS);
       assert.ok(second.alive());
-      const other = setup.machine("general-b");
+      const other = await setup.machine("general-b");
       const otherEnv = {
         ...workerEnvironment(t),
         KANTHORD_ENDPOINT: setup.fixture.endpoint,
