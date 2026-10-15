@@ -10,11 +10,14 @@ const COMMAND_TIMEOUT_MS = 10000;
 const EMPTY_OUTPUT = "";
 const PRIVATE_UMASK = 0o077;
 const DEFAULT_ENCODING = "utf8";
+const NO_ACTIVE_RUNS = 0;
+const TERMINAL_PROPERTY = "isTTY";
 
 export type CliResult = { code: number; stdout: string; stderr: string };
 
 type CliCapture = {
   env: NodeJS.ProcessEnv;
+  terminal: boolean;
   stdout: string[];
   stderr: string[];
 };
@@ -22,13 +25,8 @@ type CliCapture = {
 type WriteCallback = (error?: Error | null) => void;
 
 const cliCapture = new AsyncLocalStorage<CliCapture>();
-let cliQueue: Promise<unknown> = Promise.resolve();
-
-function serialized<T>(task: () => Promise<T>): Promise<T> {
-  const result = cliQueue.then(task);
-  cliQueue = result.catch(() => undefined);
-  return result;
-}
+let activeRuns = NO_ACTIVE_RUNS;
+let restoreProcess = () => {};
 
 function definedEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(
@@ -88,44 +86,65 @@ function capturedWrite(
   };
 }
 
-export function runInProcess(
+function routedTerminal(stream: NodeJS.WriteStream): () => void {
+  const own = Object.getOwnPropertyDescriptor(stream, TERMINAL_PROPERTY);
+  const isTTY = stream.isTTY;
+  Object.defineProperty(stream, TERMINAL_PROPERTY, {
+    configurable: true,
+    get: () => {
+      const capture = cliCapture.getStore();
+      return capture ? capture.terminal || undefined : isTTY;
+    },
+  });
+  return () => {
+    if (own) Object.defineProperty(stream, TERMINAL_PROPERTY, own);
+    else Reflect.deleteProperty(stream, TERMINAL_PROPERTY);
+  };
+}
+
+function routedProcess(): () => void {
+  const host = process.env;
+  const exitCode = process.exitCode;
+  const umask = process.umask(PRIVATE_UMASK);
+  const restoreTerminal = routedTerminal(process.stdout);
+  const restoreStdout = capturedWrite(process.stdout, (c) => c.stdout);
+  const restoreStderr = capturedWrite(process.stderr, (c) => c.stderr);
+  process.env = routedEnvironment(host);
+  return () => {
+    process.env = host;
+    restoreStderr();
+    restoreStdout();
+    restoreTerminal();
+    process.umask(umask);
+    process.exitCode = exitCode;
+  };
+}
+
+export async function runInProcess(
   args: string[],
   env: NodeJS.ProcessEnv,
   terminal = false,
 ): Promise<CliResult> {
   assert.ok(env.XDG_CONFIG_HOME);
-  return serialized(async () => {
-    const capture: CliCapture = {
-      env: definedEnvironment(env),
-      stdout: [],
-      stderr: [],
+  const capture: CliCapture = {
+    env: definedEnvironment(env),
+    terminal,
+    stdout: [],
+    stderr: [],
+  };
+  if (activeRuns++ === NO_ACTIVE_RUNS) restoreProcess = routedProcess();
+  try {
+    const code = await cliCapture.run(capture, () =>
+      runCLI([process.execPath, PROGRAM_NAME, ...args]),
+    );
+    return {
+      code,
+      stdout: capture.stdout.join(EMPTY_OUTPUT),
+      stderr: capture.stderr.join(EMPTY_OUTPUT),
     };
-    const host = process.env;
-    const exitCode = process.exitCode;
-    const umask = process.umask(PRIVATE_UMASK);
-    const isTTY = process.stdout.isTTY;
-    const restoreStdout = capturedWrite(process.stdout, (c) => c.stdout);
-    const restoreStderr = capturedWrite(process.stderr, (c) => c.stderr);
-    process.env = routedEnvironment(host);
-    if (terminal) process.stdout.isTTY = true;
-    try {
-      const code = await cliCapture.run(capture, () =>
-        runCLI([process.execPath, PROGRAM_NAME, ...args]),
-      );
-      return {
-        code,
-        stdout: capture.stdout.join(EMPTY_OUTPUT),
-        stderr: capture.stderr.join(EMPTY_OUTPUT),
-      };
-    } finally {
-      process.stdout.isTTY = isTTY;
-      process.env = host;
-      restoreStderr();
-      restoreStdout();
-      process.umask(umask);
-      process.exitCode = exitCode;
-    }
-  });
+  } finally {
+    if (--activeRuns === NO_ACTIVE_RUNS) restoreProcess();
+  }
 }
 
 export function spawnKanthord(
