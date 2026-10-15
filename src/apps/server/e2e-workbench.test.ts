@@ -1042,6 +1042,46 @@ test("the session list names the run and the pending approval of an open session
   assert.equal(idle?.pending_approval, null);
 });
 
+test("the session list answers the first of two pending approvals of one run, as the snapshot does", async (t) => {
+  const second = { ...addSpare, body: { ...addSpare.body, name: "spare-2" } };
+  const fixture = await workbenchFixture(t, [
+    fauxAssistantMessage(
+      [
+        fauxToolCall(toolName(PROVIDER_ADD), addSpare),
+        fauxToolCall(toolName(PROVIDER_ADD), second),
+      ],
+      { stopReason: TOOL_USE },
+    ),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const first = await untilApproval(fixture, sessionId);
+  const listed = await listedSession(fixture, sessionId);
+  assert.deepEqual(listed?.pending_approval, {
+    tool_call_id: first.tool_call_id,
+    operation_id: first.operation_id,
+  });
+  completed(
+    await fixture.workbench["session.approve"](
+      {
+        params: { session_id: sessionId },
+        query: {},
+        body: { tool_call_id: first.tool_call_id, approved: true },
+      },
+      fixture.options,
+    ),
+  );
+  const next = await untilApproval(fixture, sessionId);
+  assert.notEqual(next.tool_call_id, first.tool_call_id);
+  const relisted = await listedSession(fixture, sessionId);
+  assert.deepEqual(relisted?.pending_approval, {
+    tool_call_id: next.tool_call_id,
+    operation_id: next.operation_id,
+  });
+});
+
 test("a rejected call reaches the agent as a blocked call", async (t) => {
   const fixture = await workbenchFixture(t, [
     toolCall(toolName(PROVIDER_ADD), addSpare),
