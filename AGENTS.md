@@ -41,6 +41,7 @@ engine/
 │   │   ├── xdg.ts              # Configuration, data, state, and cache directories
 │   │   ├── yaml.ts             # Bounded YAML mapping parsing
 │   │   ├── files.ts            # Private filesystem validation and publication
+│   │   ├── git-environment.ts  # Git child environment without the global and system git configuration of the host
 │   │   ├── http.ts             # Shared HTTP methods, statuses, and media types
 │   │   ├── probe.ts            # Remote HTTP probe and failure-reason redaction
 │   │   ├── pi-provider.ts      # Platform to pi provider id map
