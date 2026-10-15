@@ -134,7 +134,7 @@ export const workbenchOperations = {
     }),
     output: z.strictObject({ items: z.array(sessionListItemSchema) }),
     description:
-      "List the workbench sessions of every agent, or of one agent. Each item holds run_active and pending_approval of the in-memory run.",
+      "List the workbench sessions of every agent, or of one agent. Each item also answers `run_active` and `pending_approval` of the in-memory run.",
   },
   "session.create": {
     ...workbenchMutation,
