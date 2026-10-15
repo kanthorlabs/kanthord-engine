@@ -36,6 +36,7 @@ import { requireMission } from "./write.ts";
 import { transition } from "./control.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
+import { foldExternalState } from "./node-check.ts";
 
 const NO_ATTEMPT = 0;
 const RESOURCE_KIND_SEGMENT = 0;
@@ -190,6 +191,14 @@ export function release(
     state,
     now,
   );
+  if (state === NodeState.ExternalRequested)
+    foldExternalState(
+      tx,
+      dependencies,
+      requireNode(tx, node.id),
+      execution.attempt,
+      now,
+    );
 }
 
 export function failure(

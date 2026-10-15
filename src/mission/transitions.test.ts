@@ -10,6 +10,7 @@ import {
   ClaimKind,
   AssetKind,
   AssessmentResult,
+  EndState,
   ReleaseObligation,
   RepositoryAction,
   StartPoint,
@@ -376,6 +377,92 @@ test("reviewer release requires a current success and every eligible request", (
   h.release();
   assert.equal(h.node().state, NodeState.ExternalRequested);
   assert.equal(h.claim([NodeState.ExternalRequested]), null);
+});
+
+test("reviewer release folds all expected end states to Completed", (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: createIdentity("evidence"),
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: EndState.Expected,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [],
+    ),
+  );
+  h.release();
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("reviewer release folds an other end state to Blocked", (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: createIdentity("evidence"),
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: EndState.Other,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [],
+    ),
+  );
+  h.release();
+  assert.equal(h.node().state, NodeState.Blocked);
 });
 
 test("a failure routes below the limit, pauses at the limit and resume permits another claim", async (t) => {

@@ -37,7 +37,7 @@ import {
   readRequests,
 } from "./record-store.ts";
 import { claimableMap, reconcileMission } from "./routing.ts";
-import { setNodeState } from "./store.ts";
+import { setNodeState, type NodeRow } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 import { authorizeRequest } from "./authorization.ts";
@@ -87,6 +87,23 @@ export function requestContext(
       JSON.parse(assets[FIRST_ASSET_INDEX]!.content),
     ),
   };
+}
+
+export function foldExternalState(
+  tx: Transaction,
+  dependencies: Dependencies,
+  node: NodeRow,
+  attempt: number,
+  now: number,
+): void {
+  if (node.state !== NodeState.ExternalRequested) return;
+  if (readOpenAttempt(tx, node.id)?.attempt !== attempt) return;
+  const states = actionStatesOf(tx, dependencies.bindings, node.id, attempt);
+  if (states.some((state) => state.resolution === Resolution.OtherEnd))
+    setNodeState(tx, node.id, NodeState.ExternalFailed);
+  else if (states.every((state) => state.resolution === Resolution.ExpectedEnd))
+    setNodeState(tx, node.id, NodeState.ExternalSuccess);
+  closeExternalAttempt(tx, dependencies, requireNode(tx, node.id), now);
 }
 
 export function applyEndState(
@@ -164,21 +181,9 @@ export function applyEndState(
   if (
     node.state === NodeState.ExternalRequested &&
     readOpenAttempt(tx, node.id)?.attempt === request.attempt
-  ) {
-    const states = actionStatesOf(
-      tx,
-      dependencies.bindings,
-      node.id,
-      request.attempt,
-    );
-    if (states.some((state) => state.resolution === Resolution.OtherEnd))
-      setNodeState(tx, node.id, NodeState.ExternalFailed);
-    else if (
-      states.every((state) => state.resolution === Resolution.ExpectedEnd)
-    )
-      setNodeState(tx, node.id, NodeState.ExternalSuccess);
-    closeExternalAttempt(tx, dependencies, requireNode(tx, node.id), now);
-  } else
+  )
+    foldExternalState(tx, dependencies, node, request.attempt, now);
+  else
     reconcileMission(
       tx,
       dependencies.workQueue,

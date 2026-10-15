@@ -178,7 +178,14 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
     resourceIdentity: binding("harness").resource_identity,
   });
   const { token, node, release } = machine;
-  const objective = async (filename: string, parentId: string) => {
+  const objective = async (
+    filename: string,
+    parentId: string,
+    opts?: {
+      executing?: (execution: ExecutionRecord) => Promise<void>;
+      afterSteps?: () => Promise<void>;
+    },
+  ) => {
     const nodeId = await create(filename, parentId);
     const head = await pushNodeBranch(
       c.t,
@@ -190,6 +197,8 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
       nodeId,
       bindingId: binding(GATED).id,
       commit: head,
+      executing: opts?.executing,
+      afterSteps: opts?.afterSteps,
     });
     return { nodeId, x2 };
   };

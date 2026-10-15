@@ -343,6 +343,7 @@ export async function passingEvaluation(
     bindingId: string;
     commit: string;
     executing?: (execution: ExecutionRecord) => Promise<void>;
+    afterSteps?: () => Promise<void>;
   },
 ): Promise<ExecutionRecord> {
   const { nodeId, bindingId, commit } = input;
@@ -362,6 +363,7 @@ export async function passingEvaluation(
     ],
   });
   await machine.release(x1.execution_id);
+  await input.afterSteps?.();
   const x2 = await machine.pull(nodeId, NodeState.Evaluating);
   const r1 = await submit(x2, verificationRun(bindingId, commit));
   const assessment = await session.write<{ assessment: { result: string } }>(
