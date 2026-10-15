@@ -16,7 +16,7 @@ contract, database initialization, or Intake OpenAPI document.
 event. An inbound receives through a webhook or a poll. A human creates an
 inbound to start its acquisition and deletes it to stop; no field of its
 configuration changes after the insert. The create validates before the
-insert: a poll performs one request. A webhook names no credential, kanthord
+insert: a poll performs each request of one poll cycle. A webhook names no credential, kanthord
 calls no platform for it, and a human sets its address and secret at the
 platform. The Intake Service verifies a webhook event with a secret that it
 derives from `master_key` and the inbound identity. It hands a pending event
@@ -209,7 +209,9 @@ The inbound read projection contains `id`, `project_id`, `kind`, `platform`,
 
 **Request and validation:** send the file object described above. Validate
 the fields and the configuration schema, then perform the remote validation of
-the kind: one request for a poll, nothing for a webhook. The insert
+the kind: one poll cycle for a poll, nothing for a webhook. A GitHub poll
+cycle reads the events and the closed pull requests of the resource, so a
+credential without pull request read access refuses the create. The insert
 transaction checks the credential name and its platform.
 
 **Effects and idempotency:** a success inserts exactly one inbound. A platform
@@ -221,8 +223,8 @@ natural key prevents a duplicate, because a duplicate serves a rotation.
 **Statuses:** `201` with the inbound projection; `400` for invalid input;
 `404` `intake.inbound.project_not_found` for an unknown project; `422`
 `intake.inbound.credential_invalid` for an unknown or unsuitable credential;
-`422` `intake.inbound.platform_refused` when the platform refuses the
-first request of a poll.
+`422` `intake.inbound.platform_refused` when the platform refuses a
+validation request of a poll.
 
 ### `inbound list`
 
@@ -408,9 +410,11 @@ simulates a platform signature with a human JWT.
 
 A poll has no receipt route because the Intake Service initiates it. A poll
 pauses beyond the capacity bound. A poll requests GitHub only while its project
-holds an unresolved request evidence on its resource. It waits at least 60
-seconds between two requests, and longer when GitHub names a wait through
-`X-Poll-Interval`, `Retry-After` or `x-ratelimit-reset`. The create and the
+holds an unresolved request evidence on its resource. Each cycle reads the
+events, then the closed pull requests of the resource. It waits at least 60
+seconds between two cycles, and longer when GitHub names a wait through
+`X-Poll-Interval`, `Retry-After` or `x-ratelimit-reset`. The `checkpoint` of a
+GitHub poll holds `etag` and `pulls_etag`, one ETag for each read. The create and the
 delete of a poll inbound are the only switch of its poll.
 
 The API operations `intake.action.perform`, `intake.action.read`,
@@ -499,7 +503,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `mission.evidence.upload_expired`                      | The pending asset expired before its complete.                                                                                                                      | `intake.storage.check`                                                                                                                                                     |
 | 409   | `mission.execution.context_mismatch`                   | The execution context differs from the proven claim; details `{ field }`.                                                                                           | `intake.storage.put`, `intake.storage.check`, `intake.execution.storage.get`                                                                                               |
 | 422   | `intake.inbound.credential_invalid`                    | The credential name does not exist, or its platform does not suit the inbound.                                                                                      | inbound create                                                                                                                                                             |
-| 422   | `intake.inbound.platform_refused`                      | The platform refuses the first request of a poll create.                                                                                                            | inbound create                                                                                                                                                             |
+| 422   | `intake.inbound.platform_refused`                      | The platform refuses a validation request of a poll create.                                                                                                         | inbound create                                                                                                                                                             |
 | 422   | `intake.outbound.request.action_unmapped`              | The configured action has no row in the action table.                                                                                                               | `intake.action.perform`                                                                                                                                                    |
 | 502   | `repository.connector.git_failed`                      | A git operation fails, is aborted or reaches its deadline. `intake.action.perform` answers it with `200` and stores it in the request `error` message.              | `intake.action.check`, `intake.action.perform`                                                                                                                             |
 | 502   | `repository.platform.github.<class>`                   | A GitHub call of the check answers a result class; `details.status` holds the GitHub HTTP status when the failure carries one, otherwise null.                      | `intake.action.check`                                                                                                                                                      |
