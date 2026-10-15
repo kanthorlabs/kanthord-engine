@@ -16,7 +16,9 @@ import {
   MISSION_SERVICE_NAME,
   MissionErrorCode,
   NodeState,
+  PlatformAddressKind,
   missionOperations,
+  type PlatformAddress,
 } from "../../mission/contract.ts";
 import {
   REQUEST_NUMBER,
@@ -35,6 +37,7 @@ const NO_LANDED_COMMITS = 0;
 const CHECK_FAILURE_CODE = "repository.platform.github.retryable_refusal";
 const BAD_GATEWAY_STATUS = 502;
 const PUSHED_COMMIT = "a".repeat(40);
+const PUSH_RESOURCE = "repository:github:owner/repo";
 
 function closed(number: number, merged: boolean): string {
   return Buffer.from(
@@ -254,7 +257,12 @@ test("another service identity refuses with service_mismatch", async (t) => {
   assert.equal(h.checks.length, NO_CALLS);
 });
 
-function insertRequest(h: Harness, requirementKey: string): string {
+function insertRequest(
+  h: Harness,
+  requirementKey: string,
+  nodeId = h.node_id,
+  address: PlatformAddress = h.address,
+): string {
   const id = createIdentity("evidence");
   h.store.transaction((tx) => {
     tx.database
@@ -263,7 +271,7 @@ function insertRequest(h: Harness, requirementKey: string): string {
       )
       .run(
         id,
-        h.node_id,
+        nodeId,
         FIRST_ATTEMPT,
         requirementKey,
         requirementKey,
@@ -278,7 +286,7 @@ function insertRequest(h: Harness, requirementKey: string): string {
         createIdentity("evidence_asset"),
         id,
         AssetKind.Platform,
-        canonicalJSON(h.address),
+        canonicalJSON(address),
         Date.now(),
       );
   });
@@ -567,4 +575,69 @@ test("an unmerged closed pull request item of an unknown pull request is unmatch
     { disposition: Disposition.Refused, reason: AdmissionRefusal.Unmatched },
   );
   assert.equal(h.checks.length, NO_CALLS);
+});
+
+function pushRequestOf(h: Harness): {
+  nodeId: string;
+  address: PlatformAddress;
+} {
+  const nodeId = h.node().parent_id;
+  assert.ok(nodeId);
+  return {
+    nodeId,
+    address: {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: PUSH_RESOURCE,
+      branch: "main",
+      commit: PUSHED_COMMIT,
+    },
+  };
+}
+
+test("a live claim on the exact push request refuses the admission and leaves a conflicting pull request untouched", async (t) => {
+  const h = await fixture(t);
+  const push = pushRequestOf(h);
+  const exact = insertRequest(h, "repo.merge_push", push.nodeId, push.address);
+  h.dependencies.schedulerClaims.liveExecutionOf = (tx, nodeId, now) =>
+    nodeId === push.nodeId ? h.claim(tx, nodeId, now) : null;
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
+    h.checks.push(evidenceId);
+    return evidenceId === exact
+      ? { end_state: CheckEndState.Expected, landed_commits: [MERGE_COMMIT] }
+      : { end_state: CheckEndState.Conflict, landed_commits: [] };
+  };
+  await assert.rejects(
+    h.admit(undefined, pushed("main"), "push"),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.ClaimLive &&
+      (error.details as { node_id: string }).node_id === push.nodeId,
+  );
+  assert.deepEqual(h.checks, [exact, h.request.id]);
+  assert.deepEqual(h.wakes, []);
+  assert.equal((await requestOf(h))?.end_state, undefined);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("an exact push request that becomes ambiguous during the check leaves a conflicting pull request untouched", async (t) => {
+  const h = await fixture(t);
+  const push = pushRequestOf(h);
+  const exact = insertRequest(h, "repo.merge_push", push.nodeId, push.address);
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
+    h.checks.push(evidenceId);
+    if (evidenceId !== exact)
+      return { end_state: CheckEndState.Conflict, landed_commits: [] };
+    insertRequest(h, "next.merge_push", push.nodeId, push.address);
+    return {
+      end_state: CheckEndState.Expected,
+      landed_commits: [MERGE_COMMIT],
+    };
+  };
+  assert.deepEqual(await h.admit(undefined, pushed("main"), "push"), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Ambiguous,
+  });
+  assert.deepEqual(h.checks, [exact, h.request.id]);
+  assert.equal((await requestOf(h))?.end_state, undefined);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
 });

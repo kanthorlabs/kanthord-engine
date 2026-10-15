@@ -39,6 +39,7 @@ const EMPTY_OUTPUT = "";
 const TIMEOUT = 180000;
 const POLL_INTERVAL_MS = 50;
 const VALIDATION_CALLS = 1;
+const COMPLETING_CALLS = 1;
 const HELD_CALLS = 1;
 const ANSWERED_CALLS = 2;
 const FIRST_BATCH = 2;
@@ -66,6 +67,7 @@ const LANDED_EVIDENCE_COUNT = 1;
 const DELIVERY_CREDENTIAL = "github";
 const EVENTS_PATH = /^\/repos\/owner\/repo\/events(\?|$)/;
 const PULLS_PATH = /^\/repos\/owner\/repo\/pulls\?state=closed/;
+const GATED_PULLS_PATH = /^\/repos\/owner\/gated\/pulls\?state=closed/;
 const PLATFORM_REFUSED = `${IntakeErrorCode.InboundPlatformRefused}:`;
 type Result = { code: number; stdout: string; stderr: string };
 type Checkpoint = { etag: string | null; pulls_etag: string | null };
@@ -327,6 +329,9 @@ test(
     await h.release(P.x2.execution_id);
     assert.equal((await h.node(P.nodeId)).state, NodeState.ExternalRequested);
     h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
+    const gatedPullsCalls = () =>
+      h.gitHub.calls.filter((call) => GATED_PULLS_PATH.test(call.path));
+    const pullsBefore = gatedPullsCalls().length;
     const poll = await h.write<Inbound>(["intake", "inbound", "create"], {
       project_id: h.projectId,
       kind: InboundKind.Poll,
@@ -339,6 +344,10 @@ test(
       async () => (await h.node(P.nodeId)).state,
       (state) => state === NodeState.Completed,
     );
+    const answered = gatedPullsCalls()
+      .slice(pullsBefore + VALIDATION_CALLS)
+      .filter((call) => call.status === HttpStatus.OK);
+    assert.equal(answered.length, COMPLETING_CALLS);
     const listed = await h.read<{ items: (Event & { id: string })[] }>([
       "intake",
       "event",
