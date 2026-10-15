@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
@@ -22,7 +21,7 @@ import {
   SpanStatus,
   type Span,
 } from "../../tracking/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -37,7 +36,6 @@ const FIRST_PRIORITY = 1;
 const THIRD_MISSION_VERSION = 3;
 const DEADLINE_DELTA = 7800000;
 const SHORT_DEADLINE_DELTA = 1001;
-const SPAWN_TIMEOUT = 10000;
 const JOURNEY_TIMEOUT = 180000;
 const MAX_WAIT_POLLS = 800;
 const POLL_MS = 10;
@@ -68,13 +66,13 @@ type Attempt = {
 };
 type Change = { revisions: { node_id: string }[] };
 
-function machineToken(
+async function machineToken(
   directory: string,
   projectId: string,
   binding: string,
   name: string,
   env: NodeJS.ProcessEnv,
-): string {
+): Promise<string> {
   assert.ok(projectId);
   assert.ok(binding);
   const args = [
@@ -90,17 +88,8 @@ function machineToken(
     "--config",
     join(directory, "server.yaml"),
   ];
-  const entry = new URL("../../main.ts", import.meta.url).href;
-  const result = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `process.stdout.isTTY=true;process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
-    ],
-    { env, encoding: "utf8", timeout: SPAWN_TIMEOUT },
-  );
-  assert.equal(result.status, SUCCESS, result.stderr);
+  const result = await kanthordTerminal(args, env);
+  assert.equal(result.code, SUCCESS, result.stderr);
   assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
@@ -265,7 +254,7 @@ async function setup(t: TestContext, short = false) {
   );
   const G = {
     ...H,
-    KANTHORD_TOKEN: machineToken(
+    KANTHORD_TOKEN: await machineToken(
       directory,
       project.id,
       "general",
@@ -277,7 +266,7 @@ async function setup(t: TestContext, short = false) {
     ? H
     : {
         ...H,
-        KANTHORD_TOKEN: machineToken(
+        KANTHORD_TOKEN: await machineToken(
           directory,
           project.id,
           "reviewer",
@@ -289,7 +278,7 @@ async function setup(t: TestContext, short = false) {
     ? H
     : {
         ...H,
-        KANTHORD_TOKEN: machineToken(
+        KANTHORD_TOKEN: await machineToken(
           directory,
           project.id,
           "general",

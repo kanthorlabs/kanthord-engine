@@ -35,12 +35,16 @@ import {
 import { CheckEndState, ExpectedEndState } from "./github.ts";
 import { isString } from "../kernel/values.ts";
 import {
+  fixtureTemplate,
   overrideEnvironment,
   temporary,
   UNSET_GIT_ENVIRONMENT,
 } from "../kernel/test-support.ts";
 
 const DEADLINE_MS = 5000;
+const ORIGIN_NAME = "origin";
+const SEED_NAME = "seed";
+const SIBLING_ORIGIN = `../${ORIGIN_NAME}`;
 const EXPIRED_DEADLINE_MS = 1;
 const LOCAL_HOST = "localhost";
 const SSH_RESOLVE_FAILED_STATUS = 422;
@@ -222,33 +226,54 @@ function isolateTemporary(t: test.TestContext, root: string): string {
   return scratch;
 }
 
-async function remote(t: test.TestContext): Promise<Remote> {
-  const root = temporary(t);
-  const origin = join(root, "origin");
-  const seed = join(root, "seed");
-  mkdirSync(origin);
-  mkdirSync(seed);
-  await simpleGit(origin).init(true);
+function seedCommit(seed: string) {
   const git = simpleGit(seed);
-  await git.init();
-  await git.raw(["checkout", "-b", BASE_BRANCH]);
-  const commit = async (file: string, value: string) => {
+  return async (file: string, value: string) => {
     writeFileSync(join(seed, file), value);
     await git.add(file);
     await git.raw([...IDENTITY, "commit", "-m", value]);
     return (await git.revparse(["HEAD"])).trim();
   };
+}
+
+const remoteTemplate = fixtureTemplate(async (root) => {
+  const origin = join(root, ORIGIN_NAME);
+  const seed = join(root, SEED_NAME);
+  mkdirSync(origin);
+  mkdirSync(seed);
+  await simpleGit(origin).init(true);
+  const git = simpleGit(seed);
+  await git.raw(["init", "-b", BASE_BRANCH]);
+  const commit = seedCommit(seed);
   const base = await commit("base", "base");
-  await git.addRemote("origin", origin);
+  await git.addRemote("origin", SIBLING_ORIGIN);
   await git.push("origin", BASE_BRANCH);
   await git.raw(["checkout", "-b", NODE_BRANCH]);
   const snapshot = await commit("node", "snapshot");
   await git.push("origin", NODE_BRANCH);
   await git.raw(["checkout", BASE_BRANCH]);
+  return { base, snapshot };
+});
+
+async function remote(t: test.TestContext): Promise<Remote> {
+  const {
+    root,
+    built: { base, snapshot },
+  } = await remoteTemplate(t);
+  const origin = join(root, ORIGIN_NAME);
+  const seed = join(root, SEED_NAME);
   const head = async (branch: string) =>
     (await simpleGit(origin).revparse([`refs/heads/${branch}`])).trim();
   const scratch = isolateTemporary(t, root);
-  return { origin, seed, base, snapshot, scratch, commit, head };
+  return {
+    origin,
+    seed,
+    base,
+    snapshot,
+    scratch,
+    commit: seedCommit(seed),
+    head,
+  };
 }
 
 function assertNoClone(scratch: string): void {
@@ -601,12 +626,11 @@ const UNKNOWN_COMMIT = "0".repeat(40);
 
 type SeedEntry = string | Buffer | { link: string } | { linkBlob: string };
 
-async function instructionOrigin(t: TestContext) {
-  const root = temporary(t);
-  const origin = join(root, "origin");
-  const seed = join(root, "seed");
-  const scratch = join(root, "scratch");
-  for (const directory of [origin, seed, scratch]) mkdirSync(directory);
+const instructionTemplate = fixtureTemplate(async (root) => {
+  const origin = join(root, ORIGIN_NAME);
+  const seed = join(root, SEED_NAME);
+  mkdirSync(origin);
+  mkdirSync(seed);
   await simpleGit(origin).init(true);
   await simpleGit(origin).raw(["config", "uploadpack.allowFilter", "true"]);
   await simpleGit(origin).raw([
@@ -615,9 +639,17 @@ async function instructionOrigin(t: TestContext) {
     "true",
   ]);
   const git = simpleGit(seed);
-  await git.init();
-  await git.raw(["checkout", "-b", "main"]);
-  await git.addRemote("origin", origin);
+  await git.raw(["init", "-b", "main"]);
+  await git.addRemote("origin", SIBLING_ORIGIN);
+});
+
+async function instructionOrigin(t: TestContext) {
+  const { root } = await instructionTemplate(t);
+  const origin = join(root, ORIGIN_NAME);
+  const seed = join(root, SEED_NAME);
+  const scratch = join(root, "scratch");
+  mkdirSync(scratch);
+  const git = simpleGit(seed);
   const commit = async (files: Record<string, SeedEntry>) => {
     for (const [name, entry] of Object.entries(files)) {
       const path = join(seed, name);

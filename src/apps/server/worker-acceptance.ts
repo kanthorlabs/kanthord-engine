@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { parse, stringify } from "yaml";
 import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import { fakeS3, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
@@ -154,7 +153,7 @@ export async function workerAcceptance(
       }).getProperties(),
     ),
   );
-  function machine(name: string) {
+  async function machine(name: string) {
     const args = [
       "auth",
       "jwt",
@@ -168,17 +167,8 @@ export async function workerAcceptance(
       "--config",
       configPath,
     ];
-    const entry = new URL("../../main.ts", import.meta.url).href;
-    const result = spawnSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "-e",
-        `process.stdout.isTTY=true;process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
-      ],
-      { env: human, encoding: "utf8", timeout: 15000 },
-    );
-    assert.equal(result.status, SUCCESS, result.stderr);
+    const result = await kanthordTerminal(args, human);
+    assert.equal(result.code, SUCCESS, result.stderr);
     assert.equal(result.stderr, NO_STDERR);
     return parse(result.stdout) as { token: string; client_secret: string };
   }

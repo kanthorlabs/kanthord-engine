@@ -128,7 +128,7 @@ async function fixture(t: TestContext) {
     fetchBase: (...args) => connector.fetchBase(...args),
     pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
   };
-  const auth = setup.machine("general-a");
+  const auth = await setup.machine("general-a");
   assert.ok(nodeId);
   assert.ok(auth.client_secret);
   return { ...setup, node_id: nodeId, bare, git, auth, transport };
@@ -374,7 +374,7 @@ test(
       },
     );
     const handoverSetup = await fixture(t);
-    const other = handoverSetup.machine("general-b");
+    const other = await handoverSetup.machine("general-b");
     await t.test(
       "E09.16 wrong secret refuses handover without release or deregistration",
       { timeout: JOURNEY_TIMEOUT },

@@ -147,7 +147,7 @@ test(
   { timeout: POOL_TEST_TIMEOUT },
   async (t) => {
     const f = await serverPool(t, ONE_INSTANCE);
-    const stranger = f.machine("stranger");
+    const stranger = await f.machine("stranger");
     const response = await f.fixture.request(workerOperations.register.path, {
       method: "POST",
       headers: {

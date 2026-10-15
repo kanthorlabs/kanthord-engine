@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
@@ -18,7 +17,7 @@ import {
   instanceRecordSchema,
   workerOperations,
 } from "../../worker/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
@@ -44,7 +43,6 @@ const EXTERNAL_HOST = "external-harness";
 const METHOD = "steps";
 const HARNESS = "claude-code";
 const EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
-const SPAWN_TIMEOUT = 10000;
 const JOURNEY_TIMEOUT = 120000;
 const TOKEN_DELAY = 1000;
 const BUDGET = { turns: 200, wall_time_ms: 7200000 };
@@ -91,12 +89,12 @@ function file(directory: string, name: string, value: unknown): string {
   return path;
 }
 
-function machineToken(
+async function machineToken(
   directory: string,
   projectId: string,
   name: string,
   env: NodeJS.ProcessEnv,
-): string {
+): Promise<string> {
   assert.ok(identitySchema("project").safeParse(projectId).success);
   assert.ok(name);
   const args = [
@@ -112,17 +110,8 @@ function machineToken(
     "--config",
     join(directory, "issuance.yaml"),
   ];
-  const entry = new URL("../../main.ts", import.meta.url).href;
-  const result = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `process.stdout.isTTY=true;process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
-    ],
-    { env, encoding: "utf8", timeout: SPAWN_TIMEOUT },
-  );
-  assert.equal(result.status, SUCCESS, result.stderr);
+  const result = await kanthordTerminal(args, env);
+  assert.equal(result.code, SUCCESS, result.stderr);
   assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
@@ -208,11 +197,11 @@ async function setup(t: TestContext) {
   );
   const A = {
     ...H,
-    KANTHORD_TOKEN: machineToken(directory, project.id, "worker-a", H),
+    KANTHORD_TOKEN: await machineToken(directory, project.id, "worker-a", H),
   };
   const B = {
     ...H,
-    KANTHORD_TOKEN: machineToken(directory, project.id, "worker-b", H),
+    KANTHORD_TOKEN: await machineToken(directory, project.id, "worker-b", H),
   };
   return { directory, project_id: project.id, H, A, B, fixture };
 }
@@ -552,7 +541,7 @@ test(
       await delay(TOKEN_DELAY);
       const C = {
         ...f.H,
-        KANTHORD_TOKEN: machineToken(
+        KANTHORD_TOKEN: await machineToken(
           f.directory,
           f.project_id,
           "worker-c",

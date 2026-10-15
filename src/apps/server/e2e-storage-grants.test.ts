@@ -222,13 +222,15 @@ async function setup(t: TestContext) {
   };
   const I = await create("initiative-1.md", "initiative", []);
   const A = await create("objective-a.md", "objective", ["repo", "store"], I);
-  const token = generateMachineToken({
-    env: H,
-    masterKey: fixture.config.master_key,
-    projectId: project.id,
-    bindingName: "harness",
-    name: "Harness",
-  }).token;
+  const token = (
+    await generateMachineToken({
+      env: H,
+      masterKey: fixture.config.master_key,
+      projectId: project.id,
+      bindingName: "harness",
+      name: "Harness",
+    })
+  ).token;
   secrets.push(token);
   const T = { ...H, KANTHORD_TOKEN: token };
   const { runtime_identity: rid } = await read<{ runtime_identity: string }>(

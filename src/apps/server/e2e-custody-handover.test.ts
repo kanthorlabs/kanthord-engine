@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { parse, stringify } from "yaml";
@@ -32,7 +31,7 @@ import {
   WorkPullKind,
 } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 
 const SUCCESS = 0;
@@ -48,7 +47,6 @@ const NUMBER_TYPE = "number";
 const HANDOVER_LOG_MESSAGE = "credential handover";
 const NO_OUTPUT = "";
 const MISSING_TOKEN = "";
-const SPAWN_TIMEOUT = 10000;
 const JOURNEY_TIMEOUT = 180000;
 const UNKNOWN_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const NAME = "anthro-1";
@@ -127,7 +125,7 @@ function cli(directory: string, env: NodeJS.ProcessEnv) {
   return { read, write, refuses };
 }
 
-function machine(
+async function machine(
   directory: string,
   projectId: string,
   name: string,
@@ -146,17 +144,8 @@ function machine(
     "--config",
     join(directory, "server.yaml"),
   ];
-  const entry = new URL("../../main.ts", import.meta.url).href;
-  const result = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `process.stdout.isTTY=true;process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
-    ],
-    { env, encoding: "utf8", timeout: SPAWN_TIMEOUT },
-  );
-  assert.equal(result.status, SUCCESS, result.stderr);
+  const result = await kanthordTerminal(args, env);
+  assert.equal(result.code, SUCCESS, result.stderr);
   assert.equal(result.stderr, NO_OUTPUT);
   const fragment = parse(result.stdout) as {
     token: string;
@@ -295,8 +284,8 @@ async function setup(t: TestContext) {
       }).getProperties(),
     ),
   );
-  const general = machine(directory, projectId, "general-a", human);
-  const spare = machine(directory, projectId, "general-b", human);
+  const general = await machine(directory, projectId, "general-a", human);
+  const spare = await machine(directory, projectId, "general-b", human);
   const env = { ...human, KANTHORD_TOKEN: general.token };
   const registration = await c.read<{ runtime_identity: string }>(
     ["worker", "register"],

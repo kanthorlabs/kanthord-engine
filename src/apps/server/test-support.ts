@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { simpleGit } from "simple-git";
 import { join } from "node:path";
 import { stringify } from "yaml";
@@ -1226,9 +1227,32 @@ export function seedUnresolvedRequest(
 }
 
 const MAIN_REF = "refs/heads/main";
+const TEMPLATE_PREFIX = "kanthord-template-";
+
+const bareTemplates = new Map<
+  string,
+  Promise<{ bare: string; head: string }>
+>();
+
+function templateRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), TEMPLATE_PREFIX));
+  process.once("exit", () => rmSync(root, { recursive: true, force: true }));
+  return root;
+}
 
 export async function bareRepository(t: TestContext, name: string) {
-  const root = temporary(t);
+  let template = bareTemplates.get(name);
+  if (!template) {
+    template = seededBareRepository(templateRoot(), name);
+    bareTemplates.set(name, template);
+  }
+  const { bare: source, head } = await template;
+  const bare = join(temporary(t), `${name}.git`);
+  cpSync(source, bare, { recursive: true });
+  return { bare, head };
+}
+
+async function seededBareRepository(root: string, name: string) {
   const bare = join(root, `${name}.git`);
   const seed = join(root, "seed");
   mkdirSync(bare);

@@ -1,14 +1,35 @@
-import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
-export function temporary(t: TestContext): string {
+export function temporaryDirectory(): string {
   process.umask(0o077);
   const parent = join(tmpdir(), "opencode");
   mkdirSync(parent, { recursive: true, mode: 0o700 });
-  const path = mkdtempSync(join(parent, "kanthord-"));
+  return mkdtempSync(join(parent, "kanthord-"));
+}
+
+export function temporary(t: TestContext): string {
+  const path = temporaryDirectory();
   t.after(() => rmSync(path, { recursive: true, force: true }));
   return path;
+}
+
+export function fixtureTemplate<T>(
+  build: (root: string) => Promise<T>,
+): (t: TestContext) => Promise<{ root: string; built: T }> {
+  let template: Promise<{ root: string; built: T }> | undefined;
+  return async (t) => {
+    template ??= (async () => {
+      const root = temporaryDirectory();
+      process.on("exit", () => rmSync(root, { recursive: true, force: true }));
+      return { root, built: await build(root) };
+    })();
+    const { root, built } = await template;
+    const copy = temporary(t);
+    cpSync(root, copy, { recursive: true });
+    return { root: copy, built };
+  };
 }
 
 export function hostEnvironment(): NodeJS.ProcessEnv {

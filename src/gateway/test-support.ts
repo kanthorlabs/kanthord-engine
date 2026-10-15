@@ -156,6 +156,16 @@ export function composeGateway(options: {
   return gateway;
 }
 
+const CONNECTION_HEADER = "connection";
+const CONNECTION_CLOSE = "close";
+
+export const closingFetch: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+  if (!headers.has(CONNECTION_HEADER))
+    headers.set(CONNECTION_HEADER, CONNECTION_CLOSE);
+  return fetch(input, { ...init, headers });
+};
+
 export async function gatewayFixture(
   t: TestContext,
   options: {
@@ -209,7 +219,7 @@ export async function gatewayFixture(
   config.gateway.allowed_hosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
   const endpoint = `http://127.0.0.1:${port}`;
   const request = (path: string, init?: RequestInit) =>
-    fetch(endpoint + path, init);
+    closingFetch(endpoint + path, init);
   return {
     gateway,
     store,

@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
+import { IdentityKind } from "../../kernel/caller.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { environment, kanthord } from "./cli-support.ts";
+import { packageVersion } from "../../kernel/version.ts";
+import { environment, kanthord, spawnKanthord } from "./cli-support.ts";
+import { gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;
+const NO_OUTPUT = "";
+const VERSION = "--version";
+const EXIT_FAILURE = 1;
+const SERVE = "serve";
 const NOT_FOUND = -1;
 const NO_COMMANDS = 0;
 const HELP = "--help";
@@ -146,3 +153,37 @@ for (const scenario of cases) {
     }
   });
 }
+
+test("the real process prints help and the package version", async (t) => {
+  const env = environment(temporary(t));
+  const help = await spawnKanthord([HELP], env);
+  assert.equal(help.code, EXIT_SUCCESS, help.stderr);
+  assert.ok(commandNames(help.stdout).includes(SERVE));
+  const version = await spawnKanthord([VERSION], env);
+  assert.equal(version.code, EXIT_SUCCESS, version.stderr);
+  assert.equal(version.stdout, `${packageVersion()}\n`);
+});
+
+test("the real process exits with the failure code of a failed command", async (t) => {
+  const env = environment(temporary(t));
+  const result = await spawnKanthord(["config", "validate"], env);
+  assert.equal(result.code, EXIT_FAILURE);
+  assert.equal(result.stdout, NO_OUTPUT);
+  assert.ok(result.stderr.includes(env.KANTHORD_CONFIG!), result.stderr);
+});
+
+test("the real process sends an authenticated request to the server", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  const result = await spawnKanthord(["gateway", "verify"], env);
+  assert.equal(result.code, EXIT_SUCCESS, result.stderr);
+  assert.equal(result.stderr, NO_OUTPUT);
+  assert.equal(
+    (JSON.parse(result.stdout) as { kind: string }).kind,
+    IdentityKind.Human,
+  );
+});
