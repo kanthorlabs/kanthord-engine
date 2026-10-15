@@ -28,6 +28,10 @@ const VALIDATION_CALLS = 1;
 const HELD_CALLS = 1;
 const ANSWERED_CALLS = 2;
 const FIRST_BATCH = 2;
+const SECOND_BATCH = 3;
+const HIGH_EVENT_ID = 23984532267;
+const LOW_EVENT_ID = 17268923404;
+const LOWER_EVENT_ID = 17268923405;
 const NOT_MODIFIED = 304;
 const SERVER_ERROR = 500;
 const OWNER = "owner";
@@ -43,7 +47,7 @@ const PULL_REQUEST_EVENT = "PullRequestEvent";
 const EVENTS_PATH = /^\/repos\/owner\/repo\/events(\?|$)/;
 const PLATFORM_REFUSED = `${IntakeErrorCode.InboundPlatformRefused}:`;
 type Result = { code: number; stdout: string; stderr: string };
-type Checkpoint = { etag: string | null; newest_event_id: string | null };
+type Checkpoint = { etag: string | null };
 type Inbound = { id: string; kind: string; checkpoint: Checkpoint | null };
 type Event = {
   event_id: string;
@@ -108,7 +112,10 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
   const project = succeeded<{ id: string }>(
     await kanthord(["project", "create", "--name", "polls"], H),
   );
-  const first = [ev(101, PUSH_EVENT), ev(100, PULL_REQUEST_EVENT)];
+  const first = [
+    ev(HIGH_EVENT_ID, PUSH_EVENT),
+    ev(LOW_EVENT_ID, PULL_REQUEST_EVENT),
+  ];
   gitHub.events(OWNER, REPO, first);
   const poll = file("poll.json", {
     project_id: project.id,
@@ -206,13 +213,20 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
       assert.deepEqual(
         items.map((item) => [item.event_id, item.metadata, item.state]),
         [
-          ["100", { event: PULL_REQUEST_EVENT }, InboundEventState.Succeeded],
-          ["101", { event: PUSH_EVENT }, InboundEventState.Succeeded],
+          [
+            String(LOW_EVENT_ID),
+            { event: PULL_REQUEST_EVENT },
+            InboundEventState.Succeeded,
+          ],
+          [
+            String(HIGH_EVENT_ID),
+            { event: PUSH_EVENT },
+            InboundEventState.Succeeded,
+          ],
         ],
       );
       assert.deepEqual((await inboundOf()).checkpoint, {
         etag: etagOf(first),
-        newest_event_id: "101",
       });
     },
   );
@@ -230,4 +244,25 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
     }
     assert.equal((await events()).length, FIRST_BATCH);
   });
+
+  await t.test(
+    "E07.7 a new event with an id below an earlier event id is stored",
+    async () => {
+      const second = [ev(LOWER_EVENT_ID, PULL_REQUEST_EVENT), ...first];
+      gitHub.events(OWNER, REPO, second);
+      const items = await until(
+        events,
+        (list) =>
+          list.length === SECOND_BATCH &&
+          list.every((item) => item.state === InboundEventState.Succeeded),
+      );
+      assert.deepEqual(
+        items.map((item) => item.event_id),
+        [LOW_EVENT_ID, LOWER_EVENT_ID, HIGH_EVENT_ID].map(String),
+      );
+      assert.deepEqual((await inboundOf()).checkpoint, {
+        etag: etagOf(second),
+      });
+    },
+  );
 });

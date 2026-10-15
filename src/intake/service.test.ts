@@ -538,7 +538,6 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
   const store = pollStore(t);
   insertNaming(store, InboundKind.Poll, CREDENTIAL, {
     etag: ETAG_STORED,
-    newest_event_id: "100",
   });
   const first = pollService(t, store);
   first.answers.next = async () => modified(ETAG_FIRST, [ev("101")]);

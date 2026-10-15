@@ -46,9 +46,6 @@ const REVIEW_PAGE_SIZE = 100;
 const REVIEW_PAGE_LIMIT = 30;
 const NO_CHANGE_REQUESTS = 0;
 const EVENT_ID_PATTERN = /^(0|[1-9][0-9]*)$/;
-const SAME_ORDER = 0;
-const BEFORE_ORDER = -1;
-const AFTER_ORDER = 1;
 const MIN_JSON_LENGTH = 1;
 const REQUEST_TIMEOUT_STATUS = 408;
 const CAUSE_DEPTH_LIMIT = 4;
@@ -141,9 +138,8 @@ export interface GitHubRequest {
   headers?: Record<string, string>;
 }
 
-export const githubCheckpointSchema = z.strictObject({
+export const githubCheckpointSchema = z.object({
   etag: z.string().nullable(),
-  newest_event_id: z.string().regex(EVENT_ID_PATTERN).nullable(),
 });
 export type GitHubCheckpoint = z.infer<typeof githubCheckpointSchema>;
 
@@ -556,31 +552,6 @@ export function reviewCommentPage(query: ReviewCommentQuery): Cursor {
     );
   }
   return cursor;
-}
-
-function compareEventIds(left: string, right: string): number {
-  assert.ok(EVENT_ID_PATTERN.test(left));
-  assert.ok(EVENT_ID_PATTERN.test(right));
-  if (left.length !== right.length) {
-    return left.length - right.length;
-  }
-  if (left === right) {
-    return SAME_ORDER;
-  }
-  return left < right ? BEFORE_ORDER : AFTER_ORDER;
-}
-
-export function newerEvents<E extends { id: string }>(
-  events: readonly E[],
-  newest: string | null,
-): E[] {
-  assert.ok(Array.isArray(events));
-  assert.ok(newest === null || EVENT_ID_PATTERN.test(newest));
-  const kept = events.filter(
-    (event) =>
-      newest === null || compareEventIds(event.id, newest) > SAME_ORDER,
-  );
-  return kept.sort((left, right) => compareEventIds(left.id, right.id));
 }
 
 function eventsOf(data: unknown): GitHubEvent[] | null {

@@ -49,7 +49,6 @@ const ETAG_STORED = '"etag-0"';
 const ETAG_ANSWERED = '"etag-1"';
 const CHECKPOINT: GitHubCheckpoint = {
   etag: ETAG_STORED,
-  newest_event_id: "100",
 };
 const REFUSAL_CODE = "credential.credential.archived";
 const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";

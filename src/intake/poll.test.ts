@@ -57,6 +57,8 @@ import {
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREDENTIAL = "github-poll";
 const RESOURCE = "owner/repo";
+const CREATE_EVENT_ID = "23984532267";
+const PULL_REQUEST_EVENT_ID = "17268923405";
 const ETAG_STORED = '"etag-0"';
 const ETAG_FIRST = '"etag-1"';
 const ETAG_SECOND = '"etag-2"';
@@ -157,6 +159,14 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
       })),
     );
   const eventIds = () => events().map((row) => row.event_id);
+  const insertOrder = () =>
+    store.transaction((tx) =>
+      (
+        tx.database
+          .prepare("SELECT event_id FROM intake_inbound_event ORDER BY rowid")
+          .all() as { event_id: string }[]
+      ).map((row) => row.event_id),
+    );
   const addEvent = (eventId: string) =>
     store.transaction((tx) =>
       insertEvent(tx, {
@@ -181,12 +191,13 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
     checkpoint,
     events,
     eventIds,
+    insertOrder,
     addEvent,
     settleAll,
   };
 }
 
-test("a batch inserts the newer events in ascending order and writes the checkpoint", (t) => {
+test("a batch inserts every event of the page, oldest of the page first, and writes the checkpoint", (t) => {
   const h = harness(t);
   assert.equal(
     h.batch(ETAG_FIRST, [
@@ -207,27 +218,68 @@ test("a batch inserts the newer events in ascending order and writes the checkpo
       event: JSON.stringify({ id: "102", type: "PushEvent" }),
     },
   ]);
-  assert.deepEqual(h.checkpoint(), {
-    etag: ETAG_FIRST,
-    newest_event_id: "102",
-  });
+  assert.deepEqual(h.insertOrder(), ["101", "102"]);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_FIRST });
 });
 
-test("an empty answer and an answer of known events keep newest_event_id and store the ETag", (t) => {
+test("an event with an id below an earlier event id is stored", (t) => {
+  const h = harness(t);
+  h.batch(ETAG_FIRST, [ev(CREATE_EVENT_ID, "CreateEvent")]);
+  assert.deepEqual(h.eventIds(), [CREATE_EVENT_ID]);
+  h.batch(ETAG_SECOND, [
+    ev(PULL_REQUEST_EVENT_ID, "PullRequestEvent"),
+    ev(CREATE_EVENT_ID, "CreateEvent"),
+  ]);
+  assert.deepEqual(h.eventIds().sort(), [
+    PULL_REQUEST_EVENT_ID,
+    CREATE_EVENT_ID,
+  ]);
+  assert.deepEqual(h.insertOrder(), [CREATE_EVENT_ID, PULL_REQUEST_EVENT_ID]);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_SECOND });
+});
+
+test("a second answer with the same events stores nothing new", (t) => {
+  const h = harness(t);
+  const page = [
+    ev(PULL_REQUEST_EVENT_ID, "PullRequestEvent"),
+    ev(CREATE_EVENT_ID, "CreateEvent"),
+  ];
+  h.batch(ETAG_FIRST, page);
+  const stored = h.insertOrder();
+  h.batch(ETAG_SECOND, page);
+  assert.deepEqual(h.insertOrder(), stored);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_SECOND });
+});
+
+test("a stored checkpoint that holds newest_event_id loads, and the next write drops it", (t) => {
   const h = harness(t, {
-    checkpoint: { etag: ETAG_STORED, newest_event_id: "101" },
+    checkpoint: {
+      etag: ETAG_STORED,
+      newest_event_id: CREATE_EVENT_ID,
+    } as GitHubCheckpoint,
+  });
+  h.batch(ETAG_FIRST, [
+    ev(PULL_REQUEST_EVENT_ID, "PullRequestEvent"),
+    ev(CREATE_EVENT_ID, "CreateEvent"),
+  ]);
+  assert.deepEqual(h.eventIds().sort(), [
+    PULL_REQUEST_EVENT_ID,
+    CREATE_EVENT_ID,
+  ]);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_FIRST });
+});
+
+test("an empty answer and an answer of known events store the ETag", (t) => {
+  const h = harness(t, {
+    checkpoint: { etag: ETAG_STORED },
   });
   h.batch(ETAG_FIRST, []);
-  assert.deepEqual(h.checkpoint(), {
-    etag: ETAG_FIRST,
-    newest_event_id: "101",
-  });
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_FIRST });
+  h.addEvent("101");
+  h.addEvent("100");
   h.batch(ETAG_SECOND, [ev("101", "PushEvent"), ev("100", "PushEvent")]);
-  assert.deepEqual(h.checkpoint(), {
-    etag: ETAG_SECOND,
-    newest_event_id: "101",
-  });
-  assert.deepEqual(h.eventIds(), []);
+  assert.deepEqual(h.checkpoint(), { etag: ETAG_SECOND });
+  assert.deepEqual(h.eventIds(), ["100", "101"]);
 });
 
 test("a repeated event identity inserts no row", (t) => {
@@ -237,7 +289,6 @@ test("a repeated event identity inserts no row", (t) => {
   assert.deepEqual(h.eventIds(), ["101", "102"]);
   assert.deepEqual(h.checkpoint(), {
     etag: ETAG_FIRST,
-    newest_event_id: "102",
   });
 });
 
@@ -250,13 +301,12 @@ test("a batch at the bound stores the events that fit with a null ETag, and the 
   ];
   h.batch(ETAG_FIRST, list);
   assert.deepEqual(h.eventIds(), ["100", "101"]);
-  assert.deepEqual(h.checkpoint(), { etag: null, newest_event_id: "101" });
+  assert.deepEqual(h.checkpoint(), { etag: null });
   h.settleAll();
   h.batch(ETAG_FIRST, list);
   assert.deepEqual(h.eventIds(), ["100", "101", "102"]);
   assert.deepEqual(h.checkpoint(), {
     etag: ETAG_FIRST,
-    newest_event_id: "102",
   });
 });
 
@@ -380,7 +430,6 @@ test("a cycle releases one poll grant, requests the events under a deadline, sto
   assert.deepEqual(h.eventIds(), ["101"]);
   assert.deepEqual(h.checkpoint(), {
     etag: ETAG_FIRST,
-    newest_event_id: "101",
   });
   assert.equal(h.wakes.count, WAKES_PER_BATCH);
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
@@ -407,7 +456,7 @@ test("a cycle releases one poll grant, requests the events under a deadline, sto
 });
 
 test("a 304 answer commits nothing and the request carries the stored ETag", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   h.answers.next = async () => ({ ok: true, value: { notModified: true } });
   assert.equal((await h.cycle()).outcome, CycleOutcome.Continue);
@@ -439,7 +488,7 @@ test("the capacity bound pauses the poll, and a pending event refuses the delete
     ]);
   await h.cycle();
   assert.deepEqual(h.eventIds(), ["100", "101"]);
-  assert.deepEqual(h.checkpoint(), { etag: null, newest_event_id: "101" });
+  assert.deepEqual(h.checkpoint(), { etag: null });
   await h.cycle();
   assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
   assert.throws(
@@ -455,7 +504,7 @@ test("the capacity bound pauses the poll, and a pending event refuses the delete
 test("a bound reached between the request and the commit leaves the new events unstored and writes a null ETag", async (t) => {
   const h = cycleHarness(t, {
     limit: TIGHT_LIMIT,
-    checkpoint: { etag: ETAG_STORED, newest_event_id: "100" },
+    checkpoint: { etag: ETAG_STORED },
   });
   h.answers.next = async () => {
     h.addEvent("50");
@@ -463,7 +512,7 @@ test("a bound reached between the request and the commit leaves the new events u
   };
   await h.cycle();
   assert.deepEqual(h.eventIds(), ["50"]);
-  assert.deepEqual(h.checkpoint(), { etag: null, newest_event_id: "100" });
+  assert.deepEqual(h.checkpoint(), { etag: null });
 });
 
 test("a delete of the inbound before the commit stores no event and answers gone", async (t) => {
@@ -480,7 +529,7 @@ test("a delete of the inbound before the commit stores no event and answers gone
 });
 
 test("a store failure leaves the checkpoint unchanged and drops the material", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   h.store.transaction((tx) =>
     tx.database.exec(
@@ -495,7 +544,7 @@ test("a store failure leaves the checkpoint unchanged and drops the material", a
 });
 
 test("a result class leaves the checkpoint unchanged, logs the inbound and the code, and drops the material", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   h.answers.next = async () => ({
     ok: false,
@@ -514,7 +563,7 @@ test("a result class leaves the checkpoint unchanged, logs the inbound and the c
 });
 
 test("a thrown request drops the material and leaves the checkpoint unchanged", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   const failure = new Error("transport closed");
   h.answers.next = async () => {
@@ -832,7 +881,7 @@ test("a cycle asks for the unresolved request count of the project and the resou
 });
 
 test("a count of zero sends no request, releases nothing and keeps the checkpoint", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   h.demands.next = async () => counted(NO_REQUESTS);
   const result = await h.cycle();
@@ -846,7 +895,7 @@ test("a count of zero sends no request, releases nothing and keeps the checkpoin
 });
 
 test("a failed count call skips the request and logs the reason", async (t) => {
-  const stored = { etag: ETAG_STORED, newest_event_id: "100" };
+  const stored = { etag: ETAG_STORED };
   const h = cycleHarness(t, { checkpoint: stored });
   h.demands.next = async () => ({
     type: OperationResultType.Failure,

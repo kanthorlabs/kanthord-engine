@@ -20,7 +20,6 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import {
   GitHubTargetKind,
   githubCheckpointSchema,
-  newerEvents,
   repositoryOf,
   type GitHubAnswer,
   type GitHubCheckpoint,
@@ -63,10 +62,7 @@ const NO_UNRESOLVED_REQUESTS = 0;
 const REQUEST_FAILURE_MESSAGE = "intake: a poll request of an inbound failed.";
 const DEMAND_FAILURE_MESSAGE =
   "intake: the demand check of a poll inbound failed.";
-const EMPTY_CHECKPOINT: GitHubCheckpoint = {
-  etag: null,
-  newest_event_id: null,
-};
+const EMPTY_CHECKPOINT: GitHubCheckpoint = { etag: null };
 
 export interface PollCycleDependencies {
   store: Store;
@@ -363,11 +359,9 @@ export function storeBatch(
   );
   const row = readInbound(tx, inboundId);
   if (row === null) return false;
-  const previous = checkpointOf(row.checkpoint);
   let room = pendingEventLimit - pendingCount(tx);
-  let newest = previous.newest_event_id;
   let unstored = false;
-  for (const event of newerEvents(answer.events, previous.newest_event_id)) {
+  for (const event of [...answer.events].reverse()) {
     if (findEvent(tx, inboundId, event.id) !== null) continue;
     if (room <= EXHAUSTED_ROOM) {
       unstored = true;
@@ -380,7 +374,6 @@ export function storeBatch(
       metadata: { event: event.type },
       created_at: Date.now(),
     });
-    newest = event.id;
     room -= ROOM_PER_EVENT;
   }
   writeCheckpoint(
@@ -389,7 +382,6 @@ export function storeBatch(
     canonicalJSON(
       githubCheckpointSchema.parse({
         etag: unstored ? null : answer.etag,
-        newest_event_id: newest,
       }),
     ),
   );

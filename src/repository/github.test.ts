@@ -29,7 +29,6 @@ import {
   decodeGitHubEvent,
   encodeCursor,
   githubCheckpointSchema,
-  newerEvents,
   repositoryOf,
   type GitHubCall,
   type GitHubRequest,
@@ -1021,56 +1020,18 @@ test("listEvents refuses a malformed body as a lost read", async (t) => {
   assert.equal(server.requests.length, bodies.length);
 });
 
-test("newerEvents keeps every event for a null checkpoint in ascending order", () => {
-  const events = [{ id: "12" }, { id: "9" }, { id: "100" }];
+test("githubCheckpointSchema admits the ETag and drops a stored newest_event_id", () => {
+  assert.deepEqual(githubCheckpointSchema.parse({ etag: null }), {
+    etag: null,
+  });
+  assert.deepEqual(githubCheckpointSchema.parse({ etag: FIRST_ETAG }), {
+    etag: FIRST_ETAG,
+  });
   assert.deepEqual(
-    newerEvents(events, null).map((event) => event.id),
-    ["9", "12", "100"],
+    githubCheckpointSchema.parse({ etag: FIRST_ETAG, newest_event_id: "41" }),
+    { etag: FIRST_ETAG },
   );
-});
-
-test("newerEvents drops the event equal to the checkpoint and older ones", () => {
-  const events = [{ id: "43" }, { id: "42" }, { id: "41" }];
-  assert.deepEqual(
-    newerEvents(events, "42").map((event) => event.id),
-    ["43"],
-  );
-});
-
-test("newerEvents compares identities of different length by number", () => {
-  const events = [{ id: "100" }, { id: "99" }, { id: "1000" }, { id: "8" }];
-  assert.deepEqual(
-    newerEvents(events, "99").map((event) => event.id),
-    ["100", "1000"],
-  );
-});
-
-test("githubCheckpointSchema admits the checkpoint fields and refuses others", () => {
-  assert.ok(
-    githubCheckpointSchema.safeParse({ etag: null, newest_event_id: null })
-      .success,
-  );
-  assert.ok(
-    githubCheckpointSchema.safeParse({
-      etag: FIRST_ETAG,
-      newest_event_id: "41",
-    }).success,
-  );
-  assert.ok(
-    !githubCheckpointSchema.safeParse({ etag: null, newest_event_id: "4a" })
-      .success,
-  );
-  assert.ok(
-    !githubCheckpointSchema.safeParse({ etag: null, newest_event_id: "0101" })
-      .success,
-  );
-  assert.ok(
-    !githubCheckpointSchema.safeParse({
-      etag: null,
-      newest_event_id: null,
-      extra: 1,
-    }).success,
-  );
+  assert.ok(!githubCheckpointSchema.safeParse({}).success);
 });
 
 const EVENT_RESOURCE = "owner/gated";
