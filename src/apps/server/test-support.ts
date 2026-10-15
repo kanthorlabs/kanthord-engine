@@ -585,6 +585,8 @@ const GITHUB_CREATED_STATUS = 201;
 const GITHUB_EMPTY_BODY = "";
 const GITHUB_MIN_SEGMENT_LENGTH = 1;
 const GITHUB_REVIEWS_SUFFIX = "/reviews";
+const GITHUB_FIRST_CLOSE_MS = Date.UTC(2026, 9, 15);
+const MS_PER_CLOSE_STEP = 1000;
 
 export const FakePullState = {
   Open: "open",
@@ -602,6 +604,7 @@ export interface FakePullRequest {
   state: FakePullState;
   merged: boolean;
   merge_commit_sha: string | null;
+  closed_at: string | null;
   head_sha: string;
   reviews: FakeReview[];
   mergeability: FakeMergeability[];
@@ -653,11 +656,13 @@ interface FakeGitHubState {
   failEvents: number | null;
   eventsHold: FakeEventsHold | null;
   refuseMerge: number | null;
+  closeSequence: number;
 }
 
 interface FakeGitHubAnswer {
   status: number;
   body: unknown;
+  etag?: string;
 }
 
 const createPullSchema = z.looseObject({
@@ -698,6 +703,8 @@ function pullBody(pull: FakePullRequest) {
     state: pull.state,
     merged: pull.merged,
     merge_commit_sha: pull.merge_commit_sha,
+    closed_at: pull.closed_at,
+    merged_at: pull.merged ? pull.closed_at : null,
     ...pull.mergeability[GITHUB_FIRST_MERGEABILITY],
     head: {
       ref: pull.head,
@@ -740,6 +747,7 @@ function insertPull(
     state: FakePullState.Open,
     merged: false,
     merge_commit_sha: null,
+    closed_at: null,
     head_sha: createHash("sha1")
       .update(`${owner}/${repo}#${input.head}`)
       .digest("hex"),
@@ -756,6 +764,7 @@ function listPulls(
   owner: string,
   repo: string,
   query: URLSearchParams,
+  ifNoneMatch: string | null,
 ): FakeGitHubAnswer {
   assert.ok(owner.length >= GITHUB_MIN_SEGMENT_LENGTH);
   assert.ok(repo.length >= GITHUB_MIN_SEGMENT_LENGTH);
@@ -767,7 +776,30 @@ function listPulls(
       (!query.has("head") || query.get("head") === `${owner}:${pull.head}`) &&
       (!query.has("base") || query.get("base") === pull.base),
   );
-  return { status: HttpStatus.OK, body: listed.map(pullBody) };
+  if (query.get("state") !== FakePullState.Closed)
+    return { status: HttpStatus.OK, body: listed.map(pullBody) };
+  const body = listed
+    .sort(
+      (left, right) =>
+        (right.closed_at ?? "").localeCompare(left.closed_at ?? "") ||
+        right.number - left.number,
+    )
+    .map(pullBody);
+  const etag = eventsEtag(body);
+  return ifNoneMatch === etag
+    ? { status: GITHUB_NOT_MODIFIED_STATUS, body: null, etag }
+    : { status: HttpStatus.OK, body, etag };
+}
+
+function closePull(state: FakeGitHubState, pull: FakePullRequest): void {
+  assert.equal(pull.state, FakePullState.Open);
+  state.closeSequence += GITHUB_NEXT_PULL_STEP;
+  pull.state = FakePullState.Closed;
+  pull.closed_at = new Date(
+    GITHUB_FIRST_CLOSE_MS + state.closeSequence * MS_PER_CLOSE_STEP,
+  )
+    .toISOString()
+    .replace(".000Z", "Z");
 }
 
 function routePull(
@@ -775,6 +807,7 @@ function routePull(
   method: string,
   url: URL,
   body: unknown,
+  ifNoneMatch: string | null,
 ): FakeGitHubAnswer {
   const route = GITHUB_PULL_ROUTE.exec(url.pathname);
   if (!route) return { status: HttpStatus.NotFound, body: GITHUB_NOT_FOUND };
@@ -783,7 +816,7 @@ function routePull(
   if (number === undefined) {
     return method === HttpMethod.Post
       ? createPull(state, owner, repo, body)
-      : listPulls(state, owner, repo, url.searchParams);
+      : listPulls(state, owner, repo, url.searchParams, ifNoneMatch);
   }
   const pull = state.pulls.find(
     (item) =>
@@ -923,13 +956,13 @@ async function gitHubRequest(
     ? { status: HttpStatus.OK, body: GITHUB_REPOSITORY_SETTINGS }
     : GITHUB_MERGE_ROUTE.test(url.pathname)
       ? mergePull(state, url, body)
-      : routePull(state, method, url, body);
+      : routePull(state, method, url, body, call.if_none_match);
   if (method !== HttpMethod.Get && state.dropNext) {
     state.dropNext = false;
     response.destroy();
     return;
   }
-  reply(answer);
+  reply(answer, answer.etag === undefined ? undefined : { etag: answer.etag });
 }
 
 function mergePull(
@@ -946,7 +979,7 @@ function mergePull(
   const mergeCommit = createHash("sha1")
     .update(`${sha}:${number}`)
     .digest("hex");
-  pull.state = FakePullState.Closed;
+  closePull(state, pull);
   pull.merged = true;
   pull.merge_commit_sha = mergeCommit;
   return { status: HttpStatus.OK, body: { sha: mergeCommit, merged: true } };
@@ -1000,6 +1033,7 @@ export async function fakeGitHub(t: TestContext) {
     failEvents: null,
     eventsHold: null,
     refuseMerge: null,
+    closeSequence: 0,
   };
   const failures: unknown[] = [];
   let releaseGate = () => {};
@@ -1046,12 +1080,12 @@ export async function fakeGitHub(t: TestContext) {
     merge(number: number, sha: string): void {
       assert.match(sha, GITHUB_MERGE_SHA);
       const pull = changePull(state, number);
-      pull.state = FakePullState.Closed;
+      closePull(state, pull);
       pull.merged = true;
       pull.merge_commit_sha = sha;
     },
     close(number: number): void {
-      changePull(state, number).state = FakePullState.Closed;
+      closePull(state, changePull(state, number));
     },
     review(
       number: number,

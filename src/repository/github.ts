@@ -142,6 +142,7 @@ export interface GitHubRequest {
 
 export const githubCheckpointSchema = z.object({
   etag: z.string().nullable(),
+  pulls_etag: z.string().nullable().default(null),
 });
 export type GitHubCheckpoint = z.infer<typeof githubCheckpointSchema>;
 

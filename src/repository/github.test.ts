@@ -1209,18 +1209,27 @@ test("listClosedPullRequests answers an empty page with no event", async (t) => 
   assert.equal(result.value.etag, FIRST_ETAG);
 });
 
-test("githubCheckpointSchema admits the ETag and drops a stored newest_event_id", () => {
+test("githubCheckpointSchema admits both ETags, loads a missing pulls_etag as null and drops a stored newest_event_id", () => {
   assert.deepEqual(githubCheckpointSchema.parse({ etag: null }), {
     etag: null,
+    pulls_etag: null,
   });
   assert.deepEqual(githubCheckpointSchema.parse({ etag: FIRST_ETAG }), {
     etag: FIRST_ETAG,
+    pulls_etag: null,
   });
   assert.deepEqual(
+    githubCheckpointSchema.parse({ etag: null, pulls_etag: SECOND_ETAG }),
+    { etag: null, pulls_etag: SECOND_ETAG },
+  );
+  assert.deepEqual(
     githubCheckpointSchema.parse({ etag: FIRST_ETAG, newest_event_id: "41" }),
-    { etag: FIRST_ETAG },
+    { etag: FIRST_ETAG, pulls_etag: null },
   );
   assert.ok(!githubCheckpointSchema.safeParse({}).success);
+  assert.ok(
+    !githubCheckpointSchema.safeParse({ etag: null, pulls_etag: 1 }).success,
+  );
 });
 
 const EVENT_RESOURCE = "owner/gated";
