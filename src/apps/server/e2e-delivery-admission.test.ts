@@ -317,7 +317,7 @@ test(
 );
 
 test(
-  "E08.10 a merged item that also matches a merge push request exactly resolves both requests and the sibling conflict",
+  "E08.10 a deferred check resolves the merge push; a merged pull request resolves the sibling and conflicts the other",
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t, { action: "merge_push" });
@@ -327,7 +327,6 @@ test(
     const request = await h.requestMergePush(A.x2, landed);
     assert.equal(request.requirement_key, MERGE_KEY);
     await h.release(A.x2.execution_id);
-    assert.equal((await h.node(A.nodeId)).state, NodeState.ExternalRequested);
     await h.rebind("pull_request");
     const P = await requested(h, I, "objective-p.md");
     const Q = await requested(h, I, "objective-q.md");
@@ -344,26 +343,24 @@ test(
     assert.equal((await h.node(A.nodeId)).state, NodeState.Completed);
     assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
     assert.equal((await h.node(Q.nodeId)).state, NodeState.Available);
-    for (const objective of [A, P]) {
-      const evidence = await h.read<Page<Evidence>>([
-        "mission",
-        "evidence",
-        "list",
-        objective.nodeId,
-        "--attempt",
-        String(FIRST_ATTEMPT),
-      ]);
-      const provenance = evidence.items
-        .filter((item) => item.provenance.kind === ActorKind.Service)
-        .map((item) => item.provenance);
-      assert.deepEqual(provenance, [
-        {
-          kind: ActorKind.Service,
-          service: ActorService.Mission,
-          inbound_event_id: inboundEventId,
-        },
-      ]);
-    }
+    const pEvidence = await h.read<Page<Evidence>>([
+      "mission",
+      "evidence",
+      "list",
+      P.nodeId,
+      "--attempt",
+      String(FIRST_ATTEMPT),
+    ]);
+    const pProvenance = pEvidence.items
+      .filter((item) => item.provenance.kind === ActorKind.Service)
+      .map((item) => item.provenance);
+    assert.deepEqual(pProvenance, [
+      {
+        kind: ActorKind.Service,
+        service: ActorService.Mission,
+        inbound_event_id: inboundEventId,
+      },
+    ]);
   },
 );
 

@@ -15,7 +15,6 @@ import {
   CheckEndState,
   MissionErrorCode,
   NodeState,
-  PlatformAddressKind,
   Resolution,
   platformAddressSchema,
   checkEndStateSchema,
@@ -321,8 +320,7 @@ async function runDeferredCheck(
     const requests = readRequests(tx, nodeId, attempt)
       .filter((row) => row.end_state === null)
       .sort((a, b) => a.id.localeCompare(b.id))
-      .map((row) => requestContext(tx, dependencies, row.id))
-      .filter((ctx) => ctx.address.kind === PlatformAddressKind.PullRequest);
+      .map((row) => requestContext(tx, dependencies, row.id));
     if (requests.length === NO_UNRESOLVED_REQUESTS) return null;
     const mission = requireMission(tx, node.mission_id);
     return { mission, requests };

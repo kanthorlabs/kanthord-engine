@@ -73,7 +73,6 @@ const MERGE_IDENTITY = "repository:github:owner/merge";
 const MAIN_BRANCH = "main";
 const MAIN_REF = "refs/heads/main";
 const MERGED_COMMIT = "e".repeat(40);
-const PUSH_EVENT_ID = "500";
 const MERGED_DELIVERY = "d-1";
 const WEBHOOK_CAPABILITY = "webhook";
 const POLL_CAPABILITY = "poll acquisition";
@@ -527,27 +526,16 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     });
     assert.equal(await remoteHead(h.mergeBare.bare, MAIN_REF), c);
   });
-  await t.test("EJ10.5 a polled push event completes Q", async () => {
-    h.gitHub.events("owner", MERGE, [
-      {
-        id: PUSH_EVENT_ID,
-        type: "PushEvent",
-        repo: { name: MERGE_RESOURCE },
-        payload: { ref: MAIN_REF, head: c },
-      },
-    ]);
-    const items = await until(
-      () => j.events(h.L),
-      (list) =>
-        list.length === JOURNEY_MATCH_COUNT &&
-        list[FIRST_INDEX]!.state !== InboundEventState.Pending,
-    );
-    assert.deepEqual(
-      items.map((item) => [item.event_id, item.state]),
-      [[PUSH_EVENT_ID, InboundEventState.Succeeded]],
-    );
-    assert.equal(await j.state(Q), NodeState.Completed);
-  });
+  await t.test(
+    "EJ10.5 the deferred check completes Q after the merge push",
+    async () => {
+      await until(
+        () => j.state(Q),
+        (state) => state === NodeState.Completed,
+      );
+      assert.equal(await j.state(Q), NodeState.Completed);
+    },
+  );
   const g = await remoteHead(h.gatedBare.bare, MAIN_REF);
   assert.ok(g);
   const oP = await j.outcome(h.P);

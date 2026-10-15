@@ -666,6 +666,91 @@ test("deferred check with none leaves the node in ExternalRequested", async (t) 
   assert.equal(h.node().state, NodeState.ExternalRequested);
 });
 
+function deferredBranchPushFixture(
+  t: TestContext,
+  check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
+) {
+  const h = fixture(t, NodeKind.Objective, {
+    intakeCheck: { check: async () => check },
+  });
+  h.dependencies.bindings.repositoryPolicyOf = () => ({
+    project_id: h.project_id,
+    binding_id: h.binding_id,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    ssh_credential: "github-ssh",
+    credential: "github",
+    base_branch: "main",
+    action: RepositoryAction.MergePush,
+    landing: "human",
+    project_prompt: null,
+  });
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) => {
+    const id = createIdentity("evidence");
+    insertEvidence(
+      tx,
+      {
+        id,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.merge_push",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: id,
+          kind: AssetKind.Platform,
+          content: JSON.stringify({
+            kind: "branch_push",
+            resource_identity: GATED_RESOURCE,
+            branch: "main",
+            commit: LANDED_COMMIT,
+          }),
+          published_at: NOW,
+          expired_at: null,
+        },
+      ],
+    );
+  });
+  return h;
+}
+
+test("deferred check resolves a branch_push request and completes the node", async (t) => {
+  const h = deferredBranchPushFixture(t, {
+    end_state: CheckEndState.Expected,
+    landed_commits: [LANDED_COMMIT],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
 test("a failing deferred check leaves the node unchanged", async (t) => {
   const h = fixture(t, NodeKind.Objective, {
     intakeCheck: {
