@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,8 +16,8 @@ import {
   serverMigrations,
 } from "../server/index.ts";
 import { ExitCode } from "./constants.ts";
+import { runKanthord, spawnKanthord } from "./test-support.ts";
 
-const entry = new URL("../../main.ts", import.meta.url).href;
 const PRIVATE_FILE_MODE = 0o600;
 const BACKUPS_OF_CONFIGURATION_AND_DATABASE = 2;
 const CURRENT_VERSION_LINE = `version: ${CONFIG_VERSION}\n`;
@@ -51,16 +50,9 @@ function layout(directory: string) {
   return { env, config: env.KANTHORD_CONFIG!, database };
 }
 
-function run(env: NodeJS.ProcessEnv, command: string) {
-  return spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `process.argv=[process.execPath,'kanthord','${command}'];await import(${JSON.stringify(entry)});`,
-    ],
-    { env, encoding: "utf8", timeout: 10000 },
-  );
+async function run(env: NodeJS.ProcessEnv, command: string) {
+  const { code, stdout, stderr } = await runKanthord([command], env);
+  return { status: code, stdout, stderr };
 }
 
 function legacyConfig(): string {
@@ -79,24 +71,24 @@ function olderDatabase(path: string): void {
   store.close();
 }
 
-test("serve refuses an older configuration and an older database, and upgrade brings both to the binary with backups", (t) => {
+test("serve refuses an older configuration and an older database, and upgrade brings both to the binary with backups", async (t) => {
   const paths = layout(temporary(t));
   const legacy = legacyConfig();
   writePrivate(paths.config, legacy);
   olderDatabase(paths.database);
 
-  const behind = run(paths.env, "serve");
+  const behind = await run(paths.env, "serve");
   assert.equal(behind.status, ExitCode.Failure);
   assert.match(behind.stderr, /system\.config\.version_behind/);
   assert.match(behind.stderr, /Run kanthord upgrade/);
 
   writePrivate(paths.config, currentConfig(), true);
-  const pending = run(paths.env, "serve");
+  const pending = await run(paths.env, "serve");
   assert.equal(pending.status, ExitCode.Failure);
   assert.match(pending.stderr, /system\.database\.migration\.pending/);
   writePrivate(paths.config, legacy, true);
 
-  const upgraded = run(paths.env, "upgrade");
+  const upgraded = await run(paths.env, "upgrade");
   assert.equal(upgraded.status, ExitCode.Success, upgraded.stderr);
   const backups = [...upgraded.stdout.matchAll(/^Backup: (.+)$/gm)].map(
     (match) => match[1]!,
@@ -121,19 +113,20 @@ test("serve refuses an older configuration and an older database, and upgrade br
   assert.deepEqual(copy.plan(olderMigrations).pending, []);
   copy.close();
 
-  const again = run(paths.env, "upgrade");
+  const again = await run(paths.env, "upgrade");
   assert.equal(again.status, ExitCode.Success, again.stderr);
   assert.equal(again.stdout, `Up to date: ${paths.config}\n`);
 });
 
-test("upgrade changes nothing while another process holds the database", (t) => {
+test("upgrade changes nothing while another process holds the database", async (t) => {
   const paths = layout(temporary(t));
   const legacy = legacyConfig();
   writePrivate(paths.config, legacy);
   olderDatabase(paths.database);
   const holder = new Store(paths.database);
   try {
-    const locked = run(paths.env, "upgrade");
+    const { code, stderr } = await spawnKanthord(["upgrade"], paths.env);
+    const locked = { status: code, stderr };
     assert.equal(locked.status, ExitCode.Failure);
     assert.match(locked.stderr, /database is locked/);
   } finally {
@@ -145,21 +138,21 @@ test("upgrade changes nothing while another process holds the database", (t) => 
   ]);
 });
 
-test("upgrade refuses a configuration version newer than the binary and writes nothing", (t) => {
+test("upgrade refuses a configuration version newer than the binary and writes nothing", async (t) => {
   const paths = layout(temporary(t));
   const newer = initialConfig().replace(
     CURRENT_VERSION_LINE,
     `version: ${CONFIG_VERSION + 1}\n`,
   );
   writePrivate(paths.config, newer);
-  const result = run(paths.env, "upgrade");
+  const result = await run(paths.env, "upgrade");
   assert.equal(result.status, ExitCode.Failure);
   assert.match(result.stderr, /system\.config\.version_ahead/);
   assert.equal(readFileSync(paths.config, "utf8"), newer);
   assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), []);
 });
 
-test("upgrade refuses another master_key before the backups and the migrations", (t) => {
+test("upgrade refuses another master_key before the backups and the migrations", async (t) => {
   const paths = layout(temporary(t));
   const otherService = serverMigrations.find(
     ({ service, migrations }) =>
@@ -182,7 +175,7 @@ test("upgrade refuses another master_key before the backups and the migrations",
   );
   writePrivate(paths.config, foreign);
 
-  const refused = run(paths.env, "upgrade");
+  const refused = await run(paths.env, "upgrade");
   assert.equal(refused.status, ExitCode.Failure);
   assert.match(refused.stderr, /system\.config\.master_key_mismatch/);
   assert.match(refused.stderr, /Restore the configuration file/);
