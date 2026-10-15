@@ -34,7 +34,11 @@ import {
 } from "./connector.ts";
 import { CheckEndState, ExpectedEndState } from "./github.ts";
 import { isString } from "../kernel/values.ts";
-import { temporary } from "../kernel/test-support.ts";
+import {
+  overrideEnvironment,
+  temporary,
+  UNSET_GIT_ENVIRONMENT,
+} from "../kernel/test-support.ts";
 
 const DEADLINE_MS = 5000;
 const EXPIRED_DEADLINE_MS = 1;
@@ -288,6 +292,30 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
   await assert.rejects(
     resolveBranchCommit(address, BASE_BRANCH, background, DEADLINE_MS),
     failed,
+  );
+});
+
+test("every git caller ignores the global git configuration of the host", async (t) => {
+  const { origin, snapshot } = await remote(t);
+  const home = temporary(t);
+  writeFileSync(
+    join(home, ".gitconfig"),
+    `[url "file:///nonexistent_kanthord_rewrite/"]\n\tinsteadOf = ${dirname(origin)}/\n`,
+  );
+  overrideEnvironment(t, {
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: home,
+    XDG_CONFIG_HOME: undefined,
+  });
+  const directory = temporary(t);
+  assert.equal(
+    await cloneSnapshot(origin, snapshot, directory, background, DEADLINE_MS),
+    snapshot,
+  );
+  await gitLsRemote(origin, background, DEADLINE_MS);
+  assert.equal(
+    await resolveBranchCommit(origin, NODE_BRANCH, background, DEADLINE_MS),
+    snapshot,
   );
 });
 
