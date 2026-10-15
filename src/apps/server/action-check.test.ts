@@ -437,8 +437,6 @@ test(
     await t.test(
       "a pull request answers none, other and expected",
       async () => {
-        const callsBefore = h.gitHub.calls.length;
-        const materialsBefore = h.materials.length;
         assert.deepEqual(completed<Fold>(await pullRequest()), {
           end_state: CheckEndState.None,
           landed_commits: [],
@@ -454,10 +452,8 @@ test(
           landed_commits: [MERGE_SHA],
         });
         assert.deepEqual(
-          h.gitHub.calls
-            .slice(callsBefore)
-            .map((call) => [call.method, call.path, call.token]),
-          Array.from({ length: CHECK_COUNT }, () => [
+          h.gitHub.calls.map((call) => [call.method, call.path, call.token]),
+          [
             [
               HttpMethod.Get,
               `/repos/owner/gated/pulls/${h.number}`,
@@ -468,9 +464,21 @@ test(
               `/repos/owner/gated/pulls/${h.number}/reviews?per_page=100&page=1`,
               GITHUB_KEY,
             ],
-          ]).flat(),
+            ...Array.from({ length: CHECK_COUNT }, () => [
+              [
+                HttpMethod.Get,
+                `/repos/owner/gated/pulls/${h.number}`,
+                GITHUB_KEY,
+              ],
+              [
+                HttpMethod.Get,
+                `/repos/owner/gated/pulls/${h.number}/reviews?per_page=100&page=1`,
+                GITHUB_KEY,
+              ],
+            ]).flat(),
+          ],
         );
-        dropped(h.materials.slice(materialsBefore), CHECK_COUNT);
+        dropped(h.materials, CHECK_COUNT);
       },
     );
 

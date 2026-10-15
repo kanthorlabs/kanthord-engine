@@ -41,7 +41,6 @@ import {
   type Assessment,
   type Outcome,
 } from "../../mission/contract.ts";
-import { HttpMethod } from "../../kernel/http.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 
 const GIT_TIMEOUT_MS = 10000;
@@ -521,23 +520,36 @@ test(
           "1",
         ]);
         assert.equal(actions.items[0]!.resolution, UNRESOLVED);
-        assert.deepEqual(
-          f.gitHub.calls.filter((c) => c.method === HttpMethod.Post),
-          [
-            {
-              method: "POST",
-              path: "/repos/owner/gated/pulls",
-              body: {
-                head: `kanthord/${f.gated}`,
-                base: "main",
-                title: `kanthord ${f.gated}`,
-              },
-              token: GITHUB_KEY,
-              if_none_match: null,
-              status: 201,
+        assert.deepEqual(f.gitHub.calls, [
+          {
+            method: "POST",
+            path: "/repos/owner/gated/pulls",
+            body: {
+              head: `kanthord/${f.gated}`,
+              base: "main",
+              title: `kanthord ${f.gated}`,
             },
-          ],
-        );
+            token: GITHUB_KEY,
+            if_none_match: null,
+            status: 201,
+          },
+          {
+            method: "GET",
+            path: `/repos/owner/gated/pulls/${pr.number}`,
+            body: null,
+            token: GITHUB_KEY,
+            if_none_match: null,
+            status: 200,
+          },
+          {
+            method: "GET",
+            path: `/repos/owner/gated/pulls/${pr.number}/reviews?per_page=100&page=1`,
+            body: null,
+            token: GITHUB_KEY,
+            if_none_match: null,
+            status: 200,
+          },
+        ]);
       },
     );
     let outcomeC!: string;
@@ -556,6 +568,35 @@ test(
           expected_mission_version: mission.version,
         });
         assert.equal(checked.results[0]!.resolution, EXPECTED_END);
+        assert.deepEqual(
+          f.gitHub.calls.slice(SINGLE_ITEM).map(({ method, path, token }) => ({
+            method,
+            path,
+            token,
+          })),
+          [
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}`,
+              token: GITHUB_KEY,
+            },
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}/reviews?per_page=100&page=1`,
+              token: GITHUB_KEY,
+            },
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}`,
+              token: GITHUB_KEY,
+            },
+            {
+              method: "GET",
+              path: `/repos/owner/gated/pulls/${pr.number}/reviews?per_page=100&page=1`,
+              token: GITHUB_KEY,
+            },
+          ],
+        );
         const outcomes = await f.cli.read<Page<Outcome>>([
           "mission",
           "outcome",
