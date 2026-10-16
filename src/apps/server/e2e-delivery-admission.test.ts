@@ -361,6 +361,23 @@ test(
         inbound_event_id: inboundEventId,
       },
     ]);
+    const aEvidence = await h.read<Page<Evidence>>([
+      "mission",
+      "evidence",
+      "list",
+      A.nodeId,
+      "--attempt",
+      String(FIRST_ATTEMPT),
+    ]);
+    const aProvenance = aEvidence.items
+      .filter((item) => item.provenance.kind === ActorKind.Service)
+      .map((item) => item.provenance);
+    assert.deepEqual(aProvenance, [
+      {
+        kind: ActorKind.Service,
+        service: ActorService.Mission,
+      },
+    ]);
   },
 );
 
