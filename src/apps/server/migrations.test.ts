@@ -518,7 +518,7 @@ test("the start point and node branch migrations backfill the behavior of every 
   t.after(() => store.close());
   const nodeId = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
   const startPointMigration = missionMigrations.length - 1;
-  const nodeBranchMigration = schedulerMigrations.length - 2;
+  const nodeBranchMigration = schedulerMigrations.length - 3;
   store.migrate([
     {
       service: SCHEDULER_SERVICE_NAME,
