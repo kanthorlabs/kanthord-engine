@@ -23,6 +23,7 @@ import {
   insertEvidence,
   insertAssessment,
   readOpenAttempt,
+  readEvidence,
 } from "./record-store.ts";
 import { setNodeState, insertNode, readNode } from "./store.ts";
 import { readCurrentRevision, insertRevision } from "./store.ts";
@@ -31,6 +32,7 @@ import { controlHarness } from "./test-support.ts";
 
 const NO_STALLS = 0;
 const FURTHER_WORK_LIMIT = 3;
+const ONE_CALL = 1;
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
@@ -569,8 +571,14 @@ function deferredFixture(
   t: TestContext,
   check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
 ) {
+  let checkCalls = 0;
   const h = fixture(t, NodeKind.Objective, {
-    intakeCheck: { check: async () => check },
+    intakeCheck: {
+      check: async () => {
+        checkCalls++;
+        return check;
+      },
+    },
   });
   h.store.transaction((tx) =>
     insertAssessment(tx, {
@@ -592,12 +600,12 @@ function deferredFixture(
   h.store.transaction((tx) =>
     setNodeState(tx, h.node_id, NodeState.Evaluating),
   );
+  const evidenceId = createIdentity("evidence");
   h.store.transaction((tx) => {
-    const id = createIdentity("evidence");
     insertEvidence(
       tx,
       {
-        id,
+        id: evidenceId,
         node_id: h.node_id,
         attempt: FIRST_ATTEMPT,
         subject: "Request",
@@ -610,7 +618,7 @@ function deferredFixture(
       [
         {
           id: createIdentity("evidence_asset"),
-          evidence_id: id,
+          evidence_id: evidenceId,
           kind: AssetKind.Platform,
           content: JSON.stringify({
             kind: "pull_request",
@@ -623,7 +631,7 @@ function deferredFixture(
       ],
     );
   });
-  return h;
+  return { ...h, evidenceId, checkCalls: () => checkCalls };
 }
 
 test("deferred check applies expected end state and completes the node", async (t) => {
@@ -664,6 +672,7 @@ test("deferred check with none leaves the node in ExternalRequested", async (t) 
   h.release();
   await new Promise((r) => setImmediate(r));
   assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.equal(h.checkCalls(), ONE_CALL);
 });
 
 function deferredBranchPushFixture(
@@ -752,9 +761,11 @@ test("deferred check resolves a branch_push request and completes the node", asy
 });
 
 test("a failing deferred check leaves the node unchanged", async (t) => {
+  let checkCalls = 0;
   const h = fixture(t, NodeKind.Objective, {
     intakeCheck: {
       check: async () => {
+        checkCalls++;
         throw new Error("check failed");
       },
     },
@@ -813,4 +824,23 @@ test("a failing deferred check leaves the node unchanged", async (t) => {
   h.release();
   await new Promise((r) => setImmediate(r));
   assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.equal(checkCalls, ONE_CALL);
+});
+
+test("deferred check with a live claim and expected end state writes no end state", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.Expected,
+    landed_commits: [LANDED_COMMIT],
+  });
+  h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+    execution_id: h.execution_id,
+    runtime_identity: createIdentity("runtime"),
+    attempt: FIRST_ATTEMPT,
+    pinned_revision: FIRST_ATTEMPT,
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  const row = h.store.transaction((tx) => readEvidence(tx, h.evidenceId));
+  assert.equal(row?.end_state, null);
 });
