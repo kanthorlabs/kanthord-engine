@@ -15,6 +15,7 @@ import type {
   TestedInput,
 } from "./verification.ts";
 import { isString } from "../../kernel/values.ts";
+import { CodedError, diagnostic } from "../../kernel/errors.ts";
 import { ReplyRepair, type taskJudgementSchema } from "./judgement.ts";
 
 const SUCCESS = 0;
@@ -32,6 +33,41 @@ export function phaseSpan(phase: Phase): SpanStart {
   };
   assert.ok(span.key);
   return span;
+}
+
+export const GitStep = {
+  Commit: "commit",
+  SshProof: "ssh_proof",
+  FetchBase: "fetch_base",
+  MergeBase: "merge_base",
+  Push: "push",
+} as const;
+export type GitStep = (typeof GitStep)[keyof typeof GitStep];
+
+function gitFailure(error: unknown): SpanEnd {
+  const text =
+    error instanceof CodedError
+      ? `${error.code}: ${error.cause instanceof Error ? error.cause.message : error.message}`
+      : diagnostic(error);
+  return { status: SpanStatus.Error, texts: { error: text } };
+}
+
+export function withinGit<T>(
+  spans: SpanRecorder,
+  step: GitStep,
+  work: () => Promise<T>,
+): Promise<T> {
+  assert.ok(step);
+  return spans.within(
+    {
+      key: spans.key(`${SpanOperation.Git}:${step}`),
+      operation: SpanOperation.Git,
+      attributes: { "kanthord.git.step": step },
+    },
+    work,
+    () => ({ status: SpanStatus.Ok }),
+    gitFailure,
+  );
 }
 
 export function taskSpan(spans: SpanRecorder, task: TaskContent): SpanStart {

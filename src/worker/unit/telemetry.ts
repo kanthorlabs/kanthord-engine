@@ -22,6 +22,7 @@ export const SpanOperation = {
   Verification: "worker.verification",
   Judgement: "worker.judgement",
   Evaluation: "worker.evaluation",
+  Git: "worker.git",
   Turn: "agent.turn",
   Tool: "agent.tool",
 } as const;
@@ -216,6 +217,9 @@ export class SpanRecorder {
     span: SpanStart,
     work: (spanId: string) => Promise<T>,
     endOf: (result: T) => SpanEnd = () => ({ status: SpanStatus.Ok }),
+    failureOf: (error: unknown) => SpanEnd = () => ({
+      status: SpanStatus.Error,
+    }),
   ): Promise<T> {
     assert.ok(work);
     assert.ok(endOf);
@@ -225,7 +229,7 @@ export class SpanRecorder {
     try {
       result = await work(spanId);
     } catch (error) {
-      this.end(spanId, { status: SpanStatus.Error });
+      this.end(spanId, failureOf(error));
       throw error;
     } finally {
       assert.equal(this.scopes.pop(), spanId);

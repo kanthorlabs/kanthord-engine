@@ -42,6 +42,8 @@ import { judgedAt, recordJudged } from "./judged-tasks.ts";
 import { readAttemptEvidence } from "./node-reads.ts";
 import { Phase } from "./telemetry.ts";
 import {
+  GitStep,
+  withinGit,
   judgementEnd,
   judgementSpan,
   phaseSpan,
@@ -92,29 +94,35 @@ async function settleObjective(
   try {
     if (furtherWork && task !== null) {
       await state.agent.abort();
-      await commitWork(
-        state.input.env,
-        state.directory,
-        checkpointCommitMessage(task.id, state.input.claim.attempt),
-        cleanup,
-        remaining(),
+      await withinGit(state.run.spans, GitStep.Commit, () =>
+        commitWork(
+          state.input.env,
+          state.directory!,
+          checkpointCommitMessage(task.id, state.input.claim.attempt),
+          cleanup,
+          remaining(),
+        ),
       );
     }
-    await state.input.transport.proveSshIdentity(
-      state.input.setup.repositories[0]!.ssh_identity,
-      cleanup,
-      remaining(),
+    await withinGit(state.run.spans, GitStep.SshProof, () =>
+      state.input.transport.proveSshIdentity(
+        state.input.setup.repositories[0]!.ssh_identity,
+        cleanup,
+        remaining(),
+      ),
     );
     if (
       !furtherWork &&
       !(await refreshBeforeRelease(state, () => allTasksPass(state)))
     )
       furtherWork = true;
-    await state.input.transport.pushNodeBranch(
-      state.directory,
-      state.nodeBranch,
-      cleanup,
-      remaining(),
+    await withinGit(state.run.spans, GitStep.Push, () =>
+      state.input.transport.pushNodeBranch(
+        state.directory!,
+        state.nodeBranch,
+        cleanup,
+        remaining(),
+      ),
     );
     if (!furtherWork) {
       const head = await headCommit(

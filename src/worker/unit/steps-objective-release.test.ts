@@ -10,6 +10,14 @@ import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-objective.ts";
 import { runTask, runStepsObjective } from "./steps-objective.ts";
 import { refreshBeforeRelease } from "./base-refresh.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
+import {
+  RecordKind,
+  SpanStatus,
+  type TelemetryRecord,
+} from "../../tracking/contract.ts";
+import { SpanOperation, SpanRecorder } from "./telemetry.ts";
+import { GitStep } from "./method-telemetry.ts";
 import {
   advanceBase,
   commitOnNode,
@@ -260,4 +268,57 @@ test("the release refresh refuses a conflicting base change and keeps the node h
   assert.equal(await refreshBeforeRelease(h, async () => true), false);
   assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), h.head);
   assert.equal((await simpleGit(h.directory).status()).isClean(), true);
+});
+
+test("the finish writes one git span for each git step and the cause of a failed push", async (t) => {
+  const h = await fixture(t, [], []);
+  const records: TelemetryRecord[] = [];
+  (h.run as { spans: SpanRecorder }).spans = new SpanRecorder(
+    h.run.claim,
+    "coder-1",
+    { write: (batch) => records.push(...batch), flush: async () => {} },
+  );
+  const cause =
+    "push node branch: fatal: Could not read from remote repository.";
+  h.input.transport = {
+    ...transport,
+    pushNodeBranch: async () => {
+      throw new Diagnostic(
+        "repository.connector.git_failed",
+        "push node branch: git failed.",
+        { cause: new Error(cause) },
+      );
+    },
+  };
+  await assert.rejects(runStepsObjective(h));
+  const gitStarts = records.filter(
+    (record) =>
+      record.kind === RecordKind.Span &&
+      record.operation === SpanOperation.Git &&
+      "start_time" in record,
+  );
+  const steps = gitStarts.map((record) =>
+    record.kind === RecordKind.Span
+      ? record.attributes?.["kanthord.git.step"]
+      : undefined,
+  );
+  assert.deepEqual(steps, [GitStep.SshProof, GitStep.FetchBase, GitStep.Push]);
+  const push = gitStarts.at(-1)!;
+  assert.ok(push.kind === RecordKind.Span);
+  const end = records.find(
+    (record) =>
+      record.kind === RecordKind.Span &&
+      record.span_id === push.span_id &&
+      "end_time" in record,
+  );
+  assert.ok(end && end.kind === RecordKind.Span);
+  assert.equal(end.status, SpanStatus.Error);
+  const texts = records.filter(
+    (record) =>
+      record.kind === RecordKind.Text && end.text_ids?.includes(record.text_id),
+  );
+  assert.deepEqual(
+    texts.map((record) => (record.kind === RecordKind.Text ? record.text : "")),
+    [`repository.connector.git_failed: ${cause}`],
+  );
 });
