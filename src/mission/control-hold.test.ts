@@ -206,7 +206,6 @@ test("resume Waiting refuses unsatisfied closure; Available routes to Pending wi
       assert.equal(error.code, NOT_READY);
       assert.deepEqual(error.details, {
         objectives_not_terminal: [],
-        unresolved_actions: [],
         unsatisfied_ids: [target],
       });
       return true;

@@ -4,7 +4,7 @@ import { isTerminal } from "./admission.ts";
 import { NodeKind, NodeState, type MissionBindings } from "./contract.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 import { buildDependencyClosureOf } from "./graph.ts";
-import { readOpenAttempt, readRequests } from "./record-store.ts";
+import { readOpenAttempt } from "./record-store.ts";
 import { readDependencies, readMissionNodes, type NodeRow } from "./store.ts";
 
 const NO_ATTEMPT = 0;
@@ -34,7 +34,6 @@ export function readinessOf(
 ): {
   holds: boolean;
   objectives_not_terminal: string[];
-  unresolved_actions: string[];
 } {
   assert.notEqual(node.kind, NodeKind.Task);
   assert.ok(node.attempt !== null);
@@ -51,18 +50,9 @@ export function readinessOf(
           .map((child) => child.id)
           .sort()
       : [];
-  const open =
-    node.attempt === NO_ATTEMPT ? null : readOpenAttempt(tx, node.id);
-  const unresolvedActions =
-    open === null
-      ? []
-      : readRequests(tx, node.id, open.attempt)
-          .filter((row) => row.end_state === null)
-          .map((row) => row.requirement_key!);
   return {
     holds: objectivesNotTerminal.length === NO_PENDING_ITEMS,
     objectives_not_terminal: objectivesNotTerminal,
-    unresolved_actions: unresolvedActions,
   };
 }
 

@@ -409,7 +409,7 @@ only.
   assessment. When the attempt reads 0, an objective is ready with or without current tasks.
   An initiative with attempt 0 is ready only when every current objective is terminal.
   A node that is not ready answers 409 `mission.node.not_ready`.
-  Its `details` hold `objectives_not_terminal`, `unresolved_actions` and `unsatisfied_ids`, under the [node ready ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#node-ready).
+  Its `details` hold `objectives_not_terminal` and `unsatisfied_ids`, under the [node ready ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#node-ready).
   A ready act while the attempt reads 0 opens attempt 1.
   It reaches `Waiting` in the same transaction.
 - Override accepts `Override`, returns `ControlResult`, and

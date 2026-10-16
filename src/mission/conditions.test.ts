@@ -67,7 +67,6 @@ test("readiness at attempt zero reads current children and ignores retired objec
     assert.deepEqual(readinessOf(tx, parent), {
       holds: false,
       objectives_not_terminal: [objective],
-      unresolved_actions: [],
     });
     assert.equal(readinessOf(tx, readNode(tx, objective)!).holds, true);
     setNodeState(tx, objective, NodeState.Discarded);
@@ -179,7 +178,6 @@ test("open-attempt unresolved actions do not block readiness but stop continuati
     assert.deepEqual(readinessOf(tx, node), {
       holds: true,
       objectives_not_terminal: [],
-      unresolved_actions: [REQUEST_KEY],
     });
     assert.equal(continuationHolds(tx, bindings, node), false);
     assert.equal(claimableMap(tx, h.mission_id, bindings).get(nodeId), false);
