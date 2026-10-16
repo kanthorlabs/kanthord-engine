@@ -724,6 +724,19 @@ test("getPullRequest answers the body unchanged", async (t) => {
   assert.equal(server.requests[0]?.url, PULL_REQUEST_PATH);
 });
 
+test("pullRequestMergedAt answers false when the pull request merged at another head", async (t) => {
+  const server = await platform(
+    t,
+    answer(200, { merged: true, head: { sha: OLDER_SHA } }),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.pullRequestMergedAt(call(), TARGET, {
+    number: 7,
+    sha: HEAD_SHA,
+  });
+  assert.deepEqual(result, { ok: true, value: false });
+});
+
 test("listReviewComments answers the body unchanged and a next cursor from the Link header", async (t) => {
   const server = await platform(t, (request, response, count) => {
     const headers: Record<string, string> =

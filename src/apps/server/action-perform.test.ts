@@ -77,6 +77,7 @@ const ROUTE_NOT_FOUND_CODE = "gateway.routing.not_found";
 const PULLS_PATH = "/repos/owner/gated/pulls";
 const KANTHORD_LANDING = "kanthord";
 const MERGE_REFUSED_STATUS = 405;
+const OTHER_MERGE_SHA = "fedcba9876543210fedcba9876543210fedcba98";
 const MAIN_REF = "refs/heads/main";
 const UNMAPPED_PLATFORM = "unmapped";
 const GITLAB_PLATFORM = "gitlab";
@@ -1238,5 +1239,52 @@ test(
       assert.ok("kind" in answer, JSON.stringify(answer));
       assert.equal(h.gitHub.calls.length, callsBefore);
     });
+  },
+);
+
+test(
+  "intake.action.perform: a pending merge at another head stays unresolved",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, KANTHORD_LANDING);
+    const G = h.nodes.gated;
+    const execution = await h.evaluated(G, "gated", h.gated.head);
+    const mergeBody = (requestKey: string) => ({
+      key: "gated.pull_request",
+      commit: h.gated.head,
+      request_key: requestKey,
+    });
+    const answer = completed(await h.perform(execution, mergeBody("create")));
+    assert.ok("kind" in answer, JSON.stringify(answer));
+    const evidenceId = await h.request(
+      G,
+      execution,
+      "gated.pull_request",
+      answer,
+    );
+    const realMerge = h.fixture.github.mergePullRequest.bind(h.fixture.github);
+    h.fixture.github.mergePullRequest = async (...args) => {
+      const result = await realMerge(...args);
+      if (!result.ok) throw new Error("dropped merge");
+      return result;
+    };
+    h.gitHub.mergeAtOtherHead(OTHER_MERGE_SHA);
+    h.gitHub.dropNextAfterApply();
+    try {
+      failed(
+        await h.perform(execution, mergeBody("other-head"), null, evidenceId),
+        HttpStatus.InternalServerError,
+        UNKNOWN_CODE,
+      );
+    } finally {
+      h.fixture.github.mergePullRequest = realMerge;
+    }
+    assert.equal(h.row("other-head")?.state, OutboundRequestState.Pending);
+    const readBack = completed(
+      await h.perform(execution, mergeBody("other-head"), null, evidenceId),
+    );
+    assert.ok("class" in readBack, JSON.stringify(readBack));
+    assert.equal(readBack.class, ResultClass.UnknownOutcome);
+    assert.equal(h.row("other-head")?.state, OutboundRequestState.Pending);
   },
 );
