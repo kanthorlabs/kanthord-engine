@@ -24,7 +24,12 @@ import {
   schedulerOperations,
   type ReleaseStop,
 } from "./contract.ts";
-import { consecutiveFailures, EXECUTION_NOT_RUNNING } from "./settlement.ts";
+import {
+  consecutiveFailures,
+  EXECUTION_NOT_RUNNING,
+  heldUntil,
+} from "./settlement.ts";
+import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const WAKE_CALL_COUNT = 1;
 const NO_STALLS = 0;
@@ -288,5 +293,36 @@ test("the release input refuses a stop with no further work", () => {
   assert.deepEqual(
     input.parse({ params, query: {}, body: { further_work: false } }).body,
     { further_work: false, stop: null },
+  );
+});
+
+test("the stop backoff doubles with each consecutive failure and holds no job without a failure", () => {
+  const base = DEFAULT_STOP_BACKOFF_SECONDS * 1000;
+  assert.equal(heldUntil(0, FIXTURE_NOW, DEFAULT_STOP_BACKOFF_SECONDS), null);
+  assert.equal(
+    heldUntil(FIRST_FAILURE, FIXTURE_NOW, DEFAULT_STOP_BACKOFF_SECONDS),
+    FIXTURE_NOW + base,
+  );
+  assert.equal(
+    heldUntil(SECOND_FAILURE, FIXTURE_NOW, DEFAULT_STOP_BACKOFF_SECONDS),
+    FIXTURE_NOW + 2 * base,
+  );
+});
+
+test("a release with a stop holds the job of the node until the stop backoff ends", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.dependencies.transitions.failure = (tx, nodeId) =>
+    h.service.insert(tx, nodeId, h.row.project_id, 0);
+  await h.release(true, STOP);
+  const job = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT not_before FROM scheduler_job WHERE node_id = ?")
+        .get(h.row.node_id) as { not_before: number | null },
+  );
+  assert.equal(
+    job.not_before,
+    FIXTURE_NOW + DEFAULT_STOP_BACKOFF_SECONDS * 1000,
   );
 });

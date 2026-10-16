@@ -59,6 +59,22 @@ function probe(
   }
 }
 
+function heldJobWait(
+  dependencies: PullDependencies,
+  projectId: string,
+  now: number,
+): number | null {
+  const row = dependencies.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare(
+          "SELECT min(not_before) AS until FROM scheduler_job WHERE project_id = ? AND not_before > ?",
+        )
+        .get(projectId, now) as { until: number | null },
+  );
+  return row.until === null ? null : row.until - now;
+}
+
 function cancelled(caller: CallerContext): void {
   if (caller.context.err())
     throw new OperationError(
@@ -133,10 +149,11 @@ export async function workPull(
       !dependencies.accepting()
     )
       return commit(dependencies, identity, pull, caller, now);
+    const held = heldJobWait(dependencies, identity.projectId, now);
     await dependencies.waiting.park(
       identity.projectId,
       pull.runtime_identity,
-      remaining,
+      held === null ? remaining : Math.min(remaining, held),
       caller.context,
     );
   }

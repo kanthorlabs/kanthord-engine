@@ -13,6 +13,7 @@ import {
 } from "./contract.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import { schedulerHarness, executionFixture } from "./test-support.ts";
+import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const NO_COMMITS = 0;
 const ONE_COMMIT = 1;
@@ -247,22 +248,25 @@ test("mismatches and unexpected probe errors propagate without a commit", async 
   assert.equal(h.commits(), NO_COMMITS);
 });
 
-test("loss probes commit settlement at once and return a new claim", async (t) => {
+test("loss probes commit settlement at once and claim the node after the stop backoff", async (t) => {
   const h = harness(t);
-  const now = Date.now();
+  let now = Date.now();
   t.mock.method(Date, "now", () => now);
   const expired = { ...h.row, created_at: now - 1000, expired_at: now };
   h.store.transaction((tx) => insertExecution(tx, expired));
   h.dependencies.transitions.failure = (tx, nodeId) =>
     h.service.insert(tx, nodeId, h.row.project_id, 0);
-  const result = await h.pull();
-  assert.equal(result.kind, WorkPullKind.Claimed);
+  const settledAt = now;
+  assert.equal((await h.pull()).kind, WorkPullKind.NoWork);
   assert.equal(h.commits(), ONE_COMMIT);
   assert.equal(
     h.store.transaction((tx) => readExecution(tx, expired.execution_id))!
       .ended_at,
-    now,
+    settledAt,
   );
+  now = settledAt + DEFAULT_STOP_BACKOFF_SECONDS * 1000;
+  const result = await h.pull();
+  assert.equal(result.kind, WorkPullKind.Claimed);
   if (result.kind === WorkPullKind.Claimed)
     assert.notEqual(result.execution.execution_id, expired.execution_id);
 });
@@ -328,4 +332,19 @@ test("a pull under a project pause answers no work at the end of its window and 
     ),
     ONE_COMMIT,
   );
+});
+
+test("a waiting pull claims a held job when its stop backoff ends inside the window", async (t) => {
+  const h = harness(t);
+  const heldMs = 50;
+  h.enqueue();
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE scheduler_job SET not_before = ? WHERE node_id = ?")
+      .run(Date.now() + heldMs, h.row.node_id),
+  );
+  const started = performance.now();
+  const result = await h.pull();
+  assert.equal(result.kind, WorkPullKind.Claimed);
+  assert.ok(performance.now() - started < 10 * heldMs);
 });

@@ -15,6 +15,7 @@ import {
   FIXTURE_NOW,
   FIXTURE_DEADLINE,
 } from "./test-support.ts";
+import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const WALL_TIME = 7200000;
 const RESERVE_MS = 600000;
@@ -22,6 +23,7 @@ const PIN = 3;
 const ONE_CALL = 1;
 const CLAIM_METHOD = "claim";
 const FIRST_JOB = 0;
+const BACKOFF_MS = DEFAULT_STOP_BACKOFF_SECONDS * 1000;
 
 export function claimHarness(
   t: TestContext,
@@ -136,7 +138,9 @@ test("selection preserves priority and age while skipping a stale job", (t) => {
   h.store.transaction((tx) => {
     for (let i = 0; i < nodes.length; i++)
       tx.database
-        .prepare("INSERT INTO scheduler_job VALUES (?, ?, ?, ?)")
+        .prepare(
+          "INSERT INTO scheduler_job (id, project_id, node_id, priority) VALUES (?, ?, ?, ?)",
+        )
         .run(jobs[i]!, h.row.project_id, nodes[i]!, i === FIRST_JOB ? 0 : 1);
   });
   const visited: string[] = [];
@@ -192,8 +196,10 @@ test("runtime and node expiry settle before admission; rollback undoes all claim
     assert.equal(now, FIXTURE_DEADLINE);
     h.service.insert(tx, nodeId, h.row.project_id, 0);
   };
-  const next = h.claim(FIXTURE_DEADLINE);
-  assert.equal(next.settled, true);
+  const held = h.claim(FIXTURE_DEADLINE);
+  assert.equal(held.settled, true);
+  assert.equal(held.outcome, ClaimOutcome.None);
+  const next = h.claim(FIXTURE_DEADLINE + BACKOFF_MS);
   assert.equal(next.outcome, ClaimOutcome.Claimed);
   assert.notEqual(next.row!.execution_id, h.row.execution_id);
   assert.equal(
@@ -222,7 +228,7 @@ test("runtime and node expiry settle before admission; rollback undoes all claim
           FIXTURE_DEADLINE,
         );
         assert.equal(result.settled, true);
-        assert.equal(result.outcome, ClaimOutcome.Claimed);
+        assert.equal(result.outcome, ClaimOutcome.None);
         throw failure;
       }),
     failure,
@@ -231,7 +237,11 @@ test("runtime and node expiry settle before admission; rollback undoes all claim
     fresh.store.transaction((tx) => readExecution(tx, expired.execution_id)),
     expired,
   );
-  assert.equal(fresh.claim(FIXTURE_DEADLINE).outcome, ClaimOutcome.Claimed);
+  assert.equal(fresh.claim(FIXTURE_DEADLINE).outcome, ClaimOutcome.None);
+  assert.equal(
+    fresh.claim(FIXTURE_DEADLINE + BACKOFF_MS).outcome,
+    ClaimOutcome.Claimed,
+  );
 });
 
 const NO_CLAIMS = 0;
@@ -320,4 +330,21 @@ test("a refused healthcheck still answers the running execution of the runtime",
   const result = h.claim();
   assert.equal(result.outcome, ClaimOutcome.Running);
   assert.deepEqual(result.row, h.row);
+});
+
+test("selection skips a job until its stop backoff ends", (t) => {
+  const h = claimHarness(t);
+  const heldAt = FIXTURE_NOW + 1;
+  h.store.transaction((tx) => {
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
+    tx.database
+      .prepare("UPDATE scheduler_job SET not_before = ? WHERE node_id = ?")
+      .run(heldAt, h.row.node_id);
+  });
+  assert.equal(h.claim().outcome, ClaimOutcome.None);
+  assert.equal(
+    h.calls.filter((call) => call.method === CLAIM_METHOD).length,
+    NO_CLAIMS,
+  );
+  assert.equal(h.claim(heldAt).outcome, ClaimOutcome.Claimed);
 });
