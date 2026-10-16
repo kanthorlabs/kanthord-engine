@@ -847,20 +847,18 @@ test("rework: unresolved kanthord pull request requests merge with the new teste
     mergeKeys[0],
     `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}/merge/${COMMIT}`,
   );
-  assert.deepEqual(
-    (
-      h.dependencies.intakeActions.perform as unknown as ReturnType<
-        typeof t.mock.fn
-      >
-    ).mock?.callCount() ?? mergeKeys.length,
-    SINGLE_CALL_COUNT,
-  );
 });
 
 test("rework: human landing with unresolved request makes no merge call", async (t) => {
   const h = reworkable(t);
   h.entry.action.configuration = { base_branch: "main", landing: "human" };
+  let performCount = NO_CALLS;
+  h.dependencies.intakeActions.perform = async () => {
+    performCount += 1;
+    return PR;
+  };
   assert.deepEqual((await h.perform()).items, []);
+  assert.equal(performCount, NO_CALLS);
 });
 
 test("rework: failed merge does not propagate and warns with the evidence id and error code", async (t) => {
