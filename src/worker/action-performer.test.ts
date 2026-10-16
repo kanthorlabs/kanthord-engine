@@ -878,6 +878,19 @@ test("rework: failed merge does not propagate and warns with the evidence id and
   });
 });
 
+test("rework: an operands failure warns and continues; return items stay intact", async (t) => {
+  const h = reworkable(t);
+  const warned: unknown[] = [];
+  h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
+  h.entry.action.binding_id = createIdentity("other_binding");
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(warned.length, SINGLE_CALL_COUNT);
+  assert.deepEqual(warned[0], {
+    evidence_id: h.existingEvidenceId,
+    code: WorkerErrorCode.SnapshotAbsent,
+  });
+});
+
 test("rework: a merge refusal answer warns with evidence_id, class and code", async (t) => {
   const h = reworkable(t);
   const warned: unknown[] = [];

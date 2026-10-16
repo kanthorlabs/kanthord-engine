@@ -379,24 +379,28 @@ export class ActionPerformer {
         entry.request_evidence_id === null
       )
         continue;
-      const operands = operandsOf(claim.nodeBranch, context, entry);
       const evidenceId = entry.request_evidence_id;
-      await this.requestMerge(
-        call,
-        claim.nodeId,
-        claim.attempt,
-        entry.action.key,
-        operands.commit,
-        evidenceId,
-      ).catch((error: unknown) => {
-        this.dependencies.logger?.warn(
-          {
-            evidence_id: evidenceId,
-            code: error instanceof OperationError ? error.code : undefined,
-          },
-          "merge request failed",
-        );
-      });
+      await Promise.resolve()
+        .then(() => {
+          const operands = operandsOf(claim.nodeBranch, context, entry);
+          return this.requestMerge(
+            call,
+            claim.nodeId,
+            claim.attempt,
+            entry.action.key,
+            operands.commit,
+            evidenceId,
+          );
+        })
+        .catch((error: unknown) => {
+          this.dependencies.logger?.warn(
+            {
+              evidence_id: evidenceId,
+              code: error instanceof OperationError ? error.code : undefined,
+            },
+            "merge request failed",
+          );
+        });
     }
   }
 
