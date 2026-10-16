@@ -277,11 +277,13 @@ export async function fetchAndCheckout(
   await run(["check-ref-format", "--branch", branch]);
   await run(["check-ref-format", "--branch", baseBranch]);
   const ref = `refs/remotes/origin/${branch}`;
-  const tracked = async () =>
-    (await run(["for-each-ref", "--format=%(refname)", ref]))
+  const localRef = `refs/heads/${branch}`;
+  const listed = async (name: string) =>
+    (await run(["for-each-ref", "--format=%(refname)", name]))
       .trim()
       .split("\n")
-      .includes(ref);
+      .includes(name);
+  const tracked = () => listed(ref);
   const trackedBefore = await tracked();
   if (
     trackedBefore &&
@@ -301,7 +303,10 @@ export async function fetchAndCheckout(
     "fetch and checkout",
     [EXIT_SUCCESS, EXIT_DETACHED_HEAD],
   );
-  await run(["checkout", "--force", "-B", branch, `origin/${target}`, "--"]);
+  if (!found && (await listed(localRef)))
+    await run(["checkout", "--force", branch, "--"]);
+  else
+    await run(["checkout", "--force", "-B", branch, `origin/${target}`, "--"]);
   await run(["clean", current.output.trim() === branch ? "-ffd" : "-ffdx"]);
   return (await run(["rev-parse", "HEAD"])).trim();
 }

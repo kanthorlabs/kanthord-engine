@@ -193,6 +193,63 @@ test("connector clones, resumes and pushes only fast-forward node branches and i
   assert.equal(process.env.GIT_SSH, undefined);
 });
 
+test("fetchAndCheckout keeps the unpushed commits of the local node branch when the remote node branch is missing", async (t) => {
+  const root = temporary(t);
+  const origin = join(root, "origin");
+  const seed = join(root, "seed");
+  const workspace = join(root, "workspace");
+  for (const directory of [origin, seed, workspace]) mkdirSync(directory);
+  await simpleGit(origin).init(true);
+  await simpleGit(seed).init();
+  await simpleGit(seed).raw(["checkout", "-b", "main"]);
+  const commit = async (directory: string, value: string) => {
+    writeFileSync(join(directory, "file"), value);
+    await simpleGit(directory).add("file");
+    await simpleGit(directory).raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      value,
+    ]);
+    return (await simpleGit(directory).revparse(["HEAD"])).trim();
+  };
+  const base = await commit(seed, "base");
+  await simpleGit(seed).addRemote("origin", origin);
+  await simpleGit(seed).push("origin", "main");
+  const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+  await clone(origin, workspace, background, DEADLINE_MS);
+  assert.equal(
+    await fetchAndCheckout(
+      workspace,
+      branch,
+      "main",
+      false,
+      background,
+      DEADLINE_MS,
+    ),
+    base,
+  );
+  const unpushedContent = "unpushed";
+  const unpushed = await commit(workspace, unpushedContent);
+  writeFileSync(join(workspace, "untracked"), "scratch");
+  assert.equal(
+    await fetchAndCheckout(
+      workspace,
+      branch,
+      "main",
+      false,
+      background,
+      DEADLINE_MS,
+    ),
+    unpushed,
+  );
+  assert.equal(readFileSync(join(workspace, "file"), "utf8"), unpushedContent);
+  assert.deepEqual(readdirSync(workspace).sort(), [".git", "file"]);
+});
+
 const GIT_FAILED = "repository.connector.git_failed";
 const NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const BASE_BRANCH = "main";
