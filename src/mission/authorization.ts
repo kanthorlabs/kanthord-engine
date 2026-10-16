@@ -295,15 +295,13 @@ export function authorizeFrozenAction(
       : mergeAddressOf(
           tx,
           claim,
-          action.key,
+          action,
           input.mergeEvidenceId,
           repository.resource_identity,
         );
   return {
     credential:
-      action.action === RepositoryAction.PullRequest &&
-      (reused === null ||
-        action.configuration.landing === RepositoryLanding.KanthorD)
+      action.action === RepositoryAction.PullRequest && reused === null
         ? policy.credential
         : null,
     platform: policy.platform,
@@ -321,18 +319,23 @@ export function authorizeFrozenAction(
 function mergeAddressOf(
   tx: Transaction,
   claim: ExecutionClaim,
-  actionKey: string,
+  action: FrozenAction,
   evidenceId: string,
   resourceIdentity: string,
 ): PullRequestAddress {
-  assert.ok(actionKey);
+  assert.ok(action.key);
   assert.ok(resourceIdentity);
+  if (
+    action.action !== RepositoryAction.PullRequest ||
+    action.configuration.landing !== RepositoryLanding.KanthorD
+  )
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
   const evidence = readEvidence(tx, evidenceId);
   if (
     !evidence ||
     evidence.node_id !== claim.nodeId ||
     evidence.attempt !== claim.attempt ||
-    evidence.requirement_key !== actionKey ||
+    evidence.requirement_key !== action.key ||
     evidence.end_state !== null
   )
     authorizationRefused(AuthorizationRefusal.NodeMismatch);

@@ -1116,7 +1116,7 @@ test(
     });
 
     await t.test(
-      "a reuse pushes the snapshot with a released credential and sends no PUT",
+      "a reuse pushes the snapshot with no credential and sends no PUT",
       async () => {
         assert.ok(created?.kind === PlatformAddressKind.PullRequest);
         const evidence = await h.request(
@@ -1130,7 +1130,7 @@ test(
           await h.perform(execution, body("reuse"), evidence),
         );
         assert.deepEqual(answer, created);
-        assert.equal(h.row("reuse")?.credential, GITHUB_CREDENTIAL);
+        assert.equal(h.row("reuse")?.credential, null);
         assert.equal(merges().length, mergesBefore);
         assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
         dropped(h.materials);
