@@ -110,10 +110,26 @@ interface GitOptions {
   errors?: SimpleGitOptions["errors"];
 }
 
+const URL_USERINFO = /([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi;
+const REDACTED_USERINFO = "$1<redacted>@";
+
+function exitError(result: { exitCode: number; stdErr: Buffer[] }): Error {
+  const stderr = Buffer.concat(result.stdErr).toString("utf8").trim();
+  const exited = `git exited with ${result.exitCode}`;
+  return new Error(stderr ? `${exited}: ${stderr}` : exited);
+}
+
+export function gitFailureText(operation: string, error: unknown): string {
+  assert.ok(operation);
+  const text = error instanceof Error ? error.message : String(error);
+  return `${operation}: ${text.trim()}`.replace(
+    URL_USERINFO,
+    REDACTED_USERINFO,
+  );
+}
+
 const failNonzeroExit: SimpleGitOptions["errors"] = (error, result) =>
-  result.exitCode === EXIT_SUCCESS
-    ? error
-    : (error ?? new Error(`git exited with ${result.exitCode}`));
+  result.exitCode === EXIT_SUCCESS ? error : (error ?? exitError(result));
 
 function gitEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return isolatedGitEnvironment(environment ?? process.env);
@@ -169,8 +185,10 @@ async function runGitTask<T>(
     );
     if (controller.signal.aborted) throw new Error("Git aborted");
     return output;
-  } catch {
-    throw new Diagnostic(GIT_FAILED, `${operation}: git failed.`);
+  } catch (error) {
+    throw new Diagnostic(GIT_FAILED, `${operation}: git failed.`, {
+      cause: new Error(gitFailureText(operation, error)),
+    });
   } finally {
     clearTimeout(timer);
     unsubscribe();
@@ -388,7 +406,7 @@ async function runGitExit(
     observed.exitCode = result.exitCode;
     if (result.exitCode === EXIT_SUCCESS) return error;
     if (accepted.includes(result.exitCode)) return undefined;
-    return error ?? new Error(`git exited with ${result.exitCode}`);
+    return error ?? exitError(result);
   };
   const output = await runGit(directory, args, context, deadlineMs, operation, {
     errors,

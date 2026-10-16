@@ -377,6 +377,42 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
   );
 });
 
+test("a git failure keeps the operation and the stderr without credentials in its cause", async (t) => {
+  const bin = temporary(t);
+  const secret = "ghs_0123456789abcdefghij";
+  const stderr = `fatal: unable to access 'https://x-access-token:${secret}@example.invalid/r.git/': Could not resolve host`;
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\necho "${stderr}" >&2\nexit 128\n`,
+    {
+      mode: 0o700,
+    },
+  );
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  t.after(() => {
+    process.env.PATH = path;
+  });
+  const keepsCause = (operation: string) => (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal((error as { code?: string }).code, GIT_FAILED);
+    assert.equal(error.message, `${operation}: git failed.`);
+    assert.ok(error.cause instanceof Error);
+    assert.match(error.cause.message, new RegExp(`^${operation}: `));
+    assert.match(error.cause.message, /Could not resolve host/);
+    assert.doesNotMatch(error.cause.message, new RegExp(secret));
+    return true;
+  };
+  await assert.rejects(
+    clone("file:///remote", temporary(t), background, DEADLINE_MS),
+    keepsCause("clone"),
+  );
+  await assert.rejects(
+    pushNodeBranch(temporary(t), NODE_BRANCH, background, DEADLINE_MS),
+    keepsCause("push node branch"),
+  );
+});
+
 test("every git caller ignores the global git configuration of the host", async (t) => {
   const { origin, snapshot } = await remote(t);
   const home = temporary(t);
