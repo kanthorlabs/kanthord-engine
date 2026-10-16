@@ -402,6 +402,7 @@ export function composeServices(options: {
                 key: action.key,
                 commit: action.commit,
                 reused_evidence_id: action.reusedEvidenceId,
+                merge_evidence_id: action.mergeEvidenceId ?? null,
                 request_key: requestKey,
               },
             },

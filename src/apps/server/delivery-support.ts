@@ -80,7 +80,7 @@ async function cli(t: TestContext, pollIntervalMs?: number) {
 
 type Cli = Awaited<ReturnType<typeof cli>>;
 
-async function project(c: Cli, action: string) {
+async function project(c: Cli, action: string, landing?: string) {
   await createCredentials(c.session, SECRET);
   const created = await c.read<{ id: string }>([
     "project",
@@ -94,7 +94,7 @@ async function project(c: Cli, action: string) {
     {
       version: FIRST_REVISION,
       bindings: {
-        gated: repositoryBinding(GATED, action),
+        gated: repositoryBinding(GATED, action, landing),
         harness: HARNESS_BINDING,
       },
     },
@@ -120,6 +120,7 @@ async function project(c: Cli, action: string) {
 export interface SetupOptions {
   pollIntervalMs?: number;
   action?: string;
+  landing?: string;
 }
 
 export async function setup(t: TestContext, options: SetupOptions = {}) {
@@ -127,6 +128,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
   const { projectId, missionId, ...applied } = await project(
     c,
     options.action ?? PULL_REQUEST_ACTION,
+    options.landing,
   );
   let bindingSetVersion = applied.bindingSetVersion;
   let page = applied.bindings;
@@ -178,7 +180,14 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
     resourceIdentity: binding("harness").resource_identity,
   });
   const { token, node, release } = machine;
-  const objective = async (filename: string, parentId: string) => {
+  const objective = async (
+    filename: string,
+    parentId: string,
+    opts?: {
+      executing?: (execution: ExecutionRecord) => Promise<void>;
+      afterSteps?: () => Promise<void>;
+    },
+  ) => {
     const nodeId = await create(filename, parentId);
     const head = await pushNodeBranch(
       c.t,
@@ -190,6 +199,8 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
       nodeId,
       bindingId: binding(GATED).id,
       commit: head,
+      executing: opts?.executing,
+      afterSteps: opts?.afterSteps,
     });
     return { nodeId, x2 };
   };
@@ -270,6 +281,12 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
       },
       { identity: mintServiceIdentity(service), idempotencyKey: ulid() },
     );
+  const rework = (nodeId: string, commit: string) =>
+    passingEvaluation(c.session, machine, {
+      nodeId,
+      bindingId: binding(GATED).id,
+      commit,
+    });
   return {
     ...c,
     projectId,
@@ -283,5 +300,6 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
     actionRequest,
     check,
     admit,
+    rework,
   };
 }

@@ -17,7 +17,7 @@ import {
   type ExternalAction,
 } from "../../mission/contract.ts";
 import { ActionResultKind } from "../../worker/contract.ts";
-import { completed } from "./cli-support.ts";
+import { completed, pushNextNodeBranchCommit } from "./cli-support.ts";
 import {
   FIRST_INDEX,
   GATED_KEY,
@@ -44,6 +44,8 @@ const CLOSED_AT = "2026-10-15T03:57:51Z";
 const PENDING_THEN_DIRTY_READS = 2;
 const SERVICE_MISMATCH = "service_mismatch";
 const RETRYABLE_REFUSAL = "repository.platform.github.retryable_refusal";
+const DEFERRED_CHECK_POLL_MS = 50;
+const DEFERRED_CHECK_MAX_POLLS = 40;
 
 function issue(): Webhook {
   return {
@@ -315,7 +317,7 @@ test(
 );
 
 test(
-  "E08.10 a merged item that also matches a merge push request exactly resolves both requests and the sibling conflict",
+  "E08.10 a deferred check resolves the merge push; a merged pull request resolves the sibling and conflicts the other",
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t, { action: "merge_push" });
@@ -325,7 +327,6 @@ test(
     const request = await h.requestMergePush(A.x2, landed);
     assert.equal(request.requirement_key, MERGE_KEY);
     await h.release(A.x2.execution_id);
-    assert.equal((await h.node(A.nodeId)).state, NodeState.ExternalRequested);
     await h.rebind("pull_request");
     const P = await requested(h, I, "objective-p.md");
     const Q = await requested(h, I, "objective-q.md");
@@ -342,25 +343,136 @@ test(
     assert.equal((await h.node(A.nodeId)).state, NodeState.Completed);
     assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
     assert.equal((await h.node(Q.nodeId)).state, NodeState.Available);
-    for (const objective of [A, P]) {
-      const evidence = await h.read<Page<Evidence>>([
-        "mission",
-        "evidence",
-        "list",
-        objective.nodeId,
-        "--attempt",
-        String(FIRST_ATTEMPT),
-      ]);
-      const provenance = evidence.items
-        .filter((item) => item.provenance.kind === ActorKind.Service)
-        .map((item) => item.provenance);
-      assert.deepEqual(provenance, [
-        {
-          kind: ActorKind.Service,
-          service: ActorService.Mission,
-          inbound_event_id: inboundEventId,
-        },
-      ]);
+    const pEvidence = await h.read<Page<Evidence>>([
+      "mission",
+      "evidence",
+      "list",
+      P.nodeId,
+      "--attempt",
+      String(FIRST_ATTEMPT),
+    ]);
+    const pProvenance = pEvidence.items
+      .filter((item) => item.provenance.kind === ActorKind.Service)
+      .map((item) => item.provenance);
+    assert.deepEqual(pProvenance, [
+      {
+        kind: ActorKind.Service,
+        service: ActorService.Mission,
+        inbound_event_id: inboundEventId,
+      },
+    ]);
+    const aEvidence = await h.read<Page<Evidence>>([
+      "mission",
+      "evidence",
+      "list",
+      A.nodeId,
+      "--attempt",
+      String(FIRST_ATTEMPT),
+    ]);
+    const aProvenance = aEvidence.items
+      .filter((item) => item.provenance.kind === ActorKind.Service)
+      .map((item) => item.provenance);
+    assert.deepEqual(aProvenance, [
+      {
+        kind: ActorKind.Service,
+        service: ActorService.Mission,
+      },
+    ]);
+  },
+);
+
+test(
+  "E08.11 a merge admitted after release completes the node via the fold",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const I = await h.create("initiative-1.md");
+    const P = await h.objective("objective-p.md", I);
+    await h.actionRequest(P.x2);
+    await h.release(P.x2.execution_id);
+    assert.equal((await h.node(P.nodeId)).state, NodeState.ExternalRequested);
+    h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
+    const answer = completed(
+      await h.admit(
+        closed(FIRST_PULL_REQUEST, true),
+        createIdentity("inbound_event"),
+      ),
+    );
+    assert.deepEqual(answer, {
+      disposition: Disposition.AcceptedObservation,
+      reason: null,
+    });
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+  },
+);
+
+test(
+  "E08.12 a merge under the live claim completes via the deferred check after release",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const I = await h.create("initiative-1.md");
+    const P = await h.objective("objective-p.md", I);
+    await h.actionRequest(P.x2);
+    h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
+    await h.release(P.x2.execution_id);
+    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
+      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
     }
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+  },
+);
+
+test(
+  "E08.13 kanthord landing: performer merges after release; deferred check completes the node",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, { landing: "kanthord" });
+    const I = await h.create("initiative-1.md");
+    const P = await h.objective("objective-p.md", I);
+    const action = await h.actionRequest(P.x2);
+    assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+    await h.release(P.x2.execution_id);
+    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
+      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
+    }
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
+  },
+);
+
+test(
+  "E08.14 kanthord landing: conflict fold returns to Available; rework merge completes via the deferred check",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t, { landing: "kanthord" });
+    const I = await h.create("initiative-1.md");
+    const P = await h.objective("objective-p.md", I);
+    h.gitHub.refuseMerge(HttpStatus.Conflict);
+    const action = await h.actionRequest(P.x2);
+    assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
+    h.gitHub.refuseMerge(null);
+    h.gitHub.mergeability(FIRST_PULL_REQUEST, [DIRTY]);
+    await h.release(P.x2.execution_id);
+    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
+      if ((await h.node(P.nodeId)).state === NodeState.Available) break;
+    }
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Available);
+    const head2 = await pushNextNodeBranchCommit(
+      t,
+      h.gatedBare.bare,
+      P.nodeId,
+      "rework\n",
+    );
+    const x3 = await h.rework(P.nodeId, head2);
+    await h.actionRequest(x3);
+    await h.release(x3.execution_id);
+    for (let i = 0; i < DEFERRED_CHECK_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, DEFERRED_CHECK_POLL_MS));
+      if ((await h.node(P.nodeId)).state === NodeState.Completed) break;
+    }
+    assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
   },
 );

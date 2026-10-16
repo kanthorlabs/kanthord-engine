@@ -351,7 +351,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
     credential: HARNESS_CREDENTIAL,
     base_branch: "main",
     action: RepositoryAction.PullRequest as RepositoryAction,
-    landing: "human" as const,
+    landing: "human" as "human" | "kanthord",
     project_prompt: null,
   };
   h.dependencies.bindings.repositoryPolicyOf = () => ({ ...policy });

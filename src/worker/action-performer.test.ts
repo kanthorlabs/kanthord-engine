@@ -30,6 +30,7 @@ const SINGLE_CALL_COUNT = 1;
 const NO_CALLS = 0;
 const COMMIT = "b".repeat(40);
 const NOT_RUNNING = "scheduler.execution.not_running";
+const MERGE_REFUSED = "merge.request.refused";
 const SECOND_ATTEMPT = 2;
 const DUAL_CALL_COUNT = 2;
 const UNPROCESSABLE_STATUS = 422;
@@ -116,6 +117,7 @@ function harness(t: TestContext) {
   };
   const calls: string[] = [];
   const dependencies: ConstructorParameters<typeof ActionPerformer>[0] = {
+    logger: null,
     store,
     schedulerClaims: {
       agentSelectionsOf: () => [],
@@ -722,4 +724,185 @@ test("mixed GitHub display capitalization reuses the earlier request without cha
   );
   assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, PR);
   assert.equal(h.performSpy.mock.callCount(), SINGLE_CALL_COUNT);
+});
+
+test("kanthord landing requests create, evidence, and merge in order", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  const order: string[] = [];
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => {
+      order.push("perform");
+      return PR;
+    },
+  );
+  h.dependencies.evidenceRequests.request = async () => {
+    order.push("evidence");
+    return {
+      type: OperationResultType.Completed,
+      status: HttpStatus.OK,
+      data: h.evidence,
+    };
+  };
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.deepEqual(order, ["perform", "evidence", "perform"]);
+  assert.deepEqual(perform.mock.calls[0]!.arguments[1], {
+    key: h.entry.action.key,
+    commit: COMMIT,
+    reusedEvidenceId: null,
+  });
+  assert.equal(
+    perform.mock.calls[0]!.arguments[2],
+    `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}`,
+  );
+  assert.deepEqual(perform.mock.calls[1]!.arguments[1], {
+    key: h.entry.action.key,
+    commit: COMMIT,
+    reusedEvidenceId: null,
+    mergeEvidenceId: h.evidence.id,
+  });
+  assert.equal(
+    perform.mock.calls[1]!.arguments[2],
+    `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}/merge/${COMMIT}`,
+  );
+});
+
+test("human landing makes no merge call", async (t) => {
+  const h = actionable(t);
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => PR,
+  );
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+});
+
+test("a failed merge does not change the return item and warns with the evidence id", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  const warned: unknown[] = [];
+  h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
+  let callCount = 0;
+  h.dependencies.intakeActions.perform = async () => {
+    callCount += 1;
+    if (callCount === DUAL_CALL_COUNT)
+      throw new OperationError(HttpStatus.Forbidden, MERGE_REFUSED, "refused");
+    return PR;
+  };
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(callCount, DUAL_CALL_COUNT);
+  assert.equal(warned.length, SINGLE_CALL_COUNT);
+  assert.deepEqual(warned[0], {
+    evidence_id: h.evidence.id,
+    code: MERGE_REFUSED,
+  });
+});
+
+function reworkable(t: TestContext) {
+  const h = harness(t);
+  const snapshot = h.context.current_assessment!.tested_input;
+  assert.ok(
+    !Array.isArray(snapshot) && snapshot.kind === TestedInputKind.Repository,
+  );
+  const existingEvidenceId = createIdentity("evidence");
+  const entry: ActionContext["actions"][number] = {
+    action: {
+      key: "repo.pull_request",
+      binding_id: snapshot.binding_id,
+      action: RepositoryAction.PullRequest,
+      expected_end_state: "pull_request_merged",
+      follows: null,
+      configuration: { base_branch: "main", landing: "kanthord" as const },
+    },
+    resource_identity: RESOURCE,
+    resolution: ActionResolution.Unresolved,
+    request_evidence_id: existingEvidenceId,
+    eligible: false,
+    reuse_candidates: [],
+  };
+  h.context.actions.push(entry);
+  return { ...h, entry, existingEvidenceId };
+}
+
+test("rework: unresolved kanthord pull request requests merge with the new tested commit key", async (t) => {
+  const h = reworkable(t);
+  const mergeKeys: string[] = [];
+  h.dependencies.intakeActions.perform = async (_call, body, key) => {
+    assert.ok(body.mergeEvidenceId, "expected a merge call, not a create");
+    mergeKeys.push(key);
+    return PR;
+  };
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(mergeKeys.length, SINGLE_CALL_COUNT);
+  assert.equal(
+    mergeKeys[0],
+    `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}/merge/${COMMIT}`,
+  );
+});
+
+test("rework: human landing with unresolved request makes no merge call", async (t) => {
+  const h = reworkable(t);
+  h.entry.action.configuration = { base_branch: "main", landing: "human" };
+  let performCount = NO_CALLS;
+  h.dependencies.intakeActions.perform = async () => {
+    performCount += 1;
+    return PR;
+  };
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(performCount, NO_CALLS);
+});
+
+test("rework: failed merge does not propagate and warns with the evidence id and error code", async (t) => {
+  const h = reworkable(t);
+  const warned: unknown[] = [];
+  h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
+  h.dependencies.intakeActions.perform = async () => {
+    throw new OperationError(HttpStatus.Forbidden, MERGE_REFUSED, "refused");
+  };
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(warned.length, SINGLE_CALL_COUNT);
+  assert.deepEqual(warned[0], {
+    evidence_id: h.existingEvidenceId,
+    code: MERGE_REFUSED,
+  });
+});
+
+test("rework: an operands failure warns and continues; return items stay intact", async (t) => {
+  const h = reworkable(t);
+  const warned: unknown[] = [];
+  h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
+  h.entry.action.binding_id = createIdentity("other_binding");
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(warned.length, SINGLE_CALL_COUNT);
+  assert.deepEqual(warned[0], {
+    evidence_id: h.existingEvidenceId,
+    code: WorkerErrorCode.SnapshotAbsent,
+  });
+});
+
+test("rework: a merge refusal answer warns with evidence_id, class and code", async (t) => {
+  const h = reworkable(t);
+  const warned: unknown[] = [];
+  h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
+  h.dependencies.intakeActions.perform = async () => ({
+    class: ResultClass.FinalRefusal,
+    code: "merge.not_allowed",
+    message: "Not allowed",
+  });
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(warned.length, SINGLE_CALL_COUNT);
+  assert.deepEqual(warned[0], {
+    evidence_id: h.existingEvidenceId,
+    class: ResultClass.FinalRefusal,
+    code: "merge.not_allowed",
+  });
 });

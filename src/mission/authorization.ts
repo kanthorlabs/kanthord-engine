@@ -262,7 +262,12 @@ export function authorizeFrozenAction(
   dependencies: AuthorizationDependencies,
   identity: MachineIdentity,
   claim: ExecutionClaim,
-  input: { key: string; commit: string; reusedEvidenceId: string | null },
+  input: {
+    key: string;
+    commit: string;
+    reusedEvidenceId: string | null;
+    mergeEvidenceId: string | null;
+  },
 ): Authorized<ActionFacts> {
   assert.equal(identity.kind, IdentityKind.Client);
   assert.equal(identity.projectId, claim.projectId);
@@ -284,11 +289,19 @@ export function authorizeFrozenAction(
           input.reusedEvidenceId,
           repository.resource_identity,
         );
+  const merge =
+    input.mergeEvidenceId === null
+      ? null
+      : mergeAddressOf(
+          tx,
+          claim,
+          action,
+          input.mergeEvidenceId,
+          repository.resource_identity,
+        );
   return {
     credential:
-      action.action === RepositoryAction.PullRequest &&
-      (reused === null ||
-        action.configuration.landing === RepositoryLanding.KanthorD)
+      action.action === RepositoryAction.PullRequest && reused === null
         ? policy.credential
         : null,
     platform: policy.platform,
@@ -298,8 +311,41 @@ export function authorizeFrozenAction(
       repository,
       snapshot_commit: commit,
       reused_address: reused,
+      merge_address: merge,
     },
   };
+}
+
+function mergeAddressOf(
+  tx: Transaction,
+  claim: ExecutionClaim,
+  action: FrozenAction,
+  evidenceId: string,
+  resourceIdentity: string,
+): PullRequestAddress {
+  assert.ok(action.key);
+  assert.ok(resourceIdentity);
+  if (
+    action.action !== RepositoryAction.PullRequest ||
+    action.configuration.landing !== RepositoryLanding.KanthorD
+  )
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  const evidence = readEvidence(tx, evidenceId);
+  if (
+    !evidence ||
+    evidence.node_id !== claim.nodeId ||
+    evidence.attempt !== claim.attempt ||
+    evidence.requirement_key !== action.key ||
+    evidence.end_state !== null
+  )
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  const address = platformAddressOf(tx, evidenceId);
+  if (
+    address.kind !== PlatformAddressKind.PullRequest ||
+    address.resource_identity !== resourceIdentity
+  )
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  return address;
 }
 
 function authorizeRequestOf(

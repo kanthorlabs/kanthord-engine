@@ -232,7 +232,11 @@ export async function createCredentials(
   );
 }
 
-export function repositoryBinding(name: string, action: string) {
+export function repositoryBinding(
+  name: string,
+  action: string,
+  landing?: string,
+) {
   assert.ok(name && action);
   return {
     kind: "repository",
@@ -242,12 +246,43 @@ export function repositoryBinding(name: string, action: string) {
       address: `git@github.com:owner/${name}.git`,
       strategy: {
         base_branch: "main",
-        action: { name: action, follows: { type: "assessment_passed" } },
+        action: {
+          name: action,
+          follows: { type: "assessment_passed" },
+          ...(landing ? { landing } : {}),
+        },
       },
       ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
       credential: CREDENTIAL_NAME,
     },
   };
+}
+
+export async function pushNextNodeBranchCommit(
+  t: TestContext,
+  bare: string,
+  nodeId: string,
+  content: string,
+): Promise<string> {
+  assert.ok(bare && nodeId && content);
+  const directory = join(temporary(t), `rework-${nodeId.slice(-8)}`);
+  await simpleGit().clone(bare, directory);
+  const git = simpleGit(directory);
+  await git.addConfig("user.name", "Test Node");
+  await git.addConfig("user.email", "test_node@example.invalid");
+  await git.raw([
+    "checkout",
+    "-b",
+    `kanthord/${nodeId}`,
+    `origin/kanthord/${nodeId}`,
+  ]);
+  writeFileSync(join(directory, "node.md"), content);
+  await git.add("node.md");
+  await git.commit(content);
+  await git.push("origin", `kanthord/${nodeId}`);
+  const head = (await git.revparse(["HEAD"])).trim();
+  assert.match(head, /^[a-f0-9]{40}$/);
+  return head;
 }
 
 export type CliMachine = Awaited<ReturnType<typeof cliMachine>>;
@@ -343,6 +378,7 @@ export async function passingEvaluation(
     bindingId: string;
     commit: string;
     executing?: (execution: ExecutionRecord) => Promise<void>;
+    afterSteps?: () => Promise<void>;
   },
 ): Promise<ExecutionRecord> {
   const { nodeId, bindingId, commit } = input;
@@ -362,6 +398,7 @@ export async function passingEvaluation(
     ],
   });
   await machine.release(x1.execution_id);
+  await input.afterSteps?.();
   const x2 = await machine.pull(nodeId, NodeState.Evaluating);
   const r1 = await submit(x2, verificationRun(bindingId, commit));
   const assessment = await session.write<{ assessment: { result: string } }>(

@@ -326,12 +326,12 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
     ).trim();
     assert.equal(parent, q);
   });
-  await t.test("E03.8 the landed merge push completes Q", async () => {
-    const answer = await h.check(Q);
-    assert.equal(
-      answer.results[FIRST_INDEX]?.resolution,
-      Resolution.ExpectedEnd,
-    );
-    assert.equal((await h.node(Q)).state, NodeState.Completed);
-  });
+  await t.test(
+    "E03.8 the deferred check completes Q after landing",
+    async () => {
+      while ((await h.node(Q)).state !== NodeState.Completed)
+        await new Promise<void>((r) => setTimeout(r, 10));
+      assert.equal((await h.node(Q)).state, NodeState.Completed);
+    },
+  );
 });

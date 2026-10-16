@@ -22,6 +22,7 @@ import { temporary } from "../../kernel/test-support.ts";
 import {
   MISSION_SERVICE_NAME,
   MissionErrorCode,
+  NodeState,
   PlatformAddressKind,
   missionOperations,
   type Evidence,
@@ -59,6 +60,7 @@ const PUSHED_RESOURCE = "repository:github:owner/pushed";
 const OTHER_RESOURCE = "repository:github:owner/other";
 const OTHER_PROJECT = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ONE_REQUEST = 1;
+const DEFERRED_GITHUB_CALLS = 2;
 const AUTHORIZATION_REFUSED_STATUS = 403;
 const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
 const FINAL_CODE = "repository.platform.github.final_refusal";
@@ -379,6 +381,23 @@ async function setup(t: TestContext) {
       commit: pushed.head,
     },
   );
+  await new Promise<void>((resolve) => {
+    const poll = () => {
+      if (gitHub.calls.length >= DEFERRED_GITHUB_CALLS) resolve();
+      else setImmediate(poll);
+    };
+    setImmediate(poll);
+  });
+  while (true) {
+    const node = await read<{ state: string }>([
+      "mission",
+      "node",
+      "get",
+      pushedNode,
+    ]);
+    if (node.state !== NodeState.ExternalRequested) break;
+    await new Promise<void>((r) => setTimeout(r, 5));
+  }
   const intake = directClient(intakeOperations, fixture.invocation);
   const check = (evidenceId: string, service = MISSION_SERVICE_NAME) =>
     intake["action.check"](
@@ -453,7 +472,7 @@ test(
         });
         assert.deepEqual(
           h.gitHub.calls.map((call) => [call.method, call.path, call.token]),
-          Array.from({ length: CHECK_COUNT }, () => [
+          [
             [
               HttpMethod.Get,
               `/repos/owner/gated/pulls/${h.number}`,
@@ -464,7 +483,19 @@ test(
               `/repos/owner/gated/pulls/${h.number}/reviews?per_page=100&page=1`,
               GITHUB_KEY,
             ],
-          ]).flat(),
+            ...Array.from({ length: CHECK_COUNT }, () => [
+              [
+                HttpMethod.Get,
+                `/repos/owner/gated/pulls/${h.number}`,
+                GITHUB_KEY,
+              ],
+              [
+                HttpMethod.Get,
+                `/repos/owner/gated/pulls/${h.number}/reviews?per_page=100&page=1`,
+                GITHUB_KEY,
+              ],
+            ]).flat(),
+          ],
         );
         dropped(h.materials, CHECK_COUNT);
       },
@@ -563,20 +594,15 @@ test(
         h.gitHub.failPulls(BAD_GATEWAY_STATUS);
         rmSync(h.pushed.bare, { recursive: true, force: true });
         failed(await branchPush(), BAD_GATEWAY_STATUS, GIT_FAILED_CODE);
-        for (const [nodeId, evidenceId, code] of [
-          [h.nodes.gated, h.pullRequestId, RETRYABLE_CODE],
-          [h.nodes.pushed, h.branchPushId, GIT_FAILED_CODE],
-        ] as const) {
-          const answer = await h.nodeCheck(nodeId);
-          assert.deepEqual(answer.results, []);
-          assert.deepEqual(
-            answer.failures.map((item) => [
-              item.evidence_id,
-              item.error.error.code,
-            ]),
-            [[evidenceId, code]],
-          );
-        }
+        const answer = await h.nodeCheck(h.nodes.gated);
+        assert.deepEqual(answer.results, []);
+        assert.deepEqual(
+          answer.failures.map((item) => [
+            item.evidence_id,
+            item.error.error.code,
+          ]),
+          [[h.pullRequestId, RETRYABLE_CODE]],
+        );
         h.gitHub.failPulls(null);
       },
     );
@@ -613,14 +639,17 @@ test(
         { identity: mintServiceIdentity(service) },
       );
 
-    await t.test("a pull request and a branch push count", async () => {
-      assert.deepEqual(completed(await count(GATED_RESOURCE)), {
-        count: ONE_REQUEST,
-      });
-      assert.deepEqual(completed(await count(PUSHED_RESOURCE)), {
-        count: ONE_REQUEST,
-      });
-    });
+    await t.test(
+      "a pull request counts as unresolved; a resolved branch push does not",
+      async () => {
+        assert.deepEqual(completed(await count(GATED_RESOURCE)), {
+          count: ONE_REQUEST,
+        });
+        assert.deepEqual(completed(await count(PUSHED_RESOURCE)), {
+          count: NO_ROWS,
+        });
+      },
+    );
 
     await t.test(
       "another resource and another project count nothing",
@@ -641,9 +670,6 @@ test(
       assert.equal(answer.results.length, ONE_REQUEST);
       assert.deepEqual(completed(await count(GATED_RESOURCE)), {
         count: NO_ROWS,
-      });
-      assert.deepEqual(completed(await count(PUSHED_RESOURCE)), {
-        count: ONE_REQUEST,
       });
     });
 

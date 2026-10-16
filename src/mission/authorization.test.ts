@@ -11,11 +11,13 @@ import type { CallerIdentity } from "../kernel/caller.ts";
 import {
   AssessmentResult,
   AssetKind,
+  EndState,
   MissionErrorCode,
   OBJECT_SIZE_MAX,
   NodeState,
   PlatformAddressKind,
   RepositoryAction,
+  RepositoryLanding,
 } from "./contract.ts";
 import {
   AssetUse,
@@ -141,6 +143,7 @@ function actionHarness(t: TestContext) {
       key: string;
       commit: string;
       reusedEvidenceId: string | null;
+      mergeEvidenceId: string | null;
     }> = {},
   ) =>
     h.store.transaction((tx) =>
@@ -148,6 +151,7 @@ function actionHarness(t: TestContext) {
         key: PULL_REQUEST_KEY,
         commit: ASSESSED_COMMIT,
         reusedEvidenceId: null,
+        mergeEvidenceId: null,
         ...input,
       }),
     );
@@ -578,4 +582,96 @@ test("a disabled or removed storage binding refuses every use of an object", (t)
   bindingRefusals(h, () => h.asset(pending, AssetUse.Check));
   for (const use of [AssetUse.Get, AssetUse.ExecutionGet, AssetUse.Delete])
     bindingRefusals(h, () => h.asset(published, use));
+});
+
+function kanthordHarness(t: TestContext) {
+  const h = actionHarness(t);
+  h.policy.action = RepositoryAction.PullRequest;
+  h.policy.landing = RepositoryLanding.KanthorD;
+  h.assess();
+  return h;
+}
+
+test("a human-landing merge request is refused with node_mismatch", (t) => {
+  const h = actionHarness(t);
+  h.policy.action = RepositoryAction.PullRequest;
+  h.policy.landing = RepositoryLanding.Human;
+  h.assess();
+  const id = h.request();
+  refuses(() => h.frozen({ mergeEvidenceId: id }), "node_mismatch");
+});
+
+test("a merge address refuses an unknown evidence id", (t) => {
+  const h = kanthordHarness(t);
+  refuses(
+    () => h.frozen({ mergeEvidenceId: createIdentity("evidence") }),
+    "node_mismatch",
+  );
+});
+
+test("a merge address refuses evidence from another node", (t) => {
+  const h = kanthordHarness(t);
+  refuses(
+    () =>
+      h.frozen({ mergeEvidenceId: h.request(h.pullRequest, h.otherNode()) }),
+    "node_mismatch",
+  );
+});
+
+test("a merge address refuses evidence with another action key", (t) => {
+  const h = kanthordHarness(t);
+  const otherId = h.request(h.pullRequest, h.node_id, "other.pull_request");
+  refuses(() => h.frozen({ mergeEvidenceId: otherId }), "node_mismatch");
+});
+
+test("a merge address refuses a resolved evidence request", (t) => {
+  const h = kanthordHarness(t);
+  const id = h.request();
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
+      .run(EndState.Expected, id),
+  );
+  refuses(() => h.frozen({ mergeEvidenceId: id }), "node_mismatch");
+});
+
+test("a merge address refuses a non-pull-request address", (t) => {
+  const h = kanthordHarness(t);
+  const branchId = h.request({
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: h.resourceIdentity,
+    branch: "main",
+    commit: ASSESSED_COMMIT,
+  });
+  refuses(() => h.frozen({ mergeEvidenceId: branchId }), "node_mismatch");
+});
+
+test("a merge address refuses evidence from another resource", (t) => {
+  const h = kanthordHarness(t);
+  const foreignId = h.request({
+    ...h.pullRequest,
+    resource_identity: "repository:github:other/repo",
+  });
+  refuses(() => h.frozen({ mergeEvidenceId: foreignId }), "node_mismatch");
+});
+
+test("a merge address refuses a non-pull-request action with node_mismatch", (t) => {
+  const h = actionHarness(t);
+  h.policy.action = RepositoryAction.MergePush;
+  h.policy.landing = RepositoryLanding.KanthorD;
+  h.assess();
+  const id = h.request(
+    {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: h.resourceIdentity,
+      branch: "main",
+      commit: ASSESSED_COMMIT,
+    },
+    h.node_id,
+    MERGE_PUSH_KEY,
+  );
+  refuses(
+    () => h.frozen({ key: MERGE_PUSH_KEY, mergeEvidenceId: id }),
+    "node_mismatch",
+  );
 });

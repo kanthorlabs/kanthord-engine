@@ -658,6 +658,7 @@ interface FakeGitHubState {
   eventsHold: FakeEventsHold | null;
   refuseMerge: number | null;
   closeSequence: number;
+  mergeHeadSha: string | null;
 }
 
 interface FakeGitHubAnswer {
@@ -982,6 +983,8 @@ function mergePull(
     .digest("hex");
   closePull(state, pull);
   pull.merged = true;
+  pull.head_sha = state.mergeHeadSha ?? sha;
+  state.mergeHeadSha = null;
   pull.merge_commit_sha = mergeCommit;
   return { status: HttpStatus.OK, body: { sha: mergeCommit, merged: true } };
 }
@@ -1034,6 +1037,7 @@ export async function fakeGitHub(t: TestContext) {
     failEvents: null,
     eventsHold: null,
     refuseMerge: null,
+    mergeHeadSha: null,
     closeSequence: 0,
   };
   const failures: unknown[] = [];
@@ -1133,6 +1137,10 @@ export async function fakeGitHub(t: TestContext) {
     dropNextAfterApply(): void {
       assert.equal(state.dropNext, false);
       state.dropNext = true;
+    },
+    mergeAtOtherHead(sha: string): void {
+      assert.equal(state.mergeHeadSha, null);
+      state.mergeHeadSha = sha;
     },
     events(owner: string, repo: string, events: readonly unknown[]): void {
       state.events.set(eventsKey(owner, repo), [...events]);

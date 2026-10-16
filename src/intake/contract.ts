@@ -89,6 +89,7 @@ export const OutboundRequestState = {
 } as const;
 export const OutboundOperation = {
   GitHubPullRequest: "github.pull_request",
+  GitHubPullRequestMerge: "github.pull_request_merge",
   GitMergePush: "git.merge_push",
   S3DeleteObject: "s3.delete_object",
 } as const;
@@ -661,6 +662,7 @@ export const intakeOperations = {
         key: actionKeySchema,
         commit: commitSchema,
         reused_evidence_id: identitySchema("evidence").nullable(),
+        merge_evidence_id: identitySchema("evidence").nullable(),
         request_key: z.string().min(1),
       }),
     }),

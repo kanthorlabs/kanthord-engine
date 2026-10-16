@@ -10,16 +10,20 @@ import {
   ClaimKind,
   AssetKind,
   AssessmentResult,
+  CheckEndState,
+  EndState,
   ReleaseObligation,
   RepositoryAction,
   StartPoint,
   missionOperations,
   type AssetKind as AssetType,
 } from "./contract.ts";
+import type { Dependencies } from "./service.ts";
 import {
   insertEvidence,
   insertAssessment,
   readOpenAttempt,
+  readEvidence,
 } from "./record-store.ts";
 import { setNodeState, insertNode, readNode } from "./store.ts";
 import { readCurrentRevision, insertRevision } from "./store.ts";
@@ -28,6 +32,7 @@ import { controlHarness } from "./test-support.ts";
 
 const NO_STALLS = 0;
 const FURTHER_WORK_LIMIT = 3;
+const ONE_CALL = 1;
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
@@ -37,8 +42,12 @@ const NOW = 100;
 const NO_ATTEMPT = 0;
 const INSERT = "workQueue.insert";
 const UNMET = "mission.release.obligation_unmet";
-function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
-  const h = controlHarness(t, IDENTITY);
+function fixture(
+  t: TestContext,
+  kind: NodeKind = NodeKind.Objective,
+  overrides: Partial<Dependencies> = {},
+) {
+  const h = controlHarness(t, IDENTITY, overrides);
   const bindingId = createIdentity("binding");
   const executionId = createIdentity("execution");
   const opener = {
@@ -378,6 +387,92 @@ test("reviewer release requires a current success and every eligible request", (
   assert.equal(h.claim([NodeState.ExternalRequested]), null);
 });
 
+test("reviewer release folds all expected end states to Completed", (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: createIdentity("evidence"),
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: EndState.Expected,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [],
+    ),
+  );
+  h.release();
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("reviewer release folds an other end state to Blocked", (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: createIdentity("evidence"),
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: EndState.Other,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [],
+    ),
+  );
+  h.release();
+  assert.equal(h.node().state, NodeState.Blocked);
+});
+
 test("a failure routes below the limit, pauses at the limit and resume permits another claim", async (t) => {
   const h = fixture(t);
   h.claim();
@@ -466,4 +561,286 @@ test("an unblock from the base branch starts a new node branch that later attemp
   assert.equal(evaluation?.kind, ClaimKind.Evaluation);
   assert.equal(evaluation?.attempt, THIRD_ATTEMPT);
   assert.equal(evaluation?.node_branch, restartBranch);
+});
+
+const PULL_REQUEST_NUMBER = 1;
+const LANDED_COMMIT = "a".repeat(40);
+const GATED_RESOURCE = "repository:github:owner/repo";
+
+function deferredFixture(
+  t: TestContext,
+  check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
+) {
+  let checkCalls = 0;
+  const h = fixture(t, NodeKind.Objective, {
+    intakeCheck: {
+      check: async () => {
+        checkCalls++;
+        return check;
+      },
+    },
+  });
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  const evidenceId = createIdentity("evidence");
+  h.store.transaction((tx) => {
+    insertEvidence(
+      tx,
+      {
+        id: evidenceId,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: evidenceId,
+          kind: AssetKind.Platform,
+          content: JSON.stringify({
+            kind: "pull_request",
+            resource_identity: GATED_RESOURCE,
+            number: PULL_REQUEST_NUMBER,
+          }),
+          published_at: NOW,
+          expired_at: null,
+        },
+      ],
+    );
+  });
+  return { ...h, evidenceId, checkCalls: () => checkCalls };
+}
+
+test("deferred check applies expected end state and completes the node", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.Expected,
+    landed_commits: [LANDED_COMMIT],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("deferred check applies other end state and blocks the node", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.Other,
+    landed_commits: [],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.Blocked);
+});
+
+test("deferred check applies conflict and returns the node to Available", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.Conflict,
+    landed_commits: [],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.Available);
+});
+
+test("deferred check with none leaves the node in ExternalRequested", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.None,
+    landed_commits: [],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.equal(h.checkCalls(), ONE_CALL);
+});
+
+function deferredBranchPushFixture(
+  t: TestContext,
+  check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
+) {
+  const h = fixture(t, NodeKind.Objective, {
+    intakeCheck: { check: async () => check },
+  });
+  h.dependencies.bindings.repositoryPolicyOf = () => ({
+    project_id: h.project_id,
+    binding_id: h.binding_id,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    ssh_credential: "github-ssh",
+    credential: "github",
+    base_branch: "main",
+    action: RepositoryAction.MergePush,
+    landing: "human",
+    project_prompt: null,
+  });
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) => {
+    const id = createIdentity("evidence");
+    insertEvidence(
+      tx,
+      {
+        id,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.merge_push",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: id,
+          kind: AssetKind.Platform,
+          content: JSON.stringify({
+            kind: "branch_push",
+            resource_identity: GATED_RESOURCE,
+            branch: "main",
+            commit: LANDED_COMMIT,
+          }),
+          published_at: NOW,
+          expired_at: null,
+        },
+      ],
+    );
+  });
+  return h;
+}
+
+test("deferred check resolves a branch_push request and completes the node", async (t) => {
+  const h = deferredBranchPushFixture(t, {
+    end_state: CheckEndState.Expected,
+    landed_commits: [LANDED_COMMIT],
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("a failing deferred check leaves the node unchanged", async (t) => {
+  let checkCalls = 0;
+  const h = fixture(t, NodeKind.Objective, {
+    intakeCheck: {
+      check: async () => {
+        checkCalls++;
+        throw new Error("check failed");
+      },
+    },
+  });
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      node_revision: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+      rationale: "Passed",
+      evidence_ids: "[]",
+      child_outcome_ids: "[]",
+      tested_input: null,
+      execution_id: h.execution_id,
+      actor: null,
+      created_at: NOW,
+    }),
+  );
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  h.store.transaction((tx) => {
+    const id = createIdentity("evidence");
+    insertEvidence(
+      tx,
+      {
+        id,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.opener),
+        created_at: NOW,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: id,
+          kind: AssetKind.Platform,
+          content: JSON.stringify({
+            kind: "pull_request",
+            resource_identity: GATED_RESOURCE,
+            number: PULL_REQUEST_NUMBER,
+          }),
+          published_at: NOW,
+          expired_at: null,
+        },
+      ],
+    );
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.equal(checkCalls, ONE_CALL);
+});
+
+test("deferred check with a live claim and expected end state writes no end state", async (t) => {
+  const h = deferredFixture(t, {
+    end_state: CheckEndState.Expected,
+    landed_commits: [LANDED_COMMIT],
+  });
+  h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+    execution_id: h.execution_id,
+    runtime_identity: createIdentity("runtime"),
+    attempt: FIRST_ATTEMPT,
+    pinned_revision: FIRST_ATTEMPT,
+  });
+  h.release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  const row = h.store.transaction((tx) => readEvidence(tx, h.evidenceId));
+  assert.equal(row?.end_state, null);
 });

@@ -41,7 +41,6 @@ function requireReady(
       "Node is not ready for evaluation.",
       {
         objectives_not_terminal: readiness.objectives_not_terminal,
-        unresolved_actions: readiness.unresolved_actions,
         unsatisfied_ids: unsatisfiedIds,
       },
     );

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import type { Logger } from "pino";
 import { ulid } from "ulid";
 import type { MachineIdentity } from "../kernel/caller.ts";
+import { Landing } from "../project/contract.ts";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -13,6 +15,7 @@ import {
   ACTION_REQUEST_TOOL_NAME,
   ActionAssessmentResult,
   ActionNodeState,
+  ActionResolution,
   ActionResultKind,
   ActionReadMethod,
   PlatformAddressKind,
@@ -48,7 +51,7 @@ type PerformerDependencies = Pick<
   | "missionActions"
   | "intakeActions"
   | "evidenceRequests"
->;
+> & { logger: Pick<Logger, "warn"> | null };
 type PerformerCaller = { context: Context; identity: MachineIdentity };
 type Pending = {
   entry: ActionContext["actions"][number];
@@ -149,6 +152,11 @@ export class ActionPerformer {
               ? action.reservation.held
               : await this.dispatch(caller, claim, action),
           );
+        await this.requestReworkMerges(
+          { ...caller, executionId: claim.executionId },
+          claim,
+          context,
+        );
         return { tool_name: ACTION_REQUEST_TOOL_NAME, items };
       } finally {
         for (const action of pending) {
@@ -241,6 +249,29 @@ export class ActionPerformer {
       const recorded = await this.record(caller, claim, pending, answer);
       settlement =
         recorded.kind === ActionResultKind.Uncertain ? recorded : null;
+      if (
+        recorded.kind === ActionResultKind.Submitted &&
+        pending.entry.action.action === RepositoryAction.PullRequest &&
+        pending.entry.action.configuration.landing === Landing.KanthorD
+      ) {
+        const evidenceId = recorded.evidence.id as string;
+        await this.requestMerge(
+          call,
+          claim.nodeId,
+          claim.attempt,
+          pending.entry.action.key,
+          pending.operands.commit,
+          evidenceId,
+        ).catch((error: unknown) => {
+          this.dependencies.logger?.warn(
+            {
+              evidence_id: evidenceId,
+              code: error instanceof OperationError ? error.code : undefined,
+            },
+            "merge request failed",
+          );
+        });
+      }
       return recorded;
     } finally {
       this.reservations.settle(
@@ -333,5 +364,69 @@ export class ActionPerformer {
       result = { type: OperationResultType.Indeterminate };
     }
     return recordedItem(pending.key.action, address, result);
+  }
+
+  private async requestReworkMerges(
+    call: IntakeActionCall,
+    claim: ExecutionClaim,
+    context: ActionContext,
+  ): Promise<void> {
+    for (const entry of context.actions) {
+      if (
+        entry.resolution !== ActionResolution.Unresolved ||
+        entry.action.action !== RepositoryAction.PullRequest ||
+        entry.action.configuration.landing !== Landing.KanthorD ||
+        entry.request_evidence_id === null
+      )
+        continue;
+      const evidenceId = entry.request_evidence_id;
+      await Promise.resolve()
+        .then(() => {
+          const operands = operandsOf(claim.nodeBranch, context, entry);
+          return this.requestMerge(
+            call,
+            claim.nodeId,
+            claim.attempt,
+            entry.action.key,
+            operands.commit,
+            evidenceId,
+          );
+        })
+        .catch((error: unknown) => {
+          this.dependencies.logger?.warn(
+            {
+              evidence_id: evidenceId,
+              code: error instanceof OperationError ? error.code : undefined,
+            },
+            "merge request failed",
+          );
+        });
+    }
+  }
+
+  private async requestMerge(
+    call: IntakeActionCall,
+    nodeId: string,
+    attempt: number,
+    actionKey: string,
+    commit: string,
+    evidenceId: string,
+  ): Promise<void> {
+    const mergeRequestKey = `${nodeId}/${attempt}/${actionKey}/merge/${commit}`;
+    const answer = await this.dependencies.intakeActions.perform(
+      call,
+      {
+        key: actionKey,
+        commit,
+        reusedEvidenceId: null,
+        mergeEvidenceId: evidenceId,
+      },
+      mergeRequestKey,
+    );
+    if (isResultClass(answer))
+      this.dependencies.logger?.warn(
+        { evidence_id: evidenceId, class: answer.class, code: answer.code },
+        "merge request refused",
+      );
   }
 }

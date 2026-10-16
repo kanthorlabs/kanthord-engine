@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { background } from "../kernel/context.ts";
 import { OperationError, type ErrorBody } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -37,7 +38,7 @@ import {
   readRequests,
 } from "./record-store.ts";
 import { claimableMap, reconcileMission } from "./routing.ts";
-import { setNodeState } from "./store.ts";
+import { readNode, setNodeState, type NodeRow } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 import { authorizeRequest } from "./authorization.ts";
@@ -87,6 +88,23 @@ export function requestContext(
       JSON.parse(assets[FIRST_ASSET_INDEX]!.content),
     ),
   };
+}
+
+export function foldExternalState(
+  tx: Transaction,
+  dependencies: Dependencies,
+  node: NodeRow,
+  attempt: number,
+  now: number,
+): void {
+  if (node.state !== NodeState.ExternalRequested) return;
+  if (readOpenAttempt(tx, node.id)?.attempt !== attempt) return;
+  const states = actionStatesOf(tx, dependencies.bindings, node.id, attempt);
+  if (states.some((state) => state.resolution === Resolution.OtherEnd))
+    setNodeState(tx, node.id, NodeState.ExternalFailed);
+  else if (states.every((state) => state.resolution === Resolution.ExpectedEnd))
+    setNodeState(tx, node.id, NodeState.ExternalSuccess);
+  closeExternalAttempt(tx, dependencies, requireNode(tx, node.id), now);
 }
 
 export function applyEndState(
@@ -164,21 +182,9 @@ export function applyEndState(
   if (
     node.state === NodeState.ExternalRequested &&
     readOpenAttempt(tx, node.id)?.attempt === request.attempt
-  ) {
-    const states = actionStatesOf(
-      tx,
-      dependencies.bindings,
-      node.id,
-      request.attempt,
-    );
-    if (states.some((state) => state.resolution === Resolution.OtherEnd))
-      setNodeState(tx, node.id, NodeState.ExternalFailed);
-    else if (
-      states.every((state) => state.resolution === Resolution.ExpectedEnd)
-    )
-      setNodeState(tx, node.id, NodeState.ExternalSuccess);
-    closeExternalAttempt(tx, dependencies, requireNode(tx, node.id), now);
-  } else
+  )
+    foldExternalState(tx, dependencies, node, request.attempt, now);
+  else
     reconcileMission(
       tx,
       dependencies.workQueue,
@@ -299,4 +305,71 @@ export async function checkNode(
   }));
   dependencies.wakeup.wake(prepared.mission.project_id);
   return result;
+}
+
+async function runDeferredCheck(
+  dependencies: Dependencies,
+  nodeId: string,
+  attempt: number,
+): Promise<void> {
+  const prepared = dependencies.store.transaction((tx) => {
+    const node = readNode(tx, nodeId);
+    if (!node || node.state !== NodeState.ExternalRequested) return null;
+    const openAttempt = readOpenAttempt(tx, nodeId);
+    if (openAttempt?.attempt !== attempt) return null;
+    const requests = readRequests(tx, nodeId, attempt)
+      .filter((row) => row.end_state === null)
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((row) => requestContext(tx, dependencies, row.id));
+    if (requests.length === NO_UNRESOLVED_REQUESTS) return null;
+    const mission = requireMission(tx, node.mission_id);
+    return { mission, requests };
+  });
+  if (prepared === null) return;
+  for (const item of prepared.requests) {
+    let answer: CheckAnswer;
+    try {
+      dependencies.store.transaction((tx) =>
+        authorizeRequest(tx, dependencies, item.request.id),
+      );
+      answer = checkAnswerSchema.parse(
+        await dependencies.intakeCheck.check(background, item.request.id),
+      );
+    } catch (error) {
+      dependencies.logger.warn(
+        { error, evidence_id: item.request.id },
+        "Deferred check failed.",
+      );
+      continue;
+    }
+    dependencies.store.transaction((tx) => {
+      const now = Date.now();
+      const claim =
+        answer.end_state === CheckEndState.None
+          ? null
+          : dependencies.schedulerClaims.liveExecutionOf(
+              tx,
+              item.request.node_id,
+              now,
+            );
+      if (claim === null)
+        applyEndState(tx, dependencies, item.request.id, answer, now);
+    });
+  }
+  dependencies.wakeup.wake(prepared.mission.project_id);
+}
+
+export function scheduleDeferredCheck(
+  dependencies: Dependencies,
+  nodeId: string,
+  attempt: number,
+): void {
+  setImmediate(() => {
+    runDeferredCheck(dependencies, nodeId, attempt).catch((error) => {
+      dependencies.logger.warn(
+        { error, node_id: nodeId },
+        "Deferred check crashed.",
+      );
+    });
+  });
 }

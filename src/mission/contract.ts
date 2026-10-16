@@ -818,6 +818,7 @@ export type ActionFacts = {
   repository: RepositoryFacts;
   snapshot_commit: string;
   reused_address: PullRequestAddress | null;
+  merge_address: PullRequestAddress | null;
 };
 export type RequestFacts = {
   frozen_action: FrozenAction;
