@@ -41,6 +41,7 @@ import {
   gatewayFixture,
   mappedTransport,
   remoteHead,
+  type FakeGitHubCall,
 } from "./test-support.ts";
 
 const SUCCESSFUL_EXIT = 0;
@@ -128,6 +129,15 @@ async function commitOnBranch(t: TestContext, bare: string, branch: string) {
   await git.commit("node work");
   await git.push("origin", branch);
   return (await git.revparse(["HEAD"])).trim();
+}
+
+function readOf(calls: readonly FakeGitHubCall[], number: number) {
+  return calls.some(
+    (call) =>
+      call.method === HttpMethod.Get &&
+      call.path.endsWith(`/pulls/${number}`) &&
+      call.status !== null,
+  );
 }
 
 async function until(condition: () => boolean) {
@@ -787,6 +797,7 @@ test(
       "gated.pull_request",
       address(closed),
     );
+    await until(() => readOf(h.gitHub.calls, closed));
     h.gitHub.close(closed);
     await h.write(["mission", "node", "check", G], {
       expected_mission_version: await h.version(),
@@ -1008,6 +1019,7 @@ test(
       "gated.pull_request",
       address(closed),
     );
+    await until(() => readOf(h.gitHub.calls, closed));
     h.gitHub.close(closed);
     await h.write(["mission", "node", "check", G], {
       expected_mission_version: await h.version(),
