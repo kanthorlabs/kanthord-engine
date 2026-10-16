@@ -101,7 +101,7 @@ async function machineToken(
 
 async function setup(t: TestContext, short = false) {
   const fixture = await gatewayFixture(t, {
-    scheduler: short ? { release_reserve: 1 } : {},
+    scheduler: short ? { release_reserve: 1, stop_backoff: 1 } : {},
     repositoryConnector: {
       gitLsRemote: async () => {},
       resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
@@ -727,8 +727,9 @@ test(
       },
     );
     await t.test(
-      "E03.19 pull settles the loss and reuses the open attempt",
+      "E03.19 pull settles the loss, holds the node and a later pull reuses the open attempt",
       async () => {
+        assert.equal((await h.pull()).kind, WorkPullKind.NoWork);
         const result = await h.pull();
         assert.equal(result.kind, WorkPullKind.Claimed);
         assert.notEqual(result.execution.execution_id, X);

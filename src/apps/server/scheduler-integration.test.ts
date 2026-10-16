@@ -54,6 +54,17 @@ const OPERATION_FAILED_STOP: ReleaseStop = {
 };
 const NO_FAILURE_COUNT_RESET = 1;
 const LOST_FAILURE = 2;
+const FIRST_HOLD_FAILURE = 1;
+const HOLD_GROWTH = 2;
+const MILLISECONDS_PER_SECOND = 1000;
+
+function stopHold(h: Awaited<ReturnType<typeof setup>>, failure: number) {
+  return (
+    MILLISECONDS_PER_SECOND *
+    h.f.config.scheduler.stop_backoff *
+    HOLD_GROWTH ** (failure - FIRST_HOLD_FAILURE)
+  );
+}
 const CONTENT = {
   name: "Work",
   requirement: "Do work",
@@ -495,13 +506,16 @@ test("pull, registration resume and human pause settle an expired row before adm
   const first = completed(await h.pull());
   assert.ok(first.kind === WorkPullKind.Claimed);
   now = first.execution.expired_at;
+  const settledAt = now;
+  assert.equal(completed(await h.pull()).kind, WorkPullKind.NoWork);
+  assert.equal(
+    h.f.scheduler.executionOf(first.execution.execution_id)?.ended_at,
+    settledAt,
+  );
+  now += stopHold(h, FIRST_HOLD_FAILURE);
   const next = completed(await h.pull());
   assert.ok(next.kind === WorkPullKind.Claimed);
   assert.notEqual(next.execution.execution_id, first.execution.execution_id);
-  assert.equal(
-    h.f.scheduler.executionOf(first.execution.execution_id)?.ended_at,
-    now,
-  );
   completed(
     await h.call(
       workerOperations["instance.deregister"],
@@ -523,6 +537,7 @@ test("pull, registration resume and human pause settle an expired row before adm
   assert.ok(node.kind !== NodeKind.Task);
   assert.equal(node.state, NodeState.Executing);
   h.f.scheduler.sweep();
+  now += stopHold(h, LOST_FAILURE);
   const third = completed(await h.pull(h.other, h.otherToken));
   assert.ok(third.kind === WorkPullKind.Claimed);
   completed(
@@ -648,6 +663,7 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
       const routing = step.mock.method(h.f.mission, "failure");
       const limit = h.f.config.mission.consecutive_failure_limit;
       for (let loss = 1; loss <= limit; loss++) {
+        if (loss > FIRST_HOLD_FAILURE) now += stopHold(h, loss - 1);
         const claim = completed(
           await h.pull(
             evaluation ? h.reviewer : h.general,
@@ -721,6 +737,7 @@ test("real Mission routes stopped and lost claims below and at the failure limit
       const token = evaluation ? h.reviewerToken : h.generalToken;
       for (let failure = 1; failure <= limit; failure++) {
         now++;
+        if (failure > FIRST_HOLD_FAILURE) now += stopHold(h, failure - 1);
         const claim = completed(await h.pull(runtime, token));
         assert.ok(claim.kind === WorkPullKind.Claimed);
         const lost = failure === LOST_FAILURE;
@@ -784,12 +801,15 @@ test("real Mission routes stopped and lost claims below and at the failure limit
 
 test("a release with no stop ends the failure count", async (t) => {
   const h = await setup(t, "direct");
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
   const routing = t.mock.method(h.f.mission, "failure");
   const limit = h.f.config.mission.consecutive_failure_limit;
   for (let failure = 1; failure < limit; failure++) {
     const claim = completed(await h.pull());
     assert.ok(claim.kind === WorkPullKind.Claimed);
     completed(await h.stop(claim.execution.execution_id));
+    now += stopHold(h, failure);
   }
   const released = completed(await h.pull());
   assert.ok(released.kind === WorkPullKind.Claimed);

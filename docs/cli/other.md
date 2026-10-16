@@ -396,6 +396,9 @@ The implemented fields are:
 
 - `scheduler.release_reserve`: optional positive safe integer in seconds, default
   `600`. A claim adds this reserve after its effective worker wall time.
+- `scheduler.stop_backoff`: optional positive safe integer in seconds, default
+  `30`. After a counted failure, the claim skips the node for this wait, doubled
+  for each further consecutive failure.
 
 The current Project fragment is empty and adds no YAML section.
 See [Gateway](./gateway.md) for authentication context.

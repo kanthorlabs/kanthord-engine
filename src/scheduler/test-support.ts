@@ -4,7 +4,10 @@ import type { z } from "zod";
 import { OperationRegistry, type CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { DEFAULT_RELEASE_RESERVE_SECONDS } from "./config.ts";
+import {
+  DEFAULT_RELEASE_RESERVE_SECONDS,
+  DEFAULT_STOP_BACKOFF_SECONDS,
+} from "./config.ts";
 import {
   AgentChoiceKind,
   SCHEDULER_SERVICE_NAME,
@@ -64,7 +67,10 @@ export function schedulerHarness(
   };
   const dependencies: Dependencies = {
     store,
-    config: { release_reserve: DEFAULT_RELEASE_RESERVE_SECONDS },
+    config: {
+      release_reserve: DEFAULT_RELEASE_RESERVE_SECONDS,
+      stop_backoff: DEFAULT_STOP_BACKOFF_SECONDS,
+    },
     transitions: {
       claim: (...args) => {
         record("claim", args);

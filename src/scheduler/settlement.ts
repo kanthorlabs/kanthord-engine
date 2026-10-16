@@ -18,12 +18,49 @@ import {
   readUnendedOfNode,
   readUnendedOfRuntime,
 } from "./execution-store.ts";
+import type { SchedulerConfig } from "./config.ts";
 
 export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 const NO_FAILURES = 0;
 const ENDING_FAILURE = 1;
+const MILLISECONDS_PER_SECOND = 1000;
 export interface SettlementDependencies {
   transitions: MissionTransitions;
+  config: Pick<SchedulerConfig, "stop_backoff">;
+}
+
+const FIRST_BACKOFF_FAILURE = 1;
+const BACKOFF_GROWTH = 2;
+
+export function heldUntil(
+  failures: number,
+  now: number,
+  backoffSeconds: number,
+): number | null {
+  assert.ok(Number.isSafeInteger(failures) && failures >= NO_FAILURES);
+  if (failures < FIRST_BACKOFF_FAILURE) return null;
+  const until =
+    now +
+    MILLISECONDS_PER_SECOND *
+      backoffSeconds *
+      BACKOFF_GROWTH ** (failures - FIRST_BACKOFF_FAILURE);
+  assert.ok(Number.isSafeInteger(until));
+  return until;
+}
+
+export function recordFailure(
+  tx: Transaction,
+  dependencies: SettlementDependencies,
+  nodeId: string,
+  failures: number,
+  now: number,
+): void {
+  dependencies.transitions.failure(tx, nodeId, failures, now);
+  const until = heldUntil(failures, now, dependencies.config.stop_backoff);
+  if (until === null) return;
+  tx.database
+    .prepare("UPDATE scheduler_job SET not_before = ? WHERE node_id = ?")
+    .run(until, nodeId);
 }
 
 export function pinCredential(
@@ -135,8 +172,9 @@ export function declareLoss(
   assert.equal(row.ended_at, null);
   assert.ok(now >= row.expired_at);
   endExecution(tx, row.execution_id, now);
-  dependencies.transitions.failure(
+  recordFailure(
     tx,
+    dependencies,
     row.node_id,
     consecutiveFailures(tx, row),
     now,

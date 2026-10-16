@@ -11,7 +11,11 @@ import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace } from "./telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import { consecutiveStalls, endExecution } from "./execution-store.ts";
-import { consecutiveFailures, requireRunning } from "./settlement.ts";
+import {
+  consecutiveFailures,
+  recordFailure,
+  requireRunning,
+} from "./settlement.ts";
 
 const NO_STALLS = 0;
 
@@ -50,8 +54,9 @@ export function release(
     ) {
       assert.ok(body.further_work);
       endExecution(tx, executionId, now, body.stop);
-      dependencies.transitions.failure(
+      recordFailure(
         tx,
+        dependencies,
         row.node_id,
         consecutiveFailures(tx, row, !isAdvancingStop(body.stop)),
         now,

@@ -58,13 +58,16 @@ function selectJob(
   );
   const jobs = tx.database
     .prepare(
-      "SELECT node_id FROM scheduler_job WHERE project_id = ? ORDER BY priority DESC, id ASC",
+      "SELECT node_id FROM scheduler_job WHERE project_id = ? AND (not_before IS NULL OR not_before <= ?) ORDER BY priority DESC, id ASC",
     )
-    .all(identity.projectId) as { node_id: string }[];
+    .all(identity.projectId, now) as { node_id: string }[];
   let settled = false;
   for (let index = 0; index < jobs.length; index++) {
     const nodeId = jobs[index]!.node_id;
-    settled = settleNode(tx, dependencies, nodeId, now) || settled;
+    if (settleNode(tx, dependencies, nodeId, now)) {
+      settled = true;
+      continue;
+    }
     const claim = dependencies.transitions.claim(
       tx,
       nodeId,

@@ -134,7 +134,8 @@ test("a worker thread registers its worker unit through the port and the invocat
       record.route === workerOperations.register.path,
   );
   assert.equal(registered.length, SINGLE_INSTANCE);
-  assert.ok(existsSync(`${directories(env).state}/kanthord.log`));
+  const logFile = `${directories(env).state}/kanthord.log`;
+  assert.ok(await until(() => existsSync(logFile), Boolean));
 });
 
 test("a worker thread refuses to start without an absolute directory variable", async (t) => {

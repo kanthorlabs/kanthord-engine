@@ -52,10 +52,15 @@ const addExecutionAgentSelections: Migration = (database) => {
   );
 };
 
+const addJobNotBefore: Migration = (database) => {
+  database.exec(`ALTER TABLE scheduler_job ADD COLUMN not_before INTEGER;`);
+};
+
 export const schedulerMigrations: readonly Migration[] = [
   createJobTable,
   createExecutionTable,
   addExecutionStop,
   addExecutionNodeBranch,
   addExecutionAgentSelections,
+  addJobNotBefore,
 ];

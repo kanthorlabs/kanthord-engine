@@ -12,6 +12,7 @@ import {
   resetTo,
 } from "./local-git.ts";
 import type { StepsState } from "./steps-objective.ts";
+import { GitStep, withinGit } from "./method-telemetry.ts";
 
 const NO_FILES = 0;
 
@@ -129,11 +130,13 @@ export async function refreshBeforeRelease(
   const remaining = () => state.input.claim.expired_at - Date.now();
   try {
     const base = baseBranchOf(state);
-    await state.input.transport.fetchBase(
-      state.directory,
-      base,
-      context,
-      remaining(),
+    await withinGit(state.run.spans, GitStep.FetchBase, () =>
+      state.input.transport.fetchBase(
+        state.directory,
+        base,
+        context,
+        remaining(),
+      ),
     );
     const ref = `origin/${base}`;
     if (
@@ -147,12 +150,8 @@ export async function refreshBeforeRelease(
     )
       return true;
     const before = state.head;
-    const conflicts = await mergeRef(
-      state.input.env,
-      state.directory,
-      ref,
-      context,
-      remaining(),
+    const conflicts = await withinGit(state.run.spans, GitStep.MergeBase, () =>
+      mergeRef(state.input.env, state.directory, ref, context, remaining()),
     );
     if (conflicts.length > NO_FILES) {
       await abortMerge(state.input.env, state.directory, context, remaining());

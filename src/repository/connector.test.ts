@@ -193,6 +193,63 @@ test("connector clones, resumes and pushes only fast-forward node branches and i
   assert.equal(process.env.GIT_SSH, undefined);
 });
 
+test("fetchAndCheckout keeps the unpushed commits of the local node branch when the remote node branch is missing", async (t) => {
+  const root = temporary(t);
+  const origin = join(root, "origin");
+  const seed = join(root, "seed");
+  const workspace = join(root, "workspace");
+  for (const directory of [origin, seed, workspace]) mkdirSync(directory);
+  await simpleGit(origin).init(true);
+  await simpleGit(seed).init();
+  await simpleGit(seed).raw(["checkout", "-b", "main"]);
+  const commit = async (directory: string, value: string) => {
+    writeFileSync(join(directory, "file"), value);
+    await simpleGit(directory).add("file");
+    await simpleGit(directory).raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      value,
+    ]);
+    return (await simpleGit(directory).revparse(["HEAD"])).trim();
+  };
+  const base = await commit(seed, "base");
+  await simpleGit(seed).addRemote("origin", origin);
+  await simpleGit(seed).push("origin", "main");
+  const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+  await clone(origin, workspace, background, DEADLINE_MS);
+  assert.equal(
+    await fetchAndCheckout(
+      workspace,
+      branch,
+      "main",
+      false,
+      background,
+      DEADLINE_MS,
+    ),
+    base,
+  );
+  const unpushedContent = "unpushed";
+  const unpushed = await commit(workspace, unpushedContent);
+  writeFileSync(join(workspace, "untracked"), "scratch");
+  assert.equal(
+    await fetchAndCheckout(
+      workspace,
+      branch,
+      "main",
+      false,
+      background,
+      DEADLINE_MS,
+    ),
+    unpushed,
+  );
+  assert.equal(readFileSync(join(workspace, "file"), "utf8"), unpushedContent);
+  assert.deepEqual(readdirSync(workspace).sort(), [".git", "file"]);
+});
+
 const GIT_FAILED = "repository.connector.git_failed";
 const NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const BASE_BRANCH = "main";
@@ -317,6 +374,42 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
   await assert.rejects(
     resolveBranchCommit(address, BASE_BRANCH, background, DEADLINE_MS),
     failed,
+  );
+});
+
+test("a git failure keeps the operation and the stderr without credentials in its cause", async (t) => {
+  const bin = temporary(t);
+  const secret = "ghs_0123456789abcdefghij";
+  const stderr = `fatal: unable to access 'https://x-access-token:${secret}@example.invalid/r.git/': Could not resolve host`;
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\necho "${stderr}" >&2\nexit 128\n`,
+    {
+      mode: 0o700,
+    },
+  );
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  t.after(() => {
+    process.env.PATH = path;
+  });
+  const keepsCause = (operation: string) => (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal((error as { code?: string }).code, GIT_FAILED);
+    assert.equal(error.message, `${operation}: git failed.`);
+    assert.ok(error.cause instanceof Error);
+    assert.match(error.cause.message, new RegExp(`^${operation}: `));
+    assert.match(error.cause.message, /Could not resolve host/);
+    assert.doesNotMatch(error.cause.message, new RegExp(secret));
+    return true;
+  };
+  await assert.rejects(
+    clone("file:///remote", temporary(t), background, DEADLINE_MS),
+    keepsCause("clone"),
+  );
+  await assert.rejects(
+    pushNodeBranch(temporary(t), NODE_BRANCH, background, DEADLINE_MS),
+    keepsCause("push node branch"),
   );
 });
 

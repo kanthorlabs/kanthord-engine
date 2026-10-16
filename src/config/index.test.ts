@@ -40,6 +40,7 @@ const DEFAULT_TEXT_MAX_BYTES = 32768;
 const DEFAULT_HEARTBEAT_WINDOW = 300;
 const DEFAULT_SERVER_SLOT_LIMIT = 16;
 const DEFAULT_RELEASE_RESERVE = 600;
+const DEFAULT_STOP_BACKOFF_SECONDS = 30;
 const ROOT_BASE_PATH = "/";
 const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
@@ -63,9 +64,13 @@ test("service fragments preserve the existing YAML field set", () => {
     "heartbeat_window",
     "server_slot_limit",
   ]);
-  assert.deepEqual(Object.keys(config.scheduler), ["release_reserve"]);
+  assert.deepEqual(Object.keys(config.scheduler), [
+    "release_reserve",
+    "stop_backoff",
+  ]);
   assert.deepEqual(initial.scheduler, {
     release_reserve: DEFAULT_RELEASE_RESERVE,
+    stop_backoff: DEFAULT_STOP_BACKOFF_SECONDS,
   });
   assert.deepEqual(initial.worker, {
     heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
@@ -256,6 +261,7 @@ test("config init emits Worker and Scheduler fields", (t) => {
   });
   assert.deepEqual(parseMapping(readFileSync(path, "utf8")).scheduler, {
     release_reserve: DEFAULT_RELEASE_RESERVE,
+    stop_backoff: DEFAULT_STOP_BACKOFF_SECONDS,
   });
 });
 
