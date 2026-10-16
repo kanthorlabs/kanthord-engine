@@ -30,6 +30,7 @@ const SINGLE_CALL_COUNT = 1;
 const NO_CALLS = 0;
 const COMMIT = "b".repeat(40);
 const NOT_RUNNING = "scheduler.execution.not_running";
+const MERGE_REFUSED = "merge.request.refused";
 const SECOND_ATTEMPT = 2;
 const DUAL_CALL_COUNT = 2;
 const UNPROCESSABLE_STATUS = 422;
@@ -792,11 +793,7 @@ test("a failed merge does not change the return item and warns with the evidence
   h.dependencies.intakeActions.perform = async () => {
     callCount += 1;
     if (callCount === DUAL_CALL_COUNT)
-      throw new OperationError(
-        HttpStatus.Forbidden,
-        "merge.refused",
-        "refused",
-      );
+      throw new OperationError(HttpStatus.Forbidden, MERGE_REFUSED, "refused");
     return PR;
   };
   assert.deepEqual((await h.perform()).items, [
@@ -804,7 +801,10 @@ test("a failed merge does not change the return item and warns with the evidence
   ]);
   assert.equal(callCount, DUAL_CALL_COUNT);
   assert.equal(warned.length, SINGLE_CALL_COUNT);
-  assert.deepEqual(warned[0], { evidence_id: h.evidence.id });
+  assert.deepEqual(warned[0], {
+    evidence_id: h.evidence.id,
+    code: MERGE_REFUSED,
+  });
 });
 
 function reworkable(t: TestContext) {
@@ -863,14 +863,35 @@ test("rework: human landing with unresolved request makes no merge call", async 
   assert.deepEqual((await h.perform()).items, []);
 });
 
-test("rework: failed merge does not propagate and warns with the evidence id", async (t) => {
+test("rework: failed merge does not propagate and warns with the evidence id and error code", async (t) => {
   const h = reworkable(t);
   const warned: unknown[] = [];
   h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
   h.dependencies.intakeActions.perform = async () => {
-    throw new OperationError(HttpStatus.Forbidden, "merge.refused", "refused");
+    throw new OperationError(HttpStatus.Forbidden, MERGE_REFUSED, "refused");
   };
   assert.deepEqual((await h.perform()).items, []);
   assert.equal(warned.length, SINGLE_CALL_COUNT);
-  assert.deepEqual(warned[0], { evidence_id: h.existingEvidenceId });
+  assert.deepEqual(warned[0], {
+    evidence_id: h.existingEvidenceId,
+    code: MERGE_REFUSED,
+  });
+});
+
+test("rework: a merge refusal answer warns with evidence_id, class and code", async (t) => {
+  const h = reworkable(t);
+  const warned: unknown[] = [];
+  h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
+  h.dependencies.intakeActions.perform = async () => ({
+    class: ResultClass.FinalRefusal,
+    code: "merge.not_allowed",
+    message: "Not allowed",
+  });
+  assert.deepEqual((await h.perform()).items, []);
+  assert.equal(warned.length, SINGLE_CALL_COUNT);
+  assert.deepEqual(warned[0], {
+    evidence_id: h.existingEvidenceId,
+    class: ResultClass.FinalRefusal,
+    code: "merge.not_allowed",
+  });
 });

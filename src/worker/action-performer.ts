@@ -262,9 +262,12 @@ export class ActionPerformer {
           pending.entry.action.key,
           pending.operands.commit,
           evidenceId,
-        ).catch(() => {
+        ).catch((error: unknown) => {
           this.dependencies.logger?.warn(
-            { evidence_id: evidenceId },
+            {
+              evidence_id: evidenceId,
+              code: error instanceof OperationError ? error.code : undefined,
+            },
             "merge request failed",
           );
         });
@@ -385,9 +388,12 @@ export class ActionPerformer {
         entry.action.key,
         operands.commit,
         evidenceId,
-      ).catch(() => {
+      ).catch((error: unknown) => {
         this.dependencies.logger?.warn(
-          { evidence_id: evidenceId },
+          {
+            evidence_id: evidenceId,
+            code: error instanceof OperationError ? error.code : undefined,
+          },
           "merge request failed",
         );
       });
@@ -403,7 +409,7 @@ export class ActionPerformer {
     evidenceId: string,
   ): Promise<void> {
     const mergeRequestKey = `${nodeId}/${attempt}/${actionKey}/merge/${commit}`;
-    await this.dependencies.intakeActions.perform(
+    const answer = await this.dependencies.intakeActions.perform(
       call,
       {
         key: actionKey,
@@ -413,5 +419,10 @@ export class ActionPerformer {
       },
       mergeRequestKey,
     );
+    if (isResultClass(answer))
+      this.dependencies.logger?.warn(
+        { evidence_id: evidenceId, class: answer.class, code: answer.code },
+        "merge request refused",
+      );
   }
 }
