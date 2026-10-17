@@ -9,7 +9,7 @@ import {
   CONTENT_ENCODING,
   storedContentSchema,
   MissionErrorCode,
-  NodeKind,
+  Work,
   type EvidenceAsset,
 } from "./contract.ts";
 import { admitExecution } from "./execution.ts";
@@ -59,7 +59,7 @@ export function executionContentBound(
     );
     if (evidence.node_id === claim.nodeId && evidence.attempt === claim.attempt)
       return true;
-    if (admitted.node.kind !== NodeKind.Initiative) return false;
+    if (admitted.revision.content.work !== Work.Examine) return false;
     if (
       !directDependenciesOf(
         claim.nodeId,

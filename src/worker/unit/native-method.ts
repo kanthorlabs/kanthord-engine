@@ -6,13 +6,14 @@ import {
   type ExecutionEnd,
   type ExecutionRun,
 } from "./execution-run.ts";
-import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
+import { openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import type { TranscriptSink } from "./transcript.ts";
 import { Phase, type TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import { ExecutionRun as Run, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
+  ExecutionWork,
   WorkerMethod,
   type ExecutionSetup,
   type RepositoryTransport,
@@ -77,7 +78,7 @@ export async function runNativeExecution(
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
-      const kind = input.setup.node_kind;
+      const work = input.setup.work;
       const open = async (
         workspace: string,
         checkouts: readonly string[] = [workspace],
@@ -91,7 +92,7 @@ export async function runNativeExecution(
         const native = await openNativeAgent({
           setup: input.setup,
           claim: input.claim,
-          nodeKind: kind,
+          work,
           agent,
           credential,
           budget,
@@ -111,7 +112,7 @@ export async function runNativeExecution(
       };
       if (method === WorkerMethod.Evaluation)
         return runEvaluation(input, run, budget, open);
-      if (kind === NodeKind.Initiative)
+      if (work === ExecutionWork.Examine)
         return runStepsInitiative(input, run, revision, budget, open);
       const prior = await readPriorRationale(run);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>

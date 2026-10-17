@@ -11,13 +11,10 @@ import {
 } from "../kernel/store.ts";
 import {
   ActorKind,
-  EdgeKind,
   ImportFormat,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
-  NodeKind,
   NodeState,
-  PlanFileKind,
   RevisionWrite,
   TaskChange,
   importApplySchema,
@@ -26,24 +23,27 @@ import {
   planFileNameSchema,
   type Content,
   type ImportEntry,
+  type TaskBody,
   type ImportSnapshot,
   type Mission,
   type MissionBindings,
   type SchedulerClaims,
   type WorkQueue,
+  Work,
 } from "./contract.ts";
 import { exportMission } from "./export.ts";
 import { applyImport } from "./import-apply.ts";
 import {
   checkImportCondition,
   importDigest,
+  isTaskEntry,
   normalizeImportSnapshot,
   prepareImport,
   resolveImportSet,
   type NormalizedEntry,
 } from "./import.ts";
 import { missionMigrations } from "./migrations.ts";
-import { parsePlanFile } from "./parser.ts";
+import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
 import {
   insertDependency,
   insertMission,
@@ -75,11 +75,11 @@ const REPOSITORY = "repo";
 const MISSING_BINDING = "missing";
 const INVALID_FILENAME = "../Bad.md";
 const REASON = "Import plan";
-const OBJECTIVE_FILENAME = "o.md";
+const IMPLEMENT_FILENAME = "o.md";
 const TASK_FILENAME = "t.md";
 const TEMPORARY_A_KEY = "file:a.md";
 const actor = { kind: ActorKind.Human, account: "test", name: "Test" } as const;
-const content: Content = {
+const content: TaskBody = {
   name: "Node",
   requirement: "Requirement",
   criterion: "Criterion",
@@ -103,7 +103,7 @@ const bindings: MissionBindings = {
     assert.fail("Import resolves names, not historical bindings."),
 };
 const markdown = `---
-kind: initiative
+work: examine
 bindings: []
 verifications: [true-command]
 ---
@@ -114,17 +114,38 @@ Requirement
 Criterion
 `;
 
-function entry(
-  filename = "a.md",
-  extra: Partial<NormalizedEntry> = {},
-): NormalizedEntry {
+type EntryPatch = Partial<ParsedNodeFile> & { node?: string };
+
+function entry(filename = "a.md", extra: EntryPatch = {}): NormalizedEntry {
   return {
     filename,
-    kind: NodeKind.Initiative,
+    work: Work.Examine,
+    requires: [],
     ...structuredClone(content),
     depends_on: [],
     ...extra,
-  };
+  } as NormalizedEntry;
+}
+
+function implement(filename: string, extra: EntryPatch = {}): NormalizedEntry {
+  return entry(filename, {
+    work: Work.Implement,
+    bindings: [REPOSITORY],
+    ...extra,
+  });
+}
+
+function task(
+  filename: string,
+  node: string,
+  extra: EntryPatch = {},
+): NormalizedEntry {
+  return {
+    filename,
+    node,
+    ...structuredClone(content),
+    ...extra,
+  } as NormalizedEntry;
 }
 
 function snapshot(
@@ -144,13 +165,22 @@ function normalize(entries: ImportEntry[]) {
   return normalizeImportSnapshot(snapshot(entries), MISSION_ID, TEXT_MAX_BYTES);
 }
 
-function contentOf(item: NormalizedEntry, pinned = false): Content {
+function bodyOf(item: NormalizedEntry): TaskBody {
   return {
     name: item.name,
     requirement: item.requirement,
     criterion: item.criterion,
     verifications: item.verifications,
-    bindings: pinned ? item.bindings.map(() => BINDING_ID) : item.bindings,
+    bindings: item.bindings.map(() => BINDING_ID),
+  };
+}
+
+function contentOf(item: NormalizedEntry): Content {
+  assert.ok(!isTaskEntry(item));
+  return {
+    ...bodyOf(item),
+    work: item.work as Work,
+    requires: item.requires,
   };
 }
 
@@ -161,25 +191,21 @@ function seed(
 ): NormalizedEntry[] {
   const entries = inputs.map((item) => ({
     ...item,
-    id:
-      item.id ??
-      createIdentity(item.kind === PlanFileKind.Task ? "task" : "node"),
+    id: item.id ?? createIdentity(isTaskEntry(item) ? "task" : "node"),
   }));
   const ids = new Map(entries.map((item) => [item.filename, item.id]));
   for (const item of entries)
-    if (item.kind !== PlanFileKind.Task)
+    if (!isTaskEntry(item))
       insertNode(tx, {
         id: item.id,
         mission_id: mission.id,
-        kind: item.kind,
         filename: item.filename,
-        parent_id: item.parent === undefined ? null : ids.get(item.parent)!,
         created_at: CREATED_AT,
       });
   for (const item of entries) {
+    if (isTaskEntry(item)) continue;
     for (const name of item.depends_on)
       insertDependency(tx, mission.id, item.id, ids.get(name)!);
-    if (item.kind === PlanFileKind.Task) continue;
     insertRevision(tx, {
       node_id: item.id,
       filename: item.filename,
@@ -187,14 +213,13 @@ function seed(
       reason: REASON,
       actor,
       created_at: CREATED_AT,
-      content: contentOf(item, true),
+      content: contentOf(item),
       tasks: entries
-        .filter((task) => task.parent === item.filename)
-        .filter((task) => task.kind === PlanFileKind.Task)
-        .map((task) => ({
-          id: task.id,
-          filename: task.filename,
-          content: contentOf(task, true),
+        .filter((value) => isTaskEntry(value) && value.node === item.filename)
+        .map((value) => ({
+          id: value.id,
+          filename: value.filename,
+          content: bodyOf(value),
         })),
       change: {
         write: RevisionWrite.Import,
@@ -228,19 +253,11 @@ function hierarchy(): NormalizedEntry[] {
   return [
     entry("a.md"),
     entry("b.md"),
-    entry("o.md", {
-      kind: NodeKind.Objective,
-      parent: "a.md",
-      bindings: [REPOSITORY],
-    }),
-    entry("p.md", {
-      kind: NodeKind.Objective,
-      parent: "b.md",
-      bindings: [REPOSITORY],
-    }),
-    entry("t.md", { kind: PlanFileKind.Task, parent: "o.md" }),
-    entry("s.md", { kind: PlanFileKind.Task, parent: "o.md" }),
-    entry("u.md", { kind: PlanFileKind.Task, parent: "p.md" }),
+    implement("o.md"),
+    implement("p.md"),
+    task("t.md", "o.md"),
+    task("s.md", "o.md"),
+    task("u.md", "p.md"),
   ];
 }
 
@@ -253,10 +270,12 @@ function item(entries: NormalizedEntry[], filename: string): NormalizedEntry {
 function change(
   entries: NormalizedEntry[],
   filename: string,
-  patch: Partial<NormalizedEntry>,
+  patch: EntryPatch,
 ): NormalizedEntry[] {
   return entries.map((value) =>
-    value.filename === filename ? { ...value, ...patch } : value,
+    value.filename === filename
+      ? ({ ...value, ...patch } as NormalizedEntry)
+      : value,
   );
 }
 
@@ -314,10 +333,8 @@ test("malformed Markdown preserves parser details and omits the refused file", (
 
 test("import wire schemas accept malformed nonempty names but node writes remain strict", () => {
   const json = snapshot([
-    entry(INVALID_FILENAME, {
-      parent: INVALID_FILENAME,
-      depends_on: [INVALID_FILENAME],
-    }),
+    entry(INVALID_FILENAME, { depends_on: [INVALID_FILENAME] }),
+    task("t.md", INVALID_FILENAME),
   ]);
   const md = {
     format: ImportFormat.Markdown,
@@ -340,8 +357,8 @@ test("import wire schemas accept malformed nonempty names but node writes remain
   assert.ok(
     !nodeCreateSchema.safeParse({
       filename: INVALID_FILENAME,
-      kind: NodeKind.Initiative,
-      content,
+      content: { ...content, work: Work.Examine },
+      tasks: [],
       reason: REASON,
       expected_mission_version: VERSION,
     }).success,
@@ -415,7 +432,18 @@ for (const [label, patch, code] of [
     { criterion: "x".repeat(TEXT_MAX_BYTES + TEXT_OVERFLOW) },
     MissionErrorCode.ContentInvalid,
   ],
-] satisfies Array<[string, Partial<NormalizedEntry>, string]>) {
+  ["unknown work", { work: "task" }, MissionErrorCode.ContentInvalid],
+  [
+    "repeated trait key",
+    { requires: ["platform.macos", "platform.macos"] },
+    MissionErrorCode.ContentInvalid,
+  ],
+  [
+    "malformed trait key",
+    { requires: ["platform.macOS"] },
+    MissionErrorCode.ContentInvalid,
+  ],
+] satisfies Array<[string, EntryPatch, string]>) {
   test(`normalization rejects ${label}`, () => {
     const result = normalize([entry("a.md", patch)]);
     assert.deepEqual(
@@ -429,37 +457,30 @@ for (const [label, patch, code] of [
   });
 }
 
-for (const [label, patch, reason] of [
-  ["initiative parent", { parent: "a.md" }, "parent_forbidden"],
-  ["objective without parent", { kind: NodeKind.Objective }, "parent_required"],
-  [
-    "task without parent",
-    { kind: PlanFileKind.Task, depends_on: undefined },
-    "parent_required",
-  ],
-  [
-    "task dependency list",
-    { kind: PlanFileKind.Task, parent: "a.md" },
-    "depends_on_forbidden",
-  ],
+for (const [label, value, reason] of [
   [
     "repeated dependency",
-    { depends_on: ["a.md", "a.md"] },
+    entry("a.md", { depends_on: ["b.md", "b.md"] }),
     "depends_on_repeated",
   ],
   [
-    "malformed parent",
-    { kind: NodeKind.Objective, parent: INVALID_FILENAME },
+    "malformed dependency",
+    entry("a.md", { depends_on: [INVALID_FILENAME] }),
     "reference_invalid",
   ],
   [
-    "malformed dependency",
-    { depends_on: [INVALID_FILENAME] },
+    "malformed node reference",
+    task("a.md", INVALID_FILENAME),
     "reference_invalid",
   ],
-] satisfies Array<[string, Partial<ImportEntry>, string]>) {
+  [
+    "a node entry with the task prefix",
+    entry("a.md", { id: createIdentity("task") }),
+    "id_prefix_invalid",
+  ],
+] satisfies Array<[string, NormalizedEntry, string]>) {
   test(`JSON plan rules reject ${label}`, () => {
-    const result = normalize([{ ...entry(), ...patch }]);
+    const result = normalize([value]);
     assert.deepEqual(
       result.violations.map(({ code, details }) => ({ code, details })),
       [
@@ -472,24 +493,31 @@ for (const [label, patch, reason] of [
   });
 }
 
-test("Markdown task's normalized empty dependencies are not a forbidden input field", () => {
-  const task = markdown.replace(
-    "kind: initiative",
-    "kind: task\nparent: objective.md",
-  );
+test("a Markdown task file normalizes to a task entry that names its node", () => {
+  const taskFile = markdown.replace("work: examine", "node: implement.md");
   const result = normalizeImportSnapshot(
     {
       format: ImportFormat.Markdown,
       mission_id: MISSION_ID,
       mission_version: VERSION,
       reason: REASON,
-      files: [{ filename: "task.md", content: task }],
+      files: [{ filename: "task.md", content: taskFile }],
     },
     MISSION_ID,
     TEXT_MAX_BYTES,
   );
   assert.deepEqual(result.violations, []);
-  assert.deepEqual(result.entries[FIRST_ENTRY_INDEX]?.depends_on, []);
+  assert.deepEqual(result.entries, [
+    {
+      filename: "task.md",
+      node: "implement.md",
+      bindings: [],
+      verifications: ["true-command"],
+      name: "Node",
+      requirement: "Requirement",
+      criterion: "Criterion",
+    },
+  ]);
 });
 
 test("stage one collects violations from every file, including duplicate refused files", () => {
@@ -593,46 +621,29 @@ test("foreign and retired identities retain exact identity details", (t) => {
   );
 });
 
-test("duplicate id and kind changes are collected", (t) => {
+test("a duplicate id is collected and a work change of a current node is an update", (t) => {
   const { entries, resolve } = fixture(t);
   const existing = entries[FIRST_ENTRY_INDEX]!;
-  const result = resolve([
+  const duplicated = resolve([
     existing,
-    {
-      ...existing,
-      filename: "changed.md",
-      kind: NodeKind.Objective,
-      parent: existing.filename,
-      bindings: [REPOSITORY],
-    },
+    { ...existing, filename: "changed.md" },
   ]);
-  assert.ok(
-    result.violations.some(
-      (value) => value.code === MissionErrorCode.DuplicateId,
-    ),
-  );
   assert.deepEqual(
-    result.violations.find(
-      (value) => value.code === MissionErrorCode.KindChanged,
-    )?.details,
-    {
-      id: existing.id,
-      kind: NodeKind.Objective,
-      current_kind: NodeKind.Initiative,
-    },
+    duplicated.violations.map(({ code, details }) => ({ code, details })),
+    [{ code: MissionErrorCode.DuplicateId, details: { id: existing.id! } }],
   );
+  const changed = resolve(
+    change(entries, "a.md", { work: Work.Implement, bindings: [REPOSITORY] }),
+  );
+  assert.deepEqual(changed.violations, []);
+  assert.deepEqual(changed.updates, [existing.id]);
 });
 
-test("unresolved parent and dependencies identify the submitted references", (t) => {
+test("unresolved node and dependencies identify the submitted references", (t) => {
   const { resolve } = fixture(t);
   const result = resolve([
-    entry("o.md", {
-      kind: NodeKind.Objective,
-      parent: "missing-parent.md",
-      depends_on: ["missing-dep.md"],
-      bindings: [REPOSITORY],
-    }),
-    entry("t.md", { kind: PlanFileKind.Task, parent: "o.md" }),
+    implement("o.md", { depends_on: ["missing-dep.md"] }),
+    task("t.md", "missing-node.md"),
   ]);
   assert.deepEqual(
     result.violations.map(({ code, details, filename }) => ({
@@ -643,13 +654,13 @@ test("unresolved parent and dependencies identify the submitted references", (t)
     [
       {
         code: MissionErrorCode.UnresolvedReference,
-        details: { reference: "parent", name: "missing-parent.md" },
+        details: { reference: "depends_on", name: "missing-dep.md" },
         filename: "o.md",
       },
       {
         code: MissionErrorCode.UnresolvedReference,
-        details: { reference: "depends_on", name: "missing-dep.md" },
-        filename: "o.md",
+        details: { reference: "node", name: "missing-node.md" },
+        filename: "t.md",
       },
     ],
   );
@@ -664,13 +675,13 @@ test("references cannot resolve against current filenames outside the submitted 
   );
 });
 
-test("wrong-kind parents and task dependency targets are rejected", (t) => {
+test("a task naming an examine node or a task, and a dependency on a task, are rejected", (t) => {
   const { resolve } = fixture(t, []);
   const entries = hierarchy();
   const result = resolve(
     change(
-      change(change(entries, "o.md", { parent: "p.md" }), "t.md", {
-        parent: "a.md",
+      change(change(entries, "t.md", { node: "a.md" }), "u.md", {
+        node: "s.md",
       }),
       "b.md",
       { depends_on: ["t.md"] },
@@ -684,32 +695,37 @@ test("wrong-kind parents and task dependency targets are rejected", (t) => {
     result.violations.map((value) => value.details),
     [
       { reference: "depends_on", name: "t.md" },
-      { reference: "parent", name: "p.md" },
-      { reference: "parent", name: "a.md" },
+      { reference: "node", name: "a.md" },
+      { reference: "node", name: "s.md" },
     ],
   );
 });
 
-test("binding resolution collects every missing name and applies the kind rule table", (t) => {
+test("binding resolution answers one violation for each entry and applies the work rule table", (t) => {
   const { resolve } = fixture(t, []);
   const result = resolve([
     entry("a.md", { bindings: [MISSING_BINDING, "also-missing"] }),
-    entry("b.md", { kind: NodeKind.Objective, parent: "a.md", bindings: [] }),
+    implement("b.md", { bindings: [] }),
+    entry("c.md", { bindings: [REPOSITORY, REPOSITORY] }),
   ]);
   assert.deepEqual(
-    result.violations.map((value) => value.code),
-    Array.from({ length: 3 }, () => MissionErrorCode.BindingsInvalid),
+    result.violations.map((value) => [value.filename, value.code]),
+    [
+      ["a.md", MissionErrorCode.BindingsInvalid],
+      ["b.md", MissionErrorCode.BindingsInvalid],
+      ["c.md", MissionErrorCode.BindingsInvalid],
+    ],
   );
   assert.deepEqual(
     result.violations.map((value) => value.details),
     [
       { binding: MISSING_BINDING },
-      { binding: "also-missing" },
       {
-        kind: NodeKind.Objective,
+        work: Work.Implement,
         binding_kind: "repository",
         count: NO_BINDING_COUNT,
       },
+      null,
     ],
   );
 });
@@ -718,16 +734,8 @@ test("import refuses a task file that names a binding with mission.node.bindings
   const { resolve } = fixture(t, []);
   const result = resolve([
     entry("a.md"),
-    entry("o.md", {
-      kind: NodeKind.Objective,
-      parent: "a.md",
-      bindings: [REPOSITORY],
-    }),
-    entry("t.md", {
-      kind: PlanFileKind.Task,
-      parent: "o.md",
-      bindings: [REPOSITORY],
-    }),
+    implement("o.md"),
+    task("t.md", "o.md", { bindings: [REPOSITORY] }),
   ]);
   assert.deepEqual(
     result.violations.map((value) => [value.code, value.details]),
@@ -789,7 +797,7 @@ test("unchanged hierarchy, including tasks and terminal nodes, is entirely noOps
   assert.deepEqual(
     result.no_ops,
     entries
-      .filter((value) => value.kind !== PlanFileKind.Task)
+      .filter((value) => !isTaskEntry(value))
       .map((value) => value.id!)
       .sort(),
   );
@@ -799,7 +807,7 @@ test("unchanged hierarchy, including tasks and terminal nodes, is entirely noOps
   );
   assert.deepEqual(
     result.resolved_entries.find(
-      (value) => value.entry.filename === OBJECTIVE_FILENAME,
+      (value) => value.entry.filename === IMPLEMENT_FILENAME,
     )?.binding_ids,
     [BINDING_ID],
   );
@@ -811,17 +819,15 @@ for (const [label, filename, patch, owners] of [
   ["criterion", "a.md", { criterion: "Changed" }, ["a.md"]],
   ["verifications", "a.md", { verifications: ["echo changed"] }, ["a.md"]],
   ["filename", "b.md", { filename: "renamed.md" }, ["b.md"]],
-  ["parent", "o.md", { parent: "b.md" }, ["o.md"]],
+  ["work", "a.md", { work: Work.Implement, bindings: [REPOSITORY] }, ["a.md"]],
+  ["requires", "a.md", { requires: ["platform.macos"] }, ["a.md"]],
   ["depends_on", "b.md", { depends_on: ["a.md"] }, ["b.md"]],
   ["task content", "t.md", { name: "Changed task" }, ["o.md"]],
-  ["task parent", "t.md", { parent: "p.md" }, ["o.md", "p.md"]],
-] satisfies Array<[string, string, Partial<NormalizedEntry>, string[]]>) {
+  ["task node", "t.md", { node: "p.md" }, ["o.md", "p.md"]],
+] satisfies Array<[string, string, EntryPatch, string[]]>) {
   test(`changed ${label} is an update of its content owner`, (t) => {
     const { entries, resolve } = fixture(t, hierarchy());
-    let input = change(entries, filename, patch);
-    if (patch.filename)
-      input = change(input, "p.md", { parent: patch.filename });
-    const result = resolve(input);
+    const result = resolve(change(entries, filename, patch));
     assert.deepEqual(result.violations, []);
     assert.deepEqual(
       result.updates,
@@ -884,7 +890,7 @@ test("empty set retires every current node but excludes already retired nodes", 
   assert.deepEqual(
     result.retirements,
     entries
-      .filter((value) => value.kind !== PlanFileKind.Task)
+      .filter((value) => !isTaskEntry(value))
       .map((value) => value.id!)
       .filter((id) => id !== retiredId)
       .sort(),
@@ -917,33 +923,26 @@ test("filename replacement does not retire an identity retained under a new file
   assert.deepEqual(result.retirements, []);
 });
 
-test("new parent keys, current rows and resulting dependency sets are exposed without writes", (t) => {
+test("new dependency keys, current rows and resulting dependency sets are exposed without writes", (t) => {
   const { store, entries, resolve } = fixture(t, hierarchy());
   const original = structuredClone(entries);
   const created = entry("new.md");
   const input = [
-    ...change(entries, "o.md", {
-      parent: created.filename,
-      depends_on: ["b.md"],
-    }),
+    ...change(entries, "o.md", { depends_on: ["b.md", created.filename] }),
     created,
   ];
   const before = store.database
     .prepare("SELECT total_changes() AS count")
     .get();
   const result = resolve(input);
-  const objective = item(entries, "o.md");
-  assert.equal(
-    result.parent_map.get(objective.id!),
-    `file:${created.filename}`,
-  );
+  const node = item(entries, "o.md");
   assert.deepEqual(
-    result.dependencies.get(objective.id!),
-    new Set([item(entries, "b.md").id]),
+    result.dependencies.get(node.id!),
+    new Set([item(entries, "b.md").id, `file:${created.filename}`]),
   );
   assert.equal(
-    result.current_nodes.get(objective.id!)?.parent_id,
-    item(entries, "a.md").id,
+    result.current_nodes.get(node.id!)?.filename,
+    IMPLEMENT_FILENAME,
   );
   assert.deepEqual(
     store.database.prepare("SELECT total_changes() AS count").get(),
@@ -952,8 +951,12 @@ test("new parent keys, current rows and resulting dependency sets are exposed wi
   assert.deepEqual(entries, original);
 });
 
-test("removedEdges contains dropped containment and dependency edges in stable order", (t) => {
-  const base = change(hierarchy(), "b.md", { depends_on: ["a.md"] });
+test("removedEdges contains dropped dependency edges in stable order", (t) => {
+  const base = change(
+    change(hierarchy(), "b.md", { depends_on: ["a.md"] }),
+    "o.md",
+    { depends_on: ["a.md", "b.md"] },
+  );
   const { entries, resolve } = fixture(t, base);
   const a = item(entries, "a.md").id!;
   const b = item(entries, "b.md").id!;
@@ -963,16 +966,24 @@ test("removedEdges contains dropped containment and dependency edges in stable o
       change(
         entries.filter((value) => value.filename !== TASK_FILENAME),
         "o.md",
-        { parent: "b.md" },
+        { depends_on: [] },
       ),
       "b.md",
       { depends_on: [] },
     ),
   );
-  assert.deepEqual(result.removed_edges, [
-    { kind: EdgeKind.Containment, parent_id: a, child_id: o },
-    { kind: EdgeKind.Dependency, dependent_id: b, depends_on_id: a },
-  ]);
+  assert.deepEqual(
+    result.removed_edges,
+    [
+      { dependent_id: b, depends_on_id: a },
+      { dependent_id: o, depends_on_id: a },
+      { dependent_id: o, depends_on_id: b },
+    ].sort(
+      (left, right) =>
+        left.dependent_id.localeCompare(right.dependent_id) ||
+        left.depends_on_id.localeCompare(right.depends_on_id),
+    ),
+  );
   assert.deepEqual(result.retirements, []);
   assert.deepEqual(result.updates, [b, o].sort());
 });
@@ -986,7 +997,6 @@ test("retiring an endpoint removes incoming dependencies, and same-name replacem
   assert.deepEqual(result.updates, [item(entries, "b.md").id]);
   assert.deepEqual(result.removed_edges, [
     {
-      kind: EdgeKind.Dependency,
       dependent_id: item(entries, "b.md").id,
       depends_on_id: item(entries, "a.md").id,
     },
@@ -1049,29 +1059,24 @@ const CONDITION_CASES: Array<{
   checked: string[];
 }> = [
   {
-    label: "updated initiative",
+    label: "updated examine node",
     transform: (entries) => change(entries, "a.md", { name: "Changed" }),
     checked: ["a.md"],
   },
   {
-    label: "updated objective does not modify its initiative",
+    label: "updated implement node checks itself alone",
     transform: (entries) => change(entries, "o.md", { name: "Changed" }),
     checked: ["o.md"],
   },
   {
-    label: "updated task checks its objective",
+    label: "updated task checks its implement node",
     transform: (entries) => change(entries, "t.md", { name: "Changed" }),
     checked: ["o.md"],
   },
   {
-    label: "moved task checks both objectives",
-    transform: (entries) => change(entries, "t.md", { parent: "p.md" }),
+    label: "moved task checks both implement nodes",
+    transform: (entries) => change(entries, "t.md", { node: "p.md" }),
     checked: ["o.md", "p.md"],
-  },
-  {
-    label: "moved objective checks itself and both initiatives",
-    transform: (entries) => change(entries, "o.md", { parent: "b.md" }),
-    checked: ["a.md", "b.md", "o.md"],
   },
   {
     label:
@@ -1080,59 +1085,32 @@ const CONDITION_CASES: Array<{
     checked: [],
   },
   {
-    label: "created objective checks its current initiative",
+    label: "created implement node with a task needs no current-node check",
     transform: (entries) => [
       ...entries,
-      entry("new.md", {
-        kind: NodeKind.Objective,
-        parent: "a.md",
-        bindings: [REPOSITORY],
-      }),
-      entry("new-task.md", { kind: PlanFileKind.Task, parent: "new.md" }),
-    ],
-    checked: ["a.md"],
-  },
-  {
-    label: "created task checks its current objective",
-    transform: (entries) => [
-      ...entries,
-      entry("new.md", {
-        kind: PlanFileKind.Task,
-        parent: "o.md",
-      }),
-    ],
-    checked: ["o.md"],
-  },
-  {
-    label: "created initiative and new parent need no current-node check",
-    transform: (entries) => [
-      ...entries,
-      entry("new.md"),
-      entry("new-objective.md", {
-        kind: NodeKind.Objective,
-        parent: "new.md",
-        bindings: [REPOSITORY],
-      }),
-      entry("new-task.md", {
-        kind: PlanFileKind.Task,
-        parent: "new-objective.md",
-      }),
+      implement("new.md"),
+      task("new-task.md", "new.md"),
     ],
     checked: [],
   },
   {
-    label: "retired task checks its surviving objective",
+    label: "created task checks its current implement node",
+    transform: (entries) => [...entries, task("new.md", "o.md")],
+    checked: ["o.md"],
+  },
+  {
+    label: "retired task checks its surviving implement node",
     transform: (entries) =>
       entries.filter((value) => value.filename !== TASK_FILENAME),
     checked: ["o.md"],
   },
   {
-    label: "retired objective checks itself and its surviving initiative",
+    label: "retired implement node checks itself alone",
     transform: (entries) =>
       entries.filter(
         (value) => !["o.md", "s.md", "t.md"].includes(value.filename),
       ),
-    checked: ["a.md", "o.md"],
+    checked: ["o.md"],
   },
   {
     label: "entire retirement deduplicates task owners",
@@ -1153,8 +1131,8 @@ for (const scenario of CONDITION_CASES) {
   test(`import condition: ${scenario.label}`, (t) => {
     const { store, entries, resolve } = fixture(t, hierarchy());
     store.database
-      .prepare("UPDATE mission_node SET state = ? WHERE kind != ?")
-      .run(NodeState.Executing, PlanFileKind.Task);
+      .prepare("UPDATE mission_node SET state = ?")
+      .run(NodeState.Executing);
     const resolved = resolve(scenario.transform(entries));
     assert.deepEqual(resolved.violations, []);
     const violations = store.transaction((tx) =>
@@ -1243,16 +1221,11 @@ for (const state of [NodeState.Pending, NodeState.Available]) {
 test("prepared import exposes the resolved state without resolving bindings twice", (t) => {
   const { store, mission, entries } = fixture(t, hierarchy());
   let resolutions = INITIAL_RESOLUTION_COUNT;
-  const wireEntries = entries.map((value) =>
-    value.kind === PlanFileKind.Task
-      ? { ...value, depends_on: undefined }
-      : value,
-  );
   const prepared = store.transaction((tx) =>
     prepareImport(
       tx,
       mission,
-      snapshot(wireEntries, mission.id),
+      snapshot(entries, mission.id),
       mission.id,
       {
         ...bindings,
@@ -1266,7 +1239,9 @@ test("prepared import exposes the resolved state without resolving bindings twic
   );
   assert.equal(
     resolutions,
-    hierarchy().filter((value) => value.kind === NodeKind.Objective).length,
+    hierarchy().filter(
+      (value) => !isTaskEntry(value) && value.work === Work.Implement,
+    ).length,
   );
   assert.ok(prepared.resolved);
   assert.deepEqual(prepared.preview.violations, []);
@@ -1282,7 +1257,7 @@ function uncovered(
     .map(({ filename, details }) => ({ filename, details }));
 }
 
-test("objective verifications held by tasks of the objective pass", (t) => {
+test("node verifications held by tasks of the implement node pass", (t) => {
   const { resolve } = fixture(t, []);
   const entries = change(
     change(hierarchy(), "o.md", { verifications: ["first", "second"] }),
@@ -1295,7 +1270,7 @@ test("objective verifications held by tasks of the objective pass", (t) => {
   assert.deepEqual(result.violations, []);
 });
 
-test("each uncovered objective verification is one located violation", (t) => {
+test("each uncovered node verification is one located violation", (t) => {
   const { resolve } = fixture(t, []);
   const entries = change(hierarchy(), "o.md", {
     verifications: ["first", "second", "third"],
@@ -1309,12 +1284,11 @@ test("each uncovered objective verification is one located violation", (t) => {
   ]);
 });
 
-test("import accepts an objective with no task file", (t) => {
+test("import accepts an implement node with no task file", (t) => {
   const { resolve } = fixture(t, []);
   const entries = change(
     hierarchy().filter(
-      (value) =>
-        value.kind !== PlanFileKind.Task || value.parent !== OBJECTIVE_FILENAME,
+      (value) => !isTaskEntry(value) || value.node !== IMPLEMENT_FILENAME,
     ),
     "o.md",
     { verifications: ["first", "second"] },
@@ -1335,7 +1309,7 @@ test("a verification that differs by whitespace is uncovered", (t) => {
   ]);
 });
 
-test("a task of another objective does not cover an objective verification", (t) => {
+test("a task of another implement node does not cover a node verification", (t) => {
   const { resolve } = fixture(t, []);
   const entries = change(
     change(hierarchy(), "o.md", { verifications: ["only-p"] }),
@@ -1374,29 +1348,13 @@ const exportBindings: MissionBindings = {
   }),
 };
 
-function wire(entries: NormalizedEntry[]): ImportEntry[] {
-  return entries.map((value) =>
-    value.kind === PlanFileKind.Task
-      ? { ...value, depends_on: undefined }
-      : value,
-  );
-}
-
 function plan(): NormalizedEntry[] {
   return [
-    entry("a.md"),
-    entry("o.md", {
-      kind: NodeKind.Objective,
-      parent: "a.md",
-      bindings: [REPOSITORY],
-    }),
-    entry("p.md", {
-      kind: NodeKind.Objective,
-      parent: "a.md",
-      bindings: [REPOSITORY],
-    }),
-    entry("t.md", { kind: PlanFileKind.Task, parent: "o.md" }),
-    entry("s.md", { kind: PlanFileKind.Task, parent: "o.md" }),
+    entry("a.md", { depends_on: ["o.md", "p.md"] }),
+    implement("o.md"),
+    implement("p.md", { depends_on: ["o.md"] }),
+    task("t.md", "o.md"),
+    task("s.md", "o.md"),
   ];
 }
 
@@ -1447,8 +1405,8 @@ function importer(t: TestContext) {
 
 test("import mints task identities", (t) => {
   const { store, apply, assigned } = importer(t);
-  const result = apply(wire(plan()));
-  const objective = assigned(result, "o.md");
+  const result = apply(plan());
+  const implementId = assigned(result, "o.md");
   assert.match(assigned(result, "t.md"), TASK_IDENTITY);
   assert.match(assigned(result, "s.md"), TASK_IDENTITY);
   assert.deepEqual(
@@ -1456,7 +1414,7 @@ test("import mints task identities", (t) => {
     { filename: TASK_FILENAME, task_id: assigned(result, TASK_FILENAME) },
   );
   const revision = result.changes.revisions.find(
-    (value) => value.node_id === objective,
+    (value) => value.node_id === implementId,
   );
   assert.ok(revision);
   assert.deepEqual(
@@ -1471,27 +1429,21 @@ test("import mints task identities", (t) => {
     store.transaction((tx) => readNode(tx, assigned(result, "t.md"))),
     null,
   );
-  assert.deepEqual(
-    result.changes.added_edges.filter(
+  assert.ok(
+    result.changes.added_edges.every(
       (value) =>
-        value.kind === EdgeKind.Containment &&
-        value.child_id === assigned(result, "t.md"),
+        value.dependent_id !== assigned(result, "t.md") &&
+        value.depends_on_id !== assigned(result, "t.md"),
     ),
-    [],
   );
 });
 
 test("import refuses a node prefix on a task file", () => {
-  const task = entry("t.md", {
-    kind: PlanFileKind.Task,
-    parent: "o.md",
-    id: createIdentity("node"),
-  });
+  const taskEntry = task("t.md", "o.md", { id: createIdentity("node") });
   const node = entry("a.md", { id: createIdentity("task") });
   const markdownTask = `---
 id: ${createIdentity("node")}
-kind: task
-parent: o.md
+node: o.md
 bindings: []
 verifications: [true-command]
 ---
@@ -1501,7 +1453,7 @@ Requirement
 ## Criterion
 Criterion
 `;
-  const json = normalize(wire([task, node]));
+  const json = normalize([taskEntry, node]);
   const markdown = normalizeImportSnapshot(
     {
       format: ImportFormat.Markdown,
@@ -1533,8 +1485,8 @@ Criterion
 
 test("import refuses a removed task identity with mission.import.retired_id", (t) => {
   const { mission, store, apply, identified } = importer(t);
-  const entries = identified(apply(wire(plan())));
-  apply(wire(entries.filter((value) => value.filename !== TASK_FILENAME)));
+  const entries = identified(apply(plan()));
+  apply(entries.filter((value) => value.filename !== TASK_FILENAME));
   const removed = item(entries, TASK_FILENAME);
   const unknown = { ...removed, filename: "u.md", id: createIdentity("task") };
   const result = store.transaction((tx) =>
@@ -1554,22 +1506,46 @@ test("import refuses a removed task identity with mission.import.retired_id", (t
   );
 });
 
-test("export and import round trip keeps every task identity", (t) => {
+test("export and import both formats unchanged", (t) => {
   const { mission, store, apply } = importer(t);
-  const first = apply(wire(plan()));
+  const first = apply(change(plan(), "o.md", { requires: ["platform.macos"] }));
   for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
     const exported = store.transaction((tx) =>
       exportMission(tx, mission.id, format, exportBindings),
     );
+    if ("files" in exported)
+      for (const file of exported.files) {
+        const isTask = ["t.md", "s.md"].includes(file.filename);
+        assert.equal(/^node: /m.test(file.content), isTask, file.filename);
+        assert.equal(/^work: /m.test(file.content), !isTask, file.filename);
+        assert.equal(/^requires:/m.test(file.content), !isTask, file.filename);
+        assert.equal(
+          /^depends_on:/m.test(file.content),
+          !isTask,
+          file.filename,
+        );
+      }
+    else
+      assert.deepEqual(
+        exported.entries.map((value) =>
+          "node" in value
+            ? [value.filename, value.node]
+            : [value.filename, value.work, value.requires, value.depends_on],
+        ),
+        [
+          ["a.md", Work.Examine, [], ["o.md", "p.md"]],
+          ["o.md", Work.Implement, ["platform.macos"], []],
+          ["p.md", Work.Implement, [], ["o.md"]],
+          ["s.md", "o.md"],
+          ["t.md", "o.md"],
+        ],
+      );
     const entries =
       "entries" in exported
         ? exported.entries
-        : exported.files.map((file) => {
-            const parsed = parsePlanFile(file.filename, file.content);
-            return parsed.kind === PlanFileKind.Task
-              ? { ...parsed, depends_on: undefined }
-              : parsed;
-          });
+        : exported.files.map((file) =>
+            parsePlanFile(file.filename, file.content),
+          );
     const again = apply(entries);
     assert.deepEqual(again.assigned_ids, first.assigned_ids);
     assert.deepEqual(again.changes.revisions, []);
@@ -1579,10 +1555,10 @@ test("export and import round trip keeps every task identity", (t) => {
 
 test("an import that moves a task revises both owners with moved-out and moved-in", (t) => {
   const { apply, assigned, identified } = importer(t);
-  const first = apply(wire(plan()));
+  const first = apply(plan());
   const task = assigned(first, TASK_FILENAME);
   const moved = apply(
-    wire(change(identified(first), TASK_FILENAME, { parent: "p.md" })),
+    change(identified(first), TASK_FILENAME, { node: "p.md" }),
   );
   assert.deepEqual(
     moved.changes.revisions.map((value) => ({
@@ -1620,4 +1596,246 @@ test("an import that moves a task revises both owners with moved-out and moved-i
     ].sort((left, right) => left.node_id.localeCompare(right.node_id)),
   );
   assert.deepEqual(moved.changes.retired_node_ids, []);
+});
+
+test("a no-op import of a terminal node returns no error", (t) => {
+  const { store, apply, assigned, identified } = importer(t);
+  const first = apply(plan());
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, assigned(first, "o.md"));
+  const again = apply(identified(first));
+  assert.deepEqual(again.changes.revisions, []);
+  assert.equal(again.mission_version, first.mission_version);
+});
+
+function markdownFile(
+  filename: string,
+  front: string,
+): {
+  filename: string;
+  content: string;
+} {
+  return {
+    filename,
+    content: `---\n${front}\n---\n# ${filename}\n## Requirement\nRequirement\n## Criterion\nCriterion\n`,
+  };
+}
+
+function checkSet() {
+  return [
+    markdownFile(
+      "todo-api.md",
+      "work: examine\ndepends_on: [foundation.md, contributing.md]\nbindings: [repo]\nverifications: [npm run verify]",
+    ),
+    markdownFile(
+      "foundation.md",
+      "work: implement\nbindings: [repo]\nverifications: [npm run test:foundation, npm run lint]",
+    ),
+    markdownFile(
+      "foundation-runtime.md",
+      "node: foundation.md\nbindings: []\nverifications: [npm run test:foundation, npm run lint]",
+    ),
+    markdownFile(
+      "contributing.md",
+      "work: implement\ndepends_on: [foundation.md]\nbindings: [repo]\nverifications: [npm run lint]",
+    ),
+  ];
+}
+
+function checkPreview(
+  t: TestContext,
+  files: ReturnType<typeof checkSet>,
+): ImportPreviewResult {
+  const { store, mission } = fixture(t, []);
+  return store.transaction((tx) => {
+    const before = readMission(tx, mission.id);
+    const { preview, resolved } = prepareImport(
+      tx,
+      mission,
+      {
+        format: ImportFormat.Markdown,
+        mission_id: mission.id,
+        mission_version: mission.version,
+        reason: REASON,
+        files,
+      },
+      mission.id,
+      bindings,
+      TEXT_MAX_BYTES,
+    );
+    assert.deepEqual(readMission(tx, mission.id), before);
+    return {
+      violations: preview.violations.map(({ code, filename, details }) => ({
+        code,
+        filename,
+        details,
+      })),
+      creates: resolved?.creates ?? [],
+    };
+  });
+}
+
+type ImportPreviewResult = {
+  violations: { code: string; filename: string | null; details: unknown }[];
+  creates: string[];
+};
+
+function replaced(
+  filename: string,
+  from: string,
+  to: string,
+): ReturnType<typeof checkSet> {
+  return checkSet().map((file) =>
+    file.filename === filename
+      ? { ...file, content: file.content.replace(from, to) }
+      : file,
+  );
+}
+
+test("kanthord check: the baseline check set previews with no violation", (t) => {
+  assert.deepEqual(checkPreview(t, checkSet()), {
+    violations: [],
+    creates: [
+      "contributing.md",
+      "foundation-runtime.md",
+      "foundation.md",
+      "todo-api.md",
+    ],
+  });
+});
+
+test("kanthord check: an unknown front-matter field or H2 names the file", (t) => {
+  for (const files of [
+    replaced("foundation.md", "work: implement", "work: implement\nowner: me"),
+    replaced("foundation.md", "## Criterion", "## Notes\nnone\n## Criterion"),
+  ])
+    assert.deepEqual(
+      checkPreview(t, files).violations.map(({ code, filename }) => ({
+        code,
+        filename,
+      })),
+      [{ code: MissionErrorCode.PlanInvalid, filename: "foundation.md" }],
+    );
+});
+
+test("kanthord check: a dependency on missing.md is an unresolved reference", (t) => {
+  assert.deepEqual(
+    checkPreview(t, replaced("todo-api.md", "contributing.md", "missing.md"))
+      .violations,
+    [
+      {
+        code: MissionErrorCode.UnresolvedReference,
+        filename: "todo-api.md",
+        details: { reference: "depends_on", name: "missing.md" },
+      },
+    ],
+  );
+});
+
+test("kanthord check: two entries with the same filename are a duplicate file", (t) => {
+  const files = [...checkSet(), checkSet()[1]!];
+  assert.deepEqual(
+    checkPreview(t, files).violations.map(({ code, filename }) => ({
+      code,
+      filename,
+    })),
+    [{ code: MissionErrorCode.DuplicateFile, filename: "foundation.md" }],
+  );
+});
+
+test("kanthord check: a task file with depends_on, requires or work names the file", (t) => {
+  for (const [key, reason] of [
+    ["depends_on: []", "depends_on_forbidden"],
+    ["requires: []", "requires_forbidden"],
+    ["work: implement", "form_invalid"],
+  ])
+    assert.deepEqual(
+      checkPreview(
+        t,
+        replaced(
+          "foundation-runtime.md",
+          "bindings: []",
+          `${key}\nbindings: []`,
+        ),
+      ).violations,
+      [
+        {
+          code: MissionErrorCode.PlanInvalid,
+          filename: "foundation-runtime.md",
+          details: { filename: "foundation-runtime.md", reason },
+        },
+      ],
+    );
+});
+
+test("kanthord check: a task on an examine node is a reference kind violation", (t) => {
+  assert.deepEqual(
+    checkPreview(
+      t,
+      replaced(
+        "foundation-runtime.md",
+        "node: foundation.md",
+        "node: todo-api.md",
+      ),
+    ).violations,
+    [
+      {
+        code: MissionErrorCode.ReferenceKindInvalid,
+        filename: "foundation-runtime.md",
+        details: { reference: "node", name: "todo-api.md" },
+      },
+    ],
+  );
+});
+
+test("kanthord check: an implement node with no repository binding is refused", (t) => {
+  assert.deepEqual(
+    checkPreview(
+      t,
+      replaced("contributing.md", "bindings: [repo]", "bindings: []"),
+    ).violations,
+    [
+      {
+        code: MissionErrorCode.BindingsInvalid,
+        filename: "contributing.md",
+        details: {
+          work: Work.Implement,
+          binding_kind: "repository",
+          count: NO_BINDING_COUNT,
+        },
+      },
+    ],
+  );
+});
+
+test("kanthord check: a node verification that no task holds is uncovered", (t) => {
+  assert.deepEqual(
+    checkPreview(
+      t,
+      replaced(
+        "foundation-runtime.md",
+        "verifications: [npm run test:foundation, npm run lint]",
+        "verifications: [npm run test:foundation]",
+      ),
+    ).violations,
+    [
+      {
+        code: MissionErrorCode.VerificationUncovered,
+        filename: "foundation.md",
+        details: { name: "foundation.md", command: "npm run lint" },
+      },
+    ],
+  );
+});
+
+test("kanthord check: an implement node with no task holds an empty task list", (t) => {
+  const { apply, assigned } = importer(t);
+  const result = apply([implement("contributing.md")]);
+  const revision = result.changes.revisions.find(
+    (value) => value.node_id === assigned(result, "contributing.md"),
+  );
+  assert.ok(revision);
+  assert.deepEqual(revision.tasks, []);
+  assert.equal(revision.content.work, Work.Implement);
 });

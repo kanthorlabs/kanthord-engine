@@ -6,7 +6,7 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   AssessmentResult,
   MissionErrorCode,
-  NodeKind,
+  Work,
   verificationSchema,
   type AssessmentSubmit,
   type Revision,
@@ -27,7 +27,12 @@ import {
 } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 import { directDependenciesOf } from "./graph.ts";
-import { readDependencies, readMissionNodes, type NodeRow } from "./store.ts";
+import {
+  readDependencies,
+  readMissionNodes,
+  workOf,
+  type NodeRow,
+} from "./store.ts";
 
 const FIRST_COVERING_INDEX = 0;
 const NO_REQUIRED_VERIFICATIONS = 0;
@@ -38,11 +43,12 @@ const PROPOSALS_FIELD = "proposals";
 function requireDependencyOutcomes(
   tx: Transaction,
   node: NodeRow,
+  work: Work,
   dependencyOutcomeIds: readonly string[],
 ): void {
   assert.ok(tx.database.isTransaction);
   const expected =
-    node.kind === NodeKind.Objective
+    work === Work.Implement
       ? []
       : directDependenciesOf(
           node.id,
@@ -63,27 +69,26 @@ function requireProposals(
   tx: Transaction,
   dependencies: Dependencies,
   node: NodeRow,
+  work: Work,
   body: AssessmentSubmit,
 ): void {
   if (body.proposals.length === NO_PROPOSALS) return;
-  if (
-    node.kind !== NodeKind.Initiative ||
-    body.result !== AssessmentResult.Undetermined
-  )
+  if (work !== Work.Examine || body.result !== AssessmentResult.Undetermined)
     invalidExecutionInput(PROPOSALS_FIELD);
   const direct = new Set(
     directDependenciesOf(node.id, readDependencies(tx, node.mission_id)),
   );
-  const objectives = new Set(
+  const implementDependencies = new Set(
     readMissionNodes(tx, node.mission_id)
       .filter(
         (dependency) =>
-          direct.has(dependency.id) && dependency.kind === NodeKind.Objective,
+          direct.has(dependency.id) &&
+          workOf(tx, dependency.id) === Work.Implement,
       )
       .map((dependency) => dependency.id),
   );
   for (const proposal of body.proposals) {
-    if (!objectives.has(proposal.dependency_id))
+    if (!implementDependencies.has(proposal.dependency_id))
       invalidExecutionInput(PROPOSALS_FIELD);
     for (const text of [
       proposal.name,
@@ -184,8 +189,13 @@ export function admitAssessment(
         verificationSchema.parse(JSON.parse(row.verification)),
       );
   }
-  requireDependencyOutcomes(tx, node, body.dependency_outcome_ids);
-  requireProposals(tx, dependencies, node, body);
+  requireDependencyOutcomes(
+    tx,
+    node,
+    revision.content.work,
+    body.dependency_outcome_ids,
+  );
+  requireProposals(tx, dependencies, node, revision.content.work, body);
   requireTestedInput(
     tx,
     dependencies.bindings,

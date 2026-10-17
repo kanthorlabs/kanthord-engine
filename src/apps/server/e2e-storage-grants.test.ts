@@ -17,6 +17,8 @@ import { temporary } from "../../kernel/test-support.ts";
 import {
   AssetKind,
   missionOperations,
+  Work,
+  type EvidenceAsset,
   type Revision,
 } from "../../mission/contract.ts";
 import {
@@ -48,6 +50,7 @@ const SECOND_VERSION = "v2";
 const MEDIA = "text/plain";
 const REGION = "eu-central-1";
 const PREFIX = "kanthord";
+const SECOND_BUCKET = "second";
 const NO_OUTPUT = "";
 const SECRET_ACCESS_KEY = "e2e-storage-secret";
 const GITHUB_SECRET = "test-secret";
@@ -176,6 +179,17 @@ async function setup(t: TestContext) {
           credential: "store",
         },
       },
+      "store-b": {
+        kind: "storage",
+        config: {
+          available: true,
+          endpoint: s3.endpoint,
+          bucket: SECOND_BUCKET,
+          region: REGION,
+          prefix: PREFIX,
+          credential: "store",
+        },
+      },
       harness: {
         kind: "worker",
         config: {
@@ -198,37 +212,39 @@ async function setup(t: TestContext) {
   };
   const create = async (
     filename: string,
-    kind: string,
+    work: Work,
     names: string[],
-    parentId?: string,
+    dependentId?: string,
   ) => {
     const result = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
     const nodeId = result.revisions[FIRST_INDEX]!.node_id;
-    if (parentId)
-      await write(["mission", "dependency", "add", parentId, nodeId], {
+    if (dependentId)
+      await write(["mission", "dependency", "add", dependentId, nodeId], {
         reason: "plan",
         expected_mission_version: await missionVersion(),
       });
     return nodeId;
   };
-  const I = await create("initiative-1.md", "initiative", []);
-  const A = await create("objective-a.md", "objective", ["repo", "store"], I);
+  const E = await create("examine-1.md", Work.Examine, []);
+  const A = await create(
+    "implement-a.md",
+    Work.Implement,
+    ["repo", "store", "store-b"],
+    E,
+  );
   const token = (
     await generateMachineToken({
       env: H,
@@ -267,6 +283,7 @@ async function setup(t: TestContext) {
     projectId: project.id,
     missionId: mission.id,
     A,
+    storeId: binding("store").id,
     x: pulled.execution,
     api: httpClient(missionOperations, fixture.endpoint, token),
   };
@@ -338,6 +355,19 @@ test("E04 storage grants CLI journey", { timeout: TIMEOUT }, async (t) => {
     assert.ok(upload.expires_at > before);
     assert.ok(upload.expires_at <= Date.now() + PRESIGN_LIFETIME_MS);
     key = `${j.prefix}${upload.asset_id}`;
+  });
+  await t.test("EF03.9 the asset pins the first storage binding", async () => {
+    const page = await h.read<Page<{ assets: EvidenceAsset[] }>>([
+      "mission",
+      "evidence",
+      "list",
+      h.A,
+    ]);
+    const asset = page.items
+      .flatMap((item) => item.assets)
+      .find((item) => item.id === upload.asset_id);
+    assert.ok(asset?.kind === AssetKind.Object, JSON.stringify(page));
+    assert.equal(asset.storage_binding_id, h.storeId);
   });
   await t.test("E04.2 a complete before the PUT mismatches", async () => {
     const result = await j.complete(upload.asset_id);

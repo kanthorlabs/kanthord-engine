@@ -30,11 +30,7 @@ import {
 } from "../../kernel/health.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import {
-  type Mission,
-  type NodeChange,
-  NodeKind,
-} from "../../mission/contract.ts";
+import { type Mission, type NodeChange, Work } from "../../mission/contract.ts";
 import { BindingKind, projectOperations } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import type { AgentEnablement } from "../../agent/contract.ts";
@@ -432,16 +428,16 @@ test("E07.4 github repository binding advances the binding set to version two", 
   assert.equal(read.binding_set_version, SECOND_REVISION);
 });
 
-test("E07.5 mission initiative creation queues the created node", async (t) => {
+test("E07.5 mission examine node creation queues the created node", async (t) => {
   const fixture = await setup(t);
   const project = await createProject(fixture);
   const mission = success<Mission>(
     await kanthord(["mission", "get", project.id], fixture.env),
   );
   const path = file(fixture.directory, "node.json", {
-    kind: NodeKind.Initiative,
-    filename: "initiative.md",
+    filename: "examine.md",
     content: {
+      work: Work.Examine,
       name: "Plan",
       requirement: "Do the work",
       criterion: "Work is done",

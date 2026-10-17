@@ -4,7 +4,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  NodeKind,
+  Work,
   RepositoryAction,
   MissionErrorCode,
   AssessmentResult,
@@ -64,8 +64,8 @@ test("action pages cross actionless batches and never derive attempts newer than
   };
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(NodeKind.Objective, h.node_id);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
@@ -261,8 +261,8 @@ test("attempt and external-action reads page in descending order and filter atte
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(NodeKind.Objective, h.node_id);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",

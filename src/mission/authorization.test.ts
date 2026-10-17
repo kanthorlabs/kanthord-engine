@@ -162,11 +162,7 @@ function actionHarness(t: TestContext) {
     h.store.transaction((tx) =>
       h.service.authorizeRequestEvidence(tx, machine, evidenceId, claim),
     );
-  const otherNode = () => {
-    const parent = h.node().parent_id;
-    assert.ok(parent);
-    return parent;
-  };
+  const otherNode = () => h.examine_id;
   return { ...h, machine, frozen, evidence, otherNode };
 }
 
@@ -514,7 +510,7 @@ test("a check refuses a pending asset of an earlier attempt", (t) => {
   });
 });
 
-test("an initiative claim reads the object of a current dependency outcome and nothing outside its bound", (t) => {
+test("an examine node claim reads the object of a current dependency outcome and nothing outside its bound", (t) => {
   const h = assetHarness(t);
   const named = h.object({ published: true });
   const unnamed = h.object({ published: true });

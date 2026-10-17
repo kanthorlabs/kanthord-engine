@@ -11,11 +11,7 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import {
-  missionOperations,
-  NodeState,
-  NodeKind,
-} from "../../mission/contract.ts";
+import { missionOperations, NodeState, Work } from "../../mission/contract.ts";
 import {
   schedulerOperations,
   ClaimState,
@@ -238,47 +234,47 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
       body: null,
     }),
   );
-  const initiative = completed(
+  const examine = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
       body: {
-        filename: "initiative-1.md",
-        kind: NodeKind.Initiative,
-        content: CONTENT,
+        filename: "examine-1.md",
+        content: { ...CONTENT, work: Work.Examine },
         tasks: [],
         reason: "plan",
         expected_mission_version: 1,
       },
     }),
   );
-  const objective = completed(
+  const implement = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
       body: {
-        filename: "objective-1.md",
-        kind: NodeKind.Objective,
-        content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
+        filename: "implement-1.md",
+        content: {
+          ...CONTENT,
+          work: Work.Implement,
+          bindings: [bindingSet.bindings.repo!.id],
+        },
         tasks: [],
         reason: "plan",
         expected_mission_version: 2,
-        parent_id: initiative.revisions[0]!.node_id,
-        expected_parent_revision: 1,
       },
     }),
   );
-  const nodeId = objective.revisions[0]!.node_id;
+  const nodeId = implement.revisions[0]!.node_id;
   completed(
     await call(missionOperations["dependency.add"], {
       params: {
-        node_id: initiative.revisions[0]!.node_id,
+        node_id: examine.revisions[0]!.node_id,
         depends_on_id: nodeId,
       },
       query: {},
       body: {
         reason: "plan",
-        expected_mission_version: objective.mission_version,
+        expected_mission_version: implement.mission_version,
       },
     }),
   );

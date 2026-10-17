@@ -7,7 +7,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssetKind,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NodeState,
   PlatformAddressKind,
   RepositoryAction,
@@ -57,17 +57,19 @@ function fixture(t: TestContext) {
     insertNode(tx, {
       id: nodeId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: h.node_id,
+      filename: "implement.md",
       created_at: NOW,
     });
     const revision = getRevision(tx, h.node_id, FIRST_ATTEMPT);
     insertRevision(tx, {
       ...revision,
       node_id: nodeId,
-      filename: "objective.md",
-      content: { ...revision.content, bindings: [bindingId] },
+      filename: "implement.md",
+      content: {
+        ...revision.content,
+        work: Work.Implement,
+        bindings: [bindingId],
+      },
       tasks: [],
     });
     openAttempt(tx, nodeId, FIRST_ATTEMPT, h.executionActor, NOW);

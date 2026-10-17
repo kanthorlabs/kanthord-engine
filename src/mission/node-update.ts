@@ -11,7 +11,6 @@ import {
 } from "./content.ts";
 import {
   MissionErrorCode,
-  NodeKind,
   RevisionWrite,
   type Content,
   type CriterionSet,
@@ -23,6 +22,7 @@ import {
   type Revision,
   type RevisionChange,
   type TaskContent,
+  type Work,
 } from "./contract.ts";
 import { resolveContent, resolveTasks } from "./node-create.ts";
 import { requireNode } from "./node-read.ts";
@@ -42,6 +42,7 @@ import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 
 const REVISION_INCREMENT = 1;
 const NO_CHANGED_FIELDS = 0;
+const NO_ATTEMPT = 0;
 const REASON_FIELD = "reason";
 const CRITERION_FIELDS = [ContentField.Criterion, ContentField.Verifications];
 
@@ -85,6 +86,20 @@ function editContext(
   return { node, mission, previous: revisionFromRow(tx, current) };
 }
 
+export function requireWorkUnlocked(
+  node: NodeRow,
+  previous: Work,
+  next: Work,
+): void {
+  if (previous !== next && node.attempt > NO_ATTEMPT)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      MissionErrorCode.WorkLocked,
+      "Node work cannot change after the first claim.",
+      { node_id: node.id, attempt: node.attempt },
+    );
+}
+
 function changedFields(
   filename: string,
   content: Content,
@@ -112,7 +127,7 @@ function updatedRevision(
   write: RevisionWrite,
   actor: HumanActor,
 ): Revision {
-  const { previous, node } = context;
+  const { previous } = context;
   return {
     ...previous,
     revision: previous.revision + REVISION_INCREMENT,
@@ -127,7 +142,7 @@ function updatedRevision(
       write,
       previous_revision: previous.revision,
       changed_fields: fields,
-      ...(node.kind === NodeKind.Objective ? { tasks: tasks.changes } : {}),
+      tasks: tasks.changes,
     },
   };
 }
@@ -198,12 +213,17 @@ export function updateNode(
     tx,
     bindings,
     context.mission.project_id,
-    { ...body, kind: context.node.kind },
+    body,
     textMaxBytes,
+  );
+  requireWorkUnlocked(
+    context.node,
+    context.previous.content.work,
+    content.work,
   );
   const tasks = resolveTasks(
     tx,
-    context.node,
+    { ...context.node, work: content.work },
     body.filename,
     body.tasks,
     context.previous.tasks,
@@ -236,7 +256,7 @@ export function setCriterion(
     criterion: body.criterion,
     verifications: body.verifications,
   };
-  validateNodeContent(context.node.kind, content, textMaxBytes);
+  validateNodeContent(content, textMaxBytes);
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   return finishEdit(
     tx,

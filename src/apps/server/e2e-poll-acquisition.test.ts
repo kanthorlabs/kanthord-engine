@@ -322,8 +322,8 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t, { pollIntervalMs: POLL_INTERVAL_MS });
-    const I = await h.create("initiative-1.md");
-    const P = await h.objective("objective-p.md", I);
+    const I = await h.create("examine-1.md");
+    const P = await h.implement("implement-p.md", I);
     const action = await h.actionRequest(P.x2);
     assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
     await h.release(P.x2.execution_id);

@@ -16,7 +16,7 @@ import {
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { ExecutionRun } from "./execution-run.ts";
-import { NodeKind } from "./native-agent.ts";
+import { ExecutionWork } from "../contract.ts";
 import {
   CHECKOUTS_DIRECTORY,
   EVIDENCE_DIRECTORY,
@@ -150,7 +150,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       const pending = prepareEvaluation(
         { setup, claim, workspaces, transport, env: hostEnvironment() },
         run,
-        NodeKind.Initiative,
+        ExecutionWork.Examine,
         evidence,
       );
       if (mode !== SUCCESS) {
@@ -247,7 +247,7 @@ test("an initiative with no binding places the produced evidence privately and p
       env: hostEnvironment(),
     },
     run,
-    NodeKind.Initiative,
+    ExecutionWork.Examine,
     evidence,
   );
   assert.deepEqual(prepared.tested_input, address);
@@ -269,7 +269,7 @@ test("an initiative with no binding places the produced evidence privately and p
   };
   assert.deepEqual(
     verificationCommands({
-      content,
+      content: { ...content, work: ExecutionWork.Implement, requires: [] },
       tasks: [
         {
           id: "task",
@@ -337,7 +337,7 @@ test("an initiative with one binding places the produced evidence outside its cl
       env: hostEnvironment(),
     },
     run,
-    NodeKind.Initiative,
+    ExecutionWork.Examine,
     evidence,
   );
   assert.equal(

@@ -11,9 +11,7 @@ const createMissionTables: Migration = (database) => {
     CREATE TABLE mission_node (
       id TEXT NOT NULL PRIMARY KEY,
       mission_id TEXT NOT NULL REFERENCES mission_mission(id),
-      kind TEXT NOT NULL,
       filename TEXT NOT NULL,
-      parent_id TEXT REFERENCES mission_node(id),
       state TEXT NOT NULL,
       attempt INTEGER NOT NULL,
       priority INTEGER,
@@ -30,6 +28,8 @@ const createMissionTables: Migration = (database) => {
       criterion TEXT NOT NULL,
       verifications TEXT NOT NULL,
       bindings TEXT NOT NULL,
+      work TEXT NOT NULL,
+      requires TEXT NOT NULL,
       tasks TEXT NOT NULL,
       change TEXT NOT NULL,
       reason TEXT NOT NULL,

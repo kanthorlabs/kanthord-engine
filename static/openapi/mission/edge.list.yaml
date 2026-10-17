@@ -30,12 +30,6 @@ pathItem:
         schema:
           $ref: "#/components/schemas/mission.edge.list.Input/properties/query/properties\
             /cursor"
-      - name: kind
-        in: query
-        required: false
-        schema:
-          $ref: "#/components/schemas/mission.edge.list.Input/properties/query/properties\
-            /kind"
       - name: node_id
         in: query
         required: false
@@ -96,11 +90,6 @@ components:
               maximum: 1000
             cursor:
               type: string
-            kind:
-              type: string
-              enum:
-                - containment
-                - dependency
             node_id:
               type: string
               minLength: 31
@@ -121,51 +110,24 @@ components:
         items:
           type: array
           items:
-            oneOf:
-              - type: object
-                properties:
-                  kind:
-                    type: string
-                    const: containment
-                  parent_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  child_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                required:
-                  - kind
-                  - parent_id
-                  - child_id
-                additionalProperties: false
-              - type: object
-                properties:
-                  kind:
-                    type: string
-                    const: dependency
-                  dependent_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  depends_on_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                required:
-                  - kind
-                  - dependent_id
-                  - depends_on_id
-                additionalProperties: false
+            type: object
+            properties:
+              dependent_id:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+              depends_on_id:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+            required:
+              - dependent_id
+              - depends_on_id
+            additionalProperties: false
         next_cursor:
           anyOf:
             - type: string

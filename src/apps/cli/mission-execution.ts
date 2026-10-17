@@ -160,7 +160,7 @@ function executionIdentity(executionId: string, code: string): void {
 function addDependencyReads(execution: Command): void {
   const dependency = execution
     .command("dependency")
-    .description("Direct dependencies of an initiative");
+    .description("Direct dependencies of an examine node");
   dependency.action(() => dependency.help());
   const outcome = dependency
     .command("outcome")

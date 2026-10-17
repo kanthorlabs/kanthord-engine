@@ -8,7 +8,7 @@ import {
   AssessmentResult,
   AssetKind,
   MissionErrorCode,
-  NodeKind,
+  Work,
   type AssessmentSubmit,
   type Verification,
 } from "./contract.ts";
@@ -98,12 +98,12 @@ function fixture(t: TestContext) {
     );
     return id;
   };
-  const admit = (input = body, objective = false) =>
+  const admit = (input = body, implement = false) =>
     h.store.transaction((tx) => {
       const node = readNode(tx, h.node_id)!;
       const revision = getRevision(tx, h.node_id, FIRST_REVISION);
-      if (objective) {
-        node.kind = NodeKind.Objective;
+      if (implement) {
+        revision.content.work = Work.Implement;
         revision.tasks = [
           {
             id: createIdentity("node"),
@@ -264,7 +264,7 @@ test("non-success assessments retain the verification's tested input", (t) => {
     );
 });
 
-test("initiative admission tracks replacement dependency outcomes and excludes retired dependencies", (t) => {
+test("examine admission tracks replacement dependency outcomes and excludes retired dependencies", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
   const dependencyId = createIdentity("node");
@@ -273,8 +273,6 @@ test("initiative admission tracks replacement dependency outcomes and excludes r
     insertNode(tx, {
       id: dependencyId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
-      parent_id: null,
       filename: "dependency.md",
       created_at: NOW,
     });
@@ -282,6 +280,7 @@ test("initiative admission tracks replacement dependency outcomes and excludes r
       ...base,
       node_id: dependencyId,
       filename: "dependency.md",
+      content: { ...base.content, work: Work.Implement },
       tasks: [],
     });
     insertDependency(tx, h.mission_id, h.node_id, dependencyId);
@@ -328,18 +327,16 @@ test("initiative admission tracks replacement dependency outcomes and excludes r
   h.admit();
 });
 
-test("proposals refuse a contained objective with no dependency edge and an initiative dependency", (t) => {
+test("proposals refuse an implement node with no dependency edge and an examine dependency", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
-  const node = (kind: NodeKind, parentId: string | null) => {
+  const node = (work: Work) => {
     const id = createIdentity("node");
     h.store.transaction((tx) => {
       const base = getRevision(tx, h.node_id, FIRST_REVISION);
       insertNode(tx, {
         id,
         mission_id: h.mission_id,
-        kind,
-        parent_id: parentId,
         filename: `${id.toLowerCase()}.md`,
         created_at: NOW,
       });
@@ -347,17 +344,18 @@ test("proposals refuse a contained objective with no dependency edge and an init
         ...base,
         node_id: id,
         filename: `${id.toLowerCase()}.md`,
+        content: { ...base.content, work },
         tasks: [],
       });
     });
     return id;
   };
-  const contained = node(NodeKind.Objective, h.node_id);
-  const initiative = node(NodeKind.Initiative, null);
-  const objective = node(NodeKind.Objective, null);
+  const unrelated = node(Work.Implement);
+  const examine = node(Work.Examine);
+  const implement = node(Work.Implement);
   h.store.transaction((tx) => {
-    insertDependency(tx, h.mission_id, h.node_id, initiative);
-    insertDependency(tx, h.mission_id, h.node_id, objective);
+    insertDependency(tx, h.mission_id, h.node_id, examine);
+    insertDependency(tx, h.mission_id, h.node_id, implement);
   });
   const propose = (dependencyId: string) => ({
     ...h.body,
@@ -377,12 +375,12 @@ test("proposals refuse a contained objective with no dependency edge and an init
       },
     ],
   });
-  for (const dependencyId of [contained, initiative])
+  for (const dependencyId of [unrelated, examine])
     refusal(() => h.admit(propose(dependencyId)), VALIDATION, "proposals");
-  h.admit(propose(objective));
+  h.admit(propose(implement));
 });
 
-test("proposals are admitted only for an undetermined initiative with an objective dependency", (t) => {
+test("proposals are admitted only for an undetermined examine node with an implement dependency", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
   const proposal = {

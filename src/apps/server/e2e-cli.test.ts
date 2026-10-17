@@ -99,7 +99,6 @@ const cases = [
       "get",
       "create",
       "update",
-      "move",
       "revision",
       "retire",
       "rebind",

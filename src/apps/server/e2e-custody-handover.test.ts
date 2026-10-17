@@ -8,6 +8,7 @@ import {
   handoverPayloadSchema,
   type CredentialAnswer,
 } from "../../custody/contract.ts";
+import { Work } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
@@ -233,32 +234,17 @@ async function graph(
   bindingId: string,
 ): Promise<void> {
   const mission = await c.read<{ id: string }>(["mission", "get", projectId]);
-  const initiative = await c.write<Change>(
+  const implement = await c.write<Change>(
     ["mission", "node", "create", mission.id],
     {
-      filename: "initiative-1.md",
-      kind: "initiative",
-      content: CONTENT,
+      filename: "implement-1.md",
+      content: { ...CONTENT, work: Work.Implement, bindings: [bindingId] },
       tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_REVISION,
     },
   );
-  assert.ok(initiative.revisions[0]);
-  const objective = await c.write<Change>(
-    ["mission", "node", "create", mission.id],
-    {
-      filename: "objective-1.md",
-      kind: "objective",
-      content: { ...CONTENT, bindings: [bindingId] },
-      tasks: [],
-      reason: "plan",
-      parent_id: initiative.revisions[0].node_id,
-      expected_parent_revision: FIRST_REVISION,
-      expected_mission_version: SECOND_REVISION,
-    },
-  );
-  assert.ok(objective.revisions[0]);
+  assert.ok(implement.revisions[0]);
 }
 
 async function setup(t: TestContext) {

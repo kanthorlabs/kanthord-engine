@@ -5,12 +5,12 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   ClaimKind,
-  NodeKind,
   NodeState,
   AssetKind,
   AssessmentResult,
   ReleaseObligation,
   MissionBindingKind,
+  Work,
   type ExecutionActor,
   type ClaimAdmission,
 } from "./contract.ts";
@@ -125,7 +125,7 @@ function hasEvidence(
       const assets = readAssets(tx, row.id);
       if (!assets.every((asset) => asset.published_at !== null)) return false;
       return assets.some((asset) =>
-        node.kind === NodeKind.Initiative
+        revision.work === Work.Examine
           ? asset.kind === AssetKind.Produced
           : asset.kind === AssetKind.Repository &&
             repositoryIds.includes(

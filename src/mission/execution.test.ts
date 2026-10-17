@@ -10,7 +10,7 @@ import {
   requireTextBound,
 } from "./execution.ts";
 import { executionHarness } from "./test-support.ts";
-import { MissionErrorCode, NodeKind, NodeState } from "./contract.ts";
+import { MissionErrorCode, NodeState } from "./contract.ts";
 import { insertNode, setNodeState } from "./store.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -59,9 +59,7 @@ test("execution context checks every supplied field and refuses another node rou
     insertNode(tx, {
       id: otherId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
       filename: "other.md",
-      parent_id: h.node_id,
       created_at: NOW,
     }),
   );

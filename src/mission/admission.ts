@@ -9,13 +9,6 @@ const IMPORT_STATES: ReadonlySet<string> = new Set([
   NodeState.Pending,
   NodeState.Available,
 ]);
-const PARENT_CREATE_STATES: ReadonlySet<string> = new Set([
-  NodeState.Pending,
-  NodeState.Available,
-  NodeState.Executing,
-  NodeState.Blocked,
-  NodeState.Paused,
-]);
 const INITIAL_ATTEMPT = 0;
 const DEFAULT_PRIORITY = 0;
 
@@ -36,10 +29,6 @@ export function importAdmissible(
 
 export function nodeApiWriteAdmissible(state: string | null): boolean {
   return !isTerminal(state);
-}
-
-export function parentCreateAdmissible(parentState: string | null): boolean {
-  return parentState !== null && PARENT_CREATE_STATES.has(parentState);
 }
 
 export function reconcileJob(

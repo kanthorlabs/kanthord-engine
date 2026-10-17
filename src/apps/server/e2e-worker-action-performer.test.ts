@@ -19,6 +19,7 @@ import {
   type Evidence,
   type Revision,
   type ExternalAction,
+  Work,
 } from "../../mission/contract.ts";
 import {
   WorkPullKind,
@@ -57,15 +58,15 @@ const REVIEWER = 1;
 const SINGLE_CALL = 1;
 const SINGLE_ITEM = 1;
 const FAILURE_EXIT = 1;
-const SECOND_REVISION = 2;
 const PUSHED_PRIORITY = 2;
 const TWO_CALLS = 2;
 const UNAUTHORIZED_STATUS = 401;
 const HOOK_MODE = 0o755;
 const SECOND_ATTEMPT = 2;
+const FIRST_MISSION_VERSION = 1;
+const SECOND_MISSION_VERSION = 2;
 const THIRD_MISSION_VERSION = 3;
 const GATED_PRIORITY = 3;
-const FOURTH_MISSION_VERSION = 4;
 const NO_OUTPUT = "";
 const TIMEOUT = 180000;
 const GATED = "gated";
@@ -247,20 +248,14 @@ async function setup(t: TestContext) {
   >(["project", "binding", "list", project.id]);
   const gated = bindings.items.find((item) => item.name === GATED)!;
   const pushed = bindings.items.find((item) => item.name === PUSHED)!;
-  const create = async (
-    filename: string,
-    kind: string,
-    names: string[],
-    version: number,
-    parentId?: string,
-  ) => {
+  const create = async (filename: string, names: string[], version: number) => {
     const result = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work: Work.Implement,
           bindings: names.map(
             (name) => bindings.items.find((item) => item.name === name)!.id,
           ),
@@ -268,40 +263,19 @@ async function setup(t: TestContext) {
         tasks: [],
         reason: "plan",
         expected_mission_version: version,
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
     return result.revisions[FIRST_INDEX]!.node_id;
   };
-  const initiative = await create(
-    "initiative-1.md",
-    "initiative",
-    [],
-    FIRST_REVISION,
-  );
-  const G = await create(
-    "objective-g.md",
-    "objective",
-    [GATED],
-    SECOND_REVISION,
-    initiative,
-  );
-  const P = await create(
-    "objective-p.md",
-    "objective",
-    [PUSHED],
-    THIRD_MISSION_VERSION,
-    initiative,
-  );
+  const G = await create("implement-g.md", [GATED], FIRST_MISSION_VERSION);
+  const P = await create("implement-p.md", [PUSHED], SECOND_MISSION_VERSION);
   await write(["mission", "node", "priority", "set", G], {
     value: GATED_PRIORITY,
-    expected_mission_version: FOURTH_MISSION_VERSION,
+    expected_mission_version: THIRD_MISSION_VERSION,
   });
   await write(["mission", "node", "priority", "set", P], {
     value: PUSHED_PRIORITY,
-    expected_mission_version: FOURTH_MISSION_VERSION,
+    expected_mission_version: THIRD_MISSION_VERSION,
   });
   const M = (await read<{ version: number }>(["mission", "get", project.id]))
     .version;
@@ -569,7 +543,7 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
       assert.equal((await h.node(h.G)).state, NodeState.ExternalRequested);
     },
   );
-  await t.test("E06.9 a change request blocks the objective", async () => {
+  await t.test("E06.9 a change request blocks the implement node", async () => {
     const actions = await h.read<Page<ExternalAction>>([
       "mission",
       "external-action",

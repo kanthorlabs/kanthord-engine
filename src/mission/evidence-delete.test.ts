@@ -139,7 +139,7 @@ test("asset deletes require a terminal node and terminal direct examine dependen
       error instanceof OperationError &&
       error.code === MissionErrorCode.EvidenceRemoveNodeLive,
   );
-  const parentId = h.node().parent_id!;
+  const parentId = h.examine_id;
   h.store.transaction((tx) => setNodeState(tx, parentId, NodeState.Discarded));
   assert.equal(await h.remove(), null);
   h.store.transaction((tx) => {
@@ -320,7 +320,7 @@ test("both deletes log the human, the force and the reason after the commit", as
     records.push({ fields, message });
   }) as typeof h.dependencies.logger.info;
   await h.remove(true);
-  const parentId = h.node().parent_id!;
+  const parentId = h.examine_id;
   h.store.transaction((tx) => {
     setNodeState(tx, h.node_id, NodeState.Completed);
     setNodeState(tx, parentId, NodeState.Discarded);

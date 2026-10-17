@@ -8,7 +8,6 @@ import {
   AssessmentResult,
   AssetKind,
   ClosingEvent,
-  NodeKind,
   NodeState,
   RepositoryAction,
   RevisionWrite,
@@ -81,14 +80,12 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
     insertNode(tx, {
       id: nodeId,
       mission_id: missionId,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: null,
+      filename: "implement.md",
       created_at: NOW,
     });
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, tasks, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[\"true\"]', ?, '[]', ?, 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, 1, 'implement.md', 'name', 'requirement', 'criterion', '[\"true\"]', ?, 'implement', '[]', '[]', ?, 'reason', ?, ?)",
       )
       .run(
         nodeId,

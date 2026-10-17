@@ -3,12 +3,7 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import {
-  AssessmentResult,
-  MissionErrorCode,
-  NodeKind,
-  NodeState,
-} from "./contract.ts";
+import { AssessmentResult, MissionErrorCode, NodeState } from "./contract.ts";
 import {
   admitControl,
   ControlError,
@@ -57,8 +52,8 @@ test("control admission checks retirement and mission before settlement and stat
     .run(NOW, h.node_id);
   check(MissionErrorCode.Retired);
   h.store.database
-    .prepare("UPDATE mission_node SET retired_at = NULL, kind = ? WHERE id = ?")
-    .run(NodeKind.Initiative, h.node_id);
+    .prepare("UPDATE mission_node SET retired_at = NULL WHERE id = ?")
+    .run(h.node_id);
   check(MissionErrorCode.VersionConflict);
   assert.deepEqual(h.calls, []);
   assert.throws(

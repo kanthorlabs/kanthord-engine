@@ -143,7 +143,7 @@ test("failed and unrun rationale names the command and cause", () => {
   const instruction = evaluationInstruction(SHIPPED_TEMPLATES, input);
   const initiative = evaluationInstruction(SHIPPED_TEMPLATES, {
     ...input,
-    kind: "initiative",
+    examine: true,
   });
   assert.doesNotMatch(instruction, /proposals/);
   assert.match(

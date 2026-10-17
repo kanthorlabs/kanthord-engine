@@ -23,8 +23,8 @@ import { schedulerOperations } from "../../scheduler/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   MISSION_INITIAL_VERSION,
-  NodeKind,
   AssetKind,
+  Work,
   missionOperations,
   missionSchema,
 } from "../../mission/contract.ts";
@@ -690,7 +690,6 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.node.get", AccessPolicy.Human],
   ["mission.node.create", AccessPolicy.Human],
   ["mission.node.update", AccessPolicy.Human],
-  ["mission.node.move", AccessPolicy.Human],
   ["mission.node.revision.list", AccessPolicy.Human],
   ["mission.node.revision.get", AccessPolicy.Human],
   ["mission.node.retire.preview", AccessPolicy.Human],
@@ -773,8 +772,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.span.list", AccessPolicy.Human],
   ["tracking.text.get", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 186;
-const ROUTED_OPERATION_COUNT = 176;
+const OPERATION_COUNT = 185;
+const ROUTED_OPERATION_COUNT = 175;
 const INTAKE_OPERATION_COUNT = 22;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
@@ -895,34 +894,24 @@ test("the operation inventory agrees with contracts, OpenAPI and live registry",
 });
 
 function assertBlockedNode(schema: unknown): void {
-  assert.ok(
-    isObject(schema) && "oneOf" in schema && Array.isArray(schema.oneOf),
-  );
-  const variants = schema.oneOf as ResolvedSchema[];
-  assert.deepEqual(
-    variants.map((variant) => variant.properties.kind?.const),
-    [NodeKind.Initiative, NodeKind.Objective],
-  );
-  for (const variant of variants) {
-    const context = variant.properties.blocked_context;
-    assert.ok(context);
-    assert.deepEqual(context.required, ["outcome", "requests"]);
-    assert.equal(context.properties.requests?.type, ARRAY_SCHEMA_TYPE);
-    assert.deepEqual(
-      Object.keys(context.properties.outcome!.properties).sort(),
-      [
-        "assessment_id",
-        "attempt",
-        "closing_event",
-        "created_at",
-        "evidence_ids",
-        "id",
-        "node_id",
-        "node_revision",
-        "result",
-      ],
-    );
-  }
+  assert.ok(isObject(schema) && !("oneOf" in schema));
+  const node = schema as ResolvedSchema;
+  assert.deepEqual(node.properties.work?.enum, [Work.Implement, Work.Examine]);
+  const context = node.properties.blocked_context;
+  assert.ok(context);
+  assert.deepEqual(context.required, ["outcome", "requests"]);
+  assert.equal(context.properties.requests?.type, ARRAY_SCHEMA_TYPE);
+  assert.deepEqual(Object.keys(context.properties.outcome!.properties).sort(), [
+    "assessment_id",
+    "attempt",
+    "closing_event",
+    "created_at",
+    "evidence_ids",
+    "id",
+    "node_id",
+    "node_revision",
+    "result",
+  ]);
 }
 
 function assertEvidenceShape(schema: ResolvedSchema): void {
@@ -1050,35 +1039,26 @@ test("dependency list exception preserves full dependency and identity-only vari
   assert.deepEqual(minimal.required, ["id", "state"]);
   assert.deepEqual(Object.keys(minimal.properties).sort(), ["id", "state"]);
   assert.equal(minimal.additionalProperties, false);
-  assert.deepEqual(
-    full.oneOf.map(
-      (variant: { properties: { kind: { const: string } } }) =>
-        variant.properties.kind.const,
-    ),
-    ["initiative", "objective"],
-  );
-  for (const variant of full.oneOf) {
-    assert.deepEqual(variant.required, [
-      "id",
-      "filename",
-      "mission_id",
-      "parent_id",
-      "visible_revision",
-      "content",
-      "tasks",
-      "retired_at",
-      "pinned_by_attempts",
-      "kind",
-      "state",
-      "attempt",
-      "priority",
-      "depends_on",
-    ]);
-    assert.deepEqual(variant.properties.blocked_context.required, [
-      "outcome",
-      "requests",
-    ]);
-  }
+  assert.deepEqual(full.required, [
+    "id",
+    "filename",
+    "mission_id",
+    "visible_revision",
+    "content",
+    "tasks",
+    "retired_at",
+    "pinned_by_attempts",
+    "state",
+    "attempt",
+    "priority",
+    "depends_on",
+    "work",
+    "requires",
+  ]);
+  assert.deepEqual(full.properties.blocked_context.required, [
+    "outcome",
+    "requests",
+  ]);
 });
 
 test("named Mission fragment size exceptions retain the complete blocked context", () => {

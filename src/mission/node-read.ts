@@ -15,6 +15,7 @@ import {
 import { revisionFromRow } from "./revision.ts";
 import { blockedContextOf } from "./record-read.ts";
 import {
+  claimRevisionOf,
   listNodes,
   listRevisions,
   readCurrentRevision,
@@ -92,17 +93,18 @@ export function nodeRecord(
   const current = readCurrentRevision(tx, node.id);
   assert.ok(current, "Node must have a revision.");
   const revision = revisionFromRow(tx, current);
+  const claim = revisionFromRow(tx, claimRevisionOf(tx, node.id));
   return {
     id: node.id,
     filename: node.filename,
     mission_id: node.mission_id,
-    parent_id: node.parent_id,
     visible_revision: revision.revision,
     retired_at: node.retired_at,
     pinned_by_attempts: revision.pinned_by_attempts,
-    kind: node.kind,
+    work: claim.content.work,
+    requires: claim.content.requires,
     content: revision.content,
-    tasks: revision.tasks,
+    tasks: claim.tasks,
     state: node.state,
     attempt: node.attempt,
     priority: node.priority ?? 0,

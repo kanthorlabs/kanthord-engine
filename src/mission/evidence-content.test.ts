@@ -8,7 +8,7 @@ import {
   AssetKind,
   INLINE_BYTES_MAX,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NodeState,
   repositoryAddressSchema,
   type Revision,
@@ -24,7 +24,7 @@ import {
   requiredVerifications,
   requireRepositoryAddress,
   requireTestedInput,
-  storageBindingIdOf,
+  storageBindingIdsOf,
   verificationPasses,
 } from "./evidence-content.ts";
 import { getRevision } from "./node-read.ts";
@@ -38,7 +38,7 @@ const FIRST_REVISION = 1;
 const BYTE_OVERFLOW = 1;
 const FAILURE_EXIT_CODE = 1;
 const SUCCESS_EXIT_CODE = 0;
-const OBJECTIVE_COUNT = 3;
+const IMPLEMENT_COUNT = 3;
 const RESOURCE = "repository:github:owner/repository";
 const OTHER_RESOURCE = "repository:github:owner/other";
 const VALIDATION = "gateway.request.validation_failed";
@@ -57,7 +57,7 @@ test("repository commits require complete lowercase SHA-1 or SHA-256 values", ()
     );
 });
 
-test("the tested input of an initiative with two repository bindings is a list in binding order, and an objective checks its pinned bindings", (t) => {
+test("the tested input of an examine node with two repository bindings is a list in binding order, and an implement node checks its pinned bindings", (t) => {
   const h = executionHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");
   const laterId = createIdentity("binding");
@@ -79,7 +79,7 @@ test("the tested input of an initiative with two repository bindings is a list i
   });
   h.store.transaction((tx) => {
     const revision = getRevision(tx, h.node_id, FIRST_REVISION);
-    const initiative = readNode(tx, h.node_id)!;
+    const examine = readNode(tx, h.node_id)!;
     assert.deepEqual(
       h.service.repositoryBindingIdsOf(tx, h.node_id, FIRST_REVISION),
       [],
@@ -89,40 +89,42 @@ test("the tested input of an initiative with two repository bindings is a list i
       binding_id: bindingId,
       commit: COMMIT,
     } as const;
-    requireTestedInput(tx, h.dependencies.bindings, initiative, revision, {
+    requireTestedInput(tx, h.dependencies.bindings, examine, revision, {
       kind: AssetKind.Produced,
       sha256: "a".repeat(64),
     });
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
+        requireTestedInput(tx, h.dependencies.bindings, examine, revision, [
           address,
         ]),
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
-    const objectiveBindingIds = [bindingId, laterId, otherId];
-    const objectiveNodeIds = objectiveBindingIds
+    const implementBindingIds = [bindingId, laterId, otherId];
+    const implementNodeIds = implementBindingIds
       .map(() => createIdentity("node"))
       .sort();
-    const objectives: string[] = [];
-    for (const [index, id] of objectiveBindingIds.entries()) {
-      const nodeId = objectiveNodeIds[index]!;
-      objectives.push(nodeId);
+    const implementNodes: string[] = [];
+    for (const [index, id] of implementBindingIds.entries()) {
+      const nodeId = implementNodeIds[index]!;
+      implementNodes.push(nodeId);
       insertNode(tx, {
         id: nodeId,
         mission_id: h.mission_id,
-        kind: NodeKind.Objective,
         filename: `${nodeId}.md`,
-        parent_id: h.node_id,
         created_at: NOW,
       });
-      const objectiveRevision: Revision = {
+      const implementRevision: Revision = {
         ...revision,
         node_id: nodeId,
-        content: { ...revision.content, bindings: [id, storageId] },
+        content: {
+          ...revision.content,
+          work: Work.Implement,
+          bindings: [id, storageId],
+        },
         tasks: [],
       };
-      insertRevision(tx, objectiveRevision);
+      insertRevision(tx, implementRevision);
       setNodeState(tx, nodeId, NodeState.Discarded);
       assert.deepEqual(
         repositoryBindingIdsOf(
@@ -133,16 +135,16 @@ test("the tested input of an initiative with two repository bindings is a list i
         ),
         [id],
       );
-      const objective = readNode(tx, nodeId)!;
-      assert.equal(
-        storageBindingIdOf(tx, h.dependencies.bindings, objectiveRevision),
-        storageId,
+      const implement = readNode(tx, nodeId)!;
+      assert.deepEqual(
+        storageBindingIdsOf(tx, h.dependencies.bindings, implementRevision),
+        [storageId],
       );
       requireRepositoryAddress(
         tx,
         h.dependencies.bindings,
-        objective,
-        objectiveRevision,
+        implement,
+        implementRevision,
         { ...address, binding_id: id },
       );
       assert.throws(
@@ -150,8 +152,8 @@ test("the tested input of an initiative with two repository bindings is a list i
           requireRepositoryAddress(
             tx,
             h.dependencies.bindings,
-            objective,
-            objectiveRevision,
+            implement,
+            implementRevision,
             { ...address, binding_id: storageId },
           ),
         (error) =>
@@ -163,8 +165,8 @@ test("the tested input of an initiative with two repository bindings is a list i
           requireTestedInput(
             tx,
             h.dependencies.bindings,
-            objective,
-            objectiveRevision,
+            implement,
+            implementRevision,
             [address],
           ),
         (error) => error instanceof OperationError && error.code === VALIDATION,
@@ -180,16 +182,10 @@ test("the tested input of an initiative with two repository bindings is a list i
       content: { ...revision.content, bindings: [bindingId] },
     };
     insertRevision(tx, single);
-    requireTestedInput(
-      tx,
-      h.dependencies.bindings,
-      initiative,
-      single,
-      address,
-    );
+    requireTestedInput(tx, h.dependencies.bindings, examine, single, address);
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, single, [
+        requireTestedInput(tx, h.dependencies.bindings, examine, single, [
           address,
         ]),
       (error) => error instanceof OperationError && error.code === VALIDATION,
@@ -207,20 +203,20 @@ test("the tested input of an initiative with two repository bindings is a list i
       h.service.repositoryBindingIdsOf(tx, h.node_id, pair.revision),
       [otherId, bindingId],
     );
-    requireTestedInput(tx, h.dependencies.bindings, initiative, pair, [
+    requireTestedInput(tx, h.dependencies.bindings, examine, pair, [
       { ...address, binding_id: otherId },
       address,
     ]);
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, pair, [
+        requireTestedInput(tx, h.dependencies.bindings, examine, pair, [
           address,
         ]),
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, pair, [
+        requireTestedInput(tx, h.dependencies.bindings, examine, pair, [
           address,
           { ...address, binding_id: otherId },
         ]),
@@ -234,7 +230,7 @@ test("the tested input of an initiative with two repository bindings is a list i
         requireRepositoryAddress(
           tx,
           h.dependencies.bindings,
-          initiative,
+          examine,
           revision,
           address,
         ),
@@ -242,7 +238,7 @@ test("the tested input of an initiative with two repository bindings is a list i
         error instanceof OperationError &&
         error.code === MissionErrorCode.EvidenceBindingMismatch,
     );
-    assert.equal(objectives.length, OBJECTIVE_COUNT);
+    assert.equal(implementNodes.length, IMPLEMENT_COUNT);
   });
 });
 
@@ -309,7 +305,8 @@ test("verification coverage compares command multisets including pinned tasks", 
   const h = executionHarness(t, IDENTITY);
   h.store.transaction((tx) => {
     const revision = getRevision(tx, h.node_id, FIRST_REVISION);
-    const node = { ...readNode(tx, h.node_id)!, kind: NodeKind.Objective };
+    const node = readNode(tx, h.node_id)!;
+    revision.content.work = Work.Implement;
     revision.tasks = [
       {
         id: createIdentity("node"),

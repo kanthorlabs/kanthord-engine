@@ -4,7 +4,7 @@ import type { TestContext } from "node:test";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { NodeKind } from "../../mission/contract.ts";
+import { Work, type TaskWrite } from "../../mission/contract.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -64,41 +64,27 @@ export async function createJourneyNode(
   cli: ReturnType<typeof journeyClient>,
   projectId: string,
   filename: string,
-  kind: "initiative" | "objective",
+  work: Work,
   bindings: string[],
-  parentId?: string,
+  tasks: TaskWrite[] = [],
 ) {
   const mission = await cli.read<{ id: string; version: number }>([
     "mission",
     "get",
     projectId,
   ]);
-  const parent = parentId
-    ? await cli.read<{ visible_revision: number }>([
-        "mission",
-        "node",
-        "get",
-        parentId,
-      ])
-    : null;
   const result = await cli.write<{ revisions: { node_id: string }[] }>(
     ["mission", "node", "create", mission.id],
     {
       filename,
-      kind,
-      ...(parent
-        ? {
-            parent_id: parentId,
-            expected_parent_revision: parent.visible_revision,
-          }
-        : {}),
       content: {
         ...NODE_CONTENT,
         bindings,
+        work,
         verifications:
-          kind === NodeKind.Initiative ? ["true"] : NODE_CONTENT.verifications,
+          work === Work.Examine ? ["true"] : NODE_CONTENT.verifications,
       },
-      tasks: [],
+      tasks,
       reason: "plan",
       expected_mission_version: mission.version,
     },
@@ -106,24 +92,13 @@ export async function createJourneyNode(
   assert.ok(result.revisions.length);
   const nodeId = result.revisions[0]!.node_id;
   assert.ok(nodeId);
-  if (parentId) {
-    const current = await cli.read<{ version: number }>([
-      "mission",
-      "get",
-      projectId,
-    ]);
-    await cli.write(["mission", "dependency", "add", parentId, nodeId], {
-      reason: "plan",
-      expected_mission_version: current.version,
-    });
-  }
   return nodeId;
 }
 
 export async function createJourneyTask(
   cli: ReturnType<typeof journeyClient>,
   projectId: string,
-  objectiveId: string,
+  nodeId: string,
   filename: string,
 ) {
   const mission = await cli.read<{ version: number }>([
@@ -131,29 +106,32 @@ export async function createJourneyTask(
     "get",
     projectId,
   ]);
-  const objective = await cli.read<{
+  const node = await cli.read<{
     filename: string;
     visible_revision: number;
-    content: typeof NODE_CONTENT;
+    content: typeof NODE_CONTENT & { work: Work; requires: string[] };
     tasks: { id: string; filename: string; content: typeof NODE_CONTENT }[];
-  }>(["mission", "node", "get", objectiveId]);
+  }>(["mission", "node", "get", nodeId]);
   const result = await cli.write<{
     revisions: { tasks: { id: string; filename: string }[] }[];
-  }>(["mission", "node", "update", objectiveId], {
-    filename: objective.filename,
-    content: objective.content,
+  }>(["mission", "node", "update", nodeId], {
+    filename: node.filename,
+    content: node.content,
     tasks: [
-      ...objective.tasks,
+      ...node.tasks,
       {
         filename,
         content: {
-          ...NODE_CONTENT,
+          name: NODE_CONTENT.name,
+          requirement: NODE_CONTENT.requirement,
+          criterion: NODE_CONTENT.criterion,
+          bindings: [],
           verifications: ["grep -q hello hello.txt"],
         },
       },
     ],
     reason: "plan",
-    expected_revision: objective.visible_revision,
+    expected_revision: node.visible_revision,
     expected_mission_version: mission.version,
   });
   const task = result.revisions[0]?.tasks.find(

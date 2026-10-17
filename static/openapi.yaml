@@ -162,8 +162,6 @@ paths:
     $ref: ./openapi/mission/node.discard.yaml#/pathItem
   /api/mission/node/{node_id}:
     $ref: ./openapi/mission/node.get.yaml#/pathItem
-  /api/mission/node/{node_id}/move:
-    $ref: ./openapi/mission/node.move.yaml#/pathItem
   /api/mission/node/{node_id}/override:
     $ref: ./openapi/mission/node.override.yaml#/pathItem
   /api/mission/node/{node_id}/pause:

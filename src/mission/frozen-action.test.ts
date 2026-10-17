@@ -7,7 +7,7 @@ import {
   ActorKind,
   EndState,
   ExpectedEndState,
-  NodeKind,
+  Work,
   RepositoryAction,
   Resolution,
   type MissionBindings,
@@ -30,7 +30,7 @@ const BASE_BRANCH = "main";
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const REQUEST_KEY = "repo.pull_request";
 
-test("an initiative with a repository binding requires no external action, and required actions preserve pinned policies across later revisions", (t) => {
+test("an examine node with a repository binding requires no external action, and required actions preserve pinned policies across later revisions", (t) => {
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
   const projectId = createIdentity("project");
   const oldBinding = createIdentity("binding");
@@ -93,13 +93,11 @@ test("an initiative with a repository binding requires no external action, and r
     insertNode(tx, {
       id: nodeId,
       mission_id: missionId,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: null,
+      filename: "implement.md",
       created_at: NOW,
     });
     const statement = tx.database.prepare(
-      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, tasks, change, reason, actor, created_at) VALUES (?, ?, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '[]', '{}', 'reason', ?, ?)",
+      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
     );
     statement.run(
       nodeId,
@@ -170,8 +168,8 @@ test("an initiative with a repository binding requires no external action, and r
       Resolution.OtherEnd,
     );
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(NodeKind.Initiative, nodeId);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Examine, nodeId);
     assert.deepEqual(
       requiredActionsOf(tx, bindings, nodeId, FIRST_ATTEMPT),
       [],

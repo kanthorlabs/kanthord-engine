@@ -5,11 +5,8 @@ import { createIdentity } from "../kernel/identity.ts";
 import { isObject } from "../kernel/values.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
-  EdgeKind,
   MissionErrorCode,
   NODE_IDENTITY_PREFIX,
-  NodeKind,
-  PlanFileKind,
   TASK_IDENTITY_PREFIX,
   type Edge,
   type HumanActor,
@@ -22,6 +19,7 @@ import {
   type SchedulerClaims,
 } from "./contract.ts";
 import {
+  isTaskEntry,
   prepareImport,
   type ResolvedImport,
   type ResolvedImportEntry,
@@ -46,7 +44,6 @@ const EXPECTED_ROW_CHANGE = 1;
 const VERSION_INCREMENT = 1;
 const FIRST_VIOLATION = 0;
 const TEMPORARY_FILENAME_PREFIX = "import:";
-const INSERT_ORDER = [NodeKind.Initiative, NodeKind.Objective];
 const CONFLICT_CODES: ReadonlySet<string> = new Set([
   MissionErrorCode.ConditionFailed,
   MissionErrorCode.TerminalChange,
@@ -90,9 +87,7 @@ function assignIdentities(resolved: ResolvedImport): ResolvedImportEntry[] {
       item.current?.id ??
         item.task?.id ??
         createIdentity(
-          item.entry.kind === PlanFileKind.Task
-            ? TASK_IDENTITY_PREFIX
-            : NODE_IDENTITY_PREFIX,
+          isTaskEntry(item.entry) ? TASK_IDENTITY_PREFIX : NODE_IDENTITY_PREFIX,
         ),
     ]),
   );
@@ -105,7 +100,7 @@ function assignIdentities(resolved: ResolvedImport): ResolvedImportEntry[] {
   const entries = resolved.resolved_entries.map((item) => ({
     ...item,
     key: identity(item.key),
-    parent_id: item.parent_id === null ? null : identity(item.parent_id),
+    owner_id: item.owner_id === null ? null : identity(item.owner_id),
     depends_on: new Set([...item.depends_on].map(identity)),
   }));
   assert.equal(new Set(entries.map((item) => item.key)).size, entries.length);
@@ -116,10 +111,7 @@ function addedEdges(
   resolved: ResolvedImport,
   entries: ResolvedImportEntry[],
 ): Edge[] {
-  const containment: Extract<Edge, { kind: typeof EdgeKind.Containment }>[] =
-    [];
-  const dependencies: Extract<Edge, { kind: typeof EdgeKind.Dependency }>[] =
-    [];
+  const dependencies: Edge[] = [];
   const previous = new Map<string, Set<string>>();
   for (const edge of resolved.current_dependencies) {
     const targets = previous.get(edge.dependent) ?? new Set<string>();
@@ -127,20 +119,9 @@ function addedEdges(
     previous.set(edge.dependent, targets);
   }
   for (const item of entries) {
-    if (
-      item.entry.kind !== PlanFileKind.Task &&
-      item.parent_id !== null &&
-      item.current?.parent_id !== item.parent_id
-    )
-      containment.push({
-        kind: EdgeKind.Containment,
-        parent_id: item.parent_id,
-        child_id: item.key,
-      });
     for (const target of item.depends_on) {
       if (!previous.get(item.key)?.has(target))
         dependencies.push({
-          kind: EdgeKind.Dependency,
           dependent_id: item.key,
           depends_on_id: target,
         });
@@ -148,17 +129,12 @@ function addedEdges(
   }
   assert.equal(entries.length, resolved.resolved_entries.length);
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
-  containment.sort(
-    (a, b) =>
-      a.parent_id.localeCompare(b.parent_id) ||
-      a.child_id.localeCompare(b.child_id),
-  );
   dependencies.sort(
     (a, b) =>
       a.dependent_id.localeCompare(b.dependent_id) ||
       a.depends_on_id.localeCompare(b.depends_on_id),
   );
-  return [...containment, ...dependencies];
+  return dependencies;
 }
 
 function updateRows(
@@ -185,10 +161,8 @@ function updateRows(
   }
   for (const item of changed) {
     const result = tx.database
-      .prepare(
-        "UPDATE mission_node SET filename = ?, parent_id = ? WHERE id = ?",
-      )
-      .run(item.entry.filename, item.parent_id, item.key);
+      .prepare("UPDATE mission_node SET filename = ? WHERE id = ?")
+      .run(item.entry.filename, item.key);
     assert.equal(result.changes, EXPECTED_ROW_CHANGE);
   }
 }
@@ -240,19 +214,15 @@ function writeNodes(
     entries.filter((item) => item.current !== null),
   );
   const creates = entries.filter(
-    (item) => item.current === null && item.entry.kind !== PlanFileKind.Task,
+    (item) => item.current === null && !isTaskEntry(item.entry),
   );
-  for (const kind of INSERT_ORDER) {
-    for (const item of creates.filter((item) => item.entry.kind === kind))
-      insertNode(tx, {
-        id: item.key,
-        mission_id: missionId,
-        kind,
-        filename: item.entry.filename,
-        parent_id: item.parent_id,
-        created_at: now,
-      });
-  }
+  for (const item of creates)
+    insertNode(tx, {
+      id: item.key,
+      mission_id: missionId,
+      filename: item.entry.filename,
+      created_at: now,
+    });
   writeDependencies(tx, missionId, resolved, creates);
 }
 
@@ -269,7 +239,7 @@ function initialResult(
     mission_version: mission.version,
     assigned_ids: entries
       .map((item) =>
-        item.entry.kind === PlanFileKind.Task
+        isTaskEntry(item.entry)
           ? { filename: item.entry.filename, task_id: item.key }
           : { filename: item.entry.filename, node_id: item.key },
       )

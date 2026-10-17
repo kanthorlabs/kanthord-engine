@@ -5,7 +5,12 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { AssetKind, NodeState, type Evidence } from "../../mission/contract.ts";
+import {
+  AssetKind,
+  NodeState,
+  Work,
+  type Evidence,
+} from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
@@ -71,26 +76,23 @@ async function fixture(t: TestContext) {
     verifications: ["test -f hello.txt"],
     bindings: [] as string[],
   };
-  const initiative = await setup.write<{ revisions: { node_id: string }[] }>(
+  const examine = await setup.write<{ revisions: { node_id: string }[] }>(
     ["mission", "node", "create", mission.id],
     {
-      filename: "initiative-1.md",
-      kind: "initiative",
-      content: { ...content, verifications: ["true"] },
+      filename: "examine-1.md",
+      content: { ...content, work: Work.Examine, verifications: ["true"] },
       tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_REVISION,
     },
   );
-  const objective = await setup.write<{ revisions: { node_id: string }[] }>(
+  const implement = await setup.write<{ revisions: { node_id: string }[] }>(
     ["mission", "node", "create", mission.id],
     {
-      filename: "objective-a.md",
-      kind: "objective",
-      parent_id: initiative.revisions[0]!.node_id,
-      expected_parent_revision: FIRST_REVISION,
+      filename: "implement-a.md",
       content: {
         ...content,
+        work: Work.Implement,
         bindings: [setup.bindings.repo!.id, setup.bindings.store!.id],
       },
       tasks: [{ filename: "task-a.md", content }],
@@ -98,9 +100,9 @@ async function fixture(t: TestContext) {
       expected_mission_version: SECOND_REVISION,
     },
   );
-  const nodeId = objective.revisions[0]!.node_id;
+  const nodeId = implement.revisions[0]!.node_id;
   await setup.write(
-    ["mission", "dependency", "add", initiative.revisions[0]!.node_id, nodeId],
+    ["mission", "dependency", "add", examine.revisions[0]!.node_id, nodeId],
     { reason: "plan", expected_mission_version: SECOND_REVISION + 1 },
   );
   const seed = join(setup.directory, "seed");

@@ -4,21 +4,21 @@ import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { parentCreateAdmissible } from "./admission.ts";
 import {
   CONTENT_FIELDS,
   ContentField,
   TASKS_FIELD,
-  checkBindingRuleTable,
+  TASK_CONTENT_FIELDS,
+  resolveNodeBindings,
   validateFilename,
   validateNodeContent,
+  validatePlanContent,
+  validateTaskCount,
   validateText,
 } from "./content.ts";
 import {
-  EdgeKind,
   MissionErrorCode,
   NODE_IDENTITY_PREFIX,
-  NodeKind,
   RevisionWrite,
   TASK_IDENTITY_PREFIX,
   TaskChange,
@@ -31,6 +31,7 @@ import {
   type RevisionChange,
   type TaskContent,
   type TaskWrite,
+  type Work,
   type WorkQueue,
 } from "./contract.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -42,8 +43,6 @@ import {
   incrementMissionVersion,
   insertNode,
   insertRevision,
-  readCurrentRevision,
-  readNode,
   readRevision,
   usedFilenames,
 } from "./store.ts";
@@ -60,20 +59,7 @@ const TASK_CONTENT_KEYS = [
   ContentField.Bindings,
 ] as const;
 type TaskChangeEntry = NonNullable<RevisionChange["tasks"]>[number];
-const Field = {
-  ParentId: "parent_id",
-  ExpectedParentRevision: "expected_parent_revision",
-  Reason: "reason",
-} as const;
-
-function invalidField(field: string): never {
-  throw new OperationError(
-    HttpStatus.BadRequest,
-    MissionErrorCode.ContentInvalid,
-    "Invalid parent field.",
-    { field },
-  );
-}
+const REASON_FIELD = "reason";
 
 function invalidTasks(): never {
   throw new OperationError(
@@ -84,104 +70,41 @@ function invalidTasks(): never {
   );
 }
 
-function requireParent(
-  tx: Transaction,
-  missionId: string,
-  body: NodeCreate,
-): void {
-  if (body.kind === NodeKind.Initiative) {
-    if (
-      body.parent_id !== undefined ||
-      body.expected_parent_revision !== undefined
-    )
-      invalidField(Field.ParentId);
-    return;
-  }
-  if (body.parent_id === undefined) invalidField(Field.ParentId);
-  if (body.expected_parent_revision === undefined)
-    invalidField(Field.ExpectedParentRevision);
-  const parent = readNode(tx, body.parent_id);
-  if (!parent)
-    throw new OperationError(
-      HttpStatus.NotFound,
-      MissionErrorCode.NodeNotFound,
-      "Parent node not found.",
-    );
-  if (parent.retired_at !== null)
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.Retired,
-      "Parent node is retired.",
-      { node_id: parent.id },
-    );
-  if (parent.mission_id !== missionId || parent.kind !== NodeKind.Initiative)
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.CreateRefused,
-      "Parent cannot contain this node.",
-      { parent_id: parent.id, parent_kind: parent.kind },
-    );
-  if (!parentCreateAdmissible(parent.state))
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.CreateRefused,
-      "Parent state refuses creation.",
-      { state: parent.state },
-    );
-  const current = readCurrentRevision(tx, parent.id);
-  assert.ok(current, "A content owner must have a revision.");
-  assert.equal(
-    current.node_id,
-    parent.id,
-    "Parent revision must belong to the parent.",
-  );
-  if (current.revision !== body.expected_parent_revision)
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.RevisionConflict,
-      "Parent revision changed.",
-      { current: current.revision },
-    );
-}
-
 export function resolveContent(
   tx: Transaction,
   bindings: MissionBindings,
   projectId: string,
-  body: Pick<NodeCreate, "filename" | "kind" | "content" | "reason">,
+  body: Pick<NodeCreate, "filename" | "content" | "reason">,
   textMaxBytes: number,
 ): Content {
   validateFilename(body.filename);
-  validateNodeContent(body.kind, body.content, textMaxBytes);
-  validateText(Field.Reason, body.reason, textMaxBytes);
-  const resolved = body.content.bindings.map((bindingId) => {
-    const binding = bindings.resolveBindingIdentity(tx, projectId, bindingId);
-    if (!binding)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        MissionErrorCode.BindingsInvalid,
-        "Binding identity could not be resolved.",
-        { binding: bindingId },
-      );
-    return binding;
-  });
-  checkBindingRuleTable(body.kind, resolved);
+  const work = validateNodeContent(body.content, textMaxBytes);
+  validateText(REASON_FIELD, body.reason, textMaxBytes);
+  const resolved = resolveNodeBindings(
+    tx,
+    (inner, project, bindingId) =>
+      bindings.resolveBindingIdentity(inner, project, bindingId),
+    projectId,
+    work,
+    body.content.bindings,
+  );
   return {
     ...body.content,
+    work,
+    requires: body.content.requires ?? [],
     bindings: resolved.map((binding) => binding.binding_id),
   };
 }
 
 export function resolveTasks(
   tx: Transaction,
-  owner: { id: string | null; mission_id: string; kind: NodeKind },
+  owner: { id: string | null; mission_id: string; work: Work },
   filename: string,
   writes: TaskWrite[],
   current: TaskContent[],
   textMaxBytes: number,
 ): { tasks: TaskContent[]; changes: TaskChangeEntry[] } {
-  if (owner.kind === NodeKind.Initiative && writes.length > NO_TASKS)
-    invalidTasks();
+  validateTaskCount(owner.work, writes.length);
   const named = writes.flatMap((write) =>
     write.id === undefined ? [] : [write.id],
   );
@@ -195,7 +118,7 @@ export function resolveTasks(
   const names = new Set([filename]);
   const tasks = writes.map((write) => {
     validateFilename(write.filename);
-    validateNodeContent(owner.kind, write.content, textMaxBytes);
+    validatePlanContent(write.content, textMaxBytes);
     if (write.content.bindings.length > NO_TASKS)
       throw new OperationError(
         HttpStatus.BadRequest,
@@ -219,7 +142,7 @@ export function resolveTasks(
         {
           id: task.id,
           change: TaskChange.Created,
-          changed_fields: [...CONTENT_FIELDS],
+          changed_fields: [...TASK_CONTENT_FIELDS],
         },
       ];
     const fields = TASK_CONTENT_KEYS.filter(
@@ -250,7 +173,6 @@ function createdRevision(
   actor: HumanActor,
   createdAt: number,
 ): Revision {
-  const objective = body.kind === NodeKind.Objective;
   return {
     reason: body.reason,
     actor,
@@ -264,10 +186,8 @@ function createdRevision(
     change: {
       write: RevisionWrite.NodeCreate,
       previous_revision: null,
-      changed_fields: objective
-        ? [...CONTENT_FIELDS, TASKS_FIELD]
-        : [...CONTENT_FIELDS],
-      ...(objective ? { tasks: changes } : {}),
+      changed_fields: [...CONTENT_FIELDS, TASKS_FIELD],
+      tasks: changes,
     },
   };
 }
@@ -282,7 +202,6 @@ export function createNode(
   textMaxBytes: number,
 ): NodeChange {
   const mission = requireMission(tx, missionId, body.expected_mission_version);
-  requireParent(tx, missionId, body);
   const content = resolveContent(
     tx,
     bindings,
@@ -294,7 +213,7 @@ export function createNode(
     throw filenameConflict(body.filename);
   const { tasks, changes } = resolveTasks(
     tx,
-    { id: null, mission_id: missionId, kind: body.kind },
+    { id: null, mission_id: missionId, work: content.work },
     body.filename,
     body.tasks,
     [],
@@ -306,9 +225,7 @@ export function createNode(
   insertNode(tx, {
     id: nodeId,
     mission_id: missionId,
-    kind: body.kind,
     filename: body.filename,
-    parent_id: body.parent_id ?? null,
     created_at: createdAt,
   });
   const revision = createdRevision(
@@ -345,16 +262,7 @@ export function createNode(
     mission_version: missionVersion,
     revisions: [revisionFromRow(tx, stored)],
     retired_node_ids: [],
-    added_edges:
-      body.parent_id === undefined
-        ? []
-        : [
-            {
-              kind: EdgeKind.Containment,
-              parent_id: body.parent_id,
-              child_id: nodeId,
-            },
-          ],
+    added_edges: [],
     removed_edges: [],
     open_attempts_unchanged: openAttemptsOf(tx, [stored.node_id]),
   };

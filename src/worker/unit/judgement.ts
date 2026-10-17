@@ -4,7 +4,7 @@ import type { TaskContent } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import type { Verification, VerificationRun } from "./verification.ts";
 import type { ChangeRequestRead } from "../contract.ts";
-import { NodeKind, type NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
 
@@ -235,7 +235,7 @@ export function criterionRevisionInstruction(
 export function evaluationInstruction(
   templates: PromptTemplates,
   input: {
-    kind?: NodeKind;
+    examine?: boolean;
     tasks: readonly TaskContent[];
     verification: Verification;
     evidence: unknown;
@@ -243,7 +243,7 @@ export function evaluationInstruction(
   },
 ): string {
   return renderTemplate(templates, PromptTemplate.Evaluation, {
-    examine: input.kind === NodeKind.Initiative,
+    examine: input.examine === true,
     tasks: input.tasks.map((task) => ({
       id: task.id,
       criterion: task.content.criterion,

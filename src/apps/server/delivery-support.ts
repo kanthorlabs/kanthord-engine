@@ -5,7 +5,11 @@ import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
-import { missionOperations, type Revision } from "../../mission/contract.ts";
+import {
+  missionOperations,
+  Work,
+  type Revision,
+} from "../../mission/contract.ts";
 import { type ExecutionRecord } from "../../scheduler/contract.ts";
 import {
   PlatformAddressKind,
@@ -155,27 +159,24 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
   };
   const missionVersion = async () =>
     (await c.read<{ version: number }>(["mission", "get", projectId])).version;
-  const create = async (filename: string, parentId?: string) => {
+  const create = async (filename: string, dependentId?: string) => {
     const result = await c.write<{ revisions: Revision[] }>(
       ["mission", "node", "create", missionId],
       {
         filename,
-        kind: parentId ? "objective" : "initiative",
         content: {
           ...CONTENT,
-          bindings: parentId ? [binding(GATED).id] : [],
+          work: dependentId ? Work.Implement : Work.Examine,
+          bindings: dependentId ? [binding(GATED).id] : [],
         },
         tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
     const nodeId = result.revisions[FIRST_INDEX]!.node_id;
-    if (parentId)
-      await c.write(["mission", "dependency", "add", parentId, nodeId], {
+    if (dependentId)
+      await c.write(["mission", "dependency", "add", dependentId, nodeId], {
         reason: "plan",
         expected_mission_version: await missionVersion(),
       });
@@ -187,15 +188,15 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
     resourceIdentity: binding("harness").resource_identity,
   });
   const { token, node, release } = machine;
-  const objective = async (
+  const implement = async (
     filename: string,
-    parentId: string,
+    dependentId: string,
     opts?: {
       executing?: (execution: ExecutionRecord) => Promise<void>;
       afterSteps?: () => Promise<void>;
     },
   ) => {
-    const nodeId = await create(filename, parentId);
+    const nodeId = await create(filename, dependentId);
     const head = await pushNodeBranch(
       c.t,
       c.gatedBare.bare,
@@ -299,7 +300,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
     projectId,
     rebind,
     create,
-    objective,
+    implement,
     node,
     release,
     requestPullRequest,

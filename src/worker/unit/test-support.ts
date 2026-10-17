@@ -28,8 +28,9 @@ import {
   modelConnectorInput,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
+import { ExecutionWork } from "../contract.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { NodeKind, openNativeAgent } from "./native-agent.ts";
+import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
@@ -184,7 +185,7 @@ export async function objectiveFixture(
     hostTools: unusedHostTools,
     setup,
     claim,
-    nodeKind: NodeKind.Objective,
+    work: ExecutionWork.Implement,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,

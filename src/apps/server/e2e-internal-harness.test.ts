@@ -36,6 +36,7 @@ import {
 import {
   AssetKind,
   NodeState,
+  Work,
   AssessmentResult,
   ClosingEvent,
   type Evidence,
@@ -84,6 +85,23 @@ const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
   fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
 type Page<T> = { items: T[] };
 type CLI = ReturnType<typeof journeyClient>;
+
+async function addDependency(
+  cli: CLI,
+  projectId: string,
+  dependentId: string,
+  dependsOnId: string,
+) {
+  const mission = await cli.read<{ version: number }>([
+    "mission",
+    "get",
+    projectId,
+  ]);
+  await cli.write(["mission", "dependency", "add", dependentId, dependsOnId], {
+    reason: "plan",
+    expected_mission_version: mission.version,
+  });
+}
 
 async function waitForNode(cli: CLI, nodeId: string, state: string) {
   const deadline = Date.now() + POLL_DEADLINE_MS;
@@ -218,33 +236,33 @@ async function setupInternal(t: TestContext) {
       review: worker(REVIEWER, "re@1"),
     },
   });
-  const initiative = await createJourneyNode(
+  const examine = await createJourneyNode(
     cli,
     project.id,
-    "initiative-1.md",
-    "initiative",
+    "examine-1.md",
+    Work.Examine,
     [bindingSet.bindings.repo!.id, bindingSet.bindings.gated!.id],
   );
-  const objective = await createJourneyNode(
+  const implement = await createJourneyNode(
     cli,
     project.id,
-    "objective-a.md",
-    "objective",
+    "implement-a.md",
+    Work.Implement,
     [bindingSet.bindings.repo!.id, bindingSet.bindings.store!.id],
-    initiative,
   );
-  await createJourneyTask(cli, project.id, objective, "task-a.md");
+  await addDependency(cli, project.id, examine, implement);
+  await createJourneyTask(cli, project.id, implement, "task-a.md");
   const gated = await createJourneyNode(
     cli,
     project.id,
-    "objective-c.md",
-    "objective",
+    "implement-c.md",
+    Work.Implement,
     [bindingSet.bindings.gated!.id],
-    initiative,
   );
+  await addDependency(cli, project.id, examine, gated);
   await createJourneyTask(cli, project.id, gated, "task-c.md");
   for (const [nodeId, value] of [
-    [objective, 5],
+    [implement, 5],
     [gated, 4],
   ] as const) {
     const mission = await cli.read<{ version: number }>([
@@ -274,15 +292,15 @@ async function setupInternal(t: TestContext) {
     reviewAuth.client_secret,
   );
   assert.ok(bindingSet.bindings.repo && bindingSet.bindings.gated);
-  assert.ok(objective && gated && initiative);
+  assert.ok(implement && gated && examine);
   return {
     fixture,
     cli,
     project_id: project.id,
     bindings: bindingSet.bindings,
-    objective,
+    implement,
     gated,
-    initiative,
+    examine,
     generalAuth,
     reviewAuth,
     s3,
@@ -388,16 +406,16 @@ test(
     );
     let outcomeA!: string;
     await t.test(
-      "EI10.2 objective publishes object and checkpoint, reviewer verifies",
+      "EI10.2 implement node publishes object and checkpoint, reviewer verifies",
       { timeout: JOURNEY_TIMEOUT_MS },
       async () => {
-        await waitForNode(f.cli, f.objective, NodeState.Completed);
-        await finishedExecutions(f.cli, f.project_id, f.objective, runtimes);
+        await waitForNode(f.cli, f.implement, NodeState.Completed);
+        await finishedExecutions(f.cli, f.project_id, f.implement, runtimes);
         const evidence = await f.cli.read<Page<Evidence>>([
           "mission",
           "evidence",
           "list",
-          f.objective,
+          f.implement,
           "--attempt",
           "1",
         ]);
@@ -412,7 +430,7 @@ test(
         assert.ok(Number.isFinite(asset.published_at));
         const head = await remoteHead(
           repo.bare,
-          `refs/heads/kanthord/${f.objective}`,
+          `refs/heads/kanthord/${f.implement}`,
         );
         assert.ok(head);
         const work = evidence.items.find((item) =>
@@ -447,7 +465,7 @@ test(
           "mission",
           "assessment",
           "list",
-          f.objective,
+          f.implement,
         ]);
         assert.equal(assessments.items.length, SINGLE_ITEM);
         assert.equal(assessments.items[0]!.result, AssessmentResult.Success);
@@ -460,7 +478,7 @@ test(
           "mission",
           "outcome",
           "list",
-          f.objective,
+          f.implement,
         ]);
         assert.equal(outcomes.items.length, SINGLE_ITEM);
         assert.equal(outcomes.items[0]!.result, AssessmentResult.Success);
@@ -473,7 +491,7 @@ test(
       },
     );
     await t.test(
-      "EI10.3 gated objective requests its configured action once",
+      "EI10.3 gated implement node requests its configured action once",
       async () => {
         await waitForNode(f.cli, f.gated, NodeState.ExternalRequested);
         const head = await remoteHead(
@@ -612,16 +630,16 @@ test(
       },
     );
     await t.test(
-      "EI10.5 initiative report and assessment reference both current outcomes",
+      "EI10.5 examine report and assessment reference both current outcomes",
       { timeout: JOURNEY_TIMEOUT_MS },
       async () => {
-        await waitForNode(f.cli, f.initiative, NodeState.Completed);
-        await finishedExecutions(f.cli, f.project_id, f.initiative, runtimes);
+        await waitForNode(f.cli, f.examine, NodeState.Completed);
+        await finishedExecutions(f.cli, f.project_id, f.examine, runtimes);
         const evidence = await f.cli.read<Page<Evidence>>([
           "mission",
           "evidence",
           "list",
-          f.initiative,
+          f.examine,
           "--attempt",
           "1",
         ]);
@@ -673,7 +691,7 @@ test(
           "mission",
           "assessment",
           "list",
-          f.initiative,
+          f.examine,
         ]);
         assert.equal(assessments.items.length, SINGLE_ITEM);
         assert.equal(assessments.items[0]!.result, AssessmentResult.Success);

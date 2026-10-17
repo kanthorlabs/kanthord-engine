@@ -95,7 +95,7 @@ function harness(t: TestContext) {
   return { ...h, read, request, next };
 }
 
-test("initiative context has no actions or assessment", (t) => {
+test("examine context has no actions or assessment", (t) => {
   const h = executionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
   const context = h.store.transaction((tx) =>
     h.service.actionContextOf(tx, h.node_id, FIRST_ATTEMPT),

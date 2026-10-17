@@ -5,7 +5,6 @@ import {
   importAdmissible,
   isTerminal,
   nodeApiWriteAdmissible,
-  parentCreateAdmissible,
   reconcileJob,
 } from "./admission.ts";
 import { MISSION_SERVICE_NAME, NodeState, type WorkQueue } from "./contract.ts";
@@ -18,13 +17,6 @@ const NEXT_ATTEMPT = 1;
 const PRIORITY = 9;
 const DEFAULT_PRIORITY = 0;
 const STATES = Object.values(NodeState);
-const ADMITTED_PARENTS: ReadonlySet<string> = new Set([
-  NodeState.Pending,
-  NodeState.Available,
-  NodeState.Executing,
-  NodeState.Blocked,
-  NodeState.Paused,
-]);
 const UNEXPECTED_CALL = "unexpected priority update";
 
 function fixture(t: TestContext): Store {
@@ -41,12 +33,6 @@ for (const state of [...STATES, null]) {
     assert.equal(
       isTerminal(state),
       state === NodeState.Completed || state === NodeState.Discarded,
-    );
-  });
-  test(`parentCreateAdmissible: ${state}`, () => {
-    assert.equal(
-      parentCreateAdmissible(state),
-      state !== null && ADMITTED_PARENTS.has(state),
     );
   });
   test(`nodeApiWriteAdmissible: ${state}`, () => {

@@ -18,7 +18,7 @@ import {
   producedContent,
   requireRepositoryAddress,
   requireTestedInput,
-  storageBindingIdOf,
+  storageBindingIdsOf,
 } from "./evidence-content.ts";
 import { evidenceRecord } from "./record-read.ts";
 import {
@@ -106,12 +106,12 @@ export function prepareEvidence(
         ...base,
         content: canonicalJSON(producedContent(asset.content)),
       };
-    const storageBindingId = storageBindingIdOf(
+    const [storageBindingId] = storageBindingIdsOf(
       tx,
       dependencies.bindings,
       revision,
     );
-    if (!storageBindingId)
+    if (storageBindingId === undefined)
       throw new OperationError(
         HttpStatus.Conflict,
         MissionErrorCode.EvidenceStorageBindingAbsent,

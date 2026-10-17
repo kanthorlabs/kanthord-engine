@@ -3,12 +3,7 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
-import {
-  AssessmentResult,
-  ClosingEvent,
-  NodeKind,
-  NodeState,
-} from "./contract.ts";
+import { AssessmentResult, ClosingEvent, Work, NodeState } from "./contract.ts";
 import { ControlError } from "./control.ts";
 import {
   openAttempt,
@@ -36,7 +31,7 @@ const REVOKE = "schedulerClaims.revoke";
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const COMMIT = "a".repeat(40);
 const SECOND_ATTEMPT = 2;
-test("objective override validates its attempt repository pin after the current revision changes", async (t) => {
+test("implement override validates its attempt repository pin after the current revision changes", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const original = createIdentity("binding");
   const newer = createIdentity("binding");
@@ -64,8 +59,8 @@ test("objective override validates its attempt repository pin after the current 
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(NodeKind.Objective, h.node_id);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
@@ -119,8 +114,8 @@ test("attempt-zero success override publishes a human repository evidence and sa
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(NodeKind.Objective, h.node_id);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
@@ -129,9 +124,7 @@ test("attempt-zero success override publishes a human repository evidence and sa
     insertNode(tx, {
       id: dependent,
       mission_id: h.mission_id,
-      kind: NodeKind.Initiative,
       filename: "dependent.md",
-      parent_id: null,
       created_at: NOW,
     });
     insertDependency(tx, h.mission_id, dependent, h.node_id);
@@ -335,9 +328,7 @@ test("discard does not satisfy dependencies", async (t) => {
     insertNode(tx, {
       id: dependent,
       mission_id: h.mission_id,
-      kind: NodeKind.Initiative,
       filename: "dependent.md",
-      parent_id: null,
       created_at: NOW,
     });
     insertDependency(tx, h.mission_id, dependent, h.node_id);

@@ -3,12 +3,7 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import {
-  MissionErrorCode,
-  NodeKind,
-  NodeState,
-  TaskChange,
-} from "./contract.ts";
+import { MissionErrorCode, Work, NodeState, TaskChange } from "./contract.ts";
 import { ControlError } from "./control.ts";
 import { openAttempt } from "./record-store.ts";
 import {
@@ -76,8 +71,11 @@ for (const filenames of [
         : null;
     h.store.transaction((tx) => {
       tx.database
-        .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
-        .run(NodeKind.Objective, NodeState.Paused, h.node_id);
+        .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+        .run(NodeState.Paused, h.node_id);
+      tx.database
+        .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+        .run(Work.Implement, h.node_id);
       tx.database
         .prepare(
           "UPDATE mission_node_revision SET bindings = ?, tasks = ? WHERE node_id = ?",
@@ -91,7 +89,7 @@ for (const filenames of [
       body: h.body(NodeState.Paused, FIRST_ATTEMPT),
     });
     const change = {
-      content: { ...content, bindings: [bindingId] },
+      content: { ...content, work: Work.Implement, bindings: [bindingId] },
       reason: "Rename",
       tasks: tasks.map((task, index) => ({
         ...task,
@@ -160,7 +158,7 @@ for (const filenames of [
     );
   });
 }
-test("objective unblock refuses a task of another set and writes the changed task snapshot", async (t) => {
+test("implement unblock refuses a task of another set and writes the changed task snapshot", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");
   const taskId = createIdentity("task");
@@ -180,8 +178,11 @@ test("objective unblock refuses a task of another set and writes the changed tas
       : null;
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
-      .run(NodeKind.Objective, NodeState.Paused, h.node_id);
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(NodeState.Paused, h.node_id);
+    tx.database
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ?, tasks = ? WHERE node_id = ?",
@@ -198,7 +199,7 @@ test("objective unblock refuses a task of another set and writes the changed tas
     body: h.body(NodeState.Paused),
   });
   const change = {
-    content: { ...content, bindings: [bindingId] },
+    content: { ...content, work: Work.Implement, bindings: [bindingId] },
     reason: "Redirect",
     tasks: [
       {
@@ -238,7 +239,10 @@ test("objective unblock refuses a task of another set and writes the changed tas
       ...input,
       body: {
         ...input.body,
-        change: { ...change, content: { ...content, bindings: ["repo"] } },
+        change: {
+          ...change,
+          content: { ...content, work: Work.Implement, bindings: ["repo"] },
+        },
       },
     }),
     (error) =>
@@ -383,9 +387,7 @@ test("unchanged content makes no revision and unsatisfied closure routes unblock
     insertNode(tx, {
       id: target,
       mission_id: h.mission_id,
-      kind: NodeKind.Initiative,
       filename: "target.md",
-      parent_id: null,
       created_at: NOW,
     });
     insertDependency(tx, h.mission_id, h.node_id, target);
@@ -466,8 +468,11 @@ test("unblock change adds and removes a task", async (t) => {
       : null;
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ?, state = ? WHERE id = ?")
-      .run(NodeKind.Objective, NodeState.Paused, h.node_id);
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(NodeState.Paused, h.node_id);
+    tx.database
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ?, tasks = ? WHERE node_id = ?",
@@ -494,7 +499,7 @@ test("unblock change adds and removes a task", async (t) => {
       expected_revision: FIRST_ATTEMPT,
       expected_mission_version: FIRST_ATTEMPT,
       change: {
-        content: { ...content, bindings: [bindingId] },
+        content: { ...content, work: Work.Implement, bindings: [bindingId] },
         tasks: [
           { id: kept, filename: "kept.md", content },
           { filename: ADDED_TASK_FILE, content },

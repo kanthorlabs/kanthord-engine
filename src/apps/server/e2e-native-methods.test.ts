@@ -22,7 +22,11 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { missionOperations, type Evidence } from "../../mission/contract.ts";
+import {
+  missionOperations,
+  Work,
+  type Evidence,
+} from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
   schedulerOperations,
@@ -56,7 +60,6 @@ const ZERO_BYTE = 0;
 const SINGLE_INSTANCE = 1;
 const INITIAL_BINDING_VERSION = 1;
 const SINGLE_TURN = 1;
-const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
 const GATED_BINDING_INDEX = 2;
 const NO_OUTPUT = "";
@@ -235,13 +238,6 @@ test(
       });
       return result.revisions[0]!;
     }
-    const initiative = (
-      await create({
-        filename: "initiative.md",
-        kind: "initiative",
-        content: { ...CONTENT, verifications: ["true"] },
-      })
-    ).node_id;
     const nodes: string[] = [];
     const tasks: string[] = [];
     for (const [index, name] of ["a", "b", "c"].entries()) {
@@ -250,10 +246,7 @@ test(
           .id;
       const node = await create({
         filename: `${name}.md`,
-        kind: "objective",
-        parent_id: initiative,
-        expected_parent_revision: FIRST_REVISION,
-        content: { ...CONTENT, bindings: [binding] },
+        content: { ...CONTENT, work: Work.Implement, bindings: [binding] },
         tasks: [
           {
             filename: `task-${name}.md`,
@@ -470,7 +463,7 @@ test(
     let headA = "";
     let headC = "";
     let gatedResource = "";
-    await t.test("E08.1 objective task commit and head evidence", async () => {
+    await t.test("E08.1 implement task commit and head evidence", async () => {
       const answer = await execute(general, A, hello());
       assert.deepEqual(answer.result, {
         kind: "released",
@@ -501,7 +494,7 @@ test(
       const WAITING = "Waiting";
       assert.equal(await state(A), WAITING);
     });
-    await t.test("E08.2 gated objective publishes its task", async () => {
+    await t.test("E08.2 gated implement node publishes its task", async () => {
       const answer = await execute(general, C, hello());
       assert.deepEqual(answer.result, {
         kind: "released",
@@ -563,7 +556,7 @@ test(
       },
     );
     await t.test(
-      "E08.4 reviewer verifies objective and task and closes the claim",
+      "E08.4 reviewer verifies implement node and task and closes the claim",
       async () => {
         const answer = await execute(reviewer, A, review());
         const CLOSED = "closed";

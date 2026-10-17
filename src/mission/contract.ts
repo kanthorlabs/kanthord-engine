@@ -13,6 +13,7 @@ import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
+import { traitKeySchema } from "../kernel/trait.ts";
 
 export const MISSION_SERVICE_NAME = "mission";
 export const MISSION_IDENTITY_PREFIX = "mission";
@@ -256,7 +257,7 @@ export const MissionErrorCode = {
   VerificationsMissing: "mission.node.verifications_missing",
   BindingsInvalid: "mission.node.bindings_invalid",
   FilenameConflict: "mission.node.filename_conflict",
-  CreateRefused: "mission.node.create_refused",
+  WorkLocked: "mission.node.work_locked",
   Retired: "mission.node.retired",
   Terminal: "mission.node.terminal",
   EndpointInvalid: "mission.dependency.endpoint_invalid",
@@ -266,7 +267,6 @@ export const MissionErrorCode = {
   PlanInvalid: "mission.import.plan_invalid",
   MissionMismatch: "mission.import.mission_mismatch",
   ReferenceKindInvalid: "mission.import.reference_kind_invalid",
-  KindChanged: "mission.import.kind_changed",
   UnresolvedReference: "mission.import.unresolved_reference",
   VerificationUncovered: "mission.import.verification_uncovered",
   DuplicateFile: "mission.import.duplicate_file",
@@ -292,11 +292,10 @@ export const MissionBindingKind = {
   Storage: "storage",
 } as const;
 
-export const NodeKind = {
-  Initiative: "initiative",
-  Objective: "objective",
+export const Work = {
+  Implement: "implement",
+  Examine: "examine",
 } as const;
-export const PlanFileKind = { ...NodeKind, Task: "task" } as const;
 export const NodeState = {
   Pending: "Pending",
   Available: "Available",
@@ -315,7 +314,6 @@ export const RevisionWrite = {
   Import: "import",
   NodeCreate: "node.create",
   NodeUpdate: "node.update",
-  NodeMove: "node.move",
   NodeRetire: "node.retire",
   NodeRebind: "node.rebind",
   CriterionSet: "criterion.set",
@@ -333,10 +331,6 @@ export const TaskChange = {
   MovedIn: "moved-in",
   MovedOut: "moved-out",
   Retired: "retired",
-} as const;
-export const EdgeKind = {
-  Containment: "containment",
-  Dependency: "dependency",
 } as const;
 export const ImportFormat = {
   Markdown: "markdown",
@@ -443,10 +437,8 @@ export const actionKeySchema = z
   .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
 export const textSchema = z.string().min(1);
 
-export const nodeKindSchema = z.enum(NodeKind);
-export type NodeKind = z.infer<typeof nodeKindSchema>;
-export const planFileKindSchema = z.enum(PlanFileKind);
-export type PlanFileKind = z.infer<typeof planFileKindSchema>;
+export const workSchema = z.enum(Work);
+export type Work = z.infer<typeof workSchema>;
 export const planFileIdSchema = z.union([
   identitySchema(NODE_IDENTITY_PREFIX),
   identitySchema(TASK_IDENTITY_PREFIX),
@@ -457,22 +449,32 @@ export const revisionWriteSchema = z.enum(RevisionWrite);
 export type RevisionWrite = z.infer<typeof revisionWriteSchema>;
 export const taskChangeSchema = z.enum(TaskChange);
 export type TaskChange = z.infer<typeof taskChangeSchema>;
-export const edgeKindSchema = z.enum(EdgeKind);
-export type EdgeKind = z.infer<typeof edgeKindSchema>;
 export const importFormatSchema = z.enum(ImportFormat);
 export type ImportFormat = z.infer<typeof importFormatSchema>;
 export const actorKindSchema = z.enum(ActorKind);
 export type ActorKind = z.infer<typeof actorKindSchema>;
 
-export const contentSchema = z.strictObject({
+const planContentFields = {
   name: z.string().min(1),
   requirement: z.string().min(1),
   criterion: z.string().min(1),
   verifications: z.array(z.string().min(1)).min(1),
   bindings: z.array(z.string()),
+};
+export const requiresSchema = z
+  .array(traitKeySchema)
+  .refine((keys) => new Set(keys).size === keys.length, {
+    message: "Trait keys must be unique.",
+  });
+export const contentSchema = z.strictObject({
+  ...planContentFields,
+  work: workSchema,
+  requires: requiresSchema.default([]),
 });
 export type Content = z.infer<typeof contentSchema>;
-export const taskBodySchema = contentSchema.extend({
+export type ContentInput = z.input<typeof contentSchema>;
+export const taskBodySchema = z.strictObject({
+  ...planContentFields,
   bindings: z.array(z.string()).max(0),
 });
 export type TaskBody = z.infer<typeof taskBodySchema>;
@@ -487,19 +489,16 @@ export type TaskContent = z.infer<typeof taskContentSchema>;
 export const taskWriteSchema = z.strictObject({
   id: identitySchema(TASK_IDENTITY_PREFIX).optional(),
   filename: planFileNameSchema,
-  content: contentSchema,
+  content: z.strictObject(planContentFields),
 });
 export type TaskWrite = z.infer<typeof taskWriteSchema>;
 
 export const nodeCreateSchema = z.strictObject({
   filename: planFileNameSchema,
-  kind: nodeKindSchema,
   content: contentSchema,
   tasks: z.array(taskWriteSchema),
   reason: z.string().min(1),
   expected_mission_version: z.number().int().positive(),
-  parent_id: identitySchema("node").optional(),
-  expected_parent_revision: z.number().int().positive().optional(),
 });
 export type NodeCreate = z.infer<typeof nodeCreateSchema>;
 export const nodeUpdateSchema = z.strictObject({
@@ -511,15 +510,6 @@ export const nodeUpdateSchema = z.strictObject({
   expected_mission_version: z.number().int().positive(),
 });
 export type NodeUpdate = z.infer<typeof nodeUpdateSchema>;
-export const moveSchema = z.strictObject({
-  new_parent_id: identitySchema("node"),
-  reason: z.string().min(1),
-  expected_mission_version: z.number().int().positive(),
-  expected_revision: z.number().int().positive(),
-  expected_old_parent_revision: z.number().int().positive(),
-  expected_new_parent_revision: z.number().int().positive(),
-});
-export type Move = z.infer<typeof moveSchema>;
 export const graphEditSchema = z.strictObject({
   reason: z.string().min(1),
   expected_mission_version: z.number().int().positive(),
@@ -603,18 +593,10 @@ export const revisionSchema = z.strictObject({
   pinned_by_attempts: z.array(z.number().int().positive()),
 });
 export type Revision = z.infer<typeof revisionSchema>;
-export const edgeSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal(EdgeKind.Containment),
-    parent_id: identitySchema("node"),
-    child_id: identitySchema("node"),
-  }),
-  z.strictObject({
-    kind: z.literal(EdgeKind.Dependency),
-    dependent_id: identitySchema("node"),
-    depends_on_id: identitySchema("node"),
-  }),
-]);
+export const edgeSchema = z.strictObject({
+  dependent_id: identitySchema("node"),
+  depends_on_id: identitySchema("node"),
+});
 export type Edge = z.infer<typeof edgeSchema>;
 export const nodeChangeSchema = z.strictObject({
   mission_version: z.number().int().positive(),
@@ -639,31 +621,50 @@ export const retirePreviewSchema = z.strictObject({
   preview_digest: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type RetirePreview = z.infer<typeof retirePreviewSchema>;
-export const importEntrySchema = z.strictObject({
-  filename: z.string().min(1),
-  kind: planFileKindSchema,
+const planEntryFields = {
   name: z.string().min(1),
   requirement: z.string().min(1),
   criterion: z.string().min(1),
   verifications: z.array(z.string().min(1)).min(1),
   bindings: z.array(z.string()),
+};
+export const importNodeEntrySchema = z.strictObject({
+  filename: z.string().min(1),
   id: planFileIdSchema.optional(),
-  parent: z.string().min(1).optional(),
+  work: z.string(),
+  ...planEntryFields,
+  requires: z.array(z.string()).optional(),
   depends_on: z.array(z.string().min(1)).optional(),
 });
-export type ImportEntry = z.infer<typeof importEntrySchema>;
-export const exportEntrySchema = z.strictObject({
-  filename: planFileNameSchema,
-  id: planFileIdSchema,
-  kind: planFileKindSchema,
-  name: z.string().min(1),
-  requirement: z.string().min(1),
-  criterion: z.string().min(1),
-  verifications: z.array(z.string().min(1)).min(1),
-  bindings: z.array(z.string()),
-  parent: planFileNameSchema.optional(),
-  depends_on: z.array(planFileNameSchema).optional(),
+export type ImportNodeEntry = z.infer<typeof importNodeEntrySchema>;
+export const importTaskEntrySchema = z.strictObject({
+  filename: z.string().min(1),
+  id: planFileIdSchema.optional(),
+  node: z.string().min(1),
+  ...planEntryFields,
 });
+export type ImportTaskEntry = z.infer<typeof importTaskEntrySchema>;
+export const importEntrySchema = z.union([
+  importNodeEntrySchema,
+  importTaskEntrySchema,
+]);
+export type ImportEntry = z.infer<typeof importEntrySchema>;
+export const exportEntrySchema = z.union([
+  z.strictObject({
+    filename: planFileNameSchema,
+    id: identitySchema(NODE_IDENTITY_PREFIX),
+    work: workSchema,
+    ...planEntryFields,
+    requires: z.array(traitKeySchema),
+    depends_on: z.array(planFileNameSchema),
+  }),
+  z.strictObject({
+    filename: planFileNameSchema,
+    id: identitySchema(TASK_IDENTITY_PREFIX),
+    node: planFileNameSchema,
+    ...planEntryFields,
+  }),
+]);
 export type ExportEntry = z.infer<typeof exportEntrySchema>;
 export const planFileEntrySchema = z.strictObject({
   filename: z.string().min(1),
@@ -1027,7 +1028,6 @@ const nodeBase = {
   id: identitySchema("node"),
   filename: planFileNameSchema,
   mission_id: identitySchema("mission"),
-  parent_id: identitySchema("node").nullable(),
   visible_revision: z.number().int().positive(),
   content: contentSchema,
   tasks: z.array(taskContentSchema),
@@ -1045,18 +1045,12 @@ const runnableNodeFields = {
     .max(Number.MAX_SAFE_INTEGER),
   depends_on: z.array(identitySchema("node")),
 };
-export const nodeSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    ...nodeBase,
-    kind: z.literal(NodeKind.Initiative),
-    ...runnableNodeFields,
-  }),
-  z.strictObject({
-    ...nodeBase,
-    kind: z.literal(NodeKind.Objective),
-    ...runnableNodeFields,
-  }),
-]);
+export const nodeSchema = z.strictObject({
+  ...nodeBase,
+  ...runnableNodeFields,
+  work: workSchema,
+  requires: z.array(traitKeySchema),
+});
 export type Node = z.infer<typeof nodeSchema>;
 export const controlResultSchema = z.strictObject({
   node: nodeSchema,
@@ -1111,7 +1105,7 @@ export const evidenceSubmitSchema = executionContextSchema.extend({
 });
 export type EvidenceSubmit = z.infer<typeof evidenceSubmitSchema>;
 export const PROPOSAL_MAX = 10;
-export const proposalTaskSchema = contentSchema.omit({ bindings: true });
+export const proposalTaskSchema = taskBodySchema.omit({ bindings: true });
 export type ProposalTask = z.infer<typeof proposalTaskSchema>;
 export const proposalContentSchema = z.strictObject({
   dependency_id: identitySchema(NODE_IDENTITY_PREFIX),
@@ -1371,7 +1365,7 @@ export const missionOperations = {
     ),
     output: pageOf(executionDependencySchema),
     description:
-      "List the direct dependencies of an initiative at their outcome revisions.",
+      "List the direct dependencies of an examine node at their outcome revisions.",
   },
   "execution.dependency.outcome.list": {
     ...readOperation,
@@ -1386,7 +1380,7 @@ export const missionOperations = {
     ),
     output: pageOf(outcomeSchema),
     description:
-      "List the current outcomes of the direct dependencies of an initiative.",
+      "List the current outcomes of the direct dependencies of an examine node.",
   },
   "execution.dependency.evidence.list": {
     ...readOperation,
@@ -1975,7 +1969,6 @@ export const missionOperations = {
       z.strictObject({ mission_id: identitySchema(MISSION_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
-        kind: edgeKindSchema.optional(),
         node_id: identitySchema(NODE_IDENTITY_PREFIX).optional(),
       }),
     ),
@@ -2009,9 +2002,8 @@ export const missionOperations = {
       z.strictObject({ mission_id: identitySchema(MISSION_IDENTITY_PREFIX) }),
       z.strictObject({
         ...pageQuery,
-        kind: nodeKindSchema.optional(),
+        work: workSchema.optional(),
         state: nodeStateSchema.optional(),
-        parent_id: identitySchema(NODE_IDENTITY_PREFIX).optional(),
         include_retired: z.enum(["true", "false"]).default("false").optional(),
       }),
     ),
@@ -2069,7 +2061,7 @@ export const missionOperations = {
       }),
     ),
     output: retirePreviewSchema,
-    description: "Preview retirement of a mission node and its descendants.",
+    description: "Preview retirement of a mission node.",
   },
   "node.rebind": {
     ...writeOperation,
@@ -2097,7 +2089,7 @@ export const missionOperations = {
       body: retireSchema,
     }),
     output: nodeChangeSchema,
-    description: "Retire a mission node and its descendants.",
+    description: "Retire a mission node.",
   },
   "node.priority.set": {
     ...writeOperation,
@@ -2110,20 +2102,7 @@ export const missionOperations = {
       body: prioritySetSchema,
     }),
     output: nodeSchema,
-    description: "Set the priority of a mission initiative or objective.",
-  },
-  "node.move": {
-    ...writeOperation,
-    id: "mission.node.move",
-    method: HttpMethod.Post,
-    path: "/api/mission/node/:node_id/move",
-    input: z.strictObject({
-      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
-      query: z.strictObject({}),
-      body: moveSchema,
-    }),
-    output: nodeChangeSchema,
-    description: "Move a mission node to a new parent.",
+    description: "Set the priority of a mission node.",
   },
   "criterion.set": {
     ...writeOperation,
