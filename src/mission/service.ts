@@ -76,6 +76,7 @@ import {
 } from "./execution-read.ts";
 import { claim, release, failure } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
+import { claimFacts, claimFactsOf } from "./claim-facts.ts";
 import {
   authorizeAction,
   authorizeEvidenceAsset,
@@ -864,6 +865,14 @@ export class MissionService
 
   liveNodesPinning(tx: Transaction, bindingId: string): string[] {
     return readLiveNodesPinning(tx, bindingId);
+  }
+
+  claimFacts(tx: Transaction, nodeId: string) {
+    return claimFacts(tx, nodeId);
+  }
+
+  claimFactsOf(tx: Transaction, projectId: string) {
+    return claimFactsOf(tx, this.dependencies.bindings, projectId);
   }
 
   actionContextOf(tx: Transaction, nodeId: string, attempt: number) {

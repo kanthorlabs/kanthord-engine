@@ -82,9 +82,22 @@ export interface WorkQueue {
   priorityUpdate(tx: Transaction, nodeId: string, priority: number): void;
 }
 
+export interface ClaimFacts {
+  work: Work;
+  requires: string[];
+}
+
+export interface ClaimFactsRow extends ClaimFacts {
+  node_id: string;
+  revision: number;
+  claims: ClaimableState[];
+}
+
 export interface MissionCollaborations {
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void;
   liveNodesPinning(tx: Transaction, bindingId: string): string[];
+  claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
+  claimFactsOf(tx: Transaction, projectId: string): ClaimFactsRow[];
 }
 
 export interface SchedulerClaims {
@@ -311,6 +324,13 @@ export const NodeState = {
   ExternalSuccess: "External.Success",
   ExternalFailed: "External.Failed",
 } as const;
+export const ClaimableState = {
+  Available: NodeState.Available,
+  Waiting: NodeState.Waiting,
+  ExternalRequested: NodeState.ExternalRequested,
+} as const;
+export type ClaimableState =
+  (typeof ClaimableState)[keyof typeof ClaimableState];
 export const RevisionWrite = {
   Import: "import",
   NodeCreate: "node.create",
