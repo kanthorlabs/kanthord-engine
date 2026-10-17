@@ -140,10 +140,17 @@ components:
                 maxLength: 35
                 pattern: ^evidence_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: evidence_ followed by a canonical 26-character uppercase ULID.
+              binding_id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: binding_ followed by a canonical 26-character uppercase ULID.
             required:
               - head_commit
               - change_requests
               - evidence_id
+              - binding_id
             additionalProperties: false
       required:
         - items

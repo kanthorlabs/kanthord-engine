@@ -23,7 +23,7 @@ type ChangeRequestDependencies = Pick<
 function otherEndRequestsOf(
   dependencies: ChangeRequestDependencies,
   claim: ExecutionClaim,
-): string[] {
+): { evidenceId: string; bindingId: string }[] {
   assert.ok(claim.attempt > FIRST_ATTEMPT);
   return dependencies.store.transaction((tx) =>
     dependencies.missionActions
@@ -32,7 +32,12 @@ function otherEndRequestsOf(
         entry.resolution === ActionResolution.OtherEnd &&
         entry.action.action === RepositoryAction.PullRequest &&
         entry.request_evidence_id !== null
-          ? [entry.request_evidence_id]
+          ? [
+              {
+                evidenceId: entry.request_evidence_id,
+                bindingId: entry.action.binding_id,
+              },
+            ]
           : [],
       ),
   );
@@ -46,7 +51,10 @@ export async function clearedChangeRequests(
   assert.equal(call.executionId, claim.executionId);
   if (claim.attempt === FIRST_ATTEMPT) return { items: [] };
   const items: ClearedChangeRequests["items"] = [];
-  for (const evidenceId of otherEndRequestsOf(dependencies, claim)) {
+  for (const { evidenceId, bindingId } of otherEndRequestsOf(
+    dependencies,
+    claim,
+  )) {
     const answer = await dependencies.intakeActions.read(
       call,
       ActionReadMethod.ChangeRequestGet,
@@ -57,6 +65,7 @@ export async function clearedChangeRequests(
       throw new OperationError(BAD_GATEWAY_STATUS, answer.code, answer.message);
     items.push({
       evidence_id: evidenceId,
+      binding_id: bindingId,
       ...changeRequestReadSchema.parse(answer.body),
     });
   }

@@ -136,6 +136,7 @@ export const clearedChangeRequestsSchema = z.strictObject({
   items: z.array(
     changeRequestReadSchema.extend({
       evidence_id: identitySchema("evidence"),
+      binding_id: identitySchema("binding"),
     }),
   ),
 });

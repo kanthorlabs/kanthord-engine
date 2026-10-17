@@ -194,6 +194,7 @@ test("the start check revises a task that the prior rationale names without a ju
 test("the start check judges a task against the requested changes of a change request", async (t) => {
   const requested = requestedChangesText([
     {
+      binding: "repo",
       head_commit: "a".repeat(40),
       change_requests: [
         {

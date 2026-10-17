@@ -17,6 +17,10 @@ import type { MethodClients } from "./method-clients.ts";
 const SECOND_ATTEMPT = 2;
 const ONE_READ = 1;
 const CLEARED_RATIONALE = "cleared";
+const REPOSITORIES = [
+  { binding_id: "binding_api", name: "api" },
+  { binding_id: "binding_web", name: "web" },
+];
 
 function fixture(attempt = 1) {
   return new ExecutionRun({
@@ -134,7 +138,7 @@ test("the prior rationale is the rework rationale, else the cleared rationale, e
       "execution.clearedOutcome.get": async () => notFound,
       "execution.cleared_assessment.get": async () => cleared,
     } as unknown as MethodClients["mission"];
-    assert.deepEqual(await readPriorRationale(run), {
+    assert.deepEqual(await readPriorRationale(run, REPOSITORIES), {
       rationale: expected,
       rework: rework !== notFound,
     });
@@ -166,6 +170,7 @@ const CHANGE_REQUESTS = {
   items: [
     {
       evidence_id: "evidence",
+      binding_id: "binding_api",
       head_commit: "a".repeat(40),
       change_requests: [
         {
@@ -204,10 +209,10 @@ test("the prior rationale of an attempt after a change request holds the request
     },
   } as unknown as MethodClients["worker"];
   assert.equal(
-    (await readPriorRationale(run)).rationale,
+    (await readPriorRationale(run, REPOSITORIES)).rationale,
     [
       "The pull request reviewers request these changes:",
-      `Reviewer octo requests changes at commit ${"a".repeat(40)}: Rename the route.`,
+      `Reviewer octo requests changes on api at commit ${"a".repeat(40)}: Rename the route.`,
       "- src/route.ts:4: Use /api.",
       "- README.md: Document it.",
     ].join("\n"),
@@ -233,8 +238,8 @@ test("an attempt not ended by a change request reads no change request", async (
       }),
     } as unknown as MethodClients["mission"];
     run.clients.worker = {} as MethodClients["worker"];
-    assert.equal(await readRequestedChanges(run), null);
-    assert.deepEqual(await readPriorRationale(run), {
+    assert.equal(await readRequestedChanges(run, REPOSITORIES), null);
+    assert.deepEqual(await readPriorRationale(run, REPOSITORIES), {
       rationale: CLEARED_RATIONALE,
       rework: false,
     });
@@ -243,7 +248,7 @@ test("an attempt not ended by a change request reads no change request", async (
   t.after(() => first.dispose());
   first.clients.mission = {} as MethodClients["mission"];
   first.clients.worker = {} as MethodClients["worker"];
-  assert.equal(await readRequestedChanges(first), null);
+  assert.equal(await readRequestedChanges(first, REPOSITORIES), null);
 });
 
 test("an external failure without a current change request keeps the cleared rationale", async (t) => {
@@ -268,7 +273,7 @@ test("an external failure without a current change request keeps the cleared rat
       },
     }),
   } as unknown as MethodClients["worker"];
-  assert.deepEqual(await readPriorRationale(run), {
+  assert.deepEqual(await readPriorRationale(run, REPOSITORIES), {
     rationale: CLEARED_RATIONALE,
     rework: false,
   });
@@ -279,4 +284,42 @@ test("the cleared assessment read of a first attempt answers null with no call",
   t.after(() => run.dispose());
   run.clients.mission = {} as MethodClients["mission"];
   assert.equal(await readClearedAssessment(run), null);
+});
+
+test("each change request names its binding", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  t.after(() => run.dispose());
+  const [item] = CHANGE_REQUESTS.items;
+  assert.ok(item);
+  run.clients.mission = {
+    "execution.clearedOutcome.get": async () =>
+      clearedOutcome(ClosingEvent.ExternalFailed),
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    "execution.change_request.get": async () => ({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: {
+        items: [
+          item,
+          { ...item, evidence_id: "evidence_web", binding_id: "binding_web" },
+        ].map((entry) => ({
+          ...entry,
+          change_requests: entry.change_requests.map((request) => ({
+            ...request,
+            comments: [],
+          })),
+        })),
+      },
+    }),
+  } as unknown as MethodClients["worker"];
+  const text = await readRequestedChanges(run, REPOSITORIES);
+  assert.ok(text);
+  assert.deepEqual(
+    text.split("\n").slice(1),
+    ["api", "web"].map(
+      (name) =>
+        `Reviewer octo requests changes on ${name} at commit ${"a".repeat(40)}: Rename the route.`,
+    ),
+  );
 });

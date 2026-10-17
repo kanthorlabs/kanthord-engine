@@ -114,7 +114,7 @@ export async function runNativeExecution(
         return runEvaluation(input, run, budget, open);
       if (work === ExecutionWork.Examine)
         return runStepsExamine(input, run, revision, budget, open);
-      const prior = await readPriorRationale(run);
+      const prior = await readPriorRationale(run, input.setup.repositories);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
         prepareStepsWorkspace(input, run),
       );
