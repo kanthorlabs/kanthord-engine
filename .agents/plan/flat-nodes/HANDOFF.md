@@ -77,7 +77,7 @@ Plan 10 is merged. Run these steps in this order:
 3. Run `git -C engine switch -c flat-nodes-accept` and `git -C apps switch -c flat-nodes-accept`. Without a named branch, `make bootstrap` refuses a submodule commit outside its `origin/main`.
 4. Run tasks 08.11 and 08.12 in the main checkout, not in `.dev/flat-nodes-08-reference` of plan 08.
 5. Run task 08.11. Stop `make dev`. Run `make cleanup`, then `make bootstrap`. Export and delete the homelab volume. Redeploy the homelab. Log in the LLM credential `anthropic-subscription`.
-6. Run task 08.12 once on the final root head, with the engine at the merge of #82 (superrepo #99). This run also covers plan 10 and the CLI details line, which runs no live acceptance of its own (`10-root-multi-repository-docs.md:15`). If it fails, run it again at the root merge of plan 08 to find the plan that caused it.
+6. Run task 08.12 once on the final root head, with the engine at the merge of #82 (superrepo #99). This run also covers the CLI details line and plan 10. Plan 10 runs no live acceptance of its own (`10-root-multi-repository-docs.md:15`). If it fails, run it again at the root merge of plan 08 to find the plan that caused it.
 7. Open one pull request per repository from `refactor/flat-nodes` to `main`.
 8. Merge the `engine` and `apps` pull requests first. Use a merge commit, not a squash or a rebase.
 9. In the superrepo, create a branch from `origin/refactor/flat-nodes`. Run `git -C engine switch main && git -C engine pull --ff-only`. Do the same for `apps`.
