@@ -16,6 +16,7 @@ import { schedulerHarness, executionFixture } from "./test-support.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const NO_COMMITS = 0;
+const NO_CLAIMS = 0;
 const ONE_COMMIT = 1;
 const TWO_CHECKS = 2;
 const FIRST_ATTEMPT = 1;
@@ -230,6 +231,29 @@ test("window expiry commits no-work and cancellation commits nothing", async (t)
   context.cancel();
   await assert.rejects(pending, { code: CANCELLED });
   assert.equal(cancelled.commits(), NO_COMMITS);
+});
+
+test("a pull of a worker with no declaration answers no-work and claims nothing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let monotonic = 0;
+  t.mock.method(performance, "now", () => monotonic);
+  const h = harness(t);
+  h.dependencies.declarations.declarationOf = () => null;
+  let claims = 0;
+  h.dependencies.transitions.claim = () => {
+    claims++;
+    return assert.fail("A pull without a declaration claims no node.");
+  };
+  h.enqueue();
+  const waiting = h.pull();
+  monotonic = WORK_PULL_WAIT_MS;
+  t.mock.timers.tick(WORK_PULL_WAIT_MS);
+  assert.deepEqual(await waiting, { kind: WorkPullKind.NoWork });
+  assert.equal(claims, NO_CLAIMS);
+  assert.deepEqual(
+    h.store.database.prepare("SELECT * FROM scheduler_execution").all(),
+    [],
+  );
 });
 
 test("mismatches and unexpected probe errors propagate without a commit", async (t) => {
