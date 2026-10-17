@@ -52,7 +52,7 @@ const bindingRules: Record<Work, Record<BindingKind, Range>> = {
   [Work.Implement]: {
     [MissionBindingKind.Repository]: {
       min: SINGLE_BINDING,
-      max: SINGLE_BINDING,
+      max: UNBOUNDED_BINDINGS,
     },
     [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
     [MissionBindingKind.Storage]: {
