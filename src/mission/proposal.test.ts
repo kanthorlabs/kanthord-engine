@@ -191,7 +191,7 @@ function refusal(promise: Promise<unknown>, code: string, field?: string) {
   });
 }
 
-test("proposals are refused on a success result and an unknown objective", async (t) => {
+test("proposals are refused on a success result and an unknown dependency", async (t) => {
   const h = await fixture(t);
   await refusal(
     h.submit([h.proposal()], AssessmentResult.Success),
@@ -206,7 +206,7 @@ test("proposals are refused on a success result and an unknown objective", async
   assert.equal((await h.list()).items.length, NO_PROPOSALS);
 });
 
-test("an undetermined initiative assessment records one row per proposal", async (t) => {
+test("an undetermined proposer assessment records one row per proposal", async (t) => {
   const h = await fixture(t);
   const result = await h.submit([h.proposal(), h.proposal(h.childId, "Other")]);
   assert.equal(result.outcome?.result, AssessmentResult.Undetermined);
@@ -229,7 +229,7 @@ test("an undetermined initiative assessment records one row per proposal", async
   assert.equal((await h.list(SECOND_ATTEMPT)).items.length, NO_PROPOSALS);
 });
 
-test("approving a proposal creates the objective with its task and unblocks the initiative", async (t) => {
+test("approval adds a dependency of the proposer on the created node and routes the proposer to Pending", async (t) => {
   const h = await fixture(t);
   await h.submit([h.proposal()]);
   const proposalId = (await h.list()).items[0]!.id;

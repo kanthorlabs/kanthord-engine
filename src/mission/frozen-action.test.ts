@@ -30,7 +30,7 @@ const BASE_BRANCH = "main";
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const REQUEST_KEY = "repo.pull_request";
 
-test("required actions preserve pinned policies across later revisions and an initiative with a repository binding requires none", (t) => {
+test("an initiative with a repository binding requires no external action, and required actions preserve pinned policies across later revisions", (t) => {
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
   const projectId = createIdentity("project");
   const oldBinding = createIdentity("binding");

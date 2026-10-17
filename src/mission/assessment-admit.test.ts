@@ -210,7 +210,7 @@ test("assessment result order permits criterion-not-met for a failed run but rej
   );
 });
 
-test("assessment admission checks rationale and evidence ownership before publication and child sets", (t) => {
+test("assessment admission checks rationale and evidence ownership before publication and dependency outcome sets", (t) => {
   const h = fixture(t);
   const pending = h.seed(null, false);
   const foreignAttempt = h.seed(null, true, NO_ATTEMPT);
@@ -267,31 +267,31 @@ test("non-success assessments retain the verification's tested input", (t) => {
 test("initiative admission tracks replacement dependency outcomes and excludes retired dependencies", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
-  const childId = createIdentity("node");
+  const dependencyId = createIdentity("node");
   h.store.transaction((tx) => {
     const base = getRevision(tx, h.node_id, FIRST_REVISION);
     insertNode(tx, {
-      id: childId,
+      id: dependencyId,
       mission_id: h.mission_id,
       kind: NodeKind.Objective,
       parent_id: null,
-      filename: "child.md",
+      filename: "dependency.md",
       created_at: NOW,
     });
     insertRevision(tx, {
       ...base,
-      node_id: childId,
-      filename: "child.md",
+      node_id: dependencyId,
+      filename: "dependency.md",
       tasks: [],
     });
-    insertDependency(tx, h.mission_id, h.node_id, childId);
+    insertDependency(tx, h.mission_id, h.node_id, dependencyId);
   });
   const outcome = () =>
     h.store.transaction((tx) => {
       const id = createIdentity("assessment");
       insertAssessment(tx, {
         id,
-        node_id: childId,
+        node_id: dependencyId,
         attempt: NO_ATTEMPT,
         result: AssessmentResult.Undetermined,
         rationale: "Blocked",
@@ -305,7 +305,7 @@ test("initiative admission tracks replacement dependency outcomes and excludes r
       });
       return insertOutcome(tx, {
         id: createIdentity("outcome"),
-        node_id: childId,
+        node_id: dependencyId,
         result: AssessmentResult.Undetermined,
         assessment_id: id,
         evidence_ids: "[]",
@@ -321,7 +321,7 @@ test("initiative admission tracks replacement dependency outcomes and excludes r
   h.store.transaction((tx) =>
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-      .run(NOW, childId),
+      .run(NOW, dependencyId),
   );
   refusal(() => h.admit(), VALIDATION, "dependency_outcome_ids");
   h.body.dependency_outcome_ids = [];

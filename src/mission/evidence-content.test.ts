@@ -39,7 +39,7 @@ const FIRST_REVISION = 1;
 const BYTE_OVERFLOW = 1;
 const FAILURE_EXIT_CODE = 1;
 const SUCCESS_EXIT_CODE = 0;
-const CHILD_COUNT = 3;
+const OBJECTIVE_COUNT = 3;
 const RESOURCE = "repository:github:owner/repository";
 const OTHER_RESOURCE = "repository:github:owner/other";
 const VALIDATION = "gateway.request.validation_failed";
@@ -58,7 +58,7 @@ test("repository commits require complete lowercase SHA-1 or SHA-256 values", ()
     );
 });
 
-test("content checks pinned objective bindings and the own repository bindings of an initiative in binding order", (t) => {
+test("the tested input of an initiative with two repository bindings is a list in binding order, and an objective checks its pinned bindings", (t) => {
   const h = executionHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");
   const laterId = createIdentity("binding");
@@ -101,14 +101,14 @@ test("content checks pinned objective bindings and the own repository bindings o
         ]),
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
-    const childBindingIds = [bindingId, laterId, otherId];
-    const childNodeIds = childBindingIds
+    const objectiveBindingIds = [bindingId, laterId, otherId];
+    const objectiveNodeIds = objectiveBindingIds
       .map(() => createIdentity("node"))
       .sort();
-    const children: string[] = [];
-    for (const [index, id] of childBindingIds.entries()) {
-      const nodeId = childNodeIds[index]!;
-      children.push(nodeId);
+    const objectives: string[] = [];
+    for (const [index, id] of objectiveBindingIds.entries()) {
+      const nodeId = objectiveNodeIds[index]!;
+      objectives.push(nodeId);
       insertNode(tx, {
         id: nodeId,
         mission_id: h.mission_id,
@@ -117,13 +117,13 @@ test("content checks pinned objective bindings and the own repository bindings o
         parent_id: h.node_id,
         created_at: NOW,
       });
-      const childRevision: Revision = {
+      const objectiveRevision: Revision = {
         ...revision,
         node_id: nodeId,
         content: { ...revision.content, bindings: [id, storageId] },
         tasks: [],
       };
-      insertRevision(tx, childRevision);
+      insertRevision(tx, objectiveRevision);
       setNodeState(tx, nodeId, NodeState.Discarded);
       assert.deepEqual(
         repositoryBindingIdsOf(
@@ -134,21 +134,21 @@ test("content checks pinned objective bindings and the own repository bindings o
         ),
         [id],
       );
-      const child = readNode(tx, nodeId)!;
+      const objective = readNode(tx, nodeId)!;
       assert.equal(
-        repositoryBindingOf(tx, h.dependencies.bindings, childRevision)
+        repositoryBindingOf(tx, h.dependencies.bindings, objectiveRevision)
           ?.binding_id,
         id,
       );
       assert.equal(
-        storageBindingIdOf(tx, h.dependencies.bindings, childRevision),
+        storageBindingIdOf(tx, h.dependencies.bindings, objectiveRevision),
         storageId,
       );
       requireRepositoryAddress(
         tx,
         h.dependencies.bindings,
-        child,
-        childRevision,
+        objective,
+        objectiveRevision,
         { ...address, binding_id: id },
       );
       assert.throws(
@@ -156,8 +156,8 @@ test("content checks pinned objective bindings and the own repository bindings o
           requireRepositoryAddress(
             tx,
             h.dependencies.bindings,
-            child,
-            childRevision,
+            objective,
+            objectiveRevision,
             { ...address, binding_id: storageId },
           ),
         (error) =>
@@ -169,8 +169,8 @@ test("content checks pinned objective bindings and the own repository bindings o
           requireTestedInput(
             tx,
             h.dependencies.bindings,
-            child,
-            childRevision,
+            objective,
+            objectiveRevision,
             [address],
           ),
         (error) => error instanceof OperationError && error.code === VALIDATION,
@@ -248,7 +248,7 @@ test("content checks pinned objective bindings and the own repository bindings o
         error instanceof OperationError &&
         error.code === MissionErrorCode.EvidenceBindingMismatch,
     );
-    assert.equal(children.length, CHILD_COUNT);
+    assert.equal(objectives.length, OBJECTIVE_COUNT);
   });
 });
 
