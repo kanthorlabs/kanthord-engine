@@ -10,6 +10,7 @@ import {
   fakeS3,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
 } from "./test-support.ts";
 
 const SUCCESS = 0;
@@ -19,7 +20,7 @@ export const WORKER_DEFAULTS = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
-};
+} as const;
 
 export async function workerAcceptance(
   t: TestContext,
@@ -80,12 +81,10 @@ export async function workerAcceptance(
     },
     secret: {},
   });
-  await write(["agent", "enablement", "put", "swe@1"], {
-    agent_providers: [
-      { name: "default", provider: "anthropic", credential: "anthro-1" },
-    ],
-    default_configuration: WORKER_DEFAULTS,
-    fallback_configurations: [],
+  await enableCoveringAgents(human, {
+    platform: "anthropic",
+    credential: "anthro-1",
+    configuration: WORKER_DEFAULTS,
   });
   const storage = s3 && {
     endpoint: s3.endpoint,

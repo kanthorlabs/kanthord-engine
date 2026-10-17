@@ -28,6 +28,7 @@ import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
 } from "./test-support.ts";
 
 const SUCCESS = 0;
@@ -40,7 +41,7 @@ const FIRST_REVISION = 1;
 const FIRST_ATTEMPT = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
-const THIRD_REVISION = 3;
+const COVERED_BINDING_SET_VERSION = 4;
 const SECOND_ATTEMPT = 2;
 const THIRD_MISSION_VERSION = 3;
 const FOURTH_MISSION_VERSION = 4;
@@ -118,6 +119,7 @@ async function setup(t: TestContext) {
     },
     secret: {},
   });
+  await enableCoveringAgents(env);
   const binding = await write<{
     binding_set_version: number;
     bindings: Record<string, { id: string }>;
@@ -144,7 +146,7 @@ async function setup(t: TestContext) {
       },
     },
   });
-  assert.equal(binding.binding_set_version, THIRD_REVISION);
+  assert.equal(binding.binding_set_version, COVERED_BINDING_SET_VERSION);
   const create = (body: unknown) =>
     write<NodeChange>(["mission", "node", "create", mission.id], body);
   const examine = await create({

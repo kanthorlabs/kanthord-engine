@@ -15,7 +15,11 @@ import {
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import { environment, kanthord, until } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  enableCoveringAgents,
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -31,7 +35,7 @@ const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
-};
+} as const;
 const REPOSITORY = {
   kind: "repository",
   config: {
@@ -122,14 +126,11 @@ async function setup(t: TestContext) {
     },
     secret: {},
   });
-  for (const agent of ["swe@1", "re@1"])
-    await write(["agent", "enablement", "put", agent], {
-      agent_providers: [
-        { name: "default", provider: "anthropic", credential: "anthro-1" },
-      ],
-      default_configuration: CONFIGURATION,
-      fallback_configurations: [],
-    });
+  await enableCoveringAgents(H, {
+    platform: "anthropic",
+    credential: "anthro-1",
+    configuration: CONFIGURATION,
+  });
   const project = await read<{ id: string }>([
     "project",
     "create",

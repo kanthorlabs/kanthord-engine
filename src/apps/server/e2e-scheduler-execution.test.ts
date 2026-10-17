@@ -18,6 +18,7 @@ import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
 } from "./test-support.ts";
 import {
   ExecutionEnd,
@@ -32,7 +33,6 @@ const FAILURE = 1;
 const NO_OUTPUT = "";
 const NO_REVIEWER = "";
 const UNSET_EXECUTION_ID = "";
-const INITIAL_ENABLEMENT_REVISION = 1;
 const INITIAL_BINDING_VERSION = 1;
 const FIRST_ATTEMPT = 1;
 const SINGLE_EXECUTION = 1;
@@ -56,7 +56,7 @@ const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
-};
+} as const;
 type Page<T> = { items: T[]; next_cursor: string | null };
 type Node = { state: string; attempt: number; visible_revision: number };
 type Pull = {
@@ -161,19 +161,11 @@ async function setup(t: TestContext, short = false) {
     },
     secret: {},
   });
-  for (const agent of short ? ["swe@1"] : ["swe@1", "re@1"]) {
-    const result = await write<{ revision: number }>(
-      ["agent", "enablement", "put", agent],
-      {
-        agent_providers: [
-          { name: "default", provider: "anthropic", credential: "anthro-1" },
-        ],
-        default_configuration: CONFIGURATION,
-        fallback_configurations: [],
-      },
-    );
-    assert.equal(result.revision, INITIAL_ENABLEMENT_REVISION);
-  }
+  await enableCoveringAgents(H, {
+    platform: "anthropic",
+    credential: "anthro-1",
+    configuration: CONFIGURATION,
+  });
   const project = await read<{ id: string }>([
     "project",
     "create",

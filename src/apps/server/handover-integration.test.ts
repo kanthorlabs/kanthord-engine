@@ -49,6 +49,7 @@ import {
 } from "../../kernel/handover.ts";
 import {
   COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
@@ -467,18 +468,9 @@ async function setup(
       },
     }),
   );
-  completed(
-    await call(agentOperations["enablement.put"], {
-      params: { agent_name: "swe@1" },
-      query: {},
-      body: {
-        agent_providers: [
-          { name: "default", provider: platform, credential: "anthro-1" },
-        ],
-        default_configuration: configuration,
-        fallback_configurations: [],
-      },
-    }),
+  await enableCoveringAgents(
+    { KANTHORD_ENDPOINT: f.endpoint, KANTHORD_TOKEN: f.token },
+    { platform, credential: "anthro-1", configuration },
   );
   const projectId = completed(
     await call(projectOperations.create, {

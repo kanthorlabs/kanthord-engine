@@ -37,6 +37,7 @@ import {
   FAKE_SSH_IDENTITY,
   gatewayFixture,
   COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
 } from "./test-support.ts";
 
 const SUCCESS = 0;
@@ -44,7 +45,7 @@ const FAILURE = 1;
 const FIRST_REVISION = 1;
 const SINGLE_INSTANCE = 1;
 const SECOND_REVISION = 2;
-const FULL_BINDING_SET_VERSION = 4;
+const FULL_BINDING_SET_VERSION = 5;
 const THIRD_CREDENTIAL_REVISION = 3;
 const INVALID_REPORT_COUNT = 4;
 const STRING_TYPE = "string";
@@ -69,7 +70,7 @@ const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
-};
+} as const;
 const CONTENT = {
   name: "Recover accounts",
   requirement: "Recover accounts",
@@ -127,7 +128,7 @@ function cli(directory: string, env: NodeJS.ProcessEnv) {
     assert.equal(result.stdout, NO_OUTPUT);
     noSecrets(result.stderr);
   };
-  return { read, write, refuses };
+  return { read, write, refuses, env };
 }
 
 async function machine(
@@ -184,17 +185,11 @@ async function resources(c: ReturnType<typeof cli>) {
     },
     secret: {},
   });
-  const enabled = await c.write<{ revision: number }>(
-    ["agent", "enablement", "put", "swe@1"],
-    {
-      agent_providers: [
-        { name: "default", provider: PROVIDER, credential: NAME },
-      ],
-      default_configuration: CONFIGURATION,
-      fallback_configurations: [],
-    },
-  );
-  assert.equal(enabled.revision, FIRST_REVISION);
+  await enableCoveringAgents(c.env, {
+    platform: PROVIDER,
+    credential: NAME,
+    configuration: CONFIGURATION,
+  });
   const project = await c.read<{ id: string }>([
     "project",
     "create",

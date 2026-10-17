@@ -46,6 +46,7 @@ import { environment, kanthord } from "./cli-support.ts";
 import {
   applyCoveringBindings,
   COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
@@ -87,7 +88,8 @@ const FIRST_REVISION = 1;
 const VERSION_INCREMENT = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
-const THIRD_REVISION = 3;
+const COVERED_BINDING_VERSION = 3;
+const REPOSITORY_BINDING_VERSION = 4;
 const REPOSITORY_NAME = "repo";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
 const OTHER_REPOSITORY_NAME = "other-repo";
@@ -364,9 +366,10 @@ async function createMission(fixture: Fixture): Promise<Mission> {
   assert.equal(mission.project_id, project.id);
   assert.equal(mission.version, MISSION_INITIAL_VERSION);
   assert.ok(fixture.directory);
+  await enableCoveringAgents(fixture.env);
   assert.equal(
     await applyCoveringBindings(fixture.env, fixture.directory, project.id),
-    SECOND_REVISION,
+    COVERED_BINDING_VERSION,
   );
   return mission;
 }
@@ -613,7 +616,7 @@ test(
       ),
     );
     const bindingFile = jsonFile(fixture, "binding.json", {
-      version: SECOND_REVISION,
+      version: COVERED_BINDING_VERSION,
       bindings: {
         ...COVERING_WORKER_BINDINGS,
         [REPOSITORY_NAME]: {
@@ -638,7 +641,7 @@ test(
         fixture.env,
       ),
     );
-    assert.equal(binding.binding_set_version, THIRD_REVISION);
+    assert.equal(binding.binding_set_version, REPOSITORY_BINDING_VERSION);
     const bindingId = binding.bindings[REPOSITORY_NAME]!.id;
     const first = await createNode(
       fixture,
@@ -923,7 +926,7 @@ async function configureRepository(
     ),
   );
   const bindingFile = jsonFile(fixture, "import-binding.json", {
-    version: SECOND_REVISION,
+    version: COVERED_BINDING_VERSION,
     bindings: {
       ...COVERING_WORKER_BINDINGS,
       [REPOSITORY_NAME]: {
@@ -948,7 +951,7 @@ async function configureRepository(
       fixture.env,
     ),
   );
-  assert.equal(result.binding_set_version, THIRD_REVISION);
+  assert.equal(result.binding_set_version, REPOSITORY_BINDING_VERSION);
   assert.ok(projectId);
   return result.bindings[REPOSITORY_NAME]!.id;
 }
@@ -1523,6 +1526,7 @@ async function scenarioProject(fixture: Fixture): Promise<Mission> {
     await kanthord([MISSION, GET, project.id], fixture.env),
   );
   assert.deepEqual(reread, mission);
+  await enableCoveringAgents(fixture.env);
   await applyCoveringBindings(fixture.env, fixture.directory, project.id);
   await configureRepository(fixture, project.id);
   return mission;

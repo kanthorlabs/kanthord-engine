@@ -37,6 +37,7 @@ import type { AgentEnablement } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
 import {
   applyCoveringBindings,
+  enableCoveringAgents,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
 } from "./test-support.ts";
@@ -435,6 +436,7 @@ test("E07.4 github repository binding advances the binding set to version two", 
 test("E07.5 mission examine node creation queues the created node", async (t) => {
   const fixture = await setup(t);
   const project = await createProject(fixture);
+  await enableCoveringAgents(fixture.env);
   await applyCoveringBindings(fixture.env, fixture.directory, project.id);
   const mission = success<Mission>(
     await kanthord(["mission", "get", project.id], fixture.env),
