@@ -3,6 +3,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  EdgeKind,
   MissionErrorCode,
   NodeKind,
   NodeState,
@@ -18,7 +19,7 @@ import { markProposalApproved } from "./proposal-store.ts";
 import { proposalRecord, requireProposal } from "./proposal-read.ts";
 import { revisionFromRow } from "./revision.ts";
 import type { Dependencies } from "./service.ts";
-import { readCurrentRevision } from "./store.ts";
+import { insertDependency, readCurrentRevision } from "./store.ts";
 import { requireActive, requireMission } from "./write.ts";
 
 const IDENTITY_SEPARATOR_LENGTH = 1;
@@ -104,6 +105,7 @@ export function approveProposal(
   );
   const objectiveId = objective.revisions[0]?.node_id;
   assert.ok(objectiveId);
+  insertDependency(tx, mission.id, initiative.id, objectiveId);
   const unblocked = unblockNode(
     tx,
     dependencies,
@@ -119,7 +121,17 @@ export function approveProposal(
   );
   markProposalApproved(tx, proposal.id, objectiveId, now);
   return {
-    objective,
+    objective: {
+      ...objective,
+      added_edges: [
+        ...objective.added_edges,
+        {
+          kind: EdgeKind.Dependency,
+          dependent_id: initiative.id,
+          depends_on_id: objectiveId,
+        },
+      ],
+    },
     initiative: unblocked,
   };
 }

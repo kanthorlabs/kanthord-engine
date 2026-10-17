@@ -54,24 +54,11 @@ function validateCycle(
   missionId: string,
   edge: DependencyEdge,
 ): void {
-  const nodes = readMissionNodes(tx, missionId).filter(
-    (node) => node.retired_at === null,
-  );
-  const parents = new Map<string, string>();
-  for (const node of nodes) {
-    if (node.parent_id !== null) parents.set(node.id, node.parent_id);
-  }
   const edges = [
     ...readDependencies(tx, missionId),
     { dependent: edge.dependent_id, depends_on: edge.depends_on_id },
   ];
-  if (
-    hasDependencyCycle(
-      nodes.map((node) => node.id),
-      edges,
-      parents,
-    )
-  )
+  if (hasDependencyCycle(edges))
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.Cycle,

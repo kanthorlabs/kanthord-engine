@@ -239,7 +239,7 @@ test("further-work releases without progress pause the node at the further-work 
   );
 });
 
-test("initiative claim refuses nonterminal objectives", (t) => {
+test("initiative claim ignores a nonterminal objective child", (t) => {
   const h = fixture(t, NodeKind.Initiative);
   h.store.transaction((tx) =>
     insertNode(tx, {
@@ -251,8 +251,8 @@ test("initiative claim refuses nonterminal objectives", (t) => {
       created_at: NOW,
     }),
   );
-  assert.equal(h.claim(), null);
-  assert.equal(h.node().attempt, NO_ATTEMPT);
+  assert.equal(h.claim()?.kind, ClaimKind.Steps);
+  assert.equal(h.node().attempt, FIRST_ATTEMPT);
 });
 
 test("objective steps release requires published evidence from the execution and pinned repository", (t) => {

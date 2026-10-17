@@ -92,25 +92,32 @@ for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
   });
 }
 
-test("ready refuses a nonterminal objective child before opening an attempt", async (t) => {
+test("ready refuses an unsatisfied dependency before opening an attempt", async (t) => {
   const h = controlHarness(t, IDENTITY);
-  h.store.transaction((tx) =>
+  const target = createIdentity("node");
+  h.store.transaction((tx) => {
     insertNode(tx, {
-      id: createIdentity("node"),
+      id: target,
       mission_id: h.mission_id,
       kind: NodeKind.Objective,
-      filename: "child.md",
-      parent_id: h.node_id,
+      filename: "dependency.md",
+      parent_id: null,
       created_at: NOW,
-    }),
-  );
+    });
+    insertDependency(tx, h.mission_id, h.node_id, target);
+  });
   await assert.rejects(
     h.invoke("node.ready", {
       params: { node_id: h.node_id },
       query: {},
       body: h.body(),
     }),
-    (error) => error instanceof OperationError && error.code === NOT_READY,
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, NOT_READY);
+      assert.deepEqual(error.details, { unsatisfied_ids: [target] });
+      return true;
+    },
   );
   assert.equal(h.node().attempt, NO_ATTEMPT);
   assert.equal(h.node().state, NodeState.Available);
@@ -201,10 +208,7 @@ test("resume Waiting refuses unsatisfied closure; Available routes to Pending wi
     (error) => {
       assert.ok(error instanceof OperationError);
       assert.equal(error.code, NOT_READY);
-      assert.deepEqual(error.details, {
-        objectives_not_terminal: [],
-        unsatisfied_ids: [target],
-      });
+      assert.deepEqual(error.details, { unsatisfied_ids: [target] });
       return true;
     },
   );

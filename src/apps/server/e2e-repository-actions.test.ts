@@ -149,7 +149,13 @@ async function setup(t: TestContext) {
           : {}),
       },
     );
-    return result.revisions[FIRST_INDEX]!.node_id;
+    const nodeId = result.revisions[FIRST_INDEX]!.node_id;
+    if (parentId)
+      await write(["mission", "dependency", "add", parentId, nodeId], {
+        reason: "plan",
+        expected_mission_version: await missionVersion(),
+      });
+    return nodeId;
   };
   const I = await create("initiative-1.md", "initiative", []);
   const P = await create("objective-p.md", "objective", [GATED], I);

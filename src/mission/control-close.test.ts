@@ -328,19 +328,10 @@ test("discard refuses unresolved request without revocation or closure", async (
   );
 });
 
-test("discard does not satisfy dependencies and admits the last objective's initiative", async (t) => {
+test("discard does not satisfy dependencies", async (t) => {
   const h = controlHarness(t, IDENTITY);
-  const parent = createIdentity("node");
   const dependent = createIdentity("node");
   h.store.transaction((tx) => {
-    insertNode(tx, {
-      id: parent,
-      mission_id: h.mission_id,
-      kind: NodeKind.Initiative,
-      filename: "parent.md",
-      parent_id: null,
-      created_at: NOW,
-    });
     insertNode(tx, {
       id: dependent,
       mission_id: h.mission_id,
@@ -349,10 +340,6 @@ test("discard does not satisfy dependencies and admits the last objective's init
       parent_id: null,
       created_at: NOW,
     });
-    tx.database
-      .prepare("UPDATE mission_node SET kind = ?, parent_id = ? WHERE id = ?")
-      .run(NodeKind.Objective, parent, h.node_id);
-    setNodeState(tx, parent, NodeState.Available);
     insertDependency(tx, h.mission_id, dependent, h.node_id);
   });
   const result = await h.invoke("node.discard", {
@@ -365,5 +352,4 @@ test("discard does not satisfy dependencies and admits the last objective's init
     h.store.transaction((tx) => readNode(tx, dependent))?.state,
     NodeState.Pending,
   );
-  assert.ok(h.calls.some((call) => call.arguments.includes(parent)));
 });

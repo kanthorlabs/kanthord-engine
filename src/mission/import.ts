@@ -464,10 +464,7 @@ function resolveGraph(result: ResolvedImport): void {
       depends_on: dependsOn,
     })),
   );
-  const runnable = result.resolved_entries
-    .filter((item) => item.entry.kind !== PlanFileKind.Task)
-    .map((item) => item.key);
-  if (hasDependencyCycle(runnable, edges, result.parent_map))
+  if (hasDependencyCycle(edges))
     result.violations.push(
       violation(
         MissionErrorCode.Cycle,

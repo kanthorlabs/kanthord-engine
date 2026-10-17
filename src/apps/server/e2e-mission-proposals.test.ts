@@ -155,7 +155,13 @@ async function setup(t: TestContext) {
           : {}),
       },
     );
-    return change.revisions[FIRST_INDEX]!.node_id;
+    const nodeId = change.revisions[FIRST_INDEX]!.node_id;
+    if (parentId)
+      await write(["mission", "dependency", "add", parentId, nodeId], {
+        reason: "plan",
+        expected_mission_version: await missionVersion(),
+      });
+    return nodeId;
   };
   const initiativeId = await create("initiative.md", NodeKind.Initiative, []);
   const objectiveId = await create(
@@ -422,7 +428,7 @@ test(
     await t.test("the initiative reopens in a new attempt", async () => {
       const { node } = approved.initiative;
       assert.ok(node.kind === NodeKind.Initiative);
-      assert.equal(node.state, NodeState.Available);
+      assert.equal(node.state, NodeState.Pending);
       assert.equal(node.attempt, SECOND_ATTEMPT);
       const queue = await read<Page<{ node_id: string }>>([
         "scheduler",

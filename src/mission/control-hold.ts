@@ -10,7 +10,7 @@ import {
   type HumanAct,
   type HumanActor,
 } from "./contract.ts";
-import { readinessOf, closureUnsatisfied } from "./conditions.ts";
+import { readinessOf } from "./conditions.ts";
 import { actionStatesOf } from "./frozen-action.ts";
 import { openAttempt } from "./record-store.ts";
 import { readCurrentRevision, readNode, type NodeRow } from "./store.ts";
@@ -24,25 +24,16 @@ import {
 import type { Dependencies } from "./service.ts";
 
 const NO_ATTEMPT = 0;
-const NO_UNSATISFIED_IDS = 0;
 const NOT_READY = "mission.node.not_ready";
 
-function requireReady(
-  tx: Transaction,
-  node: NodeRow,
-  checkClosure: boolean,
-): void {
+function requireReady(tx: Transaction, node: NodeRow): void {
   const readiness = readinessOf(tx, node);
-  const unsatisfiedIds = checkClosure ? closureUnsatisfied(tx, node) : [];
-  if (!readiness.holds || unsatisfiedIds.length > NO_UNSATISFIED_IDS)
+  if (!readiness.holds)
     throw new OperationError(
       HttpStatus.Conflict,
       NOT_READY,
       "Node is not ready for evaluation.",
-      {
-        objectives_not_terminal: readiness.objectives_not_terminal,
-        unsatisfied_ids: unsatisfiedIds,
-      },
+      { unsatisfied_ids: readiness.unsatisfied_ids },
     );
 }
 
@@ -73,7 +64,7 @@ export function readyNode(
     [NodeState.Available],
     now,
   );
-  requireReady(tx, node, false);
+  requireReady(tx, node);
   if (node.attempt === NO_ATTEMPT) openCurrentAttempt(tx, nodeId, actor, now);
   transition(tx, dependencies, mission, node, NodeState.Waiting, now);
   return controlResult(tx, dependencies, nodeId, null, actor, now);
@@ -110,7 +101,7 @@ export function resumeNode(
       ? NodeState.ExternalSuccess
       : NodeState.ExternalRequested;
   else if (body.target === ResumeTarget.Waiting) {
-    requireReady(tx, node, true);
+    requireReady(tx, node);
     if (node.attempt === NO_ATTEMPT) openCurrentAttempt(tx, nodeId, actor, now);
   }
   transition(tx, dependencies, mission, node, target, now);

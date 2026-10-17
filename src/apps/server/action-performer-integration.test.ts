@@ -227,6 +227,19 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
     }),
   );
   const nodeId = objective.revisions[0]!.node_id;
+  completed(
+    await call(missionOperations["dependency.add"], {
+      params: {
+        node_id: initiative.revisions[0]!.node_id,
+        depends_on_id: nodeId,
+      },
+      query: {},
+      body: {
+        reason: "plan",
+        expected_mission_version: objective.mission_version,
+      },
+    }),
+  );
   const token = await fixture.machineToken(projectId, "harness", "first");
   const runtimeIdentity = completed(
     await call(workerOperations.register, NO_INPUT, token),

@@ -73,6 +73,7 @@ import { CONTENT_FIELDS, TASKS_FIELD, ContentField } from "./content.ts";
 import { unexpectedCollaboration } from "./test-support.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
+  insertDependency,
   insertNode as insertNodeRow,
   readNode,
   readMissionNodes,
@@ -921,7 +922,7 @@ test("node.create initiative stores human attribution, pins, revision one and on
   assert.deepEqual(JSON.parse(stored.tasks), []);
 });
 
-test("node.create objective routes Available, queues it and removes its initiative job", (t) => {
+test("node.create objective routes Available, queues it and keeps its initiative job", (t) => {
   const f = nodeFixture(t);
   const parentId = f.initiative();
   f.calls.length = EMPTY_CALLS;
@@ -944,21 +945,17 @@ test("node.create objective routes Available, queues it and removes its initiati
       child_id: revision.node_id,
     },
   ]);
-  assert.equal(f.calls.length, TWO_ROUTING_CALLS);
-  assert.ok(
-    f.calls.some(
-      (call) => call.action === QueueAction.Delete && call.node_id === parentId,
-    ),
-  );
-  assert.ok(
-    f.calls.some(
-      (call) =>
-        call.action === QueueAction.Insert && call.node_id === revision.node_id,
-    ),
-  );
+  assert.deepEqual(f.calls, [
+    {
+      action: QueueAction.Insert,
+      node_id: revision.node_id,
+      project_id: PROJECT_ID,
+      priority: LOWEST_PRIORITY,
+    },
+  ]);
 });
 
-test("node.create objective inherits unmet initiative dependencies and has no job", (t) => {
+test("node.create objective inherits no initiative dependency", (t) => {
   const f = nodeFixture(t);
   const parentId = f.initiative();
   const dependency = f.create({ ...f.body(), filename: OTHER_FILENAME })
@@ -971,10 +968,16 @@ test("node.create objective inherits unmet initiative dependencies and has no jo
   f.calls.length = EMPTY_CALLS;
   const result = f.create(f.body(NodeKind.Objective, parentId));
   const nodeId = result.revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  assert.equal(f.node(nodeId)?.state, NodeState.Pending);
+  assert.equal(f.node(nodeId)?.state, NodeState.Available);
   assert.equal(f.node(parentId)?.state, NodeState.Pending);
   assert.deepEqual(f.calls, [
     { action: QueueAction.Delete, node_id: parentId },
+    {
+      action: QueueAction.Insert,
+      node_id: nodeId,
+      project_id: PROJECT_ID,
+      priority: LOWEST_PRIORITY,
+    },
   ]);
 });
 
@@ -1336,7 +1339,7 @@ test("shared routing requires Completed dependencies, preserves held states, and
     .prepare(
       "INSERT INTO mission_dependency (dependent_id, depends_on_id, mission_id) VALUES (?, ?, ?)",
     )
-    .run(parentId, dependency, f.mission_id);
+    .run(objective, dependency, f.mission_id);
   f.store.database
     .prepare("UPDATE mission_node SET priority = ? WHERE id = ?")
     .run(PRIORITY, objective);
@@ -1369,69 +1372,18 @@ test("shared routing requires Completed dependencies, preserves held states, and
   f.setState(dependency, NodeState.Pending);
   route();
   assert.equal(f.node(objective)?.state, NodeState.Executing);
-  assert.equal(f.node(parentId)?.state, NodeState.Pending);
-});
-
-test("shared claimability ignores retired children and requires every current objective terminal", (t) => {
-  const f = nodeFixture(t);
-  const objective = f.objective();
-  const parentId = f.node(objective)!.parent_id!;
-  addTask(f, objective);
-  const other = f.create({
-    ...f.body(NodeKind.Objective, parentId),
-    filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  f.setState(objective, NodeState.Completed);
-  const before = f.store.transaction((tx) =>
-    claimableMap(tx, f.mission_id, bindings),
-  );
-  assert.equal(before.get(parentId), false);
-  assert.equal(before.get(objective), false);
-  assert.equal(before.get(other), true);
-  f.calls.length = EMPTY_CALLS;
-  f.store.transaction((tx) => {
-    tx.database
-      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-      .run(RETIRED_AT, other);
-    routeMission(tx, f.mission_id);
-    reconcileMission(tx, f.queue, f.mission_id, PROJECT_ID, before, bindings);
-    const after = claimableMap(tx, f.mission_id, bindings);
-    assert.equal(after.get(parentId), true);
-    assert.equal(after.get(other), false);
-  });
-  assert.equal(f.calls.length, TWO_ROUTING_CALLS);
-  assert.ok(
-    f.calls.some(
-      (call) => call.action === QueueAction.Insert && call.node_id === parentId,
-    ),
-  );
-  assert.ok(
-    f.calls.some(
-      (call) => call.action === QueueAction.Delete && call.node_id === other,
-    ),
-  );
-  f.setState(objective, NodeState.Discarded);
-  assert.equal(
-    f.store
-      .transaction((tx) => claimableMap(tx, f.mission_id, bindings))
-      .get(parentId),
-    true,
-  );
+  assert.equal(f.node(parentId)?.state, NodeState.Available);
 });
 
 test("shared routing ignores dependency edges with a retired endpoint", (t) => {
   const f = nodeFixture(t);
-  const parentId = f.initiative();
+  const objective = f.objective();
   const dependency = f.create({ ...f.body(), filename: OTHER_FILENAME })
     .revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  f.store.database
-    .prepare(
-      "INSERT INTO mission_dependency (dependent_id, depends_on_id, mission_id) VALUES (?, ?, ?)",
-    )
-    .run(parentId, dependency, f.mission_id);
-  const objective = f.create(f.body(NodeKind.Objective, parentId)).revisions[
-    FIRST_ELEMENT_INDEX
-  ]!.node_id;
+  f.store.transaction((tx) => {
+    insertDependency(tx, f.mission_id, objective, dependency);
+    routeMission(tx, f.mission_id);
+  });
   assert.equal(f.node(objective)?.state, NodeState.Pending);
   f.calls.length = EMPTY_CALLS;
   f.store.transaction((tx) => {
@@ -1859,7 +1811,7 @@ test("node reads answer dependsOn in ascending order on initiatives and objectiv
   assert.deepEqual(dependsOnOf(f.read(objective)), [first]);
 });
 
-test("dependency addition rejects direct, self and inherited ancestor closure cycles without writes", (t) => {
+test("dependency addition rejects direct and self cycles without writes", (t) => {
   const f = dependencyFixture(t);
   const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   f.edit(DependencyOperation.Add, nodeId, dependsOnId);
@@ -1870,41 +1822,6 @@ test("dependency addition rejects direct, self and inherited ancestor closure cy
     MissionErrorCode.Cycle,
   );
   f.refuses(DependencyOperation.Add, nodeId, nodeId, MissionErrorCode.Cycle);
-  f.refuses(
-    DependencyOperation.Add,
-    f.node(nodeId)!.parent_id!,
-    nodeId,
-    MissionErrorCode.Cycle,
-  );
-});
-
-test("dependency addition rejects an objective depending on its own initiative without writes", (t) => {
-  const f = dependencyFixture(t);
-  const objective = f.objective();
-  const initiative = f.node(objective)!.parent_id!;
-  f.refuses(
-    DependencyOperation.Add,
-    objective,
-    initiative,
-    MissionErrorCode.Cycle,
-  );
-});
-
-test("dependency addition rejects crossed initiative waits without writes", (t) => {
-  const f = dependencyFixture(t);
-  const first = f.initiative();
-  const objective = f.create(f.body(NodeKind.Objective, first)).revisions[
-    FIRST_ELEMENT_INDEX
-  ]!.node_id;
-  const second = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
-    FIRST_ELEMENT_INDEX
-  ]!.node_id;
-  const other = f.create({
-    ...f.body(NodeKind.Objective, second),
-    filename: "crossed.md",
-  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  f.edit(DependencyOperation.Add, objective, second);
-  f.refuses(DependencyOperation.Add, other, first, MissionErrorCode.Cycle);
 });
 
 test("dependency addition validates cross-mission endpoints", (t) => {
@@ -2112,7 +2029,7 @@ test("dependency removal does not validate endpoint pairs or target retirement",
   );
 });
 
-test("dependency addition on initiative reroutes every child objective and removes their jobs", (t) => {
+test("dependency addition on an initiative reroutes the initiative alone", (t) => {
   const f = dependencyFixture(t);
   const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
   const parentId = f.node(nodeId)!.parent_id!;
@@ -2124,17 +2041,15 @@ test("dependency addition on initiative reroutes every child objective and remov
   f.edit(DependencyOperation.Add, parentId, dependsOnId);
   assert.equal(f.node(parentId)?.state, NodeState.Pending);
   for (const child of [nodeId, other]) {
-    assert.equal(f.node(child)?.state, NodeState.Pending);
+    assert.equal(f.node(child)?.state, NodeState.Available);
     assert.equal(
       f.jobs().some((job) => job.node_id === child),
-      false,
+      true,
     );
   }
-  assert.deepEqual(
-    f.calls.map((call) => call.node_id).sort(),
-    [nodeId, other].sort(),
-  );
-  assert.ok(f.calls.every((call) => call.action === QueueAction.Delete));
+  assert.deepEqual(f.calls, [
+    { action: QueueAction.Delete, node_id: parentId },
+  ]);
 });
 
 test("dependency removal only releases nodes when all remaining dependencies are completed", (t) => {
@@ -2447,7 +2362,7 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
   assert.deepEqual(f.snapshot().revisions, revisions);
 });
 
-test("node.priority.set accepts both signed limits and zero on initiatives and objectives without a job", (t) => {
+test("node.priority.set accepts both signed limits and zero on initiatives and objectives", (t) => {
   const f = priorityFixture(t);
   const initiative = f.initiative();
   const objective = f.create(f.body(NodeKind.Objective, initiative)).revisions[
@@ -2463,7 +2378,6 @@ test("node.priority.set accepts both signed limits and zero on initiatives and o
     assert.equal(answer.priority, value);
     assert.equal(f.node(id)?.priority, value);
   }
-  assert.equal(f.jobs.has(initiative), false);
   assert.equal(f.version(), version);
 });
 
@@ -3083,7 +2997,7 @@ function moveFixture(t: TestContext) {
   return { ...f, move, refuses, revision };
 }
 
-test("node.move objective changes containment without revisions and reroutes both initiative jobs", (t) => {
+test("node.move objective changes containment without revisions or routing", (t) => {
   const f = moveFixture(t);
   const oldParent = f.initiative();
   const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
@@ -3108,21 +3022,9 @@ test("node.move objective changes containment without revisions and reroutes bot
   });
   assert.equal(f.version(), version + VERSION_INCREMENT);
   assert.equal(f.node(objective)?.parent_id, newParent);
-  assert.equal(f.node(objective)?.state, NodeState.Pending);
+  assert.equal(f.node(objective)?.state, NodeState.Available);
   assert.deepEqual(f.snapshot().revisions, before);
-  assert.ok(
-    f.calls.some(
-      (call) =>
-        call.action === QueueAction.Delete && call.node_id === objective,
-    ),
-  );
-  assert.ok(
-    f.calls.some(
-      (call) =>
-        call.action === QueueAction.Insert && call.node_id === oldParent,
-    ),
-  );
-  f.calls.length = EMPTY_CALLS;
+  assert.deepEqual(f.calls, []);
   assert.deepEqual(f.move(objective, newParent), emptyChange(f.version()));
   assert.deepEqual(f.calls, []);
 });
@@ -3192,31 +3094,6 @@ test("node.move checks version, revisions, parents, terminal and retirement befo
   f.refuses(objective, newParent, MissionErrorCode.Retired, {
     node_id: newParent,
   });
-});
-
-test("node.move rejects a newly closed dependency cycle and rolls back containment", (t) => {
-  const f = moveFixture(t);
-  const oldParent = f.initiative();
-  const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
-    FIRST_ELEMENT_INDEX
-  ]!.node_id;
-  const newParent = f.create({ ...f.body(), filename: OTHER_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  f.edit(DependencyOperation.Add, newParent, objective);
-  f.refuses(objective, newParent, MissionErrorCode.Cycle);
-});
-
-test("node.move refuses moving an objective under the initiative it depends on", (t) => {
-  const f = moveFixture(t);
-  const oldParent = f.initiative();
-  const objective = f.create(f.body(NodeKind.Objective, oldParent)).revisions[
-    FIRST_ELEMENT_INDEX
-  ]!.node_id;
-  const newParent = f.create({ ...f.body(), filename: OTHER_FILENAME })
-    .revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  f.edit(DependencyOperation.Add, objective, newParent);
-  f.refuses(objective, newParent, MissionErrorCode.Cycle);
-  assert.equal(f.node(objective)?.parent_id, oldParent);
 });
 
 const INVALID_RETIRE_DIGEST = "0".repeat(64);
@@ -3547,7 +3424,7 @@ test("node.retire covers all current descendants, keeps internal dependencies an
   f.edit(DependencyOperation.Add, third, first);
   const dependencies = f.snapshot().dependencies;
   const jobs = f.jobs().map((job) => job.node_id);
-  assert.deepEqual(jobs, [first, second].sort());
+  assert.deepEqual(jobs, [root, first, second].sort());
   const deleted: string[] = [];
   const remove = f.queue.delete;
   f.queue.delete = (tx, id) => {
@@ -3580,38 +3457,6 @@ test("node.retire covers all current descendants, keeps internal dependencies an
   );
   assert.equal(timestamps.size, SINGLE_ITEM);
   assert.ok(!timestamps.has(null));
-});
-
-test("node.retire gives the surviving initiative a job only when its last nonterminal objective retires", (t) => {
-  const f = retireFixture(t);
-  const first = f.objective();
-  const root = f.node(first)!.parent_id!;
-  const second = f.create({
-    ...f.body(NodeKind.Objective, root),
-    filename: OTHER_FILENAME,
-  }).revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  f.apply(first, f.request(f.preview(first)));
-  assert.deepEqual(
-    f.jobs().map((job) => job.node_id),
-    [second],
-  );
-  f.calls.length = EMPTY_CALLS;
-  f.apply(second, f.request(f.preview(second)));
-  assert.deepEqual(
-    f.jobs().map((job) => job.node_id),
-    [root],
-  );
-  assert.ok(
-    f.calls.some(
-      (call) => call.action === QueueAction.Delete && call.node_id === second,
-    ),
-  );
-  assert.ok(
-    f.calls.some(
-      (call) => call.action === QueueAction.Insert && call.node_id === root,
-    ),
-  );
-  assert.equal(f.node(root)?.retired_at, null);
 });
 
 test("node retire of an objective keeps its tasks in its last revision", (t) => {
@@ -4395,7 +4240,7 @@ test("import.apply is a human mutation and imports a full graph in one commit an
   assert.deepEqual(dependsOnOf(f.read(ids.get(INITIATIVE_FILENAME)!)), []);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
-    [objective],
+    [objective, ids.get(INITIATIVE_FILENAME)!].sort(),
   );
   assert.equal(result.changes.revisions.length, THREE_REVISIONS);
   assert.equal(
@@ -4804,7 +4649,10 @@ test("import.apply task rename and move, objective retirement and dependency rep
   const created = assignedId(result, NEW_FILENAME);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
-    [created],
+    [
+      created,
+      entries.find((item) => item.kind === NodeKind.Initiative)!.id!,
+    ].sort(),
   );
   assert.equal(f.node(newObjective)?.state, NodeState.Pending);
   assert.deepEqual(
@@ -4888,7 +4736,10 @@ test("import.apply same filename without identity retires and replaces the old n
   assert.equal(f.node(replacement)?.retired_at, null);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
-    [replacement],
+    [
+      replacement,
+      entries.find((item) => item.kind === NodeKind.Initiative)!.id!,
+    ].sort(),
   );
   assert.deepEqual(result.changes.retired_node_ids, [old]);
   assert.deepEqual(
@@ -5003,7 +4854,11 @@ test("import.apply graph-only changes reroute jobs without writing content revis
   ]);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
-    [objective.id, other.id].sort(),
+    [
+      objective.id,
+      other.id,
+      entries.find((item) => item.kind === NodeKind.Initiative)!.id,
+    ].sort(),
   );
 });
 
@@ -5047,7 +4902,7 @@ test("import.apply Markdown uses the same digest, revisions, graph and no-op beh
   const result = f.apply(body);
   assert.equal(result.assigned_ids.length, IMPORT_NODE_COUNT);
   assert.equal(result.changes.revisions.length, THREE_REVISIONS);
-  assert.equal(f.jobs().length, SINGLE_ITEM);
+  assert.equal(f.jobs().length, TWO_ITEMS);
   const entries = f.identified(result);
   const before = f.state();
   const second = f.apply(f.request(markdown(entries)));

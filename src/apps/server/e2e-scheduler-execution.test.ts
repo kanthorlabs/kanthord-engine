@@ -34,6 +34,7 @@ const FIRST_ATTEMPT = 1;
 const SINGLE_EXECUTION = 1;
 const FIRST_PRIORITY = 1;
 const THIRD_MISSION_VERSION = 3;
+const FOURTH_MISSION_VERSION = 4;
 const DEADLINE_DELTA = 7800000;
 const SHORT_DEADLINE_DELTA = 1001;
 const JOURNEY_TIMEOUT = 180000;
@@ -243,6 +244,16 @@ async function setup(t: TestContext, short = false) {
     },
   );
   const objectiveId = objective.revisions[0]!.node_id;
+  await write(
+    [
+      "mission",
+      "dependency",
+      "add",
+      initiative.revisions[0]!.node_id,
+      objectiveId,
+    ],
+    { reason: "plan", expected_mission_version: THIRD_MISSION_VERSION },
+  );
   const revision = (await read<Node>(["mission", "node", "get", objectiveId]))
     .visible_revision;
   writePrivate(
@@ -314,7 +325,7 @@ async function setup(t: TestContext, short = false) {
     read<Page<{ node_id: string }>>(["scheduler", "queue", "list", project.id]);
   const act = (state: string) => ({
     reason: "hold",
-    expected_mission_version: THIRD_MISSION_VERSION,
+    expected_mission_version: FOURTH_MISSION_VERSION,
     expected_state: state,
     expected_attempt: FIRST_ATTEMPT,
   });
@@ -473,7 +484,7 @@ test(
           "--file",
           h.file({
             value: FIRST_PRIORITY,
-            expected_mission_version: THIRD_MISSION_VERSION,
+            expected_mission_version: FOURTH_MISSION_VERSION,
           }),
         ],
         "mission.node.claim_live",

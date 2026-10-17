@@ -14,15 +14,12 @@ import {
   type WorkQueue,
   type MissionBindings,
 } from "./contract.ts";
-import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   incrementMissionVersion,
   readCurrentRevision,
-  readDependencies,
-  readMissionNodes,
   type NodeRow,
 } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
@@ -67,28 +64,6 @@ function checkParent(node: NodeRow, parent: NodeRow): void {
     node.mission_id,
     "Move stays in one mission.",
   );
-}
-
-function checkCycle(tx: Transaction, missionId: string): void {
-  const nodes = readMissionNodes(tx, missionId).filter(
-    (node) => node.retired_at === null,
-  );
-  const parents = new Map<string, string>();
-  for (const node of nodes) {
-    if (node.parent_id !== null) parents.set(node.id, node.parent_id);
-  }
-  if (
-    hasDependencyCycle(
-      nodes.map((node) => node.id),
-      readDependencies(tx, missionId),
-      parents,
-    )
-  )
-    throw new OperationError(
-      HttpStatus.Conflict,
-      MissionErrorCode.Cycle,
-      "Move creates a cycle.",
-    );
 }
 
 export function moveNode(
@@ -142,7 +117,6 @@ export function moveNode(
     UPDATED_NODE_COUNT,
     "Move updates exactly one node.",
   );
-  checkCycle(tx, mission.id);
   routeMission(tx, mission.id);
   reconcileMission(
     tx,

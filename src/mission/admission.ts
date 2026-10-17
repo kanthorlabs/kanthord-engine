@@ -1,6 +1,5 @@
 import type { Transaction } from "../kernel/store.ts";
 import { NodeState, type WorkQueue } from "./contract.ts";
-import { readCurrentChildStates, readNodeState } from "./store.ts";
 
 const TERMINAL_STATES: ReadonlySet<string> = new Set([
   NodeState.Completed,
@@ -41,18 +40,6 @@ export function nodeApiWriteAdmissible(state: string | null): boolean {
 
 export function parentCreateAdmissible(parentState: string | null): boolean {
   return parentState !== null && PARENT_CREATE_STATES.has(parentState);
-}
-
-export function isObjectiveClaimable(state: string | null): boolean {
-  return state === NodeState.Available;
-}
-
-export function computeInitiativeClaimable(
-  tx: Transaction,
-  nodeId: string,
-): boolean {
-  if (!isObjectiveClaimable(readNodeState(tx, nodeId))) return false;
-  return readCurrentChildStates(tx, nodeId).every(isTerminal);
 }
 
 export function reconcileJob(

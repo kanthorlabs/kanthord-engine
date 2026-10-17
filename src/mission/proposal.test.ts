@@ -7,6 +7,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
   AssetKind,
+  EdgeKind,
   MissionErrorCode,
   NodeKind,
   NodeState,
@@ -21,7 +22,7 @@ import {
   insertOutcome,
   readOutcomesOfAttempt,
 } from "./record-store.ts";
-import { claimableMap } from "./routing.ts";
+import { claimableMap, routeMission } from "./routing.ts";
 import {
   insertNode,
   insertRevision,
@@ -255,7 +256,12 @@ test("approving a proposal creates the objective with its task and unblocks the 
   assert.equal(result.initiative.attempt?.attempt, SECOND_ATTEMPT);
   assert.equal(result.initiative.attempt?.start_point, StartPoint.NodeBranch);
   assert.equal(h.node().attempt, SECOND_ATTEMPT);
-  assert.equal(h.node().state, NodeState.Available);
+  assert.equal(h.node().state, NodeState.Pending);
+  assert.deepEqual(result.objective.added_edges.at(-1), {
+    kind: EdgeKind.Dependency,
+    dependent_id: h.node_id,
+    depends_on_id: objectiveId,
+  });
   const approved = (await h.list()).items[0]!;
   assert.equal(approved.objective_node_id, objectiveId);
   assert.notEqual(approved.approved_at, null);
@@ -265,9 +271,10 @@ test("approving a proposal creates the objective with its task and unblocks the 
     );
   assert.equal(claimable().get(h.node_id), false);
   assert.equal(claimable().get(objectiveId), true);
-  h.store.transaction((tx) =>
-    setNodeState(tx, objectiveId, NodeState.Completed),
-  );
+  h.store.transaction((tx) => {
+    setNodeState(tx, objectiveId, NodeState.Completed);
+    routeMission(tx, h.mission_id);
+  });
   assert.equal(claimable().get(h.node_id), true);
   h.store.transaction((tx) => {
     assert.ok(readOpenAttempt(tx, h.node_id));

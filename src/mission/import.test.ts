@@ -767,34 +767,6 @@ test("binding collaborator operation errors become violations but unexpected fai
   );
 });
 
-test("closure detects a cycle inherited from an initiative dependency on its objective", (t) => {
-  const { resolve } = fixture(t, []);
-  const result = resolve(change(hierarchy(), "a.md", { depends_on: ["o.md"] }));
-  assert.deepEqual(
-    result.violations.map(({ code, filename, node_id }) => ({
-      code,
-      filename,
-      node_id,
-    })),
-    [{ code: MissionErrorCode.Cycle, filename: null, node_id: null }],
-  );
-  assert.deepEqual(result.creates, []);
-});
-
-test("import rejects an objective depending on its own initiative without creates", (t) => {
-  const { resolve } = fixture(t, []);
-  const result = resolve(change(hierarchy(), "o.md", { depends_on: ["a.md"] }));
-  assert.deepEqual(
-    result.violations.map(({ code, filename, node_id }) => ({
-      code,
-      filename,
-      node_id,
-    })),
-    [{ code: MissionErrorCode.Cycle, filename: null, node_id: null }],
-  );
-  assert.deepEqual(result.creates, []);
-});
-
 test("direct dependency cycles are rejected", (t) => {
   const { resolve } = fixture(t, []);
   const result = resolve([

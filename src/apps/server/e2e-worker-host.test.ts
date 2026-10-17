@@ -99,6 +99,10 @@ async function fixture(t: TestContext) {
     },
   );
   const nodeId = objective.revisions[0]!.node_id;
+  await setup.write(
+    ["mission", "dependency", "add", initiative.revisions[0]!.node_id, nodeId],
+    { reason: "plan", expected_mission_version: SECOND_REVISION + 1 },
+  );
   const seed = join(setup.directory, "seed");
   const bare = join(setup.directory, "bare.git");
   mkdirSync(seed, { mode: 0o700 });

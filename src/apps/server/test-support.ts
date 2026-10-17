@@ -1717,7 +1717,22 @@ async function storageNode(
     return answer.revisions[STORAGE_FIRST_INDEX]!.node_id;
   };
   const initiative = await create("initiative.md", "initiative", []);
-  return create("objective.md", "objective", bindingIds, initiative);
+  const objective = await create(
+    "objective.md",
+    "objective",
+    bindingIds,
+    initiative,
+  );
+  const { version } = await cli.read<{ version: number }>([
+    "mission",
+    "get",
+    ids.projectId,
+  ]);
+  await cli.write(["mission", "dependency", "add", initiative, objective], {
+    reason: "plan",
+    expected_mission_version: version,
+  });
+  return objective;
 }
 
 async function storageExecution(
@@ -1941,7 +1956,7 @@ export async function provisionWorkerProject(
       expected_mission_version: FIRST_MISSION_VERSION,
     },
   });
-  await call(missionOperations["node.create"], {
+  const objective = await call(missionOperations["node.create"], {
     params: { mission_id: mission.id },
     query: {},
     body: {
@@ -1956,6 +1971,17 @@ export async function provisionWorkerProject(
       expected_mission_version: SECOND_MISSION_VERSION,
       parent_id: initiative.revisions[0]!.node_id,
       expected_parent_revision: FIRST_NODE_REVISION,
+    },
+  });
+  await call(missionOperations["dependency.add"], {
+    params: {
+      node_id: initiative.revisions[0]!.node_id,
+      depends_on_id: objective.revisions[0]!.node_id,
+    },
+    query: {},
+    body: {
+      reason: "plan",
+      expected_mission_version: objective.mission_version,
     },
   });
   return {
