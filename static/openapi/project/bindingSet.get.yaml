@@ -272,6 +272,7 @@ components:
                         enum:
                           - server
                           - worker
+                      traits: {}
                       resource_budget:
                         type: object
                         properties:
@@ -540,6 +541,7 @@ components:
                             enum:
                               - server
                               - worker
+                          traits: {}
                           resource_budget:
                             type: object
                             properties:

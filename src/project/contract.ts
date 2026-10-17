@@ -11,6 +11,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
 import { ResourceStatus } from "../kernel/health.ts";
+import { traitKeySchema } from "../kernel/trait.ts";
 import { fallbackConfigurationsSchema } from "../agent/contract.ts";
 
 export const BINDING_CHECK_TIMEOUT_MS = 10000;
@@ -111,6 +112,7 @@ export const ProjectErrorCode = {
   WorkerInstanceCountRange: "project.bindings.worker.instance_count_range",
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
   WorkerPlacementChanged: "project.bindings.worker.placement_changed",
+  WorkerTraitsInvalid: "project.bindings.worker.traits_invalid",
 } as const;
 
 export const projectNameSchema = z
@@ -202,6 +204,7 @@ export const workerConfigSchema = z.strictObject({
   worker: z.string().min(1),
   instance_count: z.number().int(),
   placement: z.enum(WorkerPlacement).optional(),
+  traits: z.unknown().optional(),
   resource_budget: z
     .strictObject({
       turns: z.number().int().positive(),
@@ -220,6 +223,9 @@ export const workerConfigSchema = z.strictObject({
     )
     .optional(),
 });
+export const workerTraitsSchema = z
+  .array(traitKeySchema)
+  .refine((keys) => new Set(keys).size === keys.length);
 export const storageConfigSchema = z.strictObject({
   available: z.boolean(),
   endpoint: z.url(),
@@ -837,6 +843,7 @@ export interface WorkerBindingRow {
   generation: number;
   resource_budget: { turns: number; wall_time_ms: number } | null;
   entries: NonNullable<z.infer<typeof workerConfigSchema>["entries"]>;
+  traits: string[];
   tombstone: boolean;
 }
 

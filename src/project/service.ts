@@ -37,6 +37,8 @@ import {
   validateText,
 } from "../agent/prompt-source.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
+import { traitKeySchema } from "../kernel/trait.ts";
+import { isString } from "../kernel/values.ts";
 import {
   assertPinned,
   sshPinSchema,
@@ -71,6 +73,7 @@ import {
   repositoryConfigSchema,
   storageConfigSchema,
   workerConfigSchema,
+  workerTraitsSchema,
   type ProjectBindings,
   type AgentDependentBinding,
   type BindingNaming,
@@ -160,6 +163,30 @@ function refuseRepositoryAction(
       ProjectErrorCode.RepositoryCredentialRequired,
       "The pull_request action requires a credential.",
     );
+}
+function refuseInvalidTraits(name: string, traits: unknown): void {
+  if (traits === undefined) return;
+  if (!Array.isArray(traits))
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerTraitsInvalid,
+      "Worker traits must be a list of unique trait keys.",
+      { binding: name, trait: null },
+    );
+  const seen = new Set<unknown>();
+  for (const trait of traits) {
+    if (traitKeySchema.safeParse(trait).success && !seen.has(trait)) {
+      seen.add(trait);
+      continue;
+    }
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerTraitsInvalid,
+      "Worker traits must be a list of unique trait keys.",
+      { binding: name, trait: isString(trait) ? trait : null },
+    );
+  }
+  assert.ok(workerTraitsSchema.safeParse(traits).success);
 }
 const UTF8_ENCODING = "utf8";
 const CURSOR_ENCODING = "base64url";
@@ -965,6 +992,7 @@ export class ProjectService implements Service, ProjectBindings {
         ProjectErrorCode.WorkerInstanceCountRange,
         "Worker instance count is out of range.",
       );
+    refuseInvalidTraits(name, config.traits);
     const agents = this.workerAgentsOf(config.worker);
     if (agents.length === EMPTY_LENGTH) {
       this.validateEntry(tx, config.worker, null);
@@ -1195,6 +1223,7 @@ export class ProjectService implements Service, ProjectBindings {
         readGeneration(tx, projectId, resourceIdentity) ?? NO_GENERATION,
       resource_budget: config.resource_budget ?? null,
       entries: config.entries ?? [],
+      traits: workerTraitsSchema.parse(config.traits ?? []),
       tombstone: row.removed_at !== null,
     };
   }
