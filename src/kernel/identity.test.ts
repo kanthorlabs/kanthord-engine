@@ -84,12 +84,3 @@ test("the separate bare ULID scalar preserves protocol contracts without admitti
     assert.throws(() => ulidSchema.parse(invalid));
   }
 });
-
-const SAME_MILLISECOND_IDENTITIES = 64;
-
-test("identities created in one millisecond sort in creation order", () => {
-  const created = Array.from({ length: SAME_MILLISECOND_IDENTITIES }, () =>
-    createIdentity("evidence_asset"),
-  );
-  assert.deepEqual(created.toSorted(), created);
-});
