@@ -20,7 +20,6 @@ import {
   objectKey,
   objectLocation,
   producedContent,
-  repositoryBindingOf,
   repositoryBindingIdsOf,
   requiredVerifications,
   requireRepositoryAddress,
@@ -135,11 +134,6 @@ test("the tested input of an initiative with two repository bindings is a list i
         [id],
       );
       const objective = readNode(tx, nodeId)!;
-      assert.equal(
-        repositoryBindingOf(tx, h.dependencies.bindings, objectiveRevision)
-          ?.binding_id,
-        id,
-      );
       assert.equal(
         storageBindingIdOf(tx, h.dependencies.bindings, objectiveRevision),
         storageId,

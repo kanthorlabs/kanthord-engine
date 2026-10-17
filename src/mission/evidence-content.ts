@@ -64,14 +64,6 @@ function bindingOf(
   return matches[FIRST_MATCH_INDEX] ?? null;
 }
 
-export function repositoryBindingOf(
-  tx: Transaction,
-  bindings: MissionBindings,
-  revision: Revision,
-) {
-  return bindingOf(tx, bindings, revision, MissionBindingKind.Repository);
-}
-
 export function storageBindingIdOf(
   tx: Transaction,
   bindings: MissionBindings,
