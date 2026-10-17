@@ -143,3 +143,18 @@ test("the examine template renders the dependencies and the repositories only wh
       assert.ok(text.endsWith("Final-snapshot verification: null"));
     }
 });
+
+const CONFLICT_RENDERED =
+  "The merge of origin/main into the node branch of repository web in directory `web` conflicts. Resolve every conflict in these files of that directory so that the base branch change and the node work both stay intact: a.ts, b.ts. Remove every conflict marker. Do not commit and do not abort the merge.";
+
+test("the conflict template names the binding, the directory and the base branch", () => {
+  assert.equal(
+    renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Conflict, {
+      binding: "web",
+      directory: "web",
+      base_branch: "main",
+      files: "a.ts, b.ts",
+    }),
+    CONFLICT_RENDERED,
+  );
+});

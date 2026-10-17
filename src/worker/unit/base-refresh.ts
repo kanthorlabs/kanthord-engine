@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
@@ -34,11 +35,13 @@ function baseBranchOf(
 
 export function conflictInstruction(
   templates: PromptTemplates,
-  baseBranch: string,
+  conflict: { binding: string; directory: string; base_branch: string },
   files: readonly string[],
 ): string {
   return renderTemplate(templates, PromptTemplate.Conflict, {
-    base_branch: baseBranch,
+    binding: conflict.binding,
+    directory: conflict.directory,
+    base_branch: conflict.base_branch,
     files: files.join(", "),
   });
 }
@@ -91,7 +94,15 @@ async function mergeAtClaim(
   if (conflicts.length > NO_FILES) {
     await state.agent.instruct(
       nodeWork(state),
-      conflictInstruction(state.input.setup.templates, base, conflicts),
+      conflictInstruction(
+        state.input.setup.templates,
+        {
+          binding: checkout.name,
+          directory: relative(state.root, checkout.directory) || ".",
+          base_branch: base,
+        },
+        conflicts,
+      ),
     );
     if (budget.exhausted()) {
       await abortMerge(
