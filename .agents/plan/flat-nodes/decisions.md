@@ -163,6 +163,5 @@ RULED 2026-10-17 by Ulrich (R13).
 
 - Plan 03 grants an upload on the first storage binding of the ordered list. It replaces the single-match grant of `bindingOf` (`src/mission/evidence-content.ts:61`) and adds no failover.
 - Plan 03b adds the failover: the enabled check, the failover on a refused signing call, the failed upload check and the refusal when no binding is left. It starts after plan 03 and merges before plan 08.
-- Pending Ulrich ruling B1: the table `mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at)` keys a failed upload check by `(node_id, attempt, storage_binding_id)`. The grant skips a binding that holds a failure row of the open attempt, and a new attempt tries every binding again. `asset_id` names the asset whose check failed.
-- Pending Ulrich ruling B2: no binding left answers 409 `mission.evidence.storage_exhausted`. 503 `mission.evidence.storage_unavailable` keeps the meaning "No object storage is wired" (`src/mission/storage-unavailable.ts:5-18`).
-- Plan 03b carries both values as "pending Ulrich ruling". Its gate replaces them with the ruled values before the merge.
+- Ruling R15 (2026-10-17): the table `mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at)` keys a failed upload check by `(node_id, attempt, storage_binding_id)`. The grant skips a binding that holds a failure row of the open attempt, and a new attempt tries every binding again. `asset_id` names the asset whose check failed.
+- Ruling R16 (2026-10-17): no binding left answers 409 `mission.evidence.storage_exhausted`. 503 `mission.evidence.storage_unavailable` keeps the meaning "No object storage is wired" (`src/mission/storage-unavailable.ts:5-18`).
