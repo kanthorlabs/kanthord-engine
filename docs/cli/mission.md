@@ -848,13 +848,19 @@ An execution submission always names an attempt of 1 or more, because a claim ex
 
 The complete operation takes `ExecutionContext`; the route supplies its required `EvidenceAssetId`.
 
-`TestedInput` is `Address` for an `implement` node.
+`TestedInput` holds one of four forms:
+
+- One `RepositoryAddress` for a node with one repository binding.
+- `RepositoryAddress[]` for a node with two or more repository bindings, one commit for each binding in binding order.
+- A `ProducedAddress` when no repository supplies the tested input.
+- An `ObjectAddress` when the verifications read an object that a storage binding holds.
+
+A node with at most one repository binding accepts a `ProducedAddress` or an `ObjectAddress`.
+A node with no repository binding refuses a `RepositoryAddress`.
+A node with two or more repository bindings accepts only the list form.
 An `examine` node names zero or more repository bindings of its own.
-For an `examine` node with one repository binding, `TestedInput` is one `RepositoryAddress`.
-For an `examine` node with two or more repository bindings, it is `RepositoryAddress[]`, one commit for each binding in binding order.
-The reviewer checks out each base-branch head under `checkouts/<binding name>/`.
-For an `examine` node that names no repository, `TestedInput` is `ProducedAddress` or `ObjectAddress`.
-The reviewer places that produced evidence in the workspace.
+The reviewer of an `examine` node checks out each base-branch head under `checkouts/<binding name>/`.
+When an `examine` node names no repository, the reviewer places the produced evidence in the workspace.
 
 The [verification run](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-verifications) uses list order, one item at a time, never in parallel.
 Each verification runs through `bash -c` in the execution workspace root.
