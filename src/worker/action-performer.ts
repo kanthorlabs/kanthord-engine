@@ -251,6 +251,7 @@ export class ActionPerformer {
         recorded.kind === ActionResultKind.Uncertain ? recorded : null;
       if (
         recorded.kind === ActionResultKind.Submitted &&
+        answer.kind === PlatformAddressKind.PullRequest &&
         pending.entry.action.action === RepositoryAction.PullRequest &&
         pending.entry.action.configuration.landing === Landing.KanthorD
       ) {

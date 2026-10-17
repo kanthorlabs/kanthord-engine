@@ -89,6 +89,10 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
     },
     github: { baseUrl: gitHub.endpoint },
   });
+  fixture.gitWriter.landedOn = async () => ({
+    landed: false,
+    first_parent: null,
+  });
   const creates = () =>
     gitHub.calls.filter((item) => item.method === HttpMethod.Post).length;
   async function call<T extends Operation>(

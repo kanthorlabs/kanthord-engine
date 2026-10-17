@@ -163,6 +163,12 @@ test("request admission rejects a steps claim, unknown action and mismatched pla
     {
       kind: PlatformAddressKind.BranchPush,
       resource_identity: RESOURCE,
+      branch: "develop",
+      commit: "a".repeat(40),
+    },
+    {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: "repository:github:foreign/repo",
       branch: "main",
       commit: "a".repeat(40),
     },
@@ -183,4 +189,23 @@ test("request admission rejects a steps claim, unknown action and mismatched pla
     actionStatesOf(tx, h.dependencies.bindings, h.node_id, FIRST_ATTEMPT),
   );
   assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unrequested);
+});
+
+test("a pull request request admits a branch push address of its binding", async (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  const address = {
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: RESOURCE,
+    branch: "main",
+    commit: "a".repeat(40),
+  } as const;
+  const evidence = await h.request({ ...h.body, address });
+  assert.deepEqual(evidence.assets[FIRST_INDEX]!.address, address);
+  const states = h.store.transaction((tx) =>
+    actionStatesOf(tx, h.dependencies.bindings, h.node_id, FIRST_ATTEMPT),
+  );
+  assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unresolved);
 });

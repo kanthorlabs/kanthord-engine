@@ -6,7 +6,7 @@ import {
   type Material,
 } from "../custody/contract.ts";
 import { isMachineIdentity, type MachineIdentity } from "../kernel/caller.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
@@ -245,6 +245,14 @@ async function createPullRequest(
   facts: Readonly<ActionFacts>,
   held: { material: Material | null; scope: OutboundScope },
 ): Promise<CallAnswer> {
+  let contained: string | null;
+  try {
+    contained = await baseLandingOf(dependencies, facts, held.scope);
+  } catch (error) {
+    return landingFailure(error);
+  }
+  if (contained !== null)
+    return { ok: true, result: branchPushAddress(facts, contained) };
   const call = gitHubCall(performer, held.material, held.scope);
   const answer = await dependencies.github.createPullRequest(
     call,
@@ -390,13 +398,13 @@ async function openPullRequest(
   return { match: true, result: pullRequestAddress(facts, number) };
 }
 
-async function landedMerge(
+async function baseLandingOf(
   dependencies: ActionCheckDependencies,
   facts: Readonly<ActionFacts>,
   scope: OutboundScope,
-): Promise<ReadBack> {
+): Promise<string | null> {
   const baseBranch = facts.frozen_action.configuration.base_branch;
-  assert.ok(baseBranch.length, "A merge push names its base branch.");
+  assert.ok(baseBranch.length, "An action names its base branch.");
   const landing = await dependencies.gitWriter.landedOn(
     {
       address: facts.repository.address,
@@ -406,12 +414,30 @@ async function landedMerge(
     scope.context,
     deadlineOf(scope, GIT_WRITE_DEADLINE_MS),
   );
-  if (!landing.landed) return { match: false };
+  if (!landing.landed) return null;
   assert.ok(landing.first_parent !== null, "A landing names its commit.");
+  return landing.first_parent;
+}
+
+function landingFailure(error: unknown): CallAnswer {
+  if (!(error instanceof Diagnostic) || error.code !== GIT_FAILED_CODE)
+    throw error;
   return {
-    match: true,
-    result: branchPushAddress(facts, landing.first_parent),
+    ok: false,
+    class: ResultClass.ConfirmedFailure,
+    code: error.code,
+    message: error.message,
   };
+}
+
+async function landedMerge(
+  dependencies: ActionCheckDependencies,
+  facts: Readonly<ActionFacts>,
+  scope: OutboundScope,
+): Promise<ReadBack> {
+  const landed = await baseLandingOf(dependencies, facts, scope);
+  if (landed === null) return { match: false };
+  return { match: true, result: branchPushAddress(facts, landed) };
 }
 
 async function landedSnapshot(

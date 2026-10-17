@@ -112,6 +112,10 @@ test(
       },
       github: { baseUrl: gitHub.endpoint },
     });
+    f.gitWriter.landedOn = async () => ({
+      landed: false,
+      first_parent: null,
+    });
     const directory = temporary(t);
     const human = {
       ...environment(directory),
