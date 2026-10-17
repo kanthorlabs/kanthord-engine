@@ -711,20 +711,27 @@ test("EF03b storage failover journey", { timeout: TIMEOUT }, async (t) => {
     assert.deepEqual(h.failures(), [h.primaryId]);
     recovered = result.asset_id;
   });
-  await t.test("EF03b.3 two failed stores exhaust the storage", async () => {
-    h.secondary.failNext(FAILED_PUT_STATUS);
-    const failure = await h.upload().then(
-      () => assert.fail("The upload publishes."),
-      (error: unknown) => error,
-    );
-    assert.ok(
-      diagnostic(failure).startsWith(
-        `${MissionErrorCode.EvidenceStorageExhausted}:`,
-      ),
-      diagnostic(failure),
-    );
-    assert.deepEqual(h.failures(), [h.primaryId, h.secondaryId]);
-  });
+  await t.test(
+    "EF03b.3 a failed secondary after a failed primary exhausts the storage",
+    async () => {
+      const primaryPuts = () =>
+        h.primary.calls.filter((call) => call.method === HttpMethod.Put).length;
+      const before = primaryPuts();
+      h.secondary.failNext(FAILED_PUT_STATUS);
+      const failure = await h.upload().then(
+        () => assert.fail("The upload publishes."),
+        (error: unknown) => error,
+      );
+      assert.ok(
+        diagnostic(failure).startsWith(
+          `${MissionErrorCode.EvidenceStorageExhausted}:`,
+        ),
+        diagnostic(failure),
+      );
+      assert.deepEqual(h.failures(), [h.primaryId, h.secondaryId]);
+      assert.equal(primaryPuts(), before);
+    },
+  );
   await t.test(
     "EF03b.4 the read of a failed-over asset uses secondary",
     async () => {
