@@ -115,11 +115,11 @@ export interface SchedulerClaims {
   } | null;
 }
 
-export interface UnmatchedClaim {
+export type UnmatchedClaim = {
   node_id: string;
   revision: number;
   claim: ClaimableState;
-}
+};
 
 export interface SchedulerMatch {
   unmatchedClaims(tx: Transaction, projectId: string): UnmatchedClaim[];

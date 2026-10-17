@@ -44,6 +44,7 @@ import {
   type IntakeCheck,
   type EventDecoder,
   type Work,
+  type ImportPreview,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -103,7 +104,7 @@ import {
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
 import { previewImport } from "./import.ts";
-import { applyImport } from "./import-apply.ts";
+import { applyImport, probeCoverage } from "./import-apply.ts";
 import { createNode } from "./node-create.ts";
 import { rebindNodes } from "./node-rebind.ts";
 import { planRetirement, retireNode } from "./node-retire.ts";
@@ -127,6 +128,9 @@ import {
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 
 const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
+const NO_VIOLATIONS = 0;
+
+class ProbeRollback extends Error {}
 const QUERY_TRUE = "true";
 
 export function humanActor(caller: CallerContext): HumanActor {
@@ -629,17 +633,42 @@ export class MissionService
     );
     registry.register(
       missionOperations["import.preview"],
-      ({ params, body }, caller) =>
-        caller.commit((tx) =>
-          previewImport(
-            tx,
-            requireMission(tx, params.mission_id, body.mission_version),
-            body,
-            params.mission_id,
-            this.dependencies.bindings,
-            this.dependencies.config.text_max_bytes,
-          ),
-        ),
+      ({ params, body }, caller) => {
+        let probed: ImportPreview | null = null;
+        try {
+          return caller.commit((tx) => {
+            const mission = requireMission(
+              tx,
+              params.mission_id,
+              body.mission_version,
+            );
+            const preview = previewImport(
+              tx,
+              mission,
+              body,
+              params.mission_id,
+              this.dependencies.bindings,
+              this.dependencies.config.text_max_bytes,
+            );
+            if (preview.violations.length > NO_VIOLATIONS) return preview;
+            probed = {
+              ...preview,
+              violations: probeCoverage(
+                tx,
+                mission,
+                body,
+                humanActor(caller),
+                this.dependencies,
+              ),
+            };
+            throw new ProbeRollback();
+          });
+        } catch (error) {
+          if (!(error instanceof ProbeRollback)) throw error;
+          assert.ok(probed);
+          return probed;
+        }
+      },
     );
     registry.register(
       missionOperations["edge.list"],

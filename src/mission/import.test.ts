@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { digest } from "../kernel/json.ts";
 import {
   IN_MEMORY_DATABASE,
@@ -11,6 +12,7 @@ import {
 } from "../kernel/store.ts";
 import {
   ActorKind,
+  ClaimableState,
   ImportFormat,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
@@ -43,6 +45,7 @@ import {
   type NormalizedEntry,
 } from "./import.ts";
 import { missionMigrations } from "./migrations.ts";
+import { missionHarness } from "./test-support.ts";
 import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
@@ -1944,4 +1947,103 @@ test("kanthord check: an implement node with no task holds an empty task list", 
   assert.ok(revision);
   assert.deepEqual(revision.tasks, []);
   assert.equal(revision.content.work, Work.Implement);
+});
+
+const LINUX = "platform.linux";
+
+test("preview reports the unmatched pairs and leaves the mission version unchanged", async (t) => {
+  const reads: string[] = [];
+  const h = missionHarness(t, testHumanIdentity("test", "Test", "token"), {
+    bindings,
+    schedulerMatch: {
+      unmatchedClaims: (tx, projectId) => {
+        reads.push(projectId);
+        return h.service
+          .claimFactsOf(tx, projectId)
+          .filter((row) => row.requires.includes(LINUX))
+          .flatMap((row) =>
+            row.claims.map((claim) => ({
+              node_id: row.node_id,
+              revision: row.revision,
+              claim,
+            })),
+          );
+      },
+    },
+  });
+  h.store.transaction((tx) => h.service.createMission(tx, PROJECT_ID, actor));
+  const mission = await h.invoke("get", {
+    params: { project_id: PROJECT_ID },
+    query: {},
+    body: null,
+  });
+  const [seeded] = h.store.transaction((tx) =>
+    seed(tx, mission, [entry("a.md")]),
+  );
+  assert.ok(seeded?.id);
+  const rows = () =>
+    h.store.transaction((tx) => ({
+      mission: readMission(tx, mission.id),
+      revisions: tx.database
+        .prepare("SELECT * FROM mission_node_revision")
+        .all(),
+      nodes: tx.database.prepare("SELECT * FROM mission_node").all(),
+    }));
+  const before = rows();
+  const preview = (entries: ImportEntry[]) =>
+    h.invoke("import.preview", {
+      params: { mission_id: mission.id },
+      query: {},
+      body: snapshot(entries, mission.id),
+    });
+  const unmatched = await preview([
+    { ...entry("a.md", { requires: [LINUX] }), id: seeded.id },
+    entry("b.md", { requires: [LINUX] }),
+    entry("c.md"),
+  ]);
+  assert.deepEqual(unmatched.violations, [
+    {
+      code: MissionErrorCode.RequiresUnmatched,
+      message:
+        "The node write adds a node and claimable state pair that no worker binding covers.",
+      filename: "a.md",
+      node_id: seeded.id,
+      details: {
+        claims: [
+          {
+            node_id: seeded.id,
+            revision: VERSION + NEXT_VERSION_INCREMENT,
+            claim: ClaimableState.Available,
+          },
+          {
+            node_id: seeded.id,
+            revision: VERSION + NEXT_VERSION_INCREMENT,
+            claim: ClaimableState.Waiting,
+          },
+        ],
+      },
+    },
+    {
+      code: MissionErrorCode.RequiresUnmatched,
+      message:
+        "The node write adds a node and claimable state pair that no worker binding covers.",
+      filename: "b.md",
+      node_id: null,
+      details: {
+        claims: [
+          { node_id: null, revision: VERSION, claim: ClaimableState.Available },
+          { node_id: null, revision: VERSION, claim: ClaimableState.Waiting },
+        ],
+      },
+    },
+  ]);
+  assert.equal(unmatched.creates.length, ["b.md", "c.md"].length);
+  assert.deepEqual(rows(), before);
+  assert.equal(reads.length, ["before", "after"].length);
+  const covered = await preview([
+    { ...entry("a.md"), id: seeded.id },
+    entry("c.md"),
+  ]);
+  assert.deepEqual(covered.violations, []);
+  assert.deepEqual(rows(), before);
 });

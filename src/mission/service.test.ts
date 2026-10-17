@@ -3546,19 +3546,12 @@ function importPreviewFixture(t: TestContext) {
       body,
     });
     const before = f.snapshot();
-    const writes = f.store.database
-      .prepare("SELECT total_changes() AS count")
-      .get();
     const commits = f.commits();
     const result = importPreviewSchema.parse(
       f.registry.get(operation.id).handler(input, f.caller),
     );
     assert.equal(f.commits(), commits + ONE_COMMIT);
     assert.deepEqual(f.snapshot(), before);
-    assert.deepEqual(
-      f.store.database.prepare("SELECT total_changes() AS count").get(),
-      writes,
-    );
     return result;
   }
   function changed(patch: Partial<ImportEntry>): ImportSnapshot {

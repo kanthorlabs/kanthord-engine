@@ -13,11 +13,16 @@ import {
   type ImportApply,
   type ImportPreview,
   type ImportResult,
+  type ImportSnapshot,
   type Mission,
   type MissionBindings,
+  type Revision,
+  type Violation,
   type WorkQueue,
   type SchedulerClaims,
 } from "./contract.ts";
+import { addedPairs, UNMATCHED_MESSAGE } from "./coverage.ts";
+import type { Dependencies } from "./service.ts";
 import {
   isTaskEntry,
   prepareImport,
@@ -44,6 +49,11 @@ const EXPECTED_ROW_CHANGE = 1;
 const VERSION_INCREMENT = 1;
 const FIRST_VIOLATION = 0;
 const TEMPORARY_FILENAME_PREFIX = "import:";
+const PROBE_QUEUE: WorkQueue = {
+  insert: () => undefined,
+  delete: () => undefined,
+  priorityUpdate: () => undefined,
+};
 const CONFLICT_CODES: ReadonlySet<string> = new Set([
   MissionErrorCode.ConditionFailed,
   MissionErrorCode.TerminalChange,
@@ -257,6 +267,105 @@ function initialResult(
   };
 }
 
+function changesMission(resolved: ResolvedImport): boolean {
+  return (
+    resolved.creates.length +
+      resolved.updates.length +
+      resolved.retirements.length >
+    NO_IMPORT_CHANGES
+  );
+}
+
+function writeImport(
+  tx: Transaction,
+  mission: Mission,
+  resolved: ResolvedImport,
+  entries: ResolvedImportEntry[],
+  actor: HumanActor,
+  reason: string,
+  acceptedAt: number,
+  bindings: MissionBindings,
+  workQueue: WorkQueue,
+): Revision[] {
+  const before = claimableMap(tx, mission.id, bindings);
+  const revisions = importRevisions(
+    tx,
+    resolved,
+    entries,
+    actor,
+    reason,
+    acceptedAt,
+  );
+  writeNodes(tx, mission.id, resolved, entries, acceptedAt);
+  for (const revision of revisions) insertRevision(tx, revision);
+  routeMission(tx, mission.id);
+  reconcileMission(
+    tx,
+    workQueue,
+    mission.id,
+    mission.project_id,
+    before,
+    bindings,
+  );
+  const missionVersion = incrementMissionVersion(tx, mission.id);
+  assert.equal(missionVersion, mission.version + VERSION_INCREMENT);
+  return revisions;
+}
+
+export function probeCoverage(
+  tx: Transaction,
+  mission: Mission,
+  snapshot: ImportSnapshot,
+  actor: HumanActor,
+  dependencies: Pick<Dependencies, "bindings" | "schedulerMatch" | "config">,
+): Violation[] {
+  const { preview, resolved } = prepareImport(
+    tx,
+    mission,
+    snapshot,
+    mission.id,
+    dependencies.bindings,
+    dependencies.config.text_max_bytes,
+  );
+  assert.equal(preview.violations.length, NO_VIOLATIONS);
+  assert.ok(resolved, "A valid import has a resolved graph.");
+  if (!changesMission(resolved)) return [];
+  const entries = assignIdentities(resolved);
+  const added = addedPairs(tx, dependencies, mission.project_id, () =>
+    writeImport(
+      tx,
+      mission,
+      resolved,
+      entries,
+      actor,
+      snapshot.reason,
+      Date.now(),
+      dependencies.bindings,
+      PROBE_QUEUE,
+    ),
+  );
+  return entries.flatMap((item): Violation[] => {
+    const claims = added.filter(({ node_id }) => node_id === item.key);
+    if (claims.length === NO_VIOLATIONS) return [];
+    const nodeId = item.current?.id ?? null;
+    return [
+      {
+        code: MissionErrorCode.RequiresUnmatched,
+        message: UNMATCHED_MESSAGE,
+        filename: item.entry.filename,
+        node_id: nodeId,
+        details: {
+          claims: claims.map(({ revision, claim }) => ({
+            node_id: nodeId,
+            revision,
+            claim,
+          })),
+        },
+      },
+    ];
+  });
+}
+
 export function applyImport(
   tx: Transaction,
   missionId: string,
@@ -291,35 +400,19 @@ export function applyImport(
       requireNoLiveClaim(tx, item.current.id, schedulerClaims, acceptedAt);
   }
   const result = initialResult(mission, entries, actor, acceptedAt);
-  if (
-    resolved.creates.length +
-      resolved.updates.length +
-      resolved.retirements.length ===
-    NO_IMPORT_CHANGES
-  )
-    return result;
-  const before = claimableMap(tx, missionId, bindings);
-  const revisions = importRevisions(
+  if (!changesMission(resolved)) return result;
+  const revisions = writeImport(
     tx,
+    mission,
     resolved,
     entries,
     actor,
     body.reason,
     acceptedAt,
-  );
-  writeNodes(tx, missionId, resolved, entries, acceptedAt);
-  for (const revision of revisions) insertRevision(tx, revision);
-  routeMission(tx, missionId);
-  reconcileMission(
-    tx,
-    workQueue,
-    missionId,
-    mission.project_id,
-    before,
     bindings,
+    workQueue,
   );
-  const missionVersion = incrementMissionVersion(tx, missionId);
-  assert.equal(missionVersion, mission.version + VERSION_INCREMENT);
+  const missionVersion = mission.version + VERSION_INCREMENT;
   return {
     ...result,
     mission_version: missionVersion,
