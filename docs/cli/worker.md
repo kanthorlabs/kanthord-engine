@@ -128,13 +128,14 @@ The answer holds `prompt` and `repositories`, among other fields.
 Each item of `repositories` holds `{ binding_id, name, address, ssh_identity, strategy, project_prompt, working_layer }`.
 `working_layer` is the map of the booleans `agents_md`, `agents_local_md`, `claude_md`, `claude_local_md` and `project_prompt` of the pinned binding revision, with all five keys present.
 The worker application appends the working layer of each workspace. It reads the agent files whose switch is on and the project prompt when `project_prompt` is on.
+[Project](./project.md#binding-resource-and-complete-set-edits) rules the switches.
 
 The steps method of an `implement` node keeps its workspace in `workspaces/<node identity>/` of the state directory.
 Each repository binding of the pinned revision has one checkout in `workspaces/<node identity>/checkouts/<binding name>/`.
 With one repository binding, the agent works from that checkout.
 With two or more, the agent works from `checkouts/`, and each binding is one directory under it.
-The execution commits each checkout that holds a change, pushes the node branch of every checkout, and then submits one evidence with one `repository` asset for each binding in binding order.
-[Project](./project.md#binding-resource-and-complete-set-edits) rules the switches.
+The execution commits each checkout that holds a change and pushes the node branch of every checkout.
+It then submits one evidence with one `repository` asset for each binding in binding order.
 
 The four human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
 Each is `unary`, has `mutation: false` and a default timeout of 30 s, and reads
@@ -464,6 +465,7 @@ that calls a tool. Tools are reached through the MCP server.
 The steps method writes the change requests into one requested-changes text that stops at 4 KiB.
 Each change request has the line `Reviewer <reviewer> requests changes on <binding name> at commit <commit>: <body>`.
 The binding name is the name of the repository binding that `binding_id` of the item names.
+When the pinned revision names no such binding, the line names `binding_id`.
 
 ### Action performer results
 
