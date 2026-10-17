@@ -328,6 +328,60 @@ test("initiative admission tracks replacement dependency outcomes and excludes r
   h.admit();
 });
 
+test("proposals refuse a contained objective with no dependency edge and an initiative dependency", (t) => {
+  const h = fixture(t);
+  h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
+  const node = (kind: NodeKind, parentId: string | null) => {
+    const id = createIdentity("node");
+    h.store.transaction((tx) => {
+      const base = getRevision(tx, h.node_id, FIRST_REVISION);
+      insertNode(tx, {
+        id,
+        mission_id: h.mission_id,
+        kind,
+        parent_id: parentId,
+        filename: `${id.toLowerCase()}.md`,
+        created_at: NOW,
+      });
+      insertRevision(tx, {
+        ...base,
+        node_id: id,
+        filename: `${id.toLowerCase()}.md`,
+        tasks: [],
+      });
+    });
+    return id;
+  };
+  const contained = node(NodeKind.Objective, h.node_id);
+  const initiative = node(NodeKind.Initiative, null);
+  const objective = node(NodeKind.Objective, null);
+  h.store.transaction((tx) => {
+    insertDependency(tx, h.mission_id, h.node_id, initiative);
+    insertDependency(tx, h.mission_id, h.node_id, objective);
+  });
+  const propose = (dependencyId: string) => ({
+    ...h.body,
+    result: AssessmentResult.Undetermined,
+    proposals: [
+      {
+        dependency_id: dependencyId,
+        name: "Fix",
+        requirement: "Repair",
+        criterion: "Repaired",
+        task: {
+          name: "Task",
+          requirement: "Change",
+          criterion: "Changed",
+          verifications: ["true"],
+        },
+      },
+    ],
+  });
+  for (const dependencyId of [contained, initiative])
+    refusal(() => h.admit(propose(dependencyId)), VALIDATION, "proposals");
+  h.admit(propose(objective));
+});
+
 test("proposals are admitted only for an undetermined initiative with an objective dependency", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
