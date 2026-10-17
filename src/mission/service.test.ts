@@ -81,7 +81,7 @@ import {
 } from "./content.ts";
 import { ControlError } from "./control.ts";
 import { revisionFromRow } from "./revision.ts";
-import { unexpectedCollaboration } from "./test-support.ts";
+import { databaseSnapshot, unexpectedCollaboration } from "./test-support.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   insertDependency,
@@ -258,6 +258,7 @@ const ACCOUNT_ID = "mission-account";
 const DISPLAY_NAME = "Mission Operator";
 const TOKEN_ID = "mission-token";
 const ONE_COMMIT = 1;
+const NO_PREVIEW_VIOLATIONS = 0;
 const BINDING_ID = "binding_00000000000000000000000000";
 const OTHER_BINDING_ID = "binding_00000000000000000000000001";
 const UNKNOWN_BINDING_ID = "binding_00000000000000000000000002";
@@ -3545,13 +3546,21 @@ function importPreviewFixture(t: TestContext) {
       query: {},
       body,
     });
-    const before = f.snapshot();
+    const before = databaseSnapshot(f.store);
+    const writes = f.store.database
+      .prepare("SELECT total_changes() AS count")
+      .get();
     const commits = f.commits();
     const result = importPreviewSchema.parse(
       f.registry.get(operation.id).handler(input, f.caller),
     );
     assert.equal(f.commits(), commits + ONE_COMMIT);
-    assert.deepEqual(f.snapshot(), before);
+    assert.deepEqual(databaseSnapshot(f.store), before);
+    if (result.violations.length > NO_PREVIEW_VIOLATIONS)
+      assert.deepEqual(
+        f.store.database.prepare("SELECT total_changes() AS count").get(),
+        writes,
+      );
     return result;
   }
   function changed(patch: Partial<ImportEntry>): ImportSnapshot {

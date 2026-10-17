@@ -52,6 +52,20 @@ const FIXTURE_TIME = 100;
 const FIRST_REVISION = 1;
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
 
+export function databaseSnapshot(store: Store): Record<string, unknown[]> {
+  const tables = store.database
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+    )
+    .all() as { name: string }[];
+  return Object.fromEntries(
+    tables.map(({ name }) => [
+      name,
+      store.database.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all(),
+    ]),
+  );
+}
+
 export function unexpectedCollaboration(): never {
   throw new Error(UNEXPECTED_COLLABORATION);
 }

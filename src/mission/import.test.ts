@@ -45,7 +45,7 @@ import {
   type NormalizedEntry,
 } from "./import.ts";
 import { missionMigrations } from "./migrations.ts";
-import { missionHarness } from "./test-support.ts";
+import { databaseSnapshot, missionHarness } from "./test-support.ts";
 import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
@@ -1981,14 +1981,7 @@ test("preview reports the unmatched pairs and leaves the mission version unchang
     seed(tx, mission, [entry("a.md")]),
   );
   assert.ok(seeded?.id);
-  const rows = () =>
-    h.store.transaction((tx) => ({
-      mission: readMission(tx, mission.id),
-      revisions: tx.database
-        .prepare("SELECT * FROM mission_node_revision")
-        .all(),
-      nodes: tx.database.prepare("SELECT * FROM mission_node").all(),
-    }));
+  const rows = () => databaseSnapshot(h.store);
   const before = rows();
   const preview = (entries: ImportEntry[]) =>
     h.invoke("import.preview", {
