@@ -35,6 +35,7 @@ import {
   type MissionCollaborations,
   type WorkQueue,
   type SchedulerClaims,
+  type SchedulerMatch,
   type SchedulerWakeup,
   type ExecutionAttribution,
   type MissionTransitions,
@@ -77,6 +78,7 @@ import {
 import { claim, release, failure } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
 import { claimFacts, claimFactsOf } from "./claim-facts.ts";
+import { guardCoverage } from "./coverage.ts";
 import {
   authorizeAction,
   authorizeEvidenceAsset,
@@ -140,6 +142,20 @@ export function humanActor(caller: CallerContext): HumanActor {
   };
 }
 
+type WriteScope =
+  { mission_id: string } | { node_id: string } | { proposal_id: string };
+
+function projectOf(tx: Transaction, scope: WriteScope): string {
+  const missionId =
+    "mission_id" in scope
+      ? scope.mission_id
+      : "node_id" in scope
+        ? requireNode(tx, scope.node_id).mission_id
+        : requireNode(tx, requireProposal(tx, scope.proposal_id).node_id)
+            .mission_id;
+  return requireMission(tx, missionId).project_id;
+}
+
 export interface Dependencies {
   store: Store;
   intakeStorage: IntakeStorage;
@@ -150,6 +166,7 @@ export interface Dependencies {
   bindings: MissionBindings;
   workQueue: WorkQueue;
   schedulerClaims: SchedulerClaims;
+  schedulerMatch: SchedulerMatch;
   wakeup: SchedulerWakeup;
   executionAttribution: ExecutionAttribution;
   logger: Logger;
@@ -470,13 +487,15 @@ export class MissionService
       missionOperations["proposal.approve"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { proposal_id: params.proposal_id }, (tx) =>
-          approveProposal(
-            tx,
-            this.dependencies,
-            params.proposal_id,
-            body,
-            humanActor(caller),
-            Date.now(),
+          this.covered(tx, { proposal_id: params.proposal_id }, (tx) =>
+            approveProposal(
+              tx,
+              this.dependencies,
+              params.proposal_id,
+              body,
+              humanActor(caller),
+              Date.now(),
+            ),
           ),
         ),
     );
@@ -484,13 +503,15 @@ export class MissionService
       missionOperations["node.unblock"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
-          unblockNode(
-            tx,
-            this.dependencies,
-            params.node_id,
-            body,
-            humanActor(caller),
-            Date.now(),
+          this.covered(tx, { node_id: params.node_id }, (tx) =>
+            unblockNode(
+              tx,
+              this.dependencies,
+              params.node_id,
+              body,
+              humanActor(caller),
+              Date.now(),
+            ),
           ),
         ),
     );
@@ -592,15 +613,17 @@ export class MissionService
       missionOperations["import.apply"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { mission_id: params.mission_id }, (tx) =>
-          applyImport(
-            tx,
-            params.mission_id,
-            body,
-            humanActor(caller),
-            this.dependencies.bindings,
-            this.dependencies.workQueue,
-            this.dependencies.config.text_max_bytes,
-            this.dependencies.schedulerClaims,
+          this.covered(tx, { mission_id: params.mission_id }, (tx) =>
+            applyImport(
+              tx,
+              params.mission_id,
+              body,
+              humanActor(caller),
+              this.dependencies.bindings,
+              this.dependencies.workQueue,
+              this.dependencies.config.text_max_bytes,
+              this.dependencies.schedulerClaims,
+            ),
           ),
         ),
     );
@@ -712,13 +735,15 @@ export class MissionService
       missionOperations["node.rebind"],
       ({ params, body }, caller) =>
         caller.commit((tx) =>
-          rebindNodes(
-            tx,
-            params.mission_id,
-            body,
-            humanActor(caller),
-            this.dependencies.bindings,
-            this.dependencies.config.text_max_bytes,
+          this.covered(tx, { mission_id: params.mission_id }, (tx) =>
+            rebindNodes(
+              tx,
+              params.mission_id,
+              body,
+              humanActor(caller),
+              this.dependencies.bindings,
+              this.dependencies.config.text_max_bytes,
+            ),
           ),
         ),
     );
@@ -795,13 +820,15 @@ export class MissionService
       missionOperations["node.update"],
       ({ params, body }, caller) =>
         caller.commit((tx) =>
-          updateNode(
-            tx,
-            params.node_id,
-            body,
-            humanActor(caller),
-            this.dependencies.bindings,
-            this.dependencies.config.text_max_bytes,
+          this.covered(tx, { node_id: params.node_id }, (tx) =>
+            updateNode(
+              tx,
+              params.node_id,
+              body,
+              humanActor(caller),
+              this.dependencies.bindings,
+              this.dependencies.config.text_max_bytes,
+            ),
           ),
         ),
     );
@@ -809,14 +836,16 @@ export class MissionService
       missionOperations["node.create"],
       ({ params, body }, caller) =>
         this.commitGraph(caller, { mission_id: params.mission_id }, (tx) =>
-          createNode(
-            tx,
-            params.mission_id,
-            body,
-            humanActor(caller),
-            this.dependencies.bindings,
-            this.dependencies.workQueue,
-            this.dependencies.config.text_max_bytes,
+          this.covered(tx, { mission_id: params.mission_id }, (tx) =>
+            createNode(
+              tx,
+              params.mission_id,
+              body,
+              humanActor(caller),
+              this.dependencies.bindings,
+              this.dependencies.workQueue,
+              this.dependencies.config.text_max_bytes,
+            ),
           ),
         ),
     );
@@ -832,6 +861,14 @@ export class MissionService
         return mission;
       }),
     );
+  }
+
+  private covered<T>(
+    tx: Transaction,
+    scope: WriteScope,
+    write: (tx: Transaction) => T,
+  ): T {
+    return guardCoverage(tx, this.dependencies, projectOf(tx, scope), write);
   }
 
   private commitGraph<T>(

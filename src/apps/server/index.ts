@@ -561,6 +561,10 @@ export function composeServices(options: {
       settle: (...args) => scheduler.settle(...args),
       liveExecutionOf: (...args) => scheduler.liveExecutionOf(...args),
     },
+    schedulerMatch: {
+      unmatchedClaims: (tx, projectId) =>
+        scheduler.unmatchedClaims(tx, projectId),
+    },
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),

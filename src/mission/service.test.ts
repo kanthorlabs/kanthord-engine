@@ -313,7 +313,10 @@ const workQueue: WorkQueue = {
 
 type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
   Partial<
-    Pick<Dependencies, "schedulerClaims" | "wakeup" | "executionAttribution">
+    Pick<
+      Dependencies,
+      "schedulerClaims" | "schedulerMatch" | "wakeup" | "executionAttribution"
+    >
   >;
 
 function makeService(
@@ -345,6 +348,7 @@ function makeService(
       settle: () => {},
       liveExecutionOf: () => null,
     },
+    schedulerMatch: { unmatchedClaims: () => [] },
     wakeup: { wake: () => {} },
     executionAttribution: {
       of: () => {

@@ -115,6 +115,16 @@ export interface SchedulerClaims {
   } | null;
 }
 
+export interface UnmatchedClaim {
+  node_id: string;
+  revision: number;
+  claim: ClaimableState;
+}
+
+export interface SchedulerMatch {
+  unmatchedClaims(tx: Transaction, projectId: string): UnmatchedClaim[];
+}
+
 export interface IntakeCall {
   context: Context;
   identity: CallerIdentity;
@@ -272,6 +282,7 @@ export const MissionErrorCode = {
   BindingsInvalid: "mission.node.bindings_invalid",
   FilenameConflict: "mission.node.filename_conflict",
   WorkLocked: "mission.node.work_locked",
+  RequiresUnmatched: "mission.node.requires_unmatched",
   Retired: "mission.node.retired",
   Terminal: "mission.node.terminal",
   EndpointInvalid: "mission.dependency.endpoint_invalid",

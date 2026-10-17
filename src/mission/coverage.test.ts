@@ -1,0 +1,246 @@
+import assert from "node:assert/strict";
+import { test, type TestContext } from "node:test";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import { testHumanIdentity } from "../kernel/test-identity.ts";
+import {
+  ActorKind,
+  ClaimableState,
+  MissionErrorCode,
+  RepositoryAction,
+  Work,
+  type MissionBindings,
+  type UnmatchedClaim,
+} from "./contract.ts";
+import { missionHarness } from "./test-support.ts";
+
+const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const PLAIN_REPOSITORY = "binding_00000000000000000000000001";
+const ACTION_REPOSITORY = "binding_00000000000000000000000002";
+const REPOSITORY_NAME = "repo";
+const REPOSITORY_IDENTITY = "repository:github:owner/repo";
+const MACOS = "platform.macos";
+const REASON = "plan";
+const RENAMED = "Reset on iOS";
+const BEFORE_AND_AFTER_READS = 2;
+const ONE_REVISION = 1;
+const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
+const CONTENT = {
+  name: "Add password reset",
+  requirement: "Users reset their password.",
+  criterion: "A reset email arrives.",
+  verifications: ["npm test"],
+};
+
+function coverageHarness(t: TestContext) {
+  const missing = new Set<string>();
+  const latest = { binding_id: PLAIN_REPOSITORY };
+  const bindings: MissionBindings = {
+    storageBindingOf: () => assert.fail("Coverage reads no storage."),
+    resolveBinding: (_tx, projectId, name) => {
+      assert.equal(projectId, PROJECT_ID);
+      return name === REPOSITORY_NAME
+        ? {
+            binding_id: latest.binding_id,
+            resource_identity: REPOSITORY_IDENTITY,
+          }
+        : null;
+    },
+    resolveBindingIdentity: (_tx, projectId) => {
+      assert.equal(projectId, PROJECT_ID);
+      return {
+        binding_id: latest.binding_id,
+        resource_identity: REPOSITORY_IDENTITY,
+      };
+    },
+    getBindingRevision: (_tx, bindingId) => ({
+      project_id: PROJECT_ID,
+      binding_id: bindingId,
+      name: REPOSITORY_NAME,
+      resource_identity: REPOSITORY_IDENTITY,
+      revision: bindingId === ACTION_REPOSITORY ? 2 : 1,
+      tombstone: false,
+      disabled: false,
+    }),
+    repositoryPolicyOf: (_tx, bindingId) => ({
+      binding_id: bindingId,
+      project_id: PROJECT_ID,
+      name: REPOSITORY_NAME,
+      address: "git@github.com:owner/repo.git",
+      platform: "github",
+      ssh_credential: "github-ssh",
+      credential: "github",
+      base_branch: "main",
+      action:
+        bindingId === ACTION_REPOSITORY ? RepositoryAction.PullRequest : null,
+      landing: "human",
+      project_prompt: null,
+    }),
+  };
+  const reads: string[] = [];
+  const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"), {
+    bindings,
+    schedulerMatch: {
+      unmatchedClaims: (tx, projectId) => {
+        assert.equal(projectId, PROJECT_ID);
+        assert.ok(tx.database.isTransaction);
+        reads.push(projectId);
+        return h.service
+          .claimFactsOf(tx, projectId)
+          .flatMap((row): UnmatchedClaim[] =>
+            row.claims
+              .filter(
+                (claim) =>
+                  claim === ClaimableState.ExternalRequested ||
+                  row.requires.some((trait) => missing.has(trait)),
+              )
+              .map((claim) => ({
+                node_id: row.node_id,
+                revision: row.revision,
+                claim,
+              })),
+          );
+      },
+    },
+  });
+  h.store.transaction((tx) => h.service.createMission(tx, PROJECT_ID, ACTOR));
+  const mission = () =>
+    h.invoke("get", {
+      params: { project_id: PROJECT_ID },
+      query: {},
+      body: null,
+    });
+  const snapshot = () =>
+    h.store.transaction((tx) => ({
+      nodes: tx.database.prepare("SELECT * FROM mission_node").all(),
+      revisions: tx.database
+        .prepare("SELECT * FROM mission_node_revision")
+        .all(),
+      mission: tx.database.prepare("SELECT * FROM mission_mission").all(),
+    }));
+  async function create(filename: string, requires: string[]) {
+    const { id, version } = await mission();
+    return h.invoke("node.create", {
+      params: { mission_id: id },
+      query: {},
+      body: {
+        filename,
+        content: {
+          ...CONTENT,
+          work: Work.Implement,
+          requires,
+          bindings: [REPOSITORY_NAME],
+        },
+        tasks: [],
+        reason: REASON,
+        expected_mission_version: version,
+      },
+    });
+  }
+  async function refused(
+    write: () => Promise<unknown>,
+    claims: UnmatchedClaim[],
+  ) {
+    const before = snapshot();
+    await assert.rejects(write(), (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.Conflict);
+      assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+      assert.deepEqual(error.details, { claims });
+      return true;
+    });
+    assert.deepEqual(snapshot(), before);
+  }
+  return { ...h, missing, latest, reads, mission, create, refused };
+}
+
+test("a node create with requires [platform.macos] and no such trait answers mission.node.requires_unmatched and writes nothing", async (t) => {
+  const h = coverageHarness(t);
+  h.missing.add(MACOS);
+  const before = await h.mission();
+  await assert.rejects(h.create("ios.md", [MACOS]), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+    const details = error.details as unknown as { claims: UnmatchedClaim[] };
+    assert.deepEqual(
+      details.claims.map(({ revision, claim }) => ({ revision, claim })),
+      [
+        { revision: 1, claim: ClaimableState.Available },
+        { revision: 1, claim: ClaimableState.Waiting },
+      ],
+    );
+    return true;
+  });
+  assert.deepEqual(await h.mission(), before);
+  assert.equal(h.reads.length, BEFORE_AND_AFTER_READS);
+  const created = await h.create("web.md", []);
+  assert.equal(created.revisions.length, ONE_REVISION);
+});
+
+test("a node rebind that adds an unmatched pair is refused", async (t) => {
+  const h = coverageHarness(t);
+  const created = await h.create("api.md", []);
+  const nodeId = created.revisions[0]!.node_id;
+  h.latest.binding_id = ACTION_REPOSITORY;
+  const { id, version } = await h.mission();
+  await h.refused(
+    () =>
+      h.invoke("node.rebind", {
+        params: { mission_id: id },
+        query: {},
+        body: {
+          binding_id: ACTION_REPOSITORY,
+          node_id: nodeId,
+          reason: REASON,
+          expected_mission_version: version,
+        },
+      }),
+    [
+      {
+        node_id: nodeId,
+        revision: 2,
+        claim: ClaimableState.ExternalRequested,
+      },
+    ],
+  );
+});
+
+test("an update of a node with an existing unmatched pair succeeds", async (t) => {
+  const h = coverageHarness(t);
+  const ios = (await h.create("ios.md", [MACOS])).revisions[0]!;
+  const web = (await h.create("web.md", [])).revisions[0]!;
+  h.missing.add(MACOS);
+  const update = async (
+    node: { node_id: string; revision: number },
+    filename: string,
+    requires: string[],
+    name: string,
+  ) =>
+    h.invoke("node.update", {
+      params: { node_id: node.node_id },
+      query: {},
+      body: {
+        filename,
+        content: {
+          ...CONTENT,
+          name,
+          work: Work.Implement,
+          requires,
+          bindings: [REPOSITORY_NAME],
+        },
+        tasks: [],
+        reason: REASON,
+        expected_revision: node.revision,
+        expected_mission_version: (await h.mission()).version,
+      },
+    });
+  const updated = await update(ios, "ios.md", [MACOS], RENAMED);
+  assert.equal(updated.revisions[0]!.content.name, RENAMED);
+  await h.refused(
+    () => update(web, "web.md", [MACOS], "Reset on the web"),
+    [
+      { node_id: web.node_id, revision: 2, claim: ClaimableState.Available },
+      { node_id: web.node_id, revision: 2, claim: ClaimableState.Waiting },
+    ],
+  );
+});

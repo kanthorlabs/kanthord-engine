@@ -300,6 +300,7 @@ export function missionHarness(
         return null;
       },
     },
+    schedulerMatch: { unmatchedClaims: () => [] },
     wakeup: { wake: (...args) => record("wakeup.wake", args) },
     executionAttribution: {
       of: (...args) => {
