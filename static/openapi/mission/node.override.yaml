@@ -107,25 +107,48 @@ components:
               enum:
                 - success
             landed_commit:
-              type: object
-              properties:
-                kind:
-                  type: string
-                  const: repository
-                binding_id:
-                  type: string
-                  minLength: 34
-                  maxLength: 34
-                  pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                  description: binding_ followed by a canonical 26-character uppercase ULID.
-                commit:
-                  type: string
-                  pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
-              required:
-                - kind
-                - binding_id
-                - commit
-              additionalProperties: false
+              anyOf:
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: repository
+                    binding_id:
+                      type: string
+                      minLength: 34
+                      maxLength: 34
+                      pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: binding_ followed by a canonical 26-character uppercase ULID.
+                    commit:
+                      type: string
+                      pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                  required:
+                    - kind
+                    - binding_id
+                    - commit
+                  additionalProperties: false
+                - minItems: 1
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: repository
+                      binding_id:
+                        type: string
+                        minLength: 34
+                        maxLength: 34
+                        pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: binding_ followed by a canonical 26-character uppercase ULID.
+                      commit:
+                        type: string
+                        pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                    required:
+                      - kind
+                      - binding_id
+                      - commit
+                    additionalProperties: false
           required:
             - reason
             - expected_mission_version

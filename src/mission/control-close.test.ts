@@ -29,6 +29,7 @@ const NO_EVIDENCE = 0;
 const FIRST_ATTEMPT = 1;
 const REVOKE = "schedulerClaims.revoke";
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
+const VALIDATION = "gateway.request.validation_failed";
 const COMMIT = "a".repeat(40);
 const SECOND_ATTEMPT = 2;
 test("implement override validates its attempt repository pin after the current revision changes", async (t) => {
@@ -387,5 +388,68 @@ test("discard does not satisfy dependencies", async (t) => {
   assert.equal(
     h.store.transaction((tx) => readNode(tx, dependent))?.state,
     NodeState.Pending,
+  );
+});
+
+test("a success override of a node with two bindings lands a list in binding order", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const firstId = createIdentity("binding");
+  const secondId = createIdentity("binding");
+  h.dependencies.bindings.getBindingRevision = (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: bindingId,
+    resource_identity: `repository:github:owner/${bindingId}`,
+    revision: FIRST_ATTEMPT,
+    disabled: false,
+    tombstone: false,
+  });
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(Work.Implement, h.node_id);
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([firstId, secondId]), h.node_id);
+  });
+  const address = (bindingId: string) => ({
+    kind: "repository" as const,
+    binding_id: bindingId,
+    commit: COMMIT,
+  });
+  const override = (landed: unknown) =>
+    h.invoke("node.override", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        ...h.body(),
+        result: AssessmentResult.Success,
+        landed_commit: landed,
+      },
+    });
+  await assert.rejects(
+    override([address(secondId), address(firstId)]),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === BINDING_MISMATCH &&
+      JSON.stringify(error.details) ===
+        JSON.stringify({ binding_id: secondId }),
+  );
+  await assert.rejects(
+    override(address(firstId)),
+    (error) => error instanceof OperationError && error.code === VALIDATION,
+  );
+  assert.equal(h.node().state, NodeState.Available);
+  const result = await override([address(firstId), address(secondId)]);
+  const id = result.outcome!.evidence_ids[FIRST_ELEMENT]!;
+  h.store.transaction((tx) =>
+    assert.deepEqual(
+      readAssets(tx, id)
+        .map((asset) => JSON.parse(asset.content).binding_id)
+        .sort(),
+      [firstId, secondId].sort(),
+    ),
   );
 });
