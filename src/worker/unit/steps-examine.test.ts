@@ -25,7 +25,7 @@ import { setTimeout } from "node:timers/promises";
 const EVIDENCE_UPLOAD_COUNT = 1;
 const EXPECTED_RELEASES = 1;
 const NO_EVIDENCE_UPLOADS = 0;
-test("initiative reports its dependencies once and removes its workspace", async (t) => {
+test("examine reports its dependencies once and removes its workspace", async (t) => {
   const scenarios = [
     {
       states: ["Completed"],
@@ -123,7 +123,7 @@ test("initiative reports its dependencies once and removes its workspace", async
       run,
       {
         content: {
-          name: "initiative",
+          name: "examine",
           requirement: "report",
           criterion: "report",
           verifications: [],
@@ -153,7 +153,7 @@ test("initiative reports its dependencies once and removes its workspace", async
   }
 });
 
-test("B4 initiative releases when reads or agent opening consume the wall budget", async (t) => {
+test("B4 examine releases when reads or agent opening consume the wall budget", async (t) => {
   for (const duringOpen of [false, true]) {
     const setup = anthropicSetup({
       repositories: [],
@@ -225,7 +225,7 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
   }
 });
 
-test("an initiative that its agent deadline cuts releases with further work and no failure stop", async (t) => {
+test("an examine node that its agent deadline cuts releases with further work and no failure stop", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
     execution_id: setup.execution_id,
@@ -293,7 +293,7 @@ test("an initiative that its agent deadline cuts releases with further work and 
       run,
       {
         content: {
-          name: "initiative",
+          name: "examine",
           requirement: "report",
           criterion: "report",
           verifications: [],
@@ -307,7 +307,7 @@ test("an initiative that its agent deadline cuts releases with further work and 
   assert.deepEqual(releases, [{ further_work: true, stop: null }]);
 });
 
-test("an initiative with two repository bindings runs from checkouts/ and lists each repository in the work and examine prompts", async (t) => {
+test("an examine node with two repository bindings runs from checkouts/ and lists each repository in the work and examine prompts", async (t) => {
   const names = ["first", "second"];
   const setup = anthropicSetup({
     repositories: names.map((name) => ({ ...repositorySetup(), name })),
@@ -379,7 +379,7 @@ test("an initiative with two repository bindings runs from checkouts/ and lists 
       run,
       {
         content: {
-          name: "initiative",
+          name: "examine",
           requirement: "examine",
           criterion: "examine",
           verifications: [`pwd > ${output}`],

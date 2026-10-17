@@ -25,7 +25,7 @@ import {
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { BudgetLimit, ProviderFailure } from "../../scheduler/contract.ts";
 import {
-  objectiveFixture as fixture,
+  implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordReleases,
   task,
@@ -413,7 +413,7 @@ test("a provider error reply stops the task with provider_failed and its code", 
   assert.equal(stopped.code, ProviderFailure.Unauthorized);
 });
 
-test("an objective with no task commits its change with the node identity in the message before it releases", async (t) => {
+test("an implement node with no task commits its change with the node identity in the message before it releases", async (t) => {
   const h = await fixture(
     t,
     [],

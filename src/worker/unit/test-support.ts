@@ -114,7 +114,7 @@ export const task = (name: string, command: string): TaskContent => ({
   },
 });
 
-export async function objectiveFixture(
+export async function implementFixture(
   t: TestContext,
   tasks: TaskContent[],
   script: Parameters<typeof scriptedProvider>[0],
@@ -211,11 +211,11 @@ export async function objectiveFixture(
     run,
     agent,
     revision: {
-      filename: "objective.md",
+      filename: "implement.md",
       content: {
-        name: "objective",
-        requirement: "objective",
-        criterion: "objective",
+        name: "implement",
+        requirement: "implement",
+        criterion: "implement",
         verifications: ["true"],
         bindings: [],
       },
@@ -251,7 +251,7 @@ export async function commitOnNode(directory: string, content: string) {
 }
 
 export function recordReleases(
-  h: Awaited<ReturnType<typeof objectiveFixture>>,
+  h: Awaited<ReturnType<typeof implementFixture>>,
 ) {
   const bodies: unknown[] = [];
   h.run.clients.scheduler = {

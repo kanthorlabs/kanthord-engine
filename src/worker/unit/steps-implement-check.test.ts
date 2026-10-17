@@ -28,7 +28,7 @@ import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
   advanceBase,
   commitOnNode,
-  objectiveFixture as fixture,
+  implementFixture as fixture,
   NO_PROVIDER_CALLS,
   task,
 } from "./test-support.ts";
@@ -526,13 +526,13 @@ test("the claim refresh aborts the merge and stops when a conflict marker remain
 
 function nodeUnitRevision(command: string): Revision {
   return {
-    filename: "objective.md",
+    filename: "implement.md",
     content: { ...NODE_CONTENT, verifications: [command] },
     tasks: [],
   } as unknown as Revision;
 }
 
-test("an objective with no task runs the node verifications under the node identity as the judged key", async (t) => {
+test("an implement node with no task runs the node verifications under the node identity as the judged key", async (t) => {
   const h = await fixture(t, [], [fauxAssistantMessage(MET)]);
   h.revision = nodeUnitRevision("true");
   const nodeId = h.input.claim.node_id;

@@ -79,7 +79,7 @@ test("workspace retention respects holds and release kind", (t) => {
   workspace.stopSweeping();
 });
 
-test("workspace preparation refreshes objective branches and creates disposable snapshots and initiatives", async (t) => {
+test("workspace preparation refreshes implement branches and creates disposable snapshots and examine workspaces", async (t) => {
   const state = temporary(t);
   const origin = join(state, "origin");
   mkdirSync(origin);
@@ -161,58 +161,55 @@ test("workspace preparation refreshes objective branches and creates disposable 
     name: "other-repo",
   };
   await t.test(
-    "an initiative with two bindings checks out each base-branch head under checkouts/ and records one tested commit for each",
+    "an examine node with two bindings checks out each base-branch head under checkouts/ and records one tested commit for each",
     async () => {
-      const initiative = await workspace.prepareExamine({
+      const examine = await workspace.prepareExamine({
         ...common,
         executionId: createIdentity("execution"),
         repositories: [repository, another],
       });
       assert.deepEqual(
-        initiative.tested_input,
+        examine.tested_input,
         [repository, another].map(({ binding_id }) => ({
           kind: "repository",
           binding_id: binding_id,
           commit: base,
         })),
       );
-      assert.equal(
-        initiative.directory,
-        join(initiative.key, CHECKOUTS_DIRECTORY),
-      );
+      assert.equal(examine.directory, join(examine.key, CHECKOUTS_DIRECTORY));
       assert.deepEqual(
-        initiative.checkouts,
+        examine.checkouts,
         [repository, another].map(({ name }) => ({
           name,
-          directory: join(initiative.key, CHECKOUTS_DIRECTORY, name),
+          directory: join(examine.key, CHECKOUTS_DIRECTORY, name),
           base_branch: "main",
         })),
       );
       for (const name of [repository.name, another.name])
-        assert.ok(existsSync(join(initiative.directory, name, ".git")));
-      workspace.release(initiative.key, WorkspaceKind.Execution);
-      assert.equal(existsSync(initiative.key), false);
+        assert.ok(existsSync(join(examine.directory, name, ".git")));
+      workspace.release(examine.key, WorkspaceKind.Execution);
+      assert.equal(existsSync(examine.key), false);
     },
   );
   await t.test(
-    "an initiative with one binding uses the checkout as the agent root",
+    "an examine node with one binding uses the checkout as the agent root",
     async () => {
-      const initiative = await workspace.prepareExamine({
+      const examine = await workspace.prepareExamine({
         ...common,
         executionId: createIdentity("execution"),
         repositories: [repository],
       });
-      assert.deepEqual(initiative.tested_input, {
+      assert.deepEqual(examine.tested_input, {
         kind: "repository",
         binding_id: repository.binding_id,
         commit: base,
       });
       assert.equal(
-        initiative.directory,
-        join(initiative.key, CHECKOUTS_DIRECTORY, repository.name),
+        examine.directory,
+        join(examine.key, CHECKOUTS_DIRECTORY, repository.name),
       );
-      assert.ok(existsSync(join(initiative.directory, ".git")));
-      workspace.release(initiative.key, WorkspaceKind.Execution);
+      assert.ok(existsSync(join(examine.directory, ".git")));
+      workspace.release(examine.key, WorkspaceKind.Execution);
     },
   );
   const empty = await workspace.prepareExamine({
@@ -308,7 +305,7 @@ test("a drifted SSH identity stops every workspace preparation before its git op
 const SCRATCH_ENTRIES = 1;
 const NO_UNTRACKED = 0;
 
-test("an objective workspace excludes the scratch directory from git once", async (t) => {
+test("an implement workspace excludes the scratch directory from git once", async (t) => {
   const state = temporary(t);
   const origin = join(state, "origin");
   mkdirSync(origin);

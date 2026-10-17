@@ -22,7 +22,7 @@ import { GitStep } from "./method-telemetry.ts";
 import {
   advanceBase,
   commitOnNode,
-  objectiveFixture as fixture,
+  implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordReleases,
   task,
@@ -44,7 +44,7 @@ function judgeNodeUnit(h: Awaited<ReturnType<typeof fixture>>) {
   );
 }
 
-test("objective pushes the evidenced head before release and retains its workspace", async (t) => {
+test("implement pushes the evidenced head before release and retains its workspace", async (t) => {
   const h = await fixture(t, [], []);
   judgeNodeUnit(h);
   const order: string[] = [];
@@ -75,7 +75,7 @@ test("objective pushes the evidenced head before release and retains its workspa
   assert.ok(existsSync(h.directory));
 });
 
-test("objective checkpoints budget-ended work and refuses release after a failed push", async (t) => {
+test("implement checkpoints budget-ended work and refuses release after a failed push", async (t) => {
   const current = task("partial", "false");
   const h = await fixture(
     t,
