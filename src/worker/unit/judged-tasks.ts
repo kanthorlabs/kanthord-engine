@@ -1,15 +1,26 @@
+import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { readPrivate, writePrivate } from "../../kernel/files.ts";
+import type { WorkspaceCheckout } from "./workspace.ts";
 
 const JUDGED_TASKS_FILE = "judged-tasks.json";
 const judgedTasksSchema = z.record(z.string(), z.string());
+const SINGLE_CHECKOUT = 1;
 
 export interface JudgedTask {
   readonly attempt: number;
   readonly revision: number;
   readonly taskId: string;
+}
+
+export function headSetOf(checkouts: readonly WorkspaceCheckout[]): string {
+  assert.ok(checkouts.length >= SINGLE_CHECKOUT);
+  if (checkouts.length === SINGLE_CHECKOUT) return checkouts[0]!.head;
+  return checkouts
+    .map((checkout) => `${checkout.name}=${checkout.head}`)
+    .join(",");
 }
 
 function keyOf(task: JudgedTask): string {
@@ -35,9 +46,9 @@ export function judgedAt(
 export function recordJudged(
   nodeDirectory: string,
   task: JudgedTask,
-  commit: string,
+  headSet: string,
 ): void {
-  const judged = { ...read(nodeDirectory), [keyOf(task)]: commit };
+  const judged = { ...read(nodeDirectory), [keyOf(task)]: headSet };
   writePrivate(
     join(nodeDirectory, JUDGED_TASKS_FILE),
     JSON.stringify(judged),

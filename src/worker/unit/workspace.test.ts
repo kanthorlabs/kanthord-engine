@@ -25,6 +25,26 @@ import {
 } from "./workspace.ts";
 
 const transport = { ...connector, proveSshIdentity: async () => {} };
+
+type ImplementInput = Parameters<WorkspaceRoot["prepareImplement"]>[0];
+async function prepareOne(
+  workspace: WorkspaceRoot,
+  input: Omit<ImplementInput, "pushed" | "repositories"> & {
+    pushed: boolean;
+    repository: ImplementInput["repositories"][number];
+  },
+) {
+  const { repository, pushed, ...rest } = input;
+  const prepared = await workspace.prepareImplement({
+    ...rest,
+    pushed: new Set(pushed ? [repository.binding_id] : []),
+    repositories: [repository],
+  });
+  const [checkout] = prepared.checkouts;
+  assert.ok(checkout);
+  assert.equal(prepared.root, checkout.directory);
+  return { ...checkout, nodeBranch: input.nodeBranch };
+}
 const FIRST_ATTEMPT = 1;
 const ORIGIN_NAME = "origin";
 const SEED_NAME = "seed";
@@ -38,11 +58,9 @@ test("workspace root audits private mode and keys refuse foreign identities", (t
   assert.throws(() => workspace.nodeKey("../x"));
   assert.throws(() => workspace.executionKey(createIdentity("node")));
   assert.throws(() =>
-    workspace.nodeDirectory(
-      createIdentity("node"),
-      createIdentity("execution"),
-    ),
+    workspace.nodeDirectory(createIdentity("execution"), "repo"),
   );
+  assert.throws(() => workspace.nodeDirectory(createIdentity("node"), "../x"));
   assert.equal(
     nodeBranchOf("node_01ARZ3NDEKTSV4RRFFQ69G5FAA", FIRST_ATTEMPT),
     expectedBranch,
@@ -116,7 +134,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
     strategy: { base_branch: "main" },
   };
   const common = { transport, context: background, deadlineMs: 10000 };
-  const first = await workspace.prepareImplement({
+  const first = await prepareOne(workspace, {
     ...common,
     nodeId,
     nodeBranch: nodeBranchOf(nodeId, FIRST_ATTEMPT),
@@ -133,7 +151,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
   );
   await commit(first.directory, "unpushed");
   workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
-  const second = await workspace.prepareImplement({
+  const second = await prepareOne(workspace, {
     ...common,
     nodeId,
     nodeBranch: nodeBranchOf(nodeId, FIRST_ATTEMPT),
@@ -222,7 +240,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
   workspace.release(empty.key, WorkspaceKind.Execution);
   const failedId = createIdentity("node");
   await assert.rejects(
-    workspace.prepareImplement({
+    prepareOne(workspace, {
       ...common,
       nodeId: failedId,
       nodeBranch: nodeBranchOf(failedId, FIRST_ATTEMPT),
@@ -230,7 +248,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
       repository: { ...repository, address: join(state, "missing") },
     }),
   );
-  const retried = await workspace.prepareImplement({
+  const retried = await prepareOne(workspace, {
     ...common,
     nodeId: failedId,
     nodeBranch: nodeBranchOf(failedId, FIRST_ATTEMPT),
@@ -273,7 +291,7 @@ test("a drifted SSH identity stops every workspace preparation before its git op
     deadlineMs: 10000,
   };
   await assert.rejects(
-    workspace.prepareImplement({
+    prepareOne(workspace, {
       ...common,
       nodeId: createIdentity("node"),
       nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
@@ -345,9 +363,9 @@ test("an implement workspace excludes the scratch directory from git once", asyn
       strategy: { base_branch: "main" },
     },
   };
-  const prepared = await workspace.prepareImplement(input);
+  const prepared = await prepareOne(workspace, input);
   workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
-  await workspace.prepareImplement(input);
+  await prepareOne(workspace, input);
   const exclude = readFileSync(
     join(prepared.directory, ".git", "info", "exclude"),
     "utf8",
@@ -416,7 +434,7 @@ async function restartFixture(t: test.TestContext) {
     strategy: { base_branch: "main" },
   };
   const prepare = async (startAttempt: number, pushed = false) => {
-    const prepared = await workspace.prepareImplement({
+    const prepared = await prepareOne(workspace, {
       transport,
       context: background,
       deadlineMs: 10000,
@@ -543,4 +561,118 @@ test("a branch switch removes the scratch directory and ignored files and a chec
   assert.equal(existsSync(scratch), false);
   assert.equal(existsSync(ignored), false);
   assert.equal(existsSync(untracked), false);
+});
+
+const BINDING_NAMES = ["api", "web"];
+
+async function bindingsFixture(t: test.TestContext, names = BINDING_NAMES) {
+  const workspace = WorkspaceRoot.open(temporary(t));
+  const nodeId = createIdentity("node");
+  const repositories: ImplementInput["repositories"][number][] = [];
+  let base = "";
+  for (const name of names) {
+    const { root, built } = await restartTemplate(t);
+    base = built;
+    repositories.push({
+      binding_id: createIdentity("binding"),
+      name,
+      address: join(root, ORIGIN_NAME),
+      ssh_identity: {
+        host: "github.com",
+        hostname: "github.com",
+        port: 22,
+        identity_file: "~/.ssh/id_test",
+      },
+      strategy: { base_branch: "main" },
+    });
+  }
+  const nodeBranch = nodeBranchOf(nodeId, FIRST_ATTEMPT);
+  const prepare = (pushed: ReadonlySet<string> = new Set()) =>
+    workspace.prepareImplement({
+      transport,
+      context: background,
+      deadlineMs: 10000,
+      nodeId,
+      nodeBranch,
+      pushed,
+      repositories,
+    });
+  return { workspace, nodeId, nodeBranch, repositories, base, prepare };
+}
+
+test("two bindings prepare two checkouts under checkouts/ with one hold", async (t) => {
+  const h = await bindingsFixture(t);
+  const key = h.workspace.nodeKey(h.nodeId);
+  const prepared = await h.prepare();
+  assert.equal(prepared.root, join(key, CHECKOUTS_DIRECTORY));
+  assert.deepEqual(
+    prepared.checkouts,
+    h.repositories.map((repository) => ({
+      binding_id: repository.binding_id,
+      name: repository.name,
+      directory: join(key, CHECKOUTS_DIRECTORY, repository.name),
+      head: h.base,
+    })),
+  );
+  for (const checkout of prepared.checkouts)
+    assert.equal(
+      (await simpleGit(checkout.directory).branch()).current,
+      h.nodeBranch,
+    );
+  assert.throws(() => h.workspace.hold(key));
+  h.workspace.release(key, WorkspaceKind.Node);
+  h.workspace.hold(key);
+  h.workspace.release(key, WorkspaceKind.Node);
+});
+
+test("one binding uses the checkout as the agent root", async (t) => {
+  const h = await bindingsFixture(t, ["api"]);
+  const prepared = await h.prepare();
+  assert.equal(
+    prepared.root,
+    join(h.workspace.nodeKey(h.nodeId), CHECKOUTS_DIRECTORY, "api"),
+  );
+  assert.equal(prepared.root, prepared.checkouts[0]!.directory);
+  h.workspace.release(h.workspace.nodeKey(h.nodeId), WorkspaceKind.Node);
+});
+
+test("the scratch directory is excluded in each checkout", async (t) => {
+  const h = await bindingsFixture(t);
+  const prepared = await h.prepare();
+  for (const checkout of prepared.checkouts)
+    assert.ok(
+      readFileSync(join(checkout.directory, ".git", "info", "exclude"), "utf8")
+        .split("\n")
+        .includes(SCRATCH_DIRECTORY),
+    );
+  h.workspace.release(h.workspace.nodeKey(h.nodeId), WorkspaceKind.Node);
+});
+
+test("a missing remote node branch in one checkout stops with repository.node_branch.missing", async (t) => {
+  const h = await bindingsFixture(t);
+  const key = h.workspace.nodeKey(h.nodeId);
+  const prepared = await h.prepare();
+  for (const checkout of prepared.checkouts)
+    await transport.pushNodeBranch(
+      checkout.directory,
+      h.nodeBranch,
+      background,
+      10000,
+    );
+  h.workspace.release(key, WorkspaceKind.Node);
+  await simpleGit(h.repositories[1]!.address).raw([
+    "branch",
+    "-D",
+    h.nodeBranch,
+  ]);
+  await assert.rejects(h.prepare(), missing);
+  for (const checkout of prepared.checkouts)
+    assert.ok(existsSync(join(checkout.directory, ".git")));
+  const fresh = await bindingsFixture(t);
+  await assert.rejects(
+    fresh.prepare(new Set([fresh.repositories[1]!.binding_id])),
+    missing,
+  );
+  h.workspace.hold(key);
+  h.workspace.release(key, WorkspaceKind.Node);
 });

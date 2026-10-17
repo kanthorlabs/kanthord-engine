@@ -22,6 +22,7 @@ export const WORKSPACE_RETENTION_MS = 7 * 24 * 3600 * 1000;
 export const SWEEP_INTERVAL_MS = 3600000;
 export const CHECKOUTS_DIRECTORY = "checkouts";
 export const EVIDENCE_DIRECTORY = "evidence";
+const NO_CHECKOUTS = 0;
 const SINGLE_CHECKOUT = 1;
 const FIRST_CHECKOUT = 0;
 export const WorkspaceKind = {
@@ -43,6 +44,12 @@ export interface ExamineCheckout {
   name: string;
   directory: string;
   base_branch: string;
+}
+export interface WorkspaceCheckout {
+  binding_id: string;
+  name: string;
+  directory: string;
+  head: string;
 }
 interface WorkspaceRepository {
   binding_id: string;
@@ -69,10 +76,11 @@ export class WorkspaceRoot {
   nodeKey(nodeId: string): string {
     return join(this.root, identitySchema("node").parse(nodeId));
   }
-  nodeDirectory(nodeId: string, bindingId: string): string {
+  nodeDirectory(nodeId: string, bindingName: string): string {
     return join(
       this.nodeKey(nodeId),
-      identitySchema("binding").parse(bindingId),
+      CHECKOUTS_DIRECTORY,
+      bindingNameSchema.parse(bindingName),
     );
   }
   executionKey(executionId: string): string {
@@ -82,53 +90,72 @@ export class WorkspaceRoot {
     input: Preparation & {
       nodeId: string;
       nodeBranch: string;
-      pushed: boolean;
-      repository: WorkspaceRepository;
+      pushed: ReadonlySet<string>;
+      repositories: readonly WorkspaceRepository[];
     },
-  ): Promise<{ directory: string; head: string; nodeBranch: string }> {
+  ): Promise<{ root: string; checkouts: WorkspaceCheckout[] }> {
+    assert.ok(input.repositories.length > NO_CHECKOUTS);
     const key = this.nodeKey(input.nodeId);
-    const directory = this.nodeDirectory(
-      input.nodeId,
-      input.repository.binding_id,
-    );
-    const existing = existsSync(directory);
     this.hold(key);
     const end = performance.now() + input.deadlineMs;
+    const created: string[] = [];
     try {
       ensureDirectory(key);
-      ensureDirectory(directory);
       this.touch(key);
-      if (!existing) {
+      const checkouts: WorkspaceCheckout[] = [];
+      for (const repository of input.repositories) {
+        const directory = this.nodeDirectory(input.nodeId, repository.name);
+        assert.ok(
+          !checkouts.some((checkout) => checkout.directory === directory),
+          "Duplicate repository binding",
+        );
+        if (!existsSync(directory)) {
+          created.push(directory);
+          ensureDirectory(directory);
+          await input.transport.proveSshIdentity(
+            repository.ssh_identity,
+            input.context,
+            end - performance.now(),
+          );
+          await input.transport.clone(
+            repository.address,
+            directory,
+            input.context,
+            end - performance.now(),
+          );
+        }
         await input.transport.proveSshIdentity(
-          input.repository.ssh_identity,
+          repository.ssh_identity,
           input.context,
           end - performance.now(),
         );
-        await input.transport.clone(
-          input.repository.address,
+        const head = await input.transport.fetchAndCheckout(
           directory,
+          input.nodeBranch,
+          repository.strategy.base_branch,
+          input.pushed.has(repository.binding_id),
           input.context,
           end - performance.now(),
         );
+        excludeScratch(directory);
+        checkouts.push({
+          binding_id: repository.binding_id,
+          name: repository.name,
+          directory,
+          head,
+        });
       }
-      await input.transport.proveSshIdentity(
-        input.repository.ssh_identity,
-        input.context,
-        end - performance.now(),
-      );
-      const head = await input.transport.fetchAndCheckout(
-        directory,
-        input.nodeBranch,
-        input.repository.strategy.base_branch,
-        input.pushed,
-        input.context,
-        end - performance.now(),
-      );
-      excludeScratch(directory);
-      return { directory, head, nodeBranch: input.nodeBranch };
+      return {
+        root:
+          checkouts.length > SINGLE_CHECKOUT
+            ? join(key, CHECKOUTS_DIRECTORY)
+            : checkouts[FIRST_CHECKOUT]!.directory,
+        checkouts,
+      };
     } catch (error) {
       this.held.delete(key);
-      if (!existing) rmSync(directory, { recursive: true, force: true });
+      for (const directory of created)
+        rmSync(directory, { recursive: true, force: true });
       throw error;
     }
   }
