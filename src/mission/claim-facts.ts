@@ -9,15 +9,12 @@ import {
   type ClaimFactsRow,
   type MissionBindings,
 } from "./contract.ts";
-import { requiredActionsOf } from "./frozen-action.ts";
-import { readOpenAttempt } from "./record-store.ts";
+import { actionsOfRevision } from "./frozen-action.ts";
 import {
   claimRevisionOf,
-  readCurrentRevision,
+  readClaimRevisions,
   readMissionByProject,
-  readMissionNodes,
   readNode,
-  readRevision,
   type NodeRow,
   type RevisionRow,
 } from "./store.ts";
@@ -44,10 +41,7 @@ function rowOf(
     ClaimableState.Available,
     ClaimableState.Waiting,
   ];
-  if (
-    requiredActionsOf(tx, bindings, revision.node_id, revision.revision)
-      .length > NO_ACTIONS
-  )
+  if (actionsOfRevision(tx, bindings, revision).length > NO_ACTIONS)
     claims.push(ClaimableState.ExternalRequested);
   return {
     node_id: revision.node_id,
@@ -71,18 +65,7 @@ export function claimFactsOf(
   assert.ok(tx.database.isTransaction);
   const mission = readMissionByProject(tx, projectId);
   if (!mission) return [];
-  const rows: ClaimFactsRow[] = [];
-  for (const node of readMissionNodes(tx, mission.id)) {
-    if (!claimable(node)) continue;
-    const current = readCurrentRevision(tx, node.id);
-    assert.ok(current);
-    rows.push(rowOf(tx, bindings, current));
-    const attempt = readOpenAttempt(tx, node.id);
-    if (attempt === null || attempt.node_revision === current.revision)
-      continue;
-    const pinned = readRevision(tx, node.id, attempt.node_revision);
-    assert.ok(pinned);
-    rows.push(rowOf(tx, bindings, pinned));
-  }
-  return rows;
+  return readClaimRevisions(tx, mission.id)
+    .filter(({ node_state }) => !isTerminal(node_state))
+    .map((revision) => rowOf(tx, bindings, revision));
 }
