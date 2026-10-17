@@ -20,6 +20,7 @@ import {
   type Revision,
   type ExternalAction,
   Work,
+  missionOperations,
 } from "../../mission/contract.ts";
 import {
   WorkPullKind,
@@ -68,6 +69,7 @@ const SECOND_MISSION_VERSION = 2;
 const THIRD_MISSION_VERSION = 3;
 const GATED_PRIORITY = 3;
 const NO_OUTPUT = "";
+const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const TIMEOUT = 180000;
 const GATED = "gated";
 const PUSHED = "pushed";
@@ -299,6 +301,7 @@ async function setup(t: TestContext) {
     return result.execution;
   };
   const client = httpClient(workerOperations, fixture.endpoint, token);
+  const missionApi = httpClient(missionOperations, fixture.endpoint, token);
   const request = (execution: ExecutionRecord) =>
     client["action.request"](
       {
@@ -419,6 +422,7 @@ async function setup(t: TestContext) {
     pass,
     release,
     node,
+    missionApi,
   };
 }
 
@@ -783,6 +787,33 @@ test(
           result.stderr,
         );
         assert.equal(result.stdout, NO_OUTPUT);
+        const address = {
+          kind: "repository" as const,
+          binding_id: h.gated.id,
+          commit: contained,
+        };
+        const repeated = await h.missionApi["evidence.submit"](
+          {
+            params: { node_id: h.G },
+            query: {},
+            body: {
+              execution_id: steps.execution_id,
+              attempt: steps.attempt,
+              node_revision: steps.pinned_revision,
+              subject: "head commit",
+              assets: [
+                { kind: "repository", address },
+                { kind: "repository", address },
+              ],
+            },
+          },
+          { idempotencyKey: ulid() },
+        );
+        refused(repeated, HttpStatus.BadRequest, BINDING_MISMATCH);
+        assert.ok(repeated.type === OperationResultType.Failure);
+        assert.deepEqual(repeated.error.error.details, {
+          binding_id: h.gated.id,
+        });
       },
     );
     await t.test(
