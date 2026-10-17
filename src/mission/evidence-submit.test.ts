@@ -600,3 +600,61 @@ test("an implement evidence with one asset for each of two bindings publishes", 
   );
   assert.equal(h.evidenceCount(), SINGLE_ITEM);
 });
+
+test("a node with two bindings writes a tested input list in binding order through the submit", async (t) => {
+  const h = repositoryPairHarness(t);
+  const address = (bindingId: string) => ({
+    kind: AssetKind.Repository,
+    binding_id: bindingId,
+    commit: "a".repeat(40),
+  });
+  const submit = (testedInput: ReturnType<typeof address>[]) =>
+    h.invoke("evidence.submit", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        ...h.context,
+        subject: "Verified",
+        assets: [h.repositoryId, h.secondId].map((bindingId) => ({
+          kind: AssetKind.Repository,
+          address: address(bindingId),
+        })),
+        verification: {
+          tested_input: testedInput,
+          results: [
+            {
+              command: "true",
+              exit_code: SUCCESSFUL_EXIT_CODE,
+              signal: null,
+              timed_out: false,
+            },
+          ],
+        },
+      },
+    });
+  await assert.rejects(
+    submit([address(h.repositoryId)]),
+    h.mismatch(h.secondId),
+  );
+  await assert.rejects(
+    submit([address(h.secondId), address(h.repositoryId)]),
+    h.mismatch(h.secondId),
+  );
+  assert.equal(h.evidenceCount(), NO_ITEMS);
+  const submitted = await submit([
+    address(h.repositoryId),
+    address(h.secondId),
+  ]);
+  const stored = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT verification FROM mission_evidence WHERE id = ?")
+        .get(submitted.evidence.id) as { verification: string },
+  );
+  assert.deepEqual(
+    JSON.parse(stored.verification).tested_input.map(
+      (item: { binding_id: string }) => item.binding_id,
+    ),
+    [h.repositoryId, h.secondId],
+  );
+});
