@@ -96,7 +96,7 @@ The documented and accepted flat-node product. No seam.
 - Do:
   1. `node.md`: one node shape with `work`, `requires` and `tasks`; `node list --work`; no `node move`; `mission.node.work_locked` and `mission.node.requires_unmatched` in the failures.
   2. `import.md`: the node file and the task file grammar (`mission-service.impl.md:125-151`); replace the section `#binding-inheritance` with `#bindings-of-a-node`: every node names its bindings, no node takes a binding from the project, and the rule table by work; an `implement` node with no task and the coverage rule of a node with tasks; the preview violation `mission.node.requires_unmatched`.
-  3. `evidence.md`: the ordered storage list, the grant of the first working binding, the failed upload check, the refusal code of plan 03b when no binding is left (ruling B2), and the pinned read (`mission-service.md#evidence`).
+  3. `evidence.md`: the ordered storage list, the grant of the first working binding, the failed upload check, 409 `mission.evidence.storage_exhausted` when no binding is left (ruling R16), and the pinned read (`mission-service.md#evidence`).
   4. `execution.md`: the `mission.execution.dependency.*` reads replace the objective reads.
   5. `dependency.md`: the closure is the direct dependencies; a dependency edit on a node that left `Pending` and `Available` answers `mission.node.state_conflict`.
   6. `assessment.md`: `dependency_outcome_ids`, `dependency_node_ids`, the proposal fields `dependency_id` and `created_node_id`, and the answer `{ created, proposer }`.
