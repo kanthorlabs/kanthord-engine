@@ -44,6 +44,7 @@ function harness(t: TestContext) {
     binding_id: row.worker_binding_id,
     worker_name: "coder@1",
     instance_count: 2,
+    traits: [],
     tombstone: false,
   });
   h.dependencies.declarations.declarationOf = () => ({

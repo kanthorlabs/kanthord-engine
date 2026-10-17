@@ -6,6 +6,7 @@ import {
   AgentChoiceKind,
   EXECUTION_IDENTITY_PREFIX,
   type AgentSelection,
+  type Claimant,
   traceIdSchema,
   spanIdSchema,
   type ExecutionRow,
@@ -18,6 +19,7 @@ import {
   readUnendedOfRuntime,
 } from "./execution-store.ts";
 import { settleNode, settleRuntime } from "./settlement.ts";
+import { admits } from "./match.ts";
 
 export const ClaimOutcome = {
   Running: "running",
@@ -45,7 +47,7 @@ function selectJob(
   tx: Transaction,
   dependencies: Dependencies,
   identity: MachineIdentity,
-  declaration: Declaration,
+  claimant: Claimant,
   executionId: string,
   now: number,
 ) {
@@ -62,10 +64,12 @@ function selectJob(
       settled = true;
       continue;
     }
+    const facts = dependencies.facts.claimFacts(tx, nodeId);
+    if (facts === null || !admits(claimant, facts)) continue;
     const claim = dependencies.transitions.claim(
       tx,
       nodeId,
-      declaration.declared_node_states,
+      claimant.declared_node_states,
       {
         kind: "execution",
         execution_id: executionId,
@@ -94,7 +98,11 @@ function acquire(
     tx,
     dependencies,
     identity,
-    declaration,
+    {
+      declared_node_states: declaration.declared_node_states,
+      declared_works: declaration.declared_works,
+      traits: binding.traits,
+    },
     executionId,
     now,
   );

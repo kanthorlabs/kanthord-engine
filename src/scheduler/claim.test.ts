@@ -46,6 +46,7 @@ export function claimHarness(
     binding_id: row.worker_binding_id,
     worker_name: "coder@1",
     instance_count: 1,
+    traits: [] as string[],
     tombstone: false,
     resource_budget: null as { wall_time_ms: number } | null,
   };
@@ -182,6 +183,45 @@ test("health, tombstones, zero counts and occupied binding counts refuse admissi
     h.calls.filter((call) => call.method === CLAIM_METHOD),
     [],
   );
+});
+
+test("the claim walk skips a job that the claimant does not admit and claims the next admitted job", (t) => {
+  const h = claimHarness(t);
+  const macos = createIdentity("node");
+  const examine = createIdentity("node");
+  const plain = createIdentity("node");
+  h.store.transaction((tx) => {
+    h.service.insert(tx, macos, h.row.project_id, 3);
+    h.service.insert(tx, examine, h.row.project_id, 2);
+    h.service.insert(tx, plain, h.row.project_id, 1);
+  });
+  const facts = new Map([
+    [macos, { work: ClaimWork.Implement, requires: ["platform.macos"] }],
+    [examine, { work: ClaimWork.Examine, requires: [] }],
+    [plain, { work: ClaimWork.Implement, requires: [] }],
+  ]);
+  const read: string[] = [];
+  h.dependencies.facts.claimFacts = (_tx, nodeId) => {
+    read.push(nodeId);
+    return facts.get(nodeId) ?? null;
+  };
+  h.dependencies.declarations.declarationOf = () => ({
+    declared_node_states: [ClaimNodeState.Available],
+    declared_works: [ClaimWork.Implement],
+    resource_budget: { wall_time_ms: WALL_TIME },
+  });
+  const first = h.claim();
+  assert.equal(first.row!.node_id, plain);
+  assert.deepEqual(read, [macos, examine, plain]);
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === CLAIM_METHOD)
+      .map((call) => call.arguments[0]),
+    [plain],
+  );
+  h.store.transaction((tx) => h.service.revoke(tx, plain, FIXTURE_NOW));
+  h.binding.traits = ["platform.macos"];
+  assert.equal(h.claim().row!.node_id, macos);
 });
 
 test("a worker name with no declaration answers no work and asserts nothing", (t) => {

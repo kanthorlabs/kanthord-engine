@@ -264,6 +264,12 @@ export function composeServices(options: {
     bindings: {
       workerBindingOf: (tx, projectId, resourceIdentity) =>
         project.workerBindingOf(tx, projectId, resourceIdentity),
+      workerBindingsOf: (tx, projectId) =>
+        project.workerBindingsOf(tx, projectId),
+    },
+    facts: {
+      claimFacts: (tx, nodeId) => mission.claimFacts(tx, nodeId),
+      claimFactsOf: (tx, projectId) => mission.claimFactsOf(tx, projectId),
     },
     projects: {
       projectPaused: (tx, projectId) => project.projectPaused(tx, projectId),

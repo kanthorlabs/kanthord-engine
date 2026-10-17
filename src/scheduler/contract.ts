@@ -315,8 +315,38 @@ export interface WorkerBindings {
     worker_name: string;
     instance_count: number;
     resource_budget?: { wall_time_ms: number } | null;
+    traits: readonly string[];
     tombstone: boolean;
   } | null;
+  workerBindingsOf(
+    tx: Transaction,
+    projectId: string,
+  ): { binding_id: string; worker_name: string; traits: readonly string[] }[];
+}
+export interface ClaimFacts {
+  work: ClaimWork;
+  requires: readonly string[];
+}
+export interface MissionClaimFacts {
+  claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
+  claimFactsOf(
+    tx: Transaction,
+    projectId: string,
+  ): (ClaimFacts & {
+    node_id: string;
+    revision: number;
+    claims: readonly ClaimNodeState[];
+  })[];
+}
+export interface Claimant {
+  declared_node_states: readonly string[];
+  declared_works: readonly ClaimWork[];
+  traits: readonly string[];
+}
+export interface UnmatchedClaim {
+  node_id: string;
+  revision: number;
+  claim: ClaimNodeState;
 }
 export const AgentChoiceKind = {
   Selected: "selected",
