@@ -472,7 +472,6 @@ export const contentSchema = z.strictObject({
   requires: requiresSchema.default([]),
 });
 export type Content = z.infer<typeof contentSchema>;
-export type ContentInput = z.input<typeof contentSchema>;
 export const taskBodySchema = z.strictObject({
   ...planContentFields,
   bindings: z.array(z.string()).max(0),

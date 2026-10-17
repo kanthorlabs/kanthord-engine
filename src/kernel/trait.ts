@@ -7,4 +7,3 @@ export const traitKeySchema = z
   .string()
   .max(TRAIT_KEY_MAX_BYTES)
   .regex(TRAIT_KEY_PATTERN);
-export type TraitKey = z.infer<typeof traitKeySchema>;
