@@ -13,7 +13,6 @@ import {
   type ImportApply,
   type ImportPreview,
   type ImportResult,
-  type ImportSnapshot,
   type Mission,
   type MissionBindings,
   type Revision,
@@ -26,6 +25,7 @@ import type { Dependencies } from "./service.ts";
 import {
   isTaskEntry,
   prepareImport,
+  type PreparedImport,
   type ResolvedImport,
   type ResolvedImportEntry,
 } from "./import.ts";
@@ -315,18 +315,11 @@ function writeImport(
 export function probeCoverage(
   tx: Transaction,
   mission: Mission,
-  snapshot: ImportSnapshot,
+  { preview, resolved }: PreparedImport,
+  reason: string,
   actor: HumanActor,
-  dependencies: Pick<Dependencies, "bindings" | "schedulerMatch" | "config">,
+  dependencies: Pick<Dependencies, "bindings" | "schedulerMatch">,
 ): Violation[] {
-  const { preview, resolved } = prepareImport(
-    tx,
-    mission,
-    snapshot,
-    mission.id,
-    dependencies.bindings,
-    dependencies.config.text_max_bytes,
-  );
   assert.equal(preview.violations.length, NO_VIOLATIONS);
   assert.ok(resolved, "A valid import has a resolved graph.");
   if (!changesMission(resolved)) return [];
@@ -338,7 +331,7 @@ export function probeCoverage(
       resolved,
       entries,
       actor,
-      snapshot.reason,
+      reason,
       Date.now(),
       dependencies.bindings,
       PROBE_QUEUE,

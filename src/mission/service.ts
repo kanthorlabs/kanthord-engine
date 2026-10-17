@@ -103,7 +103,7 @@ import {
 } from "./record-list.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
-import { previewImport } from "./import.ts";
+import { prepareImport } from "./import.ts";
 import { applyImport, probeCoverage } from "./import-apply.ts";
 import { createNode } from "./node-create.ts";
 import { rebindNodes } from "./node-rebind.ts";
@@ -642,7 +642,7 @@ export class MissionService
               params.mission_id,
               body.mission_version,
             );
-            const preview = previewImport(
+            const prepared = prepareImport(
               tx,
               mission,
               body,
@@ -650,13 +650,15 @@ export class MissionService
               this.dependencies.bindings,
               this.dependencies.config.text_max_bytes,
             );
-            if (preview.violations.length > NO_VIOLATIONS) return preview;
+            if (prepared.preview.violations.length > NO_VIOLATIONS)
+              return prepared.preview;
             probed = {
-              ...preview,
+              ...prepared.preview,
               violations: probeCoverage(
                 tx,
                 mission,
-                body,
+                prepared,
+                body.reason,
                 humanActor(caller),
                 this.dependencies,
               ),

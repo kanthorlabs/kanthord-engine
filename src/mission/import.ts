@@ -796,24 +796,6 @@ export function prepareImport(
   };
 }
 
-export function previewImport(
-  tx: Transaction,
-  mission: Mission,
-  snapshot: ImportSnapshot,
-  routeMissionId: string,
-  bindings: MissionBindings,
-  textMaxBytes: number,
-): ImportPreview {
-  return prepareImport(
-    tx,
-    mission,
-    snapshot,
-    routeMissionId,
-    bindings,
-    textMaxBytes,
-  ).preview;
-}
-
 export function importDigest(
   missionId: string,
   missionVersion: number,
