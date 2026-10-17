@@ -110,15 +110,24 @@ export async function createJourneyTask(
     filename: string;
     visible_revision: number;
     content: typeof NODE_CONTENT & { work: Work; requires: string[] };
-    tasks: { id: string; filename: string; content: typeof NODE_CONTENT }[];
   }>(["mission", "node", "get", nodeId]);
+  const current = await cli.read<{
+    tasks: { id: string; filename: string; content: typeof NODE_CONTENT }[];
+  }>([
+    "mission",
+    "node",
+    "revision",
+    "get",
+    nodeId,
+    String(node.visible_revision),
+  ]);
   const result = await cli.write<{
     revisions: { tasks: { id: string; filename: string }[] }[];
   }>(["mission", "node", "update", nodeId], {
     filename: node.filename,
     content: node.content,
     tasks: [
-      ...node.tasks,
+      ...current.tasks,
       {
         filename,
         content: {
