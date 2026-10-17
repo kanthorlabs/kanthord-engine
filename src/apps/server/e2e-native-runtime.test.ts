@@ -717,7 +717,7 @@ test(
         root.release(root.nodeKey(y.execution.node_id), WorkspaceKind.Node);
       }
     });
-    await t.test("E07.9 sweep retains only the held objective", () => {
+    await t.test("E07.9 sweep retains only the held implement node", () => {
       root.sweep(Date.now() + 8 * 24 * 3600 * 1000);
       assert.equal(existsSync(root.nodeKey(y.execution.node_id)), false);
       assert.equal(existsSync(root.nodeKey(x.execution.node_id)), true);
