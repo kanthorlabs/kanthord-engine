@@ -36,7 +36,7 @@ RULED 2026-10-17 by Ulrich (R14): pull request #87 stays open until plan 08. Tas
 ## D5 — Task identity
 
 - `TASK_IDENTITY_PREFIX = "task"` in `src/mission/contract.ts`. `identitySchema("task")` validates a task identity.
-- `readLastTaskSnapshot` (`src/mission/store.ts:279-293`) becomes `taskOwnerOf(tx, missionId, taskId): { node_id; revision } | null`. It reads the latest revision of any node of the mission that holds the task in `tasks`. The import answers `mission.import.retired_id` for a task identity whose owner revision no longer holds it (`mission-service.impl.md:205`).
+- `readLastTaskSnapshot` (`src/mission/store.ts:279-293`) becomes `taskOwnerOf(tx, missionId, taskId): { node_id; revision } | null`. It reads the latest revision of any node of the mission that holds the task in `tasks`. The import answers `mission.import.retired_id` for a task of a retired node and for a task identity that an earlier write removed (`mission-service.impl.md:205`).
 - A plan file `id` with the prefix of the other file form answers `mission.import.plan_invalid` (`mission-service.impl.md:147`). Before plan 03 the form is `kind: task`; from plan 03 on it is `node:`.
 
 ## D6 — Edge shape
