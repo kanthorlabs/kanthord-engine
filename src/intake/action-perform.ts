@@ -473,7 +473,10 @@ function finalizePerform(
     kind: FinalizationKind.Answer,
     body: {
       class: answer.class,
-      code: resultCodeOf(action, answer.class),
+      code:
+        answer.code === GIT_FAILED_CODE
+          ? GIT_FAILED_CODE
+          : resultCodeOf(action, answer.class),
       message: answer.message,
     },
   };

@@ -654,6 +654,30 @@ test(
     });
 
     await t.test(
+      "a git failure of the contained check answers git_failed and opens no pull request",
+      async () => {
+        const landedOn = h.fixture.gitWriter.landedOn;
+        h.fixture.gitWriter.landedOn = async () => {
+          throw new Diagnostic(GIT_FAILED_CODE, "landing read failed");
+        };
+        const before = posts();
+        try {
+          const answer = completed(
+            await h.perform(gated, gatedBody("landing")),
+          );
+          assert.ok("class" in answer);
+          assert.equal(answer.class, ResultClass.ConfirmedFailure);
+          assert.equal(answer.code, GIT_FAILED_CODE);
+        } finally {
+          h.fixture.gitWriter.landedOn = landedOn;
+        }
+        assert.equal(h.row("landing")?.state, OutboundRequestState.Failed);
+        assert.equal(posts(), before);
+        dropped(h.materials);
+      },
+    );
+
+    await t.test(
       "a thrown call keeps the pending row and the pin and drops the material",
       async () => {
         const create = h.fixture.github.createPullRequest;
