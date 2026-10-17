@@ -10,11 +10,8 @@ import { isHumanIdentity, type CallerIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import {
-  S3_RESULT_CODE_PREFIX,
-  type S3Call,
-  type S3Failure,
-} from "../storage/s3.ts";
+import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
+import { type S3Call, type S3Failure } from "../storage/s3.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {
   objectCheckSchema,

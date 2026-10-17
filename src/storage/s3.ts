@@ -17,8 +17,8 @@ import {
 import { HttpStatus } from "../kernel/http.ts";
 import { thrownReason } from "../kernel/probe.ts";
 import { isObject, isString } from "../kernel/values.ts";
+import { S3_RESULT_CODE_PREFIX } from "./contract.ts";
 
-export const S3_RESULT_CODE_PREFIX = "storage.platform.s3.";
 export const READ_RETRY_DELAY_MS = 250;
 export const READ_ATTEMPT_LIMIT = 240;
 export const CONTENT_LENGTH_HEADER = "content-length";
