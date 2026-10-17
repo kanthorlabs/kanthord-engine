@@ -36,6 +36,7 @@ engine/
 │   │   ├── json.ts             # Canonical JSON, digests, key derivation, and timestamps
 │   │   ├── handover.ts         # Handover keys, additional authenticated data and envelope codec
 │   │   ├── identity.ts         # Prefixed entity identities and ULID schemas
+│   │   ├── trait.ts            # Trait key form and byte bound
 │   │   ├── values.ts           # JavaScript value predicates
 │   │   ├── version.ts          # Cached package version
 │   │   ├── xdg.ts              # Configuration, data, state, and cache directories
@@ -149,14 +150,16 @@ engine/
 │   │   ├── frozen-action.ts    # Pinned repository requirements and resolutions
 │   │   ├── action-context.ts   # Atomic action eligibility and earlier request candidates
 │   │   ├── currency.ts         # Read-time assessment currency and selection
-│   │   ├── conditions.ts       # Readiness, closure, and continuation conditions
+│   │   ├── graph.ts            # Dependency cycle detection and direct dependencies
+│   │   ├── edge-read.ts        # Dependency edge cursor and page
+│   │   ├── conditions.ts       # Readiness, direct-dependency closure, and continuation conditions
 │   │   ├── control.ts          # Transactional human-control admission and closure
 │   │   ├── control-hold.ts     # Pause, ready, and resume
 │   │   ├── control-close.ts    # Block, discard, and success override
 │   │   ├── control-unblock.ts  # Atomic direction change and next attempt
 │   │   ├── transitions.ts     # Scheduler claim, release admission, and failure
 │   │   ├── execution.ts       # Live claim and execution context admission
-│   │   ├── execution-read.ts  # Pinned revisions, attempts and current objective outcomes
+│   │   ├── execution-read.ts  # Pinned revisions, attempts and current dependency outcomes
 │   │   ├── evidence-content.ts # Binding, byte and verification validation
 │   │   ├── evidence-submit.ts # Evidence insertion and object upload preparation
 │   │   ├── evidence-complete.ts # Checked object upload publication

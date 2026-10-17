@@ -313,7 +313,7 @@ it cannot acquire a chosen node or authorize its own claim.
 3. Selection and claim are one atomic acquisition. They recheck Mission
    state, the Mission condition, the project pause, binding availability and
    count, compatibility and one-claim-per-node exclusion. A node must be
-   `Available` for a steps claim (with terminal objectives on an initiative)
+   `Available` for a steps claim
    or eligible `Waiting`/`External.Requested`
    for an evaluation claim. A `Blocked`, `Paused`, `Pending`, terminal or
    incompatible node cannot be forced through this path. A paused project
@@ -546,7 +546,7 @@ signed delivery, and a human or machine token is not delivery verification.
 ## Service collaborations and loops excluded from the command surface
 
 - **Queue insert/delete/reorder:** Mission writes affected jobs, including
-  dependency and parent effects, within the transaction committing the
+  dependency effects, within the transaction committing the
   accepted fact. Its public collaboration is a co-location contract, not a
   routable command that can detach queue membership from Mission state.
   Priority edits remain human Mission operations.
