@@ -43,34 +43,28 @@ Raise an item that needs a ruling with Ulrich, one item at a time. Do not guess 
 
 ### Plan 03 on `feat/flat-nodes-03-flat`
 
-Commits:
+Commits, on top of `origin/refactor/flat-nodes`:
 
-- `73025c88` feat(mission): store flat nodes with work and requires on the revision
-- `0c9ce952` feat(worker): read the work of the pinned revision
-- `48a98cee` feat(cli): filter the node list by work and remove node move
-- `3f2bf505` feat(openapi): regenerate the flat node operations
-- `31dcff2f` docs(cli): describe flat nodes with work and requires
-- `ac8456fb` test(server): move the server fixtures to flat nodes, work in progress
+- `66676ffc` feat(mission): store flat nodes with work and requires on the revision
+- `efcee63a` docs: describe flat nodes in the engine map and the Scheduler CLI page
+- `0d068377` docs(plan): widen D31 to every node whose evaluation checks out repositories
 
-The last commit holds task 03.16 in progress and the D31 change for ruling S4. Fold it into its task commits before the merge, so that each commit is green.
+The first commit holds all of the code, the tests, the server fixtures, OpenAPI, the CLI and `docs/cli/mission.md`. A smaller split does not pass `tsc --noEmit`, because the type check covers the test files. The other two commits change Markdown only.
 
-Check results at `ac8456fb`:
+Check results at the head:
 
-- `tsc --noEmit` passes.
-- The tests give 3122 pass and 3 fail of 3125:
-  - `EF03.3 a task file that names an examine node is refused` (`src/apps/server/e2e-mission-service.test.ts:2386`). The import does not refuse that task file.
-  - Its parent journey `EF03.1-EF03.8 flat nodes carry their work through the CLI`.
-  - `src/apps/server/worker-thread.test.ts` stopped with a V8 fatal error (`Check failed: jit_page_->allocations_.erase(addr) == 1`). Run it again alone before you treat it as a fault.
-- The first `rg` row of gate 03 finds `src/apps/server/migrations.test.ts:221`. That line asserts that `kind` and `parent_id` are absent, so adjust the assertion or the gate pattern.
-- The second `rg` row finds `objective` and `Initiative` in `docs/cli/mission.md` (for example lines 826 and 916). Task 03.18 is not complete.
+- `pnpm run verify` passes: prettier, typecheck, lint, build and 3127 of 3127 tests.
+- The OpenAPI regeneration leaves `static/` unchanged.
+- Both `rg` rows of gate 03 print nothing.
+
+EF03.3: a preview lists a reference violation and answers HTTP 200. Only `import apply` stops at the violation and exits 1 (`docs/brainstorm/mission-service.impl.md:187-190`). The test asserts this.
 
 Remaining work for plan 03:
 
-1. Fix EF03.3, then complete task 03.16.
-2. Complete task 03.18 until the gate `rg` rows print nothing.
-3. Ruling S4 in the engine: check that the evaluation of an `implement` node with an evidence snapshot places the produced evidence in `<workspace>/evidence/` and keeps the snapshot checkout clean (`src/worker/unit/evaluation-input.ts`, near the `placement` constant). Add a test for that case.
-4. Compare each task 03.1 to 03.18 with the commits. Run the full gate row 03.
-5. Fold the work-in-progress commit. Rebase onto `origin/refactor/flat-nodes`, push, and open the pull request.
+1. Ruling S4 in the engine. `prepareSnapshot` in `src/worker/unit/workspace.ts` clones the snapshot into the workspace key, so the evidence of an `implement` evaluation lands inside the checkout. Make `prepareSnapshot` clone into `<key>/checkouts/<binding name>/` and return `key`. Place the evidence in `<key>/evidence/` when `key` and the agent root differ. Release `key`. Add a test that the snapshot checkout holds no placed asset.
+2. Change row EF03.3 in `03-flat-nodes.md` to "the preview lists the violation; the apply exits 1".
+3. Compare each task 03.1 to 03.18 with the commits. Run the full gate row 03.
+4. Rebase onto `origin/refactor/flat-nodes`, push, and open the pull request. Then run the Opus review.
 
 ## Open follow-ups
 
@@ -78,3 +72,5 @@ Remaining work for plan 03:
 - An import retirement strips the tasks of a node, but `node retire` keeps them. This behavior existed before the plan set. Raise it with Ulrich.
 - `e2e-worker-app.test.ts:298` failed once in a full run and passed alone ten times. Treat it as flaky until it fails again.
 - `docs/brainstorm/HANDOFF.md` of the superrepo holds the open design items.
+- The worker still uses old node words outside gate 03: `static/prompt/template/evaluation.md` says "completed objective dependency", and `prepareObjective`, `WorkspaceKind.Objective` and `steps-objective.ts` remain. Plan 04 renames them.
+- `worker-pool.test.ts` "a removed binding ends its threads without a restart" failed once in a full run and passed alone three times. Treat it as flaky until it fails again.
