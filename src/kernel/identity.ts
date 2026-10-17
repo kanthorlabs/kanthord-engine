@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { ulid } from "ulid";
+import { monotonicFactory } from "ulid";
 import { z } from "zod";
 
+const ulid = monotonicFactory();
 const EMPTY_PREFIX_LENGTH = 0;
 export const ULID_LENGTH = 26;
 export const IDENTITY_SUFFIX_LENGTH = ULID_LENGTH + 1;
