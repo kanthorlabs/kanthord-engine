@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, type TestContext } from "node:test";
+import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -472,5 +473,24 @@ test("no binding left answers mission.evidence.storage_exhausted", async (t) => 
   await assert.rejects(h.submit, {
     code: MissionErrorCode.EvidenceStorageExhausted,
   });
+  assert.equal(h.evidenceCount(), NO_ITEMS);
+});
+
+test("a cancelled context during signing stops with no failover", async (t) => {
+  const h = failoverFixture(t);
+  const context = new CancellationContext(background);
+  h.caller.context = context;
+  h.refusals.set(h.storageId, () => {
+    context.cancel();
+    throw new OperationError(
+      BAD_GATEWAY,
+      S3_RESULT_CODE_PREFIX + ResultClass.UnknownOutcome,
+      "The store fails.",
+    );
+  });
+  await assert.rejects(h.submit, {
+    code: S3_RESULT_CODE_PREFIX + ResultClass.UnknownOutcome,
+  });
+  assert.deepEqual(h.granted, [h.storageId]);
   assert.equal(h.evidenceCount(), NO_ITEMS);
 });
