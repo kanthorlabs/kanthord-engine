@@ -9,7 +9,7 @@ import { readDependencies } from "./node-reads.ts";
 import { examineInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { WorkspaceKind, workRepositoriesOf } from "./workspace.ts";
-import type { StepsInput } from "./steps-objective.ts";
+import type { StepsInput } from "./steps-implement.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
 import { runVerifications } from "./verification.ts";

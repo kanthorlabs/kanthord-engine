@@ -20,8 +20,8 @@ import {
 } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
-import { TaskBoundary } from "./steps-objective.ts";
-import { prepareStepsWorkspace, startCheck } from "./steps-objective.ts";
+import { TaskBoundary } from "./steps-implement.ts";
+import { prepareStepsWorkspace, startCheck } from "./steps-implement.ts";
 import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
 import { judgedAt } from "./judged-tasks.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";

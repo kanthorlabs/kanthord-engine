@@ -34,7 +34,7 @@ import {
   ReplyRepair,
 } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
-import type { StepsInput } from "./steps-objective.ts";
+import type { StepsInput } from "./steps-implement.ts";
 import {
   WorkspaceKind,
   workRepositoriesOf,

@@ -16,7 +16,7 @@ import {
   WorkspaceKind,
   type InitiativeCheckout,
 } from "./workspace.ts";
-import type { StepsInput } from "./steps-objective.ts";
+import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
 import { ExecutionWork } from "../contract.ts";
 

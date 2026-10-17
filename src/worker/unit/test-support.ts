@@ -34,7 +34,7 @@ import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
-import { prepareStepsWorkspace } from "./steps-objective.ts";
+import { prepareStepsWorkspace } from "./steps-implement.ts";
 export {
   scriptedProvider,
   type ScriptedProvider,

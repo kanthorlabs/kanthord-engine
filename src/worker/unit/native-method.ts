@@ -27,7 +27,7 @@ import type {
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { readPriorRationale, readPinnedRevision } from "./node-reads.ts";
-import { prepareStepsWorkspace, runStepsObjective } from "./steps-objective.ts";
+import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
 import { runStepsInitiative } from "./steps-initiative.ts";
 import { runEvaluation } from "./evaluation.ts";
 import { phaseSpan } from "./method-telemetry.ts";
@@ -137,7 +137,7 @@ export async function runNativeExecution(
         priorRationale: prior.rationale,
         rework: prior.rework,
       };
-      return runStepsObjective(state);
+      return runStepsImplement(state);
     });
   } finally {
     try {

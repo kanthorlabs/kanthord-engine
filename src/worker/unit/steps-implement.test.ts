@@ -15,13 +15,13 @@ import {
 } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
-import { TaskBoundary } from "./steps-objective.ts";
+import { TaskBoundary } from "./steps-implement.ts";
 import {
   startCheck,
   runTask,
-  runStepsObjective,
+  runStepsImplement,
   verifyTask,
-} from "./steps-objective.ts";
+} from "./steps-implement.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { BudgetLimit, ProviderFailure } from "../../scheduler/contract.ts";
 import {
@@ -288,7 +288,7 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
   );
   endOnRepair(h);
   const bodies = recordReleases(h);
-  assert.deepEqual(await executionBoundary(h.run, () => runStepsObjective(h)), {
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
     kind: "released",
     furtherWork: true,
     stop: { reason: "budget_end", code: "wall_time" },
@@ -446,7 +446,7 @@ test("an objective with no task commits its change with the node identity in the
       return { type: "completed", status: 200, data: {} };
     },
   } as unknown as MethodClients["scheduler"];
-  assert.deepEqual(await runStepsObjective(h), {
+  assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: false,
   });
