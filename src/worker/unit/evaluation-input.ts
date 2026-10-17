@@ -20,8 +20,6 @@ import type { StepsInput } from "./steps-objective.ts";
 import type { TestedInput } from "./verification.ts";
 import { ExecutionWork } from "../contract.ts";
 
-const NO_CHECKOUTS = 0;
-
 export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
   const candidates = evidence
     .filter((item) => !item.verification && !item.requirement_key)
@@ -127,7 +125,7 @@ async function prepareWorkspace(
         commit: snapshot.commit,
       });
       return {
-        key: workspace.directory,
+        key: workspace.key,
         directory: workspace.directory,
         checkouts: [] as InitiativeCheckout[],
         tested_input: {
@@ -197,9 +195,9 @@ export async function prepareEvaluation(
       input.claim.expired_at,
     );
     const placement =
-      workspace.checkouts.length > NO_CHECKOUTS
-        ? join(workspace.key, EVIDENCE_DIRECTORY)
-        : workspace.directory;
+      workspace.key === workspace.directory
+        ? workspace.directory
+        : join(workspace.key, EVIDENCE_DIRECTORY);
     ensureDirectory(placement);
     for (const { evidenceId, asset } of selected) {
       const name = await placeAsset(placement, run, asset, deadline);
