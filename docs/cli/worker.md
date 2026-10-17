@@ -128,6 +128,12 @@ The answer holds `prompt` and `repositories`, among other fields.
 Each item of `repositories` holds `{ binding_id, name, address, ssh_identity, strategy, project_prompt, working_layer }`.
 `working_layer` is the map of the booleans `agents_md`, `agents_local_md`, `claude_md`, `claude_local_md` and `project_prompt` of the pinned binding revision, with all five keys present.
 The worker application appends the working layer of each workspace. It reads the agent files whose switch is on and the project prompt when `project_prompt` is on.
+
+The steps method of an `implement` node keeps its workspace in `workspaces/<node identity>/` of the state directory.
+Each repository binding of the pinned revision has one checkout in `workspaces/<node identity>/checkouts/<binding name>/`.
+With one repository binding, the agent works from that checkout.
+With two or more, the agent works from `checkouts/`, and each binding is one directory under it.
+The execution commits each checkout that holds a change, pushes the node branch of every checkout, and then submits one evidence with one `repository` asset for each binding in binding order.
 [Project](./project.md#binding-resource-and-complete-set-edits) rules the switches.
 
 The four human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).
@@ -454,6 +460,10 @@ that calls a tool. Tools are reached through the MCP server.
 `worker.action.request` is an API-only `client` mutation at `POST /api/worker/execution/:execution_id/action/request`, with `unary` lifetime, no body and a 900 s timeout. It requires a live execution and the admission of the action performer. The evaluation method of `reviewer@1` calls it, and it answers 200 with the action result below. It calls the action performer and not the MCP server.
 
 `worker.execution.change_request.get` is an API-only `client` read at `GET /api/worker/execution/:execution_id/change-request`, with `unary` lifetime, no body and a 60 s timeout. It requires a live execution. The steps method of `coder@1` calls it at the start of an attempt after an unblock when the cleared outcome has the closing event `external-failed`. It reads the external actions of the cleared attempt. For each `pull_request` action with the resolution `other-end`, it calls `intake.action.read` with the method `github-pull-request-change-request-get` and the request evidence of that action. It answers 200 with `{ items }`. Each item holds `evidence_id`, `binding_id`, `head_commit` and `change_requests`. `binding_id` names the repository binding of the `pull_request` action. Each change request holds `review_id`, `reviewer`, `body`, `submitted_at`, `commit_id` and `comments`, and each comment holds `path`, `line` and `body`. A claim of attempt 1 answers `{ items: [] }`. A platform failure answers 502 with the code `repository.platform.github.<class>`.
+
+The steps method writes the change requests into one requested-changes text that stops at 4 KiB.
+Each change request has the line `Reviewer <reviewer> requests changes on <binding name> at commit <commit>: <body>`.
+The binding name is the name of the repository binding that `binding_id` of the item names.
 
 ### Action performer results
 
