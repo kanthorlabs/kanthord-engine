@@ -246,7 +246,9 @@ The execution reads that dependency at the revision that its current outcome pin
   inferred from record order. `node get` returns `Node` with revision/attempt
   links. A node read answers `work`, `requires` and `tasks: TaskContent[]` at
   the claim revision: the revision that the open attempt pins, else the current
-  revision. `content` and `visible_revision` stay current.
+  revision. `content` and `visible_revision` stay current. The `tasks` of a
+  node read can come from an older revision. An edit of the tasks reads the
+  current tasks with `node revision get` at `visible_revision`.
 - `node create` accepts `NodeCreate`, returns `NodeChange`, and validates the complete graph.
   It requires `filename`, the plan file name.
   The commit rechecks admission under the [node API rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#node-api-admission).
