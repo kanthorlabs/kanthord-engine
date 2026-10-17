@@ -54,7 +54,6 @@ type Upload = {
   expires_at: number;
 };
 const NO_STORAGE_BINDINGS = 0;
-const NO_OBJECT_ASSETS = 0;
 const FIRST_CANDIDATE = 0;
 const FAILOVER_REFUSALS: readonly string[] = [
   AuthorizationRefusal.BindingDisabled,
@@ -120,7 +119,6 @@ export function prepareEvidence(
       revision,
       body.verification.tested_input,
     );
-  const objects: ObjectUpload[] = [];
   const rows = body.assets.map((asset, index): AssetRow | null => {
     const id = ids.asset_ids[index];
     assert.ok(id);
@@ -157,12 +155,6 @@ export function prepareEvidence(
         MissionErrorCode.EvidenceStorageBindingAbsent,
         "The pinned revision has no storage binding.",
       );
-    objects.push({
-      nodeId: node.id,
-      assetId: id,
-      size: asset.size,
-      sha256: asset.sha256 ?? null,
-    });
     const storageBindingId = grants.get(id);
     if (storageBindingId === undefined) return null;
     assert.ok(storageBindingIds.includes(storageBindingId));
@@ -194,10 +186,6 @@ export function prepareEvidence(
     };
   });
   const assets = rows.filter((row): row is AssetRow => row !== null);
-  const storage =
-    objects.length === NO_OBJECT_ASSETS
-      ? null
-      : storageCandidates(tx, dependencies.bindings, revision, claim.attempt);
   const evidence: EvidenceRow = {
     id: ids.evidence_id,
     node_id: node.id,
@@ -209,7 +197,22 @@ export function prepareEvidence(
     provenance: canonicalJSON(actor),
     created_at: now,
   };
-  return { evidence, assets, objects, storage };
+  return { evidence, assets, revision };
+}
+
+function objectUploadsOf(
+  nodeId: string,
+  body: EvidenceSubmit,
+  ids: Identities,
+): ObjectUpload[] {
+  return body.assets.flatMap((asset, index) => {
+    const assetId = ids.asset_ids[index];
+    assert.ok(assetId);
+    if (asset.kind !== AssetKind.Object) return [];
+    return [
+      { nodeId, assetId, size: asset.size, sha256: asset.sha256 ?? null },
+    ];
+  });
 }
 
 function signingFailsOver(caller: CallerContext, error: unknown): boolean {
@@ -281,8 +284,8 @@ export async function submitEvidence(
   const uploads: Upload[] = [];
   const grants = new Map<string, string>();
   if (body.assets.some((asset) => asset.kind === AssetKind.Object)) {
-    const prepared = dependencies.store.transaction((tx) =>
-      prepareEvidence(
+    const { bindings, grantable } = dependencies.store.transaction((tx) => {
+      const { revision } = prepareEvidence(
         tx,
         dependencies,
         claim,
@@ -291,12 +294,16 @@ export async function submitEvidence(
         Date.now(),
         ids,
         grants,
-      ),
-    );
-    assert.ok(prepared.storage);
-    const { bindings, grantable } = prepared.storage;
+      );
+      return storageCandidates(
+        tx,
+        dependencies.bindings,
+        revision,
+        claim.attempt,
+      );
+    });
     let next = FIRST_CANDIDATE;
-    for (const object of prepared.objects) {
+    for (const object of objectUploadsOf(nodeId, body, ids)) {
       const granted = await signObject(
         dependencies,
         caller,
