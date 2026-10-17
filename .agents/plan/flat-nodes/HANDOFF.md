@@ -51,9 +51,15 @@ The superrepo `refactor/flat-nodes` points the `engine` at the merge of #79 and 
 - The storage grant fails over only on `binding_disabled`, `binding_removed` and `storage.platform.s3.*`. `details.bindings` of `mission.evidence.storage_exhausted` lists the bindings with a failed upload check in the open attempt. A failed transfer goes to the complete check, and `worker.evidence_upload.transfer_failed` answers only a file above the size limit.
 - D15 stays as written: the covering bindings are `coder@1` and `reviewer@1`, and each fixture enables `swe@1` and `re@1` through `enableCoveringAgents`.
 
+### Rulings of Ulrich on 2026-10-18
+
+- Ulrich reviewed OD1 to OD15 and approved each one, except OD2 and OD8, which the two rulings below replace.
+- OD2: the CLI prints the `details` of a refusal. When `details` is not null, the CLI writes a second stderr line `details: <compact JSON>`. When `details` is null, the output does not change.
+- OD8: the root `.githooks/pre-commit` does not change. Morning steps 8 to 11 make each root pointer reachable from the `origin/main` of its submodule.
+
 ### Overnight decisions
 
-Ulrich slept from about 22:45 on 2026-10-17. The main session decided each open item with an Opus reviewer at high effort and recorded it in `.dev/overnight-decisions.md` of the superrepo main checkout (OD1 and later). Ulrich reviews them.
+Ulrich slept from about 22:45 on 2026-10-17. The main session decided each open item with an Opus reviewer at high effort and recorded it in `.dev/overnight-decisions.md` of the superrepo main checkout (OD1 and later). Ulrich reviewed them on 2026-10-18.
 
 - OD1 to OD3: plan 06 test rows (the task-omission apply, the `httpClient` read of refusal `details`, the exact unmatched pairs).
 - OD4: plan 08 splits. Tasks 08.1 to 08.10 merge overnight. Tasks 08.11 and 08.12 wait for Ulrich.
@@ -74,15 +80,16 @@ Plan 10 is merged. Run these steps in this order:
 6. Run task 08.12 once on the final root head, with the engine at plan 09b. This run also covers plan 10, which runs no live acceptance of its own (`10-root-multi-repository-docs.md:15`). If it fails, run it again at the root merge of plan 08 to find the plan that caused it.
 7. Open one pull request per repository from `refactor/flat-nodes` to `main`.
 8. Merge the `engine` and `apps` pull requests first. Use a merge commit, not a squash or a rebase.
-9. Run `git -C engine merge-base --is-ancestor <root engine pointer> origin/main`. Run the same check for `apps`. Each check must exit 0.
-10. Merge the superrepo pull request last.
+9. In the superrepo, create a branch from `origin/refactor/flat-nodes`. Run `git -C engine switch main && git -C engine pull --ff-only`. Do the same for `apps`.
+10. Stage `engine` and `apps`, commit, and open a pull request into `refactor/flat-nodes`. Merge it. The hook accepts this commit, because each submodule is on `main` and each pointer is on its `origin/main`.
+11. Run `git fetch origin`, `git -C engine fetch origin` and `git -C apps fetch origin`. Read each pointer with `git rev-parse origin/refactor/flat-nodes:engine` and `git rev-parse origin/refactor/flat-nodes:apps`. Run `git -C engine merge-base --is-ancestor <engine pointer> origin/main`. Run the same check for `apps`.
+12. If a check exits 1, do not merge the superrepo pull request. Find the cause first.
+13. Merge the superrepo pull request last.
 
 Gate row 08 (`00-index.md:97`) holds the live run. The plan 08 pull request merges before that row runs, as OD4 states.
 
 ## Open follow-ups
 
-- Decide whether the CLI prints the `details` of a refusal. `handleMutationResult` (`src/apps/cli/shared.ts:144-152`) keeps only the code, so an operator cannot see `details.claims` or `details.node_ids` through the CLI (OD2).
 - `docs/brainstorm/HANDOFF.md` of the superrepo holds the open design items.
-- The root `.githooks/pre-commit` refuses a staged pointer change when the submodule is not on `main` or the pointer is not on its `origin/main`. When a clone runs the hook, it refuses each pointer move to `refactor/flat-nodes`. Ulrich ruled OD8 on 2026-10-18: the hook does not change, and steps 8 to 10 put each root pointer on `origin/main`.
 - These tests failed once in a full run and passed alone, so treat them as flaky until they fail again: `e2e-worker-app.test.ts:298`; `worker-pool.test.ts` "a removed binding ends its threads without a restart" and "the pool starts one instance for each slot"; two timing tests of `src/worker/unit/verification.test.ts` under parallel load.
 - `docs/brainstorm/worker-service.impl.md` has no test line for the evidence-placement rule on an `implement` node whose evidence names no repository snapshot. This gap existed before ruling S4.
