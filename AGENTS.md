@@ -219,9 +219,9 @@ engine/
 │   │   │   ├── method-clients.ts   # Injected execution-scoped operation clients
 │   │   │   ├── execution-run.ts    # Refusal boundary, submissions and release reconciliation
 │   │   │   ├── judgement.ts        # Strict handoff parsing and method instructions
-│   │   │   ├── node-reads.ts       # Bounded pinned-context and objective reads
-│   │   │   ├── steps-objective.ts  # Start checks, task revisions and objective publication
-│   │   │   ├── steps-initiative.ts # Current objective report and initiative release
+│   │   │   ├── node-reads.ts       # Bounded pinned-context and dependency reads
+│   │   │   ├── steps-implement.ts  # Start checks, task revisions and implement-node publication
+│   │   │   ├── steps-examine.ts    # Dependency outcome report and examine-node release
 │   │   │   ├── evaluation-input.ts # Isolated snapshots and evidence placement
 │   │   │   ├── evaluation.ts       # Verification evidence, assessment and action requests
 │   │   │   ├── transcript.ts       # Execution transcript sink and no-op implementation
