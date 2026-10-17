@@ -166,8 +166,7 @@ components:
                                 maxLength: 31
                                 pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                                 description: task_ followed by a canonical 26-character uppercase ULID.
-                          work:
-                            type: string
+                          work: {}
                           name:
                             type: string
                             minLength: 1
@@ -187,10 +186,7 @@ components:
                             type: array
                             items:
                               type: string
-                          requires:
-                            type: array
-                            items:
-                              type: string
+                          requires: {}
                           depends_on:
                             type: array
                             items:

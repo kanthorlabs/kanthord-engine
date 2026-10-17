@@ -287,6 +287,20 @@ test("the parser passes an unknown work value to the content rules", () => {
   assert.equal(result.work, UNKNOWN_WORK);
 });
 
+test("the parser passes a nontext work and a nonlist or nontext requires as read", () => {
+  for (const [from, to, field, value] of [
+    ["work: implement", "work: [implement]", "work", ["implement"]],
+    ["requires: []", "requires: platform.macos", "requires", "platform.macos"],
+    ["requires: []", "requires: [7]", "requires", [7]],
+  ] as const) {
+    const result = parsePlanFile(
+      FILENAME,
+      EXAMPLE.replace(from, to),
+    ) as ParsedNodeFile;
+    assert.deepEqual(result[field], value);
+  }
+});
+
 for (const key of ["name", "requirement", "criterion", "extra", "kind"]) {
   test(`refuses unknown front matter key ${key}`, () => {
     rejected(
@@ -362,16 +376,6 @@ for (const [label, content, reason] of [
       "work: implement\nnode: account-recovery.md",
     ),
     "form_invalid",
-  ],
-  [
-    "a nontext work",
-    EXAMPLE.replace("work: implement", "work: [implement]"),
-    "field_invalid",
-  ],
-  [
-    "a nonlist requires",
-    EXAMPLE.replace("requires: []", "requires: platform.macos"),
-    "field_invalid",
   ],
   [
     "a node file id with the task prefix",

@@ -635,9 +635,9 @@ const planEntryFields = {
 export const importNodeEntrySchema = z.strictObject({
   filename: z.string().min(1),
   id: planFileIdSchema.optional(),
-  work: z.string(),
+  work: z.unknown(),
   ...planEntryFields,
-  requires: z.array(z.string()).optional(),
+  requires: z.unknown().optional(),
   depends_on: z.array(z.string().min(1)).optional(),
 });
 export type ImportNodeEntry = z.infer<typeof importNodeEntrySchema>;

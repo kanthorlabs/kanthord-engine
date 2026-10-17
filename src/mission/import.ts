@@ -34,7 +34,7 @@ import { hasDependencyCycle, type DepEdge } from "./graph.ts";
 import { nodeRecord } from "./node-read.ts";
 import {
   parsePlanFile,
-  type ParsedPlanFile,
+  type ParsedNodeFile,
   type ParsedTaskFile,
 } from "./parser.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -65,7 +65,12 @@ const PLAN_REASON = {
 type Reference = (typeof REFERENCE)[keyof typeof REFERENCE];
 type Locator = Pick<NormalizedEntry, "filename" | "id">;
 
-export type NormalizedEntry = ParsedPlanFile;
+export type NormalizedEntry =
+  | ParsedTaskFile
+  | (Omit<ParsedNodeFile, "work" | "requires"> & {
+      work: Work;
+      requires: string[];
+    });
 
 export function isTaskEntry(
   entry: NormalizedEntry | ImportEntry,
@@ -178,8 +183,8 @@ function normalizeEntry(entry: ImportEntry): NormalizedEntry {
   if (isTaskEntry(entry)) return { ...shared, node: entry.node };
   return {
     ...shared,
-    work: entry.work,
-    requires: [...(entry.requires ?? [])],
+    work: entry.work as Work,
+    requires: Array.isArray(entry.requires) ? [...entry.requires] : [],
     depends_on: [...(entry.depends_on ?? [])],
   };
 }

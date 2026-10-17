@@ -75,8 +75,8 @@ interface ParsedPlanContent {
 }
 
 export interface ParsedNodeFile extends ParsedPlanContent {
-  work: string;
-  requires: string[];
+  work: unknown;
+  requires: unknown;
   depends_on: string[];
 }
 
@@ -178,12 +178,11 @@ function fields(
       refuse(filename, REASON.FieldInvalid);
     return { ...shared, node: node as string };
   }
-  const work = mapping[FIELD.Work];
-  if (typeof work !== STRING_TYPE) refuse(filename, REASON.FieldInvalid);
+  const requires = mapping[FIELD.Requires];
   return {
     ...shared,
-    work: work as string,
-    requires: stringList(filename, mapping[FIELD.Requires], false),
+    work: mapping[FIELD.Work],
+    requires: requires === undefined ? [] : requires,
     depends_on: stringList(filename, mapping[FIELD.DependsOn], true),
   };
 }

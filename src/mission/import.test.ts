@@ -564,6 +564,42 @@ test("stage one collects violations from every file, including duplicate refused
   );
 });
 
+for (const [label, line, field, value] of [
+  ["a nontext work", "work: [implement]", "work", ["implement"]],
+  ["an unknown work", "work: build", "work", "build"],
+  ["a nonlist requires", "work: examine\nrequires: x", "requires", "x"],
+  ["a nontext requires item", "work: examine\nrequires: [7]", "requires", [7]],
+] as const) {
+  test(`markdown and JSON imports answer ${label} with mission.node.content_invalid`, () => {
+    const file = markdown.replace("work: examine", line);
+    const snapshots: ImportSnapshot[] = [
+      {
+        format: ImportFormat.Markdown,
+        mission_id: MISSION_ID,
+        mission_version: VERSION,
+        reason: REASON,
+        files: [{ filename: "a.md", content: file }],
+      },
+      snapshot([{ ...entry("a.md"), [field]: value } as ImportEntry]),
+    ];
+    for (const input of snapshots) {
+      const parsed = importSnapshotSchema.parse(input);
+      assert.deepEqual(
+        normalizeImportSnapshot(parsed, MISSION_ID, TEXT_MAX_BYTES).violations,
+        [
+          {
+            code: MissionErrorCode.ContentInvalid,
+            message: `Invalid node content: ${field}.`,
+            details: { field },
+            filename: "a.md",
+            node_id: null,
+          },
+        ],
+      );
+    }
+  });
+}
+
 test("oversized reason is an operation failure, not a violation", () => {
   assert.throws(
     () =>
