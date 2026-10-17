@@ -789,14 +789,17 @@ test(
         const items = (await h.evidence(checkoutFlow)).items;
         assert.equal(items.length, SINGLE_ITEM);
         assert.equal(items[0]!.assets.length, TWO_ASSETS);
-        assert.deepEqual(
-          items[0]!.assets.map((asset) => asset.address),
-          [api, web].map((binding_id, index) => ({
-            kind: "repository",
-            binding_id,
-            commit: heads[index],
-          })),
-        );
+        for (const [index, binding_id] of [api, web].entries())
+          assert.deepEqual(
+            items[0]!.assets
+              .map((asset) => asset.address)
+              .filter(
+                (address) =>
+                  address.kind === REPOSITORY &&
+                  address.binding_id === binding_id,
+              ),
+            [{ kind: REPOSITORY, binding_id, commit: heads[index] }],
+          );
       },
     );
     await t.test(
