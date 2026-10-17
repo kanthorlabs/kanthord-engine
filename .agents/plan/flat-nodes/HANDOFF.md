@@ -74,7 +74,6 @@ Next steps:
 ## Open follow-ups
 
 - Plan 09b task 09b.6 cites line numbers in `src/worker/unit/evaluation-input.ts` that plan 02 moved. The executor of plan 09b re-anchors them.
-- An import retirement strips the tasks of a node, but `node retire` keeps them. This behavior existed before the plan set. Raise it with Ulrich.
 - `e2e-worker-app.test.ts:298` failed once in a full run and passed alone ten times. Treat it as flaky until it fails again.
 - `docs/brainstorm/HANDOFF.md` of the superrepo holds the open design items.
 - The worker still uses old node words outside gate 03: `static/prompt/template/evaluation.md` says "completed objective dependency", and `prepareObjective`, `WorkspaceKind.Objective` and `steps-objective.ts` remain. Plan 04 renames them.
