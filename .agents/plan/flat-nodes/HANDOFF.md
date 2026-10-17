@@ -1,6 +1,6 @@
 # Handoff: flat-node Mission Service refactor
 
-This page gives the state of the plan set on 2026-10-17 and the steps to continue it. Read `00-index.md` and `decisions.md` (D1 to D31) first. The design pages in `docs/brainstorm/` of the superrepo branch `refactor/flat-nodes` are the rule.
+This page gives the state of the plan set on 2026-10-18 and the steps to continue it. Read `00-index.md` and `decisions.md` (D1 to D31) first. The design pages in `docs/brainstorm/` of the superrepo branch `refactor/flat-nodes` are the rule.
 
 ## Branch model
 
@@ -33,13 +33,15 @@ Raise an item that needs a ruling with Ulrich, one item at a time. Do not guess 
 
 ### Merged into `refactor/flat-nodes`
 
-- Superrepo: #87 (design pages), #88 (rulings R15 and R16), #89 to #92 (worker thread URL, evidence placement, ruling S4), #93 (rulings of 2026-10-17 on the retirement, the storage failover and the failed transfer), #94 (prettier table alignment), #95 (`match.ts`).
-- Engine: #61 to #69 (plan set, plans 01 and 02, fixes, this page), #70 (plan 03), #71 (an import retirement keeps the tasks of the node), #72 (plan 04), #73 (plan 03b), #74 (plan 05), #75 (plan 06).
+- Superrepo: #87 (design pages), #88 (rulings R15 and R16), #89 to #92 (worker thread URL, evidence placement, ruling S4), #93 (rulings of 2026-10-17 on the retirement, the storage failover and the failed transfer), #94 (prettier table alignment), #95 (`match.ts`), #96 (plan 08, tasks 08.1 to 08.10), #97 (no merge call for a contained snapshot), #98 (plan 10).
+- Engine: #61 to #69 (plan set, plans 01 and 02, fixes, this page), #70 (plan 03), #71 (an import retirement keeps the tasks of the node), #72 (plan 04), #73 (plan 03b), #74 (plan 05), #75 (plan 06), #76 (this page), #77 (CLI doc fixes), #78 (plan 09a), #79 (plan 09b).
+- Apps: #19 (plan 07).
+
+The superrepo `refactor/flat-nodes` points the `engine` at the merge of #79 and the `apps` at the merge of #19.
 
 ### Open
 
-- Apps #19 (plan 07). The Opus review is done. The executor applies the findings and the decisions OD5 and OD6.
-- Superrepo branch `docs/flat-nodes-08-reference` (plan 08, tasks 08.1 to 08.10). The `apps` pointer moves after apps #19 merges.
+- Tasks 08.11 and 08.12 wait for Ulrich.
 
 ### Rulings of Ulrich on 2026-10-17
 
@@ -56,22 +58,28 @@ Ulrich slept from about 22:45 on 2026-10-17. The main session decided each open 
 - OD1 to OD3: plan 06 test rows (the task-omission apply, the `httpClient` read of refusal `details`, the exact unmatched pairs).
 - OD4: plan 08 splits. Tasks 08.1 to 08.10 merge overnight. Tasks 08.11 and 08.12 wait for Ulrich.
 - OD5 and OD6: the dashboard groups a "no taker" item by state, work and requires, and the scheduler board applies the full match.
+- OD7 to OD9: plan 08 review items (the engine doc fixes in #77, no change to the root pre-commit hook, the "may expire" sentence).
+- OD10 to OD12: plan 09a (the gateway code for a wrong form, no merge call for a contained snapshot, no contained-snapshot rule in the read-back).
+- OD13 to OD15: plan 09b (no identity order for the evidence assets, the `added_files` path base, the change-request `binding_id` and the absent `kanthord.commit`).
 
 ## Morning steps for Ulrich
 
-Run these steps after plan 10 merges, in this order:
+Plan 10 is merged. Run these steps in this order:
 
 1. Review `.dev/overnight-decisions.md` of the superrepo main checkout.
-2. Run task 08.11: stop `make dev`, run `make cleanup` and `make bootstrap`, export and delete the homelab volume, redeploy the homelab, and log in the LLM credential `anthropic-subscription`.
-3. Run task 08.12 once on the final root head, with the engine at plan 09b. This run also covers plan 10, which runs no live acceptance of its own (`10-root-multi-repository-docs.md:15`). If it fails, run it again at the root merge of plan 08 to find the plan that caused it.
-4. Open one pull request per repository from `refactor/flat-nodes` to `main`.
+2. In the main checkout, run `git pull --ff-only`. Then run `git submodule update`.
+3. Run `git -C engine switch -c flat-nodes-accept` and `git -C apps switch -c flat-nodes-accept`. Without a named branch, `make bootstrap` refuses a submodule commit outside its `origin/main`.
+4. Run tasks 08.11 and 08.12 in the main checkout, not in `.dev/flat-nodes-08-reference` of plan 08.
+5. Run task 08.11. Stop `make dev`. Run `make cleanup`, then `make bootstrap`. Export and delete the homelab volume. Redeploy the homelab. Log in the LLM credential `anthropic-subscription`.
+6. Run task 08.12 once on the final root head, with the engine at plan 09b. This run also covers plan 10, which runs no live acceptance of its own (`10-root-multi-repository-docs.md:15`). If it fails, run it again at the root merge of plan 08 to find the plan that caused it.
+7. Open one pull request per repository from `refactor/flat-nodes` to `main`.
 
 Gate row 08 (`00-index.md:97`) holds the live run. The plan 08 pull request merges before that row runs, as OD4 states.
 
 ## Open follow-ups
 
-- Plan 09b task 09b.6 cites line numbers in `src/worker/unit/evaluation-input.ts` that plan 02 moved. The executor of plan 09b re-anchors them.
 - Decide whether the CLI prints the `details` of a refusal. `handleMutationResult` (`src/apps/cli/shared.ts:144-152`) keeps only the code, so an operator cannot see `details.claims` or `details.node_ids` through the CLI (OD2).
 - `docs/brainstorm/HANDOFF.md` of the superrepo holds the open design items.
+- The root `.githooks/pre-commit` refuses a staged pointer change when the submodule is not on `main` or the pointer is not on its `origin/main`. When a clone runs the hook, it refuses each pointer move to `refactor/flat-nodes` (OD8).
 - These tests failed once in a full run and passed alone, so treat them as flaky until they fail again: `e2e-worker-app.test.ts:298`; `worker-pool.test.ts` "a removed binding ends its threads without a restart" and "the pool starts one instance for each slot"; two timing tests of `src/worker/unit/verification.test.ts` under parallel load.
 - `docs/brainstorm/worker-service.impl.md` has no test line for the evidence-placement rule on an `implement` node whose evidence names no repository snapshot. This gap existed before ruling S4.
