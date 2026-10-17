@@ -246,6 +246,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
         filename: "initiative-1.md",
         kind: NodeKind.Initiative,
         content: CONTENT,
+        tasks: [],
         reason: "plan",
         expected_mission_version: 1,
       },
@@ -259,6 +260,7 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
         filename: "objective-1.md",
         kind: NodeKind.Objective,
         content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
+        tasks: [],
         reason: "plan",
         expected_mission_version: 2,
         parent_id: initiative.revisions[0]!.node_id,
@@ -468,7 +470,6 @@ test("two proved releases race at the transaction, for equal and different paylo
   }
   assert.equal(routing.mock.calls.length, EXPECTED_PAIR_COUNT);
   const node = await h.node();
-  assert.ok(node.kind !== NodeKind.Task);
   assert.equal(node.state, NodeState.Available);
 });
 
@@ -534,7 +535,6 @@ test("pull, registration resume and human pause settle an expired row before adm
     "worker.instance.no_live_execution",
   );
   const node = await h.node();
-  assert.ok(node.kind !== NodeKind.Task);
   assert.equal(node.state, NodeState.Executing);
   h.f.scheduler.sweep();
   now += stopHold(h, LOST_FAILURE);
@@ -566,7 +566,6 @@ test("pull, registration resume and human pause settle an expired row before adm
       },
     }),
   );
-  assert.ok(pause.node.kind !== NodeKind.Task);
   assert.equal(pause.node.state, NodeState.Paused);
   assert.equal(
     h.f.scheduler.executionOf(fourth.execution.execution_id)?.ended_at,
@@ -677,7 +676,6 @@ test("real Mission sweeps steps and evaluation claims below and at the loss limi
         assert.equal(routing.mock.calls.length, loss);
         assert.equal(routing.mock.calls.at(-1)!.arguments[2], loss);
         const node = await h.node();
-        assert.ok(node.kind !== NodeKind.Task);
         assert.equal(
           node.state,
           loss === limit
@@ -748,7 +746,6 @@ test("real Mission routes stopped and lost claims below and at the failure limit
         assert.equal(routing.mock.calls.length, failure);
         assert.equal(routing.mock.calls.at(-1)!.arguments[2], failure);
         const node = await h.node();
-        assert.ok(node.kind !== NodeKind.Task);
         assert.equal(
           node.state,
           failure === limit
@@ -819,7 +816,6 @@ test("a release with no stop ends the failure count", async (t) => {
   completed(await h.stop(claim.execution.execution_id));
   assert.equal(routing.mock.calls.at(-1)!.arguments[2], NO_FAILURE_COUNT_RESET);
   const node = await h.node();
-  assert.ok(node.kind !== NodeKind.Task);
   assert.equal(node.state, NodeState.Available);
 });
 

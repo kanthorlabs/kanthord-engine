@@ -4,6 +4,7 @@ import type { Transaction } from "../kernel/store.ts";
 import { CONTENT_FIELDS, ContentField, TASKS_FIELD } from "./content.ts";
 import {
   NodeKind,
+  PlanFileKind,
   RevisionWrite,
   TaskChange,
   type HumanActor,
@@ -63,7 +64,8 @@ function taskList(
   entries: ResolvedImportEntry[],
 ): { tasks: TaskContent[]; changes: TaskChanges } {
   const incoming = entries.filter(
-    (item) => item.entry.kind === NodeKind.Task && item.parent_id === ownerId,
+    (item) =>
+      item.entry.kind === PlanFileKind.Task && item.parent_id === ownerId,
   );
   const kept = new Map(incoming.map((item) => [item.key, item]));
   const present = new Set(entries.map((item) => item.key));
@@ -94,7 +96,7 @@ function taskList(
     tasks.push(importContent(item));
     changes.push({
       id: item.key,
-      change: item.current === null ? TaskChange.Created : TaskChange.MovedIn,
+      change: item.task === null ? TaskChange.Created : TaskChange.MovedIn,
       changed_fields: [...CONTENT_FIELDS],
     });
   }
@@ -117,7 +119,6 @@ function ownerRevision(
   reason: string,
   now: number,
 ): Revision | null {
-  assert.notEqual(kind, NodeKind.Task, "Tasks do not own revisions.");
   assert.ok(previous !== undefined || item !== undefined);
   const next = item === undefined ? previous! : importContent(item);
   const fields = changedFields(next, previous);
@@ -143,7 +144,7 @@ function ownerRevision(
     actor,
     created_at: now,
     pinned_by_attempts: [],
-    ...(list === null ? {} : { tasks: list.tasks }),
+    tasks: list?.tasks ?? [],
     change: {
       write: RevisionWrite.Import,
       previous_revision: previous?.revision ?? null,
@@ -163,14 +164,12 @@ export function importRevisions(
 ): Revision[] {
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
   assert.equal(entries.length, resolved.resolved_entries.length);
-  const owners = new Map(
-    [...resolved.current_nodes.values()]
-      .filter((node) => node.kind !== NodeKind.Task)
-      .map((node) => [node.id, node.kind]),
+  const owners = new Map<string, NodeKind>(
+    [...resolved.current_nodes.values()].map((node) => [node.id, node.kind]),
   );
   const byId = new Map(entries.map((item) => [item.key, item]));
   for (const item of entries) {
-    if (item.entry.kind !== NodeKind.Task)
+    if (item.entry.kind !== PlanFileKind.Task)
       owners.set(item.key, item.entry.kind);
   }
   const revisions: Revision[] = [];
@@ -178,8 +177,6 @@ export function importRevisions(
     const row = readCurrentRevision(tx, id);
     assert.equal(row === null, !resolved.current_nodes.has(id));
     const previous = row === null ? undefined : revisionFromRow(tx, row);
-    if (previous !== undefined && kind === NodeKind.Objective)
-      assert.ok(previous.tasks, "Stored objectives contain a task list.");
     const revision = ownerRevision(
       id,
       kind,

@@ -255,7 +255,7 @@ test("execution revision reads carry the pinned tasks and exclude later human re
       content: { ...revision.content, name: PINNED },
       tasks: [
         {
-          id: createIdentity("node"),
+          id: createIdentity("task"),
           filename: "task.md",
           content: { ...revision.content, bindings: [] },
         },

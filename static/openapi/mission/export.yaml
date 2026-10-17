@@ -109,11 +109,17 @@ components:
                     type: string
                     pattern: ^[a-z][a-z0-9_-]*\.md$
                   id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
+                    anyOf:
+                      - type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: node_ followed by a canonical 26-character uppercase ULID.
+                      - type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: task_ followed by a canonical 26-character uppercase ULID.
                   kind:
                     type: string
                     enum:

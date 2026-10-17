@@ -412,3 +412,46 @@ test("a provider error reply stops the task with provider_failed and its code", 
   assert.equal(stopped.reason, EndReason.ProviderFailed);
   assert.equal(stopped.code, ProviderFailure.Unauthorized);
 });
+
+test("an objective with no task commits its change with the node identity in the message before it releases", async (t) => {
+  const h = await fixture(
+    t,
+    [],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "node-file", content: "node" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+  );
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: ["test -f node-file"] },
+  };
+  const nodeId = h.input.claim.node_id;
+  const order: string[] = [];
+  h.run.clients.mission = {
+    "evidence.submit": async () => {
+      order.push("evidence");
+      return { type: "completed", status: 200, data: { evidence: {} } };
+    },
+  } as unknown as MethodClients["mission"];
+  h.run.clients.scheduler = {
+    executionRelease: async (input: { body: { further_work: boolean } }) => {
+      order.push(`release:${input.body.further_work}`);
+      return { type: "completed", status: 200, data: {} };
+    },
+  } as unknown as MethodClients["scheduler"];
+  assert.deepEqual(await runStepsObjective(h), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.deepEqual(order, ["evidence", "release:false"]);
+  const log = await simpleGit(h.directory).log();
+  assert.ok(log.latest!.message.includes(nodeId));
+  assert.ok(existsSync(join(h.directory, "node-file")));
+});

@@ -55,7 +55,6 @@ test("controls reject blank and oversized UTF-8 reasons without writes, preservi
     query: {},
     body: { ...h.body(), reason: "界界界界" },
   });
-  assert.ok(result.node.kind !== NodeKind.Task);
   assert.equal(result.node.state, NodeState.Paused);
 });
 
@@ -70,7 +69,6 @@ for (const kind of [NodeKind.Initiative, NodeKind.Objective]) {
       query: {},
       body: h.body(),
     });
-    assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Waiting);
     assert.equal(result.attempt?.node_revision, FIRST_ATTEMPT);
     assert.equal(result.attempt?.start_point, StartPoint.BaseBranch);
@@ -134,7 +132,6 @@ test("resume Waiting at attempt 0 opens attempt 1 as ready does; Available opens
     query: {},
     body: { ...h.body(NodeState.Paused), target: ResumeTarget.Waiting },
   });
-  assert.ok(resumed.node.kind !== NodeKind.Task);
   assert.equal(resumed.node.state, NodeState.Waiting);
   assert.equal(h.node().attempt, FIRST_ATTEMPT);
   assert.equal(resumed.attempt?.node_revision, FIRST_ATTEMPT);
@@ -216,7 +213,6 @@ test("resume Waiting refuses unsatisfied closure; Available routes to Pending wi
     query: {},
     body: { ...h.body(NodeState.Paused), target: ResumeTarget.Available },
   });
-  assert.ok(result.node.kind !== NodeKind.Task);
   assert.equal(result.node.state, NodeState.Pending);
   assert.equal(result.attempt, null);
 });
@@ -285,7 +281,6 @@ for (const [end, target] of [
         target: ResumeTarget.Waiting,
       },
     });
-    assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, target);
     assert.equal(result.attempt?.closed_at, null);
     assert.equal(result.outcome, null);
@@ -312,7 +307,6 @@ for (const state of [
       query: {},
       body: h.body(state, FIRST_ATTEMPT),
     });
-    assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Paused);
     assert.equal(result.attempt?.closed_at, null);
     assert.equal(result.attempt?.attempt, FIRST_ATTEMPT);

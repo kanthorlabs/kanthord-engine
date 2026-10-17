@@ -10,7 +10,6 @@ import {
   AssessmentResult,
   ActorKind,
 } from "./contract.ts";
-import { ControlError } from "./control.ts";
 import { closeAttempt, openAttempt } from "./record-store.ts";
 import {
   insertAssessment,
@@ -345,7 +344,7 @@ test("attempt and external-action reads page in descending order and filter atte
   );
 });
 
-test("record reads refuse absent attempts, malformed cursors and task nodes", async (t) => {
+test("record reads refuse absent attempts and malformed cursors", async (t) => {
   const h = controlHarness(t, IDENTITY);
   await assert.rejects(
     h.invoke("attempt.get", {
@@ -367,16 +366,4 @@ test("record reads refuse absent attempts, malformed cursors and task nodes", as
         error.code === MissionErrorCode.CursorInvalid,
     );
   }
-  h.store.database
-    .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-    .run(NodeKind.Task, h.node_id);
-  await assert.rejects(
-    h.invoke("attempt.list", {
-      params: { node_id: h.node_id },
-      query: {},
-      body: null,
-    }),
-    (error) =>
-      error instanceof OperationError && error.code === ControlError.Task,
-  );
 });

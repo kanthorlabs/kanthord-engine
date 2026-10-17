@@ -15,6 +15,7 @@ import {
   READ_PAGE_LIMIT,
 } from "./node-reads.ts";
 import { NodeKind } from "./native-agent.ts";
+import { repositorySetup } from "./test-support.ts";
 import type { MethodClients } from "./method-clients.ts";
 
 const SECOND_ATTEMPT = 2;
@@ -72,9 +73,26 @@ test("reads concatenate ordered pages and enforce their finite limit", async (t)
   assert.equal(calls, READ_PAGE_LIMIT);
 });
 
-test("node kind and terminal states follow the pinned revision", () => {
-  assert.equal(nodeKindOf({ tasks: [] }), NodeKind.Objective);
-  assert.equal(nodeKindOf({}), NodeKind.Initiative);
+test("node kind follows the repository binding of the content and terminal states follow the pinned revision", () => {
+  const repository = repositorySetup();
+  const content = {
+    name: "node",
+    requirement: "node",
+    criterion: "node",
+    verifications: ["true"],
+    bindings: [repository.binding_id],
+  };
+  assert.equal(
+    nodeKindOf({ content }, { repositories: [repository] }),
+    NodeKind.Objective,
+  );
+  assert.equal(
+    nodeKindOf(
+      { content: { ...content, bindings: [] } },
+      { repositories: [repository] },
+    ),
+    NodeKind.Initiative,
+  );
   assert.equal(allTerminal([{ id: "node", state: NodeState.Blocked }]), false);
   assert.equal(
     allTerminal([

@@ -5,7 +5,6 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   ActorKind,
   ActorService,
-  NodeKind,
   type Actor,
   type AssetKind,
   type AssessmentResult,
@@ -88,7 +87,7 @@ export function openAttempt(
   startPoint: StartPoint = StartPoint.NodeBranch,
 ): AttemptRow {
   const node = readNode(tx, nodeId);
-  assert.ok(node && node.kind !== NodeKind.Task && node.attempt !== null);
+  assert.ok(node);
   assert.ok(
     tx.database.isTransaction &&
       Number.isSafeInteger(node.attempt + ATTEMPT_INCREMENT),

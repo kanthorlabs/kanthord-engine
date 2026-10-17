@@ -6,6 +6,7 @@ import {
   MissionErrorCode,
   NodeKind,
   planFileNameSchema,
+  type PlanFileKind,
 } from "./contract.ts";
 
 export const ContentField = {
@@ -47,11 +48,6 @@ const bindingRules: Record<NodeKind, Record<BindingKind, Range>> = {
     [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
     [MissionBindingKind.Storage]: { min: NO_BINDINGS, max: SINGLE_BINDING },
   },
-  [NodeKind.Task]: {
-    [MissionBindingKind.Repository]: { min: NO_BINDINGS, max: NO_BINDINGS },
-    [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
-    [MissionBindingKind.Storage]: { min: NO_BINDINGS, max: NO_BINDINGS },
-  },
 };
 
 function invalidContent(field: string): never {
@@ -84,7 +80,7 @@ export function validateText(
 }
 
 export function validateNodeContent(
-  kind: NodeKind,
+  kind: PlanFileKind,
   content: unknown,
   textMaxBytes: number,
 ): void {

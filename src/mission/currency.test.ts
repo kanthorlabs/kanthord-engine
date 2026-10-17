@@ -84,7 +84,7 @@ test("a later human revision and unrelated evidence preserve the pinned assessme
   h.store.transaction((tx) => {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(h.node_id, SECOND_ATTEMPT, canonicalJSON(ACTOR), NOW);
     insertEvidence(

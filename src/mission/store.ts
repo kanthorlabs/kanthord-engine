@@ -27,8 +27,8 @@ export interface NodeRow {
   kind: NodeKind;
   filename: string;
   parent_id: string | null;
-  state: NodeState | null;
-  attempt: number | null;
+  state: NodeState;
+  attempt: number;
   priority: number | null;
   retired_at: number | null;
   created_at: number;
@@ -43,7 +43,7 @@ export interface RevisionRow {
   criterion: string;
   verifications: string;
   bindings: string;
-  tasks: string | null;
+  tasks: string;
   change: string;
   reason: string;
   actor: string;
@@ -120,6 +120,31 @@ export function filenameTaken(
   );
 }
 
+export function usedFilenames(
+  tx: Transaction,
+  missionId: string,
+  exceptNodeId: string | null,
+): Set<string> {
+  const rows = tx.database
+    .prepare(
+      `SELECT n.filename FROM mission_node n
+     WHERE n.mission_id = ? AND n.retired_at IS NULL AND n.id IS NOT ?
+     UNION ALL
+     SELECT json_extract(task.value, '$.filename') FROM mission_node n
+     JOIN mission_node_revision r ON r.node_id = n.id
+       AND r.revision = (
+         SELECT MAX(latest.revision) FROM mission_node_revision latest
+         WHERE latest.node_id = n.id
+       )
+     JOIN json_each(r.tasks) task
+     WHERE n.mission_id = ? AND n.retired_at IS NULL AND n.id IS NOT ?`,
+    )
+    .all(missionId, exceptNodeId, missionId, exceptNodeId) as {
+    filename: string;
+  }[];
+  return new Set(rows.map((row) => row.filename));
+}
+
 export function filenameConflict(filename: string): OperationError {
   return new OperationError(
     HttpStatus.Conflict,
@@ -136,7 +161,6 @@ export function insertNode(
     "id" | "mission_id" | "kind" | "filename" | "parent_id" | "created_at"
   >,
 ): void {
-  const task = node.kind === NodeKind.Task;
   try {
     tx.database
       .prepare(
@@ -150,8 +174,8 @@ export function insertNode(
         node.kind,
         node.filename,
         node.parent_id,
-        task ? null : NodeState.Pending,
-        task ? null : INITIAL_ATTEMPT,
+        NodeState.Pending,
+        INITIAL_ATTEMPT,
         null,
         node.created_at,
       );
@@ -276,19 +300,22 @@ export function listRevisions(
     ) as unknown as RevisionRow[];
 }
 
-export function readLastTaskSnapshot(
+export function taskOwnerOf(
   tx: Transaction,
-  objectiveId: string,
+  missionId: string,
   taskId: string,
-): RevisionRow | null {
+): { node_id: string; revision: number } | null {
   return (
     (tx.database
       .prepare(
-        `SELECT * FROM mission_node_revision WHERE node_id = ?
-     AND EXISTS (SELECT 1 FROM json_each(tasks) WHERE json_extract(value, '$.id') = ?)
-     ORDER BY revision DESC LIMIT 1`,
+        `SELECT r.node_id, r.revision FROM mission_node_revision r
+     JOIN mission_node n ON n.id = r.node_id
+     WHERE n.mission_id = ?
+     AND EXISTS (SELECT 1 FROM json_each(r.tasks) WHERE json_extract(value, '$.id') = ?)
+     ORDER BY r.rowid DESC LIMIT 1`,
       )
-      .get(objectiveId, taskId) as RevisionRow | undefined) ?? null
+      .get(missionId, taskId) as
+      { node_id: string; revision: number } | undefined) ?? null
   );
 }
 
@@ -319,7 +346,7 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
       revision.content.criterion,
       JSON.stringify(revision.content.verifications),
       JSON.stringify(revision.content.bindings),
-      revision.tasks === undefined ? null : JSON.stringify(revision.tasks),
+      JSON.stringify(revision.tasks),
       JSON.stringify(revision.change),
       revision.reason,
       JSON.stringify(revision.actor),

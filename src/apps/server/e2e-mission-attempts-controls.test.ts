@@ -6,7 +6,6 @@ import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
   NodeKind,
-  EdgeKind,
   NodeState,
   ActorKind,
   AssessmentResult,
@@ -40,7 +39,6 @@ const SECOND_REVISION = 2;
 const SECOND_ATTEMPT = 2;
 const THIRD_MISSION_VERSION = 3;
 const FOURTH_MISSION_VERSION = 4;
-const VERSION = 5;
 const NUMBER_TYPE = "number";
 const BAD_REQUEST = 400;
 const VALIDATION_FAILED = "gateway.request.validation_failed";
@@ -147,6 +145,7 @@ async function setup(t: TestContext) {
     filename: "initiative-1.md",
     kind: NodeKind.Initiative,
     content: CONTENT,
+    tasks: [],
     reason: "plan",
     expected_mission_version: FIRST_REVISION,
   });
@@ -155,29 +154,21 @@ async function setup(t: TestContext) {
     filename: "objective-1.md",
     kind: NodeKind.Objective,
     content: { ...CONTENT, bindings: [binding.bindings.repo!.id] },
+    tasks: [],
     reason: "plan",
     parent_id: initiativeId,
     expected_parent_revision: FIRST_REVISION,
     expected_mission_version: SECOND_REVISION,
   };
-  const objective = await create(objectiveBody);
-  const objectiveId = objective.revisions[FIRST_INDEX]!.node_id;
-  const task = await create({
-    filename: "task-1.md",
-    kind: NodeKind.Task,
-    content: CONTENT,
-    reason: "plan",
-    parent_id: objectiveId,
-    expected_parent_revision: FIRST_REVISION,
-    expected_mission_version: THIRD_MISSION_VERSION,
+  const objective = await create({
+    ...objectiveBody,
+    tasks: [{ filename: "task-1.md", content: CONTENT }],
   });
-  const taskId = task.added_edges.find(
-    (edge) => edge.kind === EdgeKind.Containment,
-  )!.child_id;
+  const objectiveId = objective.revisions[FIRST_INDEX]!.node_id;
   const secondObjective = await create({
     ...objectiveBody,
     filename: "objective-2.md",
-    expected_mission_version: FOURTH_MISSION_VERSION,
+    expected_mission_version: THIRD_MISSION_VERSION,
   });
   const node = await read<Node>(["mission", "node", "get", objectiveId]);
   return {
@@ -191,7 +182,6 @@ async function setup(t: TestContext) {
     mission_id: mission.id,
     initiativeId,
     objectiveId,
-    taskId,
     secondObjectiveId: secondObjective.revisions[FIRST_INDEX]!.node_id,
     binding_id: node.content.bindings[FIRST_INDEX]!,
     revision: node.visible_revision,
@@ -205,7 +195,7 @@ test(
     const h = await setup(t);
     const act = (state: NodeState, attempt: number) => ({
       reason: "hold",
-      expected_mission_version: VERSION,
+      expected_mission_version: FOURTH_MISSION_VERSION,
       expected_state: state,
       expected_attempt: attempt,
     });
@@ -231,7 +221,6 @@ test(
       options: string[] = [],
     ) => h.refuses(["mission", "node", name, id, ...options], body, code);
     const state = (answer: ControlResult, expected: NodeState) => {
-      assert.notEqual(answer.node.kind, NodeKind.Task);
       assert.ok("state" in answer.node);
       assert.equal(answer.node.state, expected);
     };
@@ -259,7 +248,6 @@ test(
           act(NodeState.Available, INITIAL_ATTEMPT),
         );
         state(answer, NodeState.Waiting);
-        assert.ok(answer.node.kind !== NodeKind.Task);
         assert.equal(answer.node.attempt, FIRST_ATTEMPT);
         assert.equal(answer.attempt?.attempt, FIRST_ATTEMPT);
         assert.equal(answer.attempt?.node_revision, h.revision);
@@ -270,7 +258,7 @@ test(
         );
         assert.equal(
           (await h.read<Mission>(["mission", "get", h.project_id])).version,
-          VERSION,
+          FOURTH_MISSION_VERSION,
         );
       },
     );
@@ -326,7 +314,6 @@ test(
           "get",
           h.objectiveId,
         ]);
-        assert.ok(node.kind !== NodeKind.Task);
         assert.equal(node.blocked_context?.outcome.id, blockedOutcome);
         assert.deepEqual(node.blocked_context?.requests, []);
       },
@@ -335,7 +322,7 @@ test(
       const unblock = {
         blocked_attempt: FIRST_ATTEMPT,
         expected_revision: h.revision,
-        expected_mission_version: VERSION,
+        expected_mission_version: FOURTH_MISSION_VERSION,
       };
       const refused = await fetch(
         `${h.endpoint}/api/mission/node/${h.objectiveId}/unblock`,
@@ -360,7 +347,6 @@ test(
         "get",
         h.objectiveId,
       ]);
-      assert.ok(blocked.kind !== NodeKind.Task);
       assert.equal(blocked.state, NodeState.Blocked);
       assert.equal(blocked.attempt, FIRST_ATTEMPT);
       const answer = await control("unblock", h.objectiveId, unblock);
@@ -557,14 +543,6 @@ test(
         "mission.node.control_refused",
       );
     });
-    await scenario("E01.16 tasks have no controls", async () => {
-      await refuse(
-        "pause",
-        h.taskId,
-        act(NodeState.Waiting, FIRST_ATTEMPT),
-        "mission.node.control_task",
-      );
-    });
     await scenario("E01.17 terminal nodes refuse controls", async () => {
       await refuse(
         "pause",
@@ -589,7 +567,7 @@ test(
           h.initiativeId,
           {
             ...act(NodeState.Waiting, FIRST_ATTEMPT),
-            expected_mission_version: FOURTH_MISSION_VERSION,
+            expected_mission_version: THIRD_MISSION_VERSION,
           },
           "mission.version.conflict",
         );

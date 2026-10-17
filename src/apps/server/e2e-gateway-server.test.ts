@@ -448,6 +448,7 @@ test("E07.5 mission initiative creation queues the created node", async (t) => {
       verifications: ["Check result"],
       bindings: [],
     },
+    tasks: [],
     reason: "planning edit",
     expected_mission_version: FIRST_REVISION,
   });

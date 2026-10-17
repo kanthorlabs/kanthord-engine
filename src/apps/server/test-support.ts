@@ -12,7 +12,11 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import { missionOperations, NodeKind } from "../../mission/contract.ts";
+import {
+  missionOperations,
+  NodeKind,
+  NodeState,
+} from "../../mission/contract.ts";
 import {
   OperationResultType,
   type Operation,
@@ -1189,13 +1193,14 @@ export function seedUnresolvedRequest(
     assert.ok(mission, "The project holds a mission.");
     tx.database
       .prepare(
-        "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, ?)",
+        "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?)",
       )
       .run(
         nodeId,
         mission.id,
         NodeKind.Objective,
         `${nodeId}.md`,
+        NodeState.ExternalRequested,
         FIRST_SEEDED_ATTEMPT,
         now,
       );
@@ -1698,6 +1703,7 @@ async function storageNode(
         filename,
         kind,
         content: { ...STORAGE_NODE_CONTENT, bindings },
+        tasks: [],
         reason: "plan",
         expected_mission_version: version,
         ...(parentId
@@ -1930,6 +1936,7 @@ export async function provisionWorkerProject(
       filename: "initiative-1.md",
       kind: NodeKind.Initiative,
       content: { ...WORKER_PROJECT_NODE, bindings: [] },
+      tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_MISSION_VERSION,
     },
@@ -1944,6 +1951,7 @@ export async function provisionWorkerProject(
         ...WORKER_PROJECT_NODE,
         bindings: [bindingSet.bindings.repo!.id],
       },
+      tasks: [],
       reason: "plan",
       expected_mission_version: SECOND_MISSION_VERSION,
       parent_id: initiative.revisions[0]!.node_id,

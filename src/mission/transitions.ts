@@ -57,7 +57,6 @@ export function claim(
   if (
     node === null ||
     node.retired_at !== null ||
-    node.kind === NodeKind.Task ||
     node.state === null ||
     !declaredStates.includes(node.state)
   )

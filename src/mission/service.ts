@@ -29,7 +29,6 @@ import {
   ActorKind,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
-  NodeKind,
   missionOperations,
   type HumanActor,
   type MissionBindings,
@@ -757,13 +756,6 @@ export class MissionService
           const node = requireNode(tx, params.node_id);
           requireActive(node);
           requireMission(tx, node.mission_id, body.expected_mission_version);
-          if (node.kind === NodeKind.Task)
-            throw new OperationError(
-              HttpStatus.BadRequest,
-              MissionErrorCode.PriorityTask,
-              "Tasks have no priority.",
-              { node_id: node.id },
-            );
           requireNonterminal(node);
           const now = Date.now();
           const live = this.dependencies.schedulerClaims.liveExecutionOf(

@@ -28,6 +28,13 @@ import {
   Disposition,
   admissionAnswerSchema,
   deliveryAdmitSchema,
+  NODE_IDENTITY_PREFIX,
+  NodeKind,
+  TASK_IDENTITY_PREFIX,
+  nodeCreateSchema,
+  taskBodySchema,
+  taskContentSchema,
+  taskWriteSchema,
 } from "./contract.ts";
 
 const ZERO_ATTEMPT = 0;
@@ -203,7 +210,10 @@ const INPUTS = [
     schema: overrideSchema,
     input: { ...ACT, result: AssessmentResult.Success },
   },
-  { schema: unblockChangeSchema, input: { content: CONTENT, reason: REASON } },
+  {
+    schema: unblockChangeSchema,
+    input: { content: CONTENT, tasks: [], reason: REASON },
+  },
   {
     schema: unblockSchema,
     input: {
@@ -330,5 +340,48 @@ test("the delivery admission answer carries a reason only for a refusal", () => 
       reason: null,
     }).success,
     false,
+  );
+});
+
+test("a task identity takes the task prefix and a task body names no binding", () => {
+  const task = {
+    id: createIdentity(TASK_IDENTITY_PREFIX),
+    filename: "recover.md",
+    content: CONTENT,
+  };
+  assert.equal(taskContentSchema.safeParse(task).success, true);
+  assert.equal(
+    taskContentSchema.safeParse({
+      ...task,
+      id: createIdentity(NODE_IDENTITY_PREFIX),
+    }).success,
+    false,
+  );
+  assert.equal(
+    taskWriteSchema.safeParse({ filename: task.filename, content: CONTENT })
+      .success,
+    true,
+  );
+  assert.equal(
+    taskBodySchema.safeParse({
+      ...CONTENT,
+      bindings: [createIdentity("binding")],
+    }).success,
+    false,
+  );
+});
+
+test("a node create requires the task list", () => {
+  const create = {
+    filename: "recover.md",
+    kind: NodeKind.Objective,
+    content: CONTENT,
+    reason: REASON,
+    expected_mission_version: FIRST_REVISION,
+  };
+  assert.equal(nodeCreateSchema.safeParse(create).success, false);
+  assert.equal(
+    nodeCreateSchema.safeParse({ ...create, tasks: [] }).success,
+    true,
   );
 });

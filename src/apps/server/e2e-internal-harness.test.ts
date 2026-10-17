@@ -14,6 +14,7 @@ import {
   JOURNEY_TIMEOUT_MS,
   journeyClient,
   createJourneyNode,
+  createJourneyTask,
 } from "./journey-support.ts";
 import { generateMachineToken } from "./cli-support.ts";
 import {
@@ -232,7 +233,7 @@ async function setupInternal(t: TestContext) {
     [bindingSet.bindings.repo!.id, bindingSet.bindings.store!.id],
     initiative,
   );
-  await createJourneyNode(cli, project.id, "task-a.md", "task", [], objective);
+  await createJourneyTask(cli, project.id, objective, "task-a.md");
   const gated = await createJourneyNode(
     cli,
     project.id,
@@ -241,7 +242,7 @@ async function setupInternal(t: TestContext) {
     [bindingSet.bindings.gated!.id],
     initiative,
   );
-  await createJourneyNode(cli, project.id, "task-c.md", "task", [], gated);
+  await createJourneyTask(cli, project.id, gated, "task-c.md");
   for (const [nodeId, value] of [
     [objective, 5],
     [gated, 4],

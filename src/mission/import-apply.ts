@@ -9,6 +9,8 @@ import {
   MissionErrorCode,
   NODE_IDENTITY_PREFIX,
   NodeKind,
+  PlanFileKind,
+  TASK_IDENTITY_PREFIX,
   type Edge,
   type HumanActor,
   type ImportApply,
@@ -43,7 +45,7 @@ const EXPECTED_ROW_CHANGE = 1;
 const VERSION_INCREMENT = 1;
 const FIRST_VIOLATION = 0;
 const TEMPORARY_FILENAME_PREFIX = "import:";
-const INSERT_ORDER = [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task];
+const INSERT_ORDER = [NodeKind.Initiative, NodeKind.Objective];
 const CONFLICT_CODES: ReadonlySet<string> = new Set([
   MissionErrorCode.ConditionFailed,
   MissionErrorCode.TerminalChange,
@@ -83,14 +85,19 @@ function assignIdentities(resolved: ResolvedImport): ResolvedImportEntry[] {
   const ids = new Map(
     resolved.resolved_entries.map((item) => [
       item.key,
-      item.current?.id ?? createIdentity(NODE_IDENTITY_PREFIX),
+      item.current?.id ??
+        item.task?.id ??
+        createIdentity(
+          item.entry.kind === PlanFileKind.Task
+            ? TASK_IDENTITY_PREFIX
+            : NODE_IDENTITY_PREFIX,
+        ),
     ]),
   );
   assert.equal(ids.size, resolved.resolved_entries.length);
   const identity = (key: string): string => {
     const id = ids.get(key);
     assert.ok(id, "Resolved references belong to the imported set.");
-    assert.ok(id.startsWith(`${NODE_IDENTITY_PREFIX}_`));
     return id;
   };
   const entries = resolved.resolved_entries.map((item) => ({
@@ -118,7 +125,11 @@ function addedEdges(
     previous.set(edge.dependent, targets);
   }
   for (const item of entries) {
-    if (item.parent_id !== null && item.current?.parent_id !== item.parent_id)
+    if (
+      item.entry.kind !== PlanFileKind.Task &&
+      item.parent_id !== null &&
+      item.current?.parent_id !== item.parent_id
+    )
       containment.push({
         kind: EdgeKind.Containment,
         parent_id: item.parent_id,
@@ -226,7 +237,9 @@ function writeNodes(
     resolved,
     entries.filter((item) => item.current !== null),
   );
-  const creates = entries.filter((item) => item.current === null);
+  const creates = entries.filter(
+    (item) => item.current === null && item.entry.kind !== PlanFileKind.Task,
+  );
   for (const kind of INSERT_ORDER) {
     for (const item of creates.filter((item) => item.entry.kind === kind))
       insertNode(tx, {
@@ -253,7 +266,11 @@ function initialResult(
     mission_id: mission.id,
     mission_version: mission.version,
     assigned_ids: entries
-      .map((item) => ({ filename: item.entry.filename, node_id: item.key }))
+      .map((item) =>
+        item.entry.kind === PlanFileKind.Task
+          ? { filename: item.entry.filename, task_id: item.key }
+          : { filename: item.entry.filename, node_id: item.key },
+      )
       .sort((a, b) => a.filename.localeCompare(b.filename)),
     changes: {
       mission_version: mission.version,

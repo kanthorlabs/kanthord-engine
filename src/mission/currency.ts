@@ -48,7 +48,7 @@ function childrenMatch(
 
 function contextMatches(tx: Transaction, row: AssessmentRow): boolean {
   const node = readNode(tx, row.node_id);
-  assert.ok(node && node.kind !== NodeKind.Task);
+  assert.ok(node);
   const pin = readAttempt(tx, row.node_id, row.attempt);
   assert.ok(pin);
   return (

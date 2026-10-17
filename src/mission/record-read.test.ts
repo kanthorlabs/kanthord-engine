@@ -88,7 +88,7 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
     });
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[\"true\"]', ?, ?, 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, tasks, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[\"true\"]', ?, '[]', ?, 'reason', ?, ?)",
       )
       .run(
         nodeId,
@@ -256,7 +256,6 @@ test("blocked node projection includes its attempt-zero human outcome and no req
     assert.equal(context.outcome.attempt, NO_ATTEMPT);
     assert.deepEqual(context.requests, []);
     const node = nodeSchema.parse(nodeRecord(tx, row, h.bindings));
-    assert.ok(node.kind !== NodeKind.Task);
     assert.deepEqual(node.blocked_context, context);
     assert.deepEqual(
       externalActionRecords(tx, h.bindings, h.node_id, NO_ATTEMPT),

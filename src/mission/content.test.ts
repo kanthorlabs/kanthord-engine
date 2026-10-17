@@ -70,7 +70,7 @@ test("required content text rejects absent, blank, whitespace and nontext", () =
       contentError(
         () =>
           validateNodeContent(
-            NodeKind.Task,
+            NodeKind.Objective,
             { ...base(), [field]: value },
             DEFAULT_MAX,
           ),
@@ -79,11 +79,11 @@ test("required content text rejects absent, blank, whitespace and nontext", () =
     }
   }
   contentError(
-    () => validateNodeContent(NodeKind.Task, null, DEFAULT_MAX),
+    () => validateNodeContent(NodeKind.Objective, null, DEFAULT_MAX),
     "name",
   );
   contentError(
-    () => validateNodeContent(NodeKind.Task, [], DEFAULT_MAX),
+    () => validateNodeContent(NodeKind.Objective, [], DEFAULT_MAX),
     "name",
   );
 });
@@ -93,7 +93,7 @@ test("verifications requires a nonempty list of nonblank strings", () => {
     expectError(
       () =>
         validateNodeContent(
-          NodeKind.Task,
+          NodeKind.Objective,
           { ...base(), verifications: value },
           DEFAULT_MAX,
         ),
@@ -104,7 +104,7 @@ test("verifications requires a nonempty list of nonblank strings", () => {
     contentError(
       () =>
         validateNodeContent(
-          NodeKind.Task,
+          NodeKind.Objective,
           { ...base(), verifications: value },
           DEFAULT_MAX,
         ),
@@ -202,24 +202,6 @@ const rules = [
     allowed: [NO_BINDINGS, SINGLE_BINDING],
     forbidden: 2,
   },
-  {
-    kind: NodeKind.Task,
-    binding: MissionBindingKind.Repository,
-    allowed: [NO_BINDINGS],
-    forbidden: SINGLE_BINDING,
-  },
-  {
-    kind: NodeKind.Task,
-    binding: MissionBindingKind.Worker,
-    allowed: [NO_BINDINGS],
-    forbidden: SINGLE_BINDING,
-  },
-  {
-    kind: NodeKind.Task,
-    binding: MissionBindingKind.Storage,
-    allowed: [NO_BINDINGS],
-    forbidden: SINGLE_BINDING,
-  },
 ] as const;
 
 for (const rule of rules) {
@@ -259,6 +241,8 @@ for (const rule of rules) {
 test("unknown resource kind is rejected", () => {
   bindingsError(() => bindingKind(resolved("other", NO_BINDINGS)));
   bindingsError(() =>
-    checkBindingRuleTable(NodeKind.Task, [resolved("other", NO_BINDINGS)]),
+    checkBindingRuleTable(NodeKind.Initiative, [
+      resolved("other", NO_BINDINGS),
+    ]),
   );
 });

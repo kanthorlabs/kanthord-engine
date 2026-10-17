@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { parentCreateAdmissible } from "./admission.ts";
 import {
   CONTENT_FIELDS,
+  ContentField,
   TASKS_FIELD,
   checkBindingRuleTable,
   validateFilename,
@@ -18,6 +20,7 @@ import {
   NODE_IDENTITY_PREFIX,
   NodeKind,
   RevisionWrite,
+  TASK_IDENTITY_PREFIX,
   TaskChange,
   type Content,
   type HumanActor,
@@ -25,6 +28,9 @@ import {
   type NodeChange,
   type NodeCreate,
   type Revision,
+  type RevisionChange,
+  type TaskContent,
+  type TaskWrite,
   type WorkQueue,
 } from "./contract.ts";
 import { revisionFromRow } from "./revision.ts";
@@ -39,11 +45,21 @@ import {
   readCurrentRevision,
   readNode,
   readRevision,
+  usedFilenames,
 } from "./store.ts";
 import { requireMission } from "./write.ts";
 
 const FIRST_REVISION = 1;
 const REVISION_INCREMENT = 1;
+const NO_TASKS = 0;
+const TASK_CONTENT_KEYS = [
+  ContentField.Name,
+  ContentField.Requirement,
+  ContentField.Criterion,
+  ContentField.Verifications,
+  ContentField.Bindings,
+] as const;
+type TaskChangeEntry = NonNullable<RevisionChange["tasks"]>[number];
 const Field = {
   ParentId: "parent_id",
   ExpectedParentRevision: "expected_parent_revision",
@@ -59,18 +75,27 @@ function invalidField(field: string): never {
   );
 }
 
+function invalidTasks(): never {
+  throw new OperationError(
+    HttpStatus.BadRequest,
+    MissionErrorCode.ContentInvalid,
+    "Invalid node tasks.",
+    { field: TASKS_FIELD },
+  );
+}
+
 function requireParent(
   tx: Transaction,
   missionId: string,
   body: NodeCreate,
-): Revision | null {
+): void {
   if (body.kind === NodeKind.Initiative) {
     if (
       body.parent_id !== undefined ||
       body.expected_parent_revision !== undefined
     )
       invalidField(Field.ParentId);
-    return null;
+    return;
   }
   if (body.parent_id === undefined) invalidField(Field.ParentId);
   if (body.expected_parent_revision === undefined)
@@ -89,9 +114,7 @@ function requireParent(
       "Parent node is retired.",
       { node_id: parent.id },
     );
-  const expectedKind =
-    body.kind === NodeKind.Objective ? NodeKind.Initiative : NodeKind.Objective;
-  if (parent.mission_id !== missionId || parent.kind !== expectedKind)
+  if (parent.mission_id !== missionId || parent.kind !== NodeKind.Initiative)
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.CreateRefused,
@@ -119,7 +142,6 @@ function requireParent(
       "Parent revision changed.",
       { current: current.revision },
     );
-  return revisionFromRow(tx, current);
 }
 
 export function resolveContent(
@@ -150,60 +172,102 @@ export function resolveContent(
   };
 }
 
+export function resolveTasks(
+  tx: Transaction,
+  owner: { id: string | null; mission_id: string; kind: NodeKind },
+  filename: string,
+  writes: TaskWrite[],
+  current: TaskContent[],
+  textMaxBytes: number,
+): { tasks: TaskContent[]; changes: TaskChangeEntry[] } {
+  if (owner.kind === NodeKind.Initiative && writes.length > NO_TASKS)
+    invalidTasks();
+  const named = writes.flatMap((write) =>
+    write.id === undefined ? [] : [write.id],
+  );
+  if (
+    new Set(named).size !== named.length ||
+    named.some((id) => !current.some((task) => task.id === id))
+  )
+    invalidTasks();
+  const used = usedFilenames(tx, owner.mission_id, owner.id);
+  if (used.has(filename)) throw filenameConflict(filename);
+  const names = new Set([filename]);
+  const tasks = writes.map((write) => {
+    validateFilename(write.filename);
+    validateNodeContent(owner.kind, write.content, textMaxBytes);
+    if (write.content.bindings.length > NO_TASKS)
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        MissionErrorCode.BindingsInvalid,
+        "A task names no binding.",
+        { filename: write.filename },
+      );
+    if (names.has(write.filename) || used.has(write.filename))
+      throw filenameConflict(write.filename);
+    names.add(write.filename);
+    return {
+      id: write.id ?? createIdentity(TASK_IDENTITY_PREFIX),
+      filename: write.filename,
+      content: write.content,
+    };
+  });
+  const changes = tasks.flatMap<TaskChangeEntry>((task) => {
+    const old = current.find((item) => item.id === task.id);
+    if (old === undefined)
+      return [
+        {
+          id: task.id,
+          change: TaskChange.Created,
+          changed_fields: [...CONTENT_FIELDS],
+        },
+      ];
+    const fields = TASK_CONTENT_KEYS.filter(
+      (key) =>
+        canonicalJSON(task.content[key]) !== canonicalJSON(old.content[key]),
+    ) as string[];
+    if (task.filename !== old.filename) fields.unshift(ContentField.Filename);
+    return fields.length === NO_TASKS
+      ? []
+      : [{ id: task.id, change: TaskChange.Updated, changed_fields: fields }];
+  });
+  const retired = current
+    .filter((task) => !tasks.some((item) => item.id === task.id))
+    .map<TaskChangeEntry>((task) => ({
+      id: task.id,
+      change: TaskChange.Retired,
+      changed_fields: [],
+    }));
+  return { tasks, changes: [...changes, ...retired] };
+}
+
 function createdRevision(
   nodeId: string,
   body: NodeCreate,
   content: Content,
-  parent: Revision | null,
+  tasks: TaskContent[],
+  changes: TaskChangeEntry[],
   actor: HumanActor,
   createdAt: number,
 ): Revision {
-  const metadata = {
+  const objective = body.kind === NodeKind.Objective;
+  return {
     reason: body.reason,
     actor,
     created_at: createdAt,
     pinned_by_attempts: [],
-  };
-  if (body.kind === NodeKind.Task) {
-    assert.ok(parent, "Task creation requires an objective revision.");
-    assert.ok(parent.tasks, "An objective revision must include tasks.");
-    return {
-      ...parent,
-      ...metadata,
-      revision: parent.revision + REVISION_INCREMENT,
-      tasks: [
-        ...parent.tasks,
-        { id: nodeId, filename: body.filename, content },
-      ],
-      change: {
-        write: RevisionWrite.NodeCreate,
-        previous_revision: parent.revision,
-        changed_fields: [TASKS_FIELD],
-        tasks: [
-          {
-            id: nodeId,
-            change: TaskChange.Created,
-            changed_fields: [...CONTENT_FIELDS],
-          },
-        ],
-      },
-    };
-  }
-  const objective = body.kind === NodeKind.Objective;
-  return {
-    ...metadata,
     node_id: nodeId,
     filename: body.filename,
     revision: FIRST_REVISION,
     content,
-    ...(objective ? { tasks: [] } : {}),
+    tasks,
     change: {
       write: RevisionWrite.NodeCreate,
       previous_revision: null,
       changed_fields: objective
         ? [...CONTENT_FIELDS, TASKS_FIELD]
         : [...CONTENT_FIELDS],
-      ...(objective ? { tasks: [] } : {}),
+      ...(objective ? { tasks: changes } : {}),
     },
   };
 }
@@ -218,7 +282,7 @@ export function createNode(
   textMaxBytes: number,
 ): NodeChange {
   const mission = requireMission(tx, missionId, body.expected_mission_version);
-  const parent = requireParent(tx, missionId, body);
+  requireParent(tx, missionId, body);
   const content = resolveContent(
     tx,
     bindings,
@@ -228,6 +292,14 @@ export function createNode(
   );
   if (filenameTaken(tx, missionId, body.filename))
     throw filenameConflict(body.filename);
+  const { tasks, changes } = resolveTasks(
+    tx,
+    { id: null, mission_id: missionId, kind: body.kind },
+    body.filename,
+    body.tasks,
+    [],
+    textMaxBytes,
+  );
   const before = claimableMap(tx, missionId, bindings);
   const nodeId = createIdentity(NODE_IDENTITY_PREFIX);
   const createdAt = Date.now();
@@ -243,7 +315,8 @@ export function createNode(
     nodeId,
     body,
     content,
-    parent,
+    tasks,
+    changes,
     actor,
     createdAt,
   );

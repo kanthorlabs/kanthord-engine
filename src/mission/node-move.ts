@@ -2,13 +2,11 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { CONTENT_FIELDS, TASKS_FIELD, validateText } from "./content.ts";
+import { validateText } from "./content.ts";
 import {
   EdgeKind,
   MissionErrorCode,
   NodeKind,
-  RevisionWrite,
-  TaskChange,
   type HumanActor,
   type Move,
   type NodeChange,
@@ -19,15 +17,12 @@ import {
 import { hasDependencyCycle } from "./graph.ts";
 import { requireNode } from "./node-read.ts";
 import { revisionFromRow } from "./revision.ts";
-import { openAttemptsOf } from "./store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   incrementMissionVersion,
-  insertRevision,
   readCurrentRevision,
   readDependencies,
   readMissionNodes,
-  readRevision,
   type NodeRow,
 } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
@@ -55,11 +50,9 @@ function currentRevision(
 }
 
 function checkParent(node: NodeRow, parent: NodeRow): void {
-  const kind =
-    node.kind === NodeKind.Objective ? NodeKind.Initiative : NodeKind.Objective;
   if (
     node.kind === NodeKind.Initiative ||
-    parent.kind !== kind ||
+    parent.kind !== NodeKind.Initiative ||
     parent.mission_id !== node.mission_id
   )
     throw new OperationError(
@@ -78,7 +71,7 @@ function checkParent(node: NodeRow, parent: NodeRow): void {
 
 function checkCycle(tx: Transaction, missionId: string): void {
   const nodes = readMissionNodes(tx, missionId).filter(
-    (node) => node.retired_at === null && node.kind !== NodeKind.Task,
+    (node) => node.retired_at === null,
   );
   const parents = new Map<string, string>();
   for (const node of nodes) {
@@ -96,72 +89,6 @@ function checkCycle(tx: Transaction, missionId: string): void {
       MissionErrorCode.Cycle,
       "Move creates a cycle.",
     );
-}
-
-function moveTaskRevisions(
-  tx: Transaction,
-  nodeId: string,
-  oldRevision: Revision,
-  newRevision: Revision,
-  reason: string,
-  actor: HumanActor,
-): Revision[] {
-  assert.ok(oldRevision.tasks, "Old objective must have tasks.");
-  assert.ok(newRevision.tasks, "New objective must have tasks.");
-  const task = oldRevision.tasks.find((item) => item.id === nodeId);
-  assert.ok(task, "Moved task must be in the old objective revision.");
-  assert.ok(
-    !newRevision.tasks.some((item) => item.id === nodeId),
-    "New objective cannot already contain task.",
-  );
-  const metadata = {
-    reason,
-    actor,
-    created_at: Date.now(),
-    pinned_by_attempts: [],
-  };
-  const outgoing: Revision = {
-    ...oldRevision,
-    ...metadata,
-    revision: oldRevision.revision + REVISION_INCREMENT,
-    tasks: oldRevision.tasks.filter((item) => item.id !== nodeId),
-    change: {
-      write: RevisionWrite.NodeMove,
-      previous_revision: oldRevision.revision,
-      changed_fields: [TASKS_FIELD],
-      tasks: [{ id: nodeId, change: TaskChange.MovedOut, changed_fields: [] }],
-    },
-  };
-  const incoming: Revision = {
-    ...newRevision,
-    ...metadata,
-    revision: newRevision.revision + REVISION_INCREMENT,
-    tasks: [...newRevision.tasks, task],
-    change: {
-      write: RevisionWrite.NodeMove,
-      previous_revision: newRevision.revision,
-      changed_fields: [TASKS_FIELD],
-      tasks: [
-        {
-          id: nodeId,
-          change: TaskChange.MovedIn,
-          changed_fields: [...CONTENT_FIELDS],
-        },
-      ],
-    },
-  };
-  insertRevision(tx, outgoing);
-  insertRevision(tx, incoming);
-  return [outgoing, incoming].map((revision) => {
-    const row = readRevision(tx, revision.node_id, revision.revision);
-    assert.ok(row, "Moved revision must be readable.");
-    assert.equal(
-      row.node_id,
-      revision.node_id,
-      "Stored revision belongs to its owner.",
-    );
-    return revisionFromRow(tx, row);
-  });
 }
 
 export function moveNode(
@@ -184,22 +111,16 @@ export function moveNode(
   if (node.kind !== NodeKind.Initiative)
     assert.ok(oldParentId, "Movable node has a parent.");
   const oldParent = oldParentId === null ? null : requireNode(tx, oldParentId);
-  requireNonterminal(node.kind === NodeKind.Task ? oldParent! : node);
+  requireNonterminal(node);
   const newParent = requireNode(tx, body.new_parent_id);
   requireActive(newParent);
   checkParent(node, newParent);
-  if (node.kind === NodeKind.Task) requireNonterminal(newParent);
-  const ownerId = node.kind === NodeKind.Task ? oldParent!.id : node.id;
-  currentRevision(tx, ownerId, body.expected_revision);
+  currentRevision(tx, node.id, body.expected_revision);
   const oldRevision =
     oldParent === null
       ? null
       : currentRevision(tx, oldParent.id, body.expected_old_parent_revision);
-  const newRevision = currentRevision(
-    tx,
-    newParent.id,
-    body.expected_new_parent_revision,
-  );
+  currentRevision(tx, newParent.id, body.expected_new_parent_revision);
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   const empty: NodeChange = {
     mission_version: mission.version,
@@ -212,10 +133,7 @@ export function moveNode(
   if (body.new_parent_id === oldParentId) return empty;
   assert.ok(oldParentId, "A moved node must have an old parent.");
   assert.ok(oldRevision, "Old parent must have a revision.");
-  const before =
-    node.kind === NodeKind.Objective
-      ? claimableMap(tx, mission.id, bindings)
-      : null;
+  const before = claimableMap(tx, mission.id, bindings);
   const result = tx.database
     .prepare("UPDATE mission_node SET parent_id = ? WHERE id = ?")
     .run(newParent.id, node.id);
@@ -224,29 +142,16 @@ export function moveNode(
     UPDATED_NODE_COUNT,
     "Move updates exactly one node.",
   );
-  const revisions =
-    node.kind === NodeKind.Task
-      ? moveTaskRevisions(
-          tx,
-          node.id,
-          oldRevision,
-          newRevision,
-          body.reason,
-          actor,
-        )
-      : [];
-  if (before !== null) {
-    checkCycle(tx, mission.id);
-    routeMission(tx, mission.id);
-    reconcileMission(
-      tx,
-      workQueue,
-      mission.id,
-      mission.project_id,
-      before,
-      bindings,
-    );
-  }
+  checkCycle(tx, mission.id);
+  routeMission(tx, mission.id);
+  reconcileMission(
+    tx,
+    workQueue,
+    mission.id,
+    mission.project_id,
+    before,
+    bindings,
+  );
   const missionVersion = incrementMissionVersion(tx, mission.id);
   assert.equal(
     missionVersion,
@@ -260,12 +165,7 @@ export function moveNode(
   );
   return {
     ...empty,
-    open_attempts_unchanged: openAttemptsOf(
-      tx,
-      revisions.map((revision) => revision.node_id),
-    ),
     mission_version: missionVersion,
-    revisions,
     added_edges: [
       {
         kind: EdgeKind.Containment,

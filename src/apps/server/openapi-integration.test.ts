@@ -901,14 +901,10 @@ function assertBlockedNode(schema: unknown): void {
   const variants = schema.oneOf as ResolvedSchema[];
   assert.deepEqual(
     variants.map((variant) => variant.properties.kind?.const),
-    [NodeKind.Initiative, NodeKind.Objective, NodeKind.Task],
+    [NodeKind.Initiative, NodeKind.Objective],
   );
   for (const variant of variants) {
     const context = variant.properties.blocked_context;
-    if (variant.properties.kind?.const === NodeKind.Task) {
-      assert.equal(context, undefined);
-      continue;
-    }
     assert.ok(context);
     assert.deepEqual(context.required, ["outcome", "requests"]);
     assert.equal(context.properties.requests?.type, ARRAY_SCHEMA_TYPE);
@@ -1061,6 +1057,7 @@ test("objective list exception preserves full objective and identity-only varian
     "parent_id",
     "visible_revision",
     "content",
+    "tasks",
     "retired_at",
     "pinned_by_attempts",
     "kind",

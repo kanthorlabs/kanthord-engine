@@ -1,13 +1,13 @@
 import { isMap, isScalar, parseDocument } from "yaml";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { identitySchema } from "../kernel/identity.ts";
 import {
   MissionErrorCode,
   NodeKind,
-  nodeKindSchema,
+  PlanFileKind,
+  planFileIdSchema,
+  planFileKindSchema,
   planFileNameSchema,
-  type NodeKind as NodeKindType,
 } from "./contract.ts";
 
 const DELIMITER = "---";
@@ -21,7 +21,6 @@ const LINE_STEP = 1;
 const HEADING_CAPTURE_GROUP = 1;
 const AFTER_OPENING_DELIMITER = 1;
 const AFTER_CLOSING_DELIMITER_OFFSET = 1;
-const NODE_PREFIX = "node";
 const ALIAS_LIMIT = 100;
 const FIELD = {
   Id: "id",
@@ -53,7 +52,7 @@ const REASON = {
 export interface ParsedPlanFile {
   filename: string;
   id?: string;
-  kind: NodeKindType;
+  kind: PlanFileKind;
   parent?: string;
   depends_on: string[];
   bindings: string[];
@@ -129,11 +128,11 @@ function fields(
   mapping: Record<string, unknown>,
 ): Omit<ParsedPlanFile, "name" | "requirement" | "criterion"> {
   const kind = mapping[FIELD.Kind];
-  if (!nodeKindSchema.safeParse(kind).success)
+  if (!planFileKindSchema.safeParse(kind).success)
     refuse(filename, REASON.KindInvalid);
-  const typedKind = kind as NodeKindType;
+  const typedKind = kind as PlanFileKind;
   const id = mapping[FIELD.Id];
-  if (id !== undefined && !identitySchema(NODE_PREFIX).safeParse(id).success)
+  if (id !== undefined && !planFileIdSchema.safeParse(id).success)
     refuse(filename, REASON.FieldInvalid);
   const parent = mapping[FIELD.Parent];
   if (parent !== undefined && !planFileNameSchema.safeParse(parent).success)
@@ -142,7 +141,10 @@ function fields(
     refuse(filename, REASON.ParentForbidden);
   if (typedKind !== NodeKind.Initiative && parent === undefined)
     refuse(filename, REASON.ParentRequired);
-  if (typedKind === NodeKind.Task && Object.hasOwn(mapping, FIELD.DependsOn))
+  if (
+    typedKind === PlanFileKind.Task &&
+    Object.hasOwn(mapping, FIELD.DependsOn)
+  )
     refuse(filename, REASON.DependsOnForbidden);
   const dependsOn = stringList(filename, mapping[FIELD.DependsOn], true);
   const bindings = stringList(filename, mapping[FIELD.Bindings], false);

@@ -12,7 +12,7 @@ import {
 import { ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
-import { anthropicSetup } from "./test-support.ts";
+import { anthropicSetup, repositorySetup } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
@@ -194,7 +194,10 @@ test("evaluation writes failed-verification assessments without inference and ga
     },
     { command: "true", texts: [""], result: null, opens: 0, refused: true },
   ]) {
-    const setup = anthropicSetup({ repositories: [] });
+    const repository = repositorySetup();
+    const setup = anthropicSetup({
+      repositories: scenario.initiative ? [] : [repository],
+    });
     const claim = {
       execution_id: setup.execution_id,
       node_id: createIdentity("node"),
@@ -230,9 +233,9 @@ test("evaluation writes failed-verification assessments without inference and ga
               requirement: "work",
               criterion: "met",
               verifications: [scenario.command],
-              bindings: [],
+              bindings: scenario.initiative ? [] : [repository.binding_id],
             },
-            ...(scenario.initiative ? {} : { tasks: [] }),
+            tasks: [],
           }),
         "execution.evidence.list": async () =>
           complete({
@@ -409,7 +412,8 @@ test("evaluation writes failed-verification assessments without inference and ga
 });
 
 test("an evaluation that its agent deadline cuts ends with no assessment and no operation failure", async (t) => {
-  const setup = anthropicSetup({ repositories: [] });
+  const repository = repositorySetup();
+  const setup = anthropicSetup({ repositories: [repository] });
   const claim = {
     execution_id: setup.execution_id,
     node_id: createIdentity("node"),
@@ -439,7 +443,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
             requirement: "work",
             criterion: "met",
             verifications: ["true"],
-            bindings: [],
+            bindings: [repository.binding_id],
           },
           tasks: [],
         }),

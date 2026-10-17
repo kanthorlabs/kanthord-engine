@@ -39,7 +39,6 @@ function requireChildren(
   node: NodeRow,
   childOutcomeIds: readonly string[],
 ): void {
-  assert.notEqual(node.kind, NodeKind.Task);
   assert.ok(tx.database.isTransaction);
   const expected =
     node.kind === NodeKind.Objective

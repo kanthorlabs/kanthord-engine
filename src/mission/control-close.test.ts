@@ -235,7 +235,6 @@ for (const state of [NodeState.ExternalFailed, NodeState.Blocked]) {
         result: AssessmentResult.Success,
       },
     });
-    assert.ok(result.node.kind !== NodeKind.Task);
     assert.equal(result.node.state, NodeState.Completed);
     assert.equal(result.outcome?.closing_event, ClosingEvent.SuccessOverride);
     assert.ok(result.attempt?.closed_at);
@@ -255,7 +254,6 @@ for (const attempt of [NO_ATTEMPT, FIRST_ATTEMPT]) {
       query: {},
       body: h.body(NodeState.Paused, attempt),
     });
-    assert.ok(blocked.node.kind !== NodeKind.Task);
     assert.equal(blocked.node.state, NodeState.Blocked);
     assert.equal(blocked.outcome?.attempt, attempt);
     assert.equal(blocked.outcome?.result, AssessmentResult.Undetermined);

@@ -86,8 +86,23 @@ const bareTemplate = fixtureTemplate(async (root) => {
   await git.clone(origin, join(root, BARE_NAME), ["--bare"]);
   rmSync(origin, { recursive: true });
 });
+export const repositorySetup = () => ({
+  binding_id: createIdentity("binding"),
+  name: "repo",
+  address: "git@github.com:owner/repo.git",
+  ssh_identity: {
+    host: "github.com",
+    hostname: "github.com",
+    port: 22,
+    identity_file: "~/.ssh/id_test",
+  },
+  strategy: { base_branch: "main" },
+  project_prompt: null,
+  working_layer: WORKING_LAYER_ALL_ON,
+});
+
 export const task = (name: string, command: string): TaskContent => ({
-  id: createIdentity("node"),
+  id: createIdentity("task"),
   filename: `${name}.md`,
   content: {
     name,
@@ -193,7 +208,17 @@ export async function objectiveFixture(
     input,
     run,
     agent,
-    revision: { tasks } as Revision,
+    revision: {
+      filename: "objective.md",
+      content: {
+        name: "objective",
+        requirement: "objective",
+        criterion: "objective",
+        verifications: ["true"],
+        bindings: [],
+      },
+      tasks,
+    } as unknown as Revision,
     ...workspace,
     priorRationale: null as string | null,
     rework: false,

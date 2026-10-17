@@ -186,6 +186,7 @@ export function controlHarness(
         verifications: ["true"],
         bindings: [],
       },
+      tasks: [],
       change: {
         write: RevisionWrite.NodeCreate,
         previous_revision: null,

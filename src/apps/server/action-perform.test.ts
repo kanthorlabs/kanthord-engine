@@ -263,6 +263,7 @@ async function setup(t: TestContext, landing = "human") {
           ...CONTENT,
           bindings: names.map((name) => binding(name).id),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await version(),
         ...(parentId

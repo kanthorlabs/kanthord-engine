@@ -141,6 +141,7 @@ async function setup(t: TestContext) {
           ...CONTENT,
           bindings: names.map((name) => binding(name).id),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
         ...(parentId

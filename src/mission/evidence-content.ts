@@ -97,7 +97,6 @@ export function requireRepositoryAddress(
   revision: Revision,
   address: RepositoryAddress,
 ): void {
-  assert.notEqual(node.kind, NodeKind.Task);
   assert.equal(revision.node_id, node.id);
   if (node.kind === NodeKind.Objective) {
     if (
@@ -163,7 +162,6 @@ export function requireTestedInput(
   revision: Revision,
   testedInput: TestedInput,
 ): void {
-  assert.notEqual(node.kind, NodeKind.Task);
   assert.equal(revision.node_id, node.id);
   if (node.kind === NodeKind.Objective) {
     if (Array.isArray(testedInput)) invalidExecutionInput("tested_input");
@@ -254,7 +252,6 @@ export function requiredVerifications(
   node: NodeRow,
   revision: Revision,
 ): string[] {
-  assert.notEqual(node.kind, NodeKind.Task);
   assert.equal(revision.node_id, node.id);
   const commands = [...revision.content.verifications];
   if (node.kind === NodeKind.Objective) {

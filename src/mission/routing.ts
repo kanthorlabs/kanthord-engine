@@ -29,8 +29,7 @@ export function claimableMap(
   );
   return new Map(
     nodes.map((node) => {
-      if (node.retired_at !== null || node.kind === NodeKind.Task)
-        return [node.id, false];
+      if (node.retired_at !== null) return [node.id, false];
       if (node.state === NodeState.Available)
         return [
           node.id,
@@ -56,10 +55,7 @@ export function routeMission(tx: Transaction, missionId: string): void {
   }
   const dependencies = readDependencies(tx, missionId);
   for (const node of nodes) {
-    if (
-      node.kind === NodeKind.Task ||
-      (node.state !== NodeState.Pending && node.state !== NodeState.Available)
-    )
+    if (node.state !== NodeState.Pending && node.state !== NodeState.Available)
       continue;
     const closure = buildDependencyClosureOf(node.id, dependencies, parents);
     const available = Array.from(closure).every(

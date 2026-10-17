@@ -64,7 +64,7 @@ export async function createJourneyNode(
   cli: ReturnType<typeof journeyClient>,
   projectId: string,
   filename: string,
-  kind: "initiative" | "objective" | "task",
+  kind: "initiative" | "objective",
   bindings: string[],
   parentId?: string,
 ) {
@@ -96,12 +96,9 @@ export async function createJourneyNode(
         ...NODE_CONTENT,
         bindings,
         verifications:
-          kind === NodeKind.Initiative
-            ? ["true"]
-            : kind === NodeKind.Task
-              ? ["grep -q hello hello.txt"]
-              : NODE_CONTENT.verifications,
+          kind === NodeKind.Initiative ? ["true"] : NODE_CONTENT.verifications,
       },
+      tasks: [],
       reason: "plan",
       expected_mission_version: mission.version,
     },
@@ -109,4 +106,47 @@ export async function createJourneyNode(
   assert.ok(result.revisions.length);
   assert.ok(result.revisions[0]!.node_id);
   return result.revisions[0]!.node_id;
+}
+
+export async function createJourneyTask(
+  cli: ReturnType<typeof journeyClient>,
+  projectId: string,
+  objectiveId: string,
+  filename: string,
+) {
+  const mission = await cli.read<{ version: number }>([
+    "mission",
+    "get",
+    projectId,
+  ]);
+  const objective = await cli.read<{
+    filename: string;
+    visible_revision: number;
+    content: typeof NODE_CONTENT;
+    tasks: { id: string; filename: string; content: typeof NODE_CONTENT }[];
+  }>(["mission", "node", "get", objectiveId]);
+  const result = await cli.write<{
+    revisions: { tasks: { id: string; filename: string }[] }[];
+  }>(["mission", "node", "update", objectiveId], {
+    filename: objective.filename,
+    content: objective.content,
+    tasks: [
+      ...objective.tasks,
+      {
+        filename,
+        content: {
+          ...NODE_CONTENT,
+          verifications: ["grep -q hello hello.txt"],
+        },
+      },
+    ],
+    reason: "plan",
+    expected_revision: objective.visible_revision,
+    expected_mission_version: mission.version,
+  });
+  const task = result.revisions[0]?.tasks.find(
+    (item) => item.filename === filename,
+  );
+  assert.ok(task);
+  return task.id;
 }

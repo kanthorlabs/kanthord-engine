@@ -81,7 +81,7 @@ export async function runNativeExecution(
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
-      const kind = nodeKindOf(revision);
+      const kind = nodeKindOf(revision, input.setup);
       const open = async (workspace: string) => {
         const agent = input.setup.agents[WORKING_AGENT];
         assert.ok(agent);
