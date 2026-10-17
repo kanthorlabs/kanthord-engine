@@ -10,14 +10,14 @@ This plan merges pull request #87, moves the root repository `kanthorlabs/kantho
 - The reference pages of `docs/reference/mission/`, `docs/reference/worker/worker.md`, `docs/reference/project/binding.md`, `docs/reference/scheduler/` and the generated `docs/reference/workbench/tools.md`.
 - The explanation pages, the Mac how-to and `docs/README.md:27`.
 - `scripts/e2e/watch.mjs` and the todoapp fixture sync check.
-- The HANDOFF item `docs/brainstorm/HANDOFF.md:36`.
+- The narrowed HANDOFF item `docs/brainstorm/HANDOFF.md:36`.
 - The discard of the local and the homelab databases (decision D2).
 - The live `make e2e` acceptance run.
 
 Out of scope:
 
 - Every other design page of `docs/brainstorm/`. Pull request #87 owns them.
-- The multi-repository `implement` node (plan 09). The reference pages state the limit of decision D28 until plan 09.
+- The multi-repository `implement` node (plans 09a, 09b and 10). The reference pages state the limit of decision D28 until plan 10.
 - The executed plan sets of `.agents/plan/`.
 
 ## Model
@@ -27,7 +27,7 @@ Opus at medium effort. The plan rewrites prose on many pages and runs a live acc
 ## Sources
 
 - `docs/brainstorm/mission-service.md:27-89` — `work`, `requires`, tasks, the graph and the bindings that a node names.
-- `docs/brainstorm/mission-service.md:303-313` — the storage grant and the repository evidence of an `implement` node.
+- `docs/brainstorm/mission-service.md:303-314` — the storage grant and the repository evidence of an `implement` node.
 - `docs/brainstorm/mission-service.impl.md:17`, `:49-62` — the task identity and the rule table by work.
 - `docs/brainstorm/mission-service.impl.md:261-312` — the dependency reads and the proposal.
 - `docs/brainstorm/scheduler-service.md:233-268` — the match.
@@ -40,7 +40,7 @@ Opus at medium effort. The plan rewrites prose on many pages and runs a live acc
 
 ## Depends on
 
-- Plans 06 and 07 merged to `main` of their repositories.
+- Plans 03b, 06 and 07 merged to `main` of their repositories.
 - Pull request #87 open, with the rulings R1 to R14. Task 08.1 merges it.
 
 ## Provides
@@ -55,11 +55,12 @@ The documented and accepted flat-node product. No seam.
 - Do:
   1. Rebase the branch `design/flat-nodes` of pull request #87 on root `origin/main`. Push the branch with `--force-with-lease`.
   2. Ask Ulrich for the review. Merge pull request #87 after the review.
-  3. Create `.dev/flat-nodes-08` from the new `origin/main` (`00-index.md` "Repositories, branches and worktrees").
+  3. Create `.dev/flat-nodes-08-reference` from the new `origin/main` (`00-index.md` "Repositories, branches and worktrees").
   4. Run `git -C engine fetch origin main && git -C engine checkout --detach origin/main`.
   5. Run `git -C apps fetch origin main && git -C apps checkout --detach origin/main`.
-  6. Stage `engine` and `apps`.
-  7. When the rebase changed a file of `docs/brainstorm/assets/todoapp/plan/`, the check of task 08.9 fails. Then copy the file into the engine fixture in a separate engine pull request, as task 06.1 states, and move the engine pointer again.
+  6. Run `pnpm install` and `pnpm verify` in `apps/` against the engine of step 4. Before the run, diff `apps/src/api/types.ts` against `engine/static/openapi/**` of that engine, as task 07.E does. A difference blocks the task.
+  7. Stage `engine` and `apps`.
+  8. When the rebase changed a file of `docs/brainstorm/assets/todoapp/plan/`, the check of task 08.9 fails. Then copy the file into the engine fixture in a separate engine pull request, as task 06.1 states, and move the engine pointer again.
 - Cite: R14; decision D3; root `AGENTS.md:162`.
 - Verify: `gh pr view 87 --json state` answers `MERGED`; `git -C engine merge-base --is-ancestor <merge commit of plan 06> HEAD` and the same check for plan 07 in `apps` exit 0.
 
@@ -70,11 +71,12 @@ The documented and accepted flat-node product. No seam.
   1. `mission_node` (`01-setup.md:105-116`) drops `kind` and `parent_id`. Delete the relation `mission_node |o..o{ mission_node : "FK parent_id"` (`:156`).
   2. `mission_node_revision` (`:118-132`) adds `work "implement | examine"` and `requires "JSON set of trait keys"`. `tasks` reads "JSON task content, `[]` for an examine node". `node_id` reads "node".
   3. `:143` reads "node". `:204`, `:275`, `:278`, `:283`, `:285`, `:290` describe one node kind: a task is content of an `implement` node with a `task_<ulid>` identity, a retirement retires one node, and a dependency relates two nodes of one mission.
-  4. Add the rule of `mission.node.work_locked` and the binding rule table by work (`mission-service.impl.md:52-61`) after `01-setup.md:281`. The table states that a node names every binding, that no node takes a binding from the project, and that the storage bindings form an ordered upload list.
-  5. Add the table `mission_evidence_upload_failure` of decision D29 to `02-execution.md` next to `mission_evidence_asset`.
-  6. `docs/reference/erd/README.md`: the column map names `work`, `requires` and `tasks` and no `kind` or `parent_id`.
+  4. `01-setup.md:196` links `mission-service.vocabulary.md#edge-kind`, an anchor that no longer exists. Link `mission-service.vocabulary.md#dependency` with the text "dependency".
+  5. Add the rule of `mission.node.work_locked` and the binding rule table by work (`mission-service.impl.md:52-61`) after `01-setup.md:281`. The table states that a node names every binding, that no node takes a binding from the project, and that the storage bindings form an ordered upload list.
+  6. Add the table `mission_evidence_upload_failure` of decision D29 to `02-execution.md` next to `mission_evidence_asset`.
+  7. `docs/reference/erd/README.md`: the column map names `work`, `requires` and `tasks` and no `kind` or `parent_id`.
 - Cite: `mission-service.md:27-89`; `mission-service.impl.md:17`, `:52-66`; decision D29.
-- Verify: `rg -n -i 'initiative|objective|parent_id|containment' docs/reference/erd` prints nothing; `sh scripts/docs/check.sh` passes.
+- Verify: `rg -n -i 'initiative|objective|parent_id|containment' docs/reference/erd` and `rg -n 'edge-kind' docs/reference` print nothing; `sh scripts/docs/check.sh` passes.
 
 ### 08.3 Rewrite the execution ERD
 
@@ -94,7 +96,7 @@ The documented and accepted flat-node product. No seam.
 - Do:
   1. `node.md`: one node shape with `work`, `requires` and `tasks`; `node list --work`; no `node move`; `mission.node.work_locked` and `mission.node.requires_unmatched` in the failures.
   2. `import.md`: the node file and the task file grammar (`mission-service.impl.md:125-151`); replace the section `#binding-inheritance` with `#bindings-of-a-node`: every node names its bindings, no node takes a binding from the project, and the rule table by work; an `implement` node with no task and the coverage rule of a node with tasks; the preview violation `mission.node.requires_unmatched`.
-  3. `evidence.md`: the ordered storage list, the grant of the first working binding, the failed upload check, `mission.evidence.storage_unavailable` and the pinned read (`mission-service.md:303-307`).
+  3. `evidence.md`: the ordered storage list, the grant of the first working binding, the failed upload check, the refusal code of plan 03b when no binding is left (ruling B2), and the pinned read (`mission-service.md#evidence`).
   4. `execution.md`: the `mission.execution.dependency.*` reads replace the objective reads.
   5. `dependency.md`: the closure is the direct dependencies; a dependency edit on a node that left `Pending` and `Available` answers `mission.node.state_conflict`.
   6. `assessment.md`: `dependency_outcome_ids`, `dependency_node_ids`, the proposal fields `dependency_id` and `created_node_id`, and the answer `{ created, proposer }`.
@@ -129,7 +131,7 @@ The documented and accepted flat-node product. No seam.
   4. `run-on-a-mac-with-tailscale.md`: add the section `## Run macOS nodes on this Mac` before `## Stop sharing the server`. It sets `traits: ["platform.macos"]` on the worker bindings of the Mac and `requires: [platform.macos]` on a node that needs macOS.
   5. `docs/README.md:27`: delete the paragraph. The binding resolution is implemented.
   6. `docs/reference/README.md:48` names the dependency reads.
-- Cite: `worker-service.md:39-40`, `:325-329`, `:420-428`; `project-service.vocabulary.md:52-74`; `scheduler-service.vocabulary.md:56-67`.
+- Cite: `worker-service.md:39-40`, `:326-331`, `:422-431`; `project-service.vocabulary.md:52-74`; `scheduler-service.vocabulary.md:56-67`.
 - Verify: the `rg` of the gate row 08 prints nothing.
 
 ### 08.8 Move the e2e watch script
@@ -149,18 +151,18 @@ The documented and accepted flat-node product. No seam.
 - Cite: decision D18.
 - Verify: `sh scripts/docs/todoapp.sh` exits 0; after a one-byte edit of a temporary copy of the engine fixture it exits 1.
 
-### 08.10 Close the HANDOFF item
+### 08.10 Narrow the HANDOFF item
 
 - Files: `docs/brainstorm/HANDOFF.md` (edit)
-- Do: delete the item of `HANDOFF.md:36`. Plans 01 to 07 implement it, and plan 09 implements its multi-repository rules.
+- Do: replace the item of `HANDOFF.md:36` with one item "multi-repository implement node (plans 09a, 09b and 10)". Plans 01 to 08 implement the rest of the item. Plan 10 deletes the new item.
 - Cite: decision D1.
-- Verify: `sh scripts/docs/check.sh` passes; `rg -n 'Implement the flat-node model' docs/brainstorm/HANDOFF.md` prints nothing.
+- Verify: `sh scripts/docs/check.sh` passes; `rg -n 'Implement the flat-node model' docs/brainstorm/HANDOFF.md` prints nothing; `rg -n 'multi-repository implement node' docs/brainstorm/HANDOFF.md` prints one line.
 
 ### 08.11 Discard the local and the homelab databases
 
 - Files: none
 - Do:
-  1. Stop `make dev`. Run `make cleanup`, then `make bootstrap` (decision D2).
+  1. Stop every `make dev` of the main checkout and of other worktrees. Run the steps of tasks 08.11 and 08.12 from `.dev/flat-nodes-08-reference`. Run `make cleanup`, then `make bootstrap` there (decision D2).
   2. On the homelab, export the volume: `podman volume export kanthord-homelab -o .dev/backup/kanthord-homelab-<yymmdd>.tar`.
   3. Run `make homelab-cleanup` and confirm the volume removal.
   4. Run `IMAGE=kanthord-base-path make release-image`, then `IMAGE=kanthord-base-path:latest make homelab-kanthord`.
@@ -172,7 +174,7 @@ The documented and accepted flat-node product. No seam.
 
 - Files: none
 - Do:
-  1. Run `make e2e RUN=flat-nodes`. It applies the worker bindings before the import (`scripts/e2e/start.mjs:183-222`).
+  1. From `.dev/flat-nodes-08-reference`, run `make e2e RUN=flat-nodes PAUSED=0`. The default `PAUSED=1` pauses the project, so no worker claims a node (`scripts/e2e/start.sh:7`). It applies the worker bindings before the import (`scripts/e2e/start.mjs:183-222`).
   2. Run `make e2e-watch RUN=flat-nodes` until `foundation` reads `Completed`.
   3. Record the execution checks 1 to 3 and 6 of `kanthord-checks.md:40-45` with their identities, as the report template of `kanthord-checks.md:62-64` states.
   4. Run `make e2e-check RUN=flat-nodes`.
@@ -191,7 +193,7 @@ The live acceptance of task 08.12 is the E2E of this plan. It needs a real provi
 
 | Id     | Command                              | Expect                                                                                     |
 | ------ | ------------------------------------ | ------------------------------------------------------------------------------------------ |
-| EF08.1 | `make e2e RUN=flat-nodes`            | the import applies 8 nodes and 18 tasks; `foundation` takes the only job                   |
+| EF08.1 | `make e2e RUN=flat-nodes PAUSED=0`   | the import applies 8 nodes and 18 tasks; `foundation` takes the only job                   |
 | EF08.2 | `make e2e-watch RUN=flat-nodes`      | `foundation` moves `Available` → `Executing` → `Waiting` → `Completed`                     |
 | EF08.3 | `kanthord scheduler queue list <id>` | after `foundation` completes, jobs of `persistence`, `operations` and `contributing` alone |
 | EF08.4 | `make e2e-check RUN=flat-nodes`      | `RESULT pass`                                                                              |

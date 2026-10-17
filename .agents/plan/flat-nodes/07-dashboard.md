@@ -130,7 +130,7 @@ The dashboard of the final engine contract for plan 08. No engine seam.
   1. Delete each `kind === "task"` and `kind !== "task"` filter (`attention.ts:205`, `:305`; `fix-attention.ts:200`; `state-tally.ts:12`; `overview-summary.ts:26`; `read-scheduler-board.ts:34`; `use-scheduler-board.ts:82`; `claim-takers.ts:31`). A node list holds no task.
   2. `resume-target.ts`: delete the waiting need `objectives`, `objectivesTerminal` and the ancestor walk (`:19`, `:43-49`, `:71-86`). The dependency need reads the direct dependencies. `use-node-resume.tsx:66` loses its `objectives` line.
   3. `use-node-unblock.tsx:46` tests `work === "implement"`. `:82` and `:161` name the examine node and the fix node.
-- Cite: `mission-service.md:48-69`, `:513-519`.
+- Cite: `mission-service.md:48-69`, `:514-520`.
 - Verify: `pnpm exec vitest run src/lib src/hooks src/features/scheduler src/features/overview`.
 
 ### 07.8 Add the work and trait match of the "no taker" view
@@ -192,8 +192,9 @@ The dashboard of the final engine contract for plan 08. No engine seam.
 - Do:
   1. Run the gate row 07 of `00-index.md`.
   2. Start `pnpm dev:all`. With the `ego-browser` skill, open the project of the mock daemon at desktop width and at 390 by 844 (root `AGENTS.md:173-174`).
-  3. Check the mission graph, an `implement` node card with its `Tasks (<count>)` section, the node sheet of a task row, the "no taker" item of the node with `requires: ["platform.macos"]`, the `Traits` field and the workers screen.
-- Verify: every command of the row exits 0, the `rg` prints nothing, and each screen of step 3 renders with no horizontal page scroll.
+  3. Before the merge, compare `src/api/types.ts` with `static/openapi/**` of engine `origin/main`. Each field that this plan adds or changes on `Node`, `Edge`, `Revision`, `TaskContent`, `ProposalApproveResult` and the worker binding configuration exists in the OpenAPI schema with the same name and type. A difference blocks the merge. Task 08.1 checks again against the final engine pointer.
+  4. Check the mission graph, an `implement` node card with its `Tasks (<count>)` section, the node sheet of a task row, the "no taker" item of the node with `requires: ["platform.macos"]`, the `Traits` field and the workers screen.
+- Verify: every command of the row exits 0, the `rg` prints nothing, and each screen of step 4 renders with no horizontal page scroll.
 
 ## E2E
 

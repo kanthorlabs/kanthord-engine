@@ -11,7 +11,7 @@ Out of scope:
 
 - An execution by a real agent, a review by a real agent and a repository action. Plan 08 runs `make e2e` by hand for these (`kanthord-checks.md:41-44`, `:47`).
 - The controlled experiments of `kanthord-checks.md:52-58`, except the work lock of `:56`. Earlier plans prove the other experiments on their own fixtures.
-- An `implement` node with two repository bindings (plan 09, decision D28).
+- An `implement` node with two repository bindings (plans 09a and 09b, decision D28).
 - Every change of `src/` outside the new test, the copy and the CLI support. A failed row is a defect of an earlier plan. The task reports it as one `DEBATE:` line and stops.
 
 ## Model
@@ -29,7 +29,7 @@ Sonnet at high effort. The check table of the design page states each action and
 - `docs/brainstorm/mission-service.md:45-46`, `:256` — a node with no task and the import coverage rule.
 - `docs/brainstorm/mission-service.impl.md:52-61` — the rule table by work.
 - `docs/brainstorm/mission-service.impl.md:503`, `:510` — `node ready` opens attempt 1.
-- `docs/brainstorm/mission-service.md:672`, `:678` — the success override from `Pending` and `Available`.
+- `docs/brainstorm/mission-service.md:673`, `:679` — the success override from `Pending` and `Available`.
 - `docs/brainstorm/project-service.md:107`; `docs/brainstorm/project-service.impl.md:133` — the binding-set coverage refusal.
 
 ## Depends on
@@ -47,11 +47,12 @@ The fixture `src/apps/server/__fixtures__/todoapp/plan/` for plan 08 (decision D
 
 - Files: `src/apps/server/__fixtures__/todoapp/plan/*.md` (create, 26 files)
 - Do:
-  1. From the worktree `engine/.dev/flat-nodes-06`, run `git -C ../../.. fetch origin design/flat-nodes`.
-  2. For each basename `f` of `git -C ../../.. ls-tree --name-only origin/design/flat-nodes docs/brainstorm/assets/todoapp/plan/`, write `git -C ../../.. show origin/design/flat-nodes:docs/brainstorm/assets/todoapp/plan/$f` to `src/apps/server/__fixtures__/todoapp/plan/$f`.
+  1. From the worktree `engine/.dev/flat-nodes-06-todoapp`, run `git -C ../../.. fetch origin design/flat-nodes`. The head of pull request #87 holds the review v3 change of `contributing.md`: the verification `npm ci && npm run format:check` and the owner `kanthorlabs`.
+  2. Run `D=src/apps/server/__fixtures__/todoapp/plan; for p in $(git -C ../../.. ls-tree --name-only origin/design/flat-nodes docs/brainstorm/assets/todoapp/plan/); do f=$(basename "$p"); git -C ../../.. show "origin/design/flat-nodes:$p" > "$D/$f"; done`.
   3. Do not format the copy. `.prettierignore:5` excludes it (decision D18).
+  4. Run the copy again before the merge of this plan when the head of pull request #87 changed a file of the set.
 - Cite: decision D18; `docs/brainstorm/assets/todoapp/README.md:5`, `:24`.
-- Verify: the copy check prints nothing. The copy check is `for f in $(git -C ../../.. ls-tree --name-only origin/design/flat-nodes docs/brainstorm/assets/todoapp/plan/); do git -C ../../.. show "origin/design/flat-nodes:$f" | cmp -s - "src/apps/server/__fixtures__/todoapp/plan/$(basename "$f")" || echo "$f"; done`, and `ls src/apps/server/__fixtures__/todoapp/plan | wc -l` prints `26`.
+- Verify: the copy check prints nothing. The copy check is `D=src/apps/server/__fixtures__/todoapp/plan; for p in $(git -C ../../.. ls-tree --name-only origin/design/flat-nodes docs/brainstorm/assets/todoapp/plan/); do git -C ../../.. show "origin/design/flat-nodes:$p" | cmp -s - "$D/$(basename "$p")" || echo "$p"; done`, and `ls src/apps/server/__fixtures__/todoapp/plan | wc -l` prints `26`.
 
 ### 06.2 Add the todoapp project setup
 

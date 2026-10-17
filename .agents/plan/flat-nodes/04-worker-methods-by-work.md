@@ -16,8 +16,8 @@ Sonnet at high effort. The rename table of decision D17 settles every name.
 ## Sources
 
 - `docs/brainstorm/worker-service.md:39-40` — each method holds one form for each work.
-- `docs/brainstorm/worker-service.md:289-300`, `:309-357`, `:420-430` — the workspace and the steps method of an `implement` node and of an `examine` node.
-- `docs/brainstorm/worker-service.impl.md:512`, `:516`, `:578-580` — `startCheck`, the unblock reads and the workspace of an `implement` node.
+- `docs/brainstorm/worker-service.md:289-301`, `:310-359`, `:422-433` — the workspace and the steps method of an `implement` node and of an `examine` node.
+- `docs/brainstorm/worker-service.impl.md:512`, `:516`, `:580-582` — `startCheck`, the unblock reads and the workspace of an `implement` node.
 - `docs/brainstorm/architecture.impl.md:117-120` — the workspace path templates.
 - `engine/AGENTS.md:219-221` — the rows of the worker unit files.
 
@@ -38,14 +38,14 @@ The names of decision D17. No seam changes.
   1. `git mv` each file.
   2. Rename `runStepsObjective` → `runStepsImplement`, `finishObjective` → `finishImplement`, `settleObjective` → `settleImplement`, `startObjective` → `startImplement`, `objectiveDirectoryOf` → `nodeDirectoryOf` (`src/worker/unit/steps-objective.ts:65`, `:84`, `:192-230`, `:507-508`).
   3. Update the imports of `native-method.ts:33-34`, `base-refresh.ts:14` and `steps-initiative.ts:12`.
-- Cite: decision D17; `worker-service.md:309`.
+- Cite: decision D17; `worker-service.md:310`.
 - Verify: `node --test --test-timeout=30000 src/worker/unit/steps-implement.test.ts src/worker/unit/steps-implement-check.test.ts src/worker/unit/steps-implement-release.test.ts`.
 
 ### 04.2 Rename the steps form of an `examine` node
 
 - Files: `src/worker/unit/steps-initiative.ts` → `src/worker/unit/steps-examine.ts`; `steps-initiative.test.ts` → `steps-examine.test.ts`; `src/worker/unit/native-method.ts` (edit)
 - Do: `git mv` both files. Rename `runStepsInitiative` → `runStepsExamine` (`src/worker/unit/steps-initiative.ts:22`). Update `native-method.ts:114-115`.
-- Cite: decision D17; `worker-service.md:420-430`.
+- Cite: decision D17; `worker-service.md:422-433`.
 - Verify: `node --test --test-timeout=30000 src/worker/unit/steps-examine.test.ts src/worker/unit/native-method.test.ts`.
 
 ### 04.3 Rename the workspace kinds and keys
@@ -55,8 +55,8 @@ The names of decision D17. No seam changes.
   1. `WorkspaceKind.Objective` (`src/worker/unit/workspace.ts:23-26`) becomes `WorkspaceKind.Node` with the value `"node"`.
   2. `objectiveKey` → `nodeKey`, `objectiveDirectory` → `nodeDirectory`, `prepareObjective({ objectiveId })` → `prepareImplement({ nodeId })`, `prepareInitiative` → `prepareExamine` (`:55-79`, `:149`, `:227`).
   3. The parameter `objectiveDirectory` of `judged-tasks.ts:19-42` becomes `nodeDirectory`.
-  4. Keep the path `workspaces/<node identity>/<repository binding identity>/` of an `implement` node. Plan 09 moves it to `checkouts/<binding name>/` (decision D28). A test asserts it.
-- Cite: `worker-service.impl.md:578-580`; `architecture.impl.md:117-120`; decision D17.
+  4. Keep the path `workspaces/<node identity>/<repository binding identity>/` of an `implement` node. Plan 09b moves it to `checkouts/<binding name>/` (decision D28). A test asserts it.
+- Cite: `worker-service.impl.md:580-582`; `architecture.impl.md:117-120`; decision D17.
 - Verify: `node --test --test-timeout=30000 src/worker/unit/workspace.test.ts`.
 
 ### 04.4 Rename the remaining symbols and texts

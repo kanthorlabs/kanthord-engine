@@ -34,7 +34,7 @@ Opus at medium effort. The plan wires a collaboration cycle between three servic
 - `docs/brainstorm/project-service.vocabulary.md:43-75` — the trait.
 - `docs/brainstorm/worker-service.md:22`, `:26-32`, `:44`, `:207` — the declarations and the compatibility declarations.
 - `docs/brainstorm/worker-service.impl.md:54-55`, `:95` — `declared_works`, `declarationOf` and the catalog item.
-- `docs/brainstorm/worker-service.vocabulary.md:274-290` — the compatibility declarations and the declared works.
+- `docs/brainstorm/worker-service.vocabulary.md:275-291` — the compatibility declarations and the declared works.
 - `docs/brainstorm/architecture.md:203-205`; `docs/brainstorm/architecture.impl.md:686-689` — the collaborations and the co-location.
 
 ## Depends on
@@ -66,7 +66,7 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
   2. Add `declared_works: [Work.Implement, Work.Examine]` to `coder@1`, `reviewer@1` and `claude-code@1` (`:34-61`).
   3. `catalogItemSchema` (`src/worker/contract.ts:691-696`) and `catalogEntrySchema` (`:746-758`) answer `declared_works`.
   4. `declarationOf` (`src/worker/service.ts:454-462`) answers `null` for a name that the registry does not hold (decision D14).
-- Cite: `worker-service.impl.md:54-55`, `:95`; `worker-service.vocabulary.md:280-290`.
+- Cite: `worker-service.impl.md:54-55`, `:95`; `worker-service.vocabulary.md:281-291`.
 - Verify: `node --test --test-timeout=30000 src/worker/catalog.test.ts src/worker/service.test.ts`.
 
 ### 05.3 Offer the claim facts of the Mission Service
@@ -108,9 +108,9 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
 - Do:
   1. Add `MissionErrorCode.RequiresUnmatched = "mission.node.requires_unmatched"` and the dependency type `SchedulerMatch.unmatchedClaims` (`src/mission/contract.ts:88-101`).
   2. `guardCoverage(tx, dependencies, projectId, write)` reads `unmatchedClaims`, runs `write(tx)`, reads `unmatchedClaims` again, and throws 409 `mission.node.requires_unmatched` with `details: { claims }` for each pair of the after read whose `(node_id, claim)` the before read lacks (decision D24; `mission-service.impl.md:66`).
-  3. Call it inside the commit closure of `import.apply` (`src/mission/service.ts:591-606`), `node.create` (`:832-846`), `node.update` (`:818-831`), `node.unblock` with a change (`:483-496`) and `proposal.approve` (`:469-482`).
+  3. Call it inside the commit closure of `import.apply` (`src/mission/service.ts:591-606`), `node.create` (`:832-846`), `node.update` (`:818-831`), `node.unblock` with a change (`:483-496`), `proposal.approve` (`:469-482`) and `node.rebind` (`:713-726`, decision D24).
 - Cite: `mission-service.md:37-38`; `mission-service.impl.md:66-68`, `:311`, `:754`; `architecture.impl.md:687`.
-- Verify: `node --test --test-timeout=30000 src/mission/coverage.test.ts` with "a node create with requires [platform.macos] and no such trait answers mission.node.requires_unmatched and writes nothing" and "an update of a node with an existing unmatched pair succeeds".
+- Verify: `node --test --test-timeout=30000 src/mission/coverage.test.ts` with "a node create with requires [platform.macos] and no such trait answers mission.node.requires_unmatched and writes nothing", "a node rebind that adds an unmatched pair is refused" and "an update of a node with an existing unmatched pair succeeds".
 
 ### 05.7 Report the unmatched pairs in the import preview
 
@@ -173,10 +173,18 @@ The seams `claimFacts`, `claimFactsOf`, `workerBindingsOf` with `traits`, `worke
 - Do:
   1. `docs/cli/worker.md:245-262`: the catalog answers `declared_works`; delete the `required_node_format` prose; add the works column to the catalog table.
   2. `docs/cli/project.md`: add `traits` to the worker binding configuration (`:367-418`) and to the example (`:298-307`); add the rows `project.bindings.worker.node_unmatched` and `project.bindings.worker.traits_invalid` after `:670`.
-  3. `docs/cli/mission.md`: add the row `mission.node.requires_unmatched` and its preview violation; name the coverage check of import apply, node create, node update, unblock with a change and proposal approve.
+  3. `docs/cli/mission.md`: add the row `mission.node.requires_unmatched` and its preview violation; name the coverage check of import apply, node create, node update, unblock with a change, proposal approve and node rebind.
   4. `docs/cli/scheduler.md`: the work pull admits a node through the match; an unknown worker answers no work.
 - Cite: root `AGENTS.md:107-108`; decision D22.
 - Verify: `pnpm exec prettier --check docs/cli/*.md`.
+
+### 05.14 Add the engine map rows
+
+- Files: `AGENTS.md` (edit)
+- Lane: main session (decision D20).
+- Do: add the rows of `src/mission/claim-facts.ts`, `src/mission/coverage.ts` and `src/scheduler/match.ts` to the file tree of `AGENTS.md`.
+- Cite: root `AGENTS.md:107-108`.
+- Verify: `pnpm exec prettier --check AGENTS.md`; `rg -n '── (claim-facts|coverage|match)\.ts' AGENTS.md` prints three lines.
 
 ### 05.E Run the gate
 

@@ -20,7 +20,7 @@ Out of scope:
 
 - `kind`, `parent_id`, containment and `node move` (plan 03). The proposal approval still creates its objective under the proposer initiative in this plan.
 - The method file names of the worker unit (plan 04).
-- An objective, the later `implement` node, with more than one repository binding (plan 09, decision D28).
+- An objective, the later `implement` node, with more than one repository binding (plans 09a and 09b, decision D28).
 - The storage binding list and the grant failover (plan 03).
 
 ## Model
@@ -32,10 +32,10 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
 - `docs/brainstorm/mission-service.md:48-69` — the dependency, the closure, the cycle check and the dependency edit rules.
 - `docs/brainstorm/mission-service.md:165-171` — the forced retirement and its `mission.node.state_conflict` refusal.
 - `docs/brainstorm/mission-service.md:221-225` — only an `examine` execution reads a direct dependency.
-- `docs/brainstorm/mission-service.md:315-318`, `:350` — the evidence of an `examine` node and the delete scope.
-- `docs/brainstorm/mission-service.md:385-387`, `:401`, `:407`, `:413-418` — the evaluation scope and the context check of the dependency outcomes.
-- `docs/brainstorm/mission-service.md:513-519` — the readiness condition.
-- `docs/brainstorm/mission-service.md:600-606` — the resume target reads the closure.
+- `docs/brainstorm/mission-service.md:316-319`, `:351` — the evidence of an `examine` node and the delete scope.
+- `docs/brainstorm/mission-service.md:386-388`, `:402`, `:408`, `:414-419` — the evaluation scope and the context check of the dependency outcomes.
+- `docs/brainstorm/mission-service.md:514-520` — the readiness condition.
+- `docs/brainstorm/mission-service.md:601-607` — the resume target reads the closure.
 - `docs/brainstorm/mission-service.impl.md:199-203`, `:565` — the dependency edit codes and the forced retirement.
 - `docs/brainstorm/mission-service.impl.md:236`, `:241`, `:261-273` — `dependency_outcome_ids`, `dependency_node_ids`, the proposal content and `context_matches`.
 - `docs/brainstorm/mission-service.impl.md:302-312` — the fix-node proposal.
@@ -44,15 +44,15 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
 - `docs/brainstorm/mission-service.impl.md:450`, `:485-486` — the dependency read resolves to the revision of the current outcome; the outcome context.
 - `docs/brainstorm/mission-service.impl.md:505-509`, `:527-530` — `node ready`, `node resume` and `unsatisfied_ids`.
 - `docs/brainstorm/mission-service.impl.md:670`, `:692`, `:737`, `:752`, `:757-759` — the tests of the dependency set, of the attempt-0 outcome, of the delete scope, of the cycle and of the dependency edit refusals.
-- `docs/brainstorm/mission-service.impl.md:877-879` — the CLI codes of the dependency reads.
+- `docs/brainstorm/mission-service.impl.md:880-882` — the CLI codes of the dependency reads.
 - `docs/brainstorm/mission-service.vocabulary.md:279`, `:467` — the readiness condition and the dependency closure.
 - `docs/brainstorm/mission-service.md:31`, `:79`, `:87` — an `examine` node reads zero or more repositories, changes none and requires no external action.
 - `docs/brainstorm/mission-service.impl.md:57-61`, `:108`, `:356` — the rule table, the empty action set of an `examine` node and the tested input list.
 - `docs/brainstorm/worker-service.md:86`, `:96-102` — the repository list of the work prompt and one project prompt part for each repository binding.
-- `docs/brainstorm/worker-service.md:289-292`, `:300` — the layout rule and the workspace of an `examine` node.
-- `docs/brainstorm/worker-service.md:420-428`, `:538-548`, `:557` — the steps method of an `examine` node, the reviewer reads and the proposals.
-- `docs/brainstorm/worker-service.impl.md:390`, `:548-552`, `:564`, `:580` — the repositories of an `examine` node, its tests and its workspace.
-- `docs/brainstorm/agent.impl.md:278-280` — the template variables.
+- `docs/brainstorm/worker-service.md:289-292`, `:301` — the layout rule and the workspace of an `examine` node.
+- `docs/brainstorm/worker-service.md:422-431`, `:541-551`, `:560` — the steps method of an `examine` node, the reviewer reads and the proposals.
+- `docs/brainstorm/worker-service.impl.md:390`, `:548-552`, `:566`, `:582` — the repositories of an `examine` node, its tests and its workspace.
+- `docs/brainstorm/agent.impl.md:268-284` — the template values of `work`, `evaluation` and `examine`.
 - `docs/brainstorm/scheduler-service.impl.md:80-93` — the eligibility conditions.
 
 ## Depends on
@@ -81,7 +81,7 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
   4. `closureUnsatisfied` (`src/mission/conditions.ts:13-29`) reads the direct dependencies. `readinessOf` (`:31-57`) answers `holds` exactly when the closure holds; delete `objectives_not_terminal`.
   5. `requireReady` (`src/mission/control-hold.ts:30-47`) answers `details: { unsatisfied_ids }` alone (`mission-service.impl.md:507-508`).
   6. Delete `computeInitiativeClaimable` (`src/mission/admission.ts:50-56`) and `readCurrentChildStates` (`src/mission/store.ts:485-495`).
-- Cite: `mission-service.md:53-56`, `:513-519`, `:600-606`; `mission-service.impl.md:505-509`, `:527-530`; `mission-service.vocabulary.md:467`.
+- Cite: `mission-service.md:53-56`, `:514-520`, `:601-607`; `mission-service.impl.md:505-509`, `:527-530`; `mission-service.vocabulary.md:467`.
 - Verify: `node --test --test-timeout=30000 src/mission/graph.test.ts src/mission/conditions.test.ts src/mission/control-hold.test.ts` with the cases "an initiative with no dependency is Available", "the closure of A holds B alone when A depends on B and B depends on C", "a self dependency is a cycle".
 
 ### 02.2 Refuse a dependency edit on a dependent in a guarded state
@@ -116,7 +116,7 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
   5. `proposalApproveResultSchema` (`:1118-1121`) becomes `{ created: nodeChangeSchema, proposer: controlResultSchema }` (`mission-service.impl.md:307`).
   6. Replace the three `execution.objective.*` operations (`:1340-1381`) by `execution.dependency.list`, `execution.dependency.outcome.list` and `execution.dependency.evidence.list` with the paths of the Provides table. Rename `executionObjectiveSchema` (`:1264-1268`) to `executionDependencySchema`, built on the runnable node schema.
   7. Rewrite the descriptions of `proposal.list` and `proposal.approve` (`:1793`, `:1809`) to name the fix-node proposal and the proposer.
-- Cite: `mission-service.impl.md:236`, `:261-263`, `:302-309`, `:877-879`.
+- Cite: `mission-service.impl.md:236`, `:261-263`, `:302-309`, `:880-882`.
 - Verify: `node --test --test-timeout=30000 src/mission/contract.test.ts`.
 
 ### 02.5 Admit the dependency outcomes and the proposals of an assessment
@@ -128,14 +128,14 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
   3. Write and read `dependency_outcome_ids` in `insertAssessment` (`src/mission/record-store.ts:351-383`), `writeHumanRecords` (`src/mission/control.ts:159`) and `submitAssessment` (`src/mission/assessment-submit.ts:85`, `:138`).
   4. `assessmentRecord` (`src/mission/record-read.ts:237-260`) derives `dependency_node_ids`.
   5. `ProposalRow.created_node_id` and `markProposalApproved(tx, id, createdNodeId, at)` (`src/mission/proposal-store.ts:12-80`).
-- Cite: `mission-service.md:401`, `:407`; `mission-service.impl.md:241`, `:261-264`.
+- Cite: `mission-service.md:402`, `:408`; `mission-service.impl.md:241`, `:261-264`.
 - Verify: `node --test --test-timeout=30000 src/mission/assessment-admit.test.ts src/mission/assessment-submit.test.ts src/mission/record-read.test.ts src/mission/proposal.test.ts`.
 
 ### 02.6 Check the dependency outcomes in the currency
 
 - Files: `src/mission/currency.ts` (edit)
 - Do: replace `childrenMatch` (`src/mission/currency.ts:22-47`) by `dependenciesMatch`. For an initiative, the nodes of `dependency_outcome_ids` equal the direct dependencies of the node, and each named outcome is the current outcome of its node. For an objective the check passes.
-- Cite: `mission-service.md:414`; `mission-service.impl.md:270-271`.
+- Cite: `mission-service.md:415`; `mission-service.impl.md:270-271`.
 - Verify: `node --test --test-timeout=30000 src/mission/currency.test.ts` with the cases "a removed dependency makes an assessment not current" and "a new dependency outcome makes an assessment not current".
 
 ### 02.7 Serve the dependency reads of an execution
@@ -159,7 +159,7 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
   3. `requireRepositoryAddress` and `requireTestedInput` (`:93-120`, `:159-202`) check the tested input of an initiative against that list: one address for one binding, else one address for each binding in binding order (`mission-service.impl.md:356`).
   4. The required external actions of an initiative stay empty, whatever repository binding it names (`mission-service.impl.md:108`).
   5. `admitDelete` (`src/mission/evidence-delete.ts:44-74`) requires a terminal state on the node of the evidence and on each direct dependent that is an initiative. It reads no ancestor.
-- Cite: `mission-service.md:31`, `:79`, `:87`, `:350`; `mission-service.impl.md:57-61`, `:108`, `:356`, `:421-422`, `:737`.
+- Cite: `mission-service.md:31`, `:79`, `:87`, `:351`; `mission-service.impl.md:57-61`, `:108`, `:356`, `:421-422`, `:737`.
 - Verify: `node --test --test-timeout=30000 src/mission/content.test.ts src/mission/evidence-content.test.ts src/mission/frozen-action.test.ts src/mission/evidence-delete.test.ts` with "an initiative accepts zero, one and two repository bindings", "the tested input of an initiative with two repository bindings is a list in binding order" and "an initiative with a repository binding requires no external action".
 
 ### 02.9 Approve a fix-node proposal through a dependency
@@ -185,11 +185,11 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
 - Do:
   1. `method-clients.ts:14-16` names the three `execution.dependency.*` operations.
   2. `readObjectives` (`src/worker/unit/node-reads.ts:77-99`) becomes `readDependencies`, and `ExecutionObjective` becomes `ExecutionDependency`. Delete `allTerminal` (`:198-204`).
-  3. `runStepsInitiative` (`src/worker/unit/steps-initiative.ts:22-109`) reads `readDependencies` and drops the `allTerminal` gate (`:42-43`, `:81`), because readiness already requires every direct dependency to be `Completed` (`worker-service.md:421`). `REPORT_SUBJECT` becomes "Report on current dependency outcomes".
+  3. `runStepsInitiative` (`src/worker/unit/steps-initiative.ts:22-109`) reads `readDependencies` and drops the `allTerminal` gate (`:42-43`, `:81`), because readiness already requires every direct dependency to be `Completed` (`worker-service.md:423`). `REPORT_SUBJECT` becomes "Report on current dependency outcomes".
   4. `report-facts.ts:10-71` labels each row as a dependency, with the header `| Dependency | Node | …`.
   5. `judgement.ts`: `proposalSchema` (`:33-44`) names `dependency_id`; `evaluationInstruction` (`:235-257`) passes `examine` and `dependencies`; `reportInstruction` (`:259-272`) passes `dependencies`.
   6. `evaluation.ts:75-212` writes `dependency_outcome_ids` from the dependency outcomes and keeps proposals for an initiative alone.
-- Cite: `worker-service.md:420-428`, `:538-540`, `:557`; decision D16.
+- Cite: `worker-service.md:422-431`, `:541-543`, `:560`; decision D16.
 - Verify: `node --test --test-timeout=30000 'src/worker/unit/*.test.ts'`.
 
 ### 02.12 Check out the repositories of an initiative under the layout rule
@@ -203,19 +203,21 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
   4. The project prompt of an initiative holds one part for each repository binding in binding order. Each part joins the agent files of that checkout and the `project_prompt` of that binding (`src/worker/unit/native-agent.ts:171-187`, `src/agent/prompt-layers.ts:300-325`). The evaluation takes the `project_prompt` of each binding only.
   5. With two or more bindings, the work prompt lists each repository binding with its directory and its base branch. The work prompt render (`src/agent/prompt-composer.ts:84-93`) passes `repositories: { name; directory; base_branch }[]`, and `work.md` renders the list only when it holds two or more entries.
   6. The steps method of an initiative creates no node branch, makes no commit and pushes nothing.
-- Cite: `worker-service.md:86`, `:96-102`, `:289-292`, `:300`, `:420-428`, `:545-548`; `worker-service.impl.md:390`, `:548-552`, `:564`.
+- Cite: `worker-service.md:86`, `:96-102`, `:289-292`, `:301`, `:422-431`, `:548-551`; `worker-service.impl.md:390`, `:548-552`, `:566`.
 - Verify: `node --test --test-timeout=30000 src/worker/unit/workspace.test.ts src/worker/unit/evaluation-input.test.ts src/worker/unit/steps-initiative.test.ts src/agent/prompt-layers.test.ts` with "an initiative with two bindings checks out each base-branch head under checkouts/ and records one tested commit for each", "an initiative with one binding uses the checkout as the agent root" and "an initiative with no binding places the produced evidence".
 
-### 02.13 Rewrite the report and evaluation templates
+### 02.13 Rename the report template to `examine` and rewrite the evaluation template
 
-- Files: `static/prompt/template/report.md`, `static/prompt/template/evaluation.md`, `src/agent/prompt-templates.test.ts` (edit)
-- Lane: main session (decision D20).
+- Files: `static/prompt/template/report.md` → `static/prompt/template/examine.md`; `static/prompt/template/evaluation.md`, `src/agent/contract.ts`, `src/worker/unit/judgement.ts`, `src/worker/unit/steps-initiative.ts`, `src/agent/prompt-templates.test.ts`, `src/worker/unit/judgement.test.ts` (edit)
+- Lane: main session for `static/` (decision D20).
 - Do:
-  1. `report.md`: "each current objective" becomes "each direct dependency"; `{{json objectives}}` becomes `{{json dependencies}}` under the label "Dependencies:".
-  2. `evaluation.md`: `{{#if initiative}}` becomes `{{#if examine}}`; "objective context" becomes "dependency context" with `{{json dependencies}}`; the proposal sentence and the proposal JSON name `dependency_id` and "Fix node name".
-  3. `src/agent/prompt-templates.test.ts:105-115` renders `report.md` with `{ dependencies, outcomes, evidence, verification }`.
-- Cite: `agent.impl.md:278-280`; `mission-service.impl.md:263`; decision D16.
-- Verify: `node --test --test-timeout=30000 src/agent/prompt-templates.test.ts src/worker/unit/judgement.test.ts`.
+  1. `git mv static/prompt/template/report.md static/prompt/template/examine.md`. `PromptTemplate.Report: "report"` (`src/agent/contract.ts:114`) becomes `PromptTemplate.Examine: "examine"`. The loader list `TEMPLATE_NAMES` (`src/agent/prompt-templates.ts:22`) and the shipped asset path (`src/agent/prompt-assets.ts:9`) follow the enum, and the operator override file becomes `<agent directory>/prompts/examine.md` (`src/agent/prompt-templates.ts:15`, `:72`). No override reads `report.md` (decision D2).
+  2. `reportInstruction` (`src/worker/unit/judgement.ts:259-272`) becomes `examineInstruction(templates, { repositories, verification, dependencies, outcomes, evidence })`. `steps-initiative.ts:69` calls it.
+  3. Rewrite `examine.md` for an `examine` node. The agent examines the checkouts of `repositories` with its tools. The execution code runs the node verifications and gives `verification` to the agent. The agent judges the findings against the node criterion and writes them in the full finding format. A section of `dependencies`, `outcomes` and `evidence` renders only when the node has a direct dependency. A list of `repositories` with their directories and base branches renders only when the node names a repository binding.
+  4. `evaluation.md`: `{{#if initiative}}` becomes `{{#if examine}}`; "objective context" becomes "dependency context" with `{{json dependencies}}`; the proposal sentence and the proposal JSON name `dependency_id` and "Fix node name".
+  5. `src/agent/prompt-templates.test.ts:105-115` renders `examine.md` with and without dependencies, and with zero and two repositories.
+- Cite: `agent.impl.md#prompt-templates`; `worker-service.md#executions`; `mission-service.impl.md:263`; decision D16.
+- Verify: `node --test --test-timeout=30000 src/agent/prompt-templates.test.ts src/worker/unit/judgement.test.ts src/worker/unit/steps-initiative.test.ts`; `rg -n 'PromptTemplate.Report|reportInstruction|template/report' src static` prints nothing.
 
 ### 02.14 Change the CLI leaves of the reads and the proposals
 
@@ -223,7 +225,7 @@ Opus at medium effort. The currency, the proposal admission and the evidence sco
 - Do:
   1. `addObjectiveReads` (`src/apps/cli/mission-execution.ts:160-205`) becomes `addDependencyReads` with the commands `execution dependency list`, `execution dependency outcome list` and `execution dependency evidence list`. The local codes follow `cli.mission.execution.dependency.*.invalid_execution_id`.
   2. The descriptions of `src/apps/cli/mission-proposal.ts:40`, `:45`, `:68` name the fix-node proposal and the `examine` node.
-- Cite: `mission-service.impl.md:877-879`.
+- Cite: `mission-service.impl.md:880-882`.
 - Verify: `node --test --test-timeout=30000 src/apps/cli/completeness.test.ts`.
 
 ### 02.15 Move the server fixtures to dependencies

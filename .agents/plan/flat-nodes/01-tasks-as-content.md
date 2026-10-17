@@ -25,7 +25,7 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 
 - `docs/brainstorm/mission-service.md:40-46` — a task is content of its node, with no edge, state, attempt or priority; zero or more tasks; a node with no task is its own single work unit.
 - `docs/brainstorm/mission-service.md:256` — the import coverage rule applies only to a node with one or more tasks.
-- `docs/brainstorm/worker-service.md:325-329`; `docs/brainstorm/worker-service.impl.md:512`, `:539`, `:562` — the single work unit of a node with no task, its judged key and its tests.
+- `docs/brainstorm/worker-service.md:326-331`; `docs/brainstorm/worker-service.impl.md:512`, `:539`, `:562` — the single work unit of a node with no task, its judged key and its tests.
 - `docs/brainstorm/mission-service.md:99-105`, `:119` — the priority of a node; the node API update creates, changes and removes tasks.
 - `docs/brainstorm/mission-service.md:163`, `:184-187` — a retirement and the import condition of a task; an import moves a task.
 - `docs/brainstorm/mission-service.md:238-241` — a task holds no revision; its content belongs to the revision of its node.
@@ -37,13 +37,14 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
 - `docs/brainstorm/mission-service.impl.md:185` — the import result maps each task file name to its task identity.
 - `docs/brainstorm/mission-service.impl.md:205` — the identity of a removed task answers `mission.import.retired_id`.
 - `docs/brainstorm/mission-service.impl.md:614-617` — `change.tasks` and the task changes.
-- `docs/brainstorm/mission-service.impl.md:756`, `:825` — the tests of a foreign task, a task binding list, a removed task and the minted identity.
+- `docs/brainstorm/mission-service.impl.md:756`, `:828` — the tests of a foreign task, a task binding list, a removed task and the minted identity.
 - `docs/brainstorm/mission-service.vocabulary.md:419-436` — the content owner.
 - `docs/brainstorm/scheduler-service.md:110` — a task is never a unit of scheduling.
 
 ## Depends on
 
-- Engine `main` at `54380cd9` or later. Pull request #87 of the root repository merged.
+- Engine `main` at `54380cd9` or later.
+- Pull request #87 of the root repository open at `5fa6db3`. Its design pages are the rule, and task 08.1 merges it (R14, decision D3).
 
 ## Provides
 
@@ -93,7 +94,7 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
   4. Delete `ControlError.Task` and `requireRunnable` task branch (`src/mission/control.ts:38-55`).
   5. Delete `EndpointReason.Task` and its check (`src/mission/dependency.ts:34-54`). `validateEndpoints` keeps `cross_mission`.
   6. Delete the task filter of `validateCycle` (`src/mission/dependency.ts:56-84`).
-- Cite: `mission-service.md:42-44`, `:92`, `:764`; `scheduler-service.md:110`; decision D8.
+- Cite: `mission-service.md:42-44`, `:92`, `:765`; `scheduler-service.md:110`; decision D8.
 - Verify: `node --test --test-timeout=30000 src/mission/transitions.test.ts src/mission/control.test.ts src/mission/conditions.test.ts src/mission/record-store.test.ts`.
 
 ### 01.4 Write the tasks through node create
@@ -107,7 +108,7 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
   5. Check each task file name against the node and task file names of the current nodes of the mission (`mission-service.impl.md:161-162`); a used name answers `mission.node.filename_conflict`.
   6. Write `change.tasks` with `created` for each task (`mission-service.impl.md:617`).
   7. Delete the `Task` row of `bindingRules` (`src/mission/content.ts:36-55`).
-- Cite: `mission-service.md:45`, `:119`; `mission-service.impl.md:54`, `:161-162`, `:617`, `:825`; decision D4.
+- Cite: `mission-service.md:45`, `:119`; `mission-service.impl.md:54`, `:161-162`, `:617`, `:828`; decision D4.
 - Verify: a new test in `src/mission/service.test.ts` "node create mints a task identity for each task and writes it in revision 1"; `node --test --test-timeout=30000 src/mission/service.test.ts`.
 
 ### 01.5 Write the tasks through node update and criterion set
@@ -227,9 +228,10 @@ Opus at medium effort. The task identity in the import (creates, moves, retireme
   2. `startCheck` (`:587-620`), the task loop (`:498-536`) and the verification of a unit (`:455-497`) read `workUnitsOf`. The single unit runs the node verifications and judges the node criterion.
   3. `recordJudged` and `judgedAt` (`src/worker/unit/judged-tasks.ts:28-50`) take the node identity as the key of the single unit.
   4. The task choice (`:568-585`) sends no `task-choice` instruction for the single unit. The unit stays pending with the failure text (`worker-service.impl.md:539`).
-  5. The evaluation of an objective with no task judges the node criterion alone.
-- Cite: `mission-service.md:45-46`; `worker-service.md:325-329`; `worker-service.impl.md:512`, `:539`, `:562`.
-- Verify: `node --test --test-timeout=30000 src/worker/unit/steps-objective.test.ts src/worker/unit/steps-objective-check.test.ts` with "an objective with no task runs the node verifications under the node identity as the judged key" and "a failed node verification sends no task-choice instruction".
+  5. The single unit commits its changes with a commit message that names the node identity, before the release with no further work.
+  6. The evaluation of an objective with no task judges the node criterion alone.
+- Cite: `mission-service.md:45-46`; `worker-service.md:326-331`, `worker-service.md#executions` (the commit message of the single work unit); `worker-service.impl.md:512`, `:539`, `:562`.
+- Verify: `node --test --test-timeout=30000 src/worker/unit/steps-objective.test.ts src/worker/unit/steps-objective-check.test.ts` with "an objective with no task runs the node verifications under the node identity as the judged key", "an objective with no task commits its change with the node identity in the message before it releases" and "a failed node verification sends no task-choice instruction".
 
 ### 01.E Run the gate
 

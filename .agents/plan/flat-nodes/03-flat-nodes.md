@@ -8,8 +8,8 @@ This plan delivers:
 - `Work` (`implement`, `examine`) and `requires` in `Content`. The node read answers both at the claim revision.
 - No containment edge, no `node move`, no `NodeKind`, no `EdgeKind`, no descendant retirement, no parent create rule.
 - The node file and task file grammar, the import and the export of both formats.
-- The binding rule table by work with no binding from the project (R11). An `implement` node names exactly one repository binding until plan 09 (decision D28). An `examine` node names zero or more. Every node names zero or more storage bindings as an ordered list.
-- The storage grant over that ordered list: the first enabled binding that the signing call accepts and that holds no failed upload check, the record of a failed upload check, and `mission.evidence.storage_unavailable` (R8, R10, decision D29).
+- The binding rule table by work with no binding from the project (R11). An `implement` node names exactly one repository binding until plan 09b (decision D28). An `examine` node names zero or more. Every node names zero or more storage bindings as an ordered list.
+- The storage grant on the first storage binding of that ordered list, the pin of the chosen binding on the asset, and the read and the delete through the pinned binding. Plan 03b adds the failover (decision D29).
 - `mission.node.work_locked`.
 - `node list --work`.
 - Every `kind`-keyed rule of the release obligation, the frozen action, the evidence, the assessment and the proposal becomes a `work`-keyed rule.
@@ -19,24 +19,25 @@ Out of scope:
 
 - The match, the coverage refusals and `traits` (plan 05). `requires` is stored and read here, and no claim reads it yet.
 - The worker file and symbol renames (plan 04).
-- An `implement` node with two or more repository bindings (plan 09).
+- The storage failover, the failed upload check and the refusal when no storage binding is left (plan 03b, decision D29).
+- An `implement` node with two or more repository bindings (plans 09a and 09b).
 
 ## Model
 
-Opus at medium effort. The plan replaces the kind model in about forty files, and the storage failover is new code.
+Opus at medium effort. The plan replaces the kind model in about forty files.
 
 ## Sources
 
 - `docs/brainstorm/mission-service.md:15-38` — the mission, the node, the work, the requires list and the work lock.
 - `docs/brainstorm/mission-service.md:40-46` — the tasks of an `implement` node; an `implement` node with no task is its own single work unit.
 - `docs/brainstorm/mission-service.md:73-89` — every node names its bindings, the counts by work and the ordered storage list.
-- `docs/brainstorm/mission-service.md:303-307` — the storage grant, the failed upload check and the pinned read and delete.
+- `docs/brainstorm/mission-service.md:303-308` — the storage grant and the pinned read and delete. Plan 03b implements the failover of these lines.
 - `docs/brainstorm/mission-service.md:112`, `:142`, `:161-173` — the human writes the work; a task names its node; the retirement.
 - `docs/brainstorm/mission-service.md:201-203` — the revision covers the work, the requires list and the tasks.
 - `docs/brainstorm/mission-service.md:250-258` — the verification coverage of an `implement` node; an `examine` node holds no task.
-- `docs/brainstorm/mission-service.md:315-320`, `:382-387`, `:409-410`, `:498` — the evidence, the evaluation scope and the start point by work.
+- `docs/brainstorm/mission-service.md:316-321`, `:383-388`, `:410-411`, `:499` — the evidence, the evaluation scope and the start point by work.
 - `docs/brainstorm/mission-service.impl.md:36-77` — the node content, the rule table with no project binding and the content codes.
-- `docs/brainstorm/mission-service.impl.md:363-386` — the object evidence grant and the upload check.
+- `docs/brainstorm/mission-service.impl.md:363-386` — the object evidence grant.
 - `docs/brainstorm/mission-service.impl.md:108` — an `examine` node requires no external action.
 - `docs/brainstorm/mission-service.impl.md:125-150` — the plan file grammar.
 - `docs/brainstorm/mission-service.impl.md:165-191` — the export, the import stages and the import codes.
@@ -45,7 +46,7 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 - `docs/brainstorm/mission-service.impl.md:493-498` — the node read.
 - `docs/brainstorm/mission-service.impl.md:551`, `:561` — the rebind revision and the retirement set.
 - `docs/brainstorm/mission-service.impl.md:613-617` — the revision change and `changed_fields`.
-- `docs/brainstorm/mission-service.impl.md:745-826` — the grammar, rule-table, work-lock and content tests.
+- `docs/brainstorm/mission-service.impl.md:745-829` — the grammar, rule-table, work-lock and content tests.
 - `docs/brainstorm/mission-service.vocabulary.md:11-31`, `:77-105`, `:606-666` — the rule table, the work, the requires list and the plan file example.
 - `docs/brainstorm/project-service.md:42-43` — a node names every binding, and the storage list.
 - `docs/brainstorm/project-service.md:101` — the trait key form.
@@ -62,7 +63,7 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 | ------------------------------------------------------------ | --------------------------------------------------------------------- | --------------------------------- | -------------- |
 | `Work`, `workSchema`                                         | `{ Implement: "implement", Examine: "examine" }`                      | `src/mission/contract.ts`         | 04, 05, 07     |
 | `TRAIT_KEY_PATTERN`, `TRAIT_KEY_MAX_BYTES`, `traitKeySchema` | `/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/`, `64`                       | `src/kernel/trait.ts`             | 05             |
-| `storageBindingIdsOf`                                        | `(tx, bindings, revision): string[]` in write order                   | `src/mission/evidence-content.ts` | 09             |
+| `storageBindingIdsOf`                                        | `(tx, bindings, revision): string[]` in write order                   | `src/mission/evidence-content.ts` | 03b            |
 | `Node.work`, `Node.requires`                                 | at the revision that the open attempt pins, else the current revision | `src/mission/contract.ts`         | 05, 07         |
 | `MissionErrorCode.WorkLocked`                                | `mission.node.work_locked`                                            | `src/mission/contract.ts`         | 07             |
 
@@ -111,11 +112,11 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 
 - Files: `src/mission/content.ts`, `src/mission/content.test.ts` (edit)
 - Do:
-  1. `bindingRules` (`src/mission/content.ts:36-55`) becomes `Record<Work, Record<BindingKind, Range>>` with the table of `mission-service.impl.md:57-61`. The repository range of `implement` is exactly one until plan 09 (decision D28).
+  1. `bindingRules` (`src/mission/content.ts:36-55`) becomes `Record<Work, Record<BindingKind, Range>>` with the table of `mission-service.impl.md:57-61`. The repository range of `implement` is exactly one until plan 09b (decision D28).
   2. `validateNodeContent` (`:86-128`) takes `work`. An `examine` node with a task, an unknown `work`, a nonlist `requires`, a repeated key or a malformed key answer `mission.node.content_invalid` (`mission-service.impl.md:65`).
   3. `checkBindingRuleTable(work, resolved)` (`:153-177`) reads the row of the work.
   4. Add `resolveNodeBindings(tx, bindings, work, named)`. It resolves each named binding to the latest revision of that binding, keeps the write order, and takes no binding from the project (`mission-service.impl.md:52-53`). A repeated name, an absent list and a rule-table violation answer `mission.node.bindings_invalid` (`mission-service.impl.md:75`).
-- Cite: `mission-service.md:73-87`; `mission-service.impl.md:48-61`, `:75`, `:788`, `:822`; decision D28.
+- Cite: `mission-service.md:73-87`; `mission-service.impl.md:48-61`, `:75`, `:788`, `:825`; decision D28.
 - Verify: `node --test --test-timeout=30000 src/mission/content.test.ts` covering every cell of the rule table, "an implement node that names no repository binding answers mission.node.bindings_invalid", "an implement node with two repository bindings answers mission.node.bindings_invalid", "an examine node accepts zero, one and two repository bindings", "two storage bindings keep their write order" and "a write takes no binding from the project".
 
 ### 03.5 Parse node files and task files
@@ -190,46 +191,36 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 - Cite: `mission-service.impl.md:108`, `:230`, `:263`, `:306`, `:317`, `:354-358`.
 - Verify: `node --test --test-timeout=30000 src/mission/transitions.test.ts src/mission/frozen-action.test.ts src/mission/evidence-content.test.ts src/mission/proposal.test.ts`.
 
-### 03.11 Grant an upload on the first working storage binding
+### 03.11 Grant an upload on the first storage binding of the list
 
 - Files: `src/mission/evidence-content.ts`, `src/mission/evidence-submit.ts`, `src/mission/authorization.ts`, `src/mission/evidence-content-read.ts`, `src/mission/evidence-delete.ts` and their tests (edit)
 - Do:
-  1. `storageBindingIdsOf(tx, bindings, revision)` replaces `storageBindingIdOf` (`src/mission/evidence-content.ts:73-82`). It answers the storage bindings of the revision in write order.
-  2. `submitEvidence` (`src/mission/evidence-submit.ts:168-214`) takes, for each `object` asset, the first storage binding of that list that is enabled, that `intake.storage.put` accepts, and that holds no failed upload check of decision D29. A refused signing call moves to the next binding. The commit pins the chosen binding in `storage_binding_id` (`:109-151`).
-  3. A node with no storage binding answers 409 `mission.evidence.storage_binding_absent`. A node whose storage bindings all fail the rule answers 409 `mission.evidence.storage_unavailable` (`mission-service.impl.md:374-376`).
+  1. `storageBindingIdsOf(tx, bindings, revision)` replaces `storageBindingIdOf` (`src/mission/evidence-content.ts:73-82`). It answers the storage bindings of the revision in write order. The single-match assert of `bindingOf` (`:61`) no longer serves the storage kind.
+  2. `submitEvidence` (`src/mission/evidence-submit.ts:168-214`) takes the first storage binding of that list for each `object` asset. The commit pins it in `storage_binding_id` (`:109-151`). Plan 03b adds the failover.
+  3. A node with no storage binding answers 409 `mission.evidence.storage_binding_absent` (`mission-service.impl.md:374`).
   4. `authorizeObjectPut` (`src/mission/authorization.ts:495-528`) admits the binding that the asset names when the storage list of the pinned revision holds it.
   5. A read and a delete of an asset use the binding that the asset pins and move to no other binding (`src/mission/evidence-content-read.ts:150-180`, `src/mission/evidence-delete.ts:105-115`).
-- Cite: `mission-service.md:83-85`, `:303-307`; `mission-service.impl.md:53`, `:370-378`, `:791`; decision D29.
-- Verify: `node --test --test-timeout=30000 src/mission/evidence-submit.test.ts src/mission/authorization.test.ts src/mission/evidence-content-read.test.ts src/mission/evidence-delete.test.ts` with "a disabled first binding grants the second", "a refused signing call grants the next binding", "no binding left answers mission.evidence.storage_unavailable" and "a read uses the pinned binding".
+- Cite: `mission-service.md:83-85`, `:308`; `mission-service.impl.md:53`, `:374`; decision D29.
+- Verify: `node --test --test-timeout=30000 src/mission/evidence-submit.test.ts src/mission/authorization.test.ts src/mission/evidence-content-read.test.ts src/mission/evidence-delete.test.ts` with "two storage bindings grant the first", "a node with no storage binding answers mission.evidence.storage_binding_absent" and "a read uses the pinned binding".
 
-### 03.12 Record a failed upload check
-
-- Files: `src/mission/migrations.ts`, `src/mission/record-store.ts`, `src/mission/evidence-complete.ts`, `src/apps/server/migrations.test.ts` and their tests (edit)
-- Do:
-  1. In `createExecutionRecordTables` of `src/mission/migrations.ts` add `mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at)` with the primary key `(node_id, attempt, storage_binding_id)` (decisions D2, D29).
-  2. `completeEvidence` (`src/mission/evidence-complete.ts:66-110`) writes one failure row when `intake.storage.check` answers `intake.storage.object_mismatch` (`src/intake/storage.ts:119-124`), then answers the refusal. The asset stays unpublished.
-  3. The grant of task 03.11 skips a binding that holds a failure row of the same node and attempt.
-- Cite: `mission-service.md:304-305`; `mission-service.impl.md:385`; decision D29.
-- Verify: `node --test --test-timeout=30000 src/mission/evidence-complete.test.ts src/mission/evidence-submit.test.ts src/apps/server/migrations.test.ts` with "a failed check records the binding, and the next submission of the attempt takes the next binding".
-
-### 03.13 Answer the work and the requires list on the node read
+### 03.12 Answer the work and the requires list on the node read
 
 - Files: `src/mission/node-read.ts` (edit)
 - Do: `nodeRecord` (`src/mission/node-read.ts:95-142`) answers `work` and `requires` at the revision that the open attempt pins, else at the current revision, and drops `parent_id`.
 - Cite: `mission-service.impl.md:493-498`.
 - Verify: a test in `src/mission/service.test.ts` "node get answers work and requires of the pinned revision while an attempt is open".
 
-### 03.14 Update the colocated Mission tests
+### 03.13 Update the colocated Mission tests
 
 - Files: `src/mission/*.test.ts`, `src/mission/test-support.ts` (edit)
 - Do:
   1. `evidenceHarness` and `controlHarness` (`src/mission/test-support.ts:101-219`) insert flat nodes with `work`.
   2. Replace each initiative fixture by an `examine` node and each objective fixture by an `implement` node. Delete the tests of `node move`, of the containment, of `create_refused`, of `kind_changed` and of the descendant retirement.
-  3. Add the grammar, rule-table and work-lock tests of `mission-service.impl.md:745-826` that the tasks above do not cover.
+  3. Add the grammar, rule-table and work-lock tests of `mission-service.impl.md:745-829` that the tasks above do not cover.
 - Cite: decision D19.
 - Verify: `node --test --test-timeout=30000 'src/mission/*.test.ts'`.
 
-### 03.15 Select the worker method form by work
+### 03.14 Select the worker method form by work
 
 - Files: `src/worker/unit/node-reads.ts`, `src/worker/unit/native-method.ts`, `src/worker/unit/native-agent.ts`, `src/worker/unit/evaluation.ts`, `src/worker/unit/evaluation-input.ts`, `src/worker/unit/judgement.ts`, `src/worker/unit/test-support.ts` and their tests (edit)
 - Do:
@@ -240,7 +231,7 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 - Cite: `worker-service.md:39-40`; `worker-service.impl.md:56`.
 - Verify: `node --test --test-timeout=30000 'src/worker/unit/*.test.ts'`.
 
-### 03.16 Change the Mission CLI leaves
+### 03.15 Change the Mission CLI leaves
 
 - Files: `src/apps/cli/mission.ts` (edit)
 - Do:
@@ -250,7 +241,7 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 - Cite: decisions D6, D8; `mission-service.impl.md:495`.
 - Verify: `node --test --test-timeout=30000 src/apps/cli/index.test.ts src/apps/cli/completeness.test.ts`.
 
-### 03.17 Move the server fixtures to flat nodes
+### 03.16 Move the server fixtures to flat nodes
 
 - Files: `src/apps/server/journey-support.ts`, `src/apps/server/delivery-support.ts`, `src/apps/server/test-support.ts`, `src/apps/server/e2e-*.test.ts`, `src/apps/server/*-integration.test.ts`, `src/apps/server/mission-record-transport.test.ts` (edit)
 - Do:
@@ -261,7 +252,7 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 - Cite: decision D19.
 - Verify: `node --test --test-timeout=60000 'src/apps/server/*.test.ts'`.
 
-### 03.18 Regenerate OpenAPI
+### 03.17 Regenerate OpenAPI
 
 - Files: `static/openapi.yaml`, `static/openapi/mission/*.yaml` (generated), `src/apps/server/openapi-integration.test.ts` (edit)
 - Lane: main session (decision D20).
@@ -271,14 +262,14 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 - Cite: `engine/AGENTS.md:454-463`.
 - Verify: `node --test --test-timeout=60000 src/apps/server/openapi-integration.test.ts`.
 
-### 03.19 Rewrite the Mission CLI page and the engine map
+### 03.18 Rewrite the Mission CLI page and the engine map
 
 - Files: `docs/cli/mission.md`, `docs/cli/scheduler.md`, `AGENTS.md` (edit)
 - Lane: main session (decision D20).
 - Do:
   1. `docs/cli/mission.md`: the scope and the domain (`:35`, `:50`, `:59-79`, `:88`, `:123`), the inventory (`:194`, `:198`, `:201`), the filters (`:212-217`), the node and import sections (`:222-332`), the schema rows (`:719-761`, `:777`, `:819`, `:855-866`, `:904-910`), the binding table by work (`:737-743`) and the error rows (`:977`, `:986`, `:988`, `:991`, `:1059-1060`, `:1077-1078`, `:1082`, `:1085`, `:1090-1091`, `:1102`). Add the rows `mission.node.work_locked` and `cli.mission.node.list.invalid_work`.
   2. `docs/cli/scheduler.md:319`, `:552`: no objective, no parent effect.
-  3. `AGENTS.md`: delete the row of `node-move.ts`; add the rows of `graph.ts`, `edge-read.ts` and `src/kernel/trait.ts`; rewrite `:152` as "Readiness, direct-dependency closure, and continuation conditions".
+  3. `AGENTS.md`: add the rows of `src/mission/graph.ts`, `src/mission/edge-read.ts` and `src/kernel/trait.ts` to the file tree; the tree holds no row of `node-move.ts`; rewrite `:152` as "Readiness, direct-dependency closure, and continuation conditions".
 - Cite: root `AGENTS.md:107-108`; decision D22.
 - Verify: `pnpm exec prettier --check docs/cli/mission.md docs/cli/scheduler.md AGENTS.md`.
 
@@ -291,18 +282,17 @@ Opus at medium effort. The plan replaces the kind model in about forty files, an
 
 `e2e-mission-service.test.ts` adds these rows. Setup imports the six Markdown files of the import set example (`mission-service.vocabulary.md:579-586`), with the content of the plan file example (`:606-660`).
 
-| Id      | Commands                                                                                                           | Exit | Expect                                                                                                 |
-| ------- | ------------------------------------------------------------------------------------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------ |
-| EF03.1  | `kanthord mission import preview` and `apply` of the set                                                           | 0, 0 | three nodes and three edges; `add-password-reset.md` holds two tasks; `account-recovery.md` holds none |
-| EF03.2  | `kanthord mission node list <missionId> --work examine`                                                            | 0    | one item, `work` `examine`, `requires` `[]`                                                            |
-| EF03.3  | An import that changes `node:` of a task file to `account-recovery.md`                                             | 1    | stderr starts with `mission.import.reference_kind_invalid:`                                            |
-| EF03.4  | `kanthord mission node ready <implementId>`, then `node update` that sets `work: examine`                          | 0, 1 | stderr starts with `mission.node.work_locked:`                                                         |
-| EF03.5  | `kanthord mission node list <missionId> --work task`                                                               | 1    | stderr starts with `cli.mission.node.list.invalid_work:`                                               |
-| EF03.6  | `kanthord mission export <missionId> --format markdown`                                                            | 0    | each node file holds `work:` and `requires:`, each task file holds `node:`                             |
-| EF03.7  | `kanthord mission node create` of an `implement` node with `bindings: []`; then with two repository bindings       | 1, 1 | stderr starts with `mission.node.bindings_invalid:` each time                                          |
-| EF03.8  | `kanthord mission node create` of an `examine` node with `bindings: []`                                            | 0    | the revision holds no binding; the project holds one repository binding                                |
-| EF03.9  | `e2e-storage-grants.test.ts`: an `implement` node with two storage bindings, the first disabled; `evidence upload` | 0    | the asset pins the second binding                                                                      |
-| EF03.10 | the same node with both storage bindings disabled; `evidence upload`                                               | 1    | stderr starts with `mission.evidence.storage_unavailable:`                                             |
+| Id     | Commands                                                                                                     | Exit | Expect                                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------ |
+| EF03.1 | `kanthord mission import preview` and `apply` of the set                                                     | 0, 0 | three nodes and three edges; `add-password-reset.md` holds two tasks; `account-recovery.md` holds none |
+| EF03.2 | `kanthord mission node list <missionId> --work examine`                                                      | 0    | one item, `work` `examine`, `requires` `[]`                                                            |
+| EF03.3 | An import that changes `node:` of a task file to `account-recovery.md`                                       | 1    | stderr starts with `mission.import.reference_kind_invalid:`                                            |
+| EF03.4 | `kanthord mission node ready <implementId>`, then `node update` that sets `work: examine`                    | 0, 1 | stderr starts with `mission.node.work_locked:`                                                         |
+| EF03.5 | `kanthord mission node list <missionId> --work task`                                                         | 1    | stderr starts with `cli.mission.node.list.invalid_work:`                                               |
+| EF03.6 | `kanthord mission export <missionId> --format markdown`                                                      | 0    | each node file holds `work:` and `requires:`, each task file holds `node:`                             |
+| EF03.7 | `kanthord mission node create` of an `implement` node with `bindings: []`; then with two repository bindings | 1, 1 | stderr starts with `mission.node.bindings_invalid:` each time                                          |
+| EF03.8 | `kanthord mission node create` of an `examine` node with `bindings: []`                                      | 0    | the revision holds no binding; the project holds one repository binding                                |
+| EF03.9 | `e2e-storage-grants.test.ts`: an `implement` node with two storage bindings; `evidence upload`               | 0    | the asset pins the first binding                                                                       |
 
 ## Blockers
 

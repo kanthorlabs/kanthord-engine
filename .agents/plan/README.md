@@ -9,6 +9,6 @@ Each ERD page of `docs/reference/erd/` has one plan set in its own directory. Th
 | 3 — External integration     | `docs/reference/erd/03-integration.md` | [`erd-03-integration/`](erd-03-integration/00-index.md) | Planned; blockers B1–B11 open |
 | 4 — Telemetry                | `docs/reference/erd/04-tracking.md`    | `erd-04-tracking/`                                      | Not planned                   |
 
-One plan set follows no ERD page. [`flat-nodes/`](flat-nodes/00-index.md) implements the flat-node model and the rulings R1 to R14 of the root design pages of pull request #87 in the plans 01 to 09. Its status is Planned.
+One plan set follows no ERD page. [`flat-nodes/`](flat-nodes/00-index.md) implements the flat-node model and the rulings R1 to R14 of the root design pages of pull request #87 in the plans 01 to 10, with the plans 03b, 09a and 09b. Its status is Planned.
 
 Cite a plan by its set and file, for example `erd-01-setup/05-project-service.md` task 05.9, because every set reuses the plan numbers.

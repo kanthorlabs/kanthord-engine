@@ -4,7 +4,7 @@ The plans cite these decisions as D1 to D29. Each decision binds every plan and 
 
 ## D1 — Source and gaps
 
-The design pages at root `6b48a56` are the rule. A plan task implements the page as written. A task that meets a gap that no decision below covers writes one `DEBATE:` line in its report with the page line that proves the gap. The main session brings it to Ulrich as one open item. Cross-plan alignment, a split of a task and a one-line fix are plan work, never a gap.
+The design pages at the head of pull request #87, root `5fa6db3`, are the rule. A plan task implements the page as written. A task that meets a gap that no decision below covers writes one `DEBATE:` line in its report with the page line that proves the gap. The main session brings it to Ulrich as one open item. Cross-plan alignment, a split of a task and a one-line fix are plan work, never a gap.
 
 ## D2 — Schema in place and the database discard
 
@@ -88,7 +88,9 @@ An export entry requires `id`. A Markdown export writes `requires` on every node
 
 ## D16 — Prompt template variables
 
-- `report.md` takes `dependencies`, `outcomes`, `evidence` and `verification` (`agent.impl.md:280`).
+- `report.md` becomes `examine.md` in plan 02 (task 02.13). `PromptTemplate.Report` becomes `PromptTemplate.Examine`, and the operator override file becomes `prompts/examine.md`. `examine.md` takes `repositories`, `verification`, `dependencies`, `outcomes` and `evidence` (`agent.impl.md:280`).
+- `work.md` takes `repositories` from plan 02 on (task 02.12). The list is empty for a node with one repository binding (`agent.impl.md:270`, `:283`).
+- `conflict.md` takes `binding`, `directory`, `base_branch` and `files` from plan 09b on (`agent.impl.md:278`).
 - `evaluation.md` takes `examine` (boolean, replaces `initiative`), `tasks`, `tested_input`, `results`, `evidence`, `dependencies` (replaces `objectives`) and `marker` (`agent.impl.md:279`).
 - The proposal JSON of the evaluation template names `dependency_id` (`mission-service.impl.md:263`).
 
@@ -104,7 +106,7 @@ An export entry requires `id`. A Markdown export writes `requires` on every node
 | `readObjectives`, `ExecutionObjective`      | `readDependencies`, `ExecutionDependency` |
 | `NativeAgentInput.nodeKind`                 | `NativeAgentInput.work`                   |
 
-The workspace path of an `implement` node stays `workspaces/<node identity>/<repository binding identity>/` until plan 09 (decision D28).
+The workspace path of an `implement` node stays `workspaces/<node identity>/<repository binding identity>/` until plan 09b (decision D28).
 
 ## D18 — The todoapp fixture copy
 
@@ -132,9 +134,9 @@ No code implements `scheduler.eligibility.get` or the on-demand request. Plans 0
 
 ## D24 — The coverage check placement
 
-`mission-service.impl.md:66` names the node writes that run the coverage check.
+`mission-service.impl.md:66` names five node writes that run the coverage check. `node rebind` runs it too, because a rebind writes a node revision (`mission-service.impl.md#the-rebind`). The coverage check therefore runs in six handlers.
 
-The check sits in one function `guardCoverage(tx, dependencies, projectId, write)` of `src/mission/coverage.ts`. Each of the five handlers calls it inside its `caller.commit` closure: the before read, the write, the after read, then the refusal of an added pair. `commitGraph` (`src/mission/service.ts:861-883`) stays as it is, because `node.update` does not use it (`src/mission/service.ts:818-831`).
+The check sits in one function `guardCoverage(tx, dependencies, projectId, write)` of `src/mission/coverage.ts`. Each of the six handlers calls it inside its `caller.commit` closure: the before read, the write, the after read, then the refusal of an added pair. `commitGraph` (`src/mission/service.ts:861-883`) stays as it is, because `node.update` does not use it (`src/mission/service.ts:818-831`).
 
 ## D25 — Retired
 
@@ -148,17 +150,19 @@ The check sits in one function `guardCoverage(tx, dependencies, projectId, write
 
 `project-service.impl.md:331-332` holds the rule: the worker binding form holds the `Traits` field.
 
-## D28 — One repository binding on an `implement` node until plan 09
+## D28 — One repository binding on an `implement` node until plan 09b
 
 RULED 2026-10-17 by Ulrich (R13).
 
-- In plans 01 to 08, the repository range of `implement` in the rule table is exactly one. A second repository binding answers `mission.node.bindings_invalid`.
+- In plans 01 to 09a, the repository range of `implement` in the rule table is exactly one. A second repository binding answers `mission.node.bindings_invalid`.
 - An `examine` node names zero or more repository bindings from plan 02 on. It checks out each base-branch head read-only under `checkouts/<binding name>/`.
 - The workspace of an `implement` node stays `workspaces/<node identity>/<repository binding identity>/`, and the worker reads `repositories[0]` for it.
-- Plan 09 lifts the range to one or more. It moves the checkout of an `implement` node to `workspaces/<node identity>/checkouts/<binding name>/` (`worker-service.impl.md:578-582`) and replaces each `repositories[0]` read with a loop.
+- Plan 09a adds the evidence set, the tested input list and the actions of each binding, and keeps the range. Plan 09b lifts the range to one or more. It moves the checkout of an `implement` node to `workspaces/<node identity>/checkouts/<binding name>/` (`worker-service.impl.md:580-584`) and replaces each `repositories[0]` read with a loop.
 
-## D29 — The failed upload check and the storage failover
+## D29 — The storage failover
 
-- Plan 03 owns the storage failover. The rule table of plan 03 admits an ordered list of storage bindings, and a list with two entries breaks the single-match grant of `bindingOf` (`src/mission/evidence-content.ts:61`).
-- The table `mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at)` records a failed upload check. Its primary key is `(node_id, attempt, storage_binding_id)`. `asset_id` names the asset whose check failed.
-- The grant skips a storage binding that holds a failure row of the same node and attempt. A new attempt tries every binding again.
+- Plan 03 grants an upload on the first storage binding of the ordered list. It replaces the single-match grant of `bindingOf` (`src/mission/evidence-content.ts:61`) and adds no failover.
+- Plan 03b adds the failover: the enabled check, the failover on a refused signing call, the failed upload check and the refusal when no binding is left. It starts after plan 03 and merges before plan 08.
+- Pending Ulrich ruling B1: the table `mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at)` keys a failed upload check by `(node_id, attempt, storage_binding_id)`. The grant skips a binding that holds a failure row of the open attempt, and a new attempt tries every binding again. `asset_id` names the asset whose check failed.
+- Pending Ulrich ruling B2: no binding left answers 409 `mission.evidence.storage_exhausted`. 503 `mission.evidence.storage_unavailable` keeps the meaning "No object storage is wired" (`src/mission/storage-unavailable.ts:5-18`).
+- Plan 03b carries both values as "pending Ulrich ruling". Its gate replaces them with the ruled values before the merge.
