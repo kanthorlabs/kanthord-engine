@@ -698,7 +698,8 @@ test(
         try {
           answer = completed(await h.perform(merged, mergeBody("merge")));
         } finally {
-          process.env.TMPDIR = previous;
+          if (previous === undefined) delete process.env.TMPDIR;
+          else process.env.TMPDIR = previous;
           writer.mergePushFresh = mergePushFresh;
         }
         assert.deepEqual(roots, [scratch]);
