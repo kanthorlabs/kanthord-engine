@@ -80,6 +80,7 @@ import {
   ContentField,
 } from "./content.ts";
 import { ControlError } from "./control.ts";
+import { revisionFromRow } from "./revision.ts";
 import { unexpectedCollaboration } from "./test-support.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
@@ -88,6 +89,7 @@ import {
   readNode,
   readMissionNodes,
   readCurrentRevision,
+  taskOwnerOf,
   updateNodeFilename,
 } from "./store.ts";
 
@@ -3331,6 +3333,13 @@ test("node retire of an implement node keeps its tasks in its last revision", (t
     f.store.transaction((tx) => readCurrentRevision(tx, implement))?.revision,
     previous.revision,
   );
+  for (const id of [task, sibling])
+    assert.deepEqual(
+      {
+        ...f.store.transaction((tx) => taskOwnerOf(tx, retired.mission_id, id)),
+      },
+      { node_id: implement, revision: previous.revision },
+    );
 });
 
 test("node.retire keeps retired runnable identity, filename, content and revisions readable", (t) => {
@@ -4490,16 +4499,22 @@ test("import.apply task rename and move, implement retirement and dependency rep
   );
   assert.equal(f.node(oldImplement)?.retired_at, result.accepted_at);
   assert.equal(f.node(task), null);
-  const oldRevision = result.changes.revisions.find(
-    (item) => item.node_id === oldImplement,
-  )!;
   const newRevision = result.changes.revisions.find(
     (item) => item.node_id === newImplement,
   )!;
-  assert.deepEqual(oldRevision.change.tasks, [
-    { id: task, change: TaskChange.MovedOut, changed_fields: [] },
-  ]);
-  assert.deepEqual(oldRevision.tasks, []);
+  assert.ok(
+    result.changes.revisions.every((item) => item.node_id !== oldImplement),
+  );
+  const oldPrevious = f.store.transaction((tx) => {
+    const row = readCurrentRevision(tx, oldImplement);
+    assert.ok(row);
+    return revisionFromRow(tx, row);
+  });
+  assert.equal(oldPrevious.revision, FIRST_REVISION);
+  assert.deepEqual(
+    oldPrevious.tasks.map((item) => item.id),
+    [task],
+  );
   assert.deepEqual(newRevision.change.tasks, [
     {
       id: task,

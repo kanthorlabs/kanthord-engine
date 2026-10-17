@@ -44,11 +44,13 @@ import {
 } from "./import.ts";
 import { missionMigrations } from "./migrations.ts";
 import { parsePlanFile, type ParsedNodeFile } from "./parser.ts";
+import { revisionFromRow } from "./revision.ts";
 import {
   insertDependency,
   insertMission,
   insertNode,
   insertRevision,
+  readCurrentRevision,
   readMission,
   readNode,
 } from "./store.ts";
@@ -77,6 +79,9 @@ const INVALID_FILENAME = "../Bad.md";
 const REASON = "Import plan";
 const IMPLEMENT_FILENAME = "o.md";
 const TASK_FILENAME = "t.md";
+const SIBLING_TASK_FILENAME = "s.md";
+const ROOT_FILENAME = "a.md";
+const PEER_FILENAME = "p.md";
 const TEMPORARY_A_KEY = "file:a.md";
 const actor = { kind: ActorKind.Human, account: "test", name: "Test" } as const;
 const content: TaskBody = {
@@ -1539,6 +1544,71 @@ test("import refuses a removed task identity with mission.import.retired_id", (t
       { code: MissionErrorCode.RetiredId, details: { id: removed.id } },
       { code: MissionErrorCode.UnknownId, details: { id: unknown.id } },
     ],
+  );
+});
+
+test("an import that retires a node keeps its tasks in the last revision", (t) => {
+  const { mission, store, apply, assigned, identified } = importer(t);
+  const first = apply(plan());
+  const retiredId = assigned(first, "o.md");
+  const taskFilenames = [TASK_FILENAME, SIBLING_TASK_FILENAME];
+  const taskIds = taskFilenames.map((filename) => assigned(first, filename));
+  const lastRevision = () =>
+    store.transaction((tx) => {
+      const row = readCurrentRevision(tx, retiredId);
+      assert.ok(row);
+      return revisionFromRow(tx, row);
+    });
+  const before = lastRevision();
+  const survivors = identified(first)
+    .filter(
+      (value) =>
+        value.filename !== IMPLEMENT_FILENAME &&
+        !taskFilenames.includes(value.filename),
+    )
+    .map((value) =>
+      value.filename === ROOT_FILENAME
+        ? { ...value, depends_on: [PEER_FILENAME] }
+        : value.filename === PEER_FILENAME
+          ? { ...value, depends_on: [] }
+          : value,
+    );
+  const retired = apply(survivors);
+  assert.deepEqual(retired.changes.retired_node_ids, [retiredId]);
+  assert.ok(
+    retired.changes.revisions.every((value) => value.node_id !== retiredId),
+  );
+  assert.ok(
+    retired.changes.revisions.every((value) =>
+      value.change.tasks?.every((change) => !taskIds.includes(change.id)),
+    ),
+  );
+  const after = lastRevision();
+  assert.equal(after.revision, before.revision);
+  assert.deepEqual(
+    after.tasks.map((value) => value.id),
+    taskIds,
+  );
+  assert.ok(store.transaction((tx) => readNode(tx, retiredId))?.retired_at);
+  const named = taskFilenames.map((filename, index) => ({
+    ...item(plan(), filename),
+    node: PEER_FILENAME,
+    id: taskIds[index]!,
+  }));
+  const result = store.transaction((tx) =>
+    resolveImportSet(
+      tx,
+      readMission(tx, mission.id)!,
+      [...survivors, ...named],
+      bindings,
+    ),
+  );
+  assert.deepEqual(
+    result.violations.map(({ code, details }) => ({ code, details })),
+    taskIds.map((id) => ({
+      code: MissionErrorCode.RetiredId,
+      details: { id },
+    })),
   );
 });
 
