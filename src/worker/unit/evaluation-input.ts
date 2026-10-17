@@ -20,6 +20,8 @@ import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
 import { ExecutionWork } from "../contract.ts";
 
+const NO_SNAPSHOTS = 0;
+
 export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
   const candidates = evidence
     .filter((item) => !item.verification && !item.requirement_key)
@@ -105,7 +107,6 @@ async function prepareWorkspace(
   work: ExecutionWork,
   evidence: readonly Evidence[],
 ) {
-  const repository = input.setup.repositories[0];
   const deadline = Math.min(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
     input.claim.expired_at,
@@ -116,32 +117,31 @@ async function prepareWorkspace(
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
   };
-  if (work === ExecutionWork.Implement && repository) {
-    const snapshot = snapshotOf(evidence, repository.binding_id);
-    if (snapshot) {
-      const workspace = await input.workspaces.prepareSnapshot({
+  if (work === ExecutionWork.Implement) {
+    const snapshots = input.setup.repositories.map((repository) => ({
+      repository,
+      snapshot: snapshotOf(evidence, repository.binding_id),
+    }));
+    const found = snapshots.flatMap(({ repository, snapshot }) =>
+      snapshot ? [{ repository, ...snapshot }] : [],
+    );
+    if (found.length > NO_SNAPSHOTS) {
+      if (found.length < snapshots.length)
+        return run.stop(EndReason.OperationFailed);
+      const workspace = await input.workspaces.prepareSnapshots({
         ...common,
-        repository,
-        commit: snapshot.commit,
+        snapshots: found,
       });
-      return {
-        key: workspace.key,
-        directory: workspace.directory,
-        checkouts: [] as ExamineCheckout[],
-        tested_input: {
-          kind: AssetKind.Repository,
-          binding_id: repository.binding_id,
-          commit: snapshot.commit,
-        },
-        evidenceIds: [snapshot.evidenceId],
-        addedFiles: await addedFiles(
-          input.env,
-          workspace.directory,
-          `origin/${repository.strategy.base_branch}`,
-          run.operationContext,
-          deadline - Date.now(),
-        ),
-      };
+      try {
+        return {
+          ...workspace,
+          evidenceIds: [...new Set(found.map((item) => item.evidenceId))],
+          addedFiles: await addedFilesOf(input, run, workspace, deadline),
+        };
+      } catch (error) {
+        input.workspaces.release(workspace.key, WorkspaceKind.Execution);
+        throw error;
+      }
     }
   }
   if (work === ExecutionWork.Examine)
@@ -162,6 +162,27 @@ async function prepareWorkspace(
     evidenceIds: [] as string[],
     addedFiles: [],
   };
+}
+
+async function addedFilesOf(
+  input: StepsInput,
+  run: ExecutionRun,
+  workspace: { directory: string; checkouts: readonly ExamineCheckout[] },
+  deadline: number,
+): Promise<string[]> {
+  const files: string[] = [];
+  for (const checkout of workspace.checkouts) {
+    const prefix = relative(workspace.directory, checkout.directory);
+    for (const file of await addedFiles(
+      input.env,
+      checkout.directory,
+      `origin/${checkout.base_branch}`,
+      run.operationContext,
+      deadline - Date.now(),
+    ))
+      files.push(prefix ? join(prefix, file) : file);
+  }
+  return files;
 }
 
 export async function prepareEvaluation(

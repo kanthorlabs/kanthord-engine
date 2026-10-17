@@ -295,6 +295,7 @@ test("a failed verification report names a flaky command and carries its output"
 
 test("the requested changes text is null without a change request and stops at 4 KiB", () => {
   const read = (body: string) => ({
+    binding: "repo",
     head_commit: "a".repeat(40),
     change_requests: [
       {
@@ -310,7 +311,7 @@ test("the requested changes text is null without a change request and stops at 4
   assert.equal(requestedChangesText([]), null);
   assert.equal(
     requestedChangesText([
-      { head_commit: "a".repeat(40), change_requests: [] },
+      { binding: "repo", head_commit: "a".repeat(40), change_requests: [] },
     ]),
     null,
   );
@@ -327,5 +328,35 @@ test("the requested changes text is null without a change request and stops at 4
   assert.equal(
     Buffer.byteLength(long.slice(0, long.lastIndexOf("\n")), "utf8"),
     REQUESTED_CHANGES_MAX_BYTES,
+  );
+});
+
+test("each change request names its binding", () => {
+  const request = (reviewer: string, commit: string) => ({
+    review_id: 1,
+    reviewer,
+    body: `${reviewer} body`,
+    submitted_at: null,
+    commit_id: commit,
+    comments: [],
+  });
+  assert.equal(
+    requestedChangesText([
+      {
+        binding: "api",
+        head_commit: "a".repeat(40),
+        change_requests: [request("octo", "a".repeat(40))],
+      },
+      {
+        binding: "web",
+        head_commit: "b".repeat(40),
+        change_requests: [request("hubot", "b".repeat(40))],
+      },
+    ]),
+    [
+      "The pull request reviewers request these changes:",
+      `Reviewer octo requests changes on api at commit ${"a".repeat(40)}: octo body`,
+      `Reviewer hubot requests changes on web at commit ${"b".repeat(40)}: hubot body`,
+    ].join("\n"),
   );
 });

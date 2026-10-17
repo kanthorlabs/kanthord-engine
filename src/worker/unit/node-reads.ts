@@ -147,7 +147,10 @@ export async function readClearedOutcome(run: ExecutionRun) {
   );
 }
 
-export async function readRequestedChanges(run: ExecutionRun) {
+export async function readRequestedChanges(
+  run: ExecutionRun,
+  repositories: readonly RepositoryName[],
+) {
   const outcome = await readClearedOutcome(run);
   if (outcome?.closing_event !== ClosingEvent.ExternalFailed) return null;
   const read = await run.call((options) =>
@@ -160,7 +163,20 @@ export async function readRequestedChanges(run: ExecutionRun) {
       options,
     ),
   );
-  return requestedChangesText(read.items);
+  return requestedChangesText(
+    read.items.map((item) => ({
+      ...item,
+      binding:
+        repositories.find(
+          (repository) => repository.binding_id === item.binding_id,
+        )?.name ?? item.binding_id,
+    })),
+  );
+}
+
+interface RepositoryName {
+  binding_id: string;
+  name: string;
 }
 
 export interface PriorRationale {
@@ -170,10 +186,11 @@ export interface PriorRationale {
 
 export async function readPriorRationale(
   run: ExecutionRun,
+  repositories: readonly RepositoryName[],
 ): Promise<PriorRationale> {
   const rework = await readReworkAssessment(run);
   if (rework) return { rationale: rework.rationale, rework: true };
-  const requested = await readRequestedChanges(run);
+  const requested = await readRequestedChanges(run, repositories);
   if (requested !== null) return { rationale: requested, rework: false };
   return {
     rationale: (await readClearedAssessment(run))?.rationale ?? null,

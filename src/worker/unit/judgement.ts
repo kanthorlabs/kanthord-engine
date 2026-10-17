@@ -148,13 +148,13 @@ export function taskChoiceInstruction(
 }
 
 export function requestedChangesText(
-  reads: readonly ChangeRequestRead[],
+  reads: readonly (ChangeRequestRead & { binding: string })[],
 ): string | null {
   const lines: string[] = [];
   for (const read of reads) {
     for (const request of read.change_requests) {
       lines.push(
-        `Reviewer ${request.reviewer} requests changes at commit ${request.commit_id}: ${request.body}`,
+        `Reviewer ${request.reviewer} requests changes on ${read.binding} at commit ${request.commit_id}: ${request.body}`,
       );
       for (const comment of request.comments)
         lines.push(

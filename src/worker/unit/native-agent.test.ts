@@ -1,6 +1,7 @@
 import { ExecutionBudget } from "./budget.ts";
 import assert from "node:assert/strict";
-import { unusedHostTools } from "./test-support.ts";
+import { implementFixture, task, unusedHostTools } from "./test-support.ts";
+import { taskWork } from "./steps-implement.ts";
 import {
   existsSync,
   mkdirSync,
@@ -220,7 +221,7 @@ test("native agent composes only the switched-on workspace files and the project
   );
 });
 
-test("an examine node composes one project prompt part for each repository binding in binding order", async (t) => {
+async function composesOnePartPerBinding(t: TestContext, work: ExecutionWork) {
   const names = ["first", "second"];
   const checkoutsOf = (workspace: string) =>
     names.map((name) => join(workspace, "checkouts", name));
@@ -235,7 +236,7 @@ test("an examine node composes one project prompt part for each repository bindi
     },
     unusedHostTools,
     {
-      work: ExecutionWork.Examine,
+      work,
       checkouts: checkoutsOf,
       prepare: (workspace) => {
         for (const [index, directory] of checkoutsOf(workspace).entries()) {
@@ -260,6 +261,28 @@ test("an examine node composes one project prompt part for each repository bindi
       ],
       [`repository binding ${names[index]}`, "database project prompt"],
     ]),
+  );
+}
+
+test("an examine node composes one project prompt part for each repository binding in binding order", (t) =>
+  composesOnePartPerBinding(t, ExecutionWork.Examine));
+
+test("two bindings compose two parts in binding order from their checkouts", (t) =>
+  composesOnePartPerBinding(t, ExecutionWork.Implement));
+
+test("the work prompt lists both repositories", async (t) => {
+  const current = task("both", "true");
+  const h = await implementFixture(t, [current], [], undefined, ["api", "web"]);
+  const text = taskWork(h, current).text;
+  assert.ok(
+    text.includes(
+      "## Repositories\n\nRepository api: directory `api`, base branch `main`\nRepository web: directory `web`, base branch `main`",
+    ),
+  );
+  const single = await implementFixture(t, [current], []);
+  assert.equal(
+    taskWork(single, current).text.includes("## Repositories"),
+    false,
   );
 });
 

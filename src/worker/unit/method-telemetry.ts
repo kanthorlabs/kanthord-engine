@@ -134,14 +134,17 @@ export function verificationObserver(
 export function judgementSpan(
   spans: SpanRecorder,
   task: TaskContent,
-  commit: string,
+  commit: string | null,
 ): SpanStart {
   assert.ok(task.id);
-  assert.ok(commit);
+  assert.ok(commit === null || commit.length > NO_LENGTH);
   return {
     key: spans.key(SpanOperation.Judgement),
     operation: SpanOperation.Judgement,
-    attributes: { "kanthord.task.id": task.id, "kanthord.commit": commit },
+    attributes: {
+      "kanthord.task.id": task.id,
+      ...(commit === null ? {} : { "kanthord.commit": commit }),
+    },
   };
 }
 

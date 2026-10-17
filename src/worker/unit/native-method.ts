@@ -114,13 +114,16 @@ export async function runNativeExecution(
         return runEvaluation(input, run, budget, open);
       if (work === ExecutionWork.Examine)
         return runStepsExamine(input, run, revision, budget, open);
-      const prior = await readPriorRationale(run);
+      const prior = await readPriorRationale(run, input.setup.repositories);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
         prepareStepsWorkspace(input, run),
       );
       let working: NativeAgent;
       try {
-        working = await open(workspace.directory);
+        working = await open(
+          workspace.root,
+          workspace.checkouts.map((checkout) => checkout.directory),
+        );
       } catch (error) {
         input.workspaces.release(
           input.workspaces.nodeKey(input.claim.node_id),

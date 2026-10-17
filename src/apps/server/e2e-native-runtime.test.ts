@@ -471,19 +471,28 @@ test(
       assert.equal(refused.status, HttpStatus.Forbidden);
       assert.equal(refused.error.error.code, PROOF_FAILED);
     });
-    const prepared = await root.prepareImplement({
-      nodeId: x.execution.node_id,
-      nodeBranch: x.execution.node_branch,
-      pushed: false,
-      repository,
-      transport,
-      context: background,
-      deadlineMs: 10000,
-    });
+    const [prepared] = (
+      await root.prepareImplement({
+        nodeId: x.execution.node_id,
+        nodeBranch: x.execution.node_branch,
+        pushed: new Set(),
+        repositories: [repository],
+        transport,
+        context: background,
+        deadlineMs: 10000,
+      })
+    ).checkouts;
+    assert.ok(prepared);
     await t.test("E07.4 private node workspace", async () => {
       assert.equal(
         prepared.directory,
-        join(state, "workspaces", x.execution.node_id, repository.binding_id),
+        join(
+          state,
+          "workspaces",
+          x.execution.node_id,
+          "checkouts",
+          repository.name,
+        ),
       );
       assert.equal(statSync(prepared.directory).mode & 0o777, PRIVATE_MODE);
       assert.equal(prepared.head, main);
@@ -647,13 +656,13 @@ test(
     await t.test("E07.7 node branch push leaves main unchanged", async () => {
       await transport.pushNodeBranch(
         prepared.directory,
-        prepared.nodeBranch,
+        x.execution.node_branch,
         background,
         10000,
       );
       assert.equal(
         (
-          await git.listRemote([bare, `refs/heads/${prepared.nodeBranch}`])
+          await git.listRemote([bare, `refs/heads/${x.execution.node_branch}`])
         ).split(/\s/)[0],
         head,
       );
@@ -667,15 +676,18 @@ test(
         turns: SINGLE_TURN,
         wall_time_ms: 600000,
       });
-      const lab = await root.prepareImplement({
-        nodeId: y.execution.node_id,
-        nodeBranch: y.execution.node_branch,
-        pushed: false,
-        repository: runtimeY.setup.repositories[0]!,
-        transport,
-        context: background,
-        deadlineMs: 10000,
-      });
+      const [lab] = (
+        await root.prepareImplement({
+          nodeId: y.execution.node_id,
+          nodeBranch: y.execution.node_branch,
+          pushed: new Set(),
+          repositories: runtimeY.setup.repositories,
+          transport,
+          context: background,
+          deadlineMs: 10000,
+        })
+      ).checkouts;
+      assert.ok(lab);
       const fake = scriptedProvider([
         tool("read", { path: "AGENTS.md" }),
         tool("read", { path: "AGENTS.md" }),

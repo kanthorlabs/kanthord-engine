@@ -14,6 +14,7 @@ import {
 import type { Dependencies } from "./service.ts";
 
 const HEAD = "a".repeat(40);
+const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const SECOND_ATTEMPT = 2;
 const BAD_GATEWAY_STATUS = 502;
 const RETRYABLE_CODE = "repository.platform.github.retryable_refusal";
@@ -48,7 +49,7 @@ function entry(
   evidenceId: string | null,
 ): ActionContext["actions"][number] {
   return {
-    action: { key: `repo.${action}`, action },
+    action: { key: `repo.${action}`, binding_id: BINDING_ID, action },
     resource_identity: "owner/repo",
     resolution,
     request_evidence_id: evidenceId,
@@ -137,7 +138,9 @@ test("the read covers each pull request of the cleared attempt that ended with o
   );
   assert.equal(reads.attempt, SECOND_ATTEMPT - 1);
   assert.deepEqual(reads.evidenceIds, ["evidence_1"]);
-  assert.deepEqual(answer, { items: [{ evidence_id: "evidence_1", ...BODY }] });
+  assert.deepEqual(answer, {
+    items: [{ evidence_id: "evidence_1", binding_id: BINDING_ID, ...BODY }],
+  });
 });
 
 test("a platform failure of the read answers 502 with its result code", async () => {

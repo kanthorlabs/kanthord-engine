@@ -195,8 +195,8 @@ const rules = [
   {
     work: Work.Implement,
     binding: MissionBindingKind.Repository,
-    allowed: [SINGLE_BINDING],
-    forbidden: [NO_BINDINGS, TWO_BINDINGS],
+    allowed: [SINGLE_BINDING, TWO_BINDINGS],
+    forbidden: [NO_BINDINGS],
   },
   {
     work: Work.Implement,
@@ -295,12 +295,15 @@ test("an implement node that names no repository binding answers mission.node.bi
   });
 });
 
-test("an implement node with two repository bindings answers mission.node.bindings_invalid", () => {
-  bindingsError(() => resolveNamed(Work.Implement, ["api-repo", "web-repo"]), {
-    work: Work.Implement,
-    binding_kind: MissionBindingKind.Repository,
-    count: TWO_BINDINGS,
-  });
+test("an implement node accepts two repository bindings in binding order", () => {
+  for (const named of [
+    ["api-repo", "web-repo"],
+    ["web-repo", "api-repo"],
+  ])
+    assert.deepEqual(
+      resolveNamed(Work.Implement, named).map((binding) => binding.binding_id),
+      named.map((name) => catalog.get(name)!.binding_id),
+    );
 });
 
 test("an examine node accepts zero, one and two repository bindings", () => {

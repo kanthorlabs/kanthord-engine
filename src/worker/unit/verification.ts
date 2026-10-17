@@ -4,12 +4,26 @@ import type { Context } from "../../kernel/context.ts";
 import { killProcessGroup } from "../../kernel/process-group.ts";
 import { childEnvironment } from "./tool-table.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
+import type { WorkspaceCheckout } from "./workspace.ts";
 
 export type TestedInput =
   | { kind: "repository"; binding_id: string; commit: string }
   | { kind: "produced"; sha256: string }
   | { kind: "object"; location: string; version?: string; sha256?: string }
   | { kind: "repository"; binding_id: string; commit: string }[];
+const SINGLE_CHECKOUT = 1;
+
+export function testedInputOf(
+  checkouts: readonly WorkspaceCheckout[],
+): TestedInput {
+  assert.ok(checkouts.length >= SINGLE_CHECKOUT);
+  const addresses = checkouts.map((checkout) => ({
+    kind: "repository" as const,
+    binding_id: checkout.binding_id,
+    commit: checkout.head,
+  }));
+  return addresses.length === SINGLE_CHECKOUT ? addresses[0]! : addresses;
+}
 export interface Verification {
   tested_input: TestedInput;
   results: {

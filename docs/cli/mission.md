@@ -57,8 +57,8 @@ provides a project ID; `mission get` returns that project's mission ID.
 ## Domain boundaries that every command must preserve
 
 - A mission is a directed graph, and dependency is its only edge kind. The work
-  of a node is `implement` or `examine`. An `implement` node names exactly one
-  repository binding and holds zero or more tasks. An `examine` node names zero
+  of a node is `implement` or `examine`. An `implement` node names one or more
+  repository bindings and holds zero or more tasks. An `examine` node names zero
   or more repository bindings and holds no task. A task belongs to exactly one
   `implement` node. A human changes the work only while the attempt reads 0.
 - The requires list of a node names the traits that a worker binding needs to
@@ -776,7 +776,7 @@ from fields whose authoritative schema is still absent.
 
 | Binding kind | `implement` | `examine` | Task |
 | ------------ | ----------- | --------- | ---- |
-| Repository   | Exactly 1   | 0 or more | 0    |
+| Repository   | 1 or more   | 0 or more | 0    |
 | Worker       | 0           | 0         | 0    |
 | Storage      | 0 or more   | 0 or more | 0    |
 

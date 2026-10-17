@@ -776,18 +776,21 @@ todoapp(
 );
 
 todoapp(
-  "EF06.16 a second repository binding on an implement node is refused",
+  "EF06.16 a second repository binding on an implement node pins both bindings in binding order",
   async (h) => {
     const project = await h.todoappProject();
-    await h.write(["project", "binding", "apply", project.projectId], {
-      version: await h.bindingSetVersion(project),
-      bindings: {
-        ...COVERING_WORKER_BINDINGS,
-        [REPOSITORY_BINDING]: repositoryBinding(REPOSITORY_BINDING, ACTION),
-        [MIRROR_BINDING]: repositoryBinding(MIRROR_BINDING, ACTION),
+    const applied = await h.write<Applied>(
+      ["project", "binding", "apply", project.projectId],
+      {
+        version: await h.bindingSetVersion(project),
+        bindings: {
+          ...COVERING_WORKER_BINDINGS,
+          [REPOSITORY_BINDING]: repositoryBinding(REPOSITORY_BINDING, ACTION),
+          [MIRROR_BINDING]: repositoryBinding(MIRROR_BINDING, ACTION),
+        },
       },
-    });
-    await h.refusedImport(
+    );
+    await h.importAll(
       project,
       h.planFiles((files) =>
         replaced(
@@ -797,7 +800,16 @@ todoapp(
           bindingNames([REPOSITORY_BINDING, MIRROR_BINDING]),
         ),
       ),
-      MissionErrorCode.BindingsInvalid,
+    );
+    const listed = (await h.nodes(project)).find(
+      (item) => item.filename === TODOS,
+    );
+    assert.ok(listed);
+    assert.deepEqual(
+      (await h.node(listed.id)).content.bindings,
+      [REPOSITORY_BINDING, MIRROR_BINDING].map(
+        (name) => applied.bindings[name]!.id,
+      ),
     );
   },
 );

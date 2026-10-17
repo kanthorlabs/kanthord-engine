@@ -2576,7 +2576,7 @@ test(
       },
     );
     await t.test(
-      "EF03.7 an implement node needs exactly one repository binding",
+      "EF03.7 an implement node needs one or more repository bindings",
       async () => {
         await createRefused(
           scenario,
@@ -2597,12 +2597,17 @@ test(
             },
           },
         });
-        await createRefused(
-          scenario,
+        const pinned = bindings.map(({ id }) => id).reverse();
+        const created = await createNode(
+          fixture,
+          mission.id,
           Work.Implement,
-          bindings.map(({ id }) => id),
-          MissionErrorCode.BindingsInvalid,
+          scenario.version,
+          pinned,
         );
+        scenario.version = created.mission_version;
+        const read = await readNode(fixture, created.revisions[0]!.node_id);
+        assert.deepEqual(read.content.bindings, pinned);
       },
     );
   },

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { DeadlineExceeded } from "../../kernel/context.ts";
@@ -14,7 +14,8 @@ import {
   taskJudgementInstruction,
 } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
+import { judgedAt } from "./judged-tasks.ts";
 import { TaskBoundary } from "./steps-implement.ts";
 import {
   startCheck,
@@ -77,12 +78,12 @@ test("task work commits revisions and cleans verification writes before judgemen
     ),
     false,
   );
-  const log = await simpleGit(h.directory).log();
+  const log = await simpleGit(h.root).log();
   const COMMITS = 3;
   assert.equal(log.total, COMMITS);
   assert.equal(log.all[0]!.message, log.all[1]!.message);
   assert.ok(log.all[0]!.message.includes(current.id));
-  assert.equal(existsSync(join(h.directory, "transient")), false);
+  assert.equal(existsSync(join(h.root, "transient")), false);
   h.input.workspaces.release(
     h.input.workspaces.nodeKey(h.input.claim.node_id),
     WorkspaceKind.Node,
@@ -102,13 +103,13 @@ test("turn exhaustion during task work leaves an uncommitted checkpoint boundary
     ],
     1,
   );
-  const before = await simpleGit(h.directory).revparse(["HEAD"]);
+  const before = await simpleGit(h.root).revparse(["HEAD"]);
   assert.deepEqual(await runTask(h, current), {
     kind: "budget_end",
     boundary: "in_progress",
   });
-  assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), before);
-  assert.ok(existsSync(join(h.directory, "notes")));
+  assert.equal(await simpleGit(h.root).revparse(["HEAD"]), before);
+  assert.ok(existsSync(join(h.root, "notes")));
   h.input.workspaces.release(
     h.input.workspaces.nodeKey(h.input.claim.node_id),
     WorkspaceKind.Node,
@@ -144,7 +145,7 @@ test("B1 start-check timeout keeps failed disposition and cleanup runs after the
   h.agent.budget.exhausted = () => Date.now() >= deadline;
   const checked = await startCheck(h);
   assert.equal(checked.budgetEnd?.boundary, TaskBoundary.RunFailed);
-  assert.equal(existsSync(join(h.directory, "transient")), false);
+  assert.equal(existsSync(join(h.root, "transient")), false);
   assert.ok(Date.now() >= deadline && Date.now() < h.input.claim.expired_at);
   assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   const verification = await verifyTask(h, current);
@@ -172,7 +173,7 @@ test("criterion-negative judgement revises work and a budget-ended judgement kee
     ],
   );
   assert.deepEqual(await runTask(h, current), { kind: "complete" });
-  assert.ok(existsSync(join(h.directory, "revision")));
+  assert.ok(existsSync(join(h.root, "revision")));
   const other = await fixture(
     t,
     [current],
@@ -272,7 +273,7 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
         instruction !== repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER)
       )
         return;
-      writeFileSync(join(h.directory, PARTIAL_WORK), PARTIAL_WORK);
+      writeFileSync(join(h.root, PARTIAL_WORK), PARTIAL_WORK);
       h.agent.budget.exhausted = () => true;
     };
   };
@@ -451,7 +452,95 @@ test("an implement node with no task commits its change with the node identity i
     furtherWork: false,
   });
   assert.deepEqual(order, ["evidence", "release:false"]);
-  const log = await simpleGit(h.directory).log();
+  const log = await simpleGit(h.root).log();
   assert.ok(log.latest!.message.includes(nodeId));
-  assert.ok(existsSync(join(h.directory, "node-file")));
+  assert.ok(existsSync(join(h.root, "node-file")));
+});
+
+const TWO_BINDINGS = ["api", "web"];
+
+test("two bindings commit only the checkout with a change", async (t) => {
+  const current = task("api-change", "test -f api/added");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "api/added", content: "added" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+      fauxAssistantMessage(
+        'kanthord-judgement: {"criterion_met":true,"rationale":"met"}',
+      ),
+    ],
+    undefined,
+    TWO_BINDINGS,
+  );
+  const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+  assert.equal(h.root, join(key, CHECKOUTS_DIRECTORY));
+  const [api, web] = h.checkouts;
+  assert.ok(api && web);
+  const apiBefore = api.head;
+  const webBefore = web.head;
+  assert.deepEqual(await runTask(h, current), { kind: "complete" });
+  assert.notEqual(api.head, apiBefore);
+  assert.equal(await simpleGit(api.directory).revparse(["HEAD"]), api.head);
+  assert.ok(
+    (await simpleGit(api.directory).log()).latest!.message.includes(current.id),
+  );
+  assert.equal(web.head, webBefore);
+  assert.equal(await simpleGit(web.directory).revparse(["HEAD"]), webBefore);
+  assert.equal(
+    judgedAt(key, {
+      attempt: h.input.claim.attempt,
+      revision: h.input.claim.pinned_revision,
+      taskId: current.id,
+    }),
+    `api=${api.head},web=${web.head}`,
+  );
+  h.input.workspaces.release(key, WorkspaceKind.Node);
+});
+
+test("a revision that changes no checkout counts as no progress", async (t) => {
+  const current = task("stuck", "false");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("still nothing"),
+    ],
+    undefined,
+    TWO_BINDINGS,
+  );
+  const heads = h.checkouts.map((checkout) => checkout.head);
+  const stopped = await stopOf(runTask(h, current));
+  assert.equal(stopped.reason, EndReason.NoProgress);
+  assert.deepEqual(
+    h.checkouts.map((checkout) => checkout.head),
+    heads,
+  );
+});
+
+test("a verification at the agent root of two bindings leaves only the checkouts and the scratch directory", async (t) => {
+  const current = task(
+    "root-writes",
+    "touch stray && mkdir -p stray-dir .kanthord-scratch && touch .kanthord-scratch/probe api/transient",
+  );
+  const h = await fixture(t, [current], [], undefined, TWO_BINDINGS);
+  await verifyTask(h, current);
+  assert.deepEqual(readdirSync(h.root).sort(), [
+    ".kanthord-scratch",
+    ...TWO_BINDINGS,
+  ]);
+  assert.ok(existsSync(join(h.root, ".kanthord-scratch", "probe")));
+  assert.equal(existsSync(join(h.root, "api", "transient")), false);
+  for (const checkout of h.checkouts)
+    assert.ok(existsSync(join(checkout.directory, ".git")));
+  h.input.workspaces.release(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
+  );
 });
