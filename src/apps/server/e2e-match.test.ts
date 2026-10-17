@@ -29,6 +29,7 @@ const MACOS = "platform.macos";
 const XCODE = "toolchain.xcode";
 const LINUX = "platform.linux";
 const NODE_CREATE = 1;
+const NO_ATTEMPT = 0;
 const RELEASED_WORKERS = ["coder@1", "reviewer@1"];
 const DECLARED_WORKS = [Work.Implement, Work.Examine];
 const CONFIGURATION = {
@@ -390,6 +391,48 @@ test("EF05.1-EF05.8 the match admits a node by work and traits and refuses an un
     assert.equal(pulled.kind, WorkPullKind.Claimed);
     assert.equal(pulled.execution?.node_id, nodeId);
   });
+  const parked: Promise<Pull>[] = [waiting];
+  await t.test(
+    "the evaluation claim of a macOS node goes only to macos-reviewer",
+    async () => {
+      const { version } = await h.read<{ version: number }>([
+        "mission",
+        "get",
+        h.project.id,
+      ]);
+      const created = await h.write<Change>(
+        ["mission", "node", "create", h.mission.id],
+        {
+          ...h.node,
+          filename: "ios-review.md",
+          expected_mission_version: version,
+        },
+      );
+      const reviewId = created.revisions[0]!.node_id;
+      const ready = await h.write<{ node: { state: string } }>(
+        ["mission", "node", "ready", reviewId],
+        {
+          reason: "review",
+          expected_mission_version: version + NODE_CREATE,
+          expected_state: NodeState.Available,
+          expected_attempt: NO_ATTEMPT,
+        },
+      );
+      assert.equal(ready.node.state, NodeState.Waiting);
+      const linuxReviewer = await h.instance("linux-reviewer");
+      parked.push(linuxReviewer.pull());
+      await until(
+        () => h.fixture.scheduler.pulling(linuxReviewer.runtime_identity),
+        Boolean,
+      );
+      assert.equal((await linuxReviewer.pull()).kind, WorkPullKind.NoWork);
+      const macosReviewer = await h.instance("macos-reviewer");
+      const claimed = await macosReviewer.pull();
+      assert.equal(claimed.kind, WorkPullKind.Claimed);
+      assert.equal(claimed.execution?.node_id, reviewId);
+    },
+  );
   await h.fixture.scheduler.quiesce();
-  assert.equal((await waiting).kind, WorkPullKind.NoWork);
+  for (const pull of parked)
+    assert.equal((await pull).kind, WorkPullKind.NoWork);
 });
