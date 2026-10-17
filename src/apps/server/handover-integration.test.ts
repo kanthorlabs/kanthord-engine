@@ -545,7 +545,7 @@ async function setup(
       },
     }),
   );
-  completed(
+  const objective = completed(
     await call(missionOperations["node.create"], {
       params: { mission_id: mission.id },
       query: {},
@@ -558,6 +558,19 @@ async function setup(
         expected_mission_version: 2,
         parent_id: initiative.revisions[0]!.node_id,
         expected_parent_revision: 1,
+      },
+    }),
+  );
+  completed(
+    await call(missionOperations["dependency.add"], {
+      params: {
+        node_id: initiative.revisions[0]!.node_id,
+        depends_on_id: objective.revisions[0]!.node_id,
+      },
+      query: {},
+      body: {
+        reason: "plan",
+        expected_mission_version: objective.mission_version,
       },
     }),
   );

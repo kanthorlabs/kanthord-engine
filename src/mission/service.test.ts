@@ -1332,7 +1332,15 @@ for (const kind of Object.values(NodeKind)) {
       undefined,
       HttpStatus.BadRequest,
     );
-    body.content.bindings = kind === NodeKind.Objective ? [] : [BINDING_ID];
+    if (kind === NodeKind.Initiative) {
+      body.content.bindings = [BINDING_ID];
+      assert.deepEqual(
+        f.create(body).revisions[FIRST_ELEMENT_INDEX]!.content.bindings,
+        [BINDING_ID],
+      );
+      return;
+    }
+    body.content.bindings = [];
     f.refuses(
       body,
       MissionErrorCode.BindingsInvalid,

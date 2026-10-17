@@ -8,15 +8,12 @@ import {
   ClosingEvent,
   MissionErrorCode,
   NodeState,
-  type Revision,
   type Assessment,
   type ExecutionObjective,
   type Outcome,
 } from "../../mission/contract.ts";
-import type { ExecutionSetup } from "../contract.ts";
 import { requestedChangesText } from "./judgement.ts";
 import { EndReason, ExecutionRun } from "./execution-run.ts";
-import { NodeKind } from "./native-agent.ts";
 
 export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;
@@ -54,17 +51,6 @@ export function readPinnedRevision(run: ExecutionRun) {
       options,
     ),
   );
-}
-
-export function nodeKindOf(
-  revision: Pick<Revision, "content">,
-  setup: Pick<ExecutionSetup, "repositories">,
-): NodeKind {
-  return setup.repositories.some(({ binding_id }) =>
-    revision.content.bindings.includes(binding_id),
-  )
-    ? NodeKind.Objective
-    : NodeKind.Initiative;
 }
 
 export function readAttemptEvidence(run: ExecutionRun) {

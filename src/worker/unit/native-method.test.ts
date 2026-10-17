@@ -32,7 +32,7 @@ import {
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { noTranscript } from "./transcript.ts";
-import type { RepositoryTransport } from "../contract.ts";
+import { ExecutionNodeKind, type RepositoryTransport } from "../contract.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { NodeKind, openNativeAgent, type NativeAgent } from "./native-agent.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
@@ -252,7 +252,10 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
 test("native entry runs an initiative report with the scripted provider", async (t) => {
-  const setup = anthropicSetup({ repositories: [] });
+  const setup = anthropicSetup({
+    node_kind: ExecutionNodeKind.Initiative,
+    repositories: [],
+  });
   const claim = {
     execution_id: setup.execution_id,
     node_id: createIdentity("node"),

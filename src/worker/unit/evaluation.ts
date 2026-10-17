@@ -14,7 +14,6 @@ import {
   type ExecutionRun,
 } from "./execution-run.ts";
 import {
-  nodeKindOf,
   readAttemptEvidence,
   readObjectives,
   readPinnedRevision,
@@ -74,7 +73,7 @@ async function judge(
   openAgent: OpenAgent,
   objectives: Awaited<ReturnType<typeof readObjectives>> | null,
 ) {
-  const kind = nodeKindOf(revision, input.setup);
+  const kind = input.setup.node_kind;
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
   if (!verificationPassed(verification, commands))
@@ -138,7 +137,7 @@ async function evaluate(
 ) {
   assert.ok(prepared.directory);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
-  const kind = nodeKindOf(revision, input.setup);
+  const kind = input.setup.node_kind;
   const verificationRun = await runVerificationsWithOutput({
     observe: verificationObserver(
       run.spans,
@@ -209,7 +208,7 @@ export async function runEvaluation(
 ): Promise<ExecutionEnd> {
   const revision = await readPinnedRevision(run);
   const evidence = await readAttemptEvidence(run);
-  const kind = nodeKindOf(revision, input.setup);
+  const kind = input.setup.node_kind;
   const prepared = await prepareEvaluation(input, run, kind, evidence);
   try {
     const assessment = await run.spans.within(

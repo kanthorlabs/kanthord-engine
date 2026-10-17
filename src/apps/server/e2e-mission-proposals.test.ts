@@ -163,7 +163,9 @@ async function setup(t: TestContext) {
       });
     return nodeId;
   };
-  const initiativeId = await create("initiative.md", NodeKind.Initiative, []);
+  const initiativeId = await create("initiative.md", NodeKind.Initiative, [
+    REPOSITORY,
+  ]);
   const objectiveId = await create(
     "objective.md",
     NodeKind.Objective,
@@ -208,7 +210,7 @@ async function setup(t: TestContext) {
       subject: "verification run",
       assets: produced,
       verification: {
-        tested_input: [repositorySnapshot(binding(REPOSITORY).id, COMMIT)],
+        tested_input: repositorySnapshot(binding(REPOSITORY).id, COMMIT),
         results: [
           { command: "true", exit_code: 0, signal: null, timed_out: false },
         ],
@@ -224,7 +226,7 @@ async function setup(t: TestContext) {
       dependency_outcome_ids: outcomes.items.map((outcome) => outcome.id),
       result: AssessmentResult.Undetermined,
       rationale: "Recovery is incomplete",
-      tested_input: [repositorySnapshot(binding(REPOSITORY).id, COMMIT)],
+      tested_input: repositorySnapshot(binding(REPOSITORY).id, COMMIT),
       proposals: [
         {
           dependency_id: objectiveId,

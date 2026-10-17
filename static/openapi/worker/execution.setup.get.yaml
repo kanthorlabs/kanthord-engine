@@ -261,6 +261,11 @@ components:
           required:
             - wall_time_ms
           additionalProperties: false
+        node_kind:
+          type: string
+          enum:
+            - initiative
+            - objective
         repositories:
           type: array
           items:
@@ -345,5 +350,6 @@ components:
         - agents
         - templates
         - resource_budget
+        - node_kind
         - repositories
       additionalProperties: false

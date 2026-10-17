@@ -20,7 +20,12 @@ import {
   insertAssessment,
   insertOutcome,
 } from "./record-store.ts";
-import { readNode, insertNode, insertRevision } from "./store.ts";
+import {
+  insertDependency,
+  readNode,
+  insertNode,
+  insertRevision,
+} from "./store.ts";
 import { executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -259,7 +264,7 @@ test("non-success assessments retain the verification's tested input", (t) => {
     );
 });
 
-test("initiative admission tracks replacement child outcomes and excludes retired children", (t) => {
+test("initiative admission tracks replacement dependency outcomes and excludes retired dependencies", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
   const childId = createIdentity("node");
@@ -269,7 +274,7 @@ test("initiative admission tracks replacement child outcomes and excludes retire
       id: childId,
       mission_id: h.mission_id,
       kind: NodeKind.Objective,
-      parent_id: h.node_id,
+      parent_id: null,
       filename: "child.md",
       created_at: NOW,
     });
@@ -279,6 +284,7 @@ test("initiative admission tracks replacement child outcomes and excludes retire
       filename: "child.md",
       tasks: [],
     });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
   });
   const outcome = () =>
     h.store.transaction((tx) => {
@@ -322,7 +328,7 @@ test("initiative admission tracks replacement child outcomes and excludes retire
   h.admit();
 });
 
-test("proposals are admitted only for an undetermined initiative with an objective child", (t) => {
+test("proposals are admitted only for an undetermined initiative with an objective dependency", (t) => {
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
   const proposal = {

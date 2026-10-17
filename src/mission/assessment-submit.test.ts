@@ -46,7 +46,7 @@ const SECOND_ATTEMPT = 2;
 const FIRST_REWORK = 1;
 const HUMAN_REASON = "Hold";
 
-test("initiative currency follows real child outcomes and only current closure releases dependent work", async (t) => {
+test("initiative currency follows real dependency outcomes and only current closure releases dependent work", async (t) => {
   const h = executionHarness(t, IDENTITY);
   const childId = createIdentity("node");
   const dependentId = createIdentity("node");
@@ -57,9 +57,10 @@ test("initiative currency follows real child outcomes and only current closure r
       mission_id: h.mission_id,
       kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.node_id,
+      parent_id: null,
       created_at: FIRST_REVISION,
     });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
     insertRevision(tx, {
       ...base,
       node_id: childId,

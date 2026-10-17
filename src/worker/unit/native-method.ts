@@ -25,11 +25,7 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
-import {
-  nodeKindOf,
-  readPriorRationale,
-  readPinnedRevision,
-} from "./node-reads.ts";
+import { readPriorRationale, readPinnedRevision } from "./node-reads.ts";
 import { prepareStepsWorkspace, runStepsObjective } from "./steps-objective.ts";
 import { runStepsInitiative } from "./steps-initiative.ts";
 import { runEvaluation } from "./evaluation.ts";
@@ -81,7 +77,7 @@ export async function runNativeExecution(
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
-      const kind = nodeKindOf(revision, input.setup);
+      const kind = input.setup.node_kind;
       const open = async (workspace: string) => {
         const agent = input.setup.agents[WORKING_AGENT];
         assert.ok(agent);

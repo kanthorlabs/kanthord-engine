@@ -58,7 +58,7 @@ test("repository commits require complete lowercase SHA-1 or SHA-256 values", ()
     );
 });
 
-test("content checks pinned objective bindings and distinct current initiative resources including discarded objectives", (t) => {
+test("content checks pinned objective bindings and the own repository bindings of an initiative in binding order", (t) => {
   const h = executionHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");
   const laterId = createIdentity("binding");
@@ -178,24 +178,57 @@ test("content checks pinned objective bindings and distinct current initiative r
     }
     assert.deepEqual(
       h.service.repositoryBindingIdsOf(tx, h.node_id, FIRST_REVISION),
-      [laterId, otherId],
+      [],
     );
-    requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
+    const single: Revision = {
+      ...revision,
+      revision: FIRST_REVISION + FIRST_REVISION,
+      content: { ...revision.content, bindings: [bindingId] },
+    };
+    insertRevision(tx, single);
+    requireTestedInput(
+      tx,
+      h.dependencies.bindings,
+      initiative,
+      single,
       address,
+    );
+    assert.throws(
+      () =>
+        requireTestedInput(tx, h.dependencies.bindings, initiative, single, [
+          address,
+        ]),
+      (error) => error instanceof OperationError && error.code === VALIDATION,
+    );
+    const pair: Revision = {
+      ...revision,
+      revision: FIRST_REVISION + FIRST_REVISION + FIRST_REVISION,
+      content: {
+        ...revision.content,
+        bindings: [otherId, storageId, bindingId],
+      },
+    };
+    insertRevision(tx, pair);
+    assert.deepEqual(
+      h.service.repositoryBindingIdsOf(tx, h.node_id, pair.revision),
+      [otherId, bindingId],
+    );
+    requireTestedInput(tx, h.dependencies.bindings, initiative, pair, [
       { ...address, binding_id: otherId },
+      address,
     ]);
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
+        requireTestedInput(tx, h.dependencies.bindings, initiative, pair, [
           address,
         ]),
       (error) => error instanceof OperationError && error.code === VALIDATION,
     );
     assert.throws(
       () =>
-        requireTestedInput(tx, h.dependencies.bindings, initiative, revision, [
+        requireTestedInput(tx, h.dependencies.bindings, initiative, pair, [
           address,
-          address,
+          { ...address, binding_id: otherId },
         ]),
       (error) =>
         error instanceof OperationError &&

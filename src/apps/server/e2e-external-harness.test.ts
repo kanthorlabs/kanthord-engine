@@ -105,7 +105,7 @@ test(
       project.id,
       "initiative-1.md",
       "initiative",
-      [],
+      [bindings.bindings.repo!.id],
     );
     const objective = await createJourneyNode(
       cli,
@@ -411,7 +411,7 @@ test(
       async () => {
         const fourth = await pull();
         assert.equal(fourth.execution.node_id, initiative);
-        const testedInput = [repoAt("b")];
+        const testedInput = repoAt("b");
         const run = await verification(fourth.execution, testedInput, "true");
         const assessed = await cli.write<Assessed>(
           ["mission", "assessment", "submit", initiative],

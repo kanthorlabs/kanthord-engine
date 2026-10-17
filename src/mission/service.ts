@@ -42,6 +42,7 @@ import {
   type IntakeStorage,
   type IntakeCheck,
   type EventDecoder,
+  type NodeKind,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -963,6 +964,10 @@ export class MissionService
       nodeId,
       nodeRevision,
     );
+  }
+
+  nodeKindOf(tx: Transaction, nodeId: string): NodeKind {
+    return requireNode(tx, nodeId).kind;
   }
 
   start(): Promise<Error | null> {

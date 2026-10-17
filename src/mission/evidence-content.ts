@@ -19,14 +19,7 @@ import {
 } from "./contract.ts";
 import { invalidExecutionInput } from "./execution.ts";
 import { getRevision } from "./node-read.ts";
-import {
-  readCurrentRevision,
-  readMission,
-  readMissionNodes,
-  readNode,
-  type NodeRow,
-} from "./store.ts";
-import { revisionFromRow } from "./revision.ts";
+import type { NodeRow } from "./store.ts";
 
 const RESOURCE_KIND_SEGMENT = 0;
 const FIRST_MATCH_INDEX = 0;
@@ -40,14 +33,14 @@ const SEPARATOR = ":";
 const SHA256 = "sha256";
 const HEX = "hex";
 
-function bindingOf(
+function bindingsOf(
   tx: Transaction,
   bindings: MissionBindings,
   revision: Revision,
   kind: (typeof MissionBindingKind)[keyof typeof MissionBindingKind],
 ) {
   assert.ok(tx.database.isTransaction);
-  const matches = revision.content.bindings
+  return revision.content.bindings
     .map((id) => {
       const binding = bindings.getBindingRevision(tx, id);
       assert.ok(binding);
@@ -58,6 +51,15 @@ function bindingOf(
         binding.resource_identity.split(SEPARATOR)[RESOURCE_KIND_SEGMENT] ===
         kind,
     );
+}
+
+function bindingOf(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: Revision,
+  kind: (typeof MissionBindingKind)[keyof typeof MissionBindingKind],
+) {
+  const matches = bindingsOf(tx, bindings, revision, kind);
   assert.ok(matches.length <= SINGLE_BINDING_MATCH);
   return matches[FIRST_MATCH_INDEX] ?? null;
 }
@@ -98,22 +100,10 @@ export function requireRepositoryAddress(
   address: RepositoryAddress,
 ): void {
   assert.equal(revision.node_id, node.id);
-  if (node.kind === NodeKind.Objective) {
-    if (
-      repositoryBindingOf(tx, bindings, revision)?.binding_id !==
-      address.binding_id
-    )
-      bindingMismatch(address.binding_id);
-    return;
-  }
-  const mission = readMission(tx, node.mission_id);
-  assert.ok(mission);
-  const binding = bindings.getBindingRevision(tx, address.binding_id);
   if (
-    !binding ||
-    binding.project_id !== mission.project_id ||
-    binding.resource_identity.split(SEPARATOR)[RESOURCE_KIND_SEGMENT] !==
-      MissionBindingKind.Repository
+    !bindingsOf(tx, bindings, revision, MissionBindingKind.Repository).some(
+      (binding) => binding.binding_id === address.binding_id,
+    )
   )
     bindingMismatch(address.binding_id);
 }
@@ -124,35 +114,12 @@ export function repositoryBindingIdsOf(
   nodeId: string,
   nodeRevision: number,
 ): string[] {
-  const node = readNode(tx, nodeId);
-  assert.ok(node);
-  if (node.kind === NodeKind.Objective) {
-    const binding = repositoryBindingOf(
-      tx,
-      bindings,
-      getRevision(tx, nodeId, nodeRevision),
-    );
-    return binding ? [binding.binding_id] : [];
-  }
-  assert.equal(node.kind, NodeKind.Initiative);
-  assert.ok(tx.database.isTransaction);
-  const objectives = readMissionNodes(tx, node.mission_id).filter(
-    (child) =>
-      child.parent_id === node.id &&
-      child.kind === NodeKind.Objective &&
-      child.retired_at === null,
-  );
-  const resources = new Map<string, { binding_id: string; revision: number }>();
-  for (const child of objectives) {
-    const row = readCurrentRevision(tx, child.id);
-    assert.ok(row);
-    const binding = repositoryBindingOf(tx, bindings, revisionFromRow(tx, row));
-    if (!binding) continue;
-    const previous = resources.get(binding.resource_identity);
-    if (!previous || previous.revision < binding.revision)
-      resources.set(binding.resource_identity, binding);
-  }
-  return [...resources.values()].map(({ binding_id: bindingId }) => bindingId);
+  return bindingsOf(
+    tx,
+    bindings,
+    getRevision(tx, nodeId, nodeRevision),
+    MissionBindingKind.Repository,
+  ).map((binding) => binding.binding_id);
 }
 
 export function requireTestedInput(
@@ -163,40 +130,26 @@ export function requireTestedInput(
   testedInput: TestedInput,
 ): void {
   assert.equal(revision.node_id, node.id);
-  if (node.kind === NodeKind.Objective) {
+  const expected = bindingsOf(
+    tx,
+    bindings,
+    revision,
+    MissionBindingKind.Repository,
+  ).map((binding) => binding.binding_id);
+  if (expected.length <= SINGLE_BINDING_MATCH) {
     if (Array.isArray(testedInput)) invalidExecutionInput("tested_input");
-    if (testedInput.kind === AssetKind.Repository)
-      requireRepositoryAddress(tx, bindings, node, revision, testedInput);
-    return;
-  }
-  const resources = new Set(
-    repositoryBindingIdsOf(tx, bindings, node.id, revision.revision).map(
-      (id) => {
-        const binding = bindings.getBindingRevision(tx, id);
-        assert.ok(binding);
-        return binding.resource_identity;
-      },
-    ),
-  );
-  if (resources.size === NO_REPOSITORY_BINDINGS) {
-    if (Array.isArray(testedInput) || testedInput.kind === AssetKind.Repository)
+    if (testedInput.kind !== AssetKind.Repository) return;
+    if (expected.length === NO_REPOSITORY_BINDINGS)
       invalidExecutionInput("tested_input");
+    requireRepositoryAddress(tx, bindings, node, revision, testedInput);
     return;
   }
-  if (!Array.isArray(testedInput)) invalidExecutionInput("tested_input");
-  const seen = new Set<string>();
-  for (const address of testedInput) {
-    requireRepositoryAddress(tx, bindings, node, revision, address);
-    const binding = bindings.getBindingRevision(tx, address.binding_id);
-    assert.ok(binding);
-    if (
-      !resources.has(binding.resource_identity) ||
-      seen.has(binding.resource_identity)
-    )
+  if (!Array.isArray(testedInput) || testedInput.length !== expected.length)
+    invalidExecutionInput("tested_input");
+  testedInput.forEach((address, index) => {
+    if (address.binding_id !== expected[index])
       bindingMismatch(address.binding_id);
-    seen.add(binding.resource_identity);
-  }
-  if (seen.size !== resources.size) invalidExecutionInput("tested_input");
+  });
 }
 
 export function producedContent(bytes: { media_type: string; data: string }) {

@@ -19,7 +19,12 @@ import {
   insertEvidence,
   type AssessmentRow,
 } from "./record-store.ts";
-import { insertMission, insertNode, setNodeState } from "./store.ts";
+import {
+  insertDependency,
+  insertMission,
+  insertNode,
+  setNodeState,
+} from "./store.ts";
 import { missionHarness } from "./test-support.ts";
 
 const FIRST_ATTEMPT = 1;
@@ -171,19 +176,20 @@ test("closure whose outcome names the assessment preserves its currency", (t) =>
   assert.equal(h.currency().context_matches, true);
 });
 
-test("a changed child outcome invalidates the initiative's selected context without state changes", (t) => {
+test("a changed dependency outcome invalidates the initiative's selected context without state changes", (t) => {
   const h = fixture(t, NodeKind.Initiative);
   const childId = createIdentity("node");
-  h.store.transaction((tx) =>
+  h.store.transaction((tx) => {
     insertNode(tx, {
       id: childId,
       mission_id: h.mission_id,
       kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.node_id,
+      parent_id: null,
       created_at: NOW,
-    }),
-  );
+    });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
+  });
   const childAssessment = h.assessment({
     node_id: childId,
     attempt: 0,

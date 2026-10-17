@@ -70,6 +70,9 @@ const fakeCollaborations = {
   repositoryBindingIdsOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
+  nodeKindOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   pinnedCredentialMetadata: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },

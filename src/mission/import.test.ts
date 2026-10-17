@@ -62,7 +62,7 @@ const FIRST_ENTRY_INDEX = 0;
 const INITIAL_RESOLUTION_COUNT = 0;
 const SINGLE_ENTRY = 1;
 const TEXT_OVERFLOW = 1;
-const BINDING_COUNT = 1;
+const NO_BINDING_COUNT = 0;
 const NEXT_VERSION_INCREMENT = 1;
 const FIRST_ATTEMPT = 1;
 const MISSION_ID = "mission_00000000000000000000000000";
@@ -694,7 +694,7 @@ test("binding resolution collects every missing name and applies the kind rule t
   const { resolve } = fixture(t, []);
   const result = resolve([
     entry("a.md", { bindings: [MISSING_BINDING, "also-missing"] }),
-    entry("b.md", { bindings: [REPOSITORY] }),
+    entry("b.md", { kind: NodeKind.Objective, parent: "a.md", bindings: [] }),
   ]);
   assert.deepEqual(
     result.violations.map((value) => value.code),
@@ -706,9 +706,9 @@ test("binding resolution collects every missing name and applies the kind rule t
       { binding: MISSING_BINDING },
       { binding: "also-missing" },
       {
-        kind: NodeKind.Initiative,
+        kind: NodeKind.Objective,
         binding_kind: "repository",
-        count: BINDING_COUNT,
+        count: NO_BINDING_COUNT,
       },
     ],
   );

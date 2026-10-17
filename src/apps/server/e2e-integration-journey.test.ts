@@ -214,7 +214,7 @@ async function setup(t: TestContext) {
       });
     return nodeId;
   };
-  const I = await create("initiative-1.md", "initiative", []);
+  const I = await create("initiative-1.md", "initiative", [GATED, MERGE]);
   const P = await create("objective-p.md", "objective", [GATED, "store"], I);
   const p = await pushNodeBranch(t, gatedBare.bare, P, "objective p\n");
   const inbound = async (kind: string, resource: string) => {

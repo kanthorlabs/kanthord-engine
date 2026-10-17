@@ -24,6 +24,7 @@ import {
 } from "./record-store.ts";
 import { claimableMap, routeMission } from "./routing.ts";
 import {
+  insertDependency,
   insertNode,
   insertRevision,
   readCurrentRevision,
@@ -49,13 +50,7 @@ async function fixture(t: TestContext) {
   const h = executionHarness(t, IDENTITY);
   const repositoryId = createIdentity("binding");
   const childId = createIdentity("node");
-  const input = [
-    {
-      kind: AssetKind.Repository,
-      binding_id: repositoryId,
-      commit: "a".repeat(40),
-    },
-  ] as const;
+  const input = { kind: AssetKind.Produced, sha256: "a".repeat(64) } as const;
   h.dependencies.bindings.getBindingRevision = (_tx, id) =>
     id === repositoryId
       ? {
@@ -79,9 +74,10 @@ async function fixture(t: TestContext) {
       mission_id: h.mission_id,
       kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.node_id,
+      parent_id: null,
       created_at: NOW,
     });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
     insertRevision(tx, {
       ...base,
       node_id: childId,

@@ -54,8 +54,10 @@ const ABOVE_PINNED_REVISION = 2;
 const STALE_ATTEMPT_NUMBER = 2;
 const PAIR_COUNT = 2;
 const THIRD_MISSION_VERSION = 3;
+const FOURTH_MISSION_VERSION = 4;
+const FIFTH_MISSION_VERSION = 5;
 const PRIMARY_PRIORITY = 3;
-const POST_PLANNING_MISSION_VERSION = 4;
+const POST_PLANNING_MISSION_VERSION = 6;
 const TOTAL_EVIDENCE_COUNT = 4;
 const OBJECT_SIZE_BYTES = 5;
 const NO_OUTPUT = "";
@@ -269,6 +271,14 @@ async function setup(t: TestContext) {
     THIRD_MISSION_VERSION,
     initiative,
   );
+  for (const [objective, version] of [
+    [objectiveA, FOURTH_MISSION_VERSION],
+    [objectiveB, FIFTH_MISSION_VERSION],
+  ] as const)
+    await write(["mission", "dependency", "add", initiative, objective], {
+      reason: "plan",
+      expected_mission_version: version,
+    });
   await write(["mission", "node", "priority", "set", objectiveA], {
     value: PRIMARY_PRIORITY,
     expected_mission_version: POST_PLANNING_MISSION_VERSION,

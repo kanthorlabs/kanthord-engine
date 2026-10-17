@@ -223,7 +223,7 @@ async function setupInternal(t: TestContext) {
     project.id,
     "initiative-1.md",
     "initiative",
-    [],
+    [bindingSet.bindings.repo!.id, bindingSet.bindings.gated!.id],
   );
   const objective = await createJourneyNode(
     cli,

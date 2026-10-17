@@ -26,7 +26,8 @@ import {
   type AttemptRow,
 } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
-import { readMissionNodes, type NodeRow } from "./store.ts";
+import { directDependenciesOf } from "./graph.ts";
+import { readDependencies, readMissionNodes, type NodeRow } from "./store.ts";
 
 const FIRST_COVERING_INDEX = 0;
 const NO_REQUIRED_VERIFICATIONS = 0;
@@ -34,7 +35,7 @@ const SINGLE_COVERING_VERIFICATION = 1;
 const NO_PROPOSALS = 0;
 const PROPOSALS_FIELD = "proposals";
 
-function requireChildren(
+function requireDependencyOutcomes(
   tx: Transaction,
   node: NodeRow,
   dependencyOutcomeIds: readonly string[],
@@ -43,17 +44,13 @@ function requireChildren(
   const expected =
     node.kind === NodeKind.Objective
       ? []
-      : readMissionNodes(tx, node.mission_id)
-          .filter(
-            (child) =>
-              child.parent_id === node.id &&
-              child.kind === NodeKind.Objective &&
-              child.retired_at === null,
-          )
-          .flatMap((child) => {
-            const outcome = readCurrentOutcome(tx, child.id);
-            return outcome ? [outcome.id] : [];
-          });
+      : directDependenciesOf(
+          node.id,
+          readDependencies(tx, node.mission_id),
+        ).flatMap((id) => {
+          const outcome = readCurrentOutcome(tx, id);
+          return outcome ? [outcome.id] : [];
+        });
   if (
     dependencyOutcomeIds.length !== expected.length ||
     new Set(dependencyOutcomeIds).size !== expected.length ||
@@ -74,15 +71,16 @@ function requireProposals(
     body.result !== AssessmentResult.Undetermined
   )
     invalidExecutionInput(PROPOSALS_FIELD);
+  const direct = new Set(
+    directDependenciesOf(node.id, readDependencies(tx, node.mission_id)),
+  );
   const objectives = new Set(
     readMissionNodes(tx, node.mission_id)
       .filter(
-        (child) =>
-          child.parent_id === node.id &&
-          child.kind === NodeKind.Objective &&
-          child.retired_at === null,
+        (dependency) =>
+          direct.has(dependency.id) && dependency.kind === NodeKind.Objective,
       )
-      .map((child) => child.id),
+      .map((dependency) => dependency.id),
   );
   for (const proposal of body.proposals) {
     if (!objectives.has(proposal.dependency_id))
@@ -186,7 +184,7 @@ export function admitAssessment(
         verificationSchema.parse(JSON.parse(row.verification)),
       );
   }
-  requireChildren(tx, node, body.dependency_outcome_ids);
+  requireDependencyOutcomes(tx, node, body.dependency_outcome_ids);
   requireProposals(tx, dependencies, node, body);
   requireTestedInput(
     tx,

@@ -23,7 +23,7 @@ import {
   readOutcome,
 } from "./record-store.ts";
 import { outcomeRecord } from "./record-read.ts";
-import { readMission, setNodeState } from "./store.ts";
+import { insertDependency, readMission, setNodeState } from "./store.ts";
 import { evidenceHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -121,11 +121,15 @@ function fixture(t: TestContext, request = false) {
   return { ...h, evidence_id: evidenceId, asset_id: assetId, remove };
 }
 
-test("asset deletes require a terminal ancestor chain or force and preserve the empty evidence", async (t) => {
+test("asset deletes require a terminal node and terminal direct examine dependents or force and preserve the empty evidence", async (t) => {
   const h = fixture(t);
   h.dependencies.intakeStorage.delete = async (_call, assetId) => {
     assert.equal(assetId, h.asset_id);
   };
+  const parentId = h.node().parent_id!;
+  h.store.transaction((tx) =>
+    insertDependency(tx, h.mission_id, parentId, h.node_id),
+  );
   await assert.rejects(
     h.remove(),
     (error) =>
@@ -139,7 +143,6 @@ test("asset deletes require a terminal ancestor chain or force and preserve the 
       error instanceof OperationError &&
       error.code === MissionErrorCode.EvidenceRemoveNodeLive,
   );
-  const parentId = h.node().parent_id!;
   h.store.transaction((tx) => setNodeState(tx, parentId, NodeState.Discarded));
   assert.equal(await h.remove(), null);
   h.store.transaction((tx) => {
