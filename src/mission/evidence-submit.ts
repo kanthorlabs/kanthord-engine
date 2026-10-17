@@ -5,11 +5,15 @@ import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { isObject } from "../kernel/values.ts";
+import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
 import {
   AssetKind,
   MissionErrorCode,
   UPLOAD_LIFETIME_MS,
   type EvidenceSubmit,
+  type MissionBindings,
+  type Revision,
 } from "./contract.ts";
 import { admitExecution, requireTextBound } from "./execution.ts";
 import {
@@ -22,21 +26,56 @@ import {
 } from "./evidence-content.ts";
 import { evidenceRecord } from "./record-read.ts";
 import {
+  failedBindingsOf,
   insertEvidence,
   type AssetRow,
   type EvidenceRow,
 } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
-import { authorizeClaim, authorizeStorage } from "./authorization.ts";
+import {
+  AuthorizationRefusal,
+  authorizeClaim,
+  authorizeStorage,
+  storageEnabled,
+} from "./authorization.ts";
 
 type Identities = { evidence_id: string; asset_ids: string[] };
 type ObjectUpload = {
   nodeId: string;
   assetId: string;
-  storageBindingId: string;
   size: number;
   sha256: string | null;
 };
+type StorageCandidates = { bindings: string[]; grantable: string[] };
+type Upload = {
+  asset_id: string;
+  put_url: string;
+  headers: Record<string, string>;
+  expires_at: number;
+};
+const NO_STORAGE_BINDINGS = 0;
+const NO_OBJECT_ASSETS = 0;
+const FIRST_CANDIDATE = 0;
+const FAILOVER_REFUSALS: readonly string[] = [
+  AuthorizationRefusal.BindingDisabled,
+  AuthorizationRefusal.BindingRemoved,
+];
+
+function storageCandidates(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: Revision,
+  attempt: number,
+): StorageCandidates {
+  const storage = storageBindingIdsOf(tx, bindings, revision);
+  const failed = new Set(failedBindingsOf(tx, revision.node_id, attempt));
+  return {
+    bindings: storage,
+    grantable: storage.filter(
+      (id) => !failed.has(id) && storageEnabled(tx, bindings, id),
+    ),
+  };
+}
 
 export function prepareEvidence(
   tx: Transaction,
@@ -46,6 +85,7 @@ export function prepareEvidence(
   body: EvidenceSubmit,
   now: number,
   ids: Identities,
+  grants: ReadonlyMap<string, string>,
 ) {
   if (body.assets.some((asset) => asset.kind === AssetKind.Object))
     authorizeClaim(tx, dependencies, claim, nodeId);
@@ -81,7 +121,7 @@ export function prepareEvidence(
       body.verification.tested_input,
     );
   const objects: ObjectUpload[] = [];
-  const assets: AssetRow[] = body.assets.map((asset, index) => {
+  const rows = body.assets.map((asset, index): AssetRow | null => {
     const id = ids.asset_ids[index];
     assert.ok(id);
     const base = {
@@ -106,17 +146,26 @@ export function prepareEvidence(
         ...base,
         content: canonicalJSON(producedContent(asset.content)),
       };
-    const [storageBindingId] = storageBindingIdsOf(
+    const storageBindingIds = storageBindingIdsOf(
       tx,
       dependencies.bindings,
       revision,
     );
-    if (storageBindingId === undefined)
+    if (storageBindingIds.length === NO_STORAGE_BINDINGS)
       throw new OperationError(
         HttpStatus.Conflict,
         MissionErrorCode.EvidenceStorageBindingAbsent,
         "The pinned revision has no storage binding.",
       );
+    objects.push({
+      nodeId: node.id,
+      assetId: id,
+      size: asset.size,
+      sha256: asset.sha256 ?? null,
+    });
+    const storageBindingId = grants.get(id);
+    if (storageBindingId === undefined) return null;
+    assert.ok(storageBindingIds.includes(storageBindingId));
     const binding = authorizeStorage(
       tx,
       dependencies.bindings,
@@ -131,13 +180,6 @@ export function prepareEvidence(
       claim.attempt,
       id,
     );
-    objects.push({
-      nodeId: node.id,
-      assetId: id,
-      storageBindingId,
-      size: asset.size,
-      sha256: asset.sha256 ?? null,
-    });
     return {
       ...base,
       content: canonicalJSON({
@@ -151,6 +193,11 @@ export function prepareEvidence(
       expired_at: now + UPLOAD_LIFETIME_MS,
     };
   });
+  const assets = rows.filter((row): row is AssetRow => row !== null);
+  const storage =
+    objects.length === NO_OBJECT_ASSETS
+      ? null
+      : storageCandidates(tx, dependencies.bindings, revision, claim.attempt);
   const evidence: EvidenceRow = {
     id: ids.evidence_id,
     node_id: node.id,
@@ -162,7 +209,60 @@ export function prepareEvidence(
     provenance: canonicalJSON(actor),
     created_at: now,
   };
-  return { evidence, assets, objects };
+  return { evidence, assets, objects, storage };
+}
+
+function signingFailsOver(caller: CallerContext, error: unknown): boolean {
+  if (caller.context.err() || !(error instanceof OperationError)) return false;
+  if (error.code.startsWith(S3_RESULT_CODE_PREFIX)) return true;
+  return (
+    error.code === MissionErrorCode.AuthorizationRefused &&
+    isObject(error.details) &&
+    "reason" in error.details &&
+    FAILOVER_REFUSALS.includes(String(error.details.reason))
+  );
+}
+
+async function signObject(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  object: ObjectUpload,
+  candidates: readonly string[],
+  start: number,
+) {
+  const claim = caller.execution;
+  assert.ok(claim && caller.identity);
+  const call = {
+    context: caller.context,
+    identity: caller.identity,
+    executionId: claim.executionId,
+  };
+  for (let index = start; index < candidates.length; index++) {
+    const storageBindingId = candidates[index]!;
+    try {
+      const signed = await dependencies.intakeStorage.put(call, {
+        ...object,
+        storageBindingId,
+      });
+      return { index, storageBindingId, signed };
+    } catch (error) {
+      if (!signingFailsOver(caller, error)) throw error;
+    }
+  }
+  return null;
+}
+
+function storageExhausted(
+  nodeId: string,
+  attempt: number,
+  bindings: string[],
+): never {
+  throw new OperationError(
+    HttpStatus.Conflict,
+    MissionErrorCode.EvidenceStorageExhausted,
+    "No storage binding of the node is left for the upload.",
+    { node_id: nodeId, attempt, bindings },
+  );
 }
 
 export async function submitEvidence(
@@ -174,27 +274,40 @@ export async function submitEvidence(
   const claim = caller.execution;
   assert.ok(claim);
   assert.ok(caller.identity);
-  const identity = caller.identity;
   const ids = {
     evidence_id: createIdentity("evidence"),
     asset_ids: body.assets.map(() => createIdentity("evidence_asset")),
   };
-  const uploads: {
-    asset_id: string;
-    put_url: string;
-    headers: Record<string, string>;
-    expires_at: number;
-  }[] = [];
+  const uploads: Upload[] = [];
+  const grants = new Map<string, string>();
   if (body.assets.some((asset) => asset.kind === AssetKind.Object)) {
     const prepared = dependencies.store.transaction((tx) =>
-      prepareEvidence(tx, dependencies, claim, nodeId, body, Date.now(), ids),
+      prepareEvidence(
+        tx,
+        dependencies,
+        claim,
+        nodeId,
+        body,
+        Date.now(),
+        ids,
+        grants,
+      ),
     );
+    assert.ok(prepared.storage);
+    const { bindings, grantable } = prepared.storage;
+    let next = FIRST_CANDIDATE;
     for (const object of prepared.objects) {
-      const signed = await dependencies.intakeStorage.put(
-        { context: caller.context, identity, executionId: claim.executionId },
+      const granted = await signObject(
+        dependencies,
+        caller,
         object,
+        grantable,
+        next,
       );
-      uploads.push({ asset_id: object.assetId, ...signed });
+      if (!granted) storageExhausted(nodeId, claim.attempt, bindings);
+      next = granted.index;
+      grants.set(object.assetId, granted.storageBindingId);
+      uploads.push({ asset_id: object.assetId, ...granted.signed });
     }
   }
   return caller.commit((tx) => {
@@ -206,7 +319,9 @@ export async function submitEvidence(
       body,
       Date.now(),
       ids,
+      grants,
     );
+    assert.equal(prepared.assets.length, body.assets.length);
     insertEvidence(tx, prepared.evidence, prepared.assets);
     return { evidence: evidenceRecord(tx, prepared.evidence), uploads };
   });
