@@ -23,8 +23,6 @@ import {
 import { WorkerUnit } from "./unit.ts";
 import { httpTransport } from "./transport.ts";
 
-export { uploadEvidence } from "./evidence-upload.ts";
-
 const CLIENT_SECRET_BYTES = 32;
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const WORKER_STOP_EXIT_FAILURE = 1;
