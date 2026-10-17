@@ -33,6 +33,8 @@ import {
   readRequests,
   readReleaseEvidence,
   readLandedCommitEvidence,
+  insertUploadFailure,
+  failedBindingsOf,
   type AssessmentRow,
   type EvidenceRow,
   type AssetRow,
@@ -317,4 +319,33 @@ test("mission harness parses operation contracts and records the one caller tran
     }),
   );
   assert.equal(h.commits(), FIRST_ATTEMPT);
+});
+
+test("an upload failure records each binding once for its attempt", (t) => {
+  const h = fixture(t);
+  const primary = createIdentity("binding");
+  const secondary = createIdentity("binding");
+  const failure = (attempt: number, bindingId: string, failedAt: number) => ({
+    node_id: h.node_id,
+    attempt,
+    storage_binding_id: bindingId,
+    asset_id: createIdentity("evidence_asset"),
+    failed_at: failedAt,
+  });
+  h.store.transaction((tx) => {
+    insertUploadFailure(tx, failure(FIRST_ATTEMPT, secondary, LATER));
+    insertUploadFailure(tx, failure(FIRST_ATTEMPT, primary, NOW));
+    insertUploadFailure(tx, failure(FIRST_ATTEMPT, primary, LATER));
+    insertUploadFailure(tx, failure(SECOND_ATTEMPT, secondary, NOW));
+  });
+  h.store.transaction((tx) => {
+    assert.deepEqual(failedBindingsOf(tx, h.node_id, FIRST_ATTEMPT), [
+      primary,
+      secondary,
+    ]);
+    assert.deepEqual(failedBindingsOf(tx, h.node_id, SECOND_ATTEMPT), [
+      secondary,
+    ]);
+    assert.deepEqual(failedBindingsOf(tx, h.node_id, THIRD_ATTEMPT), []);
+  });
 });

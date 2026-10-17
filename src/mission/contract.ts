@@ -241,6 +241,7 @@ export const MissionErrorCode = {
   ExecutionContextMismatch: "mission.execution.context_mismatch",
   EvidenceStorageBindingAbsent: "mission.evidence.storage_binding_absent",
   EvidenceStorageUnavailable: "mission.evidence.storage_unavailable",
+  EvidenceStorageExhausted: "mission.evidence.storage_exhausted",
   EvidenceContentPlatform: "mission.evidence.content_platform",
   ExecutionClaimNotEvaluation: "mission.execution.claim_not_evaluation",
   RequestRequirementUnknown: "mission.request.requirement_unknown",
