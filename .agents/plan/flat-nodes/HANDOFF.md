@@ -73,6 +73,9 @@ Plan 10 is merged. Run these steps in this order:
 5. Run task 08.11. Stop `make dev`. Run `make cleanup`, then `make bootstrap`. Export and delete the homelab volume. Redeploy the homelab. Log in the LLM credential `anthropic-subscription`.
 6. Run task 08.12 once on the final root head, with the engine at plan 09b. This run also covers plan 10, which runs no live acceptance of its own (`10-root-multi-repository-docs.md:15`). If it fails, run it again at the root merge of plan 08 to find the plan that caused it.
 7. Open one pull request per repository from `refactor/flat-nodes` to `main`.
+8. Merge the `engine` and `apps` pull requests first. Use a merge commit, not a squash or a rebase.
+9. Run `git -C engine merge-base --is-ancestor <root engine pointer> origin/main`. Run the same check for `apps`. Each check must exit 0.
+10. Merge the superrepo pull request last.
 
 Gate row 08 (`00-index.md:97`) holds the live run. The plan 08 pull request merges before that row runs, as OD4 states.
 
@@ -80,6 +83,6 @@ Gate row 08 (`00-index.md:97`) holds the live run. The plan 08 pull request merg
 
 - Decide whether the CLI prints the `details` of a refusal. `handleMutationResult` (`src/apps/cli/shared.ts:144-152`) keeps only the code, so an operator cannot see `details.claims` or `details.node_ids` through the CLI (OD2).
 - `docs/brainstorm/HANDOFF.md` of the superrepo holds the open design items.
-- The root `.githooks/pre-commit` refuses a staged pointer change when the submodule is not on `main` or the pointer is not on its `origin/main`. When a clone runs the hook, it refuses each pointer move to `refactor/flat-nodes` (OD8).
+- The root `.githooks/pre-commit` refuses a staged pointer change when the submodule is not on `main` or the pointer is not on its `origin/main`. When a clone runs the hook, it refuses each pointer move to `refactor/flat-nodes`. Ulrich ruled OD8 on 2026-10-18: the hook does not change, and steps 8 to 10 put each root pointer on `origin/main`.
 - These tests failed once in a full run and passed alone, so treat them as flaky until they fail again: `e2e-worker-app.test.ts:298`; `worker-pool.test.ts` "a removed binding ends its threads without a restart" and "the pool starts one instance for each slot"; two timing tests of `src/worker/unit/verification.test.ts` under parallel load.
 - `docs/brainstorm/worker-service.impl.md` has no test line for the evidence-placement rule on an `implement` node whose evidence names no repository snapshot. This gap existed before ruling S4.
