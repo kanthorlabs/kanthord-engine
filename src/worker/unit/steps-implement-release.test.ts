@@ -10,7 +10,7 @@ import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
 import { runTask, runStepsImplement } from "./steps-implement.ts";
 import { refreshBeforeRelease } from "./base-refresh.ts";
-import { recordJudged } from "./judged-tasks.ts";
+import { headSetOf, recordJudged } from "./judged-tasks.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   RecordKind,
@@ -40,7 +40,7 @@ function judgeNodeUnit(h: Awaited<ReturnType<typeof fixture>>) {
       revision: h.input.claim.pinned_revision,
       taskId: h.input.claim.node_id,
     },
-    h.checkouts[0]!.head,
+    headSetOf(h.checkouts),
   );
 }
 
@@ -338,5 +338,98 @@ test("the finish writes one git span for each git step and the cause of a failed
   assert.deepEqual(
     texts.map((record) => (record.kind === RecordKind.Text ? record.text : "")),
     [`repository.connector.git_failed: ${cause}`],
+  );
+});
+
+const TWO_BINDINGS = ["api", "web"];
+
+async function twoBindingRelease(t: test.TestContext) {
+  const h = await fixture(t, [], [], undefined, TWO_BINDINGS);
+  for (const checkout of h.checkouts) {
+    writeFileSync(join(checkout.directory, "node-work"), checkout.name);
+    await simpleGit(checkout.directory).add("node-work");
+    await simpleGit(checkout.directory).commit("node work");
+    checkout.head = (
+      await simpleGit(checkout.directory).revparse(["HEAD"])
+    ).trim();
+  }
+  judgeNodeUnit(h);
+  const submitted: { binding_id: string; commit: string }[][] = [];
+  const order: string[] = [];
+  h.run.clients.mission = {
+    "evidence.submit": async (input: {
+      body: { assets: { address: { binding_id: string; commit: string } }[] };
+    }) => {
+      order.push("evidence");
+      submitted.push(input.body.assets.map((asset) => asset.address));
+      return { type: "completed", status: 200, data: { evidence: {} } };
+    },
+  } as unknown as MethodClients["mission"];
+  h.run.clients.scheduler = {
+    executionRelease: async () => {
+      order.push("release");
+      return { type: "completed", status: 200, data: {} };
+    },
+  } as unknown as MethodClients["scheduler"];
+  return { h, submitted, order };
+}
+
+test("two bindings push both node branches before the evidence", async (t) => {
+  const { h, order } = await twoBindingRelease(t);
+  const pushTransport = h.input.transport;
+  h.input.transport = {
+    ...pushTransport,
+    pushNodeBranch: async (...args) => {
+      order.push(`push:${args[0]}`);
+      return pushTransport.pushNodeBranch(...args);
+    },
+  };
+  assert.deepEqual(await runStepsImplement(h), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.deepEqual(order, [
+    ...h.checkouts.map((checkout) => `push:${checkout.directory}`),
+    "evidence",
+    "release",
+  ]);
+  for (const [index, checkout] of h.checkouts.entries())
+    assert.equal(
+      (
+        await simpleGit(h.bares[index]!).revparse([
+          `refs/heads/${h.nodeBranch}`,
+        ])
+      ).trim(),
+      checkout.head,
+    );
+});
+
+test("one failed push submits no evidence", async (t) => {
+  const { h, submitted } = await twoBindingRelease(t);
+  const web = h.checkouts[1]!.directory;
+  h.input.transport = {
+    ...h.input.transport,
+    pushNodeBranch: async (...args) => {
+      if (args[0] === web) throw new Error("push failed");
+      return transport.pushNodeBranch(...args);
+    },
+  };
+  await assert.rejects(runStepsImplement(h));
+  assert.deepEqual(submitted, []);
+});
+
+test("the evidence holds one asset for each binding", async (t) => {
+  const { h, submitted } = await twoBindingRelease(t);
+  await runStepsImplement(h);
+  assert.deepEqual(submitted, [
+    h.checkouts.map((checkout) => ({
+      kind: "repository",
+      binding_id: checkout.binding_id,
+      commit: checkout.head,
+    })),
+  ]);
+  assert.deepEqual(
+    submitted[0]!.map((address) => address.binding_id),
+    h.input.setup.repositories.map((repository) => repository.binding_id),
   );
 });
