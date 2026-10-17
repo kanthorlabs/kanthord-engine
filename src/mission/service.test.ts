@@ -64,12 +64,18 @@ import {
 import { missionMigrations } from "./migrations.ts";
 import { nodeRecord } from "./node-read.ts";
 import { getRevision } from "./node-read.ts";
-import { openAttempt, closeAttempt, readOpenAttempt } from "./record-store.ts";
+import {
+  openAttempt,
+  closeAttempt,
+  insertEvidence,
+  readOpenAttempt,
+} from "./record-store.ts";
 import { importDigest, normalizeImportSnapshot } from "./import.ts";
 import { serializePlanFile } from "./export.ts";
 import { parsePlanFile } from "./parser.ts";
 import { MissionService, humanActor, type Dependencies } from "./service.ts";
 import { CONTENT_FIELDS, TASKS_FIELD, ContentField } from "./content.ts";
+import { ControlError } from "./control.ts";
 import { unexpectedCollaboration } from "./test-support.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
@@ -164,7 +170,7 @@ test("priority refuses a live claim before changing its node or job", (t) => {
   });
 });
 
-test("dependency admission settles each descendant before testing its live claim", (t) => {
+test("dependency admission settles the dependent before testing its live claim", (t) => {
   const executionId = createIdentity("execution");
   let claimed = "";
   const settled = new Set<string>();
@@ -189,18 +195,27 @@ test("dependency admission settles each descendant before testing its live claim
     },
   });
   const parent = f.initiative();
-  claimed = f.create(f.body(NodeKind.Objective, parent)).revisions[
+  const child = f.create(f.body(NodeKind.Objective, parent)).revisions[
     FIRST_ELEMENT_INDEX
   ]!.node_id;
   const target = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
     FIRST_ELEMENT_INDEX
   ]!.node_id;
-  f.refuses("dependency.add", parent, target, MissionErrorCode.ClaimLive, {
-    node_id: claimed,
-    execution_id: executionId,
-  });
+  claimed = child;
+  f.edit(DependencyOperation.Add, parent, target);
+  assert.ok(!settled.has(child));
+  claimed = parent;
+  f.refuses(
+    DependencyOperation.Add,
+    parent,
+    child,
+    MissionErrorCode.ClaimLive,
+    {
+      node_id: parent,
+      execution_id: executionId,
+    },
+  );
   assert.ok(settled.has(parent));
-  assert.ok(settled.has(claimed));
 });
 
 test("queue writes wake after commit and refused graph writes never wake", (t) => {
@@ -1848,6 +1863,84 @@ test("dependency addition validates cross-mission endpoints", (t) => {
   );
 });
 
+const DEPENDENCY_GUARDED_STATES = [
+  NodeState.Waiting,
+  NodeState.Evaluating,
+  NodeState.ExternalRequested,
+  NodeState.ExternalSuccess,
+  NodeState.ExternalFailed,
+];
+
+function pauseOnRequest(
+  f: Pick<ReturnType<typeof dependencyFixture>, "store" | "setState">,
+  id: string,
+) {
+  f.store.transaction((tx) => {
+    openAttempt(tx, id, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT);
+    insertEvidence(
+      tx,
+      {
+        id: createIdentity("evidence"),
+        node_id: id,
+        attempt: FIRST_REVISION,
+        subject: "Request",
+        requirement_key: "repo.pull_request",
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(HUMAN_ACTOR),
+        created_at: CREATED_AT,
+      },
+      [],
+    );
+  });
+  f.setState(id, NodeState.Paused);
+}
+
+test("dependency add and remove refuse a Waiting, Evaluating and External dependent", (t) => {
+  const f = dependencyFixture(t);
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
+  const other = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
+    FIRST_ELEMENT_INDEX
+  ]!.node_id;
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  for (const state of DEPENDENCY_GUARDED_STATES) {
+    f.setState(nodeId, state);
+    const details = { state, attempt: NO_ATTEMPT };
+    f.refuses(
+      DependencyOperation.Add,
+      nodeId,
+      other,
+      ControlError.StateConflict,
+      details,
+    );
+    f.refuses(
+      DependencyOperation.Remove,
+      nodeId,
+      dependsOnId,
+      ControlError.StateConflict,
+      details,
+    );
+  }
+});
+
+test("dependency add refuses a Paused dependent with a request evidence", (t) => {
+  const f = dependencyFixture(t);
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
+  const other = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
+    FIRST_ELEMENT_INDEX
+  ]!.node_id;
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  pauseOnRequest(f, nodeId);
+  f.refuses(
+    DependencyOperation.Add,
+    nodeId,
+    other,
+    ControlError.StateConflict,
+    { state: NodeState.Paused, attempt: FIRST_REVISION },
+  );
+  f.edit(DependencyOperation.Remove, nodeId, dependsOnId);
+});
+
 for (const operation of Object.values(DependencyOperation)) {
   for (const state of [NodeState.Completed, NodeState.Discarded]) {
     test(`${operation} refuses terminal dependent ${state} before no-op`, (t) => {
@@ -3387,6 +3480,30 @@ test("node.retire refuses sorted unique nonterminal dependents without force, in
   assert.deepEqual(f.snapshot().dependencies, []);
 });
 
+test("forced retirement refuses a guarded dependent and writes nothing", (t) => {
+  const f = retireFixture(t);
+  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
+  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
+  for (const state of DEPENDENCY_GUARDED_STATES) {
+    f.setState(nodeId, state);
+    f.refuses(
+      dependsOnId,
+      ControlError.StateConflict,
+      { node_id: nodeId, state, attempt: NO_ATTEMPT },
+      HttpStatus.Conflict,
+      true,
+    );
+  }
+  pauseOnRequest(f, nodeId);
+  f.refuses(
+    dependsOnId,
+    ControlError.StateConflict,
+    { node_id: nodeId, state: NodeState.Paused, attempt: FIRST_REVISION },
+    HttpStatus.Conflict,
+    true,
+  );
+});
+
 for (const state of [NodeState.Completed, NodeState.Discarded]) {
   test(`node.retire preserves ${state} dependent history with and without force`, (t) => {
     const f = retireFixture(t);
@@ -4131,7 +4248,7 @@ function importApplyFixture(
   };
 }
 
-test("import dependency additions settle live descendants and dependency-only edits bypass the content import condition", (t) => {
+test("import dependency additions settle a live dependent and dependency-only edits bypass the content import condition", (t) => {
   const claimed = new Set<string>();
   const settled = new Set<string>();
   const executionId = createIdentity("execution");
@@ -4165,7 +4282,6 @@ test("import dependency additions settle live descendants and dependency-only ed
   const parentId = ids.find(
     (item) => item.filename === INITIATIVE_FILENAME,
   )!.id!;
-  const childId = ids.find((item) => item.filename === OBJECTIVE_FILENAME)!.id!;
   f.store.transaction((tx) =>
     openAttempt(tx, parentId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
   );
@@ -4173,7 +4289,7 @@ test("import dependency additions settle live descendants and dependency-only ed
     item.id === parentId ? { ...item, depends_on: [IMPORT_NEW_PARENT] } : item,
   );
   const body = f.request(f.importSnapshot(modified));
-  claimed.add(childId);
+  claimed.add(parentId);
   const before = f.state();
   assert.throws(
     () => f.apply(body),
@@ -4182,7 +4298,7 @@ test("import dependency additions settle live descendants and dependency-only ed
       assert.equal(error.code, MissionErrorCode.ClaimLive);
       assert.equal(error.status, HttpStatus.Conflict);
       assert.deepEqual(error.details, {
-        node_id: childId,
+        node_id: parentId,
         execution_id: executionId,
       });
       return true;
@@ -4493,6 +4609,34 @@ for (const [state, code] of [
     assert.deepEqual(f.state(), before);
   });
 }
+
+test("import.apply refuses a dependency edit on a Waiting dependent", (t) => {
+  const f = importApplyFixture(t);
+  const entries = f.identified(f.apply(f.request()));
+  const other = entries.find((item) => item.filename === OTHER_FILENAME)!;
+  f.setState(other.id!, NodeState.Waiting);
+  const snapshot = f.importSnapshot(
+    entries.map((item) =>
+      item.id === other.id ? { ...item, depends_on: [] } : item,
+    ),
+  );
+  const before = f.state();
+  assert.throws(
+    () =>
+      f.apply({
+        ...snapshot,
+        preview_digest: INVALID_RETIRE_DIGEST,
+        confirmed_retirements: [],
+      }),
+    retirementError(ControlError.StateConflict, {
+      state: NodeState.Waiting,
+      attempt: NO_ATTEMPT,
+      filename: OTHER_FILENAME,
+      node_id: other.id,
+    }),
+  );
+  assert.deepEqual(f.state(), before);
+});
 
 test("import.apply checks existence then version then reason without changing rows", (t) => {
   const f = importApplyFixture(t);

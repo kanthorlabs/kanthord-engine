@@ -16,6 +16,8 @@ import {
   type WorkQueue,
   type MissionBindings,
 } from "./contract.ts";
+import { ControlError } from "./control.ts";
+import { dependencyEditGuarded } from "./dependency.ts";
 import { requireNode } from "./node-read.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
@@ -117,6 +119,21 @@ function removedDependencies(
         ].sort(),
       },
     );
+  for (const edge of removed) {
+    const dependent = nodes.get(edge.dependent_id);
+    assert.ok(dependent, "Dependency source exists in its mission.");
+    if (dependencyEditGuarded(tx, dependent, true))
+      throw new OperationError(
+        HttpStatus.Conflict,
+        ControlError.StateConflict,
+        "A dependent state refuses the dependency removal.",
+        {
+          node_id: dependent.id,
+          state: dependent.state,
+          attempt: dependent.attempt,
+        },
+      );
+  }
   return removed;
 }
 
