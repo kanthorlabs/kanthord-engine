@@ -91,7 +91,7 @@ export function resolveContent(
   return {
     ...body.content,
     work,
-    requires: body.content.requires ?? [],
+    requires: (body.content.requires ?? []) as Content["requires"],
     bindings: resolved.map((binding) => binding.binding_id),
   };
 }

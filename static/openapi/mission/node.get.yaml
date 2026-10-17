@@ -896,25 +896,14 @@ components:
                   type: array
                   items:
                     type: string
-                work:
-                  type: string
-                  enum:
-                    - implement
-                    - examine
-                requires:
-                  default: []
-                  type: array
-                  items:
-                    type: string
-                    maxLength: 64
-                    pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+                work: {}
+                requires: {}
               required:
                 - name
                 - requirement
                 - criterion
                 - verifications
                 - bindings
-                - work
               additionalProperties: false
             tasks:
               type: array

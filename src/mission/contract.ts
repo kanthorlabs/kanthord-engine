@@ -472,6 +472,11 @@ export const contentSchema = z.strictObject({
   requires: requiresSchema.default([]),
 });
 export type Content = z.infer<typeof contentSchema>;
+export const contentWriteSchema = z.strictObject({
+  ...planContentFields,
+  work: z.unknown().optional(),
+  requires: z.unknown().optional(),
+});
 export const taskBodySchema = z.strictObject({
   ...planContentFields,
   bindings: z.array(z.string()).max(0),
@@ -494,7 +499,7 @@ export type TaskWrite = z.infer<typeof taskWriteSchema>;
 
 export const nodeCreateSchema = z.strictObject({
   filename: planFileNameSchema,
-  content: contentSchema,
+  content: contentWriteSchema,
   tasks: z.array(taskWriteSchema),
   reason: z.string().min(1),
   expected_mission_version: z.number().int().positive(),
@@ -502,7 +507,7 @@ export const nodeCreateSchema = z.strictObject({
 export type NodeCreate = z.infer<typeof nodeCreateSchema>;
 export const nodeUpdateSchema = z.strictObject({
   filename: planFileNameSchema,
-  content: contentSchema,
+  content: contentWriteSchema,
   tasks: z.array(taskWriteSchema),
   reason: z.string().min(1),
   expected_revision: z.number().int().positive(),
@@ -1008,7 +1013,7 @@ export const overrideSchema = humanActSchema.extend({
 });
 export type Override = z.infer<typeof overrideSchema>;
 export const unblockChangeSchema = z.strictObject({
-  content: contentSchema,
+  content: contentWriteSchema,
   tasks: z.array(taskWriteSchema),
   reason: textSchema,
 });

@@ -2659,6 +2659,33 @@ test("node update refuses a work change after the first claim with mission.node.
   );
 });
 
+for (const [label, field, value] of [
+  ["an unknown work", ContentField.Work, "build"],
+  ["a nonlist requires", ContentField.Requires, "x"],
+  ["a repeated trait key", ContentField.Requires, ["x", "x"]],
+] as const) {
+  test(`node create and update refuse ${label} with mission.node.content_invalid`, (t) => {
+    const f = nodeFixture(t);
+    const body = f.body();
+    f.refuses(
+      { ...body, content: { ...body.content, [field]: value } },
+      MissionErrorCode.ContentInvalid,
+      { field },
+      HttpStatus.BadRequest,
+    );
+    const id = f.examine();
+    const update = updateBody(f, id);
+    updateRefuses(
+      f,
+      id,
+      { ...update, content: { ...update.content, [field]: value } },
+      MissionErrorCode.ContentInvalid,
+      { field },
+      HttpStatus.BadRequest,
+    );
+  });
+}
+
 test("node update refuses a task of another node with mission.node.content_invalid", (t) => {
   const f = nodeFixture(t);
   const implementId = f.implement();
