@@ -35,12 +35,10 @@ also removes evidence-set references and pauses an open-attempt request owner.
 Execution pinned-revision and revision list/get enforce the claim's upper bound.
 Execution evidence list, cleared-outcome get, cleared-assessment get and rework-assessment get use the claimed attempt.
 Execution dependency, outcome and evidence lists use the direct dependencies and
-their current outcome revisions. Graph get, criterion list and the host upload helper remain target work.
+their current outcome revisions. Graph get and criterion list remain target work.
 The execution schemas, admission checks, content checks and assessment admission
 checks are implemented building blocks. The production Intake check collaboration
-remains explicitly unwired; local stand-ins verify its contract. The server wires
-no object storage, so every operation that calls object storage answers 503
-`mission.evidence.storage_unavailable`.
+remains explicitly unwired; local stand-ins verify its contract.
 
 The [operation contract](../../src/kernel/operation.ts),
 [identity validator](../../src/kernel/identity.ts),
@@ -652,7 +650,7 @@ The path never serves as an evidence address or a server-side path argument.
 | `mission.evidence.asset.complete` | `POST /api/mission/evidence/asset/:asset_id/complete` | `ExecutionContext` | `AssetUploadResult`    | E      |
 
 1. The component calls submit with the execution context, the evidence metadata and the asset list, where the file is an `object` asset with its size, media type and optional SHA-256.
-   The server checks the live claim, the node, the storage bindings of the pinned revision and 5 GiB single-object limit.
+   The server checks the live claim, the node, the storage bindings of the pinned revision and the 5 GiB single-object limit.
    The server selects the storage binding, and the component never selects one.
    The grant walks the storage bindings of the pinned revision in list order.
    It skips a binding whose latest revision holds `available: false` and a binding that a tombstone removed.
@@ -675,7 +673,7 @@ The path never serves as an evidence address or a server-side path argument.
    The helper returns those values and the evidence identity to the agent, not the presigned URL.
 4. After a failed transfer, the helper calls asset complete, so that the check records the binding.
    After a failed upload check, the helper submits again, and the server grants the next binding.
-   The helper submits at most once for each storage binding.
+   The helper stops when the server grants a binding that it already tried.
    It stops on `mission.evidence.storage_exhausted` and on every other refusal.
 
 A new attempt tries every storage binding again.
