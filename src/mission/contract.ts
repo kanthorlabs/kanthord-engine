@@ -314,7 +314,6 @@ export const RevisionWrite = {
   Import: "import",
   NodeCreate: "node.create",
   NodeUpdate: "node.update",
-  NodeRetire: "node.retire",
   NodeRebind: "node.rebind",
   CriterionSet: "criterion.set",
   Unblock: "unblock",
