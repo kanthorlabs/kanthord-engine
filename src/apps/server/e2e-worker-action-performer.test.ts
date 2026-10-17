@@ -738,3 +738,87 @@ test("E06 action performer CLI journey", { timeout: TIMEOUT }, async (t) => {
     },
   );
 });
+
+test(
+  "EF09a multi-repository mission rules",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const h = await setup(t);
+    const contained = h.gatedBare.head;
+    let steps: ExecutionRecord;
+
+    await t.test(
+      "EF09a.1 a repository asset of a foreign binding answers mission.evidence.binding_mismatch",
+      async () => {
+        steps = await h.pull(h.G, FIRST_ATTEMPT);
+        const result = await kanthord(
+          [
+            "mission",
+            "evidence",
+            "submit",
+            h.G,
+            "--file",
+            h.file({
+              execution_id: steps.execution_id,
+              attempt: steps.attempt,
+              node_revision: steps.pinned_revision,
+              subject: "head commit",
+              assets: [
+                {
+                  kind: "repository",
+                  address: {
+                    kind: "repository",
+                    binding_id: h.pushed.id,
+                    commit: contained,
+                  },
+                },
+              ],
+            }),
+          ],
+          h.W,
+        );
+        assert.equal(result.code, FAILURE_EXIT);
+        assert.ok(
+          result.stderr.startsWith("mission.evidence.binding_mismatch:"),
+          result.stderr,
+        );
+        assert.equal(result.stdout, NO_OUTPUT);
+      },
+    );
+    await t.test(
+      "EF09a.2 a snapshot that the base branch contains opens no pull request and folds to pull_request_merged",
+      async () => {
+        const work = (await h.work(steps, h.gated.id, contained)).evidence;
+        await h.release(steps);
+        const review = await h.pull(h.G, FIRST_ATTEMPT);
+        const run = (await h.run(review, h.gated.id, contained)).evidence;
+        await h.pass(review, [run.id, work.id], h.gated.id, contained);
+        const [item] = completed(await h.request(review)).items;
+        assert.ok(
+          item?.kind === ActionResultKind.Submitted,
+          JSON.stringify(item),
+        );
+        assert.deepEqual(
+          (item.evidence as Evidence).assets[FIRST_INDEX]?.address,
+          {
+            kind: PlatformAddressKind.BranchPush,
+            resource_identity: h.gated.resource_identity,
+            branch: "main",
+            commit: contained,
+          },
+        );
+        assert.equal(h.creates(), NO_CALLS);
+        await h.release(review);
+        const check = await h.write<{ results: { resolution: string }[] }>(
+          ["mission", "node", "check", h.G],
+          { expected_mission_version: h.M },
+        );
+        assert.equal(
+          check.results[FIRST_INDEX]?.resolution,
+          Resolution.ExpectedEnd,
+        );
+        assert.equal((await h.node(h.G)).state, NodeState.Completed);
+      },
+    );
+  },
+);
