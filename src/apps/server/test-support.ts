@@ -112,6 +112,35 @@ export const servicePing = {
   description: "Test the service access policy.",
 } as const;
 
+export const COVERING_WORKER_BINDINGS = {
+  coverage: {
+    kind: "worker",
+    config: { worker: "claude-code@1", instance_count: 0, traits: [] },
+  },
+} as const;
+
+const COVERING_APPLY_EXIT = 0;
+
+export async function applyCoveringBindings(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  projectId: string,
+  version = 1,
+): Promise<number> {
+  const path = join(directory, `covering-${projectId}-${version}.json`);
+  writePrivate(
+    path,
+    JSON.stringify({ version, bindings: COVERING_WORKER_BINDINGS }),
+  );
+  const result = await kanthord(
+    ["project", "binding", "apply", projectId, "--file", path],
+    env,
+  );
+  assert.equal(result.code, COVERING_APPLY_EXIT, result.stderr);
+  return (JSON.parse(result.stdout) as { binding_set_version: number })
+    .binding_set_version;
+}
+
 export const domainHealth = {
   repository: { toolchain: HealthStatus.Healthy },
   scheduler: { queue: 200 },

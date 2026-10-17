@@ -14,7 +14,11 @@ import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+} from "./test-support.ts";
 import {
   ExecutionEnd,
   ROOT_SPAN_OPERATION,
@@ -208,7 +212,7 @@ async function setup(t: TestContext, short = false) {
             },
           },
         }
-      : {}),
+      : COVERING_WORKER_BINDINGS),
   };
   const applied = await write<{
     binding_set_version: number;

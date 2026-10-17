@@ -33,14 +33,18 @@ import {
 } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
 const FIRST_REVISION = 1;
 const SINGLE_INSTANCE = 1;
 const SECOND_REVISION = 2;
-const FULL_BINDING_SET_VERSION = 3;
+const FULL_BINDING_SET_VERSION = 4;
 const THIRD_CREDENTIAL_REVISION = 3;
 const INVALID_REPORT_COUNT = 4;
 const STRING_TYPE = "string";
@@ -203,6 +207,7 @@ async function resources(c: ReturnType<typeof cli>) {
   }>(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
     bindings: {
+      ...COVERING_WORKER_BINDINGS,
       repo: {
         kind: "repository",
         config: {

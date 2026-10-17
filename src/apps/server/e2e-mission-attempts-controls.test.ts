@@ -24,7 +24,11 @@ import {
   type Outcome,
 } from "../../mission/contract.ts";
 import { kanthord, environment } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const NO_OUTPUT = "";
@@ -36,6 +40,7 @@ const FIRST_REVISION = 1;
 const FIRST_ATTEMPT = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
+const THIRD_REVISION = 3;
 const SECOND_ATTEMPT = 2;
 const THIRD_MISSION_VERSION = 3;
 const FOURTH_MISSION_VERSION = 4;
@@ -119,6 +124,7 @@ async function setup(t: TestContext) {
   }>(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
     bindings: {
+      ...COVERING_WORKER_BINDINGS,
       repo: {
         kind: "repository",
         config: {
@@ -138,7 +144,7 @@ async function setup(t: TestContext) {
       },
     },
   });
-  assert.equal(binding.binding_set_version, SECOND_REVISION);
+  assert.equal(binding.binding_set_version, THIRD_REVISION);
   const create = (body: unknown) =>
     write<NodeChange>(["mission", "node", "create", mission.id], body);
   const examine = await create({

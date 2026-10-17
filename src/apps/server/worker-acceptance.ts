@@ -6,7 +6,11 @@ import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord, kanthordTerminal } from "./cli-support.ts";
-import { fakeS3, gatewayFixture } from "./test-support.ts";
+import {
+  fakeS3,
+  gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const NO_STDERR = "";
@@ -109,6 +113,7 @@ export async function workerAcceptance(
   }>(["project", "binding", "apply", project.id], {
     version: 1,
     bindings: {
+      ...COVERING_WORKER_BINDINGS,
       ...(storage
         ? {
             store: {

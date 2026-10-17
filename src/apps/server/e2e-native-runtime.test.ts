@@ -65,6 +65,7 @@ import {
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
+  COVERING_WORKER_BINDINGS,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -185,6 +186,7 @@ test(
     }>(["project", "binding", "apply", project.id], {
       version: FIRST_REVISION,
       bindings: {
+        ...COVERING_WORKER_BINDINGS,
         repo: {
           kind: "repository",
           config: {

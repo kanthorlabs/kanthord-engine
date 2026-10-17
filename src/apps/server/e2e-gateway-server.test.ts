@@ -35,7 +35,11 @@ import { BindingKind, projectOperations } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import type { AgentEnablement } from "../../agent/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  applyCoveringBindings,
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+} from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 1;
@@ -431,6 +435,7 @@ test("E07.4 github repository binding advances the binding set to version two", 
 test("E07.5 mission examine node creation queues the created node", async (t) => {
   const fixture = await setup(t);
   const project = await createProject(fixture);
+  await applyCoveringBindings(fixture.env, fixture.directory, project.id);
   const mission = success<Mission>(
     await kanthord(["mission", "get", project.id], fixture.env),
   );

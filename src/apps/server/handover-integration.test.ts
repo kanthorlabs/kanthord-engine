@@ -48,6 +48,7 @@ import {
   HANDOVER_TAG_BYTES,
 } from "../../kernel/handover.ts";
 import {
+  COVERING_WORKER_BINDINGS,
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
@@ -493,6 +494,7 @@ async function setup(
       body: {
         version: 1,
         bindings: {
+          ...COVERING_WORKER_BINDINGS,
           repo: {
             kind: "repository",
             config: {
