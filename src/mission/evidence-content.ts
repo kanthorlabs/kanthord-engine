@@ -87,6 +87,32 @@ export function requireRepositoryAddress(
     bindingMismatch(address.binding_id);
 }
 
+export function repositorySetMismatch(
+  expected: readonly string[],
+  actual: readonly string[],
+): string | null {
+  const foreign = actual.find((id) => !expected.includes(id));
+  if (foreign !== undefined) return foreign;
+  const repeated = actual.find((id, index) => actual.indexOf(id) !== index);
+  if (repeated !== undefined) return repeated;
+  return expected.find((id) => !actual.includes(id)) ?? null;
+}
+
+export function requireRepositorySet(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: Revision,
+  bindingIds: readonly string[],
+): void {
+  const mismatch = repositorySetMismatch(
+    bindingsOf(tx, bindings, revision, MissionBindingKind.Repository).map(
+      (binding) => binding.binding_id,
+    ),
+    bindingIds,
+  );
+  if (mismatch !== null) bindingMismatch(mismatch);
+}
+
 export function repositoryBindingIdsOf(
   tx: Transaction,
   bindings: MissionBindings,

@@ -508,3 +508,95 @@ test("a cancelled context during signing stops with no failover", async (t) => {
   assert.deepEqual(h.granted, [h.storageId]);
   assert.equal(h.evidenceCount(), NO_ITEMS);
 });
+
+function repositoryPairHarness(t: TestContext) {
+  const h = evidenceHarness(t, IDENTITY);
+  const secondId = createIdentity("binding");
+  const lookup = h.dependencies.bindings.getBindingRevision;
+  h.dependencies.bindings.getBindingRevision = (tx, bindingId) => {
+    const binding = lookup(
+      tx,
+      bindingId === secondId ? h.repositoryId : bindingId,
+    );
+    return bindingId === secondId && binding
+      ? {
+          ...binding,
+          binding_id: secondId,
+          name: "second",
+          resource_identity: "repository:github:owner/second",
+        }
+      : binding;
+  };
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([h.repositoryId, secondId, h.storageId]), h.node_id),
+  );
+  const submit = (bindingIds: string[]) =>
+    h.invoke("evidence.submit", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        ...h.context,
+        subject: "Work",
+        assets: bindingIds.map((bindingId) => ({
+          kind: AssetKind.Repository,
+          address: {
+            kind: AssetKind.Repository,
+            binding_id: bindingId,
+            commit: "a".repeat(40),
+          },
+        })),
+      },
+    });
+  const mismatch = (bindingId: string) => (error: unknown) =>
+    error instanceof OperationError &&
+    error.code === MissionErrorCode.EvidenceBindingMismatch &&
+    error.status === HttpStatus.BadRequest &&
+    JSON.stringify(error.details) === JSON.stringify({ binding_id: bindingId });
+  const evidenceCount = () =>
+    h.store.transaction(
+      (tx) =>
+        (
+          tx.database
+            .prepare("SELECT count(*) AS count FROM mission_evidence")
+            .get() as { count: number }
+        ).count,
+    );
+  return { ...h, secondId, submit, mismatch, evidenceCount };
+}
+
+test("an implement evidence that misses a binding answers mission.evidence.binding_mismatch", async (t) => {
+  const h = repositoryPairHarness(t);
+  await assert.rejects(h.submit([h.repositoryId]), h.mismatch(h.secondId));
+  await assert.rejects(
+    h.submit([h.repositoryId, h.repositoryId]),
+    h.mismatch(h.repositoryId),
+  );
+  assert.equal(h.evidenceCount(), NO_ITEMS);
+});
+
+test("an implement evidence with a foreign binding answers mission.evidence.binding_mismatch", async (t) => {
+  const h = repositoryPairHarness(t);
+  const foreignId = createIdentity("binding");
+  await assert.rejects(
+    h.submit([h.repositoryId, h.secondId, foreignId]),
+    h.mismatch(foreignId),
+  );
+  await assert.rejects(
+    h.submit([h.repositoryId, h.storageId]),
+    h.mismatch(h.storageId),
+  );
+  assert.equal(h.evidenceCount(), NO_ITEMS);
+});
+
+test("an implement evidence with one asset for each of two bindings publishes", async (t) => {
+  const h = repositoryPairHarness(t);
+  const submitted = await h.submit([h.secondId, h.repositoryId]);
+  assert.ok(
+    submitted.evidence.assets.every((asset) => asset.published_at !== null),
+  );
+  assert.equal(h.evidenceCount(), SINGLE_ITEM);
+});
