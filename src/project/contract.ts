@@ -113,6 +113,7 @@ export const ProjectErrorCode = {
   WorkerResourceChanged: "project.bindings.worker.resource_changed",
   WorkerPlacementChanged: "project.bindings.worker.placement_changed",
   WorkerTraitsInvalid: "project.bindings.worker.traits_invalid",
+  WorkerNodeUnmatched: "project.bindings.worker.node_unmatched",
 } as const;
 
 export const projectNameSchema = z
@@ -374,6 +375,10 @@ export type CreateMission = (
   actor: HumanActor,
 ) => void;
 export type LiveNodesPinning = (tx: Transaction, bindingId: string) => string[];
+export type UnmatchedClaims = (
+  tx: Transaction,
+  projectId: string,
+) => { node_id: string; revision: number; claim: string }[];
 export type RepositoryConnector = {
   resolveSshIdentity(
     host: string,

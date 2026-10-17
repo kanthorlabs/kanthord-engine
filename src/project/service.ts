@@ -80,6 +80,7 @@ import {
   type BindingRevisionResult,
   type CreateMission,
   type LiveNodesPinning,
+  type UnmatchedClaims,
   type ValidateEntry,
   type CustodySuitability,
   type CredentialMetadataOf,
@@ -164,6 +165,28 @@ function refuseRepositoryAction(
       "The pull_request action requires a credential.",
     );
 }
+function unmatchedKey(pair: { node_id: string; claim: string }): string {
+  return JSON.stringify([pair.node_id, pair.claim]);
+}
+
+function refuseAddedUnmatched(
+  before: ReadonlySet<string>,
+  after: ReturnType<UnmatchedClaims>,
+): void {
+  const nodeIds = new Set(
+    after
+      .filter((pair) => !before.has(unmatchedKey(pair)))
+      .map(({ node_id }) => node_id),
+  );
+  if (nodeIds.size === EMPTY_LENGTH) return;
+  throw new OperationError(
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerNodeUnmatched,
+    "The binding set leaves a node and claimable state pair that no worker binding covers.",
+    { node_ids: [...nodeIds].sort() },
+  );
+}
+
 function refuseInvalidTraits(name: string, traits: unknown): void {
   if (traits === undefined) return;
   if (!Array.isArray(traits))
@@ -328,6 +351,7 @@ export interface Dependencies {
   hostHome?: string;
   createMission: CreateMission;
   liveNodesPinning: LiveNodesPinning;
+  unmatchedClaims: UnmatchedClaims;
   validateEntry: ValidateEntry;
   custodySuitability: CustodySuitability;
   repositoryConnector: RepositoryConnector;
@@ -349,6 +373,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly hostHome?: string;
   private readonly createMission: CreateMission;
   private readonly liveNodesPinning: LiveNodesPinning;
+  private readonly unmatchedClaims: UnmatchedClaims;
   private readonly validateEntry: ValidateEntry;
   private readonly custodySuitability: CustodySuitability;
   private readonly repositoryConnector: RepositoryConnector;
@@ -371,6 +396,7 @@ export class ProjectService implements Service, ProjectBindings {
     this.hostHome = dependencies.hostHome;
     this.createMission = dependencies.createMission;
     this.liveNodesPinning = dependencies.liveNodesPinning;
+    this.unmatchedClaims = dependencies.unmatchedClaims;
     this.validateEntry = dependencies.validateEntry;
     this.custodySuitability = dependencies.custodySuitability;
     this.repositoryConnector = dependencies.repositoryConnector;
@@ -800,8 +826,12 @@ export class ProjectService implements Service, ProjectBindings {
       assert.equal(submission.size, Object.keys(body.bindings).length);
       for (const [name, binding] of submission)
         this.validateBinding(tx, name, binding);
+      const before = new Set(
+        this.unmatchedClaims(tx, projectId).map(unmatchedKey),
+      );
       const result = writeBindingSet(tx, projectId, body.version, submission);
       this.endUnavailableRegistrations(tx, result.changes, Date.now());
+      refuseAddedUnmatched(before, this.unmatchedClaims(tx, projectId));
       const bindings = Object.fromEntries(
         Array.from(readCurrentBindingSet(tx, projectId), ([name, binding]) => [
           name,

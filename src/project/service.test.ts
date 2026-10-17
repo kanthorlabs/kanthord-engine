@@ -151,6 +151,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     },
     createMission: unexpected,
     liveNodesPinning: unexpected,
+    unmatchedClaims: () => [],
     validateEntry: unexpected,
     custodySuitability: unexpected,
     repositoryConnector: {
@@ -1586,6 +1587,68 @@ test("a change of worker traits creates the next revision of the binding", async
   );
   assert.equal(read()?.revision, REVISION_TWO);
   assert.deepEqual(read()?.traits, ["platform.macos"]);
+});
+
+const MACOS_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const MACOS_REVIEWER = "macos-reviewer";
+
+function macosCoverage(project: () => ProjectService) {
+  const reads: number[] = [];
+  const unmatchedClaims: Dependencies["unmatchedClaims"] = (tx, projectId) => {
+    assert.ok(tx.database.isTransaction);
+    const covered = project()
+      .workerBindingsOf(tx, projectId)
+      .some(({ traits }) => traits.includes("platform.macos"));
+    reads.push(covered ? 0 : 1);
+    return covered
+      ? []
+      : [{ node_id: MACOS_NODE, revision: REVISION_ONE, claim: "Waiting" }];
+  };
+  return { reads, unmatchedClaims };
+}
+
+test("a binding set without the only macOS reviewer answers project.bindings.worker.node_unmatched", async (t) => {
+  const services: ProjectService[] = [];
+  const coverage = macosCoverage(() => services[0]!);
+  const f = writeFixture(t, { unmatchedClaims: coverage.unmatchedClaims });
+  services.push(f.project);
+  const first = await f.write({
+    [MACOS_REVIEWER]: tracedWorker(["platform.macos"], EXTERNAL_WORKER),
+  });
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({}, first.binding_set_version),
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerNodeUnmatched,
+    { node_ids: [MACOS_NODE] },
+  );
+  assert.deepEqual(f.snapshot(), before);
+  await rejectsWrite(
+    f.write(
+      { [MACOS_REVIEWER]: tracedWorker([], EXTERNAL_WORKER) },
+      first.binding_set_version,
+    ),
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerNodeUnmatched,
+    { node_ids: [MACOS_NODE] },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a write that keeps an earlier unmatched pair succeeds", async (t) => {
+  const services: ProjectService[] = [];
+  const coverage = macosCoverage(() => services[0]!);
+  const f = writeFixture(t, { unmatchedClaims: coverage.unmatchedClaims });
+  services.push(f.project);
+  const first = await f.write({
+    [WORKER_NAME]: workerBinding(EXTERNAL_WORKER),
+  });
+  const second = await f.write(
+    { [WORKER_NAME]: tracedWorker(["platform.linux"], EXTERNAL_WORKER) },
+    first.binding_set_version,
+  );
+  assert.ok(second.binding_set_version > first.binding_set_version);
+  assert.deepEqual(coverage.reads, [1, 1, 1, 1]);
 });
 
 test("a committed binding-set write notifies the bindings change once after the commit and a refused write notifies nothing", async (t) => {

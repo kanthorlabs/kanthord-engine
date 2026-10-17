@@ -589,6 +589,8 @@ export function composeServices(options: {
     bindingsChanged: (projectId) => worker.bindingsChanged(projectId),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
+    unmatchedClaims: (tx, projectId) =>
+      scheduler.unmatchedClaims(tx, projectId),
     validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     repositoryConnector: repoConnector,
