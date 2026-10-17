@@ -122,11 +122,13 @@ Failure exits `1`, produces no success JSON, and prints a diagnostic on stderr:
 - A well-formed API failure uses its error code with
   `gateway verify: request failed (HTTP <status>).` The API envelope is
   `{"error":{"code":"...","message":"...","details":null},"request_id":"request_<ulid>"}`;
-  `details` may instead be structured JSON. The current CLI does not print the
-  envelope, its details, or request ID.
+  `details` is null or structured JSON. When `details` is not null, the CLI
+  writes a second stderr line `details: <compact JSON of details>`. The CLI does
+  not print the envelope or the request ID.
 - A `200` answer that fails the response schema is the failure
   `gateway.client.answer_invalid` with
-  `gateway verify: request failed (HTTP 200).`
+  `gateway verify: request failed (HTTP 200).` Stderr also holds the `details:`
+  line with the failed schema paths as a list of `{ path, code }`.
 - A transport failure, redirect refusal, deadline or invalid JSON produces
   `cli.gateway.verify.indeterminate` with
   `gateway verify: result is indeterminate; the server could not be verified.`

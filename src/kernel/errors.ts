@@ -28,8 +28,21 @@ export class CodedError extends Error {
   }
 }
 
+export type ErrorDetails = z.infer<typeof errorDetailsSchema>;
+
+export interface DiagnosticOptions extends ErrorOptions {
+  details?: ErrorDetails | null;
+}
+
 /** Only explicitly safe diagnostics may cross the process boundary. */
-export class Diagnostic extends CodedError {}
+export class Diagnostic extends CodedError {
+  readonly details: ErrorDetails | null;
+
+  constructor(code: string, message: string, options?: DiagnosticOptions) {
+    super(code, message, options);
+    this.details = options?.details ?? null;
+  }
+}
 
 export function asError(error: unknown): Error {
   return error instanceof Error
@@ -43,6 +56,12 @@ export function diagnostic(error: unknown): string {
   return error instanceof Diagnostic
     ? `${error.code}: ${error.message}`
     : "system.operation.unknown: Operation failed.";
+}
+
+export function diagnosticDetails(error: unknown): string | null {
+  return error instanceof Diagnostic && error.details !== null
+    ? `details: ${JSON.stringify(error.details)}`
+    : null;
 }
 
 export const errorDetailsSchema = z.json();

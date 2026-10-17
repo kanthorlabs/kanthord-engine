@@ -62,6 +62,7 @@ async function register(command: Command): Promise<void> {
     throw new Diagnostic(
       result.error.error.code,
       `worker register: request failed (HTTP ${result.status}); idempotency key ${key}.`,
+      { details: result.error.error.details },
     );
   process.stdout.write(
     `${JSON.stringify({ ...result.data, idempotency_key: key })}\n`,
@@ -93,6 +94,7 @@ async function handover(executionId: string, command: Command): Promise<void> {
     throw new Diagnostic(
       result.error.error.code,
       `worker handover: request failed (HTTP ${result.status}); idempotency key ${key}.`,
+      { details: result.error.error.details },
     );
   process.stdout.write(
     `${JSON.stringify({ received: true, idempotency_key: key })}\n`,
