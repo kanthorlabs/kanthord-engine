@@ -7,9 +7,8 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
   AssetKind,
-  EdgeKind,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NodeState,
   StartPoint,
   type ProposalContent,
@@ -43,6 +42,7 @@ const NO_PROPOSALS = 0;
 const SINGLE_PROPOSAL = 1;
 const TWO_PROPOSALS = 2;
 const NOW = 100;
+const DEPENDENCY_TRAIT = "platform.linux";
 const VALIDATION = "gateway.request.validation_failed";
 const RESOURCE_IDENTITY = "repository:github:owner/repo";
 
@@ -72,9 +72,7 @@ async function fixture(t: TestContext) {
     insertNode(tx, {
       id: childId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: null,
       created_at: NOW,
     });
     insertDependency(tx, h.mission_id, h.node_id, childId);
@@ -82,7 +80,12 @@ async function fixture(t: TestContext) {
       ...base,
       node_id: childId,
       filename: "child.md",
-      content: { ...base.content, bindings: [repositoryId] },
+      content: {
+        ...base.content,
+        work: Work.Implement,
+        requires: [DEPENDENCY_TRAIT],
+        bindings: [repositoryId],
+      },
       tasks: [],
     });
     const assessmentId = createIdentity("assessment");
@@ -136,8 +139,8 @@ async function fixture(t: TestContext) {
       },
     },
   });
-  const proposal = (objectiveId = childId, name = "Fix"): ProposalContent => ({
-    dependency_id: objectiveId,
+  const proposal = (dependencyId = childId, name = "Fix"): ProposalContent => ({
+    dependency_id: dependencyId,
     name,
     requirement: "Repair the defect",
     criterion: "The defect is gone",
@@ -210,7 +213,7 @@ test("an undetermined proposer assessment records one row per proposal", async (
   const h = await fixture(t);
   const result = await h.submit([h.proposal(), h.proposal(h.childId, "Other")]);
   assert.equal(result.outcome?.result, AssessmentResult.Undetermined);
-  assert.equal(result.node.kind, NodeKind.Initiative);
+  assert.equal(result.node.work, Work.Examine);
   assert.equal(h.node().state, NodeState.Blocked);
   const page = await h.list();
   assert.equal(page.items.length, TWO_PROPOSALS);
@@ -234,17 +237,17 @@ test("approval adds a dependency of the proposer on the created node and routes 
   await h.submit([h.proposal()]);
   const proposalId = (await h.list()).items[0]!.id;
   const result = await h.approve(proposalId);
-  const objectiveId = result.created.revisions[0]!.node_id;
-  const objective = h.store.transaction((tx) => ({
-    node: readNode(tx, objectiveId)!,
-    revision: readCurrentRevision(tx, objectiveId)!,
+  const createdId = result.created.revisions[0]!.node_id;
+  const created = h.store.transaction((tx) => ({
+    node: readNode(tx, createdId)!,
+    revision: readCurrentRevision(tx, createdId)!,
   }));
-  assert.equal(objective.node.kind, NodeKind.Objective);
-  assert.equal(objective.node.parent_id, h.node_id);
-  assert.equal(objective.node.state, NodeState.Available);
-  assert.deepEqual(JSON.parse(objective.revision.bindings), [h.repositoryId]);
-  assert.deepEqual(JSON.parse(objective.revision.verifications), ["pnpm test"]);
-  const tasks = JSON.parse(objective.revision.tasks) as { id: string }[];
+  assert.equal(created.revision.work, Work.Implement);
+  assert.deepEqual(JSON.parse(created.revision.requires), [DEPENDENCY_TRAIT]);
+  assert.equal(created.node.state, NodeState.Available);
+  assert.deepEqual(JSON.parse(created.revision.bindings), [h.repositoryId]);
+  assert.deepEqual(JSON.parse(created.revision.verifications), ["pnpm test"]);
+  const tasks = JSON.parse(created.revision.tasks) as { id: string }[];
   assert.equal(tasks.length, SINGLE_PROPOSAL);
   assert.match(tasks[0]!.id, /^task_/);
   assert.equal(result.created.revisions.at(-1)?.tasks[0]?.id, tasks[0]!.id);
@@ -254,21 +257,20 @@ test("approval adds a dependency of the proposer on the created node and routes 
   assert.equal(h.node().attempt, SECOND_ATTEMPT);
   assert.equal(h.node().state, NodeState.Pending);
   assert.deepEqual(result.created.added_edges.at(-1), {
-    kind: EdgeKind.Dependency,
     dependent_id: h.node_id,
-    depends_on_id: objectiveId,
+    depends_on_id: createdId,
   });
   const approved = (await h.list()).items[0]!;
-  assert.equal(approved.created_node_id, objectiveId);
+  assert.equal(approved.created_node_id, createdId);
   assert.notEqual(approved.approved_at, null);
   const claimable = () =>
     h.store.transaction((tx) =>
       claimableMap(tx, h.mission_id, h.dependencies.bindings),
     );
   assert.equal(claimable().get(h.node_id), false);
-  assert.equal(claimable().get(objectiveId), true);
+  assert.equal(claimable().get(createdId), true);
   h.store.transaction((tx) => {
-    setNodeState(tx, objectiveId, NodeState.Completed);
+    setNodeState(tx, createdId, NodeState.Completed);
     routeMission(tx, h.mission_id);
   });
   assert.equal(claimable().get(h.node_id), true);
@@ -292,7 +294,7 @@ test("approving twice refuses with already_approved", async (t) => {
   );
 });
 
-test("approving refuses an unknown proposal, a stale version and a changed initiative state", async (t) => {
+test("approving refuses an unknown proposal, a stale version and a changed proposer state", async (t) => {
   const h = await fixture(t);
   await h.submit([h.proposal()]);
   const proposalId = (await h.list()).items[0]!.id;

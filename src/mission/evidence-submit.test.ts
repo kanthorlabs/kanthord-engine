@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssetKind,
@@ -228,4 +230,71 @@ test("storage absence, failed signing and revoked claims write no evidence", asy
         .get() as { count: number },
   );
   assert.equal(count.count, NO_ITEMS);
+});
+
+test("two storage bindings grant the first", async (t) => {
+  const h = evidenceHarness(t, IDENTITY);
+  const second = createIdentity("binding");
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
+      )
+      .run(JSON.stringify([h.repositoryId, h.storageId, second]), h.node_id),
+  );
+  const granted: string[] = [];
+  h.dependencies.intakeStorage.put = async (_call, input) => {
+    granted.push(input.storageBindingId);
+    return {
+      put_url: "https://storage.example/put",
+      headers: {},
+      expires_at: Date.now() + UPLOAD_LIFETIME_MS,
+    };
+  };
+  const result = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Object",
+      assets: [
+        { kind: AssetKind.Object, size: SINGLE_ITEM, media_type: "text/plain" },
+      ],
+    },
+  });
+  assert.deepEqual(granted, [h.storageId]);
+  const asset = result.evidence.assets[FIRST_ASSET_INDEX]!;
+  if (asset.kind !== AssetKind.Object) assert.fail();
+  const stored = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT content FROM mission_evidence_asset WHERE id = ?")
+        .get(asset.id) as { content: string },
+  );
+  assert.equal(JSON.parse(stored.content).storage_binding_id, h.storageId);
+});
+
+test("a node with no storage binding answers mission.evidence.storage_binding_absent", async (t) => {
+  const h = executionHarness(t, IDENTITY);
+  await assert.rejects(
+    h.invoke("evidence.submit", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        ...h.context,
+        subject: "Object",
+        assets: [
+          {
+            kind: AssetKind.Object,
+            size: SINGLE_ITEM,
+            media_type: "text/plain",
+          },
+        ],
+      },
+    }),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === MissionErrorCode.EvidenceStorageBindingAbsent,
+  );
 });

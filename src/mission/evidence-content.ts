@@ -9,7 +9,7 @@ import {
   INLINE_BYTES_MAX,
   MissionBindingKind,
   MissionErrorCode,
-  NodeKind,
+  Work,
   type MissionBindings,
   type RepositoryAddress,
   type Revision,
@@ -22,7 +22,6 @@ import { getRevision } from "./node-read.ts";
 import type { NodeRow } from "./store.ts";
 
 const RESOURCE_KIND_SEGMENT = 0;
-const FIRST_MATCH_INDEX = 0;
 const NO_REPOSITORY_BINDINGS = 0;
 const MINIMUM_ATTEMPT = 0;
 const NO_OCCURRENCES = 0;
@@ -53,25 +52,13 @@ function bindingsOf(
     );
 }
 
-function bindingOf(
+export function storageBindingIdsOf(
   tx: Transaction,
   bindings: MissionBindings,
   revision: Revision,
-  kind: (typeof MissionBindingKind)[keyof typeof MissionBindingKind],
-) {
-  const matches = bindingsOf(tx, bindings, revision, kind);
-  assert.ok(matches.length <= SINGLE_BINDING_MATCH);
-  return matches[FIRST_MATCH_INDEX] ?? null;
-}
-
-export function storageBindingIdOf(
-  tx: Transaction,
-  bindings: MissionBindings,
-  revision: Revision,
-): string | null {
-  return (
-    bindingOf(tx, bindings, revision, MissionBindingKind.Storage)?.binding_id ??
-    null
+): string[] {
+  return bindingsOf(tx, bindings, revision, MissionBindingKind.Storage).map(
+    (binding) => binding.binding_id,
   );
 }
 
@@ -199,7 +186,7 @@ export function requiredVerifications(
 ): string[] {
   assert.equal(revision.node_id, node.id);
   const commands = [...revision.content.verifications];
-  if (node.kind === NodeKind.Objective) {
+  if (revision.content.work === Work.Implement) {
     for (const task of revision.tasks ?? [])
       commands.push(...task.content.verifications);
   }

@@ -1,12 +1,14 @@
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import type { Transaction } from "../kernel/store.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import {
   MissionBindingKind,
   MissionErrorCode,
-  NodeKind,
+  Work,
   planFileNameSchema,
-  type PlanFileKind,
+  requiresSchema,
+  workSchema,
 } from "./contract.ts";
 
 export const ContentField = {
@@ -16,13 +18,24 @@ export const ContentField = {
   Criterion: "criterion",
   Verifications: "verifications",
   Bindings: "bindings",
+  Work: "work",
+  Requires: "requires",
 } as const;
 export const CONTENT_FIELDS = Object.values(ContentField);
+export const TASK_CONTENT_FIELDS = [
+  ContentField.Filename,
+  ContentField.Name,
+  ContentField.Requirement,
+  ContentField.Criterion,
+  ContentField.Verifications,
+  ContentField.Bindings,
+];
 export const TASKS_FIELD = "tasks";
 const Field = ContentField;
 const UTF8 = "utf8";
 const RESOURCE_KIND_SEPARATOR = ":";
 const NO_BINDINGS = 0;
+const NO_TASKS = 0;
 const EMPTY_LENGTH = 0;
 const LOOP_START = 0;
 const RESOURCE_KIND_SEGMENT = 0;
@@ -35,22 +48,28 @@ const SPLIT_FIRST_PART_LIMIT = 1;
 type BindingKind = (typeof MissionBindingKind)[keyof typeof MissionBindingKind];
 type Range = { min: number; max: number };
 
-const bindingRules: Record<NodeKind, Record<BindingKind, Range>> = {
-  [NodeKind.Initiative]: {
-    [MissionBindingKind.Repository]: {
-      min: NO_BINDINGS,
-      max: UNBOUNDED_BINDINGS,
-    },
-    [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
-    [MissionBindingKind.Storage]: { min: NO_BINDINGS, max: SINGLE_BINDING },
-  },
-  [NodeKind.Objective]: {
+const bindingRules: Record<Work, Record<BindingKind, Range>> = {
+  [Work.Implement]: {
     [MissionBindingKind.Repository]: {
       min: SINGLE_BINDING,
       max: SINGLE_BINDING,
     },
     [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
-    [MissionBindingKind.Storage]: { min: NO_BINDINGS, max: SINGLE_BINDING },
+    [MissionBindingKind.Storage]: {
+      min: NO_BINDINGS,
+      max: UNBOUNDED_BINDINGS,
+    },
+  },
+  [Work.Examine]: {
+    [MissionBindingKind.Repository]: {
+      min: NO_BINDINGS,
+      max: UNBOUNDED_BINDINGS,
+    },
+    [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
+    [MissionBindingKind.Storage]: {
+      min: NO_BINDINGS,
+      max: UNBOUNDED_BINDINGS,
+    },
   },
 };
 
@@ -83,16 +102,36 @@ export function validateText(
   if (Buffer.byteLength(value, UTF8) > textMaxBytes) invalidContent(field);
 }
 
+export function validateTaskCount(work: Work, taskCount: number): void {
+  if (work === Work.Examine && taskCount > NO_TASKS)
+    invalidContent(TASKS_FIELD);
+}
+
+function recordOf(content: unknown): Record<string, unknown> {
+  return isObject(content) && !Array.isArray(content)
+    ? (content as Record<string, unknown>)
+    : {};
+}
+
 export function validateNodeContent(
-  kind: PlanFileKind,
+  content: unknown,
+  textMaxBytes: number,
+): Work {
+  validatePlanContent(content, textMaxBytes);
+  const input = recordOf(content);
+  const work = input[Field.Work];
+  if (!workSchema.safeParse(work).success) invalidContent(Field.Work);
+  const requires = input[Field.Requires];
+  if (requires !== undefined && !requiresSchema.safeParse(requires).success)
+    invalidContent(Field.Requires);
+  return work as Work;
+}
+
+export function validatePlanContent(
   content: unknown,
   textMaxBytes: number,
 ): void {
-  void kind;
-  const input =
-    isObject(content) && !Array.isArray(content)
-      ? (content as Record<string, unknown>)
-      : {};
+  const input = recordOf(content);
   for (const field of [Field.Name, Field.Requirement, Field.Criterion]) {
     const value = nonblankText(field, input[field]);
     validateText(field, value, textMaxBytes);
@@ -150,8 +189,34 @@ export function bindingKind(resolved: ResolvedBinding): BindingKind {
   return prefix as BindingKind;
 }
 
+export type BindingResolver = (
+  tx: Transaction,
+  projectId: string,
+  named: string,
+) => ResolvedBinding | null;
+
+export function resolveNodeBindings(
+  tx: Transaction,
+  resolve: BindingResolver,
+  projectId: string,
+  work: Work,
+  named: unknown,
+): ResolvedBinding[] {
+  if (!Array.isArray(named)) invalidBindings();
+  const resolved = named.map((value: unknown) => {
+    if (!isString(value)) invalidBindings();
+    const binding = resolve(tx, projectId, value);
+    if (binding === null) invalidBindings({ binding: value });
+    return binding;
+  });
+  const ids = resolved.map((binding) => binding.binding_id);
+  if (new Set(ids).size !== ids.length) invalidBindings();
+  checkBindingRuleTable(work, resolved);
+  return resolved;
+}
+
 export function checkBindingRuleTable(
-  kind: NodeKind,
+  work: Work,
   resolved: ResolvedBinding[],
 ): void {
   const counts: Record<BindingKind, number> = {
@@ -170,8 +235,8 @@ export function checkBindingRuleTable(
   }
   for (const binding of Object.values(MissionBindingKind)) {
     const count = counts[binding];
-    const range = bindingRules[kind][binding];
+    const range = bindingRules[work][binding];
     if (count < range.min || count > range.max)
-      invalidBindings({ kind, binding_kind: binding, count });
+      invalidBindings({ work, binding_kind: binding, count });
   }
 }

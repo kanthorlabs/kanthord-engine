@@ -6,7 +6,6 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   ActorKind,
   EndState,
-  NodeKind,
   NodeState,
   RepositoryAction,
 } from "./contract.ts";
@@ -37,18 +36,13 @@ function fixture(t: TestContext) {
   const missionId = h.store.transaction((tx) =>
     insertMission(tx, projectId, NOW),
   );
-  function node(
-    kind: NodeKind = NodeKind.Objective,
-    parentId: string | null = null,
-  ) {
+  function node() {
     return h.store.transaction((tx) => {
       const id = createIdentity("node");
       insertNode(tx, {
         id,
         mission_id: missionId,
-        kind,
         filename: `${id}.md`,
-        parent_id: parentId,
         created_at: NOW,
       });
       return id;
@@ -59,23 +53,25 @@ function fixture(t: TestContext) {
 
 test("readiness at attempt zero holds when the closure holds", (t) => {
   const h = fixture(t);
-  const initiative = h.node(NodeKind.Initiative);
-  h.node(NodeKind.Objective, initiative);
+  const examine = h.node();
   const dependency = h.node();
   h.store.transaction((tx) => {
-    const parent = readNode(tx, initiative)!;
-    assert.deepEqual(readinessOf(tx, parent), {
+    const dependent = readNode(tx, examine)!;
+    assert.deepEqual(readinessOf(tx, dependent), {
       holds: true,
       unsatisfied_ids: [],
     });
-    insertDependency(tx, h.mission_id, initiative, dependency);
-    assert.deepEqual(readinessOf(tx, parent), {
+    insertDependency(tx, h.mission_id, examine, dependency);
+    assert.deepEqual(readinessOf(tx, dependent), {
       holds: false,
       unsatisfied_ids: [dependency],
     });
     setNodeState(tx, dependency, NodeState.Completed);
-    assert.equal(readinessOf(tx, parent).holds, true);
-    assert.equal(continuationHolds(tx, h.dependencies.bindings, parent), false);
+    assert.equal(readinessOf(tx, dependent).holds, true);
+    assert.equal(
+      continuationHolds(tx, h.dependencies.bindings, dependent),
+      false,
+    );
   });
 });
 
@@ -149,7 +145,7 @@ test("open-attempt unresolved actions do not block readiness but stop continuati
   h.store.transaction((tx) => {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, tasks, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, work, requires, tasks, change, reason, actor, created_at) VALUES (?, 1, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(nodeId, canonicalJSON([bindingId]), canonicalJSON(ACTOR), NOW);
     openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);

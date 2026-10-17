@@ -156,7 +156,11 @@ test("workspace preparation refreshes objective branches and creates disposable 
     commit: pushed,
   });
   assert.equal(snapshot.head, pushed);
-  workspace.release(snapshot.directory, WorkspaceKind.Execution);
+  assert.equal(
+    snapshot.directory,
+    join(snapshot.key, CHECKOUTS_DIRECTORY, repository.name),
+  );
+  workspace.release(snapshot.key, WorkspaceKind.Execution);
   const another = {
     ...repository,
     binding_id: createIdentity("binding"),

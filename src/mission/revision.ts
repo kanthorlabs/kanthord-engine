@@ -17,6 +17,8 @@ export function revisionFromRow(tx: Transaction, row: RevisionRow): Revision {
       criterion: row.criterion,
       verifications: JSON.parse(row.verifications),
       bindings: JSON.parse(row.bindings),
+      work: row.work,
+      requires: JSON.parse(row.requires),
     },
     tasks: JSON.parse(row.tasks),
     change: JSON.parse(row.change),

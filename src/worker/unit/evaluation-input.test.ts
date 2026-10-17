@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  readdirSync,
+  statSync,
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { simpleGit } from "simple-git";
+import * as connector from "../../repository/connector.ts";
 import { background } from "../../kernel/context.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
@@ -16,7 +25,7 @@ import {
   WORKING_LAYER_ALL_ON,
 } from "./test-support.ts";
 import { ExecutionRun } from "./execution-run.ts";
-import { NodeKind } from "./native-agent.ts";
+import { ExecutionWork } from "../contract.ts";
 import {
   CHECKOUTS_DIRECTORY,
   EVIDENCE_DIRECTORY,
@@ -150,7 +159,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       const pending = prepareEvaluation(
         { setup, claim, workspaces, transport, env: hostEnvironment() },
         run,
-        NodeKind.Initiative,
+        ExecutionWork.Examine,
         evidence,
       );
       if (mode !== SUCCESS) {
@@ -247,7 +256,7 @@ test("an initiative with no binding places the produced evidence privately and p
       env: hostEnvironment(),
     },
     run,
-    NodeKind.Initiative,
+    ExecutionWork.Examine,
     evidence,
   );
   assert.deepEqual(prepared.tested_input, address);
@@ -269,7 +278,7 @@ test("an initiative with no binding places the produced evidence privately and p
   };
   assert.deepEqual(
     verificationCommands({
-      content,
+      content: { ...content, work: ExecutionWork.Implement, requires: [] },
       tasks: [
         {
           id: "task",
@@ -283,6 +292,7 @@ test("an initiative with no binding places the produced evidence privately and p
 });
 
 const PLACED_REPORT = "placed report";
+const ADDED_FILE = "added.md";
 
 test("an initiative with one binding places the produced evidence outside its clean checkout", async (t) => {
   const setup = anthropicSetup({ repositories: [repositorySetup()] });
@@ -337,7 +347,7 @@ test("an initiative with one binding places the produced evidence outside its cl
       env: hostEnvironment(),
     },
     run,
-    NodeKind.Initiative,
+    ExecutionWork.Examine,
     evidence,
   );
   assert.equal(
@@ -354,4 +364,130 @@ test("an initiative with one binding places the produced evidence outside its cl
     [join("..", "..", EVIDENCE_DIRECTORY, assetId)],
   );
   workspaces.release(prepared.key, WorkspaceKind.Execution);
+});
+
+test("an implement snapshot evaluation places the produced evidence outside its clean checkout", async (t) => {
+  const state = temporary(t);
+  const origin = join(state, "origin");
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  const commit = async (name: string) => {
+    writeFileSync(join(origin, name), name);
+    await git.add(name);
+    await git.raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      name,
+    ]);
+    return (await git.revparse(["HEAD"])).trim();
+  };
+  await commit("base");
+  await git.raw(["checkout", "-b", "node"]);
+  const snapshot = await commit(ADDED_FILE);
+  await git.raw(["checkout", "main"]);
+  const repository = { ...repositorySetup(), address: origin };
+  const setup = anthropicSetup({
+    work: ExecutionWork.Implement,
+    repositories: [repository],
+  });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const assetId = createIdentity("evidence_asset");
+  const address = { kind: "produced", sha256: "a".repeat(64) };
+  const evidence = [
+    {
+      id: "evidence_1",
+      assets: [
+        {
+          id: createIdentity("evidence_asset"),
+          kind: "repository",
+          address: {
+            kind: "repository",
+            binding_id: repository.binding_id,
+            commit: snapshot,
+          },
+        },
+      ],
+    },
+    { id: "evidence_2", assets: [{ id: assetId, kind: "produced", address }] },
+  ] as Evidence[];
+  const clients = {
+    mission: {
+      "execution.evidence.asset.content.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          asset_id: assetId,
+          address,
+          data: Buffer.from(PLACED_REPORT).toString("base64"),
+          encoding: "base64",
+          media_type: "text/markdown",
+        },
+      }),
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  t.after(() => run.dispose());
+  const workspaces = WorkspaceRoot.open(join(state, "workspaces"));
+  const prepared = await prepareEvaluation(
+    {
+      setup,
+      claim,
+      workspaces,
+      transport: {
+        ...connector,
+        proveSshIdentity: async () => {},
+      } as unknown as RepositoryTransport,
+      env: hostEnvironment(),
+    },
+    run,
+    ExecutionWork.Implement,
+    evidence,
+  );
+  assert.equal(
+    prepared.directory,
+    join(prepared.key, CHECKOUTS_DIRECTORY, repository.name),
+  );
+  assert.equal(
+    (await simpleGit(prepared.directory).revparse(["HEAD"])).trim(),
+    snapshot,
+  );
+  assert.deepEqual((await simpleGit(prepared.directory).status()).files, []);
+  assert.equal(existsSync(join(prepared.directory, assetId)), false);
+  assert.deepEqual(prepared.tested_input, {
+    kind: "repository",
+    binding_id: repository.binding_id,
+    commit: snapshot,
+  });
+  assert.equal(
+    readFileSync(join(prepared.key, EVIDENCE_DIRECTORY, assetId), "utf8"),
+    PLACED_REPORT,
+  );
+  assert.deepEqual(
+    prepared.reviewBundle.assets.map((item) => item.path),
+    [join("..", "..", EVIDENCE_DIRECTORY, assetId)],
+  );
+  assert.deepEqual(prepared.reviewBundle.added_files, [ADDED_FILE]);
+  workspaces.release(prepared.key, WorkspaceKind.Execution);
+  assert.equal(existsSync(prepared.key), false);
 });

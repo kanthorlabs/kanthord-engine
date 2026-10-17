@@ -42,7 +42,7 @@ import {
   type IntakeStorage,
   type IntakeCheck,
   type EventDecoder,
-  type NodeKind,
+  type Work,
 } from "./contract.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import { pauseNode, readyNode, resumeNode } from "./control-hold.ts";
@@ -102,7 +102,6 @@ import { exportMission } from "./export.ts";
 import { previewImport } from "./import.ts";
 import { applyImport } from "./import-apply.ts";
 import { createNode } from "./node-create.ts";
-import { moveNode } from "./node-move.ts";
 import { rebindNodes } from "./node-rebind.ts";
 import { planRetirement, retireNode } from "./node-retire.ts";
 import { setCriterion, updateNode } from "./node-update.ts";
@@ -626,7 +625,6 @@ export class MissionService
             tx,
             params.mission_id,
             {
-              kind: query.kind,
               node_id: query.node_id,
               after:
                 query.cursor === undefined
@@ -679,9 +677,8 @@ export class MissionService
             this.dependencies.bindings,
             params.mission_id,
             {
-              kind: query.kind,
+              work: query.work,
               state: query.state,
-              parent_id: query.parent_id,
               include_retired: query.include_retired === QUERY_TRUE,
               after,
             },
@@ -779,21 +776,6 @@ export class MissionService
             this.dependencies.bindings,
           );
         }),
-    );
-    registry.register(
-      missionOperations["node.move"],
-      ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
-          moveNode(
-            tx,
-            params.node_id,
-            body,
-            humanActor(caller),
-            this.dependencies.workQueue,
-            this.dependencies.config.text_max_bytes,
-            this.dependencies.bindings,
-          ),
-        ),
     );
     registry.register(
       missionOperations["criterion.set"],
@@ -966,8 +948,8 @@ export class MissionService
     );
   }
 
-  nodeKindOf(tx: Transaction, nodeId: string): NodeKind {
-    return requireNode(tx, nodeId).kind;
+  workOf(tx: Transaction, nodeId: string, nodeRevision: number): Work {
+    return getRevision(tx, nodeId, nodeRevision).content.work;
   }
 
   start(): Promise<Error | null> {

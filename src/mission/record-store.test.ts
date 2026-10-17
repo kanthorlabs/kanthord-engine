@@ -8,7 +8,6 @@ import {
   ActorService,
   AssessmentResult,
   AssetKind,
-  NodeKind,
 } from "./contract.ts";
 import { insertMission, insertNode, readNode } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
@@ -61,9 +60,7 @@ function fixture(t: TestContext) {
     insertNode(tx, {
       id: nodeId,
       mission_id: id,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: null,
+      filename: "implement.md",
       created_at: NOW,
     });
     return id;

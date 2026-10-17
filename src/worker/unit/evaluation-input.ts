@@ -11,7 +11,6 @@ import {
   type Revision,
 } from "../../mission/contract.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
-import { NodeKind } from "./native-agent.ts";
 import {
   EVIDENCE_DIRECTORY,
   WorkspaceKind,
@@ -19,8 +18,7 @@ import {
 } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import type { TestedInput } from "./verification.ts";
-
-const NO_CHECKOUTS = 0;
+import { ExecutionWork } from "../contract.ts";
 
 export function snapshotOf(evidence: readonly Evidence[], bindingId: string) {
   const candidates = evidence
@@ -104,7 +102,7 @@ async function placeAsset(
 async function prepareWorkspace(
   input: StepsInput,
   run: ExecutionRun,
-  kind: NodeKind,
+  work: ExecutionWork,
   evidence: readonly Evidence[],
 ) {
   const repository = input.setup.repositories[0];
@@ -118,7 +116,7 @@ async function prepareWorkspace(
     context: run.operationContext,
     deadlineMs: deadline - Date.now(),
   };
-  if (kind === NodeKind.Objective && repository) {
+  if (work === ExecutionWork.Implement && repository) {
     const snapshot = snapshotOf(evidence, repository.binding_id);
     if (snapshot) {
       const workspace = await input.workspaces.prepareSnapshot({
@@ -127,7 +125,7 @@ async function prepareWorkspace(
         commit: snapshot.commit,
       });
       return {
-        key: workspace.directory,
+        key: workspace.key,
         directory: workspace.directory,
         checkouts: [] as InitiativeCheckout[],
         tested_input: {
@@ -146,7 +144,7 @@ async function prepareWorkspace(
       };
     }
   }
-  if (kind === NodeKind.Initiative)
+  if (work === ExecutionWork.Examine)
     return {
       ...(await input.workspaces.prepareInitiative({
         ...common,
@@ -169,10 +167,10 @@ async function prepareWorkspace(
 export async function prepareEvaluation(
   input: StepsInput,
   run: ExecutionRun,
-  kind: NodeKind,
+  work: ExecutionWork,
   evidence: readonly Evidence[],
 ) {
-  const workspace = await prepareWorkspace(input, run, kind, evidence);
+  const workspace = await prepareWorkspace(input, run, work, evidence);
   try {
     const testedInput: TestedInput | undefined =
       workspace.tested_input ?? placedOf(evidence)?.asset.address;
@@ -197,9 +195,9 @@ export async function prepareEvaluation(
       input.claim.expired_at,
     );
     const placement =
-      workspace.checkouts.length > NO_CHECKOUTS
-        ? join(workspace.key, EVIDENCE_DIRECTORY)
-        : workspace.directory;
+      workspace.key === workspace.directory
+        ? workspace.directory
+        : join(workspace.key, EVIDENCE_DIRECTORY);
     ensureDirectory(placement);
     for (const { evidenceId, asset } of selected) {
       const name = await placeAsset(placement, run, asset, deadline);

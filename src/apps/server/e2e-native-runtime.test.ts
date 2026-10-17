@@ -28,13 +28,14 @@ import {
   type OperationResult,
 } from "../../kernel/operation.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { missionOperations } from "../../mission/contract.ts";
+import { missionOperations, Work } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
   WorkPullKind,
   type ExecutionRecord,
 } from "../../scheduler/contract.ts";
 import {
+  ExecutionWork,
   workerOperations,
   type RepositoryTransport,
 } from "../../worker/contract.ts";
@@ -207,12 +208,11 @@ test(
       },
     });
     const mission = await read<{ id: string }>(["mission", "get", project.id]);
-    const initiative = await write<{ revisions: { node_id: string }[] }>(
+    const examine = await write<{ revisions: { node_id: string }[] }>(
       ["mission", "node", "create", mission.id],
       {
-        filename: "initiative.md",
-        kind: "initiative",
-        content: { ...CONTENT, bindings: [] },
+        filename: "examine.md",
+        content: { ...CONTENT, work: Work.Examine, bindings: [] },
         tasks: [],
         reason: "runtime acceptance",
         expected_mission_version: FIRST_REVISION,
@@ -224,30 +224,31 @@ test(
         "get",
         project.id,
       ]);
-      const objective = await write<{
+      const implement = await write<{
         mission_version: number;
         revisions: { node_id: string }[];
       }>(["mission", "node", "create", mission.id], {
         filename: `${name}.md`,
-        kind: "objective",
-        content: { ...CONTENT, bindings: [bindingSet.bindings.repo!.id] },
+        content: {
+          ...CONTENT,
+          work: Work.Implement,
+          bindings: [bindingSet.bindings.repo!.id],
+        },
         tasks: [],
         reason: "runtime acceptance",
         expected_mission_version: version,
-        parent_id: initiative.revisions[0]!.node_id,
-        expected_parent_revision: FIRST_REVISION,
       });
       await write(
         [
           "mission",
           "dependency",
           "add",
-          initiative.revisions[0]!.node_id,
-          objective.revisions[0]!.node_id,
+          examine.revisions[0]!.node_id,
+          implement.revisions[0]!.node_id,
         ],
         {
           reason: "runtime acceptance",
-          expected_mission_version: objective.mission_version,
+          expected_mission_version: implement.mission_version,
         },
       );
     }
@@ -500,7 +501,7 @@ test(
       hostTools: unusedHostTools,
       setup: runtimeX.setup,
       claim: x.execution,
-      nodeKind: "objective",
+      work: ExecutionWork.Implement,
       agent: runtimeX.setup.agents[0]!,
       credential: {
         credential_id: runtimeX.item.credential_id,
@@ -684,7 +685,7 @@ test(
         hostTools: unusedHostTools,
         setup: runtimeY.setup,
         claim: y.execution,
-        nodeKind: "objective",
+        work: ExecutionWork.Implement,
         agent: runtimeY.setup.agents[0]!,
         credential: {
           credential_id: runtimeY.item.credential_id,

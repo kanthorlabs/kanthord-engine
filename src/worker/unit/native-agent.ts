@@ -8,7 +8,12 @@ import {
   type Context,
   type CancellationContext,
 } from "../../kernel/context.ts";
-import type { AgentSetup, ExecutionSetup, HostTools } from "../contract.ts";
+import type {
+  AgentSetup,
+  ExecutionSetup,
+  ExecutionWork,
+  HostTools,
+} from "../contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import type {
   CompositionRecord,
@@ -29,13 +34,6 @@ import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { traceAgent } from "./agent-telemetry.ts";
 import type { SpanRecorder } from "./telemetry.ts";
 
-export const NodeKind = {
-  Objective: "objective",
-  Initiative: "initiative",
-} as const;
-export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind];
-const FIRST_REPOSITORY = 0;
-const SINGLE_REPOSITORY = 1;
 export interface NativeAgentInput {
   setup: ExecutionSetup;
   claim: {
@@ -44,7 +42,7 @@ export interface NativeAgentInput {
     created_at: number;
     expired_at: number;
   };
-  nodeKind: NodeKind;
+  work: ExecutionWork;
   agent: AgentSetup;
   credential: ExecutionCredential;
   budget: ExecutionBudget;
@@ -172,12 +170,8 @@ export async function openNativeAgent(
   const bridge = abortSignal(context);
   let session: AgentSession | undefined;
   try {
-    const repositories =
-      input.nodeKind === NodeKind.Objective
-        ? input.setup.repositories.slice(FIRST_REPOSITORY, SINGLE_REPOSITORY)
-        : input.setup.repositories;
     const layers = [];
-    for (const [index, repository] of repositories.entries())
+    for (const [index, repository] of input.setup.repositories.entries())
       layers.push(
         await resolveRepositoryLayer({
           repository: {

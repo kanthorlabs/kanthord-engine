@@ -5,7 +5,6 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   MissionErrorCode,
-  NodeKind,
   NodeState,
   RevisionWrite,
   StartPoint,
@@ -19,6 +18,7 @@ import type { Dependencies } from "./service.ts";
 import { ContentField, TASKS_FIELD, validateText } from "./content.ts";
 import { requireNode } from "./node-read.ts";
 import { resolveContent, resolveTasks } from "./node-create.ts";
+import { requireWorkUnlocked } from "./node-update.ts";
 import {
   requireRunnable,
   requireControlState,
@@ -47,6 +47,8 @@ const CONTENT_KEYS = [
   ContentField.Criterion,
   ContentField.Verifications,
   ContentField.Bindings,
+  ContentField.Work,
+  ContentField.Requires,
 ] as const;
 
 function contentChanges(current: Content, previous: Content): string[] {
@@ -72,15 +74,15 @@ function changeRevision(
     projectId,
     {
       filename: node.filename,
-      kind: node.kind,
       content: change.content,
       reason: change.reason,
     },
     dependencies.config.text_max_bytes,
   );
+  requireWorkUnlocked(node, previous.content.work, content.work);
   const tasks = resolveTasks(
     tx,
-    node,
+    { ...node, work: content.work },
     node.filename,
     change.tasks,
     previous.tasks,
@@ -104,7 +106,7 @@ function changeRevision(
       write: RevisionWrite.Unblock,
       previous_revision: previous.revision,
       changed_fields: changedFields,
-      ...(node.kind === NodeKind.Objective ? { tasks: tasks.changes } : {}),
+      tasks: tasks.changes,
     },
   });
   incrementMissionVersion(tx, node.mission_id);

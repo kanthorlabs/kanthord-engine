@@ -420,13 +420,16 @@ export type RepositoryBindingIdsOf = (
   nodeRevision: number,
 ) => string[];
 
-export const ExecutionNodeKind = {
-  Initiative: "initiative",
-  Objective: "objective",
+export const ExecutionWork = {
+  Implement: "implement",
+  Examine: "examine",
 } as const;
-export type ExecutionNodeKind =
-  (typeof ExecutionNodeKind)[keyof typeof ExecutionNodeKind];
-export type NodeKindOf = (tx: Transaction, nodeId: string) => ExecutionNodeKind;
+export type ExecutionWork = (typeof ExecutionWork)[keyof typeof ExecutionWork];
+export type WorkOf = (
+  tx: Transaction,
+  nodeId: string,
+  nodeRevision: number,
+) => ExecutionWork;
 
 export const InstanceActivity = {
   Idle: "idle",
@@ -739,7 +742,7 @@ export const executionSetupSchema = z.strictObject({
   agents: z.array(agentSetupSchema).min(1),
   templates: promptTemplatesSchema,
   resource_budget: resourceBudgetSchema,
-  node_kind: z.enum(ExecutionNodeKind),
+  work: z.enum(ExecutionWork),
   repositories: z.array(
     z.strictObject({
       binding_id: identitySchema("binding"),

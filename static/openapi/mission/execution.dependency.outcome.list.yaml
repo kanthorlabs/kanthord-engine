@@ -4,7 +4,7 @@ pathItem:
     operationId: mission.execution.dependency.outcome.list
     tags:
       - mission
-    description: List the current outcomes of the direct dependencies of an initiative.
+    description: List the current outcomes of the direct dependencies of an examine node.
     x-access-policy: client
     x-timeout-ms: 30000
     x-mutation: false

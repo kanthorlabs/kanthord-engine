@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import type { Transaction } from "../kernel/store.ts";
-import { NodeKind, type Currency } from "./contract.ts";
+import { Work, type Currency } from "./contract.ts";
 import {
   readAttempt,
   readEvidence,
@@ -11,7 +11,12 @@ import {
   type AssessmentRow,
 } from "./record-store.ts";
 import { directDependenciesOf } from "./graph.ts";
-import { readDependencies, readNode, type NodeRow } from "./store.ts";
+import {
+  readDependencies,
+  readNode,
+  readRevision,
+  type NodeRow,
+} from "./store.ts";
 
 export const CurrencyReason = {
   Context: "The assessment no longer matches its pinned context.",
@@ -25,7 +30,9 @@ function dependenciesMatch(
   row: AssessmentRow,
   node: NodeRow,
 ): boolean {
-  if (node.kind !== NodeKind.Initiative) return true;
+  const revision = readRevision(tx, row.node_id, row.node_revision);
+  assert.ok(revision, "An assessment pins a stored revision.");
+  if (revision.work !== Work.Examine) return true;
   const direct = directDependenciesOf(
     node.id,
     readDependencies(tx, node.mission_id),

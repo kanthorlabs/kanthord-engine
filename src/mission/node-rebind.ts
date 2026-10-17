@@ -6,7 +6,6 @@ import { isTerminal } from "./admission.ts";
 import { ContentField, validateText } from "./content.ts";
 import {
   MissionErrorCode,
-  NodeKind,
   RebindSkipCondition,
   RevisionWrite,
   type HumanActor,
@@ -153,7 +152,7 @@ function reboundRevision(
       write: RevisionWrite.NodeRebind,
       previous_revision: previous.revision,
       changed_fields: [ContentField.Bindings],
-      ...(node.kind === NodeKind.Objective ? { tasks: [] } : {}),
+      tasks: [],
     },
   };
 }

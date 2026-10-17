@@ -444,7 +444,7 @@ export function composeServices(options: {
     repositoryPolicyOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     repositoryBindingIdsOf: (tx, nodeId, revision) =>
       mission.repositoryBindingIdsOf(tx, nodeId, revision),
-    nodeKindOf: (tx, nodeId) => mission.nodeKindOf(tx, nodeId),
+    workOf: (tx, nodeId, revision) => mission.workOf(tx, nodeId, revision),
     pinnedCredentialMetadata: (tx, execution, name, now) =>
       custody.pinnedCredentialMetadata(tx, execution, name, now),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),

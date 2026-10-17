@@ -4,7 +4,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import {
-  NodeKind,
+  Work,
   NodeState,
   ActorKind,
   ClaimKind,
@@ -44,7 +44,7 @@ const INSERT = "workQueue.insert";
 const UNMET = "mission.release.obligation_unmet";
 function fixture(
   t: TestContext,
-  kind: NodeKind = NodeKind.Objective,
+  work: Work = Work.Implement,
   overrides: Partial<Dependencies> = {},
 ) {
   const h = controlHarness(t, IDENTITY, overrides);
@@ -80,14 +80,14 @@ function fixture(
   });
   h.store.transaction((tx) => {
     tx.database
-      .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
-      .run(kind, h.node_id);
+      .prepare("UPDATE mission_node_revision SET work = ? WHERE node_id = ?")
+      .run(work, h.node_id);
     tx.database
       .prepare(
         "UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?",
       )
       .run(
-        JSON.stringify(kind === NodeKind.Objective ? [bindingId] : []),
+        JSON.stringify(work === Work.Implement ? [bindingId] : []),
         h.node_id,
       );
   });
@@ -239,15 +239,13 @@ test("further-work releases without progress pause the node at the further-work 
   );
 });
 
-test("initiative claim ignores a nonterminal objective child", (t) => {
-  const h = fixture(t, NodeKind.Initiative);
+test("examine claim ignores a nonterminal implement child", (t) => {
+  const h = fixture(t, Work.Examine);
   h.store.transaction((tx) =>
     insertNode(tx, {
       id: createIdentity("node"),
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: h.node_id,
       created_at: NOW,
     }),
   );
@@ -255,7 +253,7 @@ test("initiative claim ignores a nonterminal objective child", (t) => {
   assert.equal(h.node().attempt, FIRST_ATTEMPT);
 });
 
-test("objective steps release requires published evidence from the execution and pinned repository", (t) => {
+test("implement steps release requires published evidence from the execution and pinned repository", (t) => {
   const h = fixture(t);
   h.claim();
   h.refuses(ReleaseObligation.Evidence);
@@ -271,8 +269,8 @@ test("objective steps release requires published evidence from the execution and
   assert.ok(h.calls.some((call) => call.method === INSERT));
 });
 
-test("initiative steps release admits produced evidence", (t) => {
-  const h = fixture(t, NodeKind.Initiative);
+test("examine steps release admits produced evidence", (t) => {
+  const h = fixture(t, Work.Examine);
   h.claim();
   h.evidence(AssetKind.Produced, true);
   h.release();
@@ -568,7 +566,7 @@ function deferredFixture(
   check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
 ) {
   let checkCalls = 0;
-  const h = fixture(t, NodeKind.Objective, {
+  const h = fixture(t, Work.Implement, {
     intakeCheck: {
       check: async () => {
         checkCalls++;
@@ -675,7 +673,7 @@ function deferredBranchPushFixture(
   t: TestContext,
   check: Awaited<ReturnType<Dependencies["intakeCheck"]["check"]>>,
 ) {
-  const h = fixture(t, NodeKind.Objective, {
+  const h = fixture(t, Work.Implement, {
     intakeCheck: { check: async () => check },
   });
   h.dependencies.bindings.repositoryPolicyOf = () => ({
@@ -758,7 +756,7 @@ test("deferred check resolves a branch_push request and completes the node", asy
 
 test("a failing deferred check leaves the node unchanged", async (t) => {
   let checkCalls = 0;
-  const h = fixture(t, NodeKind.Objective, {
+  const h = fixture(t, Work.Implement, {
     intakeCheck: {
       check: async () => {
         checkCalls++;

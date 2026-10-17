@@ -8,7 +8,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
   NodeState,
-  NodeKind,
+  Work,
   AssetKind,
   MissionBindingKind,
   type Override,
@@ -64,14 +64,14 @@ function landedEvidence(
     address.binding_id,
   );
   if (
-    node.kind !== NodeKind.Objective ||
+    revision.work !== Work.Implement ||
     !pins.includes(address.binding_id) ||
     binding?.resource_identity.split(":")[0] !== MissionBindingKind.Repository
   )
     throw new OperationError(
       HttpStatus.BadRequest,
       BINDING_MISMATCH,
-      "Landed commit does not name the objective's pinned repository.",
+      "Landed commit does not name the pinned repository of an implement node.",
       { binding_id: address.binding_id },
     );
   const id = createIdentity("evidence");

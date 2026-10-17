@@ -18,7 +18,7 @@ import {
   readDependencies,
   readPinnedRevision,
 } from "./node-reads.ts";
-import { NodeKind, type NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent.ts";
 import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
 import {
   runVerificationsWithOutput,
@@ -40,7 +40,7 @@ import {
   workRepositoriesOf,
   type InitiativeCheckout,
 } from "./workspace.ts";
-import { ActionResultKind } from "../contract.ts";
+import { ActionResultKind, ExecutionWork } from "../contract.ts";
 import {
   evaluationEnd,
   evaluationSpan,
@@ -78,7 +78,7 @@ async function judge(
   openAgent: OpenAgent,
   dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
 ) {
-  const kind = input.setup.node_kind;
+  const examine = input.setup.work === ExecutionWork.Examine;
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
   if (!verificationPassed(verification, commands))
@@ -98,7 +98,7 @@ async function judge(
   await agent.instruct(
     work,
     evaluationInstruction(input.setup.templates, {
-      kind,
+      examine,
       tasks: revision.tasks,
       verification,
       evidence,
@@ -120,7 +120,7 @@ async function judge(
     result: judgement.result,
     unmet: judgement.unmet.map((item) => item.id),
   });
-  const proposals = kind === NodeKind.Initiative ? judgement.proposals : [];
+  const proposals = examine ? judgement.proposals : [];
   return {
     result:
       proposals.length > NO_ITEMS
@@ -143,7 +143,6 @@ async function evaluate(
 ) {
   assert.ok(prepared.directory);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
-  const kind = input.setup.node_kind;
   const verificationRun = await runVerificationsWithOutput({
     observe: verificationObserver(
       run.spans,
@@ -175,7 +174,9 @@ async function evaluate(
     verification,
   });
   const dependencies =
-    kind === NodeKind.Initiative ? await readDependencies(run) : null;
+    input.setup.work === ExecutionWork.Examine
+      ? await readDependencies(run)
+      : null;
   let judgement: Awaited<ReturnType<typeof judge>>;
   try {
     judgement = await judge(
@@ -215,8 +216,12 @@ export async function runEvaluation(
 ): Promise<ExecutionEnd> {
   const revision = await readPinnedRevision(run);
   const evidence = await readAttemptEvidence(run);
-  const kind = input.setup.node_kind;
-  const prepared = await prepareEvaluation(input, run, kind, evidence);
+  const prepared = await prepareEvaluation(
+    input,
+    run,
+    input.setup.work,
+    evidence,
+  );
   try {
     const assessment = await run.spans.within(
       evaluationSpan(run.spans, testedCommitOf(prepared.tested_input)),

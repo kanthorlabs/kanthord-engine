@@ -173,11 +173,11 @@ RULED 2026-10-17 by Ulrich (R13).
 - The worker contract declares its own `ExecutionNodeKind` and `NodeKindOf` (`src/worker/contract.ts:423-429`), because a service contract imports no other service.
 - Plan 03 deletes the field and the seam, or replaces them with `work` (task 03.14).
 
-## D31 — The evidence placement of an `examine` node with repository bindings
+## D31 — The evidence placement of a node with repository bindings
 
 RULED 2026-10-17 by Ulrich.
 
-- The reviewer of an `examine` node with one or more repository bindings places the produced evidence in `<workspace>/evidence/`. `<workspace>` is the execution workspace that `prepareInitiative` answers as `key`.
-- The `evidence` directory is outside the agent root. The agent root holds only the checkouts, and a checkout stays clean.
+- The reviewer of every node whose evaluation checks out repositories places the produced evidence in `<workspace>/evidence/`. This covers an `examine` node with one or more repository bindings and an `implement` node with an evidence snapshot. `<workspace>` is the execution workspace key.
+- The `evidence` directory is outside the agent root. The agent root holds only the checkouts, and a checkout stays an exact, clean copy. A snapshot checkout is `<workspace>/checkouts/<binding name>/` under the layout rule.
 - Each asset `path` of the review bundle names the placed file relative to the agent root.
-- An `examine` node with no repository binding keeps the evidence-placement rule: the evidence is in its workspace, which is its agent root.
+- A node with no repository checkout keeps the evidence-placement rule: the evidence is in its workspace, which is its agent root. This covers an `examine` node with no repository binding and an `implement` node whose evidence names no repository snapshot.

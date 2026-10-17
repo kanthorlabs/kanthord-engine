@@ -6,7 +6,6 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import {
   ActorKind,
-  NodeKind,
   NodeState,
   missionOperations,
 } from "../../mission/contract.ts";
@@ -100,30 +99,18 @@ test("all record reads enforce human access with valid parameters and return pre
     ).id;
     tx.database
       .prepare(
-        "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?)",
+        "INSERT INTO mission_node (id, mission_id, filename, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
       )
       .run(
         params.node_id,
         missionId,
-        NodeKind.Objective,
-        "objective.md",
+        "implement.md",
         NodeState.Available,
         INITIAL_ATTEMPT,
         INITIAL_PRIORITY,
         NOW,
       );
   });
-  h.store.database
-    .prepare(
-      "UPDATE mission_node SET kind = ?, state = ?, attempt = ?, priority = ? WHERE id = ?",
-    )
-    .run(
-      NodeKind.Initiative,
-      NodeState.Available,
-      INITIAL_ATTEMPT,
-      INITIAL_PRIORITY,
-      params.node_id,
-    );
   for (const name of [
     "attempt.list",
     "externalAction.list",

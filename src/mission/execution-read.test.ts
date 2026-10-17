@@ -3,12 +3,7 @@ import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import {
-  MissionErrorCode,
-  AssessmentResult,
-  NodeKind,
-  NodeState,
-} from "./contract.ts";
+import { MissionErrorCode, AssessmentResult, NodeState } from "./contract.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   closeAttempt,
@@ -40,9 +35,9 @@ const SECOND_ATTEMPT = 2;
 const LATER_TS = 3;
 const THIRD_REVISION = 3;
 const PINNED = "Pinned";
-const PINNED_FILENAME = "initiative.md";
+const PINNED_FILENAME = "examine.md";
 
-test("initiative reads use outcome revisions, include discarded dependencies, minimize new dependencies and exclude retired dependencies", async (t) => {
+test("examine reads use outcome revisions, include discarded dependencies, minimize new dependencies and exclude retired dependencies", async (t) => {
   const h = executionHarness(t, IDENTITY);
   const childId = createIdentity("node");
   const freshId = createIdentity("node");
@@ -54,9 +49,7 @@ test("initiative reads use outcome revisions, include discarded dependencies, mi
       insertNode(tx, {
         id,
         mission_id: h.mission_id,
-        kind: NodeKind.Objective,
         filename: `${id.toLowerCase()}.md`,
-        parent_id: h.node_id,
         created_at: CREATED_AT,
       });
       insertRevision(tx, {
@@ -162,15 +155,15 @@ test("initiative reads use outcome revisions, include discarded dependencies, mi
     (await h.invoke("execution.dependency.evidence.list", input)).items.length,
     NO_ITEMS,
   );
-  const objective = evidenceHarness(t, IDENTITY);
+  const implement = evidenceHarness(t, IDENTITY);
   for (const operation of [
     "execution.dependency.list",
     "execution.dependency.outcome.list",
     "execution.dependency.evidence.list",
   ] as const)
     assert.deepEqual(
-      await objective.invoke(operation, {
-        params: { execution_id: objective.claim.executionId },
+      await implement.invoke(operation, {
+        params: { execution_id: implement.claim.executionId },
         query: {},
         body: null,
       }),
@@ -263,7 +256,13 @@ test("execution revision reads carry the pinned tasks and exclude later human re
         {
           id: createIdentity("task"),
           filename: "task.md",
-          content: { ...revision.content, bindings: [] },
+          content: {
+            name: revision.content.name,
+            requirement: revision.content.requirement,
+            criterion: revision.content.criterion,
+            verifications: revision.content.verifications,
+            bindings: [],
+          },
         },
       ],
     });

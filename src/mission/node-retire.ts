@@ -6,7 +6,6 @@ import type { Transaction } from "../kernel/store.ts";
 import { importAdmissible, isTerminal } from "./admission.ts";
 import { validateText } from "./content.ts";
 import {
-  EdgeKind,
   MissionErrorCode,
   type Edge,
   type HumanActor,
@@ -33,42 +32,9 @@ const COUNTER_INCREMENT = 1;
 const UPDATED_NODE_COUNT = 1;
 const FIRST_NODE = 0;
 const REASON_FIELD = "reason";
-type DependencyEdge = Extract<Edge, { kind: typeof EdgeKind.Dependency }>;
 
-function retirementSet(tx: Transaction, node: NodeRow): NodeRow[] {
-  const nodes = readMissionNodes(tx, node.mission_id).filter(
-    (item) => item.retired_at === null,
-  );
-  const children = new Map<string, NodeRow[]>();
-  for (const child of nodes) {
-    if (child.parent_id === null) continue;
-    const siblings = children.get(child.parent_id) ?? [];
-    siblings.push(child);
-    children.set(child.parent_id, siblings);
-  }
-  const pending = [node];
-  const ids = new Set([node.id]);
-  for (
-    let index = FIRST_NODE;
-    index < pending.length && index < nodes.length;
-    index++
-  ) {
-    const parent = pending[index]!;
-    const descendants = children.get(parent.id) ?? [];
-    for (const child of descendants) {
-      assert.ok(!ids.has(child.id), "Containment must be acyclic.");
-      ids.add(child.id);
-      pending.push(child);
-    }
-  }
-  assert.ok(
-    pending.length <= nodes.length,
-    "Retirement stays within the current mission.",
-  );
-  return [
-    node,
-    ...nodes.filter((item) => item.id !== node.id && ids.has(item.id)),
-  ];
+function retirementSet(node: NodeRow): NodeRow[] {
+  return [node];
 }
 
 function checkRetirement(tx: Transaction, node: NodeRow): void {
@@ -87,11 +53,11 @@ function removedDependencies(
   missionId: string,
   ids: Set<string>,
   force: boolean,
-): DependencyEdge[] {
+): Edge[] {
   const nodes = new Map(
     readMissionNodes(tx, missionId).map((node) => [node.id, node]),
   );
-  const removed: DependencyEdge[] = [];
+  const removed: Edge[] = [];
   for (const edge of readDependencies(tx, missionId)) {
     if (!ids.has(edge.depends_on) || ids.has(edge.dependent)) continue;
     const dependent = nodes.get(edge.dependent);
@@ -103,7 +69,6 @@ function removedDependencies(
     );
     if (isTerminal(dependent.state)) continue;
     removed.push({
-      kind: EdgeKind.Dependency,
       dependent_id: edge.dependent,
       depends_on_id: edge.depends_on,
     });
@@ -144,7 +109,7 @@ export function planRetirement(
 ): RetirePreview {
   requireActive(node);
   const mission = requireMission(tx, node.mission_id);
-  const nodes = retirementSet(tx, node);
+  const nodes = retirementSet(node);
   assert.equal(nodes[FIRST_NODE]?.id, node.id, "Named node is checked first.");
   for (const retiring of nodes) checkRetirement(tx, retiring);
   const retiredNodeIds = nodes.map((item) => item.id).sort();
@@ -207,15 +172,8 @@ export function retireNode(
       "Retirement preview changed.",
     );
   const before = claimableMap(tx, mission.id, bindings);
-  for (const edge of plan.removed_edges) {
-    assert.equal(
-      edge.kind,
-      EdgeKind.Dependency,
-      "Retirement removes only dependency edges.",
-    );
-    if (edge.kind === EdgeKind.Dependency)
-      deleteDependency(tx, edge.dependent_id, edge.depends_on_id);
-  }
+  for (const edge of plan.removed_edges)
+    deleteDependency(tx, edge.dependent_id, edge.depends_on_id);
   retireRows(tx, new Set(plan.retired_node_ids));
   routeMission(tx, mission.id);
   reconcileMission(

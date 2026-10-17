@@ -8,7 +8,7 @@ import {
   actorSchema,
   AssessmentResult,
   MissionErrorCode,
-  NodeKind,
+  Work,
   NODE_LIST_LIMIT_DEFAULT,
   type ExecutionDependency,
 } from "./contract.ts";
@@ -91,9 +91,9 @@ export function executionDependencies(
   claim: ExecutionClaim,
   query: { limit?: number; cursor?: string },
 ) {
-  const { node } = executionRead(tx, dependencies, claim);
+  const { node, revision: pinned } = executionRead(tx, dependencies, claim);
   const page = identityPage(
-    node.kind === NodeKind.Objective
+    pinned.content.work === Work.Implement
       ? []
       : currentDependenciesOf(tx, node.id).map((item) => ({
           ...item,
@@ -112,6 +112,8 @@ export function executionDependencies(
         ...nodeRecord(tx, dependency, dependencies.bindings),
         filename: revision.filename,
         content: revision.content,
+        work: revision.content.work,
+        requires: revision.content.requires,
         tasks: revision.tasks,
         visible_revision: revision.revision,
         pinned_by_attempts: revision.pinned_by_attempts,
@@ -127,9 +129,9 @@ export function executionDependencyOutcomes(
   claim: ExecutionClaim,
   query: { limit?: number; cursor?: string },
 ) {
-  const { node } = executionRead(tx, dependencies, claim);
+  const { node, revision } = executionRead(tx, dependencies, claim);
   const items =
-    node.kind === NodeKind.Objective
+    revision.content.work === Work.Implement
       ? []
       : currentDependenciesOf(tx, node.id).flatMap(({ outcome }) =>
           outcome ? [outcome] : [],
@@ -149,9 +151,9 @@ export function executionDependencyEvidence(
   claim: ExecutionClaim,
   query: { limit?: number; cursor?: string },
 ) {
-  const { node } = executionRead(tx, dependencies, claim);
+  const { node, revision } = executionRead(tx, dependencies, claim);
   const ids =
-    node.kind === NodeKind.Objective
+    revision.content.work === Work.Implement
       ? []
       : currentDependenciesOf(tx, node.id).flatMap(({ outcome }) =>
           outcome

@@ -17,7 +17,8 @@ import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { temporary, hostEnvironment } from "../../kernel/test-support.ts";
-import { NodeKind, openNativeAgent } from "./native-agent.ts";
+import { openNativeAgent } from "./native-agent.ts";
+import { ExecutionWork } from "../contract.ts";
 import {
   WorkerMethod,
   type ExecutionSetup,
@@ -72,7 +73,7 @@ async function fixture(
     method?: WorkerMethod;
     prepare?: (workspace: string, hostHome: string) => void;
     turnCheck?: (context: CancellationContext) => Promise<void>;
-    nodeKind?: NodeKind;
+    work?: ExecutionWork;
     checkouts?: (workspace: string) => string[];
   } = {},
 ) {
@@ -97,7 +98,7 @@ async function fixture(
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
     },
-    nodeKind: options.nodeKind ?? NodeKind.Objective,
+    work: options.work ?? ExecutionWork.Implement,
     agent: setup.agents[0]!,
     credential: {
       credential_id: setup.agents[0]!.credential_id,
@@ -234,7 +235,7 @@ test("an initiative composes one project prompt part for each repository binding
     },
     unusedHostTools,
     {
-      nodeKind: NodeKind.Initiative,
+      work: ExecutionWork.Examine,
       checkouts: checkoutsOf,
       prepare: (workspace) => {
         for (const [index, directory] of checkoutsOf(workspace).entries()) {

@@ -16,7 +16,7 @@ import {
   MISSION_SERVICE_NAME,
   missionOperations,
   ActorKind,
-  NodeKind,
+  Work,
   NodeState,
   RevisionWrite,
   type HumanAct,
@@ -33,6 +33,7 @@ import {
   insertRevision,
   readNode,
   setNodeState,
+  workOf,
 } from "./store.ts";
 import { missionMigrations } from "./migrations.ts";
 import { MissionService, type Dependencies } from "./service.ts";
@@ -131,17 +132,19 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
     insertNode(tx, {
       id: nodeId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
-      filename: "objective.md",
-      parent_id: h.node_id,
+      filename: "implement.md",
       created_at: FIXTURE_TIME,
     });
     const revision = getRevision(tx, h.node_id, FIRST_REVISION);
     insertRevision(tx, {
       ...revision,
       node_id: nodeId,
-      filename: "objective.md",
-      content: { ...revision.content, bindings: [repositoryId, storageId] },
+      filename: "implement.md",
+      content: {
+        ...revision.content,
+        work: Work.Implement,
+        bindings: [repositoryId, storageId],
+      },
       tasks: [],
     });
     insertDependency(tx, h.mission_id, h.node_id, nodeId);
@@ -150,9 +153,20 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
   });
   h.claim.nodeId = nodeId;
   const node = () => h.store.transaction((tx) => readNode(tx, nodeId)!);
-  assert.equal(node().kind, NodeKind.Objective);
+  assert.equal(
+    h.store.transaction((tx) => workOf(tx, nodeId)),
+    Work.Implement,
+  );
   assert.equal(node().attempt, h.claim.attempt);
-  return { ...h, node_id: nodeId, node, repositoryId, storageId, storage };
+  return {
+    ...h,
+    examine_id: h.node_id,
+    node_id: nodeId,
+    node,
+    repositoryId,
+    storageId,
+    storage,
+  };
 }
 
 export function controlHarness(
@@ -169,15 +183,13 @@ export function controlHarness(
     insertNode(tx, {
       id: nodeId,
       mission_id: missionId,
-      kind: NodeKind.Initiative,
-      filename: "initiative.md",
-      parent_id: null,
+      filename: "examine.md",
       created_at: FIXTURE_TIME,
     });
     insertRevision(tx, {
       node_id: nodeId,
       revision: FIRST_REVISION,
-      filename: "initiative.md",
+      filename: "examine.md",
       reason: "plan",
       actor,
       created_at: FIXTURE_TIME,
@@ -187,6 +199,8 @@ export function controlHarness(
         criterion: "Criterion",
         verifications: ["true"],
         bindings: [],
+        work: Work.Examine,
+        requires: [],
       },
       tasks: [],
       change: {

@@ -8,7 +8,7 @@ import { configuration, CONFIG_VERSION } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { ulidSchema } from "../../kernel/identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { NodeState } from "../../mission/contract.ts";
+import { NodeState, Work } from "../../mission/contract.ts";
 import {
   ClaimState,
   WorkPullKind,
@@ -219,42 +219,42 @@ async function setup(t: TestContext, short = false) {
     INITIAL_BINDING_VERSION + Object.keys(bindings).length,
   );
   const mission = await read<{ id: string }>(["mission", "get", project.id]);
-  const initiative = await write<Change>(
+  const examine = await write<Change>(
     ["mission", "node", "create", mission.id],
     {
-      filename: "initiative-1.md",
-      kind: "initiative",
-      content: CONTENT,
+      filename: "examine-1.md",
+      content: { ...CONTENT, work: Work.Examine },
       tasks: [],
       reason: "plan",
       expected_mission_version: 1,
     },
   );
-  const objective = await write<Change>(
+  const implement = await write<Change>(
     ["mission", "node", "create", mission.id],
     {
-      filename: "objective-1.md",
-      kind: "objective",
-      content: { ...CONTENT, bindings: [applied.bindings.repo!.id] },
+      filename: "implement-1.md",
+      content: {
+        ...CONTENT,
+        work: Work.Implement,
+        bindings: [applied.bindings.repo!.id],
+      },
       tasks: [],
       reason: "plan",
-      parent_id: initiative.revisions[0]!.node_id,
-      expected_parent_revision: 1,
       expected_mission_version: 2,
     },
   );
-  const objectiveId = objective.revisions[0]!.node_id;
+  const implementId = implement.revisions[0]!.node_id;
   await write(
     [
       "mission",
       "dependency",
       "add",
-      initiative.revisions[0]!.node_id,
-      objectiveId,
+      examine.revisions[0]!.node_id,
+      implementId,
     ],
     { reason: "plan", expected_mission_version: THIRD_MISSION_VERSION },
   );
-  const revision = (await read<Node>(["mission", "node", "get", objectiveId]))
+  const revision = (await read<Node>(["mission", "node", "get", implementId]))
     .visible_revision;
   writePrivate(
     join(directory, "server.yaml"),
@@ -320,7 +320,7 @@ async function setup(t: TestContext, short = false) {
     read<ExecutionRecord>(["scheduler", "execution", "get", executionId], env);
   const claim = (executionId: string, env = G) =>
     read<ExecutionRecord>(["scheduler", "claim", "get", executionId], env);
-  const node = () => read<Node>(["mission", "node", "get", objectiveId]);
+  const node = () => read<Node>(["mission", "node", "get", implementId]);
   const queue = () =>
     read<Page<{ node_id: string }>>(["scheduler", "queue", "list", project.id]);
   const act = (state: string) => ({
@@ -351,7 +351,7 @@ async function setup(t: TestContext, short = false) {
     generalPull,
     reviewerPull,
     project_id: project.id,
-    objectiveId,
+    implementId,
     revision,
     file,
     read,
@@ -382,7 +382,7 @@ test(
         assert.equal(result.kind, WorkPullKind.Claimed);
         const execution = result.execution;
         X = execution.execution_id;
-        assert.equal(execution.node_id, h.objectiveId);
+        assert.equal(execution.node_id, h.implementId);
         assert.equal(execution.attempt, FIRST_ATTEMPT);
         assert.equal(execution.pinned_revision, h.revision);
         assert.equal(execution.claim_state, ClaimState.Running);
@@ -410,14 +410,14 @@ test(
         assert.equal(node.state, NodeState.Executing);
         assert.equal(node.attempt, FIRST_ATTEMPT);
         assert.equal(
-          (await h.queue()).items.some((job) => job.node_id === h.objectiveId),
+          (await h.queue()).items.some((job) => job.node_id === h.implementId),
           false,
         );
         const attempt = await h.read<Attempt>([
           "mission",
           "attempt",
           "get",
-          h.objectiveId,
+          h.implementId,
           "1",
         ]);
         const executionKind = "execution";
@@ -480,7 +480,7 @@ test(
           "node",
           "priority",
           "set",
-          h.objectiveId,
+          h.implementId,
           "--file",
           h.file({
             value: FIRST_PRIORITY,
@@ -527,7 +527,7 @@ test(
         assert.equal(node.state, NodeState.Available);
         assert.equal(node.attempt, FIRST_ATTEMPT);
         assert.equal(
-          (await h.queue()).items.some((job) => job.node_id === h.objectiveId),
+          (await h.queue()).items.some((job) => job.node_id === h.implementId),
           true,
         );
       },
@@ -549,14 +549,14 @@ test(
         await delay(POLL_MS);
       assert.equal(h.fixture.scheduler.pulling(h.reviewer), true);
       const ready = await h.write<{ node: Node }>(
-        ["mission", "node", "ready", h.objectiveId],
+        ["mission", "node", "ready", h.implementId],
         h.act(NodeState.Available),
       );
       assert.equal(ready.node.state, NodeState.Waiting);
       const result = await pending;
       assert.equal(result.kind, WorkPullKind.Claimed);
       E = result.execution.execution_id;
-      assert.equal(result.execution.node_id, h.objectiveId);
+      assert.equal(result.execution.node_id, h.implementId);
       assert.equal(result.execution.attempt, FIRST_ATTEMPT);
       assert.equal(result.execution.pinned_revision, h.revision);
       assert.equal(result.execution.claimant.runtime_identity, h.reviewer);
@@ -580,7 +580,7 @@ test(
           "list",
           h.project_id,
           "--node",
-          h.objectiveId,
+          h.implementId,
           "--attempt",
           "1",
         ]);
@@ -601,7 +601,7 @@ test(
     );
     await t.test("E03.12 human pause revokes the evaluation", async () => {
       const result = await h.write<{ node: Node }>(
-        ["mission", "node", "pause", h.objectiveId],
+        ["mission", "node", "pause", h.implementId],
         h.act(NodeState.Evaluating),
       );
       assert.equal(result.node.state, NodeState.Paused);
@@ -663,7 +663,7 @@ test(
               "list",
               h.project_id,
               "--node",
-              h.objectiveId,
+              h.implementId,
               "--attempt",
               "0",
             ],
@@ -754,7 +754,7 @@ test(
           "mission",
           "attempt",
           "list",
-          h.objectiveId,
+          h.implementId,
         ]);
         assert.deepEqual(
           attempts.items.map((attempt) => attempt.attempt),
@@ -802,7 +802,7 @@ test(
         assert.equal((await h.get(X)).claim_state, ClaimState.Finished);
         assert.equal((await h.node()).state, NodeState.Available);
         assert.equal(
-          (await h.queue()).items.some((job) => job.node_id === h.objectiveId),
+          (await h.queue()).items.some((job) => job.node_id === h.implementId),
           true,
         );
       },
@@ -828,7 +828,7 @@ test(
       const result = await pending;
       assert.equal(result.kind, WorkPullKind.Claimed);
       assert.notEqual(result.execution.execution_id, X);
-      assert.equal(result.execution.node_id, h.objectiveId);
+      assert.equal(result.execution.node_id, h.implementId);
     });
     await t.test(
       "E03.23 the pause and the resume repeat as no-ops",

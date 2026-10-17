@@ -11,7 +11,7 @@ import {
   NodeState,
   RepositoryAction,
   PlatformAddressKind,
-  NodeKind,
+  Work,
   MissionErrorCode,
   type AssessmentSubmit,
 } from "./contract.ts";
@@ -46,7 +46,7 @@ const SECOND_ATTEMPT = 2;
 const FIRST_REWORK = 1;
 const HUMAN_REASON = "Hold";
 
-test("initiative currency follows real dependency outcomes and only current closure releases dependent work", async (t) => {
+test("examine currency follows real dependency outcomes and only current closure releases dependent work", async (t) => {
   const h = executionHarness(t, IDENTITY);
   const childId = createIdentity("node");
   const dependentId = createIdentity("node");
@@ -55,9 +55,7 @@ test("initiative currency follows real dependency outcomes and only current clos
     insertNode(tx, {
       id: childId,
       mission_id: h.mission_id,
-      kind: NodeKind.Objective,
       filename: "child.md",
-      parent_id: null,
       created_at: FIRST_REVISION,
     });
     insertDependency(tx, h.mission_id, h.node_id, childId);
@@ -65,14 +63,13 @@ test("initiative currency follows real dependency outcomes and only current clos
       ...base,
       node_id: childId,
       filename: "child.md",
+      content: { ...base.content, work: Work.Implement },
       tasks: [],
     });
     insertNode(tx, {
       id: dependentId,
       mission_id: h.mission_id,
-      kind: NodeKind.Initiative,
       filename: "dependent.md",
-      parent_id: null,
       created_at: FIRST_REVISION,
     });
     insertRevision(tx, {

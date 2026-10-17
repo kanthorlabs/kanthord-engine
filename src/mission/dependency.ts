@@ -4,7 +4,6 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { validateText } from "./content.ts";
 import {
-  EdgeKind,
   MissionErrorCode,
   NodeState,
   type Edge,
@@ -43,7 +42,6 @@ const DEPENDENCY_GUARDED_STATES: ReadonlySet<string | null> = new Set([
   NodeState.ExternalSuccess,
   NodeState.ExternalFailed,
 ]);
-type DependencyEdge = Extract<Edge, { kind: typeof EdgeKind.Dependency }>;
 
 export function dependencyEditGuarded(
   tx: Transaction,
@@ -73,11 +71,7 @@ function validateEndpoints(node: NodeRow, target: NodeRow): void {
     );
 }
 
-function validateCycle(
-  tx: Transaction,
-  missionId: string,
-  edge: DependencyEdge,
-): void {
+function validateCycle(tx: Transaction, missionId: string, edge: Edge): void {
   const edges = [
     ...readDependencies(tx, missionId),
     { dependent: edge.dependent_id, depends_on: edge.depends_on_id },
@@ -104,7 +98,7 @@ function emptyChange(missionVersion: number): NodeChange {
 function applyDependency(
   tx: Transaction,
   mission: Mission,
-  edge: DependencyEdge,
+  edge: Edge,
   workQueue: WorkQueue,
   adding: boolean,
   bindings: MissionBindings,
@@ -166,11 +160,7 @@ export function addDependency(
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   if (hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);
-  const edge = {
-    kind: EdgeKind.Dependency,
-    dependent_id: nodeId,
-    depends_on_id: dependsOnId,
-  };
+  const edge = { dependent_id: nodeId, depends_on_id: dependsOnId };
   validateCycle(tx, mission.id, edge);
   return applyDependency(tx, mission, edge, workQueue, true, bindings);
 }
@@ -213,10 +203,6 @@ export function removeDependency(
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   if (!hasDependency(tx, nodeId, dependsOnId))
     return emptyChange(mission.version);
-  const edge = {
-    kind: EdgeKind.Dependency,
-    dependent_id: nodeId,
-    depends_on_id: dependsOnId,
-  };
+  const edge = { dependent_id: nodeId, depends_on_id: dependsOnId };
   return applyDependency(tx, mission, edge, workQueue, false, bindings);
 }

@@ -97,8 +97,8 @@ function pushed(branch: string): Webhook {
 
 test("E08 delivery admission journey", { timeout: TIMEOUT }, async (t) => {
   const h = await setup(t);
-  const I = await h.create("initiative-1.md");
-  const P = await h.objective("objective-p.md", I);
+  const E = await h.create("examine-1.md");
+  const P = await h.implement("implement-p.md", E);
   const action = await h.actionRequest(P.x2);
   assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
   await h.release(P.x2.execution_id);
@@ -106,8 +106,8 @@ test("E08 delivery admission journey", { timeout: TIMEOUT }, async (t) => {
   const check = await h.check(P.nodeId);
   assert.equal(check.results[FIRST_INDEX]?.resolution, Resolution.Unresolved);
   const shared = [];
-  for (const filename of ["objective-r.md", "objective-u.md"]) {
-    const o = await h.objective(filename, I);
+  for (const filename of ["implement-r.md", "implement-u.md"]) {
+    const o = await h.implement(filename, E);
     const request = await h.requestPullRequest(o.x2, SHARED_PULL_REQUEST);
     assert.equal(request.requirement_key, GATED_KEY);
     await h.release(o.x2.execution_id);
@@ -242,8 +242,8 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    const I = await h.create("initiative-1.md");
-    const P = await h.objective("objective-p.md", I);
+    const E = await h.create("examine-1.md");
+    const P = await h.implement("implement-p.md", E);
     const action = await h.actionRequest(P.x2);
     assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
     await h.release(P.x2.execution_id);
@@ -275,16 +275,13 @@ const DIRTY = { mergeable: false, mergeable_state: "dirty" };
 
 type Journey = Awaited<ReturnType<typeof setup>>;
 
-async function requested(h: Journey, initiativeId: string, filename: string) {
-  const objective = await h.objective(filename, initiativeId);
-  const action = await h.actionRequest(objective.x2);
+async function requested(h: Journey, examineId: string, filename: string) {
+  const node = await h.implement(filename, examineId);
+  const action = await h.actionRequest(node.x2);
   assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
-  await h.release(objective.x2.execution_id);
-  assert.equal(
-    (await h.node(objective.nodeId)).state,
-    NodeState.ExternalRequested,
-  );
-  return objective;
+  await h.release(node.x2.execution_id);
+  assert.equal((await h.node(node.nodeId)).state, NodeState.ExternalRequested);
+  return node;
 }
 
 test(
@@ -292,9 +289,9 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    const I = await h.create("initiative-1.md");
-    const P = await requested(h, I, "objective-p.md");
-    const Q = await requested(h, I, "objective-q.md");
+    const E = await h.create("examine-1.md");
+    const P = await requested(h, E, "implement-p.md");
+    const Q = await requested(h, E, "implement-q.md");
     assert.deepEqual(
       h.gitHub.pulls.map((pull) => pull.number),
       [FIRST_PULL_REQUEST, SECOND_PULL_REQUEST],
@@ -321,15 +318,15 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t, { action: "merge_push" });
-    const I = await h.create("initiative-1.md");
-    const A = await h.objective("objective-a.md", I);
+    const E = await h.create("examine-1.md");
+    const A = await h.implement("implement-a.md", E);
     const landed = h.gatedBare.head;
     const request = await h.requestMergePush(A.x2, landed);
     assert.equal(request.requirement_key, MERGE_KEY);
     await h.release(A.x2.execution_id);
     await h.rebind("pull_request");
-    const P = await requested(h, I, "objective-p.md");
-    const Q = await requested(h, I, "objective-q.md");
+    const P = await requested(h, E, "implement-p.md");
+    const Q = await requested(h, E, "implement-q.md");
     h.gitHub.merge(FIRST_PULL_REQUEST, landed);
     h.gitHub.mergeability(SECOND_PULL_REQUEST, [DIRTY]);
     const inboundEventId = createIdentity("inbound_event");
@@ -386,8 +383,8 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    const I = await h.create("initiative-1.md");
-    const P = await h.objective("objective-p.md", I);
+    const E = await h.create("examine-1.md");
+    const P = await h.implement("implement-p.md", E);
     await h.actionRequest(P.x2);
     await h.release(P.x2.execution_id);
     assert.equal((await h.node(P.nodeId)).state, NodeState.ExternalRequested);
@@ -411,8 +408,8 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    const I = await h.create("initiative-1.md");
-    const P = await h.objective("objective-p.md", I);
+    const E = await h.create("examine-1.md");
+    const P = await h.implement("implement-p.md", E);
     await h.actionRequest(P.x2);
     h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
     await h.release(P.x2.execution_id);
@@ -429,8 +426,8 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t, { landing: "kanthord" });
-    const I = await h.create("initiative-1.md");
-    const P = await h.objective("objective-p.md", I);
+    const E = await h.create("examine-1.md");
+    const P = await h.implement("implement-p.md", E);
     const action = await h.actionRequest(P.x2);
     assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
     await h.release(P.x2.execution_id);
@@ -447,8 +444,8 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t, { landing: "kanthord" });
-    const I = await h.create("initiative-1.md");
-    const P = await h.objective("objective-p.md", I);
+    const E = await h.create("examine-1.md");
+    const P = await h.implement("implement-p.md", E);
     h.gitHub.refuseMerge(HttpStatus.Conflict);
     const action = await h.actionRequest(P.x2);
     assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);

@@ -581,8 +581,7 @@ function pushRequestOf(h: Harness): {
   nodeId: string;
   address: PlatformAddress;
 } {
-  const nodeId = h.node().parent_id;
-  assert.ok(nodeId);
+  const nodeId = h.examine_id;
   return {
     nodeId,
     address: {

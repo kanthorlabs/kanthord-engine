@@ -135,13 +135,20 @@ export class WorkspaceRoot {
   async prepareSnapshot(
     input: Preparation & {
       executionId: string;
-      repository: { address: string; ssh_identity: SshIdentityPin };
+      repository: {
+        name: string;
+        address: string;
+        ssh_identity: SshIdentityPin;
+      };
       commit: string;
     },
-  ): Promise<{ directory: string; head: string }> {
-    const { directory } = this.prepareExecution(input);
+  ): Promise<{ key: string; directory: string; head: string }> {
+    const { directory: key } = this.prepareExecution(input);
     const end = performance.now() + input.deadlineMs;
     try {
+      const name = bindingNameSchema.parse(input.repository.name);
+      const directory = join(key, CHECKOUTS_DIRECTORY, name);
+      ensureDirectory(directory);
       await input.transport.proveSshIdentity(
         input.repository.ssh_identity,
         input.context,
@@ -154,9 +161,9 @@ export class WorkspaceRoot {
         input.context,
         end - performance.now(),
       );
-      return { directory, head };
+      return { key, directory, head };
     } catch (error) {
-      this.release(directory, WorkspaceKind.Execution);
+      this.release(key, WorkspaceKind.Execution);
       throw error;
     }
   }

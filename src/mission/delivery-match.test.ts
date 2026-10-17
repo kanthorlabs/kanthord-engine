@@ -11,7 +11,6 @@ import {
   Disposition,
   EndState,
   MISSION_SERVICE_NAME,
-  NodeKind,
   PlatformAddressKind,
   StartPoint,
   type PlatformAddress,
@@ -51,9 +50,7 @@ function fixture(t: TestContext) {
       insertNode(tx, {
         id,
         mission_id: missions[project]!,
-        kind: NodeKind.Objective,
         filename: `${id}.md`,
-        parent_id: null,
         created_at: NOW,
       });
       openAttempt(tx, id, FIRST_REVISION, ACTOR, NOW);

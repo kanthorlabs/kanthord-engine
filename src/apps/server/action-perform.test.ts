@@ -29,6 +29,7 @@ import {
   missionOperations,
   type PlatformAddress,
   type Revision,
+  Work,
 } from "../../mission/contract.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { GitStage, GitWriteError } from "../../repository/index.ts";
@@ -248,44 +249,25 @@ async function setup(t: TestContext, landing = "human") {
   };
   const version = async () =>
     (await read<{ version: number }>(["mission", "get", project.id])).version;
-  const create = async (
-    filename: string,
-    kind: string,
-    names: string[],
-    parentId?: string,
-  ) => {
+  const create = async (filename: string, names: string[]) => {
     const answer = await write<{ revisions: Revision[] }>(
       ["mission", "node", "create", mission.id],
       {
         filename,
-        kind,
         content: {
           ...CONTENT,
+          work: Work.Implement,
           bindings: names.map((name) => binding(name).id),
         },
         tasks: [],
         reason: "plan",
         expected_mission_version: await version(),
-        ...(parentId
-          ? { parent_id: parentId, expected_parent_revision: FIRST_REVISION }
-          : {}),
       },
     );
     return answer.revisions[FIRST_INDEX]!.node_id;
   };
-  const initiative = await create("initiative.md", "initiative", []);
-  const gatedNode = await create(
-    "gated.md",
-    "objective",
-    ["gated"],
-    initiative,
-  );
-  const pushedNode = await create(
-    "pushed.md",
-    "objective",
-    ["pushed"],
-    initiative,
-  );
+  const gatedNode = await create("gated.md", ["gated"]);
+  const pushedNode = await create("pushed.md", ["pushed"]);
   for (const [nodeId, value] of [
     [gatedNode, GATED_PRIORITY],
     [pushedNode, PUSHED_PRIORITY],

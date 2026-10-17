@@ -12,11 +12,7 @@ import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
-import {
-  missionOperations,
-  NodeKind,
-  NodeState,
-} from "../../mission/contract.ts";
+import { missionOperations, Work, NodeState } from "../../mission/contract.ts";
 import {
   OperationResultType,
   type Operation,
@@ -1193,12 +1189,11 @@ export function seedUnresolvedRequest(
     assert.ok(mission, "The project holds a mission.");
     tx.database
       .prepare(
-        "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?)",
+        "INSERT INTO mission_node (id, mission_id, filename, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)",
       )
       .run(
         nodeId,
         mission.id,
-        NodeKind.Objective,
         `${nodeId}.md`,
         NodeState.ExternalRequested,
         FIRST_SEEDED_ATTEMPT,
@@ -1686,12 +1681,7 @@ async function storageNode(
   ids: { projectId: string; missionId: string },
   bindingIds: string[],
 ) {
-  const create = async (
-    filename: string,
-    kind: string,
-    bindings: string[],
-    parentId?: string,
-  ) => {
+  const create = async (filename: string, work: Work, bindings: string[]) => {
     const { version } = await cli.read<{ version: number }>([
       "mission",
       "get",
@@ -1701,38 +1691,26 @@ async function storageNode(
       ["mission", "node", "create", ids.missionId],
       {
         filename,
-        kind,
-        content: { ...STORAGE_NODE_CONTENT, bindings },
+        content: { ...STORAGE_NODE_CONTENT, work, bindings },
         tasks: [],
         reason: "plan",
         expected_mission_version: version,
-        ...(parentId
-          ? {
-              parent_id: parentId,
-              expected_parent_revision: STORAGE_FIRST_REVISION,
-            }
-          : {}),
       },
     );
     return answer.revisions[STORAGE_FIRST_INDEX]!.node_id;
   };
-  const initiative = await create("initiative.md", "initiative", []);
-  const objective = await create(
-    "objective.md",
-    "objective",
-    bindingIds,
-    initiative,
-  );
+  const examine = await create("examine.md", Work.Examine, []);
+  const implement = await create("implement.md", Work.Implement, bindingIds);
   const { version } = await cli.read<{ version: number }>([
     "mission",
     "get",
     ids.projectId,
   ]);
-  await cli.write(["mission", "dependency", "add", initiative, objective], {
+  await cli.write(["mission", "dependency", "add", examine, implement], {
     reason: "plan",
     expected_mission_version: version,
   });
-  return objective;
+  return implement;
 }
 
 async function storageExecution(
@@ -1842,7 +1820,6 @@ const WORKER_PROJECT_NODE = {
 const FIRST_BINDING_SET_VERSION = 1;
 const FIRST_MISSION_VERSION = 1;
 const SECOND_MISSION_VERSION = 2;
-const FIRST_NODE_REVISION = 1;
 
 export function humanCaller(
   fixture: Pick<
@@ -1944,44 +1921,41 @@ export async function provisionWorkerProject(
     query: {},
     body: null,
   });
-  const initiative = await call(missionOperations["node.create"], {
+  const examine = await call(missionOperations["node.create"], {
     params: { mission_id: mission.id },
     query: {},
     body: {
-      filename: "initiative-1.md",
-      kind: NodeKind.Initiative,
-      content: { ...WORKER_PROJECT_NODE, bindings: [] },
+      filename: "examine-1.md",
+      content: { ...WORKER_PROJECT_NODE, work: Work.Examine, bindings: [] },
       tasks: [],
       reason: "plan",
       expected_mission_version: FIRST_MISSION_VERSION,
     },
   });
-  const objective = await call(missionOperations["node.create"], {
+  const implement = await call(missionOperations["node.create"], {
     params: { mission_id: mission.id },
     query: {},
     body: {
-      filename: "objective-1.md",
-      kind: NodeKind.Objective,
+      filename: "implement-1.md",
       content: {
         ...WORKER_PROJECT_NODE,
+        work: Work.Implement,
         bindings: [bindingSet.bindings.repo!.id],
       },
       tasks: [],
       reason: "plan",
       expected_mission_version: SECOND_MISSION_VERSION,
-      parent_id: initiative.revisions[0]!.node_id,
-      expected_parent_revision: FIRST_NODE_REVISION,
     },
   });
   await call(missionOperations["dependency.add"], {
     params: {
-      node_id: initiative.revisions[0]!.node_id,
-      depends_on_id: objective.revisions[0]!.node_id,
+      node_id: examine.revisions[0]!.node_id,
+      depends_on_id: implement.revisions[0]!.node_id,
     },
     query: {},
     body: {
       reason: "plan",
-      expected_mission_version: objective.mission_version,
+      expected_mission_version: implement.mission_version,
     },
   });
   return {

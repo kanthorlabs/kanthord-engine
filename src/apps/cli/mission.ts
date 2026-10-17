@@ -31,7 +31,6 @@ import { addEvidenceCommands } from "./mission-evidence.ts";
 import { addExecutionCommands } from "./mission-execution.ts";
 import {
   criterionSetSchema,
-  edgeKindSchema,
   graphEditSchema,
   ImportFormat,
   importFormatSchema,
@@ -39,14 +38,13 @@ import {
   importApplySchema,
   retireSchema,
   MISSION_IDENTITY_PREFIX,
-  moveSchema,
   NODE_IDENTITY_PREFIX,
   nodeCreateSchema,
   nodeUpdateSchema,
   prioritySetSchema,
   rebindSchema,
-  nodeKindSchema,
   nodeStateSchema,
+  workSchema,
 } from "../../mission/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { validateProjectId } from "./project.ts";
@@ -59,7 +57,6 @@ import {
 
 const CREATE = "create";
 const UPDATE = "update";
-const MOVE = "move";
 const ADD = "add";
 const REMOVE = "remove";
 const SET = "set";
@@ -105,14 +102,12 @@ const FALSE = "false";
 const NO_FILES = 0;
 const GET_INVALID_PROJECT_ID = "cli.mission.get.invalid_project_id";
 const NODE_LIST_INVALID_MISSION_ID = "cli.mission.node.list.invalid_mission_id";
-const NODE_LIST_INVALID_NODE_ID = "cli.mission.node.list.invalid_node_id";
-const NODE_LIST_INVALID_KIND = "cli.mission.node.list.invalid_kind";
+const NODE_LIST_INVALID_WORK = "cli.mission.node.list.invalid_work";
 const NODE_LIST_INVALID_STATE = "cli.mission.node.list.invalid_state";
 const NODE_GET_INVALID_NODE_ID = "cli.mission.node.get.invalid_node_id";
 const NODE_CREATE_INVALID_MISSION_ID =
   "cli.mission.node.create.invalid_mission_id";
 const NODE_UPDATE_INVALID_NODE_ID = "cli.mission.node.update.invalid_node_id";
-const NODE_MOVE_INVALID_NODE_ID = "cli.mission.node.move.invalid_node_id";
 const REVISION_LIST_INVALID_NODE_ID =
   "cli.mission.node.revision.list.invalid_node_id";
 const REVISION_GET_INVALID_NODE_ID =
@@ -121,7 +116,6 @@ const REVISION_GET_INVALID_REVISION =
   "cli.mission.node.revision.get.invalid_revision";
 const EDGE_LIST_INVALID_MISSION_ID = "cli.mission.edge.list.invalid_mission_id";
 const EDGE_LIST_INVALID_NODE_ID = "cli.mission.edge.list.invalid_node_id";
-const EDGE_LIST_INVALID_KIND = "cli.mission.edge.list.invalid_kind";
 const RETIRE_PREVIEW_INVALID_NODE_ID =
   "cli.mission.node.retire.preview.invalid_node_id";
 const EXPORT_INVALID_MISSION_ID = "cli.mission.export.invalid_mission_id";
@@ -166,19 +160,16 @@ async function get(projectId: string, command: Command): Promise<void> {
 async function nodeList(missionId: string, command: Command): Promise<void> {
   validateMissionId(missionId, NODE_LIST_INVALID_MISSION_ID);
   const options = command.optsWithGlobals();
-  const kind = nodeKindSchema.optional().safeParse(options.kind);
-  if (!kind.success)
-    throw new Diagnostic(NODE_LIST_INVALID_KIND, "invalid node kind");
+  const work = workSchema.optional().safeParse(options.work);
+  if (!work.success)
+    throw new Diagnostic(NODE_LIST_INVALID_WORK, "invalid node work");
   const state = nodeStateSchema.optional().safeParse(options.state);
   if (!state.success)
     throw new Diagnostic(NODE_LIST_INVALID_STATE, "invalid node state");
-  if (options.parent !== undefined)
-    validateNodeId(options.parent, NODE_LIST_INVALID_NODE_ID);
   const query = {
     ...pagination(options),
-    ...(kind.data !== undefined ? { kind: kind.data } : {}),
+    ...(work.data !== undefined ? { work: work.data } : {}),
     ...(state.data !== undefined ? { state: state.data } : {}),
-    ...(options.parent !== undefined ? { parent_id: options.parent } : {}),
     include_retired: options.includeRetired ? TRUE : FALSE,
   } as const;
   const result = await client(command, NODE_LIST)[NODE_LIST]({
@@ -213,16 +204,6 @@ async function nodeUpdate(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, NODE_UPDATE_INVALID_NODE_ID);
   await mutate(command, "node.update", nodeUpdateSchema, (api, body, key) =>
     api["node.update"](
-      { params: { node_id: nodeId }, query: {}, body },
-      { idempotencyKey: key },
-    ),
-  );
-}
-
-async function nodeMove(nodeId: string, command: Command): Promise<void> {
-  validateNodeId(nodeId, NODE_MOVE_INVALID_NODE_ID);
-  await mutate(command, "node.move", moveSchema, (api, body, key) =>
-    api["node.move"](
       { params: { node_id: nodeId }, query: {}, body },
       { idempotencyKey: key },
     ),
@@ -339,14 +320,10 @@ async function revisionGet(
 async function edgeList(missionId: string, command: Command): Promise<void> {
   validateMissionId(missionId, EDGE_LIST_INVALID_MISSION_ID);
   const options = command.optsWithGlobals();
-  const kind = edgeKindSchema.optional().safeParse(options.kind);
-  if (!kind.success)
-    throw new Diagnostic(EDGE_LIST_INVALID_KIND, "invalid edge kind");
   if (options.node !== undefined)
     validateNodeId(options.node, EDGE_LIST_INVALID_NODE_ID);
   const query = {
     ...pagination(options),
-    ...(kind.data !== undefined ? { kind: kind.data } : {}),
     ...(options.node !== undefined ? { node_id: options.node } : {}),
   };
   const result = await client(command, EDGE_LIST)[EDGE_LIST]({
@@ -637,19 +614,14 @@ function addNodeCommands(mission: Command): void {
       .description("List mission nodes as JSON")
       .argument("<mission-id>", "Mission ID")
       .option(
-        "--kind <kind>",
-        "Filter by initiative or objective",
-        singleUse("--kind"),
+        "--work <work>",
+        "Filter by implement or examine",
+        singleUse("--work"),
       )
       .option(
         "--state <state>",
         "Filter by exact node state",
         singleUse("--state"),
-      )
-      .option(
-        "--parent <node-id>",
-        "Filter direct children",
-        singleUse("--parent"),
       )
       .option("--include-retired", "Include retired nodes", false),
   ).action((missionId: string, _options, command: Command) =>
@@ -677,14 +649,6 @@ function addNodeCommands(mission: Command): void {
       .argument("<node-id>", "Node ID"),
   ).action((nodeId: string, _options, command: Command) =>
     nodeUpdate(nodeId, command),
-  );
-  addMutationOptions(
-    node
-      .command(MOVE)
-      .description("Move a mission node as JSON")
-      .argument("<node-id>", "Node ID"),
-  ).action((nodeId: string, _options, command: Command) =>
-    nodeMove(nodeId, command),
   );
   const retire = node
     .command(RETIRE)
@@ -806,11 +770,6 @@ function addEdgeCommands(mission: Command): void {
       .command(LIST)
       .description("List mission edges as JSON")
       .argument("<mission-id>", "Mission ID")
-      .option(
-        "--kind <kind>",
-        "Filter by containment or dependency",
-        singleUse("--kind"),
-      )
       .option("--node <node-id>", "Filter incident edges", singleUse("--node")),
   ).action((missionId: string, _options, command: Command) =>
     edgeList(missionId, command),
