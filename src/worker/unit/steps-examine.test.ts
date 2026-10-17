@@ -12,7 +12,7 @@ import { CHECKOUTS_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
-import { runStepsInitiative } from "./steps-initiative.ts";
+import { runStepsExamine } from "./steps-examine.ts";
 import {
   DeadlineExceeded,
   throwIfCancelled,
@@ -112,7 +112,7 @@ test("initiative reports its dependencies once and removes its workspace", async
         budget: { exhausted: () => false },
       } as unknown as NativeAgent;
     };
-    const pending = runStepsInitiative(
+    const pending = runStepsExamine(
       {
         setup,
         claim,
@@ -203,7 +203,7 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
     };
     const workspaces = WorkspaceRoot.open(temporary(t));
     assert.deepEqual(
-      await runStepsInitiative(
+      await runStepsExamine(
         {
           setup,
           claim,
@@ -282,7 +282,7 @@ test("an initiative that its agent deadline cuts releases with further work and 
   };
   const workspaces = WorkspaceRoot.open(temporary(t));
   const end = await executionBoundary(run, () =>
-    runStepsInitiative(
+    runStepsExamine(
       {
         setup,
         claim,
@@ -368,7 +368,7 @@ test("an initiative with two repository bindings runs from checkouts/ and lists 
     } as unknown as NativeAgent;
   };
   assert.deepEqual(
-    await runStepsInitiative(
+    await runStepsExamine(
       {
         setup,
         claim,

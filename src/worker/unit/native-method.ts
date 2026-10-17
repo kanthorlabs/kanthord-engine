@@ -28,7 +28,7 @@ import type {
 import { ExecutionBudget } from "./budget.ts";
 import { readPriorRationale, readPinnedRevision } from "./node-reads.ts";
 import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
-import { runStepsInitiative } from "./steps-initiative.ts";
+import { runStepsExamine } from "./steps-examine.ts";
 import { runEvaluation } from "./evaluation.ts";
 import { phaseSpan } from "./method-telemetry.ts";
 
@@ -113,7 +113,7 @@ export async function runNativeExecution(
       if (method === WorkerMethod.Evaluation)
         return runEvaluation(input, run, budget, open);
       if (work === ExecutionWork.Examine)
-        return runStepsInitiative(input, run, revision, budget, open);
+        return runStepsExamine(input, run, revision, budget, open);
       const prior = await readPriorRationale(run);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
         prepareStepsWorkspace(input, run),

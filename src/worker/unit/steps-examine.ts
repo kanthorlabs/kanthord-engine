@@ -19,7 +19,7 @@ import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
 export const REPORT_SUBJECT = "Report on current dependency outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
 
-export async function runStepsInitiative(
+export async function runStepsExamine(
   input: StepsInput,
   run: ExecutionRun,
   revision: Revision,
