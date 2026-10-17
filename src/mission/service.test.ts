@@ -4531,6 +4531,22 @@ test("import.apply task rename and move, implement retirement and dependency rep
     IMPORT_NEW_TASK,
   );
   assert.equal(newRevision.revision, NEXT_REVISION);
+  assert.deepEqual(
+    {
+      ...f.store.transaction((tx) => taskOwnerOf(tx, f.mission_id, task)),
+    },
+    { node_id: newImplement, revision: newRevision.revision },
+  );
+  const current = next.map((item) =>
+    item.filename === NEW_FILENAME
+      ? { ...item, id: assignedId(result, NEW_FILENAME) }
+      : item,
+  );
+  const again = f.preview(f.importSnapshot(current));
+  assert.deepEqual(again.violations, []);
+  assert.deepEqual(again.updates, []);
+  assert.deepEqual(again.retirements, []);
+  assert.ok(again.no_ops.includes(newImplement));
   assert.ok(
     result.changes.revisions.every(
       (item) => item.change.write === RevisionWrite.Import,
