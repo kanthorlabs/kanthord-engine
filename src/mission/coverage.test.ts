@@ -6,13 +6,17 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   ActorKind,
   ClaimableState,
+  ImportFormat,
   MissionErrorCode,
+  NodeState,
   RepositoryAction,
   Work,
   type MissionBindings,
   type UnmatchedClaim,
 } from "./contract.ts";
-import { missionHarness } from "./test-support.ts";
+import { openAttempt } from "./record-store.ts";
+import { setNodeState } from "./store.ts";
+import { databaseSnapshot, missionHarness } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const PLAIN_REPOSITORY = "binding_00000000000000000000000001";
@@ -24,6 +28,8 @@ const REASON = "plan";
 const RENAMED = "Reset on iOS";
 const BEFORE_AND_AFTER_READS = 2;
 const ONE_REVISION = 1;
+const FIRST_ATTEMPT = 1;
+const NOW = 100;
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const CONTENT = {
   name: "Add password reset",
@@ -110,14 +116,7 @@ function coverageHarness(t: TestContext) {
       query: {},
       body: null,
     });
-  const snapshot = () =>
-    h.store.transaction((tx) => ({
-      nodes: tx.database.prepare("SELECT * FROM mission_node").all(),
-      revisions: tx.database
-        .prepare("SELECT * FROM mission_node_revision")
-        .all(),
-      mission: tx.database.prepare("SELECT * FROM mission_mission").all(),
-    }));
+  const snapshot = () => databaseSnapshot(h.store);
   async function create(filename: string, requires: string[]) {
     const { id, version } = await mission();
     return h.invoke("node.create", {
@@ -151,7 +150,16 @@ function coverageHarness(t: TestContext) {
     });
     assert.deepEqual(snapshot(), before);
   }
-  return { ...h, missing, latest, reads, mission, create, refused };
+  return {
+    ...h,
+    missing,
+    latest,
+    reads,
+    mission,
+    snapshot,
+    create,
+    refused,
+  };
 }
 
 test("a node create with requires [platform.macos] and no such trait answers mission.node.requires_unmatched and writes nothing", async (t) => {
@@ -241,6 +249,106 @@ test("an update of a node with an existing unmatched pair succeeds", async (t) =
     [
       { node_id: web.node_id, revision: 2, claim: ClaimableState.Available },
       { node_id: web.node_id, revision: 2, claim: ClaimableState.Waiting },
+    ],
+  );
+});
+
+test("an import apply that adds an unmatched pair is refused and writes nothing", async (t) => {
+  const h = coverageHarness(t);
+  h.missing.add(MACOS);
+  const { id, version } = await h.mission();
+  const snapshot = {
+    format: ImportFormat.Json,
+    mission_id: id,
+    mission_version: version,
+    reason: REASON,
+    entries: [
+      {
+        filename: "ios.md",
+        ...CONTENT,
+        work: Work.Examine,
+        requires: [MACOS],
+        bindings: [],
+      },
+    ],
+  };
+  const preview = await h.invoke("import.preview", {
+    params: { mission_id: id },
+    query: {},
+    body: snapshot,
+  });
+  const before = h.snapshot();
+  await assert.rejects(
+    h.invoke("import.apply", {
+      params: { mission_id: id },
+      query: {},
+      body: {
+        ...snapshot,
+        preview_digest: preview.preview_digest,
+        confirmed_retirements: [],
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.Conflict);
+      assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+      const details = error.details as unknown as { claims: UnmatchedClaim[] };
+      assert.deepEqual(
+        details.claims.map(({ revision, claim }) => ({ revision, claim })),
+        [
+          { revision: ONE_REVISION, claim: ClaimableState.Available },
+          { revision: ONE_REVISION, claim: ClaimableState.Waiting },
+        ],
+      );
+      return true;
+    },
+  );
+  assert.deepEqual(h.snapshot(), before);
+});
+
+test("a node unblock with a content change that adds an unmatched pair is refused", async (t) => {
+  const h = coverageHarness(t);
+  const node = (await h.create("ios.md", [])).revisions[0]!;
+  h.store.transaction((tx) => {
+    setNodeState(tx, node.node_id, NodeState.Paused);
+    openAttempt(tx, node.node_id, FIRST_ATTEMPT, ACTOR, NOW);
+  });
+  const { version } = await h.mission();
+  await h.invoke("node.block", {
+    params: { node_id: node.node_id },
+    query: {},
+    body: {
+      reason: REASON,
+      expected_mission_version: version,
+      expected_state: NodeState.Paused,
+      expected_attempt: FIRST_ATTEMPT,
+    },
+  });
+  h.missing.add(MACOS);
+  await h.refused(
+    () =>
+      h.invoke("node.unblock", {
+        params: { node_id: node.node_id },
+        query: {},
+        body: {
+          blocked_attempt: FIRST_ATTEMPT,
+          expected_revision: node.revision,
+          expected_mission_version: version,
+          change: {
+            content: {
+              ...CONTENT,
+              work: Work.Implement,
+              requires: [MACOS],
+              bindings: [PLAIN_REPOSITORY],
+            },
+            reason: REASON,
+            tasks: [],
+          },
+        },
+      }),
+    [
+      { node_id: node.node_id, revision: 2, claim: ClaimableState.Available },
+      { node_id: node.node_id, revision: 2, claim: ClaimableState.Waiting },
     ],
   );
 });
