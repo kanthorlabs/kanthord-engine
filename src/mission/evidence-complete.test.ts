@@ -13,8 +13,14 @@ import {
   UPLOAD_LIFETIME_MS,
   type StorageBinding,
 } from "./contract.ts";
+import { IntakeErrorCode, ResultClass } from "../intake/contract.ts";
+import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
 import { AssetUse } from "./authorization.ts";
-import { insertEvidence, readEvidence } from "./record-store.ts";
+import {
+  failedBindingsOf,
+  insertEvidence,
+  readEvidence,
+} from "./record-store.ts";
 import { evidenceRecord } from "./record-read.ts";
 import { executionHarness } from "./test-support.ts";
 
@@ -29,6 +35,8 @@ const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
 const ISSUED_AT = 100;
 const RACED_CHECK = 1;
 const BOTH_CHECKS = 2;
+const CONFLICT = 409;
+const BAD_GATEWAY = 502;
 
 function fixture(t: TestContext, expired = false) {
   const h = executionHarness(t, IDENTITY);
@@ -117,7 +125,18 @@ function fixture(t: TestContext, expired = false) {
     evidence_id: evidenceId,
     asset_id: assetId,
     location,
+    binding_id: binding.binding_id,
     checks: () => checks,
+    failed: () =>
+      h.store.transaction((tx) =>
+        failedBindingsOf(tx, h.node_id, h.claim.attempt),
+      ),
+    failureRows: () =>
+      h.store.transaction((tx) =>
+        tx.database
+          .prepare("SELECT * FROM mission_evidence_upload_failure")
+          .all(),
+      ),
   };
 }
 
@@ -222,4 +241,84 @@ test("expired uploads fail before Intake and foreign claimed nodes fail context 
         JSON.stringify({ reason: "node_mismatch" }),
   );
   assert.equal(foreign.checks(), NO_CALLS);
+});
+
+function refusingCheck(h: ReturnType<typeof fixture>, error: OperationError) {
+  h.dependencies.intakeStorage.check = async () => {
+    throw error;
+  };
+  return error;
+}
+
+const mismatch = () =>
+  new OperationError(
+    CONFLICT,
+    IntakeErrorCode.StorageObjectMismatch,
+    "The stored object is absent or differs from the asset size or SHA-256.",
+  );
+
+test("a mismatch records the binding", async (t) => {
+  const h = fixture(t);
+  const error = refusingCheck(h, mismatch());
+  await assert.rejects(h.complete, (thrown) => thrown === error);
+  assert.deepEqual(h.failed(), [h.binding_id]);
+  assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
+});
+
+test("a missing object records the binding", async (t) => {
+  const h = fixture(t);
+  refusingCheck(h, mismatch());
+  await assert.rejects(h.complete, {
+    code: IntakeErrorCode.StorageObjectMismatch,
+  });
+  await assert.rejects(h.complete, {
+    code: IntakeErrorCode.StorageObjectMismatch,
+  });
+  assert.deepEqual(h.failed(), [h.binding_id]);
+});
+
+test("a store failure records the binding", async (t) => {
+  const h = fixture(t);
+  const code = S3_RESULT_CODE_PREFIX + ResultClass.UnknownOutcome;
+  refusingCheck(h, new OperationError(BAD_GATEWAY, code, "The store fails."));
+  await assert.rejects(h.complete, { status: BAD_GATEWAY, code });
+  assert.deepEqual(h.failed(), [h.binding_id]);
+  assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
+});
+
+test("the failure row stays after the refusal", async (t) => {
+  const h = fixture(t);
+  refusingCheck(h, mismatch());
+  const commits = h.commits();
+  await assert.rejects(h.complete);
+  const [row] = h.failureRows();
+  assert.ok(row);
+  assert.deepEqual(
+    { ...row, failed_at: null },
+    {
+      node_id: h.node_id,
+      attempt: h.claim.attempt,
+      storage_binding_id: h.binding_id,
+      asset_id: h.asset_id,
+      failed_at: null,
+    },
+  );
+  assert.equal(h.commits(), commits);
+});
+
+test("a refusal that is no check failure records no binding", async (t) => {
+  const h = fixture(t);
+  refusingCheck(
+    h,
+    new OperationError(
+      CONFLICT,
+      MissionErrorCode.AuthorizationRefused,
+      "The facility refuses the operation.",
+      { reason: "claim_not_live" },
+    ),
+  );
+  await assert.rejects(h.complete, {
+    code: MissionErrorCode.AuthorizationRefused,
+  });
+  assert.deepEqual(h.failed(), []);
 });

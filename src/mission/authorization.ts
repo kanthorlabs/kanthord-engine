@@ -144,6 +144,16 @@ export function authorizeAction(
   return action;
 }
 
+export function storageEnabled(
+  tx: Transaction,
+  bindings: MissionBindings,
+  bindingId: string,
+): boolean {
+  assert.ok(tx.database.isTransaction);
+  const binding = bindings.getBindingRevision(tx, bindingId);
+  return binding !== null && !binding.tombstone && !binding.disabled;
+}
+
 export function authorizeStorage(
   tx: Transaction,
   bindings: MissionBindings,

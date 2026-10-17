@@ -24,6 +24,7 @@ import {
 } from "../kernel/operation.ts";
 
 export const STORAGE_COMPONENT_NAME = "storage";
+export const S3_RESULT_CODE_PREFIX = "storage.platform.s3.";
 
 const emptyParams = z.strictObject({});
 const emptyQuery = z.strictObject({});

@@ -104,6 +104,14 @@ const createExecutionRecordTables: Migration = (database) => {
       created_at INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX mission_outcome_sequence ON mission_outcome (node_id, sequence);
+    CREATE TABLE mission_evidence_upload_failure (
+      node_id TEXT NOT NULL REFERENCES mission_node(id),
+      attempt INTEGER NOT NULL,
+      storage_binding_id TEXT NOT NULL,
+      asset_id TEXT NOT NULL,
+      failed_at INTEGER NOT NULL,
+      PRIMARY KEY (node_id, attempt, storage_binding_id)
+    );
   `);
 };
 

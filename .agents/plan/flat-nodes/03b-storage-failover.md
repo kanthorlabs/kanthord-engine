@@ -39,10 +39,10 @@ A design citation names a section anchor of the pages at root `5fa6db3`, because
 
 ## Provides
 
-| Seam or shape                       | Signature                                                     | Owner file                  | Consumer plans |
-| ----------------------------------- | ------------------------------------------------------------- | --------------------------- | -------------- |
-| `mission_evidence_upload_failure`   | `(node_id, attempt, storage_binding_id, asset_id, failed_at)` | `src/mission/migrations.ts` | 08             |
-| `MissionErrorCode.StorageExhausted` | `mission.evidence.storage_exhausted`, 409                     | `src/mission/contract.ts`   | 08             |
+| Seam or shape                               | Signature                                                     | Owner file                  | Consumer plans |
+| ------------------------------------------- | ------------------------------------------------------------- | --------------------------- | -------------- |
+| `mission_evidence_upload_failure`           | `(node_id, attempt, storage_binding_id, asset_id, failed_at)` | `src/mission/migrations.ts` | 08             |
+| `MissionErrorCode.EvidenceStorageExhausted` | `mission.evidence.storage_exhausted`, 409                     | `src/mission/contract.ts`   | 08             |
 
 ## Tasks
 
@@ -52,7 +52,7 @@ A design citation names a section anchor of the pages at root `5fa6db3`, because
 - Do:
   1. In `createExecutionRecordTables` of `src/mission/migrations.ts` add `mission_evidence_upload_failure (node_id, attempt, storage_binding_id, asset_id, failed_at)`. The primary key is `(node_id, attempt, storage_binding_id)` (ruling R15; decisions D2, D29).
   2. `record-store.ts` adds `insertUploadFailure(tx, row)` with `INSERT OR IGNORE` and `failedBindingsOf(tx, nodeId, attempt): string[]`.
-  3. Add `MissionErrorCode.StorageExhausted = "mission.evidence.storage_exhausted"`.
+  3. Add `MissionErrorCode.EvidenceStorageExhausted = "mission.evidence.storage_exhausted"`.
 - Cite: `mission-service.impl.md#object-evidence`; decision D29.
 - Verify: `node --test --test-timeout=30000 src/apps/server/migrations.test.ts src/mission/record-store.test.ts`.
 

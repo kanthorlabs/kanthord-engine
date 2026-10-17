@@ -17,8 +17,8 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
+import { S3_RESULT_CODE_PREFIX } from "../storage/contract.ts";
 import {
-  S3_RESULT_CODE_PREFIX,
   type ObjectHead,
   type S3Call,
   type S3Failure,
