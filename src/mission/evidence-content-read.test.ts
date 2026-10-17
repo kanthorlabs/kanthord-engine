@@ -29,7 +29,7 @@ const Change = {
   Claim: "claim",
 } as const;
 
-test("initiative content bound includes only evidence of current child outcomes", async (t) => {
+test("initiative content bound includes only evidence of current dependency outcomes", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
   const submit = () =>
     h.invoke("evidence.submit", {

@@ -514,7 +514,7 @@ test("a check refuses a pending asset of an earlier attempt", (t) => {
   });
 });
 
-test("an initiative claim reads the object of a current objective outcome and nothing outside its bound", (t) => {
+test("an initiative claim reads the object of a current dependency outcome and nothing outside its bound", (t) => {
   const h = assetHarness(t);
   const named = h.object({ published: true });
   const unnamed = h.object({ published: true });

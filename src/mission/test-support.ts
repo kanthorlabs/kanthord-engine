@@ -27,6 +27,7 @@ import {
   type PlatformAddress,
 } from "./contract.ts";
 import {
+  insertDependency,
   insertMission,
   insertNode,
   insertRevision,
@@ -143,6 +144,7 @@ export function evidenceHarness(t: TestContext, identity: CallerIdentity) {
       content: { ...revision.content, bindings: [repositoryId, storageId] },
       tasks: [],
     });
+    insertDependency(tx, h.mission_id, h.node_id, nodeId);
     openAttempt(tx, nodeId, FIRST_REVISION, h.executionActor, FIXTURE_TIME);
     setNodeState(tx, nodeId, NodeState.Executing);
   });

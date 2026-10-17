@@ -9,7 +9,7 @@ import {
   MissionErrorCode,
   NodeState,
   type Assessment,
-  type ExecutionObjective,
+  type ExecutionDependency,
   type Outcome,
 } from "../../mission/contract.ts";
 import { requestedChangesText } from "./judgement.ts";
@@ -73,16 +73,16 @@ export async function readObjectives(run: ExecutionRun) {
     body: null,
   });
   const objectives = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.list"](input(cursor), options),
+    run.clients.mission["execution.dependency.list"](input(cursor), options),
   );
   const outcomes = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.outcome.list"](
+    run.clients.mission["execution.dependency.outcome.list"](
       input(cursor),
       options,
     ),
   );
   const evidence = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.objective.evidence.list"](
+    run.clients.mission["execution.dependency.evidence.list"](
       input(cursor),
       options,
     ),
@@ -188,7 +188,7 @@ export async function readPriorRationale(
 }
 
 export function allTerminal(
-  objectives: readonly ExecutionObjective[],
+  objectives: readonly ExecutionDependency[],
 ): boolean {
   return objectives.every((objective) =>
     TERMINAL_STATES.includes(objective.state),

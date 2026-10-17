@@ -23,7 +23,7 @@ import {
   readOutcome,
 } from "./record-store.ts";
 import { outcomeRecord } from "./record-read.ts";
-import { insertDependency, readMission, setNodeState } from "./store.ts";
+import { readMission, setNodeState } from "./store.ts";
 import { evidenceHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -126,10 +126,6 @@ test("asset deletes require a terminal node and terminal direct examine dependen
   h.dependencies.intakeStorage.delete = async (_call, assetId) => {
     assert.equal(assetId, h.asset_id);
   };
-  const parentId = h.node().parent_id!;
-  h.store.transaction((tx) =>
-    insertDependency(tx, h.mission_id, parentId, h.node_id),
-  );
   await assert.rejects(
     h.remove(),
     (error) =>
@@ -143,6 +139,7 @@ test("asset deletes require a terminal node and terminal direct examine dependen
       error instanceof OperationError &&
       error.code === MissionErrorCode.EvidenceRemoveNodeLive,
   );
+  const parentId = h.node().parent_id!;
   h.store.transaction((tx) => setNodeState(tx, parentId, NodeState.Discarded));
   assert.equal(await h.remove(), null);
   h.store.transaction((tx) => {

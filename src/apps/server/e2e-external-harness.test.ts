@@ -356,7 +356,7 @@ test(
           [
             "mission",
             "execution",
-            "objective",
+            "dependency",
             "list",
             third.execution.execution_id,
           ],
@@ -371,7 +371,7 @@ test(
           [
             "mission",
             "execution",
-            "objective",
+            "dependency",
             "outcome",
             "list",
             third.execution.execution_id,

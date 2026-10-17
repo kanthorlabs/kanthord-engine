@@ -21,7 +21,8 @@ import {
   type AssetRow,
   type EvidenceRow,
 } from "./record-store.ts";
-import { readNode } from "./store.ts";
+import { directDependenciesOf } from "./graph.ts";
+import { readDependencies } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 
@@ -59,15 +60,14 @@ export function executionContentBound(
     if (evidence.node_id === claim.nodeId && evidence.attempt === claim.attempt)
       return true;
     if (admitted.node.kind !== NodeKind.Initiative) return false;
-    const child = readNode(tx, evidence.node_id);
     if (
-      !child ||
-      child.kind !== NodeKind.Objective ||
-      child.parent_id !== claim.nodeId ||
-      child.retired_at !== null
+      !directDependenciesOf(
+        claim.nodeId,
+        readDependencies(tx, admitted.node.mission_id),
+      ).includes(evidence.node_id)
     )
       return false;
-    const outcome = readCurrentOutcome(tx, child.id);
+    const outcome = readCurrentOutcome(tx, evidence.node_id);
     return (
       outcome !== null &&
       outcomeRecord(tx, dependencies.bindings, outcome).evidence_ids.includes(

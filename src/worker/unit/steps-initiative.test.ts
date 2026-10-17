@@ -80,13 +80,13 @@ test("initiative reports terminal objectives, rechecks graph changes and removes
     const empty = async () => completed({ items: [], next_cursor: null });
     const clients = {
       mission: {
-        "execution.objective.list": async () =>
+        "execution.dependency.list": async () =>
           completed({
             items: [{ id: "objective", state: scenario.states[reads++] }],
             next_cursor: null,
           }),
-        "execution.objective.outcome.list": empty,
-        "execution.objective.evidence.list": empty,
+        "execution.dependency.outcome.list": empty,
+        "execution.dependency.evidence.list": empty,
         "evidence.submit": async (input: {
           body: { assets: { content: { data: string } }[] };
         }) => {
@@ -191,9 +191,9 @@ test("B4 initiative releases when reads or agent opening consume the wall budget
     let releases = 0;
     const clients = {
       mission: {
-        "execution.objective.list": page,
-        "execution.objective.outcome.list": page,
-        "execution.objective.evidence.list": page,
+        "execution.dependency.list": page,
+        "execution.dependency.outcome.list": page,
+        "execution.dependency.evidence.list": page,
       },
       scheduler: {
         executionRelease: async () => {
@@ -259,9 +259,9 @@ test("an initiative that its agent deadline cuts releases with further work and 
   const releases: unknown[] = [];
   const clients = {
     mission: {
-      "execution.objective.list": page,
-      "execution.objective.outcome.list": page,
-      "execution.objective.evidence.list": page,
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
     },
     scheduler: {
       executionRelease: async (input: { body: unknown }) => {

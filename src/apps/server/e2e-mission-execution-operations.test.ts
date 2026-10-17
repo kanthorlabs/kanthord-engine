@@ -880,28 +880,28 @@ test(
       );
     });
     await t.test(
-      "E04.28 initiative reads its outcome-pinned objective context",
+      "E04.28 initiative reads its outcome-pinned dependency context",
       async () => {
         const answer = await h.pull();
         assert.equal(answer.execution.node_id, h.initiative);
         e5 = answer.execution.execution_id;
-        const objectives = await h.read<Page<{ visible_revision: number }>>(
-          ["mission", "execution", "objective", "list", e5],
+        const dependencies = await h.read<Page<{ visible_revision: number }>>(
+          ["mission", "execution", "dependency", "list", e5],
           h.W,
         );
-        assert.equal(objectives.items.length, PAIR_COUNT);
+        assert.equal(dependencies.items.length, PAIR_COUNT);
         assert.ok(
-          objectives.items.every(
+          dependencies.items.every(
             (item) => item.visible_revision === FIRST_REVISION,
           ),
         );
         const outcomes = await h.read<Page<Outcome>>(
-          ["mission", "execution", "objective", "outcome", "list", e5],
+          ["mission", "execution", "dependency", "outcome", "list", e5],
           h.W,
         );
         assert.equal(outcomes.items.length, PAIR_COUNT);
         const evidence = await h.read<Page<Evidence>>(
-          ["mission", "execution", "objective", "evidence", "list", e5],
+          ["mission", "execution", "dependency", "evidence", "list", e5],
           h.W,
         );
         assert.equal(evidence.items.length, TOTAL_EVIDENCE_COUNT);

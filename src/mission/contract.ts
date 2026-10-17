@@ -1282,9 +1282,9 @@ export const admissionAnswerSchema = z.union([
   }),
 ]);
 export type AdmissionAnswer = z.infer<typeof admissionAnswerSchema>;
-export type ExecutionObjective = z.infer<typeof executionObjectiveSchema>;
-export const executionObjectiveSchema = z.union([
-  nodeSchema.options[1],
+export type ExecutionDependency = z.infer<typeof executionDependencySchema>;
+export const executionDependencySchema = z.union([
+  nodeSchema,
   z.strictObject({ id: identitySchema("node"), state: nodeStateSchema }),
 ]);
 export const rebindResultSchema = z.strictObject({
@@ -1358,47 +1358,50 @@ const dependencyInput = z.strictObject({
 });
 
 export const missionOperations = {
-  "execution.objective.list": {
+  "execution.dependency.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.list",
+    id: "mission.execution.dependency.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective",
+    path: "/api/mission/execution/:execution_id/dependency",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
-    output: pageOf(executionObjectiveSchema),
-    description: "List current objectives at their outcome revisions.",
+    output: pageOf(executionDependencySchema),
+    description:
+      "List the direct dependencies of an initiative at their outcome revisions.",
   },
-  "execution.objective.outcome.list": {
+  "execution.dependency.outcome.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.outcome.list",
+    id: "mission.execution.dependency.outcome.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective/outcome",
+    path: "/api/mission/execution/:execution_id/dependency/outcome",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(outcomeSchema),
-    description: "List current outcomes of current objectives.",
+    description:
+      "List the current outcomes of the direct dependencies of an initiative.",
   },
-  "execution.objective.evidence.list": {
+  "execution.dependency.evidence.list": {
     ...readOperation,
     access: AccessPolicy.Client,
     requiresExecution: true,
-    id: "mission.execution.objective.evidence.list",
+    id: "mission.execution.dependency.evidence.list",
     method: HttpMethod.Get,
-    path: "/api/mission/execution/:execution_id/objective/evidence",
+    path: "/api/mission/execution/:execution_id/dependency/evidence",
     input: readInput(
       z.strictObject({ execution_id: identitySchema("execution") }),
       z.strictObject(pageQuery),
     ),
     output: pageOf(evidenceSchema),
-    description: "List evidence named by current objective outcomes.",
+    description:
+      "List the evidence that the current outcomes of the direct dependencies name.",
   },
   "execution.evidence.list": {
     ...readOperation,

@@ -1,13 +1,13 @@
 import {
   AssetKind,
-  type ExecutionObjective,
+  type ExecutionDependency,
   type Outcome,
 } from "../../mission/contract.ts";
 import type { Verification } from "./verification.ts";
 
 const ABSENT = "none";
 
-function labelOf(objective: ExecutionObjective): string {
+function labelOf(objective: ExecutionDependency): string {
   return "filename" in objective ? objective.filename : objective.id;
 }
 
@@ -25,7 +25,7 @@ function code(value: string): string {
 }
 
 function objectiveTable(
-  objectives: readonly ExecutionObjective[],
+  objectives: readonly ExecutionDependency[],
   outcomes: readonly Outcome[],
 ): string {
   const rows = objectives.map((objective) => {
@@ -64,7 +64,7 @@ function verificationSection(verification: Verification | null): string {
 }
 
 export function reportFacts(
-  objectives: readonly ExecutionObjective[],
+  objectives: readonly ExecutionDependency[],
   outcomes: readonly Outcome[],
   verification: Verification | null,
 ): string {

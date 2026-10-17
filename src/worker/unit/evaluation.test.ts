@@ -254,19 +254,19 @@ test("evaluation writes failed-verification assessments without inference and ga
             ],
             next_cursor: null,
           }),
-        "execution.objective.list": async () =>
+        "execution.dependency.list": async () =>
           complete({
             items: [{ id: "child", state: "Completed" }],
             next_cursor: null,
           }),
-        "execution.objective.outcome.list": async () =>
+        "execution.dependency.outcome.list": async () =>
           complete({
             items: [
               { id: "child-outcome", result: "success", node_id: "child" },
             ],
             next_cursor: null,
           }),
-        "execution.objective.evidence.list": async () =>
+        "execution.dependency.evidence.list": async () =>
           complete({ items: [], next_cursor: null }),
         "execution.evidence.asset.content.get": async () =>
           complete({
