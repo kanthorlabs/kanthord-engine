@@ -106,7 +106,7 @@ The fixture `src/apps/server/__fixtures__/todoapp/plan/` for plan 08 (decision D
 ## E2E
 
 - Test file: `src/apps/server/e2e-todoapp-plan.test.ts`.
-- Harness: `gatewayFixture` of `src/apps/server/test-support.ts:316`, `kanthord` of `src/apps/server/cli-support.ts:122`, and `todoappProject` and `planFiles` of task 06.2. Every act goes through the CLI. The test reads no store.
+- Harness: `gatewayFixture` of `src/apps/server/test-support.ts:316`, `kanthord` of `src/apps/server/cli-support.ts:122`, and `todoappProject` and `planFiles` of task 06.2. Every act goes through the CLI. The test reads no store. The CLI prints no `details` of a refusal. A row that asserts `details` reads them from the refused request through `httpClient`. Every other act goes through the CLI.
 - `import <set>` means `kanthord mission import preview <missionId> <plan-file...> --file <controls>`, then `kanthord mission import apply` with the `previewDigest` and the `confirmedRetirements` of the preview.
 - A refused `import <set>` exits 0 on the preview, and the preview holds the violation of the row. The apply with that digest exits 1, and its stderr starts with the code of the row (`src/mission/import-apply.ts:52-66`). Each refusal row asserts both.
 
