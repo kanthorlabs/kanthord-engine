@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { ulid } from "ulid";
+import { writeFile } from "node:fs/promises";
 import { httpClient } from "../../gateway/client.ts";
+import { background } from "../../kernel/context.ts";
+import { diagnostic } from "../../kernel/errors.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import {
@@ -16,6 +19,7 @@ import {
 import { temporary } from "../../kernel/test-support.ts";
 import {
   AssetKind,
+  MissionErrorCode,
   missionOperations,
   Work,
   type EvidenceAsset,
@@ -32,6 +36,8 @@ import {
   gatewayFixture,
 } from "./test-support.ts";
 import { environment, generateMachineToken, kanthord } from "./cli-support.ts";
+import { uploadEvidence } from "../worker/index.ts";
+import { httpTransport } from "../worker/transport.ts";
 
 const INITIAL_SEQUENCE = 0;
 const SUCCESSFUL_EXIT = 0;
@@ -488,4 +494,257 @@ test("E04 storage grants CLI journey", { timeout: TIMEOUT }, async (t) => {
       assert.ok(!line.includes(SIGNATURE_PARAMETER));
     }
   });
+});
+
+const FAILED_PUT_STATUS = 500;
+const EVIDENCE_FILE = "evidence.txt";
+
+function failoverBindings(
+  bucket: string,
+  primary: string,
+  secondary: string,
+  available: boolean,
+) {
+  const storage = (endpoint: string, enabled: boolean) => ({
+    kind: "storage",
+    config: {
+      available: enabled,
+      endpoint,
+      bucket,
+      region: REGION,
+      prefix: PREFIX,
+      credential: "store",
+    },
+  });
+  return {
+    repo: {
+      kind: "repository",
+      config: {
+        available: true,
+        platform: "github",
+        address: "git@github.com:owner/repo.git",
+        strategy: { base_branch: "main" },
+        ssh_credential: FAKE_SSH_CREDENTIAL_BODY.name,
+        credential: "github",
+      },
+    },
+    primary: storage(primary, available),
+    secondary: storage(secondary, true),
+    harness: {
+      kind: "worker",
+      config: {
+        worker: "claude-code@1",
+        instance_count: WORKER_INSTANCE_COUNT,
+      },
+    },
+  };
+}
+
+async function failoverSetup(t: TestContext) {
+  const primary = await fakeS3(t);
+  const secondary = await fakeS3(t);
+  const fixture = await gatewayFixture(t, {
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+      resolveSshIdentity: async () => FAKE_SSH_IDENTITY,
+    },
+  });
+  const { H, read, write } = await cli(t, fixture.endpoint, fixture.token);
+  await write(["storage", "credential", "create"], {
+    name: "store",
+    platform: "s3",
+    metadata: {
+      endpoint: primary.endpoint,
+      bucket: primary.bucket,
+      region: REGION,
+    },
+    secret: {
+      access_key_id: "AKIAEXAMPLE",
+      secret_access_key: SECRET_ACCESS_KEY,
+    },
+  });
+  await write(["repository", "credential", "create"], {
+    name: "github",
+    platform: "github",
+    metadata: null,
+    secret: { key: GITHUB_SECRET },
+  });
+  await write(["repository", "credential", "create"], FAKE_SSH_CREDENTIAL_BODY);
+  const project = await read<{ id: string }>([
+    "project",
+    "create",
+    "--name",
+    "failover",
+  ]);
+  const mission = await read<{ id: string; version: number }>([
+    "mission",
+    "get",
+    project.id,
+  ]);
+  const apply = async (available: boolean) => {
+    const { binding_set_version: version } = await read<{
+      binding_set_version: number;
+    }>(["project", "get", project.id]);
+    await write(["project", "binding", "apply", project.id], {
+      version,
+      bindings: failoverBindings(
+        primary.bucket,
+        primary.endpoint,
+        secondary.endpoint,
+        available,
+      ),
+    });
+  };
+  await apply(true);
+  const bindings = await read<Page<Binding>>([
+    "project",
+    "binding",
+    "list",
+    project.id,
+  ]);
+  const binding = (name: string) => {
+    const row = bindings.items.find((item) => item.name === name);
+    assert.ok(row, name);
+    return row;
+  };
+  const created = await write<{ revisions: Revision[] }>(
+    ["mission", "node", "create", mission.id],
+    {
+      filename: "implement-a.md",
+      content: {
+        ...CONTENT,
+        work: Work.Implement,
+        bindings: ["repo", "primary", "secondary"].map(
+          (name) => binding(name).id,
+        ),
+      },
+      tasks: [],
+      reason: "plan",
+      expected_mission_version: mission.version,
+    },
+  );
+  const nodeId = created.revisions[FIRST_INDEX]!.node_id;
+  const token = (
+    await generateMachineToken({
+      env: H,
+      masterKey: fixture.config.master_key,
+      projectId: project.id,
+      bindingName: "harness",
+      name: "Harness",
+    })
+  ).token;
+  const T = { ...H, KANTHORD_TOKEN: token };
+  const { runtime_identity: rid } = await read<{ runtime_identity: string }>(
+    ["worker", "register"],
+    T,
+  );
+  const pulled = await write<{ kind: string; execution: ExecutionRecord }>(
+    ["scheduler", "work", "pull"],
+    {
+      resource_identity: binding("harness").resource_identity,
+      runtime_identity: rid,
+    },
+    T,
+  );
+  assert.equal(pulled.kind, WorkPullKind.Claimed);
+  assert.equal(pulled.execution.node_id, nodeId);
+  const workspace = temporary(t);
+  await writeFile(join(workspace, EVIDENCE_FILE), FIRST_BODY);
+  const upload = () =>
+    uploadEvidence({
+      workspace,
+      path: EVIDENCE_FILE,
+      claim: pulled.execution,
+      api: httpTransport(fixture.endpoint, token),
+      context: background,
+    });
+  const pinnedOf = async (assetId: string) => {
+    const page = await read<Page<{ assets: EvidenceAsset[] }>>([
+      "mission",
+      "evidence",
+      "list",
+      nodeId,
+    ]);
+    const asset = page.items
+      .flatMap((item) => item.assets)
+      .find((item) => item.id === assetId);
+    assert.ok(asset?.kind === AssetKind.Object, JSON.stringify(page));
+    assert.notEqual(asset.published_at, null);
+    return asset.storage_binding_id;
+  };
+  const failures = () =>
+    fixture.store.database
+      .prepare(
+        "SELECT storage_binding_id FROM mission_evidence_upload_failure WHERE node_id = ? ORDER BY failed_at",
+      )
+      .all(nodeId)
+      .map((row) => row.storage_binding_id);
+  return {
+    primary,
+    secondary,
+    read,
+    apply,
+    upload,
+    pinnedOf,
+    failures,
+    primaryId: binding("primary").id,
+    secondaryId: binding("secondary").id,
+  };
+}
+
+test("EF03b storage failover journey", { timeout: TIMEOUT }, async (t) => {
+  const h = await failoverSetup(t);
+  let recovered = "";
+
+  await t.test("EF03b.1 a disabled primary pins secondary", async () => {
+    await h.apply(false);
+    const result = await h.upload();
+    assert.equal(await h.pinnedOf(result.asset_id), h.secondaryId);
+    assert.deepEqual(h.failures(), []);
+    await h.apply(true);
+  });
+  await t.test("EF03b.2 a primary with no object pins secondary", async () => {
+    h.primary.failNext(FAILED_PUT_STATUS);
+    const result = await h.upload();
+    assert.ok(result.uri.startsWith(`s3://${h.secondary.bucket}/${PREFIX}/`));
+    assert.equal(await h.pinnedOf(result.asset_id), h.secondaryId);
+    assert.deepEqual(h.failures(), [h.primaryId]);
+    recovered = result.asset_id;
+  });
+  await t.test("EF03b.3 two failed stores exhaust the storage", async () => {
+    h.secondary.failNext(FAILED_PUT_STATUS);
+    const failure = await h.upload().then(
+      () => assert.fail("The upload publishes."),
+      (error: unknown) => error,
+    );
+    assert.ok(
+      diagnostic(failure).startsWith(
+        `${MissionErrorCode.EvidenceStorageExhausted}:`,
+      ),
+      diagnostic(failure),
+    );
+    assert.deepEqual(h.failures(), [h.primaryId, h.secondaryId]);
+  });
+  await t.test(
+    "EF03b.4 the read of a failed-over asset uses secondary",
+    async () => {
+      const answer = await h.read<{ get_url: string }>([
+        "mission",
+        "evidence",
+        "asset",
+        "content",
+        "get",
+        recovered,
+      ]);
+      assert.ok(
+        answer.get_url.startsWith(
+          `${h.secondary.endpoint}/${h.secondary.bucket}/`,
+        ),
+        answer.get_url,
+      );
+      const response = await fetch(answer.get_url);
+      assert.equal(response.status, HttpStatus.OK);
+      assert.equal(await response.text(), FIRST_BODY);
+    },
+  );
 });
