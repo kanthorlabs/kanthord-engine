@@ -904,21 +904,13 @@ export class MissionService
 
   private commitGraph<T>(
     caller: CallerContext,
-    scope:
-      { mission_id: string } | { node_id: string } | { proposal_id: string },
+    scope: WriteScope,
     write: (tx: Transaction) => T,
   ): T {
     let projectId: string | null = null;
     const result = caller.commit((tx) => {
       const result = write(tx);
-      const missionId =
-        "mission_id" in scope
-          ? scope.mission_id
-          : "node_id" in scope
-            ? requireNode(tx, scope.node_id).mission_id
-            : requireNode(tx, requireProposal(tx, scope.proposal_id).node_id)
-                .mission_id;
-      projectId = requireMission(tx, missionId).project_id;
+      projectId = projectOf(tx, scope);
       return result;
     });
     assert.ok(projectId);
