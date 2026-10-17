@@ -1,21 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import type { z } from "zod";
 import { ulid } from "ulid";
-import { httpClient } from "../../gateway/client.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import {
-  OperationResultType,
-  type OperationResult,
-} from "../../kernel/operation.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   ImportFormat,
   MISSION_INITIAL_VERSION,
   MissionErrorCode,
-  missionOperations,
   NodeState,
   Work,
   type ControlResult,
@@ -26,7 +19,7 @@ import {
   type Node,
   type NodeChange,
 } from "../../mission/contract.ts";
-import { ProjectErrorCode, projectOperations } from "../../project/contract.ts";
+import { ProjectErrorCode } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import {
   cliSession,
@@ -44,6 +37,9 @@ import {
 const FAILURE = 1;
 const NO_OUTPUT = "";
 const UTF8 = "utf8";
+const DETAILS_PREFIX = "details: ";
+const DETAILS_LINE = 1;
+const REFUSAL_LINE_COUNT = 2;
 const MASK = "e2e-todoapp-mask";
 const REASON = "plan";
 const REPOSITORY_BINDING = "todoapp-repo";
@@ -133,9 +129,6 @@ type Project = {
   missionId: string;
   bindingId: string;
 };
-type BindingSetBody = z.input<
-  (typeof projectOperations)["bindingSet.write"]["input"]
->["body"];
 type Violation = ImportPreview["violations"][number];
 type Edit = (files: Record<string, string>) => void;
 type Harness = Awaited<ReturnType<typeof setup>>;
@@ -171,6 +164,13 @@ function claimsOf(details: unknown): string[] {
   };
   for (const item of claims) assert.equal(item.revision, INITIAL_REVISION);
   return claims.map((item) => item.claim).sort();
+}
+
+function refusalDetails(stderr: string): unknown {
+  const lines = stderr.trimEnd().split("\n");
+  assert.equal(lines.length, REFUSAL_LINE_COUNT, stderr);
+  assert.ok(lines[DETAILS_LINE]!.startsWith(DETAILS_PREFIX), stderr);
+  return JSON.parse(lines[DETAILS_LINE]!.slice(DETAILS_PREFIX.length));
 }
 
 function bindingNames(names: string[]): string {
@@ -217,6 +217,7 @@ async function setup(t: TestContext) {
     assert.equal(result.code, FAILURE, result.stderr);
     assert.equal(result.stdout, NO_OUTPUT);
     assert.ok(result.stderr.startsWith(`${code}:`), result.stderr);
+    return result.stderr;
   };
   const planFiles = (edit?: Edit) => {
     const files = planContents();
@@ -420,52 +421,6 @@ async function setup(t: TestContext) {
     }
     return { names, ids };
   };
-  const failedBindingSet = async (
-    project: Project,
-    bindings: Record<string, unknown>,
-  ) => {
-    const result = (await httpClient(
-      { operation: projectOperations["bindingSet.write"] },
-      fixture.endpoint,
-      fixture.token,
-    ).operation({
-      params: { project_id: project.projectId },
-      query: {},
-      body: {
-        version: await bindingSetVersion(project),
-        bindings: bindings as BindingSetBody["bindings"],
-      },
-    })) as OperationResult<unknown>;
-    assert.equal(result.type, OperationResultType.Failure);
-    if (result.type !== OperationResultType.Failure) throw new Error();
-    return result.error.error;
-  };
-  const failedImportApply = async (project: Project, paths: string[]) => {
-    const previewed = await preview(project, paths);
-    const result = (await httpClient(
-      { operation: missionOperations["import.apply"] },
-      fixture.endpoint,
-      fixture.token,
-    ).operation({
-      params: { mission_id: project.missionId },
-      query: {},
-      body: {
-        format: ImportFormat.Markdown,
-        mission_id: project.missionId,
-        mission_version: previewed.expected_mission_version,
-        reason: REASON,
-        files: paths.map((path) => ({
-          filename: basename(path),
-          content: readFileSync(path, UTF8),
-        })),
-        preview_digest: previewed.preview_digest,
-        confirmed_retirements: [],
-      },
-    })) as OperationResult<unknown>;
-    assert.equal(result.type, OperationResultType.Failure);
-    if (result.type !== OperationResultType.Failure) throw new Error();
-    return result.error.error;
-  };
   return {
     read,
     write,
@@ -487,8 +442,6 @@ async function setup(t: TestContext) {
     update,
     control,
     overrideInOrder,
-    failedBindingSet,
-    failedImportApply,
     applyArgs,
     applyBody,
   };
@@ -769,9 +722,13 @@ todoapp(
     assert.equal(found.length, SINGLE_ITEM);
     assert.equal(found[0]!.filename, FOUNDATION);
     assert.deepEqual(claimsOf(found[0]!.details), EXPECTED_CLAIMS);
-    const refused = await h.failedImportApply(project, paths);
-    assert.equal(refused.code, MissionErrorCode.RequiresUnmatched);
-    assert.deepEqual(claimsOf(refused.details), EXPECTED_CLAIMS);
+    const previewed = await h.preview(project, paths);
+    const stderr = await h.refuses(
+      h.applyArgs(project, paths),
+      await h.applyBody(project, previewed, []),
+      MissionErrorCode.RequiresUnmatched,
+    );
+    assert.deepEqual(claimsOf(refusalDetails(stderr)), EXPECTED_CLAIMS);
   },
 );
 
@@ -1028,14 +985,12 @@ todoapp(
       coder: COVERING_WORKER_BINDINGS.coder,
       [REPOSITORY_BINDING]: repositoryBinding(REPOSITORY_BINDING, ACTION),
     };
-    await h.refuses(
+    const stderr = await h.refuses(
       ["project", "binding", "apply", project.projectId],
       { version, bindings },
       ProjectErrorCode.WorkerNodeUnmatched,
     );
-    const failure = await h.failedBindingSet(project, bindings);
-    assert.equal(failure.code, ProjectErrorCode.WorkerNodeUnmatched);
-    const details = failure.details as { node_ids: string[] };
+    const details = refusalDetails(stderr) as { node_ids: string[] };
     assert.deepEqual(
       details.node_ids.slice().sort(),
       all.map((i) => i.id).sort(),

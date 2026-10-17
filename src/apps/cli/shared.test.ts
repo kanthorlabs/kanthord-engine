@@ -236,6 +236,49 @@ test("read results return data, preserve server failures, and signal uncertainty
   );
 });
 
+test("server failures carry the error details to the diagnostic", () => {
+  const details = { node_ids: ["node_" + KEY] };
+  const withDetails: OperationResult<number> = {
+    type: OperationResultType.Failure,
+    status: FAILURE_STATUS,
+    error: {
+      error: { code: FAILURE_CODE, message: "failed", details },
+      request_id: "request_" + KEY,
+    },
+  };
+  const withoutDetails: OperationResult<number> = {
+    type: OperationResultType.Failure,
+    status: FAILURE_STATUS,
+    error: {
+      error: { code: FAILURE_CODE, message: "failed", details: null },
+      request_id: "request_" + KEY,
+    },
+  };
+  const carries =
+    (expected: unknown) =>
+    (error: unknown): boolean => {
+      assert.ok(error instanceof Diagnostic);
+      assert.deepEqual(error.details, expected);
+      return true;
+    };
+  assert.throws(
+    () => handleMutationResult(withDetails, INDETERMINATE_CODE, KEY),
+    carries(details),
+  );
+  assert.throws(
+    () => handleReadResult(withDetails, INDETERMINATE_CODE),
+    carries(details),
+  );
+  assert.throws(
+    () => handleMutationResult(withoutDetails, INDETERMINATE_CODE, KEY),
+    carries(null),
+  );
+  assert.throws(
+    () => handleReadResult(withoutDetails, INDETERMINATE_CODE),
+    carries(null),
+  );
+});
+
 test("requireToken rejects absent and blank tokens", () => {
   assert.throws(
     () => requireToken(undefined, TOKEN_CODE),

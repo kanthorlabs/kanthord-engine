@@ -6,6 +6,7 @@ import {
   CodedError,
   Diagnostic,
   diagnostic,
+  diagnosticDetails,
   errorCodeSchema,
 } from "./errors.ts";
 import { ContextCancelled, DeadlineExceeded } from "./context.ts";
@@ -17,6 +18,7 @@ const SECRET_MARKER = "secret-marker";
 const ExpectedDiagnostic = {
   MissingConfiguration: "cli.config.not_found: Configuration absent.",
   Unknown: "system.operation.unknown: Operation failed.",
+  Details: 'details: {"node_ids":["node_a","node_b"],"count":2}',
 } as const;
 const ExpectedErrorCode = {
   Unknown: "system.operation.unknown",
@@ -94,6 +96,35 @@ test("diagnostics display scoped codes without exposing unexpected errors or cau
     assert.equal(diagnostic(reason), ExpectedDiagnostic.Unknown);
     assert.doesNotMatch(diagnostic(reason), /secret-marker|SECRET/);
   }
+});
+
+test("diagnostic details print compact JSON only for a diagnostic with details", () => {
+  const details = { node_ids: ["node_a", "node_b"], count: 2 };
+  const error = new Diagnostic(
+    "cli.config.not_found",
+    "Configuration absent.",
+    {
+      details,
+    },
+  );
+  assert.equal(diagnostic(error), ExpectedDiagnostic.MissingConfiguration);
+  assert.equal(diagnosticDetails(error), ExpectedDiagnostic.Details);
+  assert.equal(
+    diagnosticDetails(
+      new Diagnostic("cli.config.not_found", "Configuration absent."),
+    ),
+    null,
+  );
+  assert.equal(
+    diagnosticDetails(
+      new Diagnostic("cli.config.not_found", "Configuration absent.", {
+        details: null,
+      }),
+    ),
+    null,
+  );
+  for (const reason of [new Error(SECRET_MARKER), { details }, SECRET_MARKER])
+    assert.equal(diagnosticDetails(reason), null);
 });
 
 test("context errors identify cancellation and deadlines without changing their types", () => {

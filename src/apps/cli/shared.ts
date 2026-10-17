@@ -148,6 +148,7 @@ export function handleMutationResult<T>(
     throw new Diagnostic(
       result.error.error.code,
       `request failed (HTTP ${result.status}); idempotency key ${key}.`,
+      { details: result.error.error.details },
     );
   throw new Diagnostic(
     indeterminateCode,
@@ -164,6 +165,7 @@ export function handleReadResult<T>(
     throw new Diagnostic(
       result.error.error.code,
       `request failed (HTTP ${result.status}).`,
+      { details: result.error.error.details },
     );
   throw new Diagnostic(indeterminateCode, "retry the command");
 }

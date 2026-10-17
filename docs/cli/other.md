@@ -183,8 +183,10 @@ failure writes a diagnostic to stderr. A declared remote failure of a mutation
 prints `<code>: request failed (HTTP <status>); idempotency key <key>.`, and a
 declared remote failure of a read prints `<code>: request failed (HTTP <status>).`
 `gateway verify`, `worker register` and `worker handover` put the command name
-before `request failed`. The CLI does not print the remote message, details or
-request ID. Coded diagnostics use the owning
+before `request failed`. When the error body holds non-null `details`, the CLI
+writes one more stderr line after the diagnostic: `details: <compact JSON of details>`.
+With `details` null, the CLI writes no such line. The CLI does not print the
+remote message or the request ID. Coded diagnostics use the owning
 `cli`, `system`, or service namespace; Commander syntax diagnostics are not a
 uniform JSON envelope. The launcher rejects unsupported Node.js versions with
 one stderr line and a nonzero exit before loading the application. The supported
