@@ -1814,7 +1814,7 @@ export const missionOperations = {
       z.strictObject({ ...pageQuery, attempt: attemptSelector(0).optional() }),
     ),
     output: pageOf(proposalSchema),
-    description: "List fix-objective proposals of an initiative.",
+    description: "List the fix-node proposals of an examine proposer.",
   },
   "proposal.approve": {
     ...writeOperation,
@@ -1830,7 +1830,7 @@ export const missionOperations = {
     }),
     output: proposalApproveResultSchema,
     description:
-      "Approve a fix-objective proposal, create its objective and unblock the initiative.",
+      "Approve a fix-node proposal, create its node, add the dependency of the proposer on it and unblock the proposer.",
   },
   "node.unblock": {
     ...writeOperation,

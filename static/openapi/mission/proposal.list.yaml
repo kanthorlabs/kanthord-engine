@@ -4,7 +4,7 @@ pathItem:
     operationId: mission.proposal.list
     tags:
       - mission
-    description: List fix-objective proposals of an initiative.
+    description: List the fix-node proposals of an examine proposer.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false

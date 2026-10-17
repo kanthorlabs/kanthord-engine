@@ -37,12 +37,12 @@ function attemptFilter(value: string | undefined): number | undefined {
 export function addProposalCommands(mission: Command): void {
   const proposal = mission
     .command("proposal")
-    .description("Mission fix-objective proposals");
+    .description("Mission fix-node proposals");
   proposal.action(() => proposal.help());
   addPagination(
     proposal
       .command("list")
-      .description("List the proposals of an initiative as JSON")
+      .description("List the fix-node proposals of an examine node as JSON")
       .argument("<node-id>", "Node ID")
       .option("--attempt <attempt>", "Attempt filter", singleUse("--attempt")),
   ).action(async (nodeId: string, _options, command: Command) => {
@@ -65,7 +65,9 @@ export function addProposalCommands(mission: Command): void {
   addMutationOptions(
     proposal
       .command("approve")
-      .description("Approve a proposal and unblock its initiative")
+      .description(
+        "Approve a fix-node proposal and unblock its examine proposer",
+      )
       .argument("<proposal-id>", "Proposal ID"),
   ).action(async (proposalId: string, _options, command: Command) => {
     if (!identitySchema(PROPOSAL_IDENTITY_PREFIX).safeParse(proposalId).success)

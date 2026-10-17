@@ -4,8 +4,8 @@ pathItem:
     operationId: mission.proposal.approve
     tags:
       - mission
-    description: Approve a fix-objective proposal, create its objective and unblock
-      the initiative.
+    description: Approve a fix-node proposal, create its node, add the dependency of
+      the proposer on it and unblock the proposer.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
