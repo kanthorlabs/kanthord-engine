@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { DeadlineExceeded } from "../../kernel/context.ts";
@@ -521,5 +521,26 @@ test("a revision that changes no checkout counts as no progress", async (t) => {
   assert.deepEqual(
     h.checkouts.map((checkout) => checkout.head),
     heads,
+  );
+});
+
+test("a verification at the agent root of two bindings leaves only the checkouts and the scratch directory", async (t) => {
+  const current = task(
+    "root-writes",
+    "touch stray && mkdir -p stray-dir .kanthord-scratch && touch .kanthord-scratch/probe api/transient",
+  );
+  const h = await fixture(t, [current], [], undefined, TWO_BINDINGS);
+  await verifyTask(h, current);
+  assert.deepEqual(readdirSync(h.root).sort(), [
+    ".kanthord-scratch",
+    ...TWO_BINDINGS,
+  ]);
+  assert.ok(existsSync(join(h.root, ".kanthord-scratch", "probe")));
+  assert.equal(existsSync(join(h.root, "api", "transient")), false);
+  for (const checkout of h.checkouts)
+    assert.ok(existsSync(join(checkout.directory, ".git")));
+  h.input.workspaces.release(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
 });

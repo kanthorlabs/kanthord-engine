@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readdirSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import {
   AssetKind,
   type Revision,
@@ -6,6 +8,7 @@ import {
 } from "../../mission/contract.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import {
+  SCRATCH_DIRECTORY,
   WorkspaceKind,
   workRepositoriesOf,
   type WorkspaceCheckout,
@@ -69,6 +72,8 @@ import {
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
+const SINGLE_CHECKOUT = 1;
+const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const NO_PROGRESS_LIMIT = 2;
 
 export function workUnitsOf(
@@ -562,10 +567,23 @@ async function verifyCommands(
         cleanup,
         state.input.claim.expired_at - Date.now(),
       );
+    discardRootEntries(state);
   } finally {
     cleanup.cancel();
   }
   return run;
+}
+
+function discardRootEntries(state: StepsState): void {
+  if (state.checkouts.length === SINGLE_CHECKOUT) return;
+  const kept = new Set([SCRATCH_ENTRY]);
+  for (const checkout of state.checkouts) {
+    assert.equal(dirname(checkout.directory), state.root);
+    kept.add(basename(checkout.directory));
+  }
+  for (const entry of readdirSync(state.root))
+    if (!kept.has(entry))
+      rmSync(join(state.root, entry), { recursive: true, force: true });
 }
 
 async function allTasksPass(state: StepsState): Promise<boolean> {
