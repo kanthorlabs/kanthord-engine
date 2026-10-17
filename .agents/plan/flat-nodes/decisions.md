@@ -1,6 +1,6 @@
 # Flat-node plan decisions
 
-The plans cite these decisions as D1 to D30. Each decision binds every plan and every task of this set. A decision records only what the design pages of pull request #87 leave open. A retired decision keeps its identifier and names the page line that now holds the rule.
+The plans cite these decisions as D1 to D31. Each decision binds every plan and every task of this set. A decision records only what the design pages of pull request #87 leave open. A retired decision keeps its identifier and names the page line that now holds the rule.
 
 ## D1 — Source and gaps
 
@@ -172,3 +172,12 @@ RULED 2026-10-17 by Ulrich (R13).
 - `MissionCollaborations.nodeKindOf(tx, nodeId)` answers the kind of the node (`src/mission/service.ts:969`). `src/worker/execution-setup.ts:155` fills `node_kind` with it, and `src/apps/server/index.ts:447` wires it.
 - The worker contract declares its own `ExecutionNodeKind` and `NodeKindOf` (`src/worker/contract.ts:423-429`), because a service contract imports no other service.
 - Plan 03 deletes the field and the seam, or replaces them with `work` (task 03.14).
+
+## D31 — The evidence placement of an `examine` node with repository bindings
+
+RULED 2026-10-17 by Ulrich.
+
+- The reviewer of an `examine` node with one or more repository bindings places the produced evidence in `<workspace>/evidence/`. `<workspace>` is the execution workspace that `prepareInitiative` answers as `key`.
+- The `evidence` directory is outside the agent root. The agent root holds only the checkouts, and a checkout stays clean.
+- Each asset `path` of the review bundle names the placed file relative to the agent root.
+- An `examine` node with no repository binding keeps the evidence-placement rule: the evidence is in its workspace, which is its agent root.
