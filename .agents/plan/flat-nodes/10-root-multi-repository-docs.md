@@ -16,7 +16,7 @@ Out of scope:
 
 ## Model
 
-Sonnet at high effort. The plan deletes a limit and adds one layout rule on four pages.
+Sonnet at high effort. The plan deletes a limit, adds one layout rule on four pages and adds three design and explanation sentences.
 
 ## Sources
 
@@ -72,6 +72,22 @@ The documented multi-repository product. No seam.
 - Do: delete the item "multi-repository implement node (plans 09a, 09b and 10)" that task 08.10 wrote.
 - Cite: decision D1.
 - Verify: `rg -n 'multi-repository implement node' docs/brainstorm/HANDOFF.md` prints nothing.
+
+### 10.5 State the review bundle paths and the change request binding on the Worker design page
+
+- Files: `docs/brainstorm/worker-service.impl.md` (edit)
+- Do:
+  1. After the `added_files` sentence (`worker-service.impl.md:562`), add "Each `added_files` path is relative to the agent root."
+  2. In the unblock reads (`worker-service.impl.md:520-525`), state that each item of `worker.execution.change_request.get` holds `binding_id`, the repository binding of its `pull_request` action.
+- Cite: engine plan 09b, tasks 09b.6 and 09b.7; decisions OD14 and OD15.
+- Verify: `rg -n 'Each .added_files. path is relative to the agent root' docs/brainstorm/worker-service.impl.md` prints one line, and `rg -n 'binding_id' docs/brainstorm/worker-service.impl.md` prints the change request line.
+
+### 10.6 State the absent commit attribute on the worker contract page
+
+- Files: `docs/explanation/worker-contract.md` (edit)
+- Do: in the span table (`worker-contract.md:84-86`), state that `kanthord.commit` is absent on `worker.verification`, `worker.judgement` and `worker.evaluation` for a node with two or more repository bindings.
+- Cite: engine `src/worker/unit/method-telemetry.ts` (`testedCommitOf`, `judgementSpan`); engine plan 09b, finding S6.
+- Verify: `rg -n 'two or more repository bindings' docs/explanation/worker-contract.md` prints a line.
 
 ### 10.E Run the gate
 
