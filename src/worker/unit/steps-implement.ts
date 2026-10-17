@@ -234,8 +234,8 @@ export async function runStepsImplement(
     throw stopped;
   } finally {
     state.input.workspaces.release(
-      state.input.workspaces.objectiveKey(state.input.claim.node_id),
-      WorkspaceKind.Objective,
+      state.input.workspaces.nodeKey(state.input.claim.node_id),
+      WorkspaceKind.Node,
     );
   }
 }
@@ -441,8 +441,8 @@ export async function prepareStepsWorkspace(
         asset.address.binding_id === repository.binding_id,
     ),
   );
-  return await input.workspaces.prepareObjective({
-    objectiveId: input.claim.node_id,
+  return await input.workspaces.prepareImplement({
+    nodeId: input.claim.node_id,
     nodeBranch: input.claim.node_branch,
     pushed,
     repository,
@@ -516,7 +516,7 @@ async function allTasksPass(state: StepsState): Promise<boolean> {
 }
 
 function nodeDirectoryOf(state: StepsState): string {
-  return state.input.workspaces.objectiveKey(state.input.claim.node_id);
+  return state.input.workspaces.nodeKey(state.input.claim.node_id);
 }
 
 function judgedTaskOf(state: StepsState, task: TaskContent) {

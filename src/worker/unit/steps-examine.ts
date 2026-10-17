@@ -33,7 +33,7 @@ export async function runStepsExamine(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
     input.claim.expired_at,
   );
-  const workspace = await input.workspaces.prepareInitiative({
+  const workspace = await input.workspaces.prepareExamine({
     executionId: input.claim.execution_id,
     transport: input.transport,
     context: run.operationContext,

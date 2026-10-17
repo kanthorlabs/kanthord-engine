@@ -38,7 +38,7 @@ import type { StepsInput } from "./steps-implement.ts";
 import {
   WorkspaceKind,
   workRepositoriesOf,
-  type InitiativeCheckout,
+  type ExamineCheckout,
 } from "./workspace.ts";
 import { ActionResultKind, ExecutionWork } from "../contract.ts";
 import {
@@ -74,7 +74,7 @@ async function judge(
   evidence: unknown,
   verificationRun: VerificationRun,
   directory: string,
-  checkouts: readonly InitiativeCheckout[],
+  checkouts: readonly ExamineCheckout[],
   openAgent: OpenAgent,
   dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
 ) {

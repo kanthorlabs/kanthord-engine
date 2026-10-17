@@ -84,8 +84,8 @@ test("task work commits revisions and cleans verification writes before judgemen
   assert.ok(log.all[0]!.message.includes(current.id));
   assert.equal(existsSync(join(h.directory, "transient")), false);
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
 });
 
@@ -110,8 +110,8 @@ test("turn exhaustion during task work leaves an uncommitted checkpoint boundary
   assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), before);
   assert.ok(existsSync(join(h.directory, "notes")));
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
 });
 

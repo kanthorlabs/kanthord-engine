@@ -123,8 +123,8 @@ export async function runNativeExecution(
         working = await open(workspace.directory);
       } catch (error) {
         input.workspaces.release(
-          input.workspaces.objectiveKey(input.claim.node_id),
-          WorkspaceKind.Objective,
+          input.workspaces.nodeKey(input.claim.node_id),
+          WorkspaceKind.Node,
         );
         throw error;
       }

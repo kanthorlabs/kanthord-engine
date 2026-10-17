@@ -25,7 +25,7 @@ export const EVIDENCE_DIRECTORY = "evidence";
 const SINGLE_CHECKOUT = 1;
 const FIRST_CHECKOUT = 0;
 export const WorkspaceKind = {
-  Objective: "objective",
+  Node: "node",
   Execution: "execution",
 } as const;
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
@@ -39,7 +39,7 @@ interface RepositoryAddress {
   binding_id: string;
   commit: string;
 }
-export interface InitiativeCheckout {
+export interface ExamineCheckout {
   name: string;
   directory: string;
   base_branch: string;
@@ -66,29 +66,29 @@ export class WorkspaceRoot {
     assert.equal(dirname(root), resolve(stateDirectory));
     return new WorkspaceRoot(root);
   }
-  objectiveKey(objectiveId: string): string {
-    return join(this.root, identitySchema("node").parse(objectiveId));
+  nodeKey(nodeId: string): string {
+    return join(this.root, identitySchema("node").parse(nodeId));
   }
-  objectiveDirectory(objectiveId: string, bindingId: string): string {
+  nodeDirectory(nodeId: string, bindingId: string): string {
     return join(
-      this.objectiveKey(objectiveId),
+      this.nodeKey(nodeId),
       identitySchema("binding").parse(bindingId),
     );
   }
   executionKey(executionId: string): string {
     return join(this.root, identitySchema("execution").parse(executionId));
   }
-  async prepareObjective(
+  async prepareImplement(
     input: Preparation & {
-      objectiveId: string;
+      nodeId: string;
       nodeBranch: string;
       pushed: boolean;
       repository: WorkspaceRepository;
     },
   ): Promise<{ directory: string; head: string; nodeBranch: string }> {
-    const key = this.objectiveKey(input.objectiveId);
-    const directory = this.objectiveDirectory(
-      input.objectiveId,
+    const key = this.nodeKey(input.nodeId);
+    const directory = this.nodeDirectory(
+      input.nodeId,
       input.repository.binding_id,
     );
     const existing = existsSync(directory);
@@ -167,7 +167,7 @@ export class WorkspaceRoot {
       throw error;
     }
   }
-  async prepareInitiative(
+  async prepareExamine(
     input: Preparation & {
       executionId: string;
       repositories: WorkspaceRepository[];
@@ -175,12 +175,12 @@ export class WorkspaceRoot {
   ): Promise<{
     key: string;
     directory: string;
-    checkouts: InitiativeCheckout[];
+    checkouts: ExamineCheckout[];
     tested_input: RepositoryAddress | RepositoryAddress[] | null;
   }> {
     const { directory: key } = this.prepareExecution(input);
     const end = performance.now() + input.deadlineMs;
-    const checkouts: InitiativeCheckout[] = [];
+    const checkouts: ExamineCheckout[] = [];
     const testedInput: RepositoryAddress[] = [];
     try {
       for (const repository of input.repositories) {
@@ -253,7 +253,7 @@ export class WorkspaceRoot {
   release(key: string, kind: WorkspaceKind): void {
     assert.equal(dirname(key), this.root);
     assert.ok(this.held.has(key));
-    if (kind === WorkspaceKind.Objective) this.touch(key);
+    if (kind === WorkspaceKind.Node) this.touch(key);
     else rmSync(key, { recursive: true, force: true });
     this.held.delete(key);
   }
@@ -282,8 +282,8 @@ export class WorkspaceRoot {
 
 export function workRepositoriesOf(
   root: string,
-  checkouts: readonly InitiativeCheckout[],
-): InitiativeCheckout[] {
+  checkouts: readonly ExamineCheckout[],
+): ExamineCheckout[] {
   return checkouts.map((checkout) => ({
     ...checkout,
     directory: relative(root, checkout.directory) || ".",

@@ -14,7 +14,7 @@ import { EndReason, type ExecutionRun } from "./execution-run.ts";
 import {
   EVIDENCE_DIRECTORY,
   WorkspaceKind,
-  type InitiativeCheckout,
+  type ExamineCheckout,
 } from "./workspace.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
@@ -127,7 +127,7 @@ async function prepareWorkspace(
       return {
         key: workspace.key,
         directory: workspace.directory,
-        checkouts: [] as InitiativeCheckout[],
+        checkouts: [] as ExamineCheckout[],
         tested_input: {
           kind: AssetKind.Repository,
           binding_id: repository.binding_id,
@@ -146,7 +146,7 @@ async function prepareWorkspace(
   }
   if (work === ExecutionWork.Examine)
     return {
-      ...(await input.workspaces.prepareInitiative({
+      ...(await input.workspaces.prepareExamine({
         ...common,
         repositories: input.setup.repositories,
       })),
@@ -157,7 +157,7 @@ async function prepareWorkspace(
   return {
     key: directory,
     directory,
-    checkouts: [] as InitiativeCheckout[],
+    checkouts: [] as ExamineCheckout[],
     tested_input: null,
     evidenceIds: [] as string[],
     addedFiles: [],

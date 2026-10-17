@@ -34,7 +34,7 @@ const LATE_MAIN_CHANGE = "late main change";
 
 function judgeNodeUnit(h: Awaited<ReturnType<typeof fixture>>) {
   recordJudged(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
     {
       attempt: h.input.claim.attempt,
       revision: h.input.claim.pinned_revision,
