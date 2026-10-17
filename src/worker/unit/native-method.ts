@@ -78,7 +78,10 @@ export async function runNativeExecution(
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
       const kind = input.setup.node_kind;
-      const open = async (workspace: string) => {
+      const open = async (
+        workspace: string,
+        checkouts: readonly string[] = [workspace],
+      ) => {
         const agent = input.setup.agents[WORKING_AGENT];
         assert.ok(agent);
         const credential = input.credentials.items.find(
@@ -94,6 +97,7 @@ export async function runNativeExecution(
           budget,
           workspaceAgentFiles: method !== WorkerMethod.Evaluation,
           workspace,
+          checkouts,
           hostHome: input.hostHome,
           env: input.env,
           modelRuntimeFactory: input.modelRuntimeFactory,

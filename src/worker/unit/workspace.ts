@@ -8,7 +8,7 @@ import {
   rmSync,
   utimesSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { bindingNameSchema } from "../../project/contract.ts";
@@ -20,6 +20,9 @@ export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
 const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const WORKSPACE_RETENTION_MS = 7 * 24 * 3600 * 1000;
 export const SWEEP_INTERVAL_MS = 3600000;
+export const CHECKOUTS_DIRECTORY = "checkouts";
+const SINGLE_CHECKOUT = 1;
+const FIRST_CHECKOUT = 0;
 export const WorkspaceKind = {
   Objective: "objective",
   Execution: "execution",
@@ -29,6 +32,16 @@ interface Preparation {
   transport: RepositoryTransport;
   context: Context;
   deadlineMs: number;
+}
+interface RepositoryAddress {
+  kind: "repository";
+  binding_id: string;
+  commit: string;
+}
+export interface InitiativeCheckout {
+  name: string;
+  directory: string;
+  base_branch: string;
 }
 interface WorkspaceRepository {
   binding_id: string;
@@ -152,23 +165,19 @@ export class WorkspaceRoot {
       repositories: WorkspaceRepository[];
     },
   ): Promise<{
+    key: string;
     directory: string;
-    tested_input:
-      { kind: "repository"; binding_id: string; commit: string }[] | null;
+    checkouts: InitiativeCheckout[];
+    tested_input: RepositoryAddress | RepositoryAddress[] | null;
   }> {
-    const { directory } = this.prepareExecution(input);
+    const { directory: key } = this.prepareExecution(input);
     const end = performance.now() + input.deadlineMs;
-    const testedInput: {
-      kind: "repository";
-      binding_id: string;
-      commit: string;
-    }[] = [];
+    const checkouts: InitiativeCheckout[] = [];
+    const testedInput: RepositoryAddress[] = [];
     try {
       for (const repository of input.repositories) {
-        const target = join(
-          directory,
-          bindingNameSchema.parse(repository.name),
-        );
+        const name = bindingNameSchema.parse(repository.name);
+        const target = join(key, CHECKOUTS_DIRECTORY, name);
         assert.ok(!existsSync(target), "Duplicate repository binding");
         ensureDirectory(target);
         await input.transport.proveSshIdentity(
@@ -183,18 +192,30 @@ export class WorkspaceRoot {
           input.context,
           end - performance.now(),
         );
+        checkouts.push({
+          name,
+          directory: target,
+          base_branch: repository.strategy.base_branch,
+        });
         testedInput.push({
           kind: "repository",
           binding_id: repository.binding_id,
           commit,
         });
       }
+      const listed = checkouts.length > SINGLE_CHECKOUT;
       return {
-        directory,
-        tested_input: testedInput.length ? testedInput : null,
+        key,
+        directory: listed
+          ? join(key, CHECKOUTS_DIRECTORY)
+          : (checkouts[FIRST_CHECKOUT]?.directory ?? key),
+        checkouts,
+        tested_input: listed
+          ? testedInput
+          : (testedInput[FIRST_CHECKOUT] ?? null),
       };
     } catch (error) {
-      this.release(directory, WorkspaceKind.Execution);
+      this.release(key, WorkspaceKind.Execution);
       throw error;
     }
   }
@@ -249,6 +270,16 @@ export class WorkspaceRoot {
     clearInterval(this.timer);
     this.timer = undefined;
   }
+}
+
+export function workRepositoriesOf(
+  root: string,
+  checkouts: readonly InitiativeCheckout[],
+): InitiativeCheckout[] {
+  return checkouts.map((checkout) => ({
+    ...checkout,
+    directory: relative(root, checkout.directory) || ".",
+  }));
 }
 
 function excludeScratch(directory: string): void {

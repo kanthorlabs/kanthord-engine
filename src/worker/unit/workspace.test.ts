@@ -17,6 +17,7 @@ import { fixtureTemplate, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import {
+  CHECKOUTS_DIRECTORY,
   SCRATCH_DIRECTORY,
   WorkspaceKind,
   WorkspaceRoot,
@@ -161,29 +162,69 @@ test("workspace preparation refreshes objective branches and creates disposable 
     binding_id: createIdentity("binding"),
     name: "other-repo",
   };
-  const initiative = await workspace.prepareInitiative({
-    ...common,
-    executionId: createIdentity("execution"),
-    repositories: [repository, another],
-  });
-  assert.deepEqual(
-    initiative.tested_input,
-    [repository, another].map(({ binding_id }) => ({
-      kind: "repository",
-      binding_id: binding_id,
-      commit: base,
-    })),
+  await t.test(
+    "an initiative with two bindings checks out each base-branch head under checkouts/ and records one tested commit for each",
+    async () => {
+      const initiative = await workspace.prepareInitiative({
+        ...common,
+        executionId: createIdentity("execution"),
+        repositories: [repository, another],
+      });
+      assert.deepEqual(
+        initiative.tested_input,
+        [repository, another].map(({ binding_id }) => ({
+          kind: "repository",
+          binding_id: binding_id,
+          commit: base,
+        })),
+      );
+      assert.equal(
+        initiative.directory,
+        join(initiative.key, CHECKOUTS_DIRECTORY),
+      );
+      assert.deepEqual(
+        initiative.checkouts,
+        [repository, another].map(({ name }) => ({
+          name,
+          directory: join(initiative.key, CHECKOUTS_DIRECTORY, name),
+          base_branch: "main",
+        })),
+      );
+      for (const name of [repository.name, another.name])
+        assert.ok(existsSync(join(initiative.directory, name, ".git")));
+      workspace.release(initiative.key, WorkspaceKind.Execution);
+      assert.equal(existsSync(initiative.key), false);
+    },
   );
-  for (const name of [repository.name, another.name])
-    assert.ok(existsSync(join(initiative.directory, name, ".git")));
-  workspace.release(initiative.directory, WorkspaceKind.Execution);
+  await t.test(
+    "an initiative with one binding uses the checkout as the agent root",
+    async () => {
+      const initiative = await workspace.prepareInitiative({
+        ...common,
+        executionId: createIdentity("execution"),
+        repositories: [repository],
+      });
+      assert.deepEqual(initiative.tested_input, {
+        kind: "repository",
+        binding_id: repository.binding_id,
+        commit: base,
+      });
+      assert.equal(
+        initiative.directory,
+        join(initiative.key, CHECKOUTS_DIRECTORY, repository.name),
+      );
+      assert.ok(existsSync(join(initiative.directory, ".git")));
+      workspace.release(initiative.key, WorkspaceKind.Execution);
+    },
+  );
   const empty = await workspace.prepareInitiative({
     ...common,
     executionId: createIdentity("execution"),
     repositories: [],
   });
   assert.equal(empty.tested_input, null);
-  workspace.release(empty.directory, WorkspaceKind.Execution);
+  assert.equal(empty.directory, empty.key);
+  workspace.release(empty.key, WorkspaceKind.Execution);
   const failedId = createIdentity("node");
   await assert.rejects(
     workspace.prepareObjective({

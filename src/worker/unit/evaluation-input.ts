@@ -11,7 +11,7 @@ import {
 } from "../../mission/contract.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind, type InitiativeCheckout } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import type { TestedInput } from "./verification.ts";
 
@@ -120,7 +120,9 @@ async function prepareWorkspace(
         commit: snapshot.commit,
       });
       return {
+        key: workspace.directory,
         directory: workspace.directory,
+        checkouts: [] as InitiativeCheckout[],
         tested_input: {
           kind: AssetKind.Repository,
           binding_id: repository.binding_id,
@@ -137,14 +139,24 @@ async function prepareWorkspace(
       };
     }
   }
-  const workspace =
-    kind === NodeKind.Initiative
-      ? await input.workspaces.prepareInitiative({
-          ...common,
-          repositories: input.setup.repositories,
-        })
-      : { ...input.workspaces.prepareExecution(common), tested_input: null };
-  return { ...workspace, evidenceIds: [] as string[], addedFiles: [] };
+  if (kind === NodeKind.Initiative)
+    return {
+      ...(await input.workspaces.prepareInitiative({
+        ...common,
+        repositories: input.setup.repositories,
+      })),
+      evidenceIds: [] as string[],
+      addedFiles: [],
+    };
+  const { directory } = input.workspaces.prepareExecution(common);
+  return {
+    key: directory,
+    directory,
+    checkouts: [] as InitiativeCheckout[],
+    tested_input: null,
+    evidenceIds: [] as string[],
+    addedFiles: [],
+  };
 }
 
 export async function prepareEvaluation(
@@ -183,7 +195,9 @@ export async function prepareEvaluation(
       assets.push({ evidence_id: evidenceId, asset_id: asset.id, path });
     }
     return {
+      key: workspace.key,
       directory: workspace.directory,
+      checkouts: workspace.checkouts,
       tested_input: testedInput,
       evidenceIds: [...evidenceIds],
       reviewBundle: {
@@ -193,7 +207,7 @@ export async function prepareEvaluation(
       },
     };
   } catch (error) {
-    input.workspaces.release(workspace.directory, WorkspaceKind.Execution);
+    input.workspaces.release(workspace.key, WorkspaceKind.Execution);
     throw error;
   }
 }

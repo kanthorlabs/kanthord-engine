@@ -8,7 +8,7 @@ import {
 import { readDependencies } from "./node-reads.ts";
 import { reportInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind, workRepositoriesOf } from "./workspace.ts";
 import type { StepsInput } from "./steps-objective.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
@@ -24,7 +24,10 @@ export async function runStepsInitiative(
   run: ExecutionRun,
   revision: Revision,
   budget: ExecutionBudget,
-  openAgent: (directory: string) => Promise<NativeAgent>,
+  openAgent: (
+    directory: string,
+    checkouts: readonly string[],
+  ) => Promise<NativeAgent>,
 ): Promise<ExecutionEnd> {
   const deadline = Math.min(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
@@ -37,16 +40,20 @@ export async function runStepsInitiative(
     deadlineMs: deadline - Date.now(),
     repositories: input.setup.repositories,
   });
-  const { directory } = workspace;
+  const { directory, checkouts } = workspace;
   try {
     const current = await readDependencies(run);
     if (budget.exhausted()) return await run.release(true);
-    const agent = await openAgent(directory);
+    const agent = await openAgent(
+      directory,
+      checkouts.map((checkout) => checkout.directory),
+    );
     if (agent.budget.exhausted()) return await run.release(true);
     const work = renderWorkPrompt(input.setup.templates, {
       node_id: input.claim.node_id,
       revision: input.claim.pinned_revision,
       content: revision.content,
+      repositories: workRepositoriesOf(directory, checkouts),
     });
     const verification =
       workspace.tested_input === null
@@ -101,6 +108,6 @@ export async function runStepsInitiative(
       return await run.release(true);
     throw error;
   } finally {
-    input.workspaces.release(directory, WorkspaceKind.Execution);
+    input.workspaces.release(workspace.key, WorkspaceKind.Execution);
   }
 }

@@ -13,7 +13,11 @@ import type { MethodClients } from "./method-clients.ts";
 import { anthropicSetup, WORKING_LAYER_ALL_ON } from "./test-support.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import { NodeKind } from "./native-agent.ts";
-import { WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
+import {
+  CHECKOUTS_DIRECTORY,
+  WorkspaceRoot,
+  WorkspaceKind,
+} from "./workspace.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import {
   snapshotOf,
@@ -162,12 +166,16 @@ test("B3 review bundle places all supporting assets beside repositories and remo
         ASSET_REVIEW_COUNT,
       );
       assert.equal(JSON.stringify(result).includes(url), false);
+      assert.equal(
+        result.directory,
+        join(workspaces.executionKey(claim.execution_id), CHECKOUTS_DIRECTORY),
+      );
       const OBJECT_REPORT = "object report";
       assert.equal(
         readFileSync(join(result.directory, second), "utf8"),
         OBJECT_REPORT,
       );
-      workspaces.release(result.directory, WorkspaceKind.Execution);
+      workspaces.release(result.key, WorkspaceKind.Execution);
     } finally {
       run.dispose();
       server.closeAllConnections();
@@ -178,7 +186,7 @@ test("B3 review bundle places all supporting assets beside repositories and remo
   }
 });
 
-test("evaluation places a produced report privately and preserves command order", async (t) => {
+test("an initiative with no binding places the produced evidence privately and preserves command order", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
     execution_id: setup.execution_id,
@@ -239,7 +247,8 @@ test("evaluation places a produced report privately and preserves command order"
     statSync(join(prepared.directory, assetId)).mode & 0o777,
     PRIVATE,
   );
-  workspaces.release(prepared.directory, WorkspaceKind.Execution);
+  assert.equal(prepared.directory, prepared.key);
+  workspaces.release(prepared.key, WorkspaceKind.Execution);
   const content = {
     name: "name",
     requirement: "requirement",

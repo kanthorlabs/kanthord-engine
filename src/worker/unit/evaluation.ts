@@ -35,7 +35,11 @@ import {
 } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-objective.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import {
+  WorkspaceKind,
+  workRepositoriesOf,
+  type InitiativeCheckout,
+} from "./workspace.ts";
 import { ActionResultKind } from "../contract.ts";
 import {
   evaluationEnd,
@@ -70,6 +74,7 @@ async function judge(
   evidence: unknown,
   verificationRun: VerificationRun,
   directory: string,
+  checkouts: readonly InitiativeCheckout[],
   openAgent: OpenAgent,
   dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
 ) {
@@ -88,6 +93,7 @@ async function judge(
     node_id: input.claim.node_id,
     revision: input.claim.pinned_revision,
     content: revision.content,
+    repositories: workRepositoriesOf(directory, checkouts),
   });
   await agent.instruct(
     work,
@@ -179,6 +185,7 @@ async function evaluate(
       prepared.reviewBundle,
       verificationRun,
       prepared.directory,
+      prepared.checkouts,
       openAgent,
       dependencies,
     );
@@ -235,6 +242,6 @@ export async function runEvaluation(
       };
     return run.stop(EndReason.OperationFailed);
   } finally {
-    input.workspaces.release(prepared.directory, WorkspaceKind.Execution);
+    input.workspaces.release(prepared.key, WorkspaceKind.Execution);
   }
 }

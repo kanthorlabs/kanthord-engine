@@ -34,6 +34,8 @@ export const NodeKind = {
   Initiative: "initiative",
 } as const;
 export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind];
+const FIRST_REPOSITORY = 0;
+const SINGLE_REPOSITORY = 1;
 export interface NativeAgentInput {
   setup: ExecutionSetup;
   claim: {
@@ -48,6 +50,7 @@ export interface NativeAgentInput {
   budget: ExecutionBudget;
   workspaceAgentFiles: boolean;
   workspace: string;
+  checkouts: readonly string[];
   hostHome: string;
   env: NodeJS.ProcessEnv;
   modelRuntimeFactory: ModelRuntimeFactory;
@@ -169,24 +172,26 @@ export async function openNativeAgent(
   const bridge = abortSignal(context);
   let session: AgentSession | undefined;
   try {
-    const repository =
+    const repositories =
       input.nodeKind === NodeKind.Objective
-        ? (input.setup.repositories[0] ?? null)
-        : null;
-    const layers = repository
-      ? [
-          await resolveRepositoryLayer({
-            repository: {
-              name: repository.name,
-              project_prompt: repository.project_prompt,
-              working_layer: repository.working_layer,
-            },
-            workspace: input.workspaceAgentFiles ? input.workspace : null,
-            hostHome: input.hostHome,
-            context,
-          }),
-        ]
-      : [];
+        ? input.setup.repositories.slice(FIRST_REPOSITORY, SINGLE_REPOSITORY)
+        : input.setup.repositories;
+    const layers = [];
+    for (const [index, repository] of repositories.entries())
+      layers.push(
+        await resolveRepositoryLayer({
+          repository: {
+            name: repository.name,
+            project_prompt: repository.project_prompt,
+            working_layer: repository.working_layer,
+          },
+          workspace: input.workspaceAgentFiles
+            ? (input.checkouts[index] ?? null)
+            : null,
+          hostHome: input.hostHome,
+          context,
+        }),
+      );
     const { runtime, model } = await withDeadline(
       input.modelRuntimeFactory({
         credential: input.credential,

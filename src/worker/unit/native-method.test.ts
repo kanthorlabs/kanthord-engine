@@ -91,6 +91,7 @@ test("S1 refusal aborts an active native session and records its stopped transcr
     }),
     workspaceAgentFiles: true,
     workspace,
+    checkouts: [workspace],
     hostHome: temporary(t),
     env: hostEnvironment(),
     modelRuntimeFactory: scriptedModelRuntime(provider),
