@@ -175,14 +175,14 @@ test("evaluation writes failed-verification assessments without inference and ga
       ],
       result: "success",
       opens: 1,
-      initiative: true,
+      examine: true,
     },
     {
       command: "true",
       texts: [PROPOSAL_REPLY],
       result: "undetermined",
       opens: 1,
-      initiative: true,
+      examine: true,
       proposals: [PROPOSAL],
     },
     {
@@ -197,10 +197,8 @@ test("evaluation writes failed-verification assessments without inference and ga
   ]) {
     const repository = repositorySetup();
     const setup = anthropicSetup({
-      work: scenario.initiative
-        ? ExecutionWork.Examine
-        : ExecutionWork.Implement,
-      repositories: scenario.initiative ? [] : [repository],
+      work: scenario.examine ? ExecutionWork.Examine : ExecutionWork.Implement,
+      repositories: scenario.examine ? [] : [repository],
     });
     const claim = {
       execution_id: setup.execution_id,
@@ -233,11 +231,11 @@ test("evaluation writes failed-verification assessments without inference and ga
         "execution.pinnedRevision.get": async () =>
           complete({
             content: {
-              name: "objective",
+              name: "node",
               requirement: "work",
               criterion: "met",
               verifications: [scenario.command],
-              bindings: scenario.initiative ? [] : [repository.binding_id],
+              bindings: scenario.examine ? [] : [repository.binding_id],
             },
             tasks: [],
           }),
@@ -314,7 +312,7 @@ test("evaluation writes failed-verification assessments without inference and ga
           assert.deepEqual(input.body.evidence_ids, ["verification", "placed"]);
           assert.deepEqual(
             input.body.dependency_outcome_ids,
-            scenario.initiative ? ["child-outcome"] : [],
+            scenario.examine ? ["child-outcome"] : [],
           );
           if (!scenario.opens)
             assert.match(input.body.rationale, /Verification 1 `false` failed/);
@@ -357,7 +355,7 @@ test("evaluation writes failed-verification assessments without inference and ga
           )
             return;
           assert.ok(instruction.includes(assetId));
-          if (scenario.initiative) {
+          if (scenario.examine) {
             assert.match(instruction, /child-outcome/);
             assert.match(instruction, /Completed/);
             assert.match(instruction, /proposals replace criterion-not-met/);
@@ -443,7 +441,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
-            name: "objective",
+            name: "node",
             requirement: "work",
             criterion: "met",
             verifications: ["true"],

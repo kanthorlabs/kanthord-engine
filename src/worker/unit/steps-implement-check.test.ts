@@ -20,15 +20,15 @@ import {
 } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
-import { TaskBoundary } from "./steps-objective.ts";
-import { prepareStepsWorkspace, startCheck } from "./steps-objective.ts";
+import { TaskBoundary } from "./steps-implement.ts";
+import { prepareStepsWorkspace, startCheck } from "./steps-implement.ts";
 import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
 import { judgedAt } from "./judged-tasks.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
   advanceBase,
   commitOnNode,
-  objectiveFixture as fixture,
+  implementFixture as fixture,
   NO_PROVIDER_CALLS,
   task,
 } from "./test-support.ts";
@@ -89,8 +89,8 @@ test("start check judges passing tasks in order and discards verification change
   assert.ok(JSON.stringify(h.provider.calls[0]).includes(tasks[1]!.id));
   assert.ok(JSON.stringify(h.provider.calls[1]).includes(tasks[2]!.id));
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
 });
 
@@ -383,8 +383,8 @@ test("the claim refresh merges a moved base branch without a conflict", async (t
 test("repository evidence of the attempt stops the preparation when the node branch is gone", async (t) => {
   const h = await fixture(t, [], []);
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
   const run = new ExecutionRun({
     claim: h.input.claim,
@@ -445,11 +445,11 @@ test("an attempt that continues a restart branch checks out that branch and merg
   );
   await advanceBase(h, t, MAIN_ADDITION, "other");
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(nodeId),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(nodeId),
+    WorkspaceKind.Node,
   );
-  const prepared = await h.input.workspaces.prepareObjective({
-    objectiveId: nodeId,
+  const prepared = await h.input.workspaces.prepareImplement({
+    nodeId,
     nodeBranch: restartBranch,
     pushed: false,
     repository: h.input.setup.repositories[0]!,
@@ -526,13 +526,13 @@ test("the claim refresh aborts the merge and stops when a conflict marker remain
 
 function nodeUnitRevision(command: string): Revision {
   return {
-    filename: "objective.md",
+    filename: "implement.md",
     content: { ...NODE_CONTENT, verifications: [command] },
     tasks: [],
   } as unknown as Revision;
 }
 
-test("an objective with no task runs the node verifications under the node identity as the judged key", async (t) => {
+test("an implement node with no task runs the node verifications under the node identity as the judged key", async (t) => {
   const h = await fixture(t, [], [fauxAssistantMessage(MET)]);
   h.revision = nodeUnitRevision("true");
   const nodeId = h.input.claim.node_id;
@@ -542,7 +542,7 @@ test("an objective with no task runs the node verifications under the node ident
     { task_id: nodeId, commit: h.head, criterion_met: true },
   ]);
   assert.equal(
-    judgedAt(h.input.workspaces.objectiveKey(nodeId), {
+    judgedAt(h.input.workspaces.nodeKey(nodeId), {
       attempt: h.input.claim.attempt,
       revision: h.input.claim.pinned_revision,
       taskId: nodeId,

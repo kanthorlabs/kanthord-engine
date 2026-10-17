@@ -206,7 +206,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
   }
 });
 
-test("an initiative with no binding places the produced evidence privately and preserves command order", async (t) => {
+test("an examine node with no binding places the produced evidence privately and preserves command order", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
     execution_id: setup.execution_id,
@@ -294,7 +294,7 @@ test("an initiative with no binding places the produced evidence privately and p
 const PLACED_REPORT = "placed report";
 const ADDED_FILE = "added.md";
 
-test("an initiative with one binding places the produced evidence outside its clean checkout", async (t) => {
+test("an examine node with one binding places the produced evidence outside its clean checkout", async (t) => {
   const setup = anthropicSetup({ repositories: [repositorySetup()] });
   const claim = {
     execution_id: setup.execution_id,

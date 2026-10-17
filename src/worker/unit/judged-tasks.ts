@@ -16,8 +16,8 @@ function keyOf(task: JudgedTask): string {
   return `${task.attempt}/${task.revision}/${task.taskId}`;
 }
 
-function read(objectiveDirectory: string): Record<string, string> {
-  const path = join(objectiveDirectory, JUDGED_TASKS_FILE);
+function read(nodeDirectory: string): Record<string, string> {
+  const path = join(nodeDirectory, JUDGED_TASKS_FILE);
   if (!existsSync(path)) return {};
   const parsed = judgedTasksSchema.safeParse(
     JSON.parse(readPrivate(path) || "{}"),
@@ -26,20 +26,20 @@ function read(objectiveDirectory: string): Record<string, string> {
 }
 
 export function judgedAt(
-  objectiveDirectory: string,
+  nodeDirectory: string,
   task: JudgedTask,
 ): string | null {
-  return read(objectiveDirectory)[keyOf(task)] ?? null;
+  return read(nodeDirectory)[keyOf(task)] ?? null;
 }
 
 export function recordJudged(
-  objectiveDirectory: string,
+  nodeDirectory: string,
   task: JudgedTask,
   commit: string,
 ): void {
-  const judged = { ...read(objectiveDirectory), [keyOf(task)]: commit };
+  const judged = { ...read(nodeDirectory), [keyOf(task)]: commit };
   writePrivate(
-    join(objectiveDirectory, JUDGED_TASKS_FILE),
+    join(nodeDirectory, JUDGED_TASKS_FILE),
     JSON.stringify(judged),
     true,
   );

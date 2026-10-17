@@ -175,7 +175,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
-            name: "objective",
+            name: "node",
             requirement: "review",
             criterion: "met",
             verifications: ["true"],
@@ -252,7 +252,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   assert.equal(assessments, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
-test("native entry runs an initiative report with the scripted provider", async (t) => {
+test("native entry runs an examine report with the scripted provider", async (t) => {
   const setup = anthropicSetup({
     work: ExecutionWork.Examine,
     repositories: [],
@@ -269,7 +269,7 @@ test("native entry runs an initiative report with the scripted provider", async 
     root_span_id: "1".repeat(16),
   };
   const provider = scriptedProvider([
-    fauxAssistantMessage("All objectives completed."),
+    fauxAssistantMessage("All dependencies completed."),
   ]);
   const store = new InMemoryCredentialStore();
   await store.modify("anthropic", async () => ({
@@ -287,7 +287,7 @@ test("native entry runs an initiative report with the scripted provider", async 
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
-            name: "initiative",
+            name: "examine",
             requirement: "report",
             criterion: "report",
             verifications: [],

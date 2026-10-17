@@ -27,8 +27,8 @@ import type {
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { readPriorRationale, readPinnedRevision } from "./node-reads.ts";
-import { prepareStepsWorkspace, runStepsObjective } from "./steps-objective.ts";
-import { runStepsInitiative } from "./steps-initiative.ts";
+import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
+import { runStepsExamine } from "./steps-examine.ts";
 import { runEvaluation } from "./evaluation.ts";
 import { phaseSpan } from "./method-telemetry.ts";
 
@@ -113,7 +113,7 @@ export async function runNativeExecution(
       if (method === WorkerMethod.Evaluation)
         return runEvaluation(input, run, budget, open);
       if (work === ExecutionWork.Examine)
-        return runStepsInitiative(input, run, revision, budget, open);
+        return runStepsExamine(input, run, revision, budget, open);
       const prior = await readPriorRationale(run);
       const workspace = await run.spans.within(phaseSpan(Phase.Prepare), () =>
         prepareStepsWorkspace(input, run),
@@ -123,8 +123,8 @@ export async function runNativeExecution(
         working = await open(workspace.directory);
       } catch (error) {
         input.workspaces.release(
-          input.workspaces.objectiveKey(input.claim.node_id),
-          WorkspaceKind.Objective,
+          input.workspaces.nodeKey(input.claim.node_id),
+          WorkspaceKind.Node,
         );
         throw error;
       }
@@ -137,7 +137,7 @@ export async function runNativeExecution(
         priorRationale: prior.rationale,
         rework: prior.rework,
       };
-      return runStepsObjective(state);
+      return runStepsImplement(state);
     });
   } finally {
     try {

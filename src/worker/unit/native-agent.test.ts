@@ -220,7 +220,7 @@ test("native agent composes only the switched-on workspace files and the project
   );
 });
 
-test("an initiative composes one project prompt part for each repository binding in binding order", async (t) => {
+test("an examine node composes one project prompt part for each repository binding in binding order", async (t) => {
   const names = ["first", "second"];
   const checkoutsOf = (workspace: string) =>
     names.map((name) => join(workspace, "checkouts", name));

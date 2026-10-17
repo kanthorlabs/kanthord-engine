@@ -76,7 +76,7 @@ function unitsOf(state: StepsState): TaskContent[] {
   return workUnitsOf(state.input.claim.node_id, state.revision);
 }
 
-async function finishObjective(
+async function finishImplement(
   state: StepsState,
   task: TaskContent | null,
   boundary: TaskBoundary | null,
@@ -85,7 +85,7 @@ async function finishObjective(
   const budgetEnd = boundary !== null && boundary !== TaskBoundary.RunFailed;
   const furtherWork = await state.run.spans.within(
     phaseSpan(Phase.Finish),
-    () => settleObjective(state, task, budgetEnd),
+    () => settleImplement(state, task, budgetEnd),
   );
   return await state.run.release(
     furtherWork,
@@ -95,7 +95,7 @@ async function finishObjective(
   );
 }
 
-async function settleObjective(
+async function settleImplement(
   state: StepsState,
   task: TaskContent | null,
   budgetEnd: boolean,
@@ -203,17 +203,17 @@ export type TaskRunner = (
   instruction: string | null,
 ) => Promise<TaskResult>;
 
-export async function runStepsObjective(
+export async function runStepsImplement(
   state: StepsState,
   taskRunner: TaskRunner = runTask,
 ): Promise<ExecutionEnd> {
   const spans = state.run.spans;
   try {
     const checked = await spans.within(phaseSpan(Phase.Start), () =>
-      startObjective(state),
+      startImplement(state),
     );
     if (checked.budgetEnd)
-      return await finishObjective(
+      return await finishImplement(
         state,
         checked.budgetEnd.task,
         checked.budgetEnd.boundary,
@@ -222,7 +222,7 @@ export async function runStepsObjective(
     const ran = await spans.within(phaseSpan(Phase.Tasks), () =>
       runPending(state, checked.pending, taskRunner),
     );
-    return await finishObjective(
+    return await finishImplement(
       state,
       ran.task,
       ran.boundary,
@@ -234,13 +234,13 @@ export async function runStepsObjective(
     throw stopped;
   } finally {
     state.input.workspaces.release(
-      state.input.workspaces.objectiveKey(state.input.claim.node_id),
-      WorkspaceKind.Objective,
+      state.input.workspaces.nodeKey(state.input.claim.node_id),
+      WorkspaceKind.Node,
     );
   }
 }
 
-async function startObjective(state: StepsState): Promise<StartCheck> {
+async function startImplement(state: StepsState): Promise<StartCheck> {
   assert.ok(state.head);
   if ((await refreshAtClaim(state)) === RefreshResult.BudgetEnd)
     return {
@@ -393,7 +393,7 @@ export async function runTask(
     });
     if (judgement.criterion_met) {
       recordJudged(
-        objectiveDirectoryOf(state),
+        nodeDirectoryOf(state),
         judgedTaskOf(state, task),
         state.head,
       );
@@ -441,8 +441,8 @@ export async function prepareStepsWorkspace(
         asset.address.binding_id === repository.binding_id,
     ),
   );
-  return await input.workspaces.prepareObjective({
-    objectiveId: input.claim.node_id,
+  return await input.workspaces.prepareImplement({
+    nodeId: input.claim.node_id,
     nodeBranch: input.claim.node_branch,
     pushed,
     repository,
@@ -515,8 +515,8 @@ async function allTasksPass(state: StepsState): Promise<boolean> {
   return true;
 }
 
-function objectiveDirectoryOf(state: StepsState): string {
-  return state.input.workspaces.objectiveKey(state.input.claim.node_id);
+function nodeDirectoryOf(state: StepsState): string {
+  return state.input.workspaces.nodeKey(state.input.claim.node_id);
 }
 
 function judgedTaskOf(state: StepsState, task: TaskContent) {
@@ -620,7 +620,7 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
       continue;
     }
     if (
-      judgedAt(objectiveDirectoryOf(state), judgedTaskOf(state, task)) ===
+      judgedAt(nodeDirectoryOf(state), judgedTaskOf(state, task)) ===
         state.head &&
       !state.priorRationale?.includes(task.id)
     )
@@ -648,7 +648,7 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
     });
     if (judgement.criterion_met)
       recordJudged(
-        objectiveDirectoryOf(state),
+        nodeDirectoryOf(state),
         judgedTaskOf(state, task),
         state.head,
       );

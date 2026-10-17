@@ -471,8 +471,8 @@ test(
       assert.equal(refused.status, HttpStatus.Forbidden);
       assert.equal(refused.error.error.code, PROOF_FAILED);
     });
-    const prepared = await root.prepareObjective({
-      objectiveId: x.execution.node_id,
+    const prepared = await root.prepareImplement({
+      nodeId: x.execution.node_id,
       nodeBranch: x.execution.node_branch,
       pushed: false,
       repository,
@@ -667,8 +667,8 @@ test(
         turns: SINGLE_TURN,
         wall_time_ms: 600000,
       });
-      const lab = await root.prepareObjective({
-        objectiveId: y.execution.node_id,
+      const lab = await root.prepareImplement({
+        nodeId: y.execution.node_id,
         nodeBranch: y.execution.node_branch,
         pushed: false,
         repository: runtimeY.setup.repositories[0]!,
@@ -714,20 +714,14 @@ test(
         assert.equal(turns.mock.callCount(), SINGLE_TURN);
       } finally {
         labAgent.dispose();
-        root.release(
-          root.objectiveKey(y.execution.node_id),
-          WorkspaceKind.Objective,
-        );
+        root.release(root.nodeKey(y.execution.node_id), WorkspaceKind.Node);
       }
     });
-    await t.test("E07.9 sweep retains only the held objective", () => {
+    await t.test("E07.9 sweep retains only the held implement node", () => {
       root.sweep(Date.now() + 8 * 24 * 3600 * 1000);
-      assert.equal(existsSync(root.objectiveKey(y.execution.node_id)), false);
-      assert.equal(existsSync(root.objectiveKey(x.execution.node_id)), true);
-      root.release(
-        root.objectiveKey(x.execution.node_id),
-        WorkspaceKind.Objective,
-      );
+      assert.equal(existsSync(root.nodeKey(y.execution.node_id)), false);
+      assert.equal(existsSync(root.nodeKey(x.execution.node_id)), true);
+      root.release(root.nodeKey(x.execution.node_id), WorkspaceKind.Node);
     });
   },
 );

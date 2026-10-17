@@ -15,17 +15,17 @@ import {
 } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
-import { TaskBoundary } from "./steps-objective.ts";
+import { TaskBoundary } from "./steps-implement.ts";
 import {
   startCheck,
   runTask,
-  runStepsObjective,
+  runStepsImplement,
   verifyTask,
-} from "./steps-objective.ts";
+} from "./steps-implement.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { BudgetLimit, ProviderFailure } from "../../scheduler/contract.ts";
 import {
-  objectiveFixture as fixture,
+  implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordReleases,
   task,
@@ -84,8 +84,8 @@ test("task work commits revisions and cleans verification writes before judgemen
   assert.ok(log.all[0]!.message.includes(current.id));
   assert.equal(existsSync(join(h.directory, "transient")), false);
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
 });
 
@@ -110,8 +110,8 @@ test("turn exhaustion during task work leaves an uncommitted checkpoint boundary
   assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), before);
   assert.ok(existsSync(join(h.directory, "notes")));
   h.input.workspaces.release(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
-    WorkspaceKind.Objective,
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    WorkspaceKind.Node,
   );
 });
 
@@ -288,7 +288,7 @@ test("a repair turn that ends the budget keeps the passing boundary and releases
   );
   endOnRepair(h);
   const bodies = recordReleases(h);
-  assert.deepEqual(await executionBoundary(h.run, () => runStepsObjective(h)), {
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
     kind: "released",
     furtherWork: true,
     stop: { reason: "budget_end", code: "wall_time" },
@@ -413,7 +413,7 @@ test("a provider error reply stops the task with provider_failed and its code", 
   assert.equal(stopped.code, ProviderFailure.Unauthorized);
 });
 
-test("an objective with no task commits its change with the node identity in the message before it releases", async (t) => {
+test("an implement node with no task commits its change with the node identity in the message before it releases", async (t) => {
   const h = await fixture(
     t,
     [],
@@ -446,7 +446,7 @@ test("an objective with no task commits its change with the node identity in the
       return { type: "completed", status: 200, data: {} };
     },
   } as unknown as MethodClients["scheduler"];
-  assert.deepEqual(await runStepsObjective(h), {
+  assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: false,
   });

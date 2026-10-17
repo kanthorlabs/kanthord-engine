@@ -11,7 +11,7 @@ import {
   mergeRef,
   resetTo,
 } from "./local-git.ts";
-import type { StepsState } from "./steps-objective.ts";
+import type { StepsState } from "./steps-implement.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 
 const NO_FILES = 0;

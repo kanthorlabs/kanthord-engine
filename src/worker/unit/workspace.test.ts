@@ -35,10 +35,10 @@ test("workspace root audits private mode and keys refuse foreign identities", (t
   const workspace = WorkspaceRoot.open(state);
   const mode = 0o700;
   assert.equal(statSync(workspace.root).mode & 0o777, mode);
-  assert.throws(() => workspace.objectiveKey("../x"));
+  assert.throws(() => workspace.nodeKey("../x"));
   assert.throws(() => workspace.executionKey(createIdentity("node")));
   assert.throws(() =>
-    workspace.objectiveDirectory(
+    workspace.nodeDirectory(
       createIdentity("node"),
       createIdentity("execution"),
     ),
@@ -55,9 +55,9 @@ test("workspace root audits private mode and keys refuse foreign identities", (t
 
 test("workspace retention respects holds and release kind", (t) => {
   const workspace = WorkspaceRoot.open(temporary(t));
-  const old = workspace.objectiveKey(createIdentity("node"));
-  const recent = workspace.objectiveKey(createIdentity("node"));
-  const held = workspace.objectiveKey(createIdentity("node"));
+  const old = workspace.nodeKey(createIdentity("node"));
+  const recent = workspace.nodeKey(createIdentity("node"));
+  const held = workspace.nodeKey(createIdentity("node"));
   const execution = workspace.executionKey(createIdentity("execution"));
   const now = Date.now();
   for (const key of [old, recent, held, execution])
@@ -70,7 +70,7 @@ test("workspace retention respects holds and release kind", (t) => {
   assert.equal(existsSync(old), false);
   assert.equal(existsSync(recent), true);
   assert.equal(existsSync(held), true);
-  workspace.release(held, WorkspaceKind.Objective);
+  workspace.release(held, WorkspaceKind.Node);
   assert.ok(statSync(held).mtimeMs > now - WORKSPACE_RETENTION_MS);
   workspace.hold(execution);
   workspace.release(execution, WorkspaceKind.Execution);
@@ -79,7 +79,7 @@ test("workspace retention respects holds and release kind", (t) => {
   workspace.stopSweeping();
 });
 
-test("workspace preparation refreshes objective branches and creates disposable snapshots and initiatives", async (t) => {
+test("workspace preparation refreshes implement branches and creates disposable snapshots and examine workspaces", async (t) => {
   const state = temporary(t);
   const origin = join(state, "origin");
   mkdirSync(origin);
@@ -102,7 +102,7 @@ test("workspace preparation refreshes objective branches and creates disposable 
   };
   const base = await commit(origin, "base");
   const workspace = WorkspaceRoot.open(state);
-  const objectiveId = createIdentity("node");
+  const nodeId = createIdentity("node");
   const repository = {
     binding_id: createIdentity("binding"),
     name: "todoapp-repo",
@@ -116,10 +116,10 @@ test("workspace preparation refreshes objective branches and creates disposable 
     strategy: { base_branch: "main" },
   };
   const common = { transport, context: background, deadlineMs: 10000 };
-  const first = await workspace.prepareObjective({
+  const first = await workspace.prepareImplement({
     ...common,
-    objectiveId,
-    nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
+    nodeId,
+    nodeBranch: nodeBranchOf(nodeId, FIRST_ATTEMPT),
     pushed: false,
     repository,
   });
@@ -132,23 +132,17 @@ test("workspace preparation refreshes objective branches and creates disposable 
     10000,
   );
   await commit(first.directory, "unpushed");
-  workspace.release(
-    workspace.objectiveKey(objectiveId),
-    WorkspaceKind.Objective,
-  );
-  const second = await workspace.prepareObjective({
+  workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
+  const second = await workspace.prepareImplement({
     ...common,
-    objectiveId,
-    nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
+    nodeId,
+    nodeBranch: nodeBranchOf(nodeId, FIRST_ATTEMPT),
     pushed: false,
     repository,
   });
   assert.equal(second.directory, first.directory);
   assert.equal(second.head, pushed);
-  workspace.release(
-    workspace.objectiveKey(objectiveId),
-    WorkspaceKind.Objective,
-  );
+  workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
   const snapshot = await workspace.prepareSnapshot({
     ...common,
     executionId: createIdentity("execution"),
@@ -167,61 +161,58 @@ test("workspace preparation refreshes objective branches and creates disposable 
     name: "other-repo",
   };
   await t.test(
-    "an initiative with two bindings checks out each base-branch head under checkouts/ and records one tested commit for each",
+    "an examine node with two bindings checks out each base-branch head under checkouts/ and records one tested commit for each",
     async () => {
-      const initiative = await workspace.prepareInitiative({
+      const examine = await workspace.prepareExamine({
         ...common,
         executionId: createIdentity("execution"),
         repositories: [repository, another],
       });
       assert.deepEqual(
-        initiative.tested_input,
+        examine.tested_input,
         [repository, another].map(({ binding_id }) => ({
           kind: "repository",
           binding_id: binding_id,
           commit: base,
         })),
       );
-      assert.equal(
-        initiative.directory,
-        join(initiative.key, CHECKOUTS_DIRECTORY),
-      );
+      assert.equal(examine.directory, join(examine.key, CHECKOUTS_DIRECTORY));
       assert.deepEqual(
-        initiative.checkouts,
+        examine.checkouts,
         [repository, another].map(({ name }) => ({
           name,
-          directory: join(initiative.key, CHECKOUTS_DIRECTORY, name),
+          directory: join(examine.key, CHECKOUTS_DIRECTORY, name),
           base_branch: "main",
         })),
       );
       for (const name of [repository.name, another.name])
-        assert.ok(existsSync(join(initiative.directory, name, ".git")));
-      workspace.release(initiative.key, WorkspaceKind.Execution);
-      assert.equal(existsSync(initiative.key), false);
+        assert.ok(existsSync(join(examine.directory, name, ".git")));
+      workspace.release(examine.key, WorkspaceKind.Execution);
+      assert.equal(existsSync(examine.key), false);
     },
   );
   await t.test(
-    "an initiative with one binding uses the checkout as the agent root",
+    "an examine node with one binding uses the checkout as the agent root",
     async () => {
-      const initiative = await workspace.prepareInitiative({
+      const examine = await workspace.prepareExamine({
         ...common,
         executionId: createIdentity("execution"),
         repositories: [repository],
       });
-      assert.deepEqual(initiative.tested_input, {
+      assert.deepEqual(examine.tested_input, {
         kind: "repository",
         binding_id: repository.binding_id,
         commit: base,
       });
       assert.equal(
-        initiative.directory,
-        join(initiative.key, CHECKOUTS_DIRECTORY, repository.name),
+        examine.directory,
+        join(examine.key, CHECKOUTS_DIRECTORY, repository.name),
       );
-      assert.ok(existsSync(join(initiative.directory, ".git")));
-      workspace.release(initiative.key, WorkspaceKind.Execution);
+      assert.ok(existsSync(join(examine.directory, ".git")));
+      workspace.release(examine.key, WorkspaceKind.Execution);
     },
   );
-  const empty = await workspace.prepareInitiative({
+  const empty = await workspace.prepareExamine({
     ...common,
     executionId: createIdentity("execution"),
     repositories: [],
@@ -231,23 +222,23 @@ test("workspace preparation refreshes objective branches and creates disposable 
   workspace.release(empty.key, WorkspaceKind.Execution);
   const failedId = createIdentity("node");
   await assert.rejects(
-    workspace.prepareObjective({
+    workspace.prepareImplement({
       ...common,
-      objectiveId: failedId,
+      nodeId: failedId,
       nodeBranch: nodeBranchOf(failedId, FIRST_ATTEMPT),
       pushed: false,
       repository: { ...repository, address: join(state, "missing") },
     }),
   );
-  const retried = await workspace.prepareObjective({
+  const retried = await workspace.prepareImplement({
     ...common,
-    objectiveId: failedId,
+    nodeId: failedId,
     nodeBranch: nodeBranchOf(failedId, FIRST_ATTEMPT),
     pushed: false,
     repository,
   });
   assert.equal(retried.head, base);
-  workspace.release(workspace.objectiveKey(failedId), WorkspaceKind.Objective);
+  workspace.release(workspace.nodeKey(failedId), WorkspaceKind.Node);
 });
 
 test("a drifted SSH identity stops every workspace preparation before its git operation", async (t) => {
@@ -282,9 +273,9 @@ test("a drifted SSH identity stops every workspace preparation before its git op
     deadlineMs: 10000,
   };
   await assert.rejects(
-    workspace.prepareObjective({
+    workspace.prepareImplement({
       ...common,
-      objectiveId: createIdentity("node"),
+      nodeId: createIdentity("node"),
       nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
       pushed: false,
       repository,
@@ -301,7 +292,7 @@ test("a drifted SSH identity stops every workspace preparation before its git op
     (error) => error === drift,
   );
   await assert.rejects(
-    workspace.prepareInitiative({
+    workspace.prepareExamine({
       ...common,
       executionId: createIdentity("execution"),
       repositories: [repository],
@@ -314,7 +305,7 @@ test("a drifted SSH identity stops every workspace preparation before its git op
 const SCRATCH_ENTRIES = 1;
 const NO_UNTRACKED = 0;
 
-test("an objective workspace excludes the scratch directory from git once", async (t) => {
+test("an implement workspace excludes the scratch directory from git once", async (t) => {
   const state = temporary(t);
   const origin = join(state, "origin");
   mkdirSync(origin);
@@ -333,13 +324,13 @@ test("an objective workspace excludes the scratch directory from git once", asyn
     "base",
   ]);
   const workspace = WorkspaceRoot.open(state);
-  const objectiveId = createIdentity("node");
+  const nodeId = createIdentity("node");
   const input = {
     transport,
     context: background,
     deadlineMs: 10000,
-    objectiveId,
-    nodeBranch: nodeBranchOf(objectiveId, FIRST_ATTEMPT),
+    nodeId,
+    nodeBranch: nodeBranchOf(nodeId, FIRST_ATTEMPT),
     pushed: false,
     repository: {
       binding_id: createIdentity("binding"),
@@ -354,12 +345,9 @@ test("an objective workspace excludes the scratch directory from git once", asyn
       strategy: { base_branch: "main" },
     },
   };
-  const prepared = await workspace.prepareObjective(input);
-  workspace.release(
-    workspace.objectiveKey(objectiveId),
-    WorkspaceKind.Objective,
-  );
-  await workspace.prepareObjective(input);
+  const prepared = await workspace.prepareImplement(input);
+  workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
+  await workspace.prepareImplement(input);
   const exclude = readFileSync(
     join(prepared.directory, ".git", "info", "exclude"),
     "utf8",
@@ -374,10 +362,7 @@ test("an objective workspace excludes the scratch directory from git once", asyn
     (await simpleGit(prepared.directory).status()).not_added.length,
     NO_UNTRACKED,
   );
-  workspace.release(
-    workspace.objectiveKey(objectiveId),
-    WorkspaceKind.Objective,
-  );
+  workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
 });
 
 const RESTART_ATTEMPT = 2;
@@ -417,7 +402,7 @@ async function restartFixture(t: test.TestContext) {
   const seed = join(state, SEED_NAME);
   const git = simpleGit(seed);
   const workspace = WorkspaceRoot.open(state);
-  const objectiveId = createIdentity("node");
+  const nodeId = createIdentity("node");
   const repository = {
     binding_id: createIdentity("binding"),
     name: "todoapp-repo",
@@ -431,19 +416,16 @@ async function restartFixture(t: test.TestContext) {
     strategy: { base_branch: "main" },
   };
   const prepare = async (startAttempt: number, pushed = false) => {
-    const prepared = await workspace.prepareObjective({
+    const prepared = await workspace.prepareImplement({
       transport,
       context: background,
       deadlineMs: 10000,
-      objectiveId,
-      nodeBranch: nodeBranchOf(objectiveId, startAttempt),
+      nodeId,
+      nodeBranch: nodeBranchOf(nodeId, startAttempt),
       pushed,
       repository,
     });
-    workspace.release(
-      workspace.objectiveKey(objectiveId),
-      WorkspaceKind.Objective,
-    );
+    workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
     return prepared;
   };
   const remoteHead = async (branch: string) =>

@@ -141,16 +141,16 @@ test("failed and unrun rationale names the command and cause", () => {
     evidence: [],
   };
   const instruction = evaluationInstruction(SHIPPED_TEMPLATES, input);
-  const initiative = evaluationInstruction(SHIPPED_TEMPLATES, {
+  const examineEvaluation = evaluationInstruction(SHIPPED_TEMPLATES, {
     ...input,
     examine: true,
   });
   assert.doesNotMatch(instruction, /proposals/);
   assert.match(
-    initiative,
-    /A defect inside a completed objective dependency gets one proposal with dependency_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
+    examineEvaluation,
+    /A defect inside a completed implement dependency gets one proposal with dependency_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
   );
-  assert.match(initiative, /"proposals": \[\{"dependency_id"/);
+  assert.match(examineEvaluation, /"proposals": \[\{"dependency_id"/);
   assert.match(instruction, /distinct criterion/);
   assert.match(
     instruction,

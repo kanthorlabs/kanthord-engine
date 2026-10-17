@@ -9,7 +9,7 @@ import { readDependencies } from "./node-reads.ts";
 import { examineInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { WorkspaceKind, workRepositoriesOf } from "./workspace.ts";
-import type { StepsInput } from "./steps-objective.ts";
+import type { StepsInput } from "./steps-implement.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
 import { runVerifications } from "./verification.ts";
@@ -19,7 +19,7 @@ import { testedCommitOf, verificationObserver } from "./method-telemetry.ts";
 export const REPORT_SUBJECT = "Report on current dependency outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
 
-export async function runStepsInitiative(
+export async function runStepsExamine(
   input: StepsInput,
   run: ExecutionRun,
   revision: Revision,
@@ -33,7 +33,7 @@ export async function runStepsInitiative(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
     input.claim.expired_at,
   );
-  const workspace = await input.workspaces.prepareInitiative({
+  const workspace = await input.workspaces.prepareExamine({
     executionId: input.claim.execution_id,
     transport: input.transport,
     context: run.operationContext,

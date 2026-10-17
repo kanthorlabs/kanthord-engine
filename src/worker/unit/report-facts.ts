@@ -41,7 +41,7 @@ function dependencyTable(
 
 function verificationSection(verification: Verification | null): string {
   if (verification === null)
-    return "No final-snapshot verification ran: the initiative names no repository binding.";
+    return "No final-snapshot verification ran: the node names no repository binding.";
   const inputs = [verification.tested_input]
     .flat()
     .map((input) =>

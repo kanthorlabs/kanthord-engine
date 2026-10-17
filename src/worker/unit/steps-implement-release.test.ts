@@ -7,8 +7,8 @@ import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
 import { EndReason } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import type { TaskRunner } from "./steps-objective.ts";
-import { runTask, runStepsObjective } from "./steps-objective.ts";
+import type { TaskRunner } from "./steps-implement.ts";
+import { runTask, runStepsImplement } from "./steps-implement.ts";
 import { refreshBeforeRelease } from "./base-refresh.ts";
 import { recordJudged } from "./judged-tasks.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -22,7 +22,7 @@ import { GitStep } from "./method-telemetry.ts";
 import {
   advanceBase,
   commitOnNode,
-  objectiveFixture as fixture,
+  implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordReleases,
   task,
@@ -34,7 +34,7 @@ const LATE_MAIN_CHANGE = "late main change";
 
 function judgeNodeUnit(h: Awaited<ReturnType<typeof fixture>>) {
   recordJudged(
-    h.input.workspaces.objectiveKey(h.input.claim.node_id),
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
     {
       attempt: h.input.claim.attempt,
       revision: h.input.claim.pinned_revision,
@@ -44,7 +44,7 @@ function judgeNodeUnit(h: Awaited<ReturnType<typeof fixture>>) {
   );
 }
 
-test("objective pushes the evidenced head before release and retains its workspace", async (t) => {
+test("implement pushes the evidenced head before release and retains its workspace", async (t) => {
   const h = await fixture(t, [], []);
   judgeNodeUnit(h);
   const order: string[] = [];
@@ -66,7 +66,7 @@ test("objective pushes the evidenced head before release and retains its workspa
       return { type: "completed", status: 200, data: {} };
     },
   } as unknown as MethodClients["scheduler"];
-  assert.deepEqual(await runStepsObjective(h), {
+  assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: false,
   });
@@ -75,7 +75,7 @@ test("objective pushes the evidenced head before release and retains its workspa
   assert.ok(existsSync(h.directory));
 });
 
-test("objective checkpoints budget-ended work and refuses release after a failed push", async (t) => {
+test("implement checkpoints budget-ended work and refuses release after a failed push", async (t) => {
   const current = task("partial", "false");
   const h = await fixture(
     t,
@@ -95,7 +95,7 @@ test("objective checkpoints budget-ended work and refuses release after a failed
       return { type: "completed", status: 200, data: {} };
     },
   } as unknown as MethodClients["scheduler"];
-  assert.deepEqual(await runStepsObjective(h), {
+  assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: true,
     stop: { reason: "budget_end", code: "turns" },
@@ -115,7 +115,7 @@ test("objective checkpoints budget-ended work and refuses release after a failed
       throw new Error("push failed");
     },
   };
-  await assert.rejects(runStepsObjective(other));
+  await assert.rejects(runStepsImplement(other));
   assert.ok(existsSync(other.directory));
 });
 
@@ -139,7 +139,7 @@ test("S1 budget-ended task verification releases the evidenced head without furt
       return { type: "completed", status: 200, data: {} };
     },
   } as unknown as MethodClients["scheduler"];
-  assert.deepEqual(await runStepsObjective(h), {
+  assert.deepEqual(await runStepsImplement(h), {
     kind: "released",
     furtherWork: false,
   });
@@ -186,7 +186,7 @@ test("a stop with each reason checkpoints, pushes and releases with the stop", a
     const stop = { reason, code: STOP_CODE };
     assert.deepEqual(
       await executionBoundary(h.run, () =>
-        runStepsObjective(h, stoppingRunner(reason)),
+        runStepsImplement(h, stoppingRunner(reason)),
       ),
       { kind: "released", furtherWork: true, stop },
     );
@@ -215,7 +215,7 @@ test("a failed push still releases with the stop and a failed release ends with 
   const stop = { reason: EndReason.OperationFailed, code: STOP_CODE };
   assert.deepEqual(
     await executionBoundary(pushed.run, () =>
-      runStepsObjective(pushed, stoppingRunner(EndReason.OperationFailed)),
+      runStepsImplement(pushed, stoppingRunner(EndReason.OperationFailed)),
     ),
     { kind: "released", furtherWork: true, stop },
   );
@@ -228,7 +228,7 @@ test("a failed push still releases with the stop and a failed release ends with 
   } as unknown as MethodClients["scheduler"];
   assert.deepEqual(
     await executionBoundary(refused.run, () =>
-      runStepsObjective(refused, stoppingRunner(EndReason.OperationFailed)),
+      runStepsImplement(refused, stoppingRunner(EndReason.OperationFailed)),
     ),
     { kind: "ended", ...stop },
   );
@@ -246,7 +246,7 @@ test("a revoked stop writes no checkpoint, pushes nothing and releases nothing",
   };
   assert.deepEqual(
     await executionBoundary(h.run, () =>
-      runStepsObjective(h, stoppingRunner(EndReason.Revoked)),
+      runStepsImplement(h, stoppingRunner(EndReason.Revoked)),
     ),
     { kind: "ended", reason: EndReason.Revoked, code: STOP_CODE },
   );
@@ -305,7 +305,7 @@ test("the finish writes one git span for each git step and the cause of a failed
       );
     },
   };
-  await assert.rejects(runStepsObjective(h));
+  await assert.rejects(runStepsImplement(h));
   const gitStarts = records.filter(
     (record) =>
       record.kind === RecordKind.Span &&
