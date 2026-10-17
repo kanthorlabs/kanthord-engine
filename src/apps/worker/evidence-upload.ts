@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { open, realpath, lstat, type FileHandle } from "node:fs/promises";
 import { platform } from "node:os";
 import { isAbsolute, relative, resolve, dirname, sep } from "node:path";
+import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import { ulid } from "ulid";
 import {
@@ -12,11 +13,18 @@ import {
   type Context,
 } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { OBJECT_SIZE_MAX } from "../../mission/contract.ts";
+import { IntakeErrorCode } from "../../intake/contract.ts";
+import type { z } from "zod";
+import {
+  AssetKind,
+  OBJECT_SIZE_MAX,
+  type evidenceSubmitResultSchema,
+} from "../../mission/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
+import { S3_RESULT_CODE_PREFIX } from "../../storage/contract.ts";
 import type { UploadResult } from "../../worker/contract.ts";
 import type { WorkerTransport } from "./transport.ts";
-import { completed } from "./handover.ts";
+import { completed, HandoverRefused } from "./handover.ts";
 
 export const WorkerErrorCode = {
   EvidenceUploadPathRefused: "worker.evidence_upload.path_refused",
@@ -35,6 +43,7 @@ const LINUX = "linux";
 const DARWIN_NOFOLLOW_ANY = 0x20000000;
 const HASH_CHUNK_BYTES = 64 * 1024;
 const NO_BYTES = 0;
+const UPLOADS_PER_SUBMISSION = 1;
 
 const evidenceFiles = { open, realpath, lstat };
 async function openContained(root: string, path: string, io = evidenceFiles) {
@@ -174,13 +183,25 @@ export async function openEvidence(
   }
 }
 
+async function* contentOf(file: FileHandle, size: number) {
+  let position = 0;
+  while (position < size) {
+    const chunk = Buffer.alloc(Math.min(HASH_CHUNK_BYTES, size - position));
+    const { bytesRead } = await file.read(chunk, 0, chunk.length, position);
+    if (bytesRead === NO_BYTES) refuse(PathRefusal.Replaced);
+    position += bytesRead;
+    yield chunk.subarray(0, bytesRead);
+  }
+}
+
 async function transfer(
-  file: Awaited<ReturnType<typeof open>>,
+  file: FileHandle,
+  size: number,
   putUrl: string,
   headers: Record<string, string>,
   context: Context,
 ) {
-  const stream = file.createReadStream({ start: 0, autoClose: false });
+  const stream = Readable.from(contentOf(file, size));
   const bridge = abortSignal(context);
   try {
     const options: RequestInit & { duplex: "half" } = {
@@ -210,6 +231,50 @@ async function transfer(
   }
 }
 
+type Execution = {
+  execution_id: string;
+  attempt: number;
+  node_revision: number;
+};
+type EvidenceSubmitResult = z.infer<typeof evidenceSubmitResultSchema>;
+type Upload = EvidenceSubmitResult["uploads"][number];
+
+function checkFailed(error: unknown): boolean {
+  return (
+    error instanceof HandoverRefused &&
+    (error.code === IntakeErrorCode.StorageObjectMismatch ||
+      error.code.startsWith(S3_RESULT_CODE_PREFIX))
+  );
+}
+
+function grantedBindingOf(submitted: EvidenceSubmitResult, upload: Upload) {
+  const asset = submitted.evidence.assets.find(
+    (item) => item.id === upload.asset_id,
+  );
+  assert.ok(asset?.kind === AssetKind.Object);
+  return asset.storage_binding_id;
+}
+
+async function publish(
+  file: FileHandle,
+  size: number,
+  upload: Upload,
+  execution: Execution,
+  api: WorkerTransport,
+  context: Context,
+) {
+  await transfer(file, size, upload.put_url, upload.headers, context).catch(
+    () => throwIfCancelled(context),
+  );
+  throwIfCancelled(context);
+  return completed(
+    await api.mission["evidence.asset.complete"](
+      { params: { asset_id: upload.asset_id }, query: {}, body: execution },
+      { context, idempotencyKey: ulid() },
+    ),
+  );
+}
+
 export async function uploadEvidence(input: {
   workspace: string;
   path: string;
@@ -224,49 +289,61 @@ export async function uploadEvidence(input: {
     throwIfCancelled(context);
     file = await openEvidence(input.workspace, input.path);
     const metadata = await hashEvidence(file, context);
-    throwIfCancelled(context);
-    const execution = {
+    const execution: Execution = {
       execution_id: claim.execution_id,
       attempt: claim.attempt,
       node_revision: claim.pinned_revision,
     };
-    const submitted = completed(
-      await api.mission["evidence.submit"](
-        {
-          params: { node_id: claim.node_id },
-          query: {},
-          body: {
-            ...execution,
-            subject: input.path,
-            assets: [
-              {
-                kind: "object",
-                size: metadata.size,
-                media_type: OBJECT_MEDIA_TYPE,
-                sha256: metadata.sha256,
-              },
-            ],
+    const granted = new Set<string>();
+    let failure: unknown = null;
+    for (;;) {
+      throwIfCancelled(context);
+      const submitted = completed(
+        await api.mission["evidence.submit"](
+          {
+            params: { node_id: claim.node_id },
+            query: {},
+            body: {
+              ...execution,
+              subject: input.path,
+              assets: [
+                {
+                  kind: "object",
+                  size: metadata.size,
+                  media_type: OBJECT_MEDIA_TYPE,
+                  sha256: metadata.sha256,
+                },
+              ],
+            },
           },
-        },
-        { context, idempotencyKey: ulid() },
-      ),
-    );
-    const singleUpload = 1;
-    assert.equal(submitted.uploads.length, singleUpload);
-    const upload = submitted.uploads[0]!;
-    await transfer(file, upload.put_url, upload.headers, context);
-    const result = completed(
-      await api.mission["evidence.asset.complete"](
-        { params: { asset_id: upload.asset_id }, query: {}, body: execution },
-        { context, idempotencyKey: ulid() },
-      ),
-    );
-    assert.equal(result.asset_id, upload.asset_id);
-    return {
-      evidence_id: result.evidence_id,
-      asset_id: result.asset_id,
-      uri: result.uri,
-    };
+          { context, idempotencyKey: ulid() },
+        ),
+      );
+      assert.equal(submitted.uploads.length, UPLOADS_PER_SUBMISSION);
+      const upload = submitted.uploads[0]!;
+      const bindingId = grantedBindingOf(submitted, upload);
+      if (granted.has(bindingId)) throw failure;
+      granted.add(bindingId);
+      try {
+        const result = await publish(
+          file,
+          metadata.size,
+          upload,
+          execution,
+          api,
+          context,
+        );
+        assert.equal(result.asset_id, upload.asset_id);
+        return {
+          evidence_id: result.evidence_id,
+          asset_id: result.asset_id,
+          uri: result.uri,
+        };
+      } catch (error) {
+        if (!checkFailed(error)) throw error;
+        failure = error;
+      }
+    }
   } finally {
     await file?.close();
     context.cancel();

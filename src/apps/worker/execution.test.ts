@@ -170,7 +170,16 @@ test("host takes handover before setup and method, discards on every method end"
         type: OperationResultType.Completed,
         status: 200,
         data: {
-          evidence: { id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA" },
+          evidence: {
+            id: "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+            assets: [
+              {
+                id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+                kind: "object",
+                storage_binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+              },
+            ],
+          },
           uploads: [
             {
               asset_id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA",
