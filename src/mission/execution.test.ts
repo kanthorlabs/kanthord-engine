@@ -52,21 +52,21 @@ test("execution admission derives the pin and actor and rejects ended or foreign
   }
 });
 
-test("execution context checks every supplied field and refuses a task route", (t) => {
+test("execution context checks every supplied field and refuses another node route", (t) => {
   const h = executionHarness(t, IDENTITY);
-  const taskId = createIdentity("node");
+  const otherId = createIdentity("node");
   h.store.transaction((tx) =>
     insertNode(tx, {
-      id: taskId,
+      id: otherId,
       mission_id: h.mission_id,
-      kind: NodeKind.Task,
-      filename: "task.md",
+      kind: NodeKind.Objective,
+      filename: "other.md",
       parent_id: h.node_id,
       created_at: NOW,
     }),
   );
   const cases = [
-    { node_id: taskId, context: h.context, field: "node_id" },
+    { node_id: otherId, context: h.context, field: "node_id" },
     {
       node_id: h.node_id,
       context: { ...h.context, execution_id: createIdentity("execution") },

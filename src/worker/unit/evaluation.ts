@@ -74,7 +74,7 @@ async function judge(
   openAgent: OpenAgent,
   objectives: Awaited<ReturnType<typeof readObjectives>> | null,
 ) {
-  const kind = nodeKindOf(revision);
+  const kind = nodeKindOf(revision, input.setup);
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
   if (!verificationPassed(verification, commands))
@@ -94,7 +94,7 @@ async function judge(
     work,
     evaluationInstruction(input.setup.templates, {
       kind,
-      tasks: revision.tasks ?? [],
+      tasks: revision.tasks,
       verification,
       evidence,
       objectives,
@@ -138,7 +138,7 @@ async function evaluate(
 ) {
   assert.ok(prepared.directory);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
-  const kind = nodeKindOf(revision);
+  const kind = nodeKindOf(revision, input.setup);
   const verificationRun = await runVerificationsWithOutput({
     observe: verificationObserver(
       run.spans,
@@ -208,7 +208,7 @@ export async function runEvaluation(
 ): Promise<ExecutionEnd> {
   const revision = await readPinnedRevision(run);
   const evidence = await readAttemptEvidence(run);
-  const kind = nodeKindOf(revision);
+  const kind = nodeKindOf(revision, input.setup);
   const prepared = await prepareEvaluation(input, run, kind, evidence);
   try {
     const assessment = await run.spans.within(

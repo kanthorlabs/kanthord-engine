@@ -4,31 +4,23 @@ import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { importAdmissible, isTerminal } from "./admission.ts";
-import { TASKS_FIELD, validateText } from "./content.ts";
+import { validateText } from "./content.ts";
 import {
   EdgeKind,
   MissionErrorCode,
-  NodeKind,
-  RevisionWrite,
-  TaskChange,
   type Edge,
   type HumanActor,
   type NodeChange,
   type Retire,
   type RetirePreview,
-  type Revision,
   type WorkQueue,
   type MissionBindings,
 } from "./contract.ts";
 import { requireNode } from "./node-read.ts";
-import { revisionFromRow } from "./revision.ts";
-import { openAttemptsOf } from "./store.ts";
 import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   deleteDependency,
   incrementMissionVersion,
-  insertRevision,
-  readCurrentRevision,
   readDependencies,
   readMissionNodes,
   type NodeRow,
@@ -79,21 +71,12 @@ function retirementSet(tx: Transaction, node: NodeRow): NodeRow[] {
 
 function checkRetirement(tx: Transaction, node: NodeRow): void {
   assert.equal(node.retired_at, null, "Only current nodes enter retirement.");
-  if (node.kind === NodeKind.Task)
-    assert.ok(node.parent_id, "A task has an objective parent.");
-  const checked =
-    node.kind === NodeKind.Task ? requireNode(tx, node.parent_id!) : node;
-  assert.notEqual(
-    checked.kind,
-    NodeKind.Task,
-    "Retirement checks a runnable owner.",
-  );
-  if (!importAdmissible(checked.state, checked.attempt))
+  if (!importAdmissible(node.state, node.attempt))
     throw new OperationError(
       HttpStatus.Conflict,
       MissionErrorCode.RetireRefused,
       "Node cannot be retired.",
-      { node_id: checked.id, state: checked.state, attempt: checked.attempt },
+      { node_id: node.id, state: node.state, attempt: node.attempt },
     );
 }
 
@@ -168,57 +151,9 @@ export function planRetirement(
   return { ...preview, preview_digest: digest(preview) };
 }
 
-function retireTasks(
-  tx: Transaction,
-  objectiveId: string,
-  retiredIds: Set<string>,
-  reason: string,
-  actor: HumanActor,
-  now: number,
-): Revision {
-  const row = readCurrentRevision(tx, objectiveId);
-  assert.ok(row, "Surviving objective has a current revision.");
-  const previous = revisionFromRow(tx, row);
-  assert.ok(previous.tasks, "Objective revision contains tasks.");
-  const retired = previous.tasks.filter((task) => retiredIds.has(task.id));
-  assert.ok(retired.length, "Affected objective loses at least one task.");
-  const revision: Revision = {
-    ...previous,
-    revision: previous.revision + COUNTER_INCREMENT,
-    reason,
-    actor,
-    created_at: now,
-    pinned_by_attempts: [],
-    tasks: previous.tasks.filter((task) => !retiredIds.has(task.id)),
-    change: {
-      write: RevisionWrite.NodeRetire,
-      previous_revision: previous.revision,
-      changed_fields: [TASKS_FIELD],
-      tasks: retired.map((task) => ({
-        id: task.id,
-        change: TaskChange.Retired,
-        changed_fields: [],
-      })),
-    },
-  };
-  insertRevision(tx, revision);
-  return revision;
-}
-
-function retireRows(
-  tx: Transaction,
-  ids: Set<string>,
-  reason: string,
-  actor: HumanActor,
-): Revision[] {
+function retireRows(tx: Transaction, ids: Set<string>): void {
   const now = Date.now();
-  const objectives = new Set<string>();
   for (const id of ids) {
-    const node = requireNode(tx, id);
-    if (node.kind === NodeKind.Task) {
-      assert.ok(node.parent_id, "Retired task has an objective parent.");
-      if (!ids.has(node.parent_id)) objectives.add(node.parent_id);
-    }
     const result = tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(now, id);
@@ -228,9 +163,6 @@ function retireRows(
       "Retirement retains and marks one node.",
     );
   }
-  return [...objectives]
-    .sort()
-    .map((id) => retireTasks(tx, id, ids, reason, actor, now));
 }
 
 export function retireNode(
@@ -267,12 +199,7 @@ export function retireNode(
     if (edge.kind === EdgeKind.Dependency)
       deleteDependency(tx, edge.dependent_id, edge.depends_on_id);
   }
-  const revisions = retireRows(
-    tx,
-    new Set(plan.retired_node_ids),
-    body.reason,
-    actor,
-  );
+  retireRows(tx, new Set(plan.retired_node_ids));
   routeMission(tx, mission.id);
   reconcileMission(
     tx,
@@ -295,13 +222,10 @@ export function retireNode(
   );
   return {
     mission_version: missionVersion,
-    revisions,
+    revisions: [],
     retired_node_ids: plan.retired_node_ids,
     added_edges: [],
     removed_edges: plan.removed_edges,
-    open_attempts_unchanged: openAttemptsOf(
-      tx,
-      revisions.map((revision) => revision.node_id),
-    ),
+    open_attempts_unchanged: [],
   };
 }

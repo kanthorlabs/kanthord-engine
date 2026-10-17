@@ -45,7 +45,6 @@ import {
   nodeUpdateSchema,
   prioritySetSchema,
   rebindSchema,
-  NodeKind,
   nodeKindSchema,
   nodeStateSchema,
 } from "../../mission/contract.ts";
@@ -109,7 +108,6 @@ const NODE_LIST_INVALID_MISSION_ID = "cli.mission.node.list.invalid_mission_id";
 const NODE_LIST_INVALID_NODE_ID = "cli.mission.node.list.invalid_node_id";
 const NODE_LIST_INVALID_KIND = "cli.mission.node.list.invalid_kind";
 const NODE_LIST_INVALID_STATE = "cli.mission.node.list.invalid_state";
-const KIND_STATE_CONFLICT = "cli.mission.node.list.kind_state_conflict";
 const NODE_GET_INVALID_NODE_ID = "cli.mission.node.get.invalid_node_id";
 const NODE_CREATE_INVALID_MISSION_ID =
   "cli.mission.node.create.invalid_mission_id";
@@ -174,11 +172,6 @@ async function nodeList(missionId: string, command: Command): Promise<void> {
   const state = nodeStateSchema.optional().safeParse(options.state);
   if (!state.success)
     throw new Diagnostic(NODE_LIST_INVALID_STATE, "invalid node state");
-  if (kind.data === NodeKind.Task && state.data !== undefined)
-    throw new Diagnostic(
-      KIND_STATE_CONFLICT,
-      "tasks have no independent state",
-    );
   if (options.parent !== undefined)
     validateNodeId(options.parent, NODE_LIST_INVALID_NODE_ID);
   const query = {
@@ -645,12 +638,12 @@ function addNodeCommands(mission: Command): void {
       .argument("<mission-id>", "Mission ID")
       .option(
         "--kind <kind>",
-        "Filter by initiative, objective, or task",
+        "Filter by initiative or objective",
         singleUse("--kind"),
       )
       .option(
         "--state <state>",
-        "Filter by exact node state (not tasks)",
+        "Filter by exact node state",
         singleUse("--state"),
       )
       .option(

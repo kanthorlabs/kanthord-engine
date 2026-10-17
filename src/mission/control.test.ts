@@ -35,7 +35,7 @@ const NO_ATTEMPT = 0;
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const KEY = "repo.pull_request";
 
-test("control admission checks retirement, kind and mission before settlement and state", (t) => {
+test("control admission checks retirement and mission before settlement and state", (t) => {
   const h = controlHarness(t, IDENTITY);
   const check = (code: string) =>
     assert.throws(
@@ -58,10 +58,6 @@ test("control admission checks retirement, kind and mission before settlement an
   check(MissionErrorCode.Retired);
   h.store.database
     .prepare("UPDATE mission_node SET retired_at = NULL, kind = ? WHERE id = ?")
-    .run(NodeKind.Task, h.node_id);
-  check(ControlError.Task);
-  h.store.database
-    .prepare("UPDATE mission_node SET kind = ? WHERE id = ?")
     .run(NodeKind.Initiative, h.node_id);
   check(MissionErrorCode.VersionConflict);
   assert.deepEqual(h.calls, []);
@@ -168,7 +164,6 @@ test("attempt-zero human records produce blocked context and no attempt", (t) =>
     );
     assert.equal(answer.attempt, null);
     assert.equal(answer.outcome?.attempt, NO_ATTEMPT);
-    assert.ok(answer.node.kind !== NodeKind.Task);
     assert.equal(answer.node.state, NodeState.Blocked);
     assert.equal(requireMission(tx, h.mission_id).version, FIRST_ATTEMPT);
   });

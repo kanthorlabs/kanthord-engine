@@ -8,7 +8,6 @@ import {
   NodeState,
   PROPOSAL_IDENTITY_PREFIX,
   type HumanActor,
-  type NodeChange,
   type ProposalApprove,
 } from "./contract.ts";
 import { stateConflict } from "./control.ts";
@@ -22,7 +21,6 @@ import type { Dependencies } from "./service.ts";
 import { readCurrentRevision } from "./store.ts";
 import { requireActive, requireMission } from "./write.ts";
 
-const FIRST_REVISION = 1;
 const IDENTITY_SEPARATOR_LENGTH = 1;
 const FILENAME_PREFIX = "proposal-";
 const FILENAME_SUFFIX = ".md";
@@ -34,17 +32,6 @@ function filenameStem(proposalId: string): string {
   return `${FILENAME_PREFIX}${proposalId
     .slice(PROPOSAL_IDENTITY_PREFIX.length + IDENTITY_SEPARATOR_LENGTH)
     .toLowerCase()}`;
-}
-
-function mergeChanges(objective: NodeChange, task: NodeChange): NodeChange {
-  return {
-    mission_version: task.mission_version,
-    revisions: [...objective.revisions, ...task.revisions],
-    retired_node_ids: [],
-    added_edges: [...objective.added_edges, ...task.added_edges],
-    removed_edges: [],
-    open_attempts_unchanged: task.open_attempts_unchanged,
-  };
 }
 
 export function approveProposal(
@@ -99,6 +86,12 @@ export function approveProposal(
         verifications: task.verifications,
         bindings: revisionFromRow(tx, sourceRow).content.bindings,
       },
+      tasks: [
+        {
+          filename: `${stem}${TASK_FILENAME_SUFFIX}`,
+          content: { ...task, bindings: NO_BINDINGS },
+        },
+      ],
       reason,
       expected_mission_version: mission.version,
       parent_id: initiative.id,
@@ -111,23 +104,6 @@ export function approveProposal(
   );
   const objectiveId = objective.revisions[0]?.node_id;
   assert.ok(objectiveId);
-  const taskChange = createNode(
-    tx,
-    mission.id,
-    {
-      filename: `${stem}${TASK_FILENAME_SUFFIX}`,
-      kind: NodeKind.Task,
-      content: { ...task, bindings: NO_BINDINGS },
-      reason,
-      expected_mission_version: objective.mission_version,
-      parent_id: objectiveId,
-      expected_parent_revision: FIRST_REVISION,
-    },
-    actor,
-    dependencies.bindings,
-    dependencies.workQueue,
-    dependencies.config.text_max_bytes,
-  );
   const unblocked = unblockNode(
     tx,
     dependencies,
@@ -135,7 +111,7 @@ export function approveProposal(
     {
       blocked_attempt: proposal.attempt,
       expected_revision: initiativeRevision.revision,
-      expected_mission_version: taskChange.mission_version,
+      expected_mission_version: objective.mission_version,
       ...(body.reason === undefined ? {} : { reason: body.reason }),
     },
     actor,
@@ -143,7 +119,7 @@ export function approveProposal(
   );
   markProposalApproved(tx, proposal.id, objectiveId, now);
   return {
-    objective: mergeChanges(objective, taskChange),
+    objective,
     initiative: unblocked,
   };
 }

@@ -10,6 +10,7 @@ import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-objective.ts";
 import { runTask, runStepsObjective } from "./steps-objective.ts";
 import { refreshBeforeRelease } from "./base-refresh.ts";
+import { recordJudged } from "./judged-tasks.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   RecordKind,
@@ -31,8 +32,21 @@ import {
 const NO_PUSHES = 0;
 const LATE_MAIN_CHANGE = "late main change";
 
+function judgeNodeUnit(h: Awaited<ReturnType<typeof fixture>>) {
+  recordJudged(
+    h.input.workspaces.objectiveKey(h.input.claim.node_id),
+    {
+      attempt: h.input.claim.attempt,
+      revision: h.input.claim.pinned_revision,
+      taskId: h.input.claim.node_id,
+    },
+    h.head,
+  );
+}
+
 test("objective pushes the evidenced head before release and retains its workspace", async (t) => {
   const h = await fixture(t, [], []);
+  judgeNodeUnit(h);
   const order: string[] = [];
   h.run.clients.mission = {
     "evidence.submit": async (input: {
@@ -272,6 +286,7 @@ test("the release refresh refuses a conflicting base change and keeps the node h
 
 test("the finish writes one git span for each git step and the cause of a failed push", async (t) => {
   const h = await fixture(t, [], []);
+  judgeNodeUnit(h);
   const records: TelemetryRecord[] = [];
   (h.run as { spans: SpanRecorder }).spans = new SpanRecorder(
     h.run.claim,

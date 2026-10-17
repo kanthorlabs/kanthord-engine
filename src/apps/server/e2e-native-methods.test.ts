@@ -225,23 +225,23 @@ test(
       const result = await write<{
         revisions: {
           node_id: string;
-          tasks?: { id: string; filename: string }[];
+          tasks: { id: string; filename: string }[];
         }[];
       }>(["mission", "node", "create", mission.id], {
+        tasks: [],
         ...body,
         reason: "methods acceptance",
         expected_mission_version: version,
       });
-      const task = result.revisions
-        .flatMap((revision) => revision.tasks ?? [])
-        .find((task) => task.filename === body.filename);
-      return task?.id ?? result.revisions[0]!.node_id;
+      return result.revisions[0]!;
     }
-    const initiative = await create({
-      filename: "initiative.md",
-      kind: "initiative",
-      content: { ...CONTENT, verifications: ["true"] },
-    });
+    const initiative = (
+      await create({
+        filename: "initiative.md",
+        kind: "initiative",
+        content: { ...CONTENT, verifications: ["true"] },
+      })
+    ).node_id;
     const nodes: string[] = [];
     const tasks: string[] = [];
     for (const [index, name] of ["a", "b", "c"].entries()) {
@@ -254,21 +254,19 @@ test(
         parent_id: initiative,
         expected_parent_revision: FIRST_REVISION,
         content: { ...CONTENT, bindings: [binding] },
-      });
-      nodes.push(node);
-      tasks.push(
-        await create({
-          filename: `task-${name}.md`,
-          kind: "task",
-          parent_id: node,
-          expected_parent_revision: FIRST_REVISION,
-          content: {
-            ...CONTENT,
-            criterion: "hello.txt holds hello",
-            verifications: ["grep -q hello hello.txt"],
+        tasks: [
+          {
+            filename: `task-${name}.md`,
+            content: {
+              ...CONTENT,
+              criterion: "hello.txt holds hello",
+              verifications: ["grep -q hello hello.txt"],
+            },
           },
-        }),
-      );
+        ],
+      });
+      nodes.push(node.node_id);
+      tasks.push(node.tasks[0]!.id);
     }
     const [A, B, C] = nodes as [string, string, string];
     for (const [node, value] of [

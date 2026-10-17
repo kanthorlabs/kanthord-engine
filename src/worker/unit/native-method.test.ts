@@ -28,6 +28,7 @@ import {
   fauxToolCall,
   scriptedProvider,
   scriptedModelRuntime,
+  repositorySetup,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { noTranscript } from "./transcript.ts";
@@ -143,10 +144,11 @@ test("S1 refusal aborts an active native session and records its stopped transcr
 });
 
 test("S1 native reviewer evaluates even when the attempt already contains an expected request", async (t) => {
+  const repository = repositorySetup();
   const setup = anthropicSetup({
     worker_name: "reviewer@1",
     agents: [anthropicAgent({ agent_name: "re@1" })],
-    repositories: [],
+    repositories: [repository],
   });
   const claim = {
     execution_id: setup.execution_id,
@@ -176,7 +178,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
             requirement: "review",
             criterion: "met",
             verifications: ["true"],
-            bindings: [],
+            bindings: [repository.binding_id],
           },
           tasks: [],
         }),

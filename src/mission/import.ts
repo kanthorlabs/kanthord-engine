@@ -14,7 +14,10 @@ import {
   EdgeKind,
   ImportFormat,
   MissionErrorCode,
+  NODE_IDENTITY_PREFIX,
   NodeKind,
+  PlanFileKind,
+  TASK_IDENTITY_PREFIX,
   planFileNameSchema,
   type Content,
   type Edge,
@@ -23,15 +26,19 @@ import {
   type ImportSnapshot,
   type Mission,
   type MissionBindings,
+  type TaskContent,
   type Violation,
 } from "./contract.ts";
 import { hasDependencyCycle, type DepEdge } from "./graph.ts";
 import { nodeRecord } from "./node-read.ts";
 import { parsePlanFile, type ParsedPlanFile } from "./parser.ts";
+import { revisionFromRow } from "./revision.ts";
 import {
+  readCurrentRevision,
   readDependencies,
   readMissionNodes,
   readNode,
+  taskOwnerOf,
   type NodeRow,
 } from "./store.ts";
 
@@ -51,6 +58,7 @@ const PLAN_REASON = {
   DependsOnForbidden: "depends_on_forbidden",
   DependsOnRepeated: "depends_on_repeated",
   ReferenceInvalid: "reference_invalid",
+  IdPrefixInvalid: "id_prefix_invalid",
 } as const;
 type Reference = (typeof REFERENCE)[keyof typeof REFERENCE];
 type Locator = Pick<NormalizedEntry, "filename" | "id">;
@@ -62,10 +70,13 @@ export interface NormalizedSnapshot {
   violations: Violation[];
 }
 
+export type CurrentTask = TaskContent & { owner_id: string };
+
 export interface ResolvedImportEntry {
   entry: NormalizedEntry;
   key: string;
   current: NodeRow | null;
+  task: CurrentTask | null;
   parent_id: string | null;
   depends_on: Set<string>;
   binding_ids: string[];
@@ -81,6 +92,7 @@ export interface ResolvedImport {
   removed_edges: Edge[];
   resolved_entries: ResolvedImportEntry[];
   current_nodes: Map<string, NodeRow>;
+  current_tasks: Map<string, CurrentTask>;
   current_dependencies: DepEdge[];
   parent_map: Map<string, string>;
   dependencies: Map<string, Set<string>>;
@@ -102,7 +114,9 @@ function violation(
     message,
     details,
     filename: entry?.filename ?? null,
-    node_id: entry?.id ?? null,
+    node_id: entry?.id?.startsWith(`${NODE_IDENTITY_PREFIX}_`)
+      ? entry.id
+      : null,
   };
 }
 
@@ -126,8 +140,14 @@ function planRules(entry: ImportEntry, violations: Violation[]): void {
     reasons.push(PLAN_REASON.ParentForbidden);
   if (entry.kind !== NodeKind.Initiative && entry.parent === undefined)
     reasons.push(PLAN_REASON.ParentRequired);
-  if (entry.kind === NodeKind.Task && entry.depends_on !== undefined)
+  if (entry.kind === PlanFileKind.Task && entry.depends_on !== undefined)
     reasons.push(PLAN_REASON.DependsOnForbidden);
+  const prefix =
+    entry.kind === PlanFileKind.Task
+      ? TASK_IDENTITY_PREFIX
+      : NODE_IDENTITY_PREFIX;
+  if (entry.id !== undefined && !entry.id.startsWith(`${prefix}_`))
+    reasons.push(PLAN_REASON.IdPrefixInvalid);
   const dependencies = entry.depends_on ?? [];
   if (new Set(dependencies).size !== dependencies.length)
     reasons.push(PLAN_REASON.DependsOnRepeated);
@@ -204,7 +224,7 @@ export function normalizeImportSnapshot(
         : input;
     if (parsed === undefined) continue;
     const rules =
-      "content" in input && parsed.kind === NodeKind.Task
+      "content" in input && parsed.kind === PlanFileKind.Task
         ? { ...parsed, depends_on: undefined }
         : parsed;
     planRules(rules, violations);
@@ -222,8 +242,10 @@ function resolveIdentity(
   entry: NormalizedEntry,
   seen: Set<string>,
   violations: Violation[],
-): NodeRow | null {
-  if (entry.id === undefined) return null;
+  currentTasks: Map<string, CurrentTask>,
+): Pick<ResolvedImportEntry, "current" | "task"> {
+  const none = { current: null, task: null };
+  if (entry.id === undefined) return none;
   const id = entry.id;
   if (seen.has(id))
     violations.push(
@@ -235,6 +257,26 @@ function resolveIdentity(
       ),
     );
   seen.add(id);
+  if (entry.kind === PlanFileKind.Task) {
+    const task = currentTasks.get(id);
+    if (task !== undefined) return { current: null, task };
+    violations.push(
+      taskOwnerOf(tx, mission.id, id) === null
+        ? violation(
+            MissionErrorCode.UnknownId,
+            "Task identity does not exist.",
+            { id },
+            entry,
+          )
+        : violation(
+            MissionErrorCode.RetiredId,
+            "Task identity is retired.",
+            { id },
+            entry,
+          ),
+    );
+    return none;
+  }
   const current = readNode(tx, id);
   if (current === null) {
     violations.push(
@@ -245,7 +287,7 @@ function resolveIdentity(
         entry,
       ),
     );
-    return null;
+    return none;
   }
   if (current.mission_id !== mission.id)
     violations.push(
@@ -274,7 +316,7 @@ function resolveIdentity(
         entry,
       ),
     );
-  return current;
+  return { current, task: null };
 }
 
 function resolveReference(
@@ -297,11 +339,11 @@ function resolveReference(
     return null;
   }
   const expectedParent =
-    entry.kind === NodeKind.Task ? NodeKind.Objective : NodeKind.Initiative;
+    entry.kind === PlanFileKind.Task ? NodeKind.Objective : NodeKind.Initiative;
   const valid =
     reference === REFERENCE.Parent
       ? target.entry.kind === expectedParent
-      : target.entry.kind !== NodeKind.Task;
+      : target.entry.kind !== PlanFileKind.Task;
   if (!valid) {
     violations.push(
       violation(
@@ -323,6 +365,19 @@ function resolveBindings(
   bindings: MissionBindings,
   violations: Violation[],
 ): string[] {
+  if (entry.kind === PlanFileKind.Task) {
+    if (entry.bindings.length > EMPTY_FIELD_LENGTH)
+      violations.push(
+        violation(
+          MissionErrorCode.BindingsInvalid,
+          "A task names no binding.",
+          { filename: entry.filename },
+          entry,
+        ),
+      );
+    return [];
+  }
+  const kind = entry.kind;
   const resolved: ResolvedBinding[] = [];
   for (const name of entry.bindings) {
     const binding = collect(violations, entry, () =>
@@ -343,22 +398,22 @@ function resolveBindings(
     resolved.push(binding);
   }
   if (resolved.length === entry.bindings.length)
-    collect(violations, entry, () =>
-      checkBindingRuleTable(entry.kind, resolved),
-    );
+    collect(violations, entry, () => checkBindingRuleTable(kind, resolved));
   return resolved.map((binding) => binding.binding_id);
 }
 
 function checkVerificationCoverage(result: ResolvedImport): void {
   const covered = new Map<string, Set<string>>();
   for (const item of result.resolved_entries) {
-    if (item.entry.kind !== NodeKind.Task || item.parent_id === null) continue;
+    if (item.entry.kind !== PlanFileKind.Task || item.parent_id === null)
+      continue;
     const commands = covered.get(item.parent_id) ?? new Set<string>();
     for (const command of item.entry.verifications) commands.add(command);
     covered.set(item.parent_id, commands);
   }
   for (const item of result.resolved_entries) {
-    if (item.entry.kind !== NodeKind.Objective) continue;
+    if (item.entry.kind !== NodeKind.Objective || !covered.has(item.key))
+      continue;
     for (const command of item.entry.verifications)
       if (!covered.get(item.key)?.has(command))
         result.violations.push(
@@ -410,7 +465,7 @@ function resolveGraph(result: ResolvedImport): void {
     })),
   );
   const runnable = result.resolved_entries
-    .filter((item) => item.entry.kind !== NodeKind.Task)
+    .filter((item) => item.entry.kind !== PlanFileKind.Task)
     .map((item) => item.key);
   if (hasDependencyCycle(runnable, edges, result.parent_map))
     result.violations.push(
@@ -442,6 +497,23 @@ function entryChanged(
     current.parent_id !== item.parent_id ||
     canonicalJSON(nodeRecord(tx, current, bindings).content) !==
       canonicalJSON(content)
+  );
+}
+
+function taskChanged(item: ResolvedImportEntry): boolean {
+  const { entry, task } = item;
+  assert.ok(task, "Only an existing task can be compared.");
+  const content: Content = {
+    name: entry.name,
+    requirement: entry.requirement,
+    criterion: entry.criterion,
+    verifications: entry.verifications,
+    bindings: item.binding_ids,
+  };
+  return (
+    task.filename !== entry.filename ||
+    task.owner_id !== item.parent_id ||
+    canonicalJSON(task.content) !== canonicalJSON(content)
   );
 }
 
@@ -491,17 +563,34 @@ function classify(
     "Classification requires a valid resolved graph.",
   );
   const kept = new Set<string>();
+  const keptTasks = new Set<string>();
+  const owners = new Set<string>();
+  for (const item of result.resolved_entries) {
+    if (item.entry.kind !== PlanFileKind.Task) continue;
+    if (item.parent_id !== null && item.task?.owner_id !== item.parent_id)
+      owners.add(item.parent_id);
+    if (item.task === null) continue;
+    keptTasks.add(item.task.id);
+    if (taskChanged(item)) {
+      owners.add(item.task.owner_id);
+      if (item.parent_id !== null) owners.add(item.parent_id);
+    }
+  }
+  for (const task of result.current_tasks.values())
+    if (!keptTasks.has(task.id)) owners.add(task.owner_id);
   for (const item of result.resolved_entries) {
     if (item.entry.id === undefined) {
       result.creates.push(item.entry.filename);
       continue;
     }
+    if (item.entry.kind === PlanFileKind.Task) continue;
     assert.ok(
       item.current,
       "Supplied identities resolve before classification.",
     );
     kept.add(item.current.id);
-    const contentChanged = entryChanged(tx, item, bindings);
+    const contentChanged =
+      entryChanged(tx, item, bindings) || owners.has(item.current.id);
     if (contentChanged) result.content_updates.push(item.current.id);
     const previous = result.current_dependencies
       .filter((edge) => edge.dependent === item.key)
@@ -542,6 +631,13 @@ export function resolveImportSet(
       .filter((node) => node.retired_at === null)
       .map((node) => [node.id, node]),
   );
+  const currentTasks = new Map<string, CurrentTask>();
+  for (const node of currentNodes.values()) {
+    const row = readCurrentRevision(tx, node.id);
+    assert.ok(row, "A current node has a revision.");
+    for (const task of revisionFromRow(tx, row).tasks)
+      currentTasks.set(task.id, { ...task, owner_id: node.id });
+  }
   const result: ResolvedImport = {
     violations: [],
     creates: [],
@@ -552,6 +648,7 @@ export function resolveImportSet(
     removed_edges: [],
     resolved_entries: [],
     current_nodes: currentNodes,
+    current_tasks: currentTasks,
     current_dependencies: readDependencies(tx, mission.id).filter(
       (edge) =>
         currentNodes.has(edge.dependent) && currentNodes.has(edge.depends_on),
@@ -564,7 +661,14 @@ export function resolveImportSet(
     result.resolved_entries.push({
       entry,
       key: entry.id ?? `${TEMPORARY_KEY_PREFIX}${entry.filename}`,
-      current: resolveIdentity(tx, mission, entry, seen, result.violations),
+      ...resolveIdentity(
+        tx,
+        mission,
+        entry,
+        seen,
+        result.violations,
+        currentTasks,
+      ),
       parent_id: null,
       depends_on: new Set(),
       binding_ids: resolveBindings(
@@ -590,18 +694,23 @@ function modifiedNodes(resolved: ResolvedImport): Set<string> {
   const add = (id: string | null): void => {
     if (id !== null && resolved.current_nodes.has(id)) modified.add(id);
   };
+  const keptTasks = new Set<string>();
   for (const item of resolved.resolved_entries) {
-    const { current } = item;
+    const { current, task } = item;
+    if (task !== null) {
+      keptTasks.add(task.id);
+      if (!taskChanged(item)) continue;
+      add(task.owner_id);
+      add(item.parent_id);
+      continue;
+    }
     if (current === null) {
       add(item.parent_id);
       continue;
     }
     if (!updates.has(current.id)) continue;
-    if (current.kind !== NodeKind.Task) add(current.id);
-    if (
-      current.kind === NodeKind.Task ||
-      current.parent_id !== item.parent_id
-    ) {
+    add(current.id);
+    if (current.parent_id !== item.parent_id) {
       add(current.parent_id);
       add(item.parent_id);
     }
@@ -609,10 +718,12 @@ function modifiedNodes(resolved: ResolvedImport): Set<string> {
   for (const id of retiring) {
     const node = resolved.current_nodes.get(id);
     assert.ok(node, "Retirements name current nodes.");
-    add(node.kind === NodeKind.Task ? node.parent_id : node.id);
+    add(node.id);
     if (node.parent_id !== null && !retiring.has(node.parent_id))
       add(node.parent_id);
   }
+  for (const task of resolved.current_tasks.values())
+    if (!keptTasks.has(task.id)) add(task.owner_id);
   return modified;
 }
 
@@ -623,10 +734,7 @@ export function checkImportCondition(
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
   const violations: Violation[] = [];
   const modified = modifiedNodes(resolved);
-  const dependents = resolved.updates.filter(
-    (id) => resolved.current_nodes.get(id)?.kind !== NodeKind.Task,
-  );
-  for (const id of [...new Set([...modified, ...dependents])].sort()) {
+  for (const id of [...new Set([...modified, ...resolved.updates])].sort()) {
     const node = readNode(tx, id);
     assert.ok(node, "Modified nodes exist in the transaction.");
     const locator = { id, filename: node.filename };

@@ -86,10 +86,7 @@ function candidates(
   missionId: string,
   body: Rebind,
 ): NodeRow[] {
-  if (body.node_id === undefined)
-    return readMissionNodes(tx, missionId).filter(
-      (node) => node.kind !== NodeKind.Task,
-    );
+  if (body.node_id === undefined) return readMissionNodes(tx, missionId);
   const node = requireNode(tx, body.node_id);
   if (node.mission_id !== missionId)
     throw new OperationError(
@@ -99,7 +96,6 @@ function candidates(
     );
   requireActive(node);
   requireNonterminal(node);
-  if (node.kind === NodeKind.Task) mismatch(node.id, body.binding_id);
   assert.equal(node.id, body.node_id, "Candidate must be the requested node.");
   assert.ok(node.state, "Candidate must be runnable.");
   return [node];
@@ -144,7 +140,6 @@ function reboundRevision(
   body: Rebind,
   actor: HumanActor,
 ): Revision {
-  assert.notEqual(node.kind, NodeKind.Task, "Tasks own no binding pins.");
   assert.equal(previous.node_id, node.id, "Revision must belong to candidate.");
   return {
     ...previous,

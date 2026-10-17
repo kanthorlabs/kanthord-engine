@@ -23,11 +23,13 @@ import { WorkspaceKind } from "./workspace.ts";
 import { TaskBoundary } from "./steps-objective.ts";
 import { prepareStepsWorkspace, startCheck } from "./steps-objective.ts";
 import { RefreshResult, refreshAtClaim } from "./base-refresh.ts";
+import { judgedAt } from "./judged-tasks.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
   advanceBase,
   commitOnNode,
   objectiveFixture as fixture,
+  NO_PROVIDER_CALLS,
   task,
 } from "./test-support.ts";
 
@@ -520,4 +522,54 @@ test("the claim refresh aborts the merge and stops when a conflict marker remain
   await assert.rejects(refreshAtClaim(h), ExecutionStop);
   assert.equal(await simpleGit(h.directory).revparse(["HEAD"]), before);
   assert.equal((await simpleGit(h.directory).status()).isClean(), true);
+});
+
+function nodeUnitRevision(command: string): Revision {
+  return {
+    filename: "objective.md",
+    content: { ...NODE_CONTENT, verifications: [command] },
+    tasks: [],
+  } as unknown as Revision;
+}
+
+test("an objective with no task runs the node verifications under the node identity as the judged key", async (t) => {
+  const h = await fixture(t, [], [fauxAssistantMessage(MET)]);
+  h.revision = nodeUnitRevision("true");
+  const nodeId = h.input.claim.node_id;
+  const events = t.mock.method(h.run, "log");
+  assert.deepEqual((await startCheck(h)).pending, []);
+  assert.deepEqual(loggedFields(events, TASK_JUDGED), [
+    { task_id: nodeId, commit: h.head, criterion_met: true },
+  ]);
+  assert.equal(
+    judgedAt(h.input.workspaces.objectiveKey(nodeId), {
+      attempt: h.input.claim.attempt,
+      revision: h.input.claim.pinned_revision,
+      taskId: nodeId,
+    }),
+    h.head,
+  );
+  assert.ok(JSON.stringify(h.provider.calls[0]).includes(nodeId));
+  h.revision = nodeUnitRevision("false");
+  assert.deepEqual(
+    (await startCheck(h)).pending.map((pending) => pending.task.id),
+    [nodeId],
+  );
+  assert.equal(h.provider.calls.length, ONE_JUDGEMENT);
+});
+
+test("a failed node verification sends no task-choice instruction", async (t) => {
+  const h = await fixture(t, [], []);
+  h.revision = nodeUnitRevision(`echo ${NODE_FAILURE}; false`);
+  h.rework = true;
+  const events = t.mock.method(h.run, "log");
+  const checked = await startCheck(h);
+  assert.equal(checked.budgetEnd, null);
+  assert.deepEqual(
+    checked.pending.map((pending) => pending.task.id),
+    [h.input.claim.node_id],
+  );
+  assert.ok(checked.pending[0]!.instruction?.includes(NODE_FAILURE));
+  assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+  assert.deepEqual(loggedFields(events, "task chosen"), []);
 });

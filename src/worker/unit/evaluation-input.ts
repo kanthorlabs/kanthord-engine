@@ -203,6 +203,6 @@ export function verificationCommands(
 ): string[] {
   return [
     ...revision.content.verifications,
-    ...(revision.tasks ?? []).flatMap((task) => task.content.verifications),
+    ...revision.tasks.flatMap((task) => task.content.verifications),
   ];
 }

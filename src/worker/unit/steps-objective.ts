@@ -62,6 +62,20 @@ export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
 const NO_PROGRESS_LIMIT = 2;
 
+export function workUnitsOf(
+  nodeId: string,
+  revision: Pick<Revision, "filename" | "content" | "tasks">,
+): TaskContent[] {
+  if (revision.tasks.length > NO_TASKS) return revision.tasks;
+  return [
+    { id: nodeId, filename: revision.filename, content: revision.content },
+  ];
+}
+
+function unitsOf(state: StepsState): TaskContent[] {
+  return workUnitsOf(state.input.claim.node_id, state.revision);
+}
+
 async function finishObjective(
   state: StepsState,
   task: TaskContent | null,
@@ -227,7 +241,6 @@ export async function runStepsObjective(
 }
 
 async function startObjective(state: StepsState): Promise<StartCheck> {
-  assert.ok(state.revision.tasks);
   assert.ok(state.head);
   if ((await refreshAtClaim(state)) === RefreshResult.BudgetEnd)
     return {
@@ -246,8 +259,7 @@ async function runPending(
   boundary: TaskBoundary | null;
   completedTasks: number;
 }> {
-  assert.ok(state.revision.tasks);
-  assert.ok(pending.length <= state.revision.tasks.length);
+  assert.ok(pending.length <= unitsOf(state).length);
   let completedTasks = NO_TASKS;
   for (const { task, boundary, instruction } of pending) {
     state.task = task;
@@ -495,8 +507,7 @@ async function verifyCommands(
 }
 
 async function allTasksPass(state: StepsState): Promise<boolean> {
-  assert.ok(state.revision.tasks);
-  for (const task of state.revision.tasks) {
+  for (const task of unitsOf(state)) {
     const verification = await verifyTask(state, task);
     if (!verificationPassed(verification, task.content.verifications))
       return false;
@@ -533,9 +544,7 @@ interface NodeCheck {
 }
 
 async function reworkNodeCheck(state: StepsState): Promise<NodeCheck> {
-  assert.ok(state.revision.tasks);
-  if (!state.rework || state.revision.tasks.length === NO_TASKS)
-    return { budgetEnd: false, revised: null };
+  if (!state.rework) return { budgetEnd: false, revised: null };
   const commands = state.revision.content.verifications;
   const run = await verifyCommands(state, commands);
   const passed = verificationPassed(run.verification, commands);
@@ -547,7 +556,10 @@ async function reworkNodeCheck(state: StepsState): Promise<NodeCheck> {
   if (state.agent.budget.exhausted()) return { budgetEnd: true, revised: null };
   if (passed) return { budgetEnd: false, revised: null };
   const failure = failedVerificationReport(run, commands);
-  const task = await chooseTask(state, failure);
+  const task =
+    state.revision.tasks.length === NO_TASKS
+      ? unitsOf(state)[0]!
+      : await chooseTask(state, failure);
   if (task === null) return { budgetEnd: true, revised: null };
   return {
     budgetEnd: false,
@@ -566,7 +578,6 @@ async function chooseTask(
   failure: string,
 ): Promise<TaskContent | null> {
   const tasks = state.revision.tasks;
-  assert.ok(tasks);
   const last = tasks.at(-1);
   assert.ok(last);
   await state.agent.instruct(
@@ -585,7 +596,6 @@ async function chooseTask(
 }
 
 export async function startCheck(state: StepsState): Promise<StartCheck> {
-  assert.ok(state.revision.tasks);
   assert.ok(state.head);
   const pending: PendingTask[] = [];
   const node = await reworkNodeCheck(state);
@@ -594,7 +604,7 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
       pending,
       budgetEnd: { task: null, boundary: TaskBoundary.InProgress },
     };
-  for (const task of state.revision.tasks) {
+  for (const task of unitsOf(state)) {
     state.task = task;
     const verification = await verifyTask(state, task);
     const passed = verificationPassed(verification, task.content.verifications);

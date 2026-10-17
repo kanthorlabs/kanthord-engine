@@ -20,6 +20,10 @@ import {
   MISSION_IDENTITY_PREFIX,
   MISSION_INITIAL_VERSION,
   NODE_IDENTITY_PREFIX,
+  TASK_IDENTITY_PREFIX,
+  TaskChange,
+  type TaskContent,
+  PlanFileKind,
   MissionErrorCode,
   RebindSkipCondition,
   type Node,
@@ -100,12 +104,14 @@ const TWO_ITEMS = 2;
 const THREE_ITEMS = 3;
 const DIGEST = "0".repeat(64);
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+const TASK_ID_PATTERN = /^task_[0-9A-HJKMNP-TV-Z]{26}$/;
 const MANIFEST_FILE = "manifest.json";
 const RETIRE_FILE = "retire.json";
 const PLAN_FIRST_REVISION = "plan1.md";
 const PLAN_SECOND_REVISION = "plan2.md";
 const NEW_OBJECTIVE_FILE = "new-objective.md";
 const NEW_TASK_FILE = "new-task.md";
+const TASK_FILE = "task-1.md";
 const NEW_OBJECTIVE_CONTENT = [
   "---",
   "kind: objective",
@@ -185,7 +191,6 @@ const SHARED_DIRECTORY = "shared";
 const PUBLISH_FAILED = "system.files.publish_failed";
 const EXISTING_FILE = "keep.md";
 const EXISTING_CONTENT = "preserve this file";
-const KIND_STATE_CONFLICT = "cli.mission.node.list.kind_state_conflict";
 const INVALID_REVISION_CODE = "cli.mission.node.revision.get.invalid_revision";
 const INVALID_FORMAT_CODE = "cli.mission.export.invalid_format";
 const OUT_NOT_EMPTY = "cli.mission.export.out_not_empty";
@@ -261,18 +266,6 @@ const READ_LEAVES = [
 ];
 const INVALID_CASES = [
   {
-    args: [
-      NODE,
-      LIST,
-      MISSION_ID,
-      KIND,
-      NodeKind.Task,
-      STATE,
-      NodeState.Available,
-    ],
-    code: KIND_STATE_CONFLICT,
-  },
-  {
     args: [NODE, REVISION, GET, NODE_ID, INVALID_REVISION],
     code: INVALID_REVISION_CODE,
   },
@@ -305,7 +298,15 @@ const INVALID_CASES = [
   },
   { args: [EDGE, LIST, MISSION_ID, LIMIT, ZERO_LIMIT], code: LIMIT_INVALID },
   {
-    args: [NODE, LIST, MISSION_ID, KIND, NodeKind.Task, KIND, NodeKind.Task],
+    args: [
+      NODE,
+      LIST,
+      MISSION_ID,
+      KIND,
+      NodeKind.Objective,
+      KIND,
+      NodeKind.Objective,
+    ],
     code: DUPLICATE_OPTION,
   },
 ];
@@ -388,6 +389,7 @@ async function createNode(
   parentId?: string,
   parentRevision = FIRST_REVISION,
   bindings: string[] = [],
+  tasks: string[] = [],
 ): Promise<Mutation> {
   assert.ok(missionId);
   assert.ok(Number.isSafeInteger(version));
@@ -395,6 +397,7 @@ async function createNode(
     filename: `${kind}-${version}.md`,
     kind,
     content: { ...CONTENT, bindings },
+    tasks: tasks.map((filename) => ({ filename, content: CONTENT })),
     reason: REASON,
     expected_mission_version: version,
     ...(parentId === undefined
@@ -529,7 +532,7 @@ test("mission graph commands expose flags and reject invalid rebind IDs offline"
 });
 
 test(
-  "mission node create replay, update and move task between objectives",
+  "mission node create replay, update and move an objective with its task",
   { timeout: NODE_EDIT_LIFECYCLE_TIMEOUT_MS },
   async (t) => {
     const fixture = await setup(t);
@@ -539,6 +542,7 @@ test(
       filename: "initiative.md",
       kind: NodeKind.Initiative,
       content: CONTENT,
+      tasks: [],
       reason: REASON,
       expected_mission_version: mission.version,
     });
@@ -570,6 +574,7 @@ test(
           jsonFile(fixture, "update.json", {
             filename: "initiative.md",
             content: { ...CONTENT, name: "Updated plan" },
+            tasks: [],
             reason: REASON,
             expected_revision: FIRST_REVISION,
             expected_mission_version: SECOND_REVISION,
@@ -653,6 +658,7 @@ test(
       initiativeId,
       SECOND_REVISION,
       [bindingId],
+      [TASK_FILE],
     );
     const second = await createNode(
       fixture,
@@ -665,28 +671,28 @@ test(
     );
     const oldParent = first.revisions[0]!.node_id;
     const newParent = second.revisions[0]!.node_id;
-    const task = await createNode(
+    const taskId = first.revisions[0]!.tasks[0]!.id;
+    assert.ok(taskId.startsWith(`${TASK_IDENTITY_PREFIX}_`));
+    const target = await createNode(
       fixture,
       mission.id,
-      NodeKind.Task,
+      NodeKind.Initiative,
       second.mission_version,
-      oldParent,
     );
-    const taskId = task.revisions[0]?.tasks?.[0]?.id;
-    assert.ok(taskId);
+    const targetId = target.revisions[0]!.node_id;
     const moved = success<Mutation>(
       await kanthord(
         [
           MISSION,
           NODE,
           MOVE,
-          taskId,
+          oldParent,
           FILE,
           jsonFile(fixture, "move.json", {
-            new_parent_id: newParent,
+            new_parent_id: targetId,
             reason: REASON,
-            expected_mission_version: task.mission_version,
-            expected_revision: SECOND_REVISION,
+            expected_mission_version: target.mission_version,
+            expected_revision: FIRST_REVISION,
             expected_old_parent_revision: SECOND_REVISION,
             expected_new_parent_revision: FIRST_REVISION,
           }),
@@ -696,13 +702,17 @@ test(
     );
     assert.equal(
       moved.mission_version,
-      task.mission_version + VERSION_INCREMENT,
+      target.mission_version + VERSION_INCREMENT,
     );
     assert.ok(moved.idempotency_key);
-    const read = success<{ parent_id: string }>(
-      await kanthord([MISSION, NODE, GET, taskId], fixture.env),
+    const read = success<Node>(
+      await kanthord([MISSION, NODE, GET, oldParent], fixture.env),
     );
-    assert.equal(read.parent_id, newParent);
+    assert.equal(read.parent_id, targetId);
+    assert.deepEqual(
+      read.tasks.map((task) => task.id),
+      [taskId],
+    );
     const graphFile = (version: number) =>
       jsonFile(fixture, `graph-${version}.json`, {
         reason: REASON,
@@ -1059,13 +1069,7 @@ test(
       initiative.revisions[0]!.node_id,
       FIRST_REVISION,
       [bindingId],
-    );
-    const task = await createNode(
-      fixture,
-      mission.id,
-      NodeKind.Task,
-      objective.mission_version,
-      objective.revisions[0]!.node_id,
+      [TASK_FILE],
     );
     const out = join(fixture.directory, OUTPUT_DIRECTORY);
     const exported = success<{ mission_version: number }>(
@@ -1074,7 +1078,7 @@ test(
         fixture.env,
       ),
     );
-    assert.equal(exported.mission_version, task.mission_version);
+    assert.equal(exported.mission_version, objective.mission_version);
     const paths = readdirSync(out).map((filename) => join(out, filename));
     assert.equal(paths.length, THREE_ITEMS);
     const manifest = {
@@ -1082,7 +1086,7 @@ test(
       mission_version: exported.mission_version,
     };
     const preview = await previewImport(fixture, mission.id, manifest, paths);
-    assert.equal(preview.no_ops.length, THREE_ITEMS);
+    assert.equal(preview.no_ops.length, TWO_ITEMS);
     assert.deepEqual(preview.creates, []);
     const unchanged = await applyImport(
       fixture,
@@ -1127,8 +1131,169 @@ test(
         ({ filename }) => filename === NEW_OBJECTIVE_FILE,
       ),
     );
+    assert.ok(
+      applied.assigned_ids.some(
+        (assigned) =>
+          assigned.filename === NEW_TASK_FILE &&
+          "task_id" in assigned &&
+          assigned.task_id.startsWith(`${TASK_IDENTITY_PREFIX}_`),
+      ),
+    );
     assert.equal(readFileSync(newPath, UTF8), NEW_OBJECTIVE_CONTENT);
     await retireImportedNode(fixture, applied);
+  },
+);
+
+test(
+  "EF01.1-EF01.6 tasks are content of their objective through the CLI",
+  { timeout: IMPORT_LIFECYCLE_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await setup(t);
+    const mission = await createMission(fixture);
+    const bindingId = await configureRepository(fixture, mission.project_id);
+    const initiative = await createNode(
+      fixture,
+      mission.id,
+      NodeKind.Initiative,
+      mission.version,
+    );
+    const created = success<Mutation>(
+      await kanthord(
+        [
+          MISSION,
+          NODE,
+          CREATE,
+          mission.id,
+          FILE,
+          jsonFile(fixture, "objective.json", {
+            filename: "objective-tasks.md",
+            kind: NodeKind.Objective,
+            content: { ...CONTENT, bindings: [bindingId] },
+            tasks: [
+              { filename: "task-first.md", content: CONTENT },
+              { filename: "task-second.md", content: CONTENT },
+            ],
+            parent_id: initiative.revisions[0]!.node_id,
+            expected_parent_revision: FIRST_REVISION,
+            reason: REASON,
+            expected_mission_version: initiative.mission_version,
+          }),
+        ],
+        fixture.env,
+      ),
+    );
+    const revision = created.revisions[0]!;
+    const objectiveId = revision.node_id;
+    assert.equal(revision.tasks.length, TWO_ITEMS);
+    for (const task of revision.tasks) assert.match(task.id, TASK_ID_PATTERN);
+    assert.deepEqual(
+      revision.change.tasks?.map(({ change }) => change),
+      [TaskChange.Created, TaskChange.Created],
+    );
+    const [first, second] = revision.tasks as [TaskContent, TaskContent];
+    const read = await readNode(fixture, objectiveId);
+    assert.deepEqual(read.tasks, revision.tasks);
+    const updated = success<Mutation>(
+      await kanthord(
+        [
+          MISSION,
+          NODE,
+          UPDATE,
+          objectiveId,
+          FILE,
+          jsonFile(fixture, "update.json", {
+            filename: read.filename,
+            content: read.content,
+            tasks: [second],
+            reason: REASON,
+            expected_revision: read.visible_revision,
+            expected_mission_version: created.mission_version,
+          }),
+        ],
+        fixture.env,
+      ),
+    );
+    assert.deepEqual(updated.revisions[0]!.change.tasks, [
+      { id: first.id, change: TaskChange.Retired, changed_fields: [] },
+    ]);
+    refusal(
+      await kanthord([MISSION, NODE, GET, second.id], fixture.env),
+      INVALID_NODE_ID_CODE,
+    );
+    const out = join(fixture.directory, OUTPUT_FILE);
+    const exported = success<{ mission_version: number }>(
+      await kanthord(
+        exportArgs(mission.id, ImportFormat.Json, out),
+        fixture.env,
+      ),
+    );
+    const payload = JSON.parse(readFileSync(out, UTF8)) as ExportAnswer;
+    assert.ok(JSON_ENTRIES in payload);
+    const manifest = {
+      format: ImportFormat.Json,
+      mission_id: mission.id,
+      mission_version: exported.mission_version,
+      reason: REASON,
+      entries: payload.entries,
+    };
+    const preview = await previewImport(fixture, mission.id, manifest, []);
+    const applied = await applyImport(
+      fixture,
+      mission.id,
+      manifest,
+      [],
+      preview,
+    );
+    assert.equal(applied.mission_version, exported.mission_version);
+    const kept = await readNode(fixture, objectiveId);
+    assert.equal(
+      kept.visible_revision,
+      read.visible_revision + VERSION_INCREMENT,
+    );
+    assert.deepEqual(
+      kept.tasks.map(({ id }) => id),
+      [second.id],
+    );
+    const empty = success<Mutation>(
+      await kanthord(
+        [
+          MISSION,
+          NODE,
+          CREATE,
+          mission.id,
+          FILE,
+          jsonFile(fixture, "empty.json", {
+            filename: "objective-empty.md",
+            kind: NodeKind.Objective,
+            content: { ...CONTENT, bindings: [bindingId] },
+            tasks: [],
+            parent_id: initiative.revisions[0]!.node_id,
+            expected_parent_revision: FIRST_REVISION,
+            reason: REASON,
+            expected_mission_version: applied.mission_version,
+          }),
+        ],
+        fixture.env,
+      ),
+    );
+    assert.deepEqual(empty.revisions[0]!.tasks, []);
+    const markdown = join(fixture.directory, OUTPUT_DIRECTORY);
+    success(
+      await kanthord(
+        exportArgs(mission.id, ImportFormat.Markdown, markdown),
+        fixture.env,
+      ),
+    );
+    const paths = readdirSync(markdown)
+      .filter((filename) => !filename.startsWith("task-"))
+      .map((filename) => join(markdown, filename));
+    const uncovered = await previewImport(
+      fixture,
+      mission.id,
+      { ...IMPORT_CONTROLS, mission_version: empty.mission_version },
+      paths,
+    );
+    assert.deepEqual(uncovered.violations, []);
   },
 );
 
@@ -1139,7 +1304,7 @@ async function retireImportedNode(
   const assigned = applied.assigned_ids.find(
     ({ filename }) => filename === NEW_OBJECTIVE_FILE,
   );
-  assert.ok(assigned);
+  assert.ok(assigned && "node_id" in assigned);
   const nodeId = assigned.node_id;
   const preview = success<RetirePreview>(
     await kanthord([MISSION, NODE, RETIRE, PREVIEW, nodeId], fixture.env),
@@ -1420,6 +1585,7 @@ async function scenarioInitiative(fixture: Fixture): Promise<Scenario> {
     filename: INITIATIVE_PLAN,
     kind: NodeKind.Initiative,
     content: CONTENT,
+    tasks: [],
     reason: REASON,
     expected_mission_version: mission.version,
   });
@@ -1477,6 +1643,7 @@ async function scenarioChildren(scenario: Scenario): Promise<void> {
     initiativeId,
     FIRST_REVISION,
     [scenario.bindingId],
+    [TASK_FILE],
   );
   assert.equal(objective.mission_version, scenario.version + VERSION_INCREMENT);
   assert.equal(objective.revisions.length, SINGLE_ITEM);
@@ -1484,26 +1651,17 @@ async function scenarioChildren(scenario: Scenario): Promise<void> {
   scenario.version = objective.mission_version;
   const read = await readNode(fixture, scenario.objectiveId);
   assert.deepEqual(read.content.bindings, [scenario.bindingId]);
-  const task = await createNode(
-    fixture,
-    mission.id,
-    NodeKind.Task,
-    scenario.version,
-    scenario.objectiveId,
-  );
-  assert.equal(task.mission_version, scenario.version + VERSION_INCREMENT);
-  const taskId = task.revisions[0]?.tasks?.[0]?.id;
-  assert.ok(taskId);
+  const taskId = objective.revisions[0]!.tasks[0]!.id;
+  assert.ok(taskId.startsWith(`${TASK_IDENTITY_PREFIX}_`));
   scenario.taskId = taskId;
-  scenario.version = task.mission_version;
   const listed = success<Page<Node>>(
     await kanthord([MISSION, NODE, LIST, mission.id], fixture.env),
   );
-  assert.equal(listed.items.length, THREE_ITEMS);
+  assert.equal(listed.items.length, TWO_ITEMS);
   assert.equal(listed.next_cursor, null);
   assert.deepEqual(
     listed.items.map(({ id }) => id).sort(),
-    [initiativeId, scenario.objectiveId, taskId].sort(),
+    [initiativeId, scenario.objectiveId].sort(),
   );
 }
 
@@ -1513,10 +1671,12 @@ async function scenarioRevisions(scenario: Scenario): Promise<void> {
   await scenarioChange(scenario, [NODE, UPDATE, objectiveId], {
     filename: before.filename,
     content: { ...before.content, name: UPDATED_NAME },
+    tasks: before.tasks,
     expected_revision: before.visible_revision,
   });
   const updated = await readNode(fixture, objectiveId);
   assert.equal(updated.content.name, UPDATED_NAME);
+  assert.deepEqual(updated.tasks, before.tasks);
   assert.equal(
     updated.visible_revision,
     before.visible_revision + VERSION_INCREMENT,
@@ -1552,18 +1712,27 @@ async function scenarioMove(scenario: Scenario): Promise<void> {
   assert.equal(second.revisions.length, SINGLE_ITEM);
   scenario.secondObjectiveId = second.revisions[0]!.node_id;
   scenario.version = second.mission_version;
-  const oldParent = await readNode(fixture, objectiveId);
-  const newParent = await readNode(fixture, scenario.secondObjectiveId);
-  const task = await readNode(fixture, taskId);
-  await scenarioChange(scenario, [NODE, MOVE, taskId], {
-    new_parent_id: newParent.id,
-    expected_revision: task.visible_revision,
-    expected_old_parent_revision: oldParent.visible_revision,
-    expected_new_parent_revision: newParent.visible_revision,
+  const oldOwner = await readNode(fixture, objectiveId);
+  const task = oldOwner.tasks.find(({ id }) => id === taskId)!;
+  await scenarioChange(scenario, [NODE, UPDATE, objectiveId], {
+    filename: oldOwner.filename,
+    content: oldOwner.content,
+    tasks: [],
+    expected_revision: oldOwner.visible_revision,
   });
-  const moved = await readNode(fixture, taskId);
-  assert.equal(moved.parent_id, newParent.id);
-  assert.equal(moved.kind, NodeKind.Task);
+  const newOwner = await readNode(fixture, scenario.secondObjectiveId);
+  await scenarioChange(scenario, [NODE, UPDATE, newOwner.id], {
+    filename: newOwner.filename,
+    content: newOwner.content,
+    tasks: [{ filename: task.filename, content: task.content }],
+    expected_revision: newOwner.visible_revision,
+  });
+  assert.deepEqual((await readNode(fixture, objectiveId)).tasks, []);
+  const moved = await readNode(fixture, newOwner.id);
+  assert.equal(moved.tasks.length, SINGLE_ITEM);
+  assert.equal(moved.tasks[0]!.filename, task.filename);
+  assert.ok(moved.tasks[0]!.id.startsWith(`${TASK_IDENTITY_PREFIX}_`));
+  scenario.taskId = moved.tasks[0]!.id;
 }
 
 async function scenarioDependencies(scenario: Scenario): Promise<void> {
@@ -1575,7 +1744,6 @@ async function scenarioDependencies(scenario: Scenario): Promise<void> {
     secondObjectiveId,
   ]);
   const pending = await readNode(fixture, objectiveId);
-  assert.ok(pending.kind !== NodeKind.Task);
   assert.equal(pending.state, NodeState.Pending);
   await scenarioChange(scenario, [
     DEPENDENCY,
@@ -1584,7 +1752,6 @@ async function scenarioDependencies(scenario: Scenario): Promise<void> {
     secondObjectiveId,
   ]);
   const available = await readNode(fixture, objectiveId);
-  assert.ok(available.kind !== NodeKind.Task);
   assert.equal(available.state, NodeState.Available);
   const edges = success<Page<Edge>>(
     await kanthord([MISSION, EDGE, LIST, mission.id], fixture.env),
@@ -1660,7 +1827,7 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
       {
         ...CONTENT,
         filename: NEW_TASK_FILE,
-        kind: NodeKind.Task,
+        kind: PlanFileKind.Task,
         parent: NEW_OBJECTIVE_FILE,
       },
     ],
@@ -1684,7 +1851,7 @@ async function scenarioImport(scenario: Scenario): Promise<void> {
   const assigned = applied.assigned_ids.find(
     ({ filename }) => filename === NEW_OBJECTIVE_FILE,
   );
-  assert.ok(assigned);
+  assert.ok(assigned && "node_id" in assigned);
   scenario.importedId = assigned.node_id;
   await queued(scenario, assigned.node_id);
   const after = await scenarioExport(scenario, EXISTING_EXPORT_FILE);
@@ -1777,10 +1944,8 @@ async function scenarioPriorityReplay(scenario: Scenario): Promise<void> {
     ),
   );
   assert.equal(priority.id, secondObjectiveId);
-  assert.ok(priority.kind !== NodeKind.Task);
   assert.equal(priority.priority, PRIORITY_VALUE);
   const read = await readNode(fixture, secondObjectiveId);
-  assert.ok(read.kind !== NodeKind.Task);
   assert.equal(read.priority, PRIORITY_VALUE);
   const beforeReplay = success<Mission>(
     await kanthord([MISSION, GET, mission.project_id], fixture.env),
@@ -1819,6 +1984,7 @@ test(
         filename: REFUSED_PLAN,
         kind: NodeKind.Initiative,
         content,
+        tasks: [],
         reason: REASON,
         expected_mission_version: scenario.version,
       });
@@ -1835,22 +2001,21 @@ test(
       assert.equal(read.version, scenario.version);
     });
     await t.test(
-      "E06.26 creating a child of the retired objective is refused",
+      "E06.26 adding a task to the retired objective is refused",
       async () => {
-        const parent = await readNode(fixture, scenario.objectiveId);
-        assert.notEqual(parent.retired_at, null);
+        const owner = await readNode(fixture, scenario.objectiveId);
+        assert.notEqual(owner.retired_at, null);
         const path = jsonFile(fixture, SCENARIO_FILE, {
-          filename: REFUSED_PLAN,
-          kind: NodeKind.Task,
-          content: CONTENT,
-          parent_id: parent.id,
-          expected_parent_revision: parent.visible_revision,
+          filename: owner.filename,
+          content: owner.content,
+          tasks: [{ filename: REFUSED_PLAN, content: CONTENT }],
+          expected_revision: owner.visible_revision,
           reason: REASON,
           expected_mission_version: scenario.version,
         });
         refusal(
           await kanthord(
-            [MISSION, NODE, CREATE, mission.id, FILE, path],
+            [MISSION, NODE, UPDATE, owner.id, FILE, path],
             fixture.env,
           ),
           MissionErrorCode.Retired,

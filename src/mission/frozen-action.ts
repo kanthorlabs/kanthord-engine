@@ -25,7 +25,7 @@ export function requiredActionsOf(
   nodeRevision: number,
 ): FrozenAction[] {
   const node = readNode(tx, nodeId);
-  assert.ok(node && node.kind !== NodeKind.Task);
+  assert.ok(node);
   const revision = readRevision(tx, nodeId, nodeRevision);
   assert.ok(revision);
   if (node.kind === NodeKind.Initiative) return [];

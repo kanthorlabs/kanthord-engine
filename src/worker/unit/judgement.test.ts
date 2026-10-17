@@ -183,7 +183,7 @@ test("the repair instruction names the marker of the invalid reply", () => {
 
 test("a prior rationale adds the previous judgement to the task judgement instruction", () => {
   const task = {
-    id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    id: "task_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     filename: "task.md",
     content: {
       name: "task",

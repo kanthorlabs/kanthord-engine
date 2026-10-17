@@ -265,6 +265,7 @@ async function setup(t: TestContext) {
             (name) => bindings.items.find((item) => item.name === name)!.id,
           ),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: version,
         ...(parentId

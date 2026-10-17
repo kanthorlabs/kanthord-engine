@@ -951,6 +951,55 @@ components:
                     - verifications
                     - bindings
                   additionalProperties: false
+                tasks:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: task_ followed by a canonical 26-character uppercase ULID.
+                      filename:
+                        type: string
+                        pattern: ^[a-z][a-z0-9_-]*\.md$
+                      content:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                          requirement:
+                            type: string
+                            minLength: 1
+                          criterion:
+                            type: string
+                            minLength: 1
+                          verifications:
+                            minItems: 1
+                            type: array
+                            items:
+                              type: string
+                              minLength: 1
+                          bindings:
+                            maxItems: 0
+                            type: array
+                            items:
+                              type: string
+                        required:
+                          - name
+                          - requirement
+                          - criterion
+                          - verifications
+                          - bindings
+                        additionalProperties: false
+                    required:
+                      - id
+                      - filename
+                      - content
+                    additionalProperties: false
                 retired_at:
                   anyOf:
                     - type: integer
@@ -1544,6 +1593,7 @@ components:
                 - parent_id
                 - visible_revision
                 - content
+                - tasks
                 - retired_at
                 - pinned_by_attempts
                 - kind
@@ -1610,6 +1660,55 @@ components:
                     - verifications
                     - bindings
                   additionalProperties: false
+                tasks:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: task_ followed by a canonical 26-character uppercase ULID.
+                      filename:
+                        type: string
+                        pattern: ^[a-z][a-z0-9_-]*\.md$
+                      content:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                          requirement:
+                            type: string
+                            minLength: 1
+                          criterion:
+                            type: string
+                            minLength: 1
+                          verifications:
+                            minItems: 1
+                            type: array
+                            items:
+                              type: string
+                              minLength: 1
+                          bindings:
+                            maxItems: 0
+                            type: array
+                            items:
+                              type: string
+                        required:
+                          - name
+                          - requirement
+                          - criterion
+                          - verifications
+                          - bindings
+                        additionalProperties: false
+                    required:
+                      - id
+                      - filename
+                      - content
+                    additionalProperties: false
                 retired_at:
                   anyOf:
                     - type: integer
@@ -2203,6 +2302,7 @@ components:
                 - parent_id
                 - visible_revision
                 - content
+                - tasks
                 - retired_at
                 - pinned_by_attempts
                 - kind
@@ -2210,91 +2310,6 @@ components:
                 - attempt
                 - priority
                 - depends_on
-              additionalProperties: false
-            - type: object
-              properties:
-                id:
-                  type: string
-                  minLength: 31
-                  maxLength: 31
-                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                  description: node_ followed by a canonical 26-character uppercase ULID.
-                filename:
-                  type: string
-                  pattern: ^[a-z][a-z0-9_-]*\.md$
-                mission_id:
-                  type: string
-                  minLength: 34
-                  maxLength: 34
-                  pattern: ^mission_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                  description: mission_ followed by a canonical 26-character uppercase ULID.
-                parent_id:
-                  anyOf:
-                    - type: string
-                      minLength: 31
-                      maxLength: 31
-                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                      description: node_ followed by a canonical 26-character uppercase ULID.
-                    - type: "null"
-                visible_revision:
-                  type: integer
-                  exclusiveMinimum: 0
-                  maximum: 9007199254740991
-                content:
-                  type: object
-                  properties:
-                    name:
-                      type: string
-                      minLength: 1
-                    requirement:
-                      type: string
-                      minLength: 1
-                    criterion:
-                      type: string
-                      minLength: 1
-                    verifications:
-                      minItems: 1
-                      type: array
-                      items:
-                        type: string
-                        minLength: 1
-                    bindings:
-                      type: array
-                      items:
-                        type: string
-                  required:
-                    - name
-                    - requirement
-                    - criterion
-                    - verifications
-                    - bindings
-                  additionalProperties: false
-                retired_at:
-                  anyOf:
-                    - type: integer
-                      minimum: 0
-                      maximum: 9007199254740991
-                      description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
-                    - type: "null"
-                pinned_by_attempts:
-                  type: array
-                  items:
-                    type: integer
-                    exclusiveMinimum: 0
-                    maximum: 9007199254740991
-                kind:
-                  type: string
-                  const: task
-              required:
-                - id
-                - filename
-                - mission_id
-                - parent_id
-                - visible_revision
-                - content
-                - retired_at
-                - pinned_by_attempts
-                - kind
               additionalProperties: false
         outcome:
           anyOf:

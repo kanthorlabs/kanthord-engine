@@ -7,6 +7,7 @@ import {
   ImportFormat,
   MissionErrorCode,
   NodeKind,
+  PlanFileKind,
   type ExportAnswer,
   type ExportEntry,
   type MissionBindings,
@@ -23,7 +24,7 @@ export function serializePlanFile(entry: ExportEntry): string {
     id: entry.id,
     kind: entry.kind,
     ...(entry.parent === undefined ? {} : { parent: entry.parent }),
-    ...(entry.kind === NodeKind.Task
+    ...(entry.kind === PlanFileKind.Task
       ? {}
       : { depends_on: entry.depends_on ?? [] }),
     bindings: entry.bindings,
@@ -38,8 +39,9 @@ function exportEntry(
   nodes: Map<string, NodeRow>,
   dependencies: Map<string, string[]>,
   bindings: MissionBindings,
-): ExportEntry {
-  const content = nodeRecord(tx, node, bindings).content;
+): ExportEntry[] {
+  const record = nodeRecord(tx, node, bindings);
+  const content = record.content;
   const names = content.bindings.map((id) => {
     const binding = bindings.getBindingRevision(tx, id);
     if (binding === null) throw new Error(`Missing binding revision: ${id}`);
@@ -53,17 +55,26 @@ function exportEntry(
     return target === undefined ? [] : [target.filename];
   });
   dependsOn.sort();
-  return {
-    filename: node.filename,
-    id: node.id,
-    kind: node.kind,
-    ...content,
-    ...(parent === null || parent === undefined
-      ? {}
-      : { parent: parent.filename }),
-    ...(node.kind === NodeKind.Task ? {} : { depends_on: dependsOn }),
-    bindings: names,
-  };
+  return [
+    {
+      filename: node.filename,
+      id: node.id,
+      kind: node.kind,
+      ...content,
+      ...(parent === null || parent === undefined
+        ? {}
+        : { parent: parent.filename }),
+      depends_on: dependsOn,
+      bindings: names,
+    },
+    ...record.tasks.map((task) => ({
+      filename: task.filename,
+      id: task.id,
+      kind: PlanFileKind.Task,
+      ...task.content,
+      parent: node.filename,
+    })),
+  ];
 }
 
 export function exportMission(
@@ -85,7 +96,7 @@ export function exportMission(
     dependencies.set(edge.dependent, targets);
   }
   const entries = [...nodes.values()]
-    .map((node) => exportEntry(tx, node, nodes, dependencies, bindings))
+    .flatMap((node) => exportEntry(tx, node, nodes, dependencies, bindings))
     .sort((a, b) => a.filename.localeCompare(b.filename));
   const base = { mission_id: mission.id, mission_version: mission.version };
   const answer: ExportAnswer =

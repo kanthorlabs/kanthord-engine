@@ -6,7 +6,6 @@ import type { Transaction } from "../kernel/store.ts";
 import {
   ActorKind,
   MissionErrorCode,
-  NodeKind,
   NodeState,
   type ExecutionActor,
   type ExecutionContext,
@@ -71,7 +70,6 @@ export function admitExecution(
   assert.equal(live.attempt, claim.attempt);
   assert.equal(live.pinned_revision, claim.pinnedRevision);
   const node = requireNode(tx, claim.nodeId);
-  assert.notEqual(node.kind, NodeKind.Task);
   const attempt = readOpenAttempt(tx, node.id);
   assert.ok(attempt);
   assert.equal(attempt.attempt, claim.attempt);
@@ -92,7 +90,6 @@ export function admitExecution(
 }
 
 export function requireEvaluationClaim(node: NodeRow): void {
-  assert.notEqual(node.kind, NodeKind.Task);
   assert.ok(node.state);
   if (node.state !== NodeState.Evaluating)
     throw new OperationError(

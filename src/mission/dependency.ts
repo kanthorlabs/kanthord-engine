@@ -6,7 +6,6 @@ import { validateText } from "./content.ts";
 import {
   EdgeKind,
   MissionErrorCode,
-  NodeKind,
   type Edge,
   type GraphEdit,
   type Mission,
@@ -32,18 +31,15 @@ import { requireActive, requireMission, requireNonterminal } from "./write.ts";
 const REASON_FIELD = "reason";
 const VERSION_INCREMENT = 1;
 const EndpointReason = {
-  Task: "task_endpoint",
   CrossMission: "cross_mission",
 } as const;
 type DependencyEdge = Extract<Edge, { kind: typeof EdgeKind.Dependency }>;
 
 function validateEndpoints(node: NodeRow, target: NodeRow): void {
   const reason =
-    node.kind === NodeKind.Task || target.kind === NodeKind.Task
-      ? EndpointReason.Task
-      : node.mission_id !== target.mission_id
-        ? EndpointReason.CrossMission
-        : undefined;
+    node.mission_id !== target.mission_id
+      ? EndpointReason.CrossMission
+      : undefined;
   if (reason !== undefined)
     throw new OperationError(
       HttpStatus.Conflict,
@@ -59,7 +55,7 @@ function validateCycle(
   edge: DependencyEdge,
 ): void {
   const nodes = readMissionNodes(tx, missionId).filter(
-    (node) => node.retired_at === null && node.kind !== NodeKind.Task,
+    (node) => node.retired_at === null,
   );
   const parents = new Map<string, string>();
   for (const node of nodes) {

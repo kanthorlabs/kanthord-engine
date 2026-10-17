@@ -61,8 +61,8 @@ function insertNode(
   const id = createIdentity("node");
   tx.database
     .prepare(
-      `INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, retired_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, retired_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
     )
     .run(
       id,

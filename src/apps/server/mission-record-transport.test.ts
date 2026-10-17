@@ -21,7 +21,6 @@ const UNAUTHORIZED = "gateway.authentication.unauthorized";
 const INVALID = "gateway.request.validation_failed";
 const NOT_FOUND = "mission.record.not_found";
 const NODE_NOT_FOUND = "mission.node.not_found";
-const TASK = "mission.node.control_task";
 const CURSOR = "system.pagination.cursor_invalid";
 const FIRST_ATTEMPT = 1;
 const INITIAL_ATTEMPT = 0;
@@ -113,23 +112,7 @@ test("all record reads enforce human access with valid parameters and return pre
         INITIAL_PRIORITY,
         NOW,
       );
-    const taskId = createIdentity("node");
-    tx.database
-      .prepare(
-        "INSERT INTO mission_node (id, mission_id, kind, filename, parent_id, state, attempt, priority, retired_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)",
-      )
-      .run(taskId, missionId, NodeKind.Task, "task.md", params.node_id, NOW);
-    params.node_id = taskId;
   });
-  for (const name of [
-    "attempt.list",
-    "attempt.get",
-    "externalAction.list",
-    "externalAction.get",
-    "assessment.list",
-    "outcome.list",
-  ] as const)
-    await refuses(pathOf(name), HttpStatus.BadRequest, TASK);
   h.store.database
     .prepare(
       "UPDATE mission_node SET kind = ?, state = ?, attempt = ?, priority = ? WHERE id = ?",

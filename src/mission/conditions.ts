@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import { isTerminal } from "./admission.ts";
 import { NodeKind, NodeState, type MissionBindings } from "./contract.ts";
@@ -35,8 +34,6 @@ export function readinessOf(
   holds: boolean;
   objectives_not_terminal: string[];
 } {
-  assert.notEqual(node.kind, NodeKind.Task);
-  assert.ok(node.attempt !== null);
   const objectivesNotTerminal =
     node.kind === NodeKind.Initiative
       ? readMissionNodes(tx, node.mission_id)
@@ -61,8 +58,6 @@ export function continuationHolds(
   bindings: MissionBindings,
   node: NodeRow,
 ): boolean {
-  assert.notEqual(node.kind, NodeKind.Task);
-  assert.ok(node.attempt !== null);
   const open =
     node.attempt === NO_ATTEMPT ? null : readOpenAttempt(tx, node.id);
   return (

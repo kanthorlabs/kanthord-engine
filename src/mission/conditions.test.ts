@@ -57,11 +57,10 @@ function fixture(t: TestContext) {
   return { ...h, project_id: projectId, mission_id: missionId, node };
 }
 
-test("readiness at attempt zero reads current children and ignores retired objectives and tasks", (t) => {
+test("readiness at attempt zero reads current children and ignores retired objectives", (t) => {
   const h = fixture(t);
   const initiative = h.node(NodeKind.Initiative);
   const objective = h.node(NodeKind.Objective, initiative);
-  h.node(NodeKind.Task, objective);
   h.store.transaction((tx) => {
     const parent = readNode(tx, initiative)!;
     assert.deepEqual(readinessOf(tx, parent), {
@@ -151,7 +150,7 @@ test("open-attempt unresolved actions do not block readiness but stop continuati
   h.store.transaction((tx) => {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, tasks, change, reason, actor, created_at) VALUES (?, 1, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '[]', '{}', 'reason', ?, ?)",
       )
       .run(nodeId, canonicalJSON([bindingId]), canonicalJSON(ACTOR), NOW);
     openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);

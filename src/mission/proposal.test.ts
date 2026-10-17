@@ -247,13 +247,10 @@ test("approving a proposal creates the objective with its task and unblocks the 
   assert.equal(objective.node.state, NodeState.Available);
   assert.deepEqual(JSON.parse(objective.revision.bindings), [h.repositoryId]);
   assert.deepEqual(JSON.parse(objective.revision.verifications), ["pnpm test"]);
-  const tasks = h.store.transaction((tx) =>
-    readMissionNodes(tx, h.mission_id).filter(
-      (node) => node.kind === NodeKind.Task && node.parent_id === objectiveId,
-    ),
-  );
+  const tasks = JSON.parse(objective.revision.tasks) as { id: string }[];
   assert.equal(tasks.length, SINGLE_PROPOSAL);
-  assert.equal(result.objective.revisions.at(-1)?.tasks?.[0]?.id, tasks[0]!.id);
+  assert.match(tasks[0]!.id, /^task_/);
+  assert.equal(result.objective.revisions.at(-1)?.tasks[0]?.id, tasks[0]!.id);
   assert.equal(result.initiative.node.id, h.node_id);
   assert.equal(result.initiative.attempt?.attempt, SECOND_ATTEMPT);
   assert.equal(result.initiative.attempt?.start_point, StartPoint.NodeBranch);

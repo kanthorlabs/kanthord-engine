@@ -200,8 +200,22 @@ test("each service migration set applies alone to an empty store", () => {
       );
       if (service.service === SCHEDULER_SERVICE_NAME)
         assert.deepEqual(tables(store), SCHEDULER_TABLES);
-      if (service.service === MISSION_SERVICE_NAME)
+      if (service.service === MISSION_SERVICE_NAME) {
         assert.deepEqual(tables(store), MISSION_TABLES);
+        assert.deepEqual(
+          store.database
+            .prepare(
+              `SELECT name, "notnull" FROM pragma_table_info('${MISSION_NODE_TABLE}') WHERE name IN ('state', 'attempt', 'priority')`,
+            )
+            .all()
+            .map((row) => ({ ...row })),
+          [
+            { name: "state", notnull: 1 },
+            { name: "attempt", notnull: 1 },
+            { name: "priority", notnull: 0 },
+          ],
+        );
+      }
       if (service.service === AGENT_COMPONENT_NAME)
         assert.deepEqual(tables(store), [
           AGENT_ENABLEMENT_TABLE,

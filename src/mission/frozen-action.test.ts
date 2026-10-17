@@ -99,7 +99,7 @@ test("required actions preserve pinned policies across later revisions and omit 
       created_at: NOW,
     });
     const statement = tx.database.prepare(
-      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, change, reason, actor, created_at) VALUES (?, ?, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '{}', 'reason', ?, ?)",
+      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, tasks, change, reason, actor, created_at) VALUES (?, ?, 'objective.md', 'name', 'requirement', 'criterion', '[]', ?, '[]', '{}', 'reason', ?, ?)",
     );
     statement.run(
       nodeId,

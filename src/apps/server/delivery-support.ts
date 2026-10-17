@@ -165,6 +165,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
           ...CONTENT,
           bindings: parentId ? [binding(GATED).id] : [],
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
         ...(parentId

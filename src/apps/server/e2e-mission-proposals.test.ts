@@ -16,6 +16,7 @@ import {
   MissionErrorCode,
   NodeKind,
   NodeState,
+  TASK_IDENTITY_PREFIX,
   missionOperations,
   type Assessment,
   type ControlResult,
@@ -24,7 +25,6 @@ import {
   type NodeChange,
   type Outcome,
   type Proposal,
-  type Revision,
 } from "../../mission/contract.ts";
 import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
 import {
@@ -46,7 +46,6 @@ const FIRST_REVISION = 1;
 const FIRST_ATTEMPT = 1;
 const SECOND_ATTEMPT = 2;
 const SINGLE_ITEM = 1;
-const TWO_REVISIONS = 2;
 const NO_ITEMS = 0;
 const WORKER_INSTANCE_COUNT = 1;
 const TIMEOUT = 300000;
@@ -148,6 +147,7 @@ async function setup(t: TestContext) {
           ...CONTENT,
           bindings: names.map((name) => binding(name).id),
         },
+        tasks: [],
         reason: "plan",
         expected_mission_version: await missionVersion(),
         ...(parentId
@@ -393,16 +393,13 @@ test(
         ["mission", "proposal", "approve", proposal.id],
         { expected_mission_version: await h.missionVersion() },
       );
-      assert.equal(approved.objective.revisions.length, TWO_REVISIONS);
-      const [created, tasked] = approved.objective.revisions as [
-        Revision,
-        Revision,
-      ];
+      assert.equal(approved.objective.revisions.length, SINGLE_ITEM);
+      const created = approved.objective.revisions[FIRST_INDEX]!;
       const objectiveId = created.node_id;
-      assert.equal(tasked.node_id, objectiveId);
-      assert.equal(tasked.content.name, PROPOSAL_NAME);
-      assert.equal(tasked.tasks?.length, SINGLE_ITEM);
-      const taskContent = tasked.tasks![FIRST_INDEX]!;
+      assert.equal(created.content.name, PROPOSAL_NAME);
+      assert.equal(created.tasks.length, SINGLE_ITEM);
+      const taskContent = created.tasks[FIRST_INDEX]!;
+      assert.ok(taskContent.id.startsWith(`${TASK_IDENTITY_PREFIX}_`));
       assert.equal(taskContent.content.name, TASK_NAME);
       const objective = await read<Node>([
         "mission",
@@ -413,9 +410,10 @@ test(
       assert.equal(objective.kind, NodeKind.Objective);
       assert.equal(objective.parent_id, h.initiativeId);
       assert.deepEqual(objective.content.bindings, [h.repositoryId]);
-      const task = await read<Node>(["mission", "node", "get", taskContent.id]);
-      assert.equal(task.kind, NodeKind.Task);
-      assert.equal(task.parent_id, objectiveId);
+      assert.deepEqual(
+        objective.tasks.map((task) => task.id),
+        [taskContent.id],
+      );
       const listed = await read<Page<Proposal>>(listArguments());
       assert.equal(typeof listed.items[FIRST_INDEX]!.approved_at, NUMBER_TYPE);
       assert.equal(listed.items[FIRST_INDEX]!.objective_node_id, objectiveId);
