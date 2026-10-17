@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { MissionErrorCode, Work, NodeState, TaskChange } from "./contract.ts";
 import { ControlError } from "./control.ts";
@@ -540,4 +541,96 @@ test("unblock change adds and removes a task", async (t) => {
     { id: removed, change: TaskChange.Retired, changed_fields: [] },
   ]);
   assert.deepEqual(result.node.tasks, revision.tasks);
+});
+
+test("unblock refuses a work change after the first claim with mission.node.work_locked", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const bindingId = createIdentity("binding");
+  h.dependencies.bindings.getBindingRevision = () => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "repo",
+    resource_identity: "repository:github:owner/repo",
+    revision: FIRST_ATTEMPT,
+    disabled: false,
+    tombstone: false,
+  });
+  h.dependencies.bindings.repositoryPolicyOf = () => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    ssh_credential: "github-ssh",
+    credential: "github",
+    base_branch: "main",
+    action: null,
+    landing: "human",
+    project_prompt: null,
+  });
+  const content = {
+    name: "Task",
+    requirement: "Requirement",
+    criterion: "Criterion",
+    verifications: ["true"],
+    bindings: [],
+  };
+  h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
+    projectId === h.project_id && id === bindingId
+      ? {
+          binding_id: bindingId,
+          resource_identity: "repository:github:owner/repo",
+        }
+      : null;
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(NodeState.Paused, h.node_id);
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET work = ?, bindings = ? WHERE node_id = ?",
+      )
+      .run(Work.Implement, JSON.stringify([bindingId]), h.node_id);
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+  });
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  const snapshot = () =>
+    h.store.database.prepare("SELECT * FROM mission_node ORDER BY id").all();
+  const before = snapshot();
+  await assert.rejects(
+    h.invoke("node.unblock", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        blocked_attempt: FIRST_ATTEMPT,
+        expected_revision: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
+        change: {
+          content: { ...content, work: Work.Examine, bindings: [bindingId] },
+          tasks: [],
+          reason: "Redirect",
+        },
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.Conflict);
+      assert.equal(error.code, MissionErrorCode.WorkLocked);
+      assert.deepEqual(error.details, {
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+      });
+      return true;
+    },
+  );
+  assert.deepEqual(snapshot(), before);
+  assert.equal(h.node().state, NodeState.Blocked);
+  assert.equal(
+    h.store.transaction((tx) => readCurrentRevision(tx, h.node_id))?.revision,
+    FIRST_ATTEMPT,
+  );
 });

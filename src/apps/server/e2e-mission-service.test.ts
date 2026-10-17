@@ -2177,6 +2177,8 @@ function nodeFile(
   bindings: string[],
   verifications: string[],
   title: string,
+  requirement = `Deliver ${title.toLowerCase()}.`,
+  criterion = `${title} works.`,
 ): string {
   return planFile(
     [
@@ -2187,17 +2189,23 @@ function nodeFile(
       `verifications: ${list(verifications)}`,
     ],
     title,
-    `Deliver ${title.toLowerCase()}.`,
-    `${title} works.`,
+    requirement,
+    criterion,
   );
 }
 
-function taskFile(node: string, verifications: string[], title: string) {
+function taskFile(
+  node: string,
+  verifications: string[],
+  title: string,
+  requirement = `Deliver ${title.toLowerCase()}.`,
+  criterion = `${title} works.`,
+) {
   return planFile(
     [`node: ${node}`, "bindings: []", `verifications: ${list(verifications)}`],
     title,
-    `Deliver ${title.toLowerCase()}.`,
-    `${title} works.`,
+    requirement,
+    criterion,
   );
 }
 
@@ -2216,11 +2224,15 @@ function importSet(taskNode = RESET_FILE): Record<string, string> {
       [REPOSITORY_NAME],
       RESET_VERIFICATIONS,
       "Add password reset",
+      "Let account holders reset a forgotten password.",
+      "A valid token permits one reset and an expired token permits none.",
     ),
     [RESET_REQUEST_FILE]: taskFile(
       taskNode,
       RESET_VERIFICATIONS,
       "Add the reset request",
+      "Accept a reset request for an account and send one reset token.",
+      "A valid token permits one reset.",
     ),
     [TOKEN_EXPIRY_FILE]: taskFile(
       RESET_FILE,
@@ -2505,6 +2517,7 @@ test(
           ),
         );
         assert.equal(bindings.items.length, SINGLE_ITEM);
+        assert.equal(bindings.items[0]!.name, REPOSITORY_NAME);
       },
     );
     await t.test(

@@ -204,6 +204,51 @@ test("override rejects another binding and Evaluating before any evidence write"
   );
 });
 
+test("override rejects a landed commit on the pinned repository of an examine node", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const bindingId = createIdentity("binding");
+  h.dependencies.bindings.getBindingRevision = () => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "repo",
+    resource_identity: "repository:github:owner/repo",
+    revision: FIRST_ATTEMPT,
+    disabled: false,
+    tombstone: false,
+  });
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET work = ?, bindings = ? WHERE node_id = ?",
+      )
+      .run(Work.Examine, JSON.stringify([bindingId]), h.node_id),
+  );
+  await assert.rejects(
+    h.invoke("node.override", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        ...h.body(),
+        result: AssessmentResult.Success,
+        landed_commit: {
+          kind: "repository",
+          binding_id: bindingId,
+          commit: COMMIT,
+        },
+      },
+    }),
+    (error) =>
+      error instanceof OperationError && error.code === BINDING_MISMATCH,
+  );
+  assert.equal(h.node().state, NodeState.Available);
+  assert.equal(
+    h.store.database
+      .prepare("SELECT count(*) AS count FROM mission_evidence")
+      .get()!.count,
+    NO_EVIDENCE,
+  );
+});
+
 for (const state of [NodeState.ExternalFailed, NodeState.Blocked]) {
   test(`success override from ${state} writes a new success outcome`, async (t) => {
     const h = controlHarness(t, IDENTITY);

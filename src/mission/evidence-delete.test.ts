@@ -62,6 +62,30 @@ test("force never bypasses disabled or removed storage authorization", async (t)
   }
 });
 
+test("asset delete authorizes the storage binding that the object pins", async (t) => {
+  const h = fixture(t);
+  const pinnedId = createIdentity("binding");
+  h.store.database
+    .prepare("UPDATE mission_evidence_asset SET content = ? WHERE id = ?")
+    .run(
+      canonicalJSON({
+        location: "s3://bucket/key",
+        size: FIRST_ATTEMPT,
+        media_type: "text/plain",
+        storage_binding_id: pinnedId,
+        object_version: VERSION,
+      }),
+      h.asset_id,
+    );
+  const storage = t.mock.method(h.dependencies.bindings, "storageBindingOf");
+  h.dependencies.intakeStorage.delete = async () => undefined;
+  assert.equal(await h.remove(true), null);
+  assert.deepEqual(
+    storage.mock.calls.map((call) => call.arguments[1]),
+    [pinnedId],
+  );
+});
+
 function fixture(t: TestContext, request = false) {
   const h = evidenceHarness(t, IDENTITY);
   const evidenceId = createIdentity("evidence");

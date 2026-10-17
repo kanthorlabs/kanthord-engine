@@ -1424,6 +1424,44 @@ test("node get answers work and requires of the pinned revision while an attempt
   assert.deepEqual(f.read(nodeId).requires, ["platform.macos"]);
 });
 
+test("node list filters work on the pinned revision while an attempt is open", (t) => {
+  const f = nodeFixture(t);
+  const nodeId = f.examine();
+  f.store.transaction((tx) => {
+    openAttempt(tx, nodeId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT);
+    tx.database
+      .prepare(
+        `INSERT INTO mission_node_revision
+         (node_id, revision, filename, name, requirement, criterion,
+          verifications, bindings, work, requires, tasks, change, reason,
+          actor, created_at)
+         SELECT node_id, ?, filename, name, requirement, criterion,
+          verifications, bindings, ?, requires, tasks, change, reason,
+          actor, created_at
+         FROM mission_node_revision WHERE node_id = ? AND revision = ?`,
+      )
+      .run(NEXT_REVISION, Work.Implement, nodeId, FIRST_REVISION);
+  });
+  function list(work: Work): string[] {
+    const operation = missionOperations["node.list"];
+    const input = operation.input.parse({
+      params: { mission_id: f.mission_id },
+      query: { work },
+      body: null,
+    });
+    return pageOf(nodeSchema)
+      .parse(f.registry.get(operation.id).handler(input, f.caller))
+      .items.map((item) => item.id);
+  }
+  assert.deepEqual(list(Work.Examine), [nodeId]);
+  assert.deepEqual(list(Work.Implement), []);
+  f.store.transaction((tx) =>
+    closeAttempt(tx, nodeId, FIRST_REVISION, RETIRED_AT),
+  );
+  assert.deepEqual(list(Work.Examine), []);
+  assert.deepEqual(list(Work.Implement), [nodeId]);
+});
+
 test("node reads refuse missing identities and malformed cursors", (t) => {
   const f = nodeFixture(t);
   function refuses(
@@ -5034,7 +5072,10 @@ test("mission.node.rebind declares a human write and advances a pin without chan
   assert.equal(operation.access, AccessPolicy.Human);
   assert.equal(operation.mutation, true);
   assert.equal(operation.body, true);
-  const nodeId = f.implement();
+  const implementBody = f.body(Work.Implement);
+  implementBody.content.requires = ["platform.macos"];
+  const nodeId =
+    f.create(implementBody).revisions[FIRST_ELEMENT_INDEX]!.node_id;
   addTask(f, nodeId);
   const previous = f.store.transaction((tx) =>
     readCurrentRevision(tx, nodeId),
@@ -5071,7 +5112,7 @@ test("mission.node.rebind declares a human write and advances a pin without chan
     verifications: JSON.parse(previous.verifications),
     bindings: [NEXT_BINDING_ID],
     work: Work.Implement,
-    requires: [],
+    requires: ["platform.macos"],
   });
   assert.deepEqual(revision.actor, {
     kind: ActorKind.Human,
@@ -5128,6 +5169,7 @@ test("mission rebind changes examine and implement nodes once, preserving unrela
     (r) => r.node_id === implement,
   )!;
   assert.deepEqual(examineRevision.content.bindings, [NEXT_STORAGE_ID]);
+  assert.equal(examineRevision.content.work, Work.Examine);
   assert.deepEqual(examineRevision.change.tasks, []);
   assert.deepEqual(examineRevision.tasks, []);
   assert.deepEqual(implementRevision.content.bindings, [

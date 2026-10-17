@@ -448,6 +448,22 @@ test("an object PUT names the server key of the claim attempt and the storage cr
   assert.equal(h.put({ size: OBJECT_SIZE_MAX }).facts.size, OBJECT_SIZE_MAX);
 });
 
+test("an object PUT admits a storage binding that is not the first storage pin", (t) => {
+  const h = assetHarness(t);
+  const secondId = createIdentity("binding");
+  h.store.database
+    .prepare("UPDATE mission_node_revision SET bindings = ? WHERE node_id = ?")
+    .run(JSON.stringify([h.repositoryId, h.storageId, secondId]), h.node_id);
+  h.dependencies.bindings.storageBindingOf = (_tx, bindingId) => ({
+    ...h.storage,
+    binding_id: bindingId,
+  });
+  assert.equal(
+    h.put({ storageBindingId: secondId }).facts.storage.binding_id,
+    secondId,
+  );
+});
+
 test("an object PUT refuses another node, a recorded asset, another storage binding and a size above the limit", (t) => {
   const h = assetHarness(t);
   refuses(() => h.put({ nodeId: h.otherNode() }), "node_mismatch");
