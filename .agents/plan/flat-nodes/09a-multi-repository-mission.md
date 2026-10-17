@@ -57,7 +57,7 @@ No seam. The evidence rules of this plan serve plan 09b.
 
 - Files: `src/mission/evidence-content.ts`, `src/mission/control-close.ts`, `src/worker/action-operands.ts` and their tests (edit)
 - Do:
-  1. `requireTestedInput` (`src/mission/evidence-content.ts:159-203`) accepts one address for a node with one repository binding, and a list with one address for each binding in binding order for two or more. Another form answers `mission.evidence.binding_mismatch` with `details: { binding_id }`.
+  1. `requireTestedInput` (`src/mission/evidence-content.ts:159-203`) accepts one address for a node with one repository binding, and a list with one address for each binding in binding order for two or more. ~~Another form answers `mission.evidence.binding_mismatch` with `details: { binding_id }`.~~ OD10: a wrong form answers 400 `gateway.request.validation_failed`, and a wrong binding set answers `mission.evidence.binding_mismatch`.
   2. `landedEvidence` (`src/mission/control-close.ts:50-107`) applies the same form and binding rule to the landed commit of a success override.
   3. `operandsOf` (`src/worker/action-operands.ts:11-40`) takes the address of the action binding from a list. A list without that binding keeps the refusal `WorkerErrorCode.SnapshotAbsent`. `assessedCommitOf` (`src/mission/authorization.ts:220-238`) already reads a list.
 - Cite: `mission-service.md:313-314`; `mission-service.impl.md:356-357`, `:790`; `worker-service.md:574`.
@@ -67,7 +67,7 @@ No seam. The evidence rules of this plan serve plan 09b.
 
 - Files: `src/intake/action-perform.ts`, `src/intake/action-check.ts`, `src/repository/connector.ts`, `src/mission/evidence-request.ts` and their tests (edit)
 - Do:
-  1. `createPullRequest` (`src/intake/action-perform.ts:242-266`) first calls `gitWriter.landedOn` with the base branch and the snapshot commit, as `landedMerge` does (`:393-415`). A landing opens no pull request and answers `branchPushAddress(facts, landing.first_parent)`. The read-back of a repeat (`:335-350`) applies the same rule.
+  1. `createPullRequest` (`src/intake/action-perform.ts:242-266`) first calls `gitWriter.landedOn` with the base branch and the snapshot commit, as `landedMerge` does (`:393-415`). A landing opens no pull request and answers `branchPushAddress(facts, landing.first_parent)`. ~~The read-back of a repeat (`:335-350`) applies the same rule.~~ OD12: the read-back keeps the open pull request rule, because `intake-service.impl.md:234` leaves a human merge `failed`.
   2. `foldBranchPush` (`src/repository/connector.ts:593-602`) accepts the expected end state `pull_request_merged` next to `base_branch_pushed`. A landing folds to the expected end state with the landed commit.
   3. `inspect` (`src/intake/action-check.ts:103-131`) folds a `branch_push` address of a `pull_request` action through `landedOn` and that fold.
   4. The address check of a request (`src/mission/evidence-request.ts:52-70`) admits a `branch_push` address for a `pull_request` action when its `resource_identity` is that of the action binding. Every other kind mismatch keeps `mission.request.address_mismatch`.
