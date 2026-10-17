@@ -906,3 +906,77 @@ test("rework: a merge refusal answer warns with evidence_id, class and code", as
     code: "merge.not_allowed",
   });
 });
+
+test("one reviewer execution requests both actions", async (t) => {
+  const h = actionable(t);
+  const otherCommit = "c".repeat(40);
+  const otherResource = "repository:github:owner/other";
+  const snapshot = h.context.current_assessment!.tested_input;
+  assert.ok(
+    !Array.isArray(snapshot) && snapshot.kind === TestedInputKind.Repository,
+  );
+  const other = {
+    kind: TestedInputKind.Repository,
+    binding_id: createIdentity("binding"),
+    commit: otherCommit,
+  };
+  h.context.current_assessment!.tested_input = [snapshot, other];
+  h.context.actions.push({
+    ...h.entry,
+    action: {
+      ...h.entry.action,
+      key: "other.merge_push",
+      binding_id: other.binding_id,
+      action: RepositoryAction.MergePush,
+      expected_end_state: "base_branch_pushed",
+    },
+    resource_identity: otherResource,
+  });
+  const pushed = {
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: otherResource,
+    branch: "main",
+    commit: otherCommit,
+  };
+  const performed: string[][] = [];
+  h.dependencies.intakeActions.perform = async (_call, action) => {
+    performed.push([action.key, action.commit]);
+    return action.key === h.entry.action.key ? PR : pushed;
+  };
+  const request = t.mock.method(h.dependencies.evidenceRequests, "request");
+  const items = (await h.perform()).items;
+  assert.equal(items.length, DUAL_CALL_COUNT);
+  assert.ok(items.every((item) => item.kind === ActionResultKind.Submitted));
+  assert.deepEqual(
+    performed.sort(),
+    [
+      ["other.merge_push", otherCommit],
+      [h.entry.action.key, COMMIT],
+    ].sort(),
+  );
+  assert.deepEqual(
+    request.mock.calls
+      .map((call) => call.arguments[0].body.address.kind)
+      .sort(),
+    [PlatformAddressKind.BranchPush, PlatformAddressKind.PullRequest].sort(),
+  );
+});
+
+test("a contained pull request snapshot of a kanthord landing makes no merge call", async (t) => {
+  const h = actionable(t);
+  h.entry.action.configuration.landing = "kanthord";
+  const perform = t.mock.method(
+    h.dependencies.intakeActions,
+    "perform",
+    async () => ({
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: RESOURCE,
+      branch: "main",
+      commit: "d".repeat(40),
+    }),
+  );
+  assert.deepEqual((await h.perform()).items, [
+    { kind: ActionResultKind.Submitted, evidence: h.evidence },
+  ]);
+  assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
+});
