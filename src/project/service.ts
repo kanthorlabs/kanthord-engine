@@ -243,6 +243,30 @@ function requireBinding(tx: Transaction, projectId: string, bindingId: string) {
   return binding;
 }
 
+function workerRowOf(
+  tx: Transaction,
+  row: StoredBinding,
+  projectName: string,
+): WorkerBindingRow {
+  const config = workerConfigSchema.parse(row.config);
+  return {
+    binding_id: row.id,
+    name: row.name,
+    project_name: projectName,
+    revision: row.revision,
+    worker_name: config.worker,
+    instance_count: config.instance_count,
+    placement: config.placement ?? WorkerPlacement.Worker,
+    generation:
+      readGeneration(tx, row.project_id, row.resource_identity) ??
+      NO_GENERATION,
+    resource_budget: config.resource_budget ?? null,
+    entries: config.entries ?? [],
+    traits: config.traits ?? [],
+    tombstone: row.removed_at !== null,
+  };
+}
+
 function requireWorkerBinding(
   tx: Transaction,
   projectId: string,
@@ -1242,22 +1266,7 @@ export class ProjectService implements Service, ProjectBindings {
     if (!row || kindOf(row.resource_identity) !== BindingKind.Worker)
       return null;
     assert.equal(row.project_id, projectId);
-    const config = workerConfigSchema.parse(row.config);
-    return {
-      binding_id: row.id,
-      name: row.name,
-      project_name: requireProject(tx, projectId).name,
-      revision: row.revision,
-      worker_name: config.worker,
-      instance_count: config.instance_count,
-      placement: config.placement ?? WorkerPlacement.Worker,
-      generation:
-        readGeneration(tx, projectId, resourceIdentity) ?? NO_GENERATION,
-      resource_budget: config.resource_budget ?? null,
-      entries: config.entries ?? [],
-      traits: config.traits ?? [],
-      tombstone: row.removed_at !== null,
-    };
+    return workerRowOf(tx, row, requireProject(tx, projectId).name);
   }
   workerBindingsOf(
     tx: Transaction,
@@ -1266,18 +1275,20 @@ export class ProjectService implements Service, ProjectBindings {
     WorkerBindingRow & { project_id: string; resource_identity: string }
   > {
     assert.ok(tx.database.isTransaction);
-    return readCurrentBindings(tx).flatMap((row) => {
+    const rows =
+      projectId === null
+        ? readCurrentBindings(tx)
+        : Array.from(readCurrentBindingSet(tx, projectId).values());
+    const projectNames = new Map<string, string>();
+    return rows.flatMap((row) => {
       if (kindOf(row.resource_identity) !== BindingKind.Worker) return [];
-      if (projectId !== null && row.project_id !== projectId) return [];
-      const binding = this.workerBindingOf(
-        tx,
-        row.project_id,
-        row.resource_identity,
-      );
-      assert.ok(binding);
+      const projectName =
+        projectNames.get(row.project_id) ??
+        requireProject(tx, row.project_id).name;
+      projectNames.set(row.project_id, projectName);
       return [
         {
-          ...binding,
+          ...workerRowOf(tx, row, projectName),
           project_id: row.project_id,
           resource_identity: row.resource_identity,
         },
