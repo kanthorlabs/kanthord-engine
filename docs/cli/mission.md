@@ -652,17 +652,34 @@ The path never serves as an evidence address or a server-side path argument.
 | `mission.evidence.asset.complete` | `POST /api/mission/evidence/asset/:asset_id/complete` | `ExecutionContext` | `AssetUploadResult`    | E      |
 
 1. The component calls submit with the execution context, the evidence metadata and the asset list, where the file is an `object` asset with its size, media type and optional SHA-256.
-   The server checks the live claim, the node, the storage binding of the pinned revision and 5 GiB single-object limit.
+   The server checks the live claim, the node, the storage bindings of the pinned revision and 5 GiB single-object limit.
+   The server selects the storage binding, and the component never selects one.
+   The grant walks the storage bindings of the pinned revision in list order.
+   It skips a binding whose latest revision holds `available: false` and a binding that a tombstone removed.
+   It skips a binding that holds a failed upload check in the open attempt of the node.
+   It moves to the next binding when the signing call refuses with `binding_disabled`, `binding_removed` or `storage.platform.s3.<class>`.
+   Every other refusal of the signing call stops the submission.
+   With no binding left, the submission answers 409 `mission.evidence.storage_exhausted`.
    It creates the evidence and one pending asset for each `object` asset, with the server-generated key `<prefix>/<project>/<mission>/<node>/<attempt>/<evidence asset id>`.
    The asset pins that storage binding revision in `storage_binding_id`.
    The answer supplies one presigned PUT for each `object` asset, with a lifetime of 1 hour, which the Intake Service signs.
    The checksum header is required only when the submission supplies a SHA-256.
 2. The component sends the bytes directly to the store through that PUT, with no proxy through the server.
 3. The component calls asset complete with the asset identity and execution context.
-   The server checks the live claim, and the Intake Service checks the object size and optional checksum; a mismatch prevents publication.
+   The server checks the live claim, and the Intake Service checks the object size and optional checksum.
+   A check that finds a mismatch, finds no object or fails at the store prevents publication.
+   That failed upload check records the storage binding as failed for the open attempt of the node.
+   The record stays after the refusal, and the refusal keeps the code of the check.
    It sets `published_at` of the asset with location, returned version, size, media type and optional SHA-256 only after those checks pass.
    The answer holds the asset identity and `s3://` URI.
    The helper returns those values and the evidence identity to the agent, not the presigned URL.
+4. After a failed transfer, the helper calls asset complete, so that the check records the binding.
+   After a failed upload check, the helper submits again, and the server grants the next binding.
+   The helper submits at most once for each storage binding.
+   It stops on `mission.evidence.storage_exhausted` and on every other refusal.
+
+A new attempt tries every storage binding again.
+A read and a delete of an asset use the binding that the asset pins, and no read moves to another binding.
 
 A pending asset expires 1 hour after the submission; a complete of an expired asset answers 409 `mission.evidence.upload_expired`.
 An evidence is published when every asset of it is published.
@@ -747,7 +764,7 @@ from fields whose authoritative schema is still absent.
 | Storage      | 0 or more   | 0 or more | 0    |
 
 A new binding kind adds a row. No binding comes from the project.
-An upload grant uses the first storage binding of the ordered list, and the asset pins that binding.
+An upload grant uses the first working storage binding of the ordered list, and the asset pins that binding.
 An absent, blank or nontext `name`, `requirement` or `criterion` answers `mission.node.content_invalid`.
 An absent or empty `verifications` list answers `mission.node.verifications_missing`.
 A nonlist `verifications` value or a blank or nontext item answers `mission.node.content_invalid`.
@@ -1074,6 +1091,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `mission.evidence.content_platform`                                     | A content read names the `platform` asset of a request evidence; details `{ evidence_id, address }`.                                                                                                                                                        | evidence asset content get, execution evidence asset content get                                                                                                                                                                                                                                                                                                                                   |
 | 409   | `mission.evidence.content_repository`                                   | Proposed. Repository evidence has no stored content to return.                                                                                                                                                                                              | evidence asset content get, execution evidence asset content get                                                                                                                                                                                                                                                                                                                                   |
 | 409   | `mission.evidence.storage_binding_absent`                               | An `object` asset is submitted for a node whose pinned revision names no storage binding.                                                                                                                                                                   | evidence submit, evidence upload                                                                                                                                                                                                                                                                                                                                                                   |
+| 409   | `mission.evidence.storage_exhausted`                                    | No storage binding of the pinned revision is left for the grant of an `object` asset in the open attempt. Details `{ node_id, attempt, bindings }` list every storage binding of the pinned revision.                                                       | evidence submit, evidence upload                                                                                                                                                                                                                                                                                                                                                                   |
 | 503   | `mission.evidence.storage_unavailable`                                  | The operation calls object storage, and the server wires none.                                                                                                                                                                                              | evidence submit with an `object` asset, evidence asset complete, evidence delete, evidence asset delete, evidence asset content get, execution asset content get                                                                                                                                                                                                                                   |
 | 409   | `mission.execution.claim_not_evaluation`                                | An assessment or a request is submitted under a steps claim.                                                                                                                                                                                                | assessment submit, API evidence request                                                                                                                                                                                                                                                                                                                                                            |
 | 409   | `mission.execution.context_mismatch`                                    | The route node, `execution_id`, `attempt` or `node_revision` of an execution submission differs from the proven claim; details `{ field }`.                                                                                                                 | evidence submit, evidence upload, assessment submit, API evidence request, API asset complete                                                                                                                                                                                                                                                                                                      |
