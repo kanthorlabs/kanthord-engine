@@ -41,7 +41,9 @@ The superrepo `refactor/flat-nodes` points the `engine` at the merge of #79 and 
 
 ### Open
 
-- Tasks 08.11 and 08.12 wait for Ulrich.
+- Task 08.12 passed on 2026-10-18 on the local daemon. `foundation` and `persistence` reached `Completed`, and `make e2e-check` printed `RESULT pass`. Ulrich accepted the run.
+- The homelab part of task 08.11 waits until after the merge to `main` (ruling of 2026-10-18).
+- Steps 7 to 13 below wait for Ulrich.
 
 ### Rulings of Ulrich on 2026-10-17
 
@@ -91,6 +93,8 @@ Gate row 08 (`00-index.md:97`) holds the live run. The plan 08 pull request merg
 ## Open follow-ups
 
 - `docs/brainstorm/HANDOFF.md` of the superrepo holds the open design items.
+- The todoapp node `contributing` asks for "the current year" in its criterion. In the live run, the agent judged that criterion unmet on a correct commit until the budget ended. Write a fixed year in the criterion.
+- `make e2e-watch` does not report `worker.pool.instance_failed`. A crash loop of the pool workers then looks like a quiet run. Report each pool failure in the watch output.
 - Audit the human output of every CLI command. Some commands print bare values with no names. For example, `llm credential login` prints the session identity, the address, the code, the expiry and the mutation key as five bare lines. Show each value as a `name: value` row. Put each URL on a separate row of its own.
 - These tests failed once in a full run and passed alone, so treat them as flaky until they fail again: `e2e-worker-app.test.ts:298`; `worker-pool.test.ts` "a removed binding ends its threads without a restart" and "the pool starts one instance for each slot"; two timing tests of `src/worker/unit/verification.test.ts` under parallel load.
 - `docs/brainstorm/worker-service.impl.md` has no test line for the evidence-placement rule on an `implement` node whose evidence names no repository snapshot. This gap existed before ruling S4.
