@@ -703,7 +703,7 @@ export const catalogItemSchema = z.strictObject({
   name: z.string().min(1),
   host: z.enum(WorkerHost),
   declared_node_states: z.array(z.string()),
-  required_node_format: z.array(z.string()),
+  declared_works: z.array(z.enum(ExecutionWork)),
 });
 const resourceBudgetSchema = z.strictObject({
   wall_time_ms: z.number().int().positive(),

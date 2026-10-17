@@ -82,9 +82,22 @@ export interface WorkQueue {
   priorityUpdate(tx: Transaction, nodeId: string, priority: number): void;
 }
 
+export interface ClaimFacts {
+  work: Work;
+  requires: string[];
+}
+
+export interface ClaimFactsRow extends ClaimFacts {
+  node_id: string;
+  revision: number;
+  claims: ClaimableState[];
+}
+
 export interface MissionCollaborations {
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void;
   liveNodesPinning(tx: Transaction, bindingId: string): string[];
+  claimFacts(tx: Transaction, nodeId: string): ClaimFacts | null;
+  claimFactsOf(tx: Transaction, projectId: string): ClaimFactsRow[];
 }
 
 export interface SchedulerClaims {
@@ -100,6 +113,16 @@ export interface SchedulerClaims {
     attempt: number;
     pinned_revision: number;
   } | null;
+}
+
+export type UnmatchedClaim = {
+  node_id: string;
+  revision: number;
+  claim: ClaimableState;
+};
+
+export interface SchedulerMatch {
+  unmatchedClaims(tx: Transaction, projectId: string): UnmatchedClaim[];
 }
 
 export interface IntakeCall {
@@ -259,6 +282,7 @@ export const MissionErrorCode = {
   BindingsInvalid: "mission.node.bindings_invalid",
   FilenameConflict: "mission.node.filename_conflict",
   WorkLocked: "mission.node.work_locked",
+  RequiresUnmatched: "mission.node.requires_unmatched",
   Retired: "mission.node.retired",
   Terminal: "mission.node.terminal",
   EndpointInvalid: "mission.dependency.endpoint_invalid",
@@ -311,6 +335,13 @@ export const NodeState = {
   ExternalSuccess: "External.Success",
   ExternalFailed: "External.Failed",
 } as const;
+export const ClaimableState = {
+  Available: NodeState.Available,
+  Waiting: NodeState.Waiting,
+  ExternalRequested: NodeState.ExternalRequested,
+} as const;
+export type ClaimableState =
+  (typeof ClaimableState)[keyof typeof ClaimableState];
 export const RevisionWrite = {
   Import: "import",
   NodeCreate: "node.create",

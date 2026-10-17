@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
-import {
-  AgentChoiceKind,
-  ClaimNodeState,
-  NodeFormatField,
-} from "./contract.ts";
+import { AgentChoiceKind, ClaimNodeState, ClaimWork } from "./contract.ts";
 import { claimOnce, ClaimOutcome } from "./claim.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
 import {
@@ -50,13 +46,14 @@ export function claimHarness(
     binding_id: row.worker_binding_id,
     worker_name: "coder@1",
     instance_count: 1,
+    traits: [] as string[],
     tombstone: false,
     resource_budget: null as { wall_time_ms: number } | null,
   };
   h.dependencies.bindings.workerBindingOf = () => binding;
   h.dependencies.declarations.declarationOf = () => ({
     declared_node_states: states,
-    required_node_format: Object.values(NodeFormatField),
+    declared_works: Object.values(ClaimWork),
     resource_budget: { wall_time_ms: WALL_TIME },
   });
   h.dependencies.transitions.claim = (
@@ -182,6 +179,60 @@ test("health, tombstones, zero counts and occupied binding counts refuse admissi
     insertExecution(tx, executionFixture({ project_id: h.row.project_id })),
   );
   assert.equal(h.claim().outcome, ClaimOutcome.None);
+  assert.deepEqual(
+    h.calls.filter((call) => call.method === CLAIM_METHOD),
+    [],
+  );
+});
+
+test("the claim walk skips a job that the claimant does not admit and claims the next admitted job", (t) => {
+  const h = claimHarness(t);
+  const macos = createIdentity("node");
+  const examine = createIdentity("node");
+  const plain = createIdentity("node");
+  h.store.transaction((tx) => {
+    h.service.insert(tx, macos, h.row.project_id, 3);
+    h.service.insert(tx, examine, h.row.project_id, 2);
+    h.service.insert(tx, plain, h.row.project_id, 1);
+  });
+  const facts = new Map([
+    [macos, { work: ClaimWork.Implement, requires: ["platform.macos"] }],
+    [examine, { work: ClaimWork.Examine, requires: [] }],
+    [plain, { work: ClaimWork.Implement, requires: [] }],
+  ]);
+  const read: string[] = [];
+  h.dependencies.facts.claimFacts = (_tx, nodeId) => {
+    read.push(nodeId);
+    return facts.get(nodeId) ?? null;
+  };
+  h.dependencies.declarations.declarationOf = () => ({
+    declared_node_states: [ClaimNodeState.Available],
+    declared_works: [ClaimWork.Implement],
+    resource_budget: { wall_time_ms: WALL_TIME },
+  });
+  const first = h.claim();
+  assert.equal(first.row!.node_id, plain);
+  assert.deepEqual(read, [macos, examine, plain]);
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === CLAIM_METHOD)
+      .map((call) => call.arguments[0]),
+    [plain],
+  );
+  h.store.transaction((tx) => h.service.revoke(tx, plain, FIXTURE_NOW));
+  h.binding.traits = ["platform.macos"];
+  assert.equal(h.claim().row!.node_id, macos);
+});
+
+test("a worker name with no declaration answers no work and asserts nothing", (t) => {
+  const h = claimHarness(t);
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.declarations.declarationOf = () => null;
+  const result = h.claim();
+  assert.equal(result.outcome, ClaimOutcome.None);
+  assert.equal(result.row, null);
   assert.deepEqual(
     h.calls.filter((call) => call.method === CLAIM_METHOD),
     [],

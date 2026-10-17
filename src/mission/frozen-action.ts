@@ -13,7 +13,7 @@ import {
   type MissionBindings,
 } from "./contract.ts";
 import { readAttempt, readRequests, type EvidenceRow } from "./record-store.ts";
-import { readRevision } from "./store.ts";
+import { readRevision, type RevisionRow } from "./store.ts";
 
 const bindingIdsSchema = z.array(z.string());
 const RESOURCE_KIND_SEPARATOR = ":";
@@ -26,6 +26,14 @@ export function requiredActionsOf(
 ): FrozenAction[] {
   const revision = readRevision(tx, nodeId, nodeRevision);
   assert.ok(revision);
+  return actionsOfRevision(tx, bindings, revision);
+}
+
+export function actionsOfRevision(
+  tx: Transaction,
+  bindings: MissionBindings,
+  revision: RevisionRow,
+): FrozenAction[] {
   if (revision.work === Work.Examine) return [];
   const actions: FrozenAction[] = [];
   for (const bindingId of bindingIdsSchema.parse(

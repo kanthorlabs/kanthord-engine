@@ -7,7 +7,7 @@ import { testMachineIdentity } from "../kernel/test-identity.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   ClaimNodeState,
-  NodeFormatField,
+  ClaimWork,
   WorkPullKind,
   WORK_PULL_WAIT_MS,
 } from "./contract.ts";
@@ -16,6 +16,7 @@ import { schedulerHarness, executionFixture } from "./test-support.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 
 const NO_COMMITS = 0;
+const NO_CLAIMS = 0;
 const ONE_COMMIT = 1;
 const TWO_CHECKS = 2;
 const FIRST_ATTEMPT = 1;
@@ -44,11 +45,12 @@ function harness(t: TestContext) {
     binding_id: row.worker_binding_id,
     worker_name: "coder@1",
     instance_count: 2,
+    traits: [],
     tombstone: false,
   });
   h.dependencies.declarations.declarationOf = () => ({
     declared_node_states: [ClaimNodeState.Available],
-    required_node_format: Object.values(NodeFormatField),
+    declared_works: Object.values(ClaimWork),
     resource_budget: { wall_time_ms: 7200000 },
   });
   h.dependencies.transitions.claim = (tx, nodeId) => {
@@ -229,6 +231,29 @@ test("window expiry commits no-work and cancellation commits nothing", async (t)
   context.cancel();
   await assert.rejects(pending, { code: CANCELLED });
   assert.equal(cancelled.commits(), NO_COMMITS);
+});
+
+test("a pull of a worker with no declaration answers no-work and claims nothing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let monotonic = 0;
+  t.mock.method(performance, "now", () => monotonic);
+  const h = harness(t);
+  h.dependencies.declarations.declarationOf = () => null;
+  let claims = 0;
+  h.dependencies.transitions.claim = () => {
+    claims++;
+    return assert.fail("A pull without a declaration claims no node.");
+  };
+  h.enqueue();
+  const waiting = h.pull();
+  monotonic = WORK_PULL_WAIT_MS;
+  t.mock.timers.tick(WORK_PULL_WAIT_MS);
+  assert.deepEqual(await waiting, { kind: WorkPullKind.NoWork });
+  assert.equal(claims, NO_CLAIMS);
+  assert.deepEqual(
+    h.store.database.prepare("SELECT * FROM scheduler_execution").all(),
+    [],
+  );
 });
 
 test("mismatches and unexpected probe errors propagate without a commit", async (t) => {

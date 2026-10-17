@@ -6,7 +6,7 @@ import {
   AgentChoiceKind,
   EXECUTION_IDENTITY_PREFIX,
   type AgentSelection,
-  nodeFormatFieldSchema,
+  type Claimant,
   traceIdSchema,
   spanIdSchema,
   type ExecutionRow,
@@ -19,6 +19,7 @@ import {
   readUnendedOfRuntime,
 } from "./execution-store.ts";
 import { settleNode, settleRuntime } from "./settlement.ts";
+import { admits } from "./match.ts";
 
 export const ClaimOutcome = {
   Running: "running",
@@ -46,16 +47,11 @@ function selectJob(
   tx: Transaction,
   dependencies: Dependencies,
   identity: MachineIdentity,
-  declaration: Declaration,
+  claimant: Claimant,
   executionId: string,
   now: number,
 ) {
   assert.ok(identity.runtimeIdentity);
-  assert.ok(
-    declaration.required_node_format.every(
-      (field) => nodeFormatFieldSchema.safeParse(field).success,
-    ),
-  );
   const jobs = tx.database
     .prepare(
       "SELECT node_id FROM scheduler_job WHERE project_id = ? AND (not_before IS NULL OR not_before <= ?) ORDER BY priority DESC, id ASC",
@@ -68,10 +64,12 @@ function selectJob(
       settled = true;
       continue;
     }
+    const facts = dependencies.facts.claimFacts(tx, nodeId);
+    if (facts === null || !admits(claimant, facts)) continue;
     const claim = dependencies.transitions.claim(
       tx,
       nodeId,
-      declaration.declared_node_states,
+      claimant.declared_node_states,
       {
         kind: "execution",
         execution_id: executionId,
@@ -100,7 +98,11 @@ function acquire(
     tx,
     dependencies,
     identity,
-    declaration,
+    {
+      declared_node_states: declaration.declared_node_states,
+      declared_works: declaration.declared_works,
+      traits: binding.traits,
+    },
     executionId,
     now,
   );
@@ -167,12 +169,7 @@ export function claimOnce(
   const declaration = dependencies.declarations.declarationOf(
     binding.worker_name,
   );
-  assert.ok(declaration, "a worker binding must name a declared worker");
-  assert.ok(
-    declaration.required_node_format.every(
-      (field) => nodeFormatFieldSchema.safeParse(field).success,
-    ),
-  );
+  if (!declaration) return { outcome: ClaimOutcome.None, row: null, settled };
   if (
     countRunningOfGroup(
       tx,

@@ -64,6 +64,7 @@ import {
   projectOperations,
 } from "./contract.ts";
 import { RepositoryFileState } from "../repository/contract.ts";
+import { TRAIT_KEY_MAX_BYTES } from "../kernel/trait.ts";
 import { projectMigrations } from "./migrations.ts";
 import { SshErrorCode, type SshIdentity } from "../repository/ssh-identity.ts";
 import {
@@ -150,6 +151,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     },
     createMission: unexpected,
     liveNodesPinning: unexpected,
+    unmatchedClaims: () => [],
     validateEntry: unexpected,
     custodySuitability: unexpected,
     repositoryConnector: {
@@ -835,6 +837,7 @@ test("workerBindingOf reads current configuration, disablement and tombstone in 
     generation: revisionOf(f, first),
     resource_budget: null,
     entries: [],
+    traits: [],
     tombstone: false,
   });
   const next = f.write(TWO_INSTANCES);
@@ -1495,6 +1498,157 @@ test("an external worker refuses the placement field", async (t) => {
     { binding: WORKER_NAME, field: WorkerField.Placement },
   );
   assert.deepEqual(f.snapshot(), before);
+});
+
+const TRAIT_PREFIX = "platform.";
+const TRAIT_KEY_MAX = `${TRAIT_PREFIX}${"a".repeat(TRAIT_KEY_MAX_BYTES - TRAIT_PREFIX.length)}`;
+
+function tracedWorker(traits: unknown, worker = NATIVE_WORKER) {
+  const binding = workerBinding(worker);
+  return { ...binding, config: { ...binding.config, traits } };
+}
+
+test("worker traits accept a key of 64 bytes and read an absent field as an empty list", async (t) => {
+  const f = writeFixture(t);
+  const read = () =>
+    f.store.transaction((tx) =>
+      f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
+    );
+  const list = () =>
+    f.store.transaction((tx) =>
+      f.project.workerBindingsOf(tx, f.params.project_id),
+    );
+  assert.equal(Buffer.byteLength(TRAIT_KEY_MAX), TRAIT_KEY_MAX_BYTES);
+  const first = await f.write({ [WORKER_NAME]: workerBinding() });
+  assert.deepEqual(read()?.traits, []);
+  await f.write(
+    { [WORKER_NAME]: tracedWorker([TRAIT_KEY_MAX, "toolchain.xcode_16"]) },
+    first.binding_set_version,
+  );
+  assert.deepEqual(read()?.traits, [TRAIT_KEY_MAX, "toolchain.xcode_16"]);
+  assert.deepEqual(
+    list().map(({ traits }) => traits),
+    [[TRAIT_KEY_MAX, "toolchain.xcode_16"]],
+  );
+});
+
+test("worker traits refuse a longer key, an upper-case key, an empty segment, a repeated key and a nonlist value", async (t) => {
+  const f = writeFixture(t);
+  const before = f.snapshot();
+  const cases: Array<{ traits: unknown; trait: string | null }> = [
+    { traits: [`${TRAIT_KEY_MAX}a`], trait: `${TRAIT_KEY_MAX}a` },
+    { traits: ["platform.macOS"], trait: "platform.macOS" },
+    { traits: ["platform..macos"], trait: "platform..macos" },
+    {
+      traits: ["platform.macos", "platform.macos"],
+      trait: "platform.macos",
+    },
+    { traits: "platform.macos", trait: null },
+    { traits: [7], trait: null },
+  ];
+  for (const { traits, trait } of cases)
+    await rejectsWrite(
+      f.write({ [WORKER_NAME]: tracedWorker(traits) }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.WorkerTraitsInvalid,
+      { binding: WORKER_NAME, trait },
+    );
+  await rejectsWrite(
+    f.write({ [WORKER_NAME]: tracedWorker(["Platform"], EXTERNAL_WORKER) }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.WorkerTraitsInvalid,
+    { binding: WORKER_NAME, trait: "Platform" },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a change of worker traits creates the next revision of the binding", async (t) => {
+  const f = writeFixture(t);
+  const read = () =>
+    f.store.transaction((tx) =>
+      f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
+    );
+  const first = await f.write({
+    [WORKER_NAME]: tracedWorker(["platform.linux"], EXTERNAL_WORKER),
+  });
+  assert.equal(read()?.revision, REVISION_ONE);
+  const unchanged = await f.write(
+    { [WORKER_NAME]: tracedWorker(["platform.linux"], EXTERNAL_WORKER) },
+    first.binding_set_version,
+  );
+  assert.equal(unchanged.binding_set_version, first.binding_set_version);
+  const second = await f.write(
+    { [WORKER_NAME]: tracedWorker(["platform.macos"], EXTERNAL_WORKER) },
+    first.binding_set_version,
+  );
+  assert.deepEqual(
+    second.changes.map(({ kind }) => kind),
+    [ChangeKind.Revised],
+  );
+  assert.equal(read()?.revision, REVISION_TWO);
+  assert.deepEqual(read()?.traits, ["platform.macos"]);
+});
+
+const MACOS_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+const MACOS_REVIEWER = "macos-reviewer";
+
+function macosCoverage(project: () => ProjectService) {
+  const reads: number[] = [];
+  const unmatchedClaims: Dependencies["unmatchedClaims"] = (tx, projectId) => {
+    assert.ok(tx.database.isTransaction);
+    const covered = project()
+      .workerBindingsOf(tx, projectId)
+      .some(({ traits }) => traits.includes("platform.macos"));
+    reads.push(covered ? 0 : 1);
+    return covered
+      ? []
+      : [{ node_id: MACOS_NODE, revision: REVISION_ONE, claim: "Waiting" }];
+  };
+  return { reads, unmatchedClaims };
+}
+
+test("a binding set without the only macOS reviewer answers project.bindings.worker.node_unmatched", async (t) => {
+  const services: ProjectService[] = [];
+  const coverage = macosCoverage(() => services[0]!);
+  const f = writeFixture(t, { unmatchedClaims: coverage.unmatchedClaims });
+  services.push(f.project);
+  const first = await f.write({
+    [MACOS_REVIEWER]: tracedWorker(["platform.macos"], EXTERNAL_WORKER),
+  });
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({}, first.binding_set_version),
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerNodeUnmatched,
+    { node_ids: [MACOS_NODE] },
+  );
+  assert.deepEqual(f.snapshot(), before);
+  await rejectsWrite(
+    f.write(
+      { [MACOS_REVIEWER]: tracedWorker([], EXTERNAL_WORKER) },
+      first.binding_set_version,
+    ),
+    HttpStatus.Conflict,
+    ProjectErrorCode.WorkerNodeUnmatched,
+    { node_ids: [MACOS_NODE] },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a write that keeps an earlier unmatched pair succeeds", async (t) => {
+  const services: ProjectService[] = [];
+  const coverage = macosCoverage(() => services[0]!);
+  const f = writeFixture(t, { unmatchedClaims: coverage.unmatchedClaims });
+  services.push(f.project);
+  const first = await f.write({
+    [WORKER_NAME]: workerBinding(EXTERNAL_WORKER),
+  });
+  const second = await f.write(
+    { [WORKER_NAME]: tracedWorker(["platform.linux"], EXTERNAL_WORKER) },
+    first.binding_set_version,
+  );
+  assert.ok(second.binding_set_version > first.binding_set_version);
+  assert.deepEqual(coverage.reads, [1, 1, 1, 1]);
 });
 
 test("a committed binding-set write notifies the bindings change once after the commit and a refused write notifies nothing", async (t) => {

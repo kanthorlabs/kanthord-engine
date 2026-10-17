@@ -264,6 +264,12 @@ export function composeServices(options: {
     bindings: {
       workerBindingOf: (tx, projectId, resourceIdentity) =>
         project.workerBindingOf(tx, projectId, resourceIdentity),
+      workerBindingsOf: (tx, projectId) =>
+        project.workerBindingsOf(tx, projectId),
+    },
+    facts: {
+      claimFacts: (tx, nodeId) => mission.claimFacts(tx, nodeId),
+      claimFactsOf: (tx, projectId) => mission.claimFactsOf(tx, projectId),
     },
     projects: {
       projectPaused: (tx, projectId) => project.projectPaused(tx, projectId),
@@ -555,6 +561,10 @@ export function composeServices(options: {
       settle: (...args) => scheduler.settle(...args),
       liveExecutionOf: (...args) => scheduler.liveExecutionOf(...args),
     },
+    schedulerMatch: {
+      unmatchedClaims: (tx, projectId) =>
+        scheduler.unmatchedClaims(tx, projectId),
+    },
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
@@ -579,6 +589,8 @@ export function composeServices(options: {
     bindingsChanged: (projectId) => worker.bindingsChanged(projectId),
     createMission: (tx, pid, actor) => mission.createMission(tx, pid, actor),
     liveNodesPinning: (tx, bid) => mission.liveNodesPinning(tx, bid),
+    unmatchedClaims: (tx, projectId) =>
+      scheduler.unmatchedClaims(tx, projectId),
     validateEntry: (tx, name, entry) => worker.validateEntry(tx, name, entry),
     custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
     repositoryConnector: repoConnector,

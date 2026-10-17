@@ -1328,9 +1328,9 @@ test("catalog pages released declarations once per commit and registrations add 
   assert.equal(f.commits(), expectedCommits);
   assert.deepEqual(Object.keys(before.items[0]!).sort(), [
     "declared_node_states",
+    "declared_works",
     "host",
     "name",
-    "required_node_format",
   ]);
 });
 

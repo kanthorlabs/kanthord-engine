@@ -7,6 +7,7 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
   AssetKind,
+  ClaimableState,
   MissionErrorCode,
   Work,
   NodeState,
@@ -31,7 +32,7 @@ import {
   readNode,
   setNodeState,
 } from "./store.ts";
-import { executionHarness } from "./test-support.ts";
+import { databaseSnapshot, executionHarness } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_REVISION = 1;
@@ -281,6 +282,51 @@ test("approval adds a dependency of the proposer on the created node and routes 
       SINGLE_PROPOSAL,
     );
   });
+});
+
+test("an approval that adds an unmatched pair is refused and writes nothing", async (t) => {
+  const h = await fixture(t);
+  await h.submit([h.proposal()]);
+  const proposalId = (await h.list()).items[0]!.id;
+  h.dependencies.bindings.repositoryPolicyOf = (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    ssh_credential: "github-ssh",
+    credential: "github",
+    base_branch: "main",
+    action: null,
+    landing: "human",
+    project_prompt: null,
+  });
+  h.dependencies.schedulerMatch = {
+    unmatchedClaims: (tx, projectId) =>
+      h.service
+        .claimFactsOf(tx, projectId)
+        .filter(({ requires }) => requires.includes(DEPENDENCY_TRAIT))
+        .flatMap(({ node_id, revision, claims }) =>
+          claims.map((claim) => ({ node_id, revision, claim })),
+        ),
+  };
+  const before = databaseSnapshot(h.store);
+  await assert.rejects(h.approve(proposalId), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, MissionErrorCode.RequiresUnmatched);
+    const details = error.details as unknown as {
+      claims: { revision: number; claim: string }[];
+    };
+    assert.deepEqual(
+      details.claims.map(({ revision, claim }) => ({ revision, claim })),
+      [
+        { revision: FIRST_REVISION, claim: ClaimableState.Available },
+        { revision: FIRST_REVISION, claim: ClaimableState.Waiting },
+      ],
+    );
+    return true;
+  });
+  assert.deepEqual(databaseSnapshot(h.store), before);
 });
 
 test("approving twice refuses with already_approved", async (t) => {

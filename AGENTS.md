@@ -158,6 +158,8 @@ engine/
 │   │   ├── control-close.ts    # Block, discard, and success override
 │   │   ├── control-unblock.ts  # Atomic direction change and next attempt
 │   │   ├── transitions.ts     # Scheduler claim, release admission, and failure
+│   │   ├── claim-facts.ts     # Work, requires and claimable states of a node at its claim revisions
+│   │   ├── coverage.ts        # Unmatched pairs that a node write adds, and the refusal of that write
 │   │   ├── execution.ts       # Live claim and execution context admission
 │   │   ├── execution-read.ts  # Pinned revisions, attempts and current dependency outcomes
 │   │   ├── evidence-content.ts # Binding, byte and verification validation
@@ -180,6 +182,7 @@ engine/
 │   │   ├── migrations.ts       # scheduler_job and scheduler_execution tables
 │   │   ├── execution-store.ts  # Execution rows, claim-state derivation, and record projection
 │   │   ├── claim.ts            # Transactional work selection and admission
+│   │   ├── match.ts            # Match of a claimant and a node, coverage, and the unmatched pairs of a project
 │   │   ├── work-pull.ts        # Rolled-back probes, waiting, and one final commit
 │   │   ├── wakeup.ts           # Project-scoped waiting pulls and coalesced notifications
 │   │   ├── release.ts          # Transactional proof and Mission release routing

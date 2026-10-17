@@ -43,7 +43,13 @@ import {
 import { BindingKind, REPOSITORY_PLATFORM } from "../../project/contract.ts";
 import type { Job } from "../../scheduler/contract.ts";
 import { environment, kanthord } from "./cli-support.ts";
-import { FAKE_SSH_IDENTITY, gatewayFixture } from "./test-support.ts";
+import {
+  applyCoveringBindings,
+  COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
+  FAKE_SSH_IDENTITY,
+  gatewayFixture,
+} from "./test-support.ts";
 
 const SUCCESS = 0;
 const FAILURE = 1;
@@ -82,6 +88,8 @@ const FIRST_REVISION = 1;
 const VERSION_INCREMENT = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
+const COVERED_BINDING_VERSION = 3;
+const REPOSITORY_BINDING_VERSION = 4;
 const REPOSITORY_NAME = "repo";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
 const OTHER_REPOSITORY_NAME = "other-repo";
@@ -357,6 +365,12 @@ async function createMission(fixture: Fixture): Promise<Mission> {
   assert.ok(mission.id.startsWith(`${MISSION_IDENTITY_PREFIX}_`));
   assert.equal(mission.project_id, project.id);
   assert.equal(mission.version, MISSION_INITIAL_VERSION);
+  assert.ok(fixture.directory);
+  await enableCoveringAgents(fixture.env);
+  assert.equal(
+    await applyCoveringBindings(fixture.env, fixture.directory, project.id),
+    COVERED_BINDING_VERSION,
+  );
   return mission;
 }
 
@@ -602,8 +616,9 @@ test(
       ),
     );
     const bindingFile = jsonFile(fixture, "binding.json", {
-      version: FIRST_REVISION,
+      version: COVERED_BINDING_VERSION,
       bindings: {
+        ...COVERING_WORKER_BINDINGS,
         [REPOSITORY_NAME]: {
           kind: BindingKind.Repository,
           config: {
@@ -626,7 +641,7 @@ test(
         fixture.env,
       ),
     );
-    assert.equal(binding.binding_set_version, SECOND_REVISION);
+    assert.equal(binding.binding_set_version, REPOSITORY_BINDING_VERSION);
     const bindingId = binding.bindings[REPOSITORY_NAME]!.id;
     const first = await createNode(
       fixture,
@@ -911,8 +926,9 @@ async function configureRepository(
     ),
   );
   const bindingFile = jsonFile(fixture, "import-binding.json", {
-    version: FIRST_REVISION,
+    version: COVERED_BINDING_VERSION,
     bindings: {
+      ...COVERING_WORKER_BINDINGS,
       [REPOSITORY_NAME]: {
         kind: BindingKind.Repository,
         config: {
@@ -935,7 +951,7 @@ async function configureRepository(
       fixture.env,
     ),
   );
-  assert.equal(result.binding_set_version, SECOND_REVISION);
+  assert.equal(result.binding_set_version, REPOSITORY_BINDING_VERSION);
   assert.ok(projectId);
   return result.bindings[REPOSITORY_NAME]!.id;
 }
@@ -1510,6 +1526,8 @@ async function scenarioProject(fixture: Fixture): Promise<Mission> {
     await kanthord([MISSION, GET, project.id], fixture.env),
   );
   assert.deepEqual(reread, mission);
+  await enableCoveringAgents(fixture.env);
+  await applyCoveringBindings(fixture.env, fixture.directory, project.id);
   await configureRepository(fixture, project.id);
   return mission;
 }
@@ -1565,7 +1583,17 @@ async function scenarioExamine(fixture: Fixture): Promise<Scenario> {
 async function scenarioImplement(scenario: Scenario): Promise<void> {
   const { fixture, mission, examineId } = scenario;
   const bindings = success<Page<RepositoryRecord>>(
-    await kanthord([PROJECT, BINDING, LIST, mission.project_id], fixture.env),
+    await kanthord(
+      [
+        PROJECT,
+        BINDING,
+        LIST,
+        mission.project_id,
+        "--kind",
+        BindingKind.Repository,
+      ],
+      fixture.env,
+    ),
   );
   assert.equal(bindings.items.length, SINGLE_ITEM);
   scenario.bindingId = bindings.items[0]!.id;
@@ -1793,7 +1821,7 @@ async function applyRepositorySet(scenario: Scenario, bindings: RepositorySet) {
   );
   const path = jsonFile(fixture, SCENARIO_FILE, {
     version: project.binding_set_version,
-    bindings,
+    bindings: { ...COVERING_WORKER_BINDINGS, ...bindings },
   });
   const applied = success<{ project_id: string; binding_set_version: number }>(
     await kanthord(
@@ -1807,7 +1835,17 @@ async function applyRepositorySet(scenario: Scenario, bindings: RepositorySet) {
     project.binding_set_version + VERSION_INCREMENT,
   );
   const listed = success<Page<RepositoryRecord>>(
-    await kanthord([PROJECT, BINDING, LIST, mission.project_id], fixture.env),
+    await kanthord(
+      [
+        PROJECT,
+        BINDING,
+        LIST,
+        mission.project_id,
+        "--kind",
+        BindingKind.Repository,
+      ],
+      fixture.env,
+    ),
   );
   assert.equal(listed.items.length, Object.keys(bindings).length);
   assert.equal(listed.next_cursor, null);
@@ -2271,7 +2309,17 @@ function writeImportSet(
 async function flatScenario(fixture: Fixture): Promise<Scenario> {
   const mission = await scenarioProject(fixture);
   const bindings = success<Page<RepositoryRecord>>(
-    await kanthord([PROJECT, BINDING, LIST, mission.project_id], fixture.env),
+    await kanthord(
+      [
+        PROJECT,
+        BINDING,
+        LIST,
+        mission.project_id,
+        "--kind",
+        BindingKind.Repository,
+      ],
+      fixture.env,
+    ),
   );
   return {
     fixture,
@@ -2512,7 +2560,14 @@ test(
         assert.deepEqual(created.revisions[0]!.content.bindings, []);
         const bindings = success<Page<RepositoryRecord>>(
           await kanthord(
-            [PROJECT, BINDING, LIST, mission.project_id],
+            [
+              PROJECT,
+              BINDING,
+              LIST,
+              mission.project_id,
+              "--kind",
+              BindingKind.Repository,
+            ],
             fixture.env,
           ),
         );

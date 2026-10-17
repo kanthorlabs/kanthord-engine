@@ -65,6 +65,8 @@ import {
   FAKE_SSH_CREDENTIAL_BODY,
   FAKE_SSH_IDENTITY,
   gatewayFixture,
+  COVERING_WORKER_BINDINGS,
+  enableCoveringAgents,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -91,7 +93,7 @@ const DEFAULTS = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
   reasoning_effort: "off",
-};
+} as const;
 const CONTENT = {
   name: "Say hello",
   requirement: "Write hello.txt",
@@ -161,14 +163,11 @@ test(
       },
       secret: {},
     });
-    for (const agent of ["swe@1", "re@1"])
-      await write(["agent", "enablement", "put", agent], {
-        agent_providers: [
-          { name: "default", provider: "anthropic", credential: "anthro-1" },
-        ],
-        default_configuration: DEFAULTS,
-        fallback_configurations: [],
-      });
+    await enableCoveringAgents(human, {
+      platform: "anthropic",
+      credential: "anthro-1",
+      configuration: DEFAULTS,
+    });
     const project = await read<{ id: string }>([
       "project",
       "create",
@@ -185,6 +184,7 @@ test(
     }>(["project", "binding", "apply", project.id], {
       version: FIRST_REVISION,
       bindings: {
+        ...COVERING_WORKER_BINDINGS,
         repo: {
           kind: "repository",
           config: {

@@ -112,6 +112,93 @@ export const servicePing = {
   description: "Test the service access policy.",
 } as const;
 
+export const COVERING_WORKER_BINDINGS = {
+  coder: {
+    kind: "worker",
+    config: { worker: "coder@1", instance_count: 0, traits: [] },
+  },
+  reviewer: {
+    kind: "worker",
+    config: { worker: "reviewer@1", instance_count: 0, traits: [] },
+  },
+} as const;
+export const COVERING_AGENTS = ["swe@1", "re@1"] as const;
+
+type EnablementBody = z.input<
+  (typeof agentOperations)["enablement.put"]["input"]
+>["body"];
+export interface CoveringProvider {
+  platform: EnablementBody["agent_providers"][number]["provider"];
+  credential: string;
+  configuration: EnablementBody["default_configuration"];
+}
+
+export async function enableCoveringAgents(
+  env: NodeJS.ProcessEnv,
+  provider?: CoveringProvider,
+): Promise<void> {
+  assert.ok(env.KANTHORD_ENDPOINT);
+  assert.ok(env.KANTHORD_TOKEN);
+  const call = humanCaller({
+    endpoint: env.KANTHORD_ENDPOINT,
+    token: env.KANTHORD_TOKEN,
+  });
+  const enabled: CoveringProvider = provider ?? {
+    platform: "anthropic",
+    credential: "covering-llm",
+    configuration: NATIVE_DEFAULTS,
+  };
+  if (provider === undefined)
+    await call(llmOperations.create, {
+      params: {},
+      query: {},
+      body: {
+        name: enabled.credential,
+        platform: "anthropic",
+        metadata: null,
+        [SECRET_FIELD]: { key: "covering-provider-key" },
+      },
+    });
+  for (const agent of COVERING_AGENTS)
+    await call(agentOperations["enablement.put"], {
+      params: { agent_name: agent },
+      query: {},
+      body: {
+        agent_providers: [
+          {
+            name: enabled.configuration.agent_provider,
+            provider: enabled.platform,
+            credential: enabled.credential,
+          },
+        ],
+        default_configuration: enabled.configuration,
+        fallback_configurations: [],
+      },
+    });
+}
+
+const COVERING_APPLY_EXIT = 0;
+
+export async function applyCoveringBindings(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  projectId: string,
+  version = 1,
+): Promise<number> {
+  const path = join(directory, `covering-${projectId}-${version}.json`);
+  writePrivate(
+    path,
+    JSON.stringify({ version, bindings: COVERING_WORKER_BINDINGS }),
+  );
+  const result = await kanthord(
+    ["project", "binding", "apply", projectId, "--file", path],
+    env,
+  );
+  assert.equal(result.code, COVERING_APPLY_EXIT, result.stderr);
+  return (JSON.parse(result.stdout) as { binding_set_version: number })
+    .binding_set_version;
+}
+
 export const domainHealth = {
   repository: { toolchain: HealthStatus.Healthy },
   scheduler: { queue: 200 },
