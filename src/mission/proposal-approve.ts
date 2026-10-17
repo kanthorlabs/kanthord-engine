@@ -67,7 +67,7 @@ export function approveProposal(
     stateConflict(initiative);
   const initiativeRevision = readCurrentRevision(tx, initiative.id);
   assert.ok(initiativeRevision);
-  const source = requireNode(tx, proposal.content.objective_id);
+  const source = requireNode(tx, proposal.content.dependency_id);
   requireActive(source);
   const sourceRow = readCurrentRevision(tx, source.id);
   assert.ok(sourceRow);
@@ -121,7 +121,7 @@ export function approveProposal(
   );
   markProposalApproved(tx, proposal.id, objectiveId, now);
   return {
-    objective: {
+    created: {
       ...objective,
       added_edges: [
         ...objective.added_edges,
@@ -132,6 +132,6 @@ export function approveProposal(
         },
       ],
     },
-    initiative: unblocked,
+    proposer: unblocked,
   };
 }

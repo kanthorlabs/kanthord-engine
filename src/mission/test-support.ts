@@ -368,7 +368,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
         result,
         rationale: "Reviewed",
         evidence_ids: "[]",
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: canonicalJSON({
           kind: AssetKind.Repository,
           binding_id: h.repositoryId,
@@ -506,7 +506,7 @@ export async function externalRequestHarness(
     body: {
       ...h.context,
       evidence_ids: [evidence.evidence.id],
-      child_outcome_ids: [],
+      dependency_outcome_ids: [],
       result: AssessmentResult.Success,
       rationale: "Passed",
       tested_input: testedInput,

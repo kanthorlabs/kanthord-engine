@@ -350,7 +350,7 @@ const MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS = [
     "proposal.approve",
     "mission.proposal.approve",
     "properties",
-    "initiative",
+    "proposer",
     "properties",
     "node",
   ],
@@ -1025,7 +1025,7 @@ test("named evidence exceptions retain record shapes and conditional request val
       "utf8",
     ),
   );
-  for (const field of ["evidence_ids", "child_outcome_ids"])
+  for (const field of ["evidence_ids", "dependency_outcome_ids"])
     assert.equal(
       assessment.components.schemas["mission.assessment.submit.Input"]
         .properties.body.properties[field].uniqueItems,

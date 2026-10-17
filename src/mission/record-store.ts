@@ -55,7 +55,7 @@ export interface AssessmentRow {
   result: AssessmentResult;
   rationale: string;
   evidence_ids: string;
-  child_outcome_ids: string;
+  dependency_outcome_ids: string;
   tested_input: string | null;
   execution_id: string | null;
   actor: string | null;
@@ -365,11 +365,11 @@ export function insertAssessment(
     ...row,
     sequence,
     evidence_ids: canonicalSet(row.evidence_ids),
-    child_outcome_ids: canonicalSet(row.child_outcome_ids),
+    dependency_outcome_ids: canonicalSet(row.dependency_outcome_ids),
   };
   tx.database
     .prepare(
-      "INSERT INTO mission_assessment (id, node_id, sequence, attempt, result, rationale, evidence_ids, child_outcome_ids, tested_input, execution_id, actor, node_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mission_assessment (id, node_id, sequence, attempt, result, rationale, evidence_ids, dependency_outcome_ids, tested_input, execution_id, actor, node_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       stored.id,
@@ -379,7 +379,7 @@ export function insertAssessment(
       stored.result,
       stored.rationale,
       stored.evidence_ids,
-      stored.child_outcome_ids,
+      stored.dependency_outcome_ids,
       stored.tested_input,
       stored.execution_id,
       stored.actor,

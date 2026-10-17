@@ -225,7 +225,7 @@ for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {
         result: AssessmentResult.Success,
         rationale: "Passed",
         evidence_ids: "[]",
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: null,
         execution_id: createIdentity("execution"),
         actor: null,

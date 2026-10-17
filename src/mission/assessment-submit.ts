@@ -82,7 +82,7 @@ export function submitAssessment(
     result: body.result,
     rationale: body.rationale,
     evidence_ids: canonicalJSON(body.evidence_ids),
-    child_outcome_ids: canonicalJSON(body.child_outcome_ids),
+    dependency_outcome_ids: canonicalJSON(body.dependency_outcome_ids),
     tested_input: canonicalJSON(body.tested_input),
     execution_id: claim.executionId,
     actor: null,
@@ -135,7 +135,7 @@ export function submitAssessment(
         attempt: attempt.attempt,
         assessment_id: assessment.id,
         content: canonicalJSON(proposal),
-        objective_node_id: null,
+        created_node_id: null,
         approved_at: null,
         created_at: now,
       });

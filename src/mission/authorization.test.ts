@@ -527,7 +527,7 @@ test("an initiative claim reads the object of a current objective outcome and no
       result: AssessmentResult.Undetermined,
       rationale: "Blocked",
       evidence_ids: canonicalJSON([named.evidenceId]),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),

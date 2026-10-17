@@ -678,7 +678,7 @@ test(
         assert.equal(assessments.items.length, SINGLE_ITEM);
         assert.equal(assessments.items[0]!.result, AssessmentResult.Success);
         assert.deepEqual(
-          [...assessments.items[0]!.child_outcome_ids].sort(),
+          [...assessments.items[0]!.dependency_outcome_ids].sort(),
           [outcomeA, outcomeC].sort(),
         );
       },

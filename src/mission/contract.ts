@@ -954,14 +954,14 @@ export const assessmentSchema = z.strictObject({
   attempt: z.number().int().nonnegative(),
   node_revision: z.number().int().positive(),
   evidence_ids: z.array(identitySchema("evidence")),
-  child_outcome_ids: z.array(identitySchema("outcome")),
+  dependency_outcome_ids: z.array(identitySchema("outcome")),
   result: assessmentResultSchema,
   rationale: textSchema,
   tested_input: testedInputSchema.nullable(),
   actor: actorSchema,
   created_at: timestamp,
   currency: currencySchema.nullable(),
-  child_node_ids: z.array(identitySchema("node")),
+  dependency_node_ids: z.array(identitySchema("node")),
   worker_version: textSchema.nullable(),
 });
 export type Assessment = z.infer<typeof assessmentSchema>;
@@ -1114,7 +1114,7 @@ export const PROPOSAL_MAX = 10;
 export const proposalTaskSchema = contentSchema.omit({ bindings: true });
 export type ProposalTask = z.infer<typeof proposalTaskSchema>;
 export const proposalContentSchema = z.strictObject({
-  objective_id: identitySchema(NODE_IDENTITY_PREFIX),
+  dependency_id: identitySchema(NODE_IDENTITY_PREFIX),
   ...contentSchema.pick({ name: true, requirement: true, criterion: true })
     .shape,
   task: proposalTaskSchema,
@@ -1126,7 +1126,7 @@ export const proposalSchema = z.strictObject({
   attempt: z.number().int().nonnegative(),
   assessment_id: identitySchema("assessment"),
   content: proposalContentSchema,
-  objective_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
+  created_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
   approved_at: timestamp.nullable(),
   created_at: timestamp,
 });
@@ -1137,15 +1137,15 @@ export const proposalApproveSchema = z.strictObject({
 });
 export type ProposalApprove = z.infer<typeof proposalApproveSchema>;
 export const proposalApproveResultSchema = z.strictObject({
-  objective: nodeChangeSchema,
-  initiative: controlResultSchema,
+  created: nodeChangeSchema,
+  proposer: controlResultSchema,
 });
 export const assessmentSubmitSchema = executionContextSchema.extend({
   evidence_ids: z
     .array(identitySchema("evidence"))
     .refine((items) => new Set(items).size === items.length)
     .meta({ uniqueItems: true }),
-  child_outcome_ids: z
+  dependency_outcome_ids: z
     .array(identitySchema("outcome"))
     .refine((items) => new Set(items).size === items.length)
     .meta({ uniqueItems: true }),

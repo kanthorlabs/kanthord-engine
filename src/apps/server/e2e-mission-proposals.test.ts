@@ -221,13 +221,13 @@ async function setup(t: TestContext) {
     {
       ...executionContext(evaluation),
       evidence_ids: [run.evidence.id],
-      child_outcome_ids: outcomes.items.map((outcome) => outcome.id),
+      dependency_outcome_ids: outcomes.items.map((outcome) => outcome.id),
       result: AssessmentResult.Undetermined,
       rationale: "Recovery is incomplete",
       tested_input: [repositorySnapshot(binding(REPOSITORY).id, COMMIT)],
       proposals: [
         {
-          objective_id: objectiveId,
+          dependency_id: objectiveId,
           name: PROPOSAL_NAME,
           requirement: PROPOSAL_REQUIREMENT,
           criterion: PROPOSAL_CRITERION,
@@ -299,7 +299,7 @@ test(
       assert.equal(result.stdout, EMPTY_OUTPUT);
     };
     let proposal!: Proposal;
-    let approved!: { objective: NodeChange; initiative: ControlResult };
+    let approved!: { created: NodeChange; proposer: ControlResult };
 
     await t.test("the initiative judgement blocks the initiative", () => {
       assert.equal(h.judged.assessment.result, AssessmentResult.Undetermined);
@@ -317,8 +317,8 @@ test(
       assert.equal(proposal.node_id, h.initiativeId);
       assert.equal(proposal.attempt, FIRST_ATTEMPT);
       assert.equal(proposal.approved_at, null);
-      assert.equal(proposal.objective_node_id, null);
-      assert.equal(proposal.content.objective_id, h.objectiveId);
+      assert.equal(proposal.created_node_id, null);
+      assert.equal(proposal.content.dependency_id, h.objectiveId);
       assert.equal(proposal.content.name, PROPOSAL_NAME);
       assert.deepEqual(proposal.content.task.verifications, TASK_VERIFICATIONS);
     });
@@ -399,8 +399,8 @@ test(
         ["mission", "proposal", "approve", proposal.id],
         { expected_mission_version: await h.missionVersion() },
       );
-      assert.equal(approved.objective.revisions.length, SINGLE_ITEM);
-      const created = approved.objective.revisions[FIRST_INDEX]!;
+      assert.equal(approved.created.revisions.length, SINGLE_ITEM);
+      const created = approved.created.revisions[FIRST_INDEX]!;
       const objectiveId = created.node_id;
       assert.equal(created.content.name, PROPOSAL_NAME);
       assert.equal(created.tasks.length, SINGLE_ITEM);
@@ -422,11 +422,11 @@ test(
       );
       const listed = await read<Page<Proposal>>(listArguments());
       assert.equal(typeof listed.items[FIRST_INDEX]!.approved_at, NUMBER_TYPE);
-      assert.equal(listed.items[FIRST_INDEX]!.objective_node_id, objectiveId);
+      assert.equal(listed.items[FIRST_INDEX]!.created_node_id, objectiveId);
     });
 
     await t.test("the initiative reopens in a new attempt", async () => {
-      const { node } = approved.initiative;
+      const { node } = approved.proposer;
       assert.ok(node.kind === NodeKind.Initiative);
       assert.equal(node.state, NodeState.Pending);
       assert.equal(node.attempt, SECOND_ATTEMPT);
@@ -438,7 +438,7 @@ test(
       ]);
       const queued = queue.items.map((item) => item.node_id);
       assert.ok(
-        queued.includes(approved.objective.revisions[FIRST_INDEX]!.node_id),
+        queued.includes(approved.created.revisions[FIRST_INDEX]!.node_id),
       );
       assert.ok(!queued.includes(h.initiativeId));
     });

@@ -325,7 +325,7 @@ test(
         {
           ...ctx(second.execution),
           evidence_ids: [run.id, work.id],
-          child_outcome_ids: [],
+          dependency_outcome_ids: [],
           result: SUCCESS,
           rationale: "hello.txt exists",
           tested_input: repoAt("a"),
@@ -418,7 +418,7 @@ test(
           {
             ...ctx(fourth.execution),
             evidence_ids: [run.id, report.id],
-            child_outcome_ids: [outcomeA],
+            dependency_outcome_ids: [outcomeA],
             result: SUCCESS,
             rationale: "A is complete.",
             tested_input: testedInput,
@@ -426,7 +426,7 @@ test(
           auth.token,
         );
         assert.equal(assessed.node.state, NodeState.Completed);
-        assert.deepEqual(assessed.assessment.child_node_ids, [objective]);
+        assert.deepEqual(assessed.assessment.dependency_node_ids, [objective]);
         assert.equal(assessed.outcome.result, SUCCESS);
       },
     );

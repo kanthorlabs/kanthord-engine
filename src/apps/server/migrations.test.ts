@@ -462,8 +462,8 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
     "mission_outcome.assessment_id->mission_assessment.id",
     "mission_outcome.node_id->mission_node.id",
     "mission_proposal.assessment_id->mission_assessment.id",
+    "mission_proposal.created_node_id->mission_node.id",
     "mission_proposal.node_id->mission_node.id",
-    "mission_proposal.objective_node_id->mission_node.id",
   ]);
 }
 

@@ -59,7 +59,7 @@ function fixture(t: TestContext, kind: NodeKind = NodeKind.Objective) {
         result: AssessmentResult.Success,
         rationale: "Reviewed",
         evidence_ids: "[]",
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: null,
         execution_id: createIdentity("execution"),
         actor: null,
@@ -201,7 +201,7 @@ test("a changed child outcome invalidates the initiative's selected context with
     }),
   );
   const parent = h.assessment({
-    child_outcome_ids: canonicalJSON([outcome.id]),
+    dependency_outcome_ids: canonicalJSON([outcome.id]),
   });
   assert.equal(
     h.store.transaction((tx) => currencyOf(tx, parent)).current,

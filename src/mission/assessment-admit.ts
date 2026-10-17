@@ -37,7 +37,7 @@ const PROPOSALS_FIELD = "proposals";
 function requireChildren(
   tx: Transaction,
   node: NodeRow,
-  childOutcomeIds: readonly string[],
+  dependencyOutcomeIds: readonly string[],
 ): void {
   assert.ok(tx.database.isTransaction);
   const expected =
@@ -55,11 +55,11 @@ function requireChildren(
             return outcome ? [outcome.id] : [];
           });
   if (
-    childOutcomeIds.length !== expected.length ||
-    new Set(childOutcomeIds).size !== expected.length ||
-    !expected.every((id) => childOutcomeIds.includes(id))
+    dependencyOutcomeIds.length !== expected.length ||
+    new Set(dependencyOutcomeIds).size !== expected.length ||
+    !expected.every((id) => dependencyOutcomeIds.includes(id))
   )
-    invalidExecutionInput("child_outcome_ids");
+    invalidExecutionInput("dependency_outcome_ids");
 }
 
 function requireProposals(
@@ -85,7 +85,7 @@ function requireProposals(
       .map((child) => child.id),
   );
   for (const proposal of body.proposals) {
-    if (!objectives.has(proposal.objective_id))
+    if (!objectives.has(proposal.dependency_id))
       invalidExecutionInput(PROPOSALS_FIELD);
     for (const text of [
       proposal.name,
@@ -186,7 +186,7 @@ export function admitAssessment(
         verificationSchema.parse(JSON.parse(row.verification)),
       );
   }
-  requireChildren(tx, node, body.child_outcome_ids);
+  requireChildren(tx, node, body.dependency_outcome_ids);
   requireProposals(tx, dependencies, node, body);
   requireTestedInput(
     tx,

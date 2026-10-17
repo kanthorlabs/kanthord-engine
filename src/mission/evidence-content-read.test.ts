@@ -61,7 +61,7 @@ test("initiative content bound includes only evidence of current child outcomes"
       result: AssessmentResult.Undetermined,
       rationale: "Blocked",
       evidence_ids: canonicalJSON([named.evidence.id]),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),

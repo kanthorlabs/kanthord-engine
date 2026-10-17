@@ -32,7 +32,7 @@ function childrenMatch(
       child.retired_at === null,
   );
   const outcomes = stringSet
-    .parse(JSON.parse(row.child_outcome_ids))
+    .parse(JSON.parse(row.dependency_outcome_ids))
     .map((id) => readOutcome(tx, id));
   const childIds = new Set(outcomes.map((outcome) => outcome?.node_id));
   return (

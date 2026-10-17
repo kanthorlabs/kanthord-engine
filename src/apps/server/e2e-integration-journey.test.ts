@@ -600,7 +600,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       {
         ...executionContext(x2),
         evidence_ids: [ir.evidence.id, rep.evidence.id],
-        child_outcome_ids: [oP, oQ],
+        dependency_outcome_ids: [oP, oQ],
         result: AssessmentResult.Success,
         rationale: "P and Q are complete.",
         tested_input: testedInput,

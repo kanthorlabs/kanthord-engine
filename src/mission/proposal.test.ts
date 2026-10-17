@@ -72,7 +72,7 @@ async function fixture(t: TestContext) {
     projectId === h.project_id && id === repositoryId
       ? { binding_id: repositoryId, resource_identity: RESOURCE_IDENTITY }
       : null;
-  const childOutcomeId = h.store.transaction((tx) => {
+  const dependencyOutcomeId = h.store.transaction((tx) => {
     const base = getRevision(tx, h.node_id, FIRST_REVISION);
     insertNode(tx, {
       id: childId,
@@ -97,7 +97,7 @@ async function fixture(t: TestContext) {
       result: AssessmentResult.Success,
       rationale: "Override",
       evidence_ids: "[]",
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -141,7 +141,7 @@ async function fixture(t: TestContext) {
     },
   });
   const proposal = (objectiveId = childId, name = "Fix"): ProposalContent => ({
-    objective_id: objectiveId,
+    dependency_id: objectiveId,
     name,
     requirement: "Repair the defect",
     criterion: "The defect is gone",
@@ -158,7 +158,7 @@ async function fixture(t: TestContext) {
   ) => ({
     ...h.context,
     evidence_ids: [evidence.evidence.id],
-    child_outcome_ids: [childOutcomeId],
+    dependency_outcome_ids: [dependencyOutcomeId],
     result,
     rationale: "Defect found",
     tested_input: input,
@@ -223,7 +223,7 @@ test("an undetermined initiative assessment records one row per proposal", async
     assert.equal(item.node_id, h.node_id);
     assert.equal(item.attempt, FIRST_ATTEMPT);
     assert.equal(item.assessment_id, result.assessment.id);
-    assert.equal(item.objective_node_id, null);
+    assert.equal(item.created_node_id, null);
     assert.equal(item.approved_at, null);
   }
   assert.deepEqual(page.items.map((item) => item.content.name).sort(), [
@@ -238,7 +238,7 @@ test("approving a proposal creates the objective with its task and unblocks the 
   await h.submit([h.proposal()]);
   const proposalId = (await h.list()).items[0]!.id;
   const result = await h.approve(proposalId);
-  const objectiveId = result.objective.revisions[0]!.node_id;
+  const objectiveId = result.created.revisions[0]!.node_id;
   const objective = h.store.transaction((tx) => ({
     node: readNode(tx, objectiveId)!,
     revision: readCurrentRevision(tx, objectiveId)!,
@@ -251,19 +251,19 @@ test("approving a proposal creates the objective with its task and unblocks the 
   const tasks = JSON.parse(objective.revision.tasks) as { id: string }[];
   assert.equal(tasks.length, SINGLE_PROPOSAL);
   assert.match(tasks[0]!.id, /^task_/);
-  assert.equal(result.objective.revisions.at(-1)?.tasks[0]?.id, tasks[0]!.id);
-  assert.equal(result.initiative.node.id, h.node_id);
-  assert.equal(result.initiative.attempt?.attempt, SECOND_ATTEMPT);
-  assert.equal(result.initiative.attempt?.start_point, StartPoint.NodeBranch);
+  assert.equal(result.created.revisions.at(-1)?.tasks[0]?.id, tasks[0]!.id);
+  assert.equal(result.proposer.node.id, h.node_id);
+  assert.equal(result.proposer.attempt?.attempt, SECOND_ATTEMPT);
+  assert.equal(result.proposer.attempt?.start_point, StartPoint.NodeBranch);
   assert.equal(h.node().attempt, SECOND_ATTEMPT);
   assert.equal(h.node().state, NodeState.Pending);
-  assert.deepEqual(result.objective.added_edges.at(-1), {
+  assert.deepEqual(result.created.added_edges.at(-1), {
     kind: EdgeKind.Dependency,
     dependent_id: h.node_id,
     depends_on_id: objectiveId,
   });
   const approved = (await h.list()).items[0]!;
-  assert.equal(approved.objective_node_id, objectiveId);
+  assert.equal(approved.created_node_id, objectiveId);
   assert.notEqual(approved.approved_at, null);
   const claimable = () =>
     h.store.transaction((tx) =>
@@ -291,7 +291,7 @@ test("approving twice refuses with already_approved", async (t) => {
   const proposalId = (await h.list()).items[0]!.id;
   const result = await h.approve(proposalId);
   await refusal(
-    h.approve(proposalId, result.objective.mission_version),
+    h.approve(proposalId, result.created.mission_version),
     MissionErrorCode.ProposalAlreadyApproved,
   );
 });

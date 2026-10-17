@@ -31,7 +31,7 @@ const unmetItemSchema = z.strictObject({
 });
 const proposalTextSchema = z.string().trim().min(1);
 const proposalSchema = z.strictObject({
-  objective_id: proposalTextSchema,
+  dependency_id: proposalTextSchema,
   name: proposalTextSchema,
   requirement: proposalTextSchema,
   criterion: proposalTextSchema,

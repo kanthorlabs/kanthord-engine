@@ -47,7 +47,7 @@ function fixture(t: TestContext) {
   const body: AssessmentSubmit = {
     ...h.context,
     evidence_ids: [],
-    child_outcome_ids: [],
+    dependency_outcome_ids: [],
     result: AssessmentResult.Success,
     rationale: "Checked",
     tested_input: INPUT,
@@ -225,14 +225,14 @@ test("assessment admission checks rationale and evidence ownership before public
       canonicalJSON(error.details).includes("rationale"),
   );
   h.body.evidence_ids = [pending];
-  h.body.child_outcome_ids = [createIdentity("outcome")];
+  h.body.dependency_outcome_ids = [createIdentity("outcome")];
   refusal(() => h.admit(), MissionErrorCode.AssessmentEvidenceUnpublished);
   h.body.evidence_ids = [h.seed(null, false, FIRST_ATTEMPT, EXPIRED_TIMESTAMP)];
   refusal(() => h.admit(), MissionErrorCode.AssessmentEvidenceUnpublished);
   h.body.evidence_ids = [h.seed(null)];
-  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
-  refusal(() => h.admit(h.body, true), VALIDATION, "child_outcome_ids");
-  h.body.child_outcome_ids = [];
+  refusal(() => h.admit(), VALIDATION, "dependency_outcome_ids");
+  refusal(() => h.admit(h.body, true), VALIDATION, "dependency_outcome_ids");
+  h.body.dependency_outcome_ids = [];
   refusal(
     () => h.admit({ ...h.body, result: AssessmentResult.Undetermined }),
     VALIDATION,
@@ -290,7 +290,7 @@ test("initiative admission tracks replacement child outcomes and excludes retire
         result: AssessmentResult.Undetermined,
         rationale: "Blocked",
         evidence_ids: "[]",
-        child_outcome_ids: "[]",
+        dependency_outcome_ids: "[]",
         tested_input: null,
         actor: canonicalJSON(h.actor),
         execution_id: null,
@@ -306,19 +306,19 @@ test("initiative admission tracks replacement child outcomes and excludes retire
         created_at: NOW,
       });
     });
-  h.body.child_outcome_ids = [outcome().id];
+  h.body.dependency_outcome_ids = [outcome().id];
   h.admit();
   const replacement = outcome();
-  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
-  h.body.child_outcome_ids = [replacement.id];
+  refusal(() => h.admit(), VALIDATION, "dependency_outcome_ids");
+  h.body.dependency_outcome_ids = [replacement.id];
   h.admit();
   h.store.transaction((tx) =>
     tx.database
       .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
       .run(NOW, childId),
   );
-  refusal(() => h.admit(), VALIDATION, "child_outcome_ids");
-  h.body.child_outcome_ids = [];
+  refusal(() => h.admit(), VALIDATION, "dependency_outcome_ids");
+  h.body.dependency_outcome_ids = [];
   h.admit();
 });
 
@@ -326,7 +326,7 @@ test("proposals are admitted only for an undetermined initiative with an objecti
   const h = fixture(t);
   h.body.evidence_ids = [h.seed({ tested_input: INPUT, results: [RESULT] })];
   const proposal = {
-    objective_id: createIdentity("node"),
+    dependency_id: createIdentity("node"),
     name: "Fix",
     requirement: "Repair",
     criterion: "Repaired",

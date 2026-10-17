@@ -347,7 +347,7 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
         body: {
           ...context,
           evidence_ids: [work.evidence.id, run.evidence.id],
-          child_outcome_ids: [],
+          dependency_outcome_ids: [],
           result: AssessmentResult.Success,
           rationale: "met",
           tested_input: snapshot,

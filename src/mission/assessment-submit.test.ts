@@ -115,7 +115,7 @@ test("initiative currency follows real child outcomes and only current closure r
   const body = {
     ...h.context,
     evidence_ids: [evidence.evidence.id],
-    child_outcome_ids: [] as string[],
+    dependency_outcome_ids: [] as string[],
     result: AssessmentResult.Success,
     rationale: "Passed",
     tested_input: input,
@@ -143,7 +143,7 @@ test("initiative currency follows real child outcomes and only current closure r
       result: AssessmentResult.Success,
       rationale: "Override",
       evidence_ids: "[]",
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
@@ -164,7 +164,7 @@ test("initiative currency follows real child outcomes and only current closure r
     submit(),
     (error) => error instanceof OperationError && error.code === VALIDATION,
   );
-  body.child_outcome_ids = [outcomeId];
+  body.dependency_outcome_ids = [outcomeId];
   const final = await submit();
   assert.equal(final.assessment.currency?.current, true);
   assert.equal(final.outcome?.result, AssessmentResult.Success);
@@ -228,7 +228,7 @@ async function fixture(t: TestContext, action: RepositoryAction | null = null) {
   const body: AssessmentSubmit = {
     ...h.context,
     evidence_ids: [evidence.evidence.id],
-    child_outcome_ids: [],
+    dependency_outcome_ids: [],
     result: AssessmentResult.Success,
     rationale: "Passed",
     tested_input: address,

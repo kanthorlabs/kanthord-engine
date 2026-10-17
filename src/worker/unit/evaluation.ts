@@ -195,7 +195,8 @@ async function evaluate(
   }
   return {
     evidence_ids: [recorded.id, ...prepared.evidenceIds],
-    child_outcome_ids: objectives?.outcomes.map((outcome) => outcome.id) ?? [],
+    dependency_outcome_ids:
+      objectives?.outcomes.map((outcome) => outcome.id) ?? [],
     ...judgement,
   };
 }

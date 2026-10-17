@@ -95,7 +95,7 @@ components:
     mission.proposal.approve.Output:
       type: object
       properties:
-        objective:
+        created:
           type: object
           properties:
             mission_version:
@@ -477,7 +477,7 @@ components:
             - removed_edges
             - open_attempts_unchanged
           additionalProperties: false
-        initiative:
+        proposer:
           type: object
           properties:
             node:
@@ -2224,6 +2224,6 @@ components:
             - accepted_at
           additionalProperties: false
       required:
-        - objective
-        - initiative
+        - created
+        - proposer
       additionalProperties: false

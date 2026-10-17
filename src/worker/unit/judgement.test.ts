@@ -148,9 +148,9 @@ test("failed and unrun rationale names the command and cause", () => {
   assert.doesNotMatch(instruction, /proposals/);
   assert.match(
     initiative,
-    /A defect inside a completed objective gets one proposal with objective_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
+    /A defect inside a completed objective gets one proposal with dependency_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
   );
-  assert.match(initiative, /"proposals": \[\{"objective_id"/);
+  assert.match(initiative, /"proposals": \[\{"dependency_id"/);
   assert.match(instruction, /distinct criterion/);
   assert.match(
     instruction,

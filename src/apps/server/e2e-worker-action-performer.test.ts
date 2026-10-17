@@ -405,7 +405,7 @@ async function setup(t: TestContext) {
       {
         ...context(execution),
         evidence_ids: evidenceIds,
-        child_outcome_ids: [],
+        dependency_outcome_ids: [],
         result: "success",
         rationale: "met",
         tested_input: snapshot(bindingId, commit),

@@ -333,7 +333,7 @@ async function setup(t: TestContext) {
       {
         ...context(evaluation),
         evidence_ids: [run.evidence.id],
-        child_outcome_ids: [],
+        dependency_outcome_ids: [],
         result: "success",
         rationale: "met",
         tested_input: snapshot,

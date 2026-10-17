@@ -374,7 +374,7 @@ test(
     ) => ({
       ...ctx(executionId),
       evidence_ids: evidenceIds,
-      child_outcome_ids: [],
+      dependency_outcome_ids: [],
       result: AssessmentResult.Success,
       rationale: "met",
       tested_input: address(gated),

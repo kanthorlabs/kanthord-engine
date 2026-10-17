@@ -221,7 +221,7 @@ test("whole evidence deletion clears assessment and outcome sets without changin
       result: AssessmentResult.Undetermined,
       rationale: "Human block",
       evidence_ids: canonicalJSON([h.evidence_id]),
-      child_outcome_ids: "[]",
+      dependency_outcome_ids: "[]",
       tested_input: null,
       execution_id: null,
       actor: canonicalJSON(h.actor),
